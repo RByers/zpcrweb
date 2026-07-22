@@ -12,3 +12,15 @@ export function readSampleBytes(): Uint8Array {
   const buf = readFileSync(SAMPLE_PATH);
   return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
 }
+
+/** A committed multi-step sample: a protocol with two PLATEREAD steps (2 + 8 reads). */
+export const MULTISTEP_SAMPLE_PATH = resolve(
+  here,
+  "../../../samples/20190516_122922_CT019138_SHORT_QUALIF.zpcr",
+);
+
+/** Raw bytes of the multi-step sample. */
+export function readMultistepBytes(): Uint8Array {
+  const buf = readFileSync(MULTISTEP_SAMPLE_PATH);
+  return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
+}

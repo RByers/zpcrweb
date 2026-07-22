@@ -64,6 +64,8 @@ export function decodePlateRead(
   const darkStart = darkField.offset + 4;
 
   const cycle = fields.get("CYCLE")?.int ?? 0;
+  const step = fields.get("STEP")?.int ?? 0;
+  const channelMask = fields.get("CHANNELMASK")?.int ?? 0;
 
   const blockTempRaw = fields.get("BLOCKTEMP")?.float;
   const blockTempC =
@@ -88,6 +90,8 @@ export function decodePlateRead(
   return {
     index,
     cycle,
+    step,
+    channelMask,
     fileName,
     blockTempC,
     timestamp,

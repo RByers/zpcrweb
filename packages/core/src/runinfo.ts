@@ -69,7 +69,8 @@ export function parseRunInfo(xml: string): RunMetadata {
     runStartDate:
       parsedDate && !Number.isNaN(parsedDate.getTime()) ? parsedDate : null,
     scanMask,
-    channelCount: popcount(scanMask),
+    // Only the low 6 bits are optical channels (e.g. 0x81 = C1 only; bit 7 is a flag).
+    channelCount: popcount(scanMask & 0x3f),
     numberPlateColumns: toInt(raw["NumberPlateColumns"]),
     numberPlateRows,
     numberReferenceRows,

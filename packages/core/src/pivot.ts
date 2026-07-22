@@ -1,5 +1,34 @@
-import type { CurveOptions, DarkCurve, PlateRead, WellCurve } from "./types.js";
+import type {
+  CurveOptions,
+  DarkCurve,
+  PlateRead,
+  PlateReadStep,
+  WellCurve,
+} from "./types.js";
 import { CHANNELS, COLUMNS, ROWS } from "./plateread.js";
+
+/**
+ * Optical channel indices that hold data, from the reads' `CHANNELMASK` (low 6 bits, unioned
+ * across reads). Falls back to all channels if no mask is present.
+ */
+export function toChannels(reads: PlateRead[]): number[] {
+  let mask = 0;
+  for (const r of reads) mask |= r.channelMask;
+  const channels: number[] = [];
+  for (let i = 0; i < CHANNELS; i++) if ((mask >> i) & 1) channels.push(i);
+  return channels.length > 0 ? channels : Array.from({ length: CHANNELS }, (_, i) => i);
+}
+
+/** Distinct protocol steps (by the `STEP` field), in first-appearance order, with counts. */
+export function toSteps(reads: PlateRead[]): PlateReadStep[] {
+  const order: number[] = [];
+  const counts = new Map<number, number>();
+  for (const r of reads) {
+    if (!counts.has(r.step)) order.push(r.step);
+    counts.set(r.step, (counts.get(r.step) ?? 0) + 1);
+  }
+  return order.map((step) => ({ step, readCount: counts.get(step) as number }));
+}
 
 /** Reference row index (row 8): holds real optical readings, not a sample row. */
 export const REFERENCE_ROW = 8;
@@ -18,10 +47,14 @@ export function wellLabel(row: number, col: number): string {
  * @param options filter by channel and/or include the reference row
  */
 export function toCurves(
-  reads: PlateRead[],
+  allReads: PlateRead[],
   options: CurveOptions = {},
 ): WellCurve[] {
   const includeReference = options.includeReference ?? false;
+  const reads =
+    options.step === undefined
+      ? allReads
+      : allReads.filter((r) => r.step === options.step);
   const cycles = reads.map((r) => r.cycle);
 
   const channels =
@@ -68,7 +101,9 @@ export function toCurves(
  * Pivot the per-read DARKDATA into one curve per channel: the LED-off background reading
  * across cycles. Useful as a baseline reference or for background subtraction.
  */
-export function toDarkCurves(reads: PlateRead[]): DarkCurve[] {
+export function toDarkCurves(allReads: PlateRead[], step?: number): DarkCurve[] {
+  const reads =
+    step === undefined ? allReads : allReads.filter((r) => r.step === step);
   const cycles = reads.map((r) => r.cycle);
   const curves: DarkCurve[] = [];
   for (let channel = 0; channel < CHANNELS; channel++) {

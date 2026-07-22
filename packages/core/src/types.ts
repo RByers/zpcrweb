@@ -23,8 +23,18 @@ export interface WellReading {
 export interface PlateRead {
   /** 1-based position in the ordered read series (by filename suffix). */
   index: number;
-  /** Cycle number as recorded in the file header (int32 at 0x120). */
+  /** Cycle number within this read's protocol step (resets at each PLATEREAD step). */
   cycle: number;
+  /**
+   * Protocol step this read belongs to, from the `STEP` field. Protocols with more than one
+   * PLATEREAD produce reads with different step values; use this to separate them.
+   */
+  step: number;
+  /**
+   * Scanned-channel bitmask (`CHANNELMASK`). The low 6 bits are the optical channels that
+   * hold data (e.g. `0x3F` = all six, `0x81` = C1 only); bit 7 is a flag.
+   */
+  channelMask: number;
   /** Source file name inside the archive, e.g. `Read00045.Plateread`. */
   fileName: string;
   /** Block temperature in °C, if it could be read from the header (best-effort). */
@@ -127,6 +137,16 @@ export interface CurveOptions {
   channel?: number;
   /** Include reference-row wells (row 8). Default false. */
   includeReference?: boolean;
+  /** Restrict to reads from a single protocol step; omit for all reads. */
+  step?: number;
+}
+
+/** A distinct protocol PLATEREAD step and how many reads it produced. */
+export interface PlateReadStep {
+  /** The `STEP` field value shared by this step's reads. */
+  step: number;
+  /** Number of reads (cycles) in this step. */
+  readCount: number;
 }
 
 /** Low-level access to the raw files inside the archive. */
@@ -160,7 +180,11 @@ export interface Zpcr {
   /** Pivot the run-centric reads into well-centric amplification curves. */
   curves(options?: CurveOptions): WellCurve[];
   /** The per-channel dark (LED-off background) reading across cycles. */
-  darkCurves(): DarkCurve[];
+  darkCurves(step?: number): DarkCurve[];
+  /** Distinct protocol PLATEREAD steps, in first-appearance order. */
+  steps(): PlateReadStep[];
+  /** Optical channel indices that hold data, from `CHANNELMASK` (e.g. `[0]` or `[0..5]`). */
+  channels(): number[];
   /** Factory calibration of the reference row, from `RunInfo.xml`'s `FactoryRefRowCal`. */
   factoryRefCal(): RefWellCal[];
   /** Live reference row vs factory calibration, per channel/column (optical drift). */

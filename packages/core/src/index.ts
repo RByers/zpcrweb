@@ -11,7 +11,14 @@ export { zpcrFromFile } from "./node.js";
 
 export { hexDump } from "./hex.js";
 export { deltaBaseline, subtractSeries } from "./analysis.js";
-export { toCurves, toDarkCurves, wellLabel, REFERENCE_ROW } from "./pivot.js";
+export {
+  toCurves,
+  toDarkCurves,
+  toSteps,
+  toChannels,
+  wellLabel,
+  REFERENCE_ROW,
+} from "./pivot.js";
 export { parseFactoryRefRowCal, compareRefToCal } from "./refcal.js";
 export {
   decodePlateReadDetail,
@@ -42,6 +49,7 @@ export type {
   WellCurve,
   DarkCurve,
   CurveOptions,
+  PlateReadStep,
   ArchiveAccess,
   HexDumpOptions,
   RefWellCal,
