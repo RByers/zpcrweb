@@ -8,6 +8,8 @@ import {
 import { channelColor, channelDye } from "../channelColors";
 import type { Baseline, Scale } from "../../state/useZpcrStore";
 
+const SVG_NS = "http://www.w3.org/2000/svg";
+
 /** Values <= 0 are undefined on a log axis; render them as gaps. */
 function logSafe(values: number[], scale: Scale): (number | null)[] {
   if (scale !== "log") return values;
@@ -25,6 +27,14 @@ interface SeriesMeta {
   std: number[];
   min: number[];
   max: number[];
+}
+
+/** Min/max envelope for a single isolated well (drawn as a shaded band). */
+interface BandData {
+  color: string;
+  cycles: number[];
+  min: (number | null)[];
+  max: (number | null)[];
 }
 
 export interface TooltipData {
@@ -56,15 +66,6 @@ export interface BuildChartConfig {
 const REF_DASH = [3, 3];
 const DARK_DASH = [8, 5];
 
-/**
- * Build uPlot data + options from the visible well curves and the dark curves.
- *
- * - Each well curve is optionally dark-subtracted (per its channel), then optionally
- *   ΔRFU-baselined, then log-guarded.
- * - Reference-row curves are drawn dashed.
- * - When dark subtraction is OFF, one dashed line per present channel shows that channel's
- *   dark (LED-off) background level, transformed the same way as the curves.
- */
 export function buildChart(cfg: BuildChartConfig): {
   data: uPlot.AlignedData;
   options: uPlot.Options;
@@ -82,7 +83,6 @@ export function buildChart(cfg: BuildChartConfig): {
   const meta: SeriesMeta[] = [];
   const series: uPlot.Series[] = [{ label: "Cycle" }];
 
-  // Well curves.
   for (const curve of wellCurves) {
     const darkMean = darkByChannel.get(curve.channel)?.mean;
     const base =
@@ -108,7 +108,6 @@ export function buildChart(cfg: BuildChartConfig): {
     });
   }
 
-  // Dark baselines (only when not subtracting), one per channel that has visible curves.
   if (!subtractDark) {
     const presentChannels = new Set(wellCurves.map((c) => c.channel));
     for (const channel of presentChannels) {
@@ -136,6 +135,25 @@ export function buildChart(cfg: BuildChartConfig): {
     }
   }
 
+  // Min/max envelope band when exactly one well curve is shown.
+  let band: BandData | null = null;
+  if (wellCurves.length === 1) {
+    const c = wellCurves[0]!;
+    const darkMean = darkByChannel.get(c.channel)?.mean;
+    const base = subtractDark && darkMean ? subtractSeries(c.mean, darkMean) : c.mean;
+    const plottedMean = transform(base);
+    const min: (number | null)[] = [];
+    const max: (number | null)[] = [];
+    for (let i = 0; i < c.mean.length; i++) {
+      const off = (plottedMean[i] ?? 0) - (c.mean[i] ?? 0);
+      const mn = (c.min[i] ?? 0) + off;
+      const mx = (c.max[i] ?? 0) + off;
+      min.push(scale === "log" && mn <= 0 ? null : mn);
+      max.push(scale === "log" && mx <= 0 ? null : mx);
+    }
+    band = { color: channelColor(c.channel), cycles: c.cycles, min, max };
+  }
+
   const options: uPlot.Options = {
     width: cfg.width,
     height: cfg.height,
@@ -147,7 +165,6 @@ export function buildChart(cfg: BuildChartConfig): {
     axes: [
       {
         stroke: "#8aa0c0",
-        // Integer cycles: a tick per cycle, gridline + label only every 5.
         splits: (_u, _i, min, max) => {
           const out: number[] = [];
           for (let v = Math.max(1, Math.ceil(min)); v <= Math.floor(max); v++) out.push(v);
@@ -179,7 +196,7 @@ export function buildChart(cfg: BuildChartConfig): {
     cursor: { focus: { prox: 24 }, points: { size: 6 } },
     focus: { alpha: 0.12 },
     legend: { show: false },
-    plugins: [tooltipPlugin(meta, cfg.onHover)],
+    plugins: [overlayPlugin(meta, band, cfg.onHover)],
   };
 
   return { data: rows as uPlot.AlignedData, options };
@@ -190,18 +207,91 @@ function yLabel(baseline: Baseline, subtractDark: boolean): string {
   return subtractDark ? `${base} − dark` : base;
 }
 
-/** A cursor plugin that finds the nearest series under the pointer and reports its stats. */
-function tooltipPlugin(
+/**
+ * Cursor plugin that (1) reports the nearest series for the tooltip, (2) draws an on-hover
+ * whisker for the focused point — the min–max range with caps and a ±1σ box — and (3) draws
+ * a shaded min/max envelope when a single well is isolated. Rendered as an SVG overlay on
+ * the plot area, so it shares uPlot's coordinate system and updates on redraw/hover.
+ */
+function overlayPlugin(
   meta: SeriesMeta[],
+  band: BandData | null,
   onHover: (t: TooltipData | null) => void,
 ): uPlot.Plugin {
+  let svg: SVGSVGElement;
+  let bandPath: SVGPathElement;
+  let group: SVGGElement;
+  let vline: SVGLineElement;
+  let capMax: SVGLineElement;
+  let capMin: SVGLineElement;
+  let stdRect: SVGRectElement;
+
+  const line = (): SVGLineElement => {
+    const l = document.createElementNS(SVG_NS, "line");
+    l.setAttribute("stroke-width", "1.5");
+    return l;
+  };
+
   return {
     hooks: {
+      init: (u: uPlot) => {
+        svg = document.createElementNS(SVG_NS, "svg");
+        Object.assign(svg.style, {
+          position: "absolute",
+          left: "0",
+          top: "0",
+          width: "100%",
+          height: "100%",
+          pointerEvents: "none",
+          overflow: "visible",
+          zIndex: "5",
+        });
+        bandPath = document.createElementNS(SVG_NS, "path");
+        bandPath.setAttribute("fill", band ? band.color : "none");
+        bandPath.setAttribute("fill-opacity", "0.13");
+        bandPath.setAttribute("stroke", "none");
+        svg.appendChild(bandPath);
+
+        group = document.createElementNS(SVG_NS, "g");
+        group.style.display = "none";
+        stdRect = document.createElementNS(SVG_NS, "rect");
+        stdRect.setAttribute("fill-opacity", "0.4");
+        stdRect.setAttribute("stroke", "none");
+        vline = line();
+        capMax = line();
+        capMin = line();
+        group.append(stdRect, vline, capMax, capMin);
+        svg.appendChild(group);
+        u.over.appendChild(svg);
+      },
+
+      draw: (u: uPlot) => {
+        if (!band) {
+          bandPath?.setAttribute("d", "");
+          return;
+        }
+        const top: string[] = [];
+        const bot: string[] = [];
+        for (let i = 0; i < band.cycles.length; i++) {
+          const mx = band.max[i];
+          const mn = band.min[i];
+          if (mx == null || mn == null) continue;
+          const x = u.valToPos(band.cycles[i]!, "x");
+          top.push(`${x},${u.valToPos(mx, "y")}`);
+          bot.push(`${x},${u.valToPos(mn, "y")}`);
+        }
+        bandPath.setAttribute(
+          "d",
+          top.length ? `M${top.join("L")}L${bot.reverse().join("L")}Z` : "",
+        );
+      },
+
       setCursor: (u: uPlot) => {
         const idx = u.cursor.idx;
         const { left, top } = u.cursor;
         if (idx == null || left == null || top == null || left < 0) {
           onHover(null);
+          group.style.display = "none";
           return;
         }
         let best = -1;
@@ -219,14 +309,44 @@ function tooltipPlugin(
         const m = best > 0 ? meta[best - 1] : undefined;
         if (!m || bestDist > 24) {
           onHover(null);
+          group.style.display = "none";
           return;
         }
+
+        const plotted = (u.data[best] as (number | null)[])[idx] as number;
+        const offset = plotted - (m.mean[idx] ?? 0);
+        const x = u.valToPos(m.cycles[idx] ?? 0, "x");
+        const yMax = u.valToPos((m.max[idx] ?? 0) + offset, "y");
+        const yMin = u.valToPos((m.min[idx] ?? 0) + offset, "y");
+        const yHi = u.valToPos(plotted + (m.std[idx] ?? 0), "y");
+        const yLo = u.valToPos(plotted - (m.std[idx] ?? 0), "y");
+        const color = channelColor(m.channel);
+
+        if ([x, yMax, yMin, yHi, yLo].every(Number.isFinite)) {
+          const set = (el: SVGElement, attrs: Record<string, number | string>) => {
+            for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, String(v));
+          };
+          set(vline, { x1: x, x2: x, y1: yMax, y2: yMin, stroke: color });
+          set(capMax, { x1: x - 5, x2: x + 5, y1: yMax, y2: yMax, stroke: color });
+          set(capMin, { x1: x - 5, x2: x + 5, y1: yMin, y2: yMin, stroke: color });
+          set(stdRect, {
+            x: x - 4,
+            width: 8,
+            y: Math.min(yHi, yLo),
+            height: Math.abs(yLo - yHi),
+            fill: color,
+          });
+          group.style.display = "";
+        } else {
+          group.style.display = "none";
+        }
+
         onHover({
           kind: m.kind,
           label: m.label,
           channel: m.channel,
           dye: channelDye(m.channel),
-          color: channelColor(m.channel),
+          color,
           cycle: m.cycles[idx] ?? 0,
           mean: m.mean[idx] ?? 0,
           min: m.min[idx] ?? 0,
