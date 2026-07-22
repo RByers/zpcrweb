@@ -1,7 +1,7 @@
 # zpcrweb
 
 Tools for reading **Bio-Rad CFX** qPCR `.zpcr` files — an isomorphic TypeScript library plus
-a web app (in progress) built on top of it.
+a cyberpunk-dark web app built on top of it.
 
 A `.zpcr` file is a ZIP archive written by a Bio-Rad CFX real-time PCR instrument. Inside it
 holds one `.Plateread` binary file per PCR cycle (the raw fluorescence readings), a
@@ -18,7 +18,7 @@ This is an npm-workspaces monorepo:
 | Path | What |
 |------|------|
 | `packages/core` | `@zpcrweb/core` — the isomorphic parsing library |
-| `apps/web` | the web app (scaffold; see [`TODO.md`](./TODO.md)) |
+| `apps/web` | `@zpcrweb/web` — the React web app ([architecture](./apps/web/ARCHITECTURE.md)) |
 | `samples/` | a committed sample `.zpcr` used by the test suite |
 
 ## `@zpcrweb/core`
@@ -78,13 +78,34 @@ const zpcr = await zpcrFromBlob(file);
 See [`ARCHITECTURE.md`](./ARCHITECTURE.md) for design details and
 [`packages/core/src/types.ts`](./packages/core/src/types.ts) for the full typed surface.
 
+## `@zpcrweb/web`
+
+A React + Vite web app for exploring `.zpcr` files, in a cyberpunk-dark theme. Drag-and-drop
+or click to load multiple files, switch between them, and view each three ways:
+
+- **Overview** — run metadata and thermal protocol.
+- **Curves** — amplification curves for up to ~648 well/channel series (uPlot), with a
+  channel bar and an 8×12 well matrix (row/column headers toggle whole rows/columns), Raw ↔
+  ΔRFU baselining, Linear ↔ Log scale, and a hover/tap tooltip showing mean/min/max/std.
+- **Raw files** — a hex/ASCII (and text) viewer over every file in the archive.
+
+Loaded files and each file's view settings persist in **IndexedDB** across reloads; files
+can be deleted from storage from the file bar. Non-trivial logic lives in `@zpcrweb/core` —
+see the [web architecture notes](./apps/web/ARCHITECTURE.md).
+
+```sh
+npm run dev -w @zpcrweb/web      # start the dev server (http://localhost:5173)
+npm run build -w @zpcrweb/web    # production build
+```
+
 ## Development
 
 ```sh
 npm install                 # install all workspaces
 npm test                    # run the @zpcrweb/core Vitest suite
-npm run build               # build ESM + CJS + .d.ts
-npm run typecheck           # tsc --noEmit
+npm run build               # build the library (ESM + CJS + .d.ts)
+npm run typecheck           # typecheck the library
+npm run dev -w @zpcrweb/web  # run the web app
 ```
 
 ## License

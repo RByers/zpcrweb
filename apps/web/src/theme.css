@@ -1,0 +1,126 @@
+/* ============================================================================
+   zpcrweb — cyberpunk dark design system
+   Dark-only by design. Neon accents are used for UI chrome ONLY; data series
+   use the CVD-validated channel palette (see lib/channelColors.ts).
+   ========================================================================== */
+
+:root {
+  color-scheme: dark;
+
+  /* Surfaces */
+  --plane: #07090d;
+  --panel: #0b0e14;
+  --raised: #111621;
+  --raised-2: #161d2b;
+
+  /* Hairlines / borders */
+  --border: rgba(120, 200, 255, 0.1);
+  --border-strong: rgba(120, 200, 255, 0.22);
+
+  /* Ink */
+  --ink: #e6f0ff;
+  --ink-2: #8aa0c0;
+  --ink-muted: #5f7391;
+
+  /* Neon accents (chrome only) */
+  --neon-cyan: #22d3ee;
+  --neon-magenta: #ff4fa3;
+  --neon-cyan-dim: rgba(34, 211, 238, 0.14);
+  --neon-magenta-dim: rgba(255, 79, 163, 0.14);
+
+  /* State */
+  --danger: #ff5a5a;
+  --good: #3ddc84;
+
+  /* Type */
+  --font-ui: system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, "JetBrains Mono", "SF Mono", "Menlo", monospace;
+
+  /* Metrics */
+  --radius: 8px;
+  --radius-sm: 5px;
+  --gap: clamp(8px, 1.2cqi, 16px);
+  --header-h: 52px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background:
+    radial-gradient(1200px 600px at 80% -10%, rgba(34, 211, 238, 0.06), transparent 60%),
+    radial-gradient(900px 500px at -10% 110%, rgba(255, 79, 163, 0.05), transparent 60%),
+    var(--plane);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+  transition: border-color 120ms, background 120ms, color 120ms, box-shadow 120ms;
+}
+button:hover {
+  border-color: var(--border-strong);
+  background: var(--raised);
+}
+button:focus-visible {
+  outline: 2px solid var(--neon-cyan);
+  outline-offset: 1px;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--raised-2);
+  border-radius: 10px;
+  border: 2px solid var(--panel);
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* uPlot dark overrides */
+.uplot,
+.uplot *,
+.uplot :before,
+.uplot :after {
+  box-sizing: border-box;
+}
+.u-axis {
+  color: var(--ink-muted);
+}
+.u-legend {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+    animation: none !important;
+  }
+}

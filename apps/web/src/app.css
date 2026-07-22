@@ -1,0 +1,580 @@
+/* ============================================================================
+   Layout + components. Cyberpunk dark; tokens from theme.css.
+   ========================================================================== */
+
+.splash {
+  display: grid;
+  place-content: center;
+  height: 100%;
+  color: var(--ink-muted);
+  letter-spacing: 0.1em;
+}
+
+/* ---- App shell ---------------------------------------------------------- */
+.app {
+  display: grid;
+  grid-template-rows: var(--header-h) auto 1fr;
+  height: 100%;
+  min-height: 0;
+}
+.app--empty {
+  grid-template-rows: var(--header-h) 1fr;
+  padding: 0;
+}
+
+.app__header,
+.app__brand {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 14px;
+  height: var(--header-h);
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(180deg, var(--panel), transparent);
+}
+.app__logo {
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--ink);
+  text-shadow: 0 0 12px var(--neon-cyan-dim);
+}
+.app__logo::first-letter {
+  color: var(--neon-cyan);
+}
+.app__tag {
+  color: var(--ink-muted);
+}
+.app__header-spacer {
+  flex: 1;
+}
+.app__main {
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  container: appmain / inline-size;
+}
+.app__error {
+  position: fixed;
+  inset-block-end: 12px;
+  inset-inline-end: 12px;
+  max-width: 60ch;
+  padding: 8px 12px;
+  background: rgba(255, 90, 90, 0.12);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-sm);
+  color: #ffd9d9;
+  z-index: 20;
+}
+
+/* ---- DropZone ----------------------------------------------------------- */
+.dropzone {
+  display: grid;
+  place-items: center;
+  gap: 6px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+  color: var(--ink-2);
+  transition: border-color 120ms, background 120ms, box-shadow 120ms;
+}
+.dropzone--large {
+  margin: clamp(16px, 6cqi, 64px);
+  padding: clamp(24px, 8cqi, 72px);
+}
+.dropzone:not(.dropzone--large) {
+  padding: 6px 12px;
+}
+.dropzone--active,
+.dropzone:hover {
+  border-color: var(--neon-cyan);
+  background: var(--neon-cyan-dim);
+  box-shadow: 0 0 24px var(--neon-cyan-dim) inset;
+}
+.dropzone__icon {
+  font-size: clamp(32px, 8cqi, 56px);
+  color: var(--neon-cyan);
+  text-shadow: 0 0 20px var(--neon-cyan-dim);
+}
+.dropzone__title {
+  font-size: clamp(15px, 3cqi, 20px);
+  color: var(--ink);
+}
+.dropzone__sub {
+  color: var(--ink-muted);
+}
+.dropzone__link {
+  color: var(--neon-cyan);
+}
+.dropzone__compact {
+  color: var(--neon-cyan);
+  font-size: 13px;
+}
+
+/* ---- Segmented control -------------------------------------------------- */
+.segmented {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.segmented__item {
+  border: 0;
+  background: transparent;
+  padding: 5px 12px;
+  border-radius: 4px;
+  color: var(--ink-2);
+}
+.segmented__item:hover {
+  background: var(--raised-2);
+}
+.segmented__item.is-active {
+  background: var(--neon-cyan-dim);
+  color: var(--ink);
+  box-shadow: inset 0 -2px 0 var(--neon-cyan);
+}
+.segmented--sm .segmented__item {
+  padding: 3px 9px;
+  font-size: 12px;
+}
+
+/* ---- FileBar ------------------------------------------------------------ */
+.filebar {
+  display: flex;
+  gap: 6px;
+  padding: 6px 12px;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--border);
+  background: var(--plane);
+}
+.filechip {
+  display: flex;
+  align-items: stretch;
+  flex: 0 0 auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--panel);
+}
+.filechip.is-active {
+  border-color: var(--neon-cyan);
+  box-shadow: 0 0 0 1px var(--neon-cyan-dim), 0 0 16px var(--neon-cyan-dim);
+}
+.filechip__main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  max-width: 40ch;
+}
+.filechip__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ink-muted);
+  flex: 0 0 auto;
+}
+.filechip.is-active .filechip__dot {
+  background: var(--neon-cyan);
+  box-shadow: 0 0 8px var(--neon-cyan);
+}
+.filechip__name {
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.filechip__meta {
+  font-size: 11px;
+  color: var(--ink-muted);
+}
+.filechip__del {
+  border: 0;
+  border-left: 1px solid var(--border);
+  border-radius: 0;
+  padding: 0 9px;
+  color: var(--ink-muted);
+  font-size: 11px;
+}
+.filechip__del:hover {
+  background: rgba(255, 90, 90, 0.16);
+  color: var(--danger);
+}
+
+/* ---- Overview ----------------------------------------------------------- */
+.overview {
+  height: 100%;
+  overflow: auto;
+  padding: clamp(12px, 3cqi, 28px);
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+.overview__tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 12px;
+}
+.tile {
+  padding: 12px 14px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.tile__label {
+  color: var(--ink-muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.tile__value {
+  margin-top: 4px;
+  font-size: 16px;
+  color: var(--ink);
+}
+.overview__h {
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--neon-cyan);
+  margin: 0 0 8px;
+}
+.overview__pre {
+  margin: 0;
+  padding: 14px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--ink-2);
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 12px;
+}
+.overview__dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 18px;
+  margin: 0;
+  font-size: 12px;
+}
+.overview__dl dt {
+  color: var(--ink-muted);
+}
+.overview__dl dd {
+  margin: 0;
+  color: var(--ink-2);
+  word-break: break-all;
+}
+
+/* ---- Curves view -------------------------------------------------------- */
+.curves {
+  display: grid;
+  grid-template-columns: minmax(260px, 320px) 1fr;
+  height: 100%;
+  min-height: 0;
+}
+.curves__rail {
+  overflow-y: auto;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  border-right: 1px solid var(--border);
+  background: var(--panel);
+}
+.curves__plot {
+  min-width: 0;
+  min-height: 0;
+  padding: 10px;
+}
+.rail__title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--ink-muted);
+  margin-bottom: 8px;
+}
+.rail__row {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.rail__stat {
+  color: var(--ink-2);
+  font-size: 12px;
+}
+.rail__note {
+  color: var(--neon-magenta);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+/* Narrow: stack the rail above the plot. */
+@container appmain (inline-size < 720px) {
+  .curves {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr;
+    overflow-y: auto;
+  }
+  .curves__rail {
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .curves__plot {
+    min-height: 60cqb;
+  }
+}
+
+/* ---- Channel bar -------------------------------------------------------- */
+.chanbar {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+  gap: 6px;
+}
+.chanchip {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 8px;
+  opacity: 0.4;
+}
+.chanchip.is-on {
+  opacity: 1;
+  border-color: color-mix(in srgb, var(--chan) 60%, transparent);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--chan) 22%, transparent);
+}
+.chanchip__swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  background: var(--chan);
+  flex: 0 0 auto;
+}
+.chanchip__label {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  line-height: 1.15;
+}
+.chanchip__ch {
+  font-size: 11px;
+  color: var(--ink);
+}
+.chanchip__dye {
+  font-size: 10px;
+  color: var(--ink-muted);
+}
+
+/* ---- Well matrix -------------------------------------------------------- */
+.wellmatrix {
+  display: grid;
+  grid-template-columns: auto repeat(var(--cols), minmax(0, 1fr));
+  gap: 3px;
+}
+.wm-corner,
+.wm-head {
+  border: 0;
+  background: transparent;
+  color: var(--ink-muted);
+  font-size: 10px;
+  padding: 0;
+  aspect-ratio: 1;
+  display: grid;
+  place-items: center;
+}
+.wm-head:hover,
+.wm-corner:hover {
+  color: var(--neon-cyan);
+}
+.wm-cell {
+  aspect-ratio: 1;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--raised);
+  padding: 0;
+}
+.wm-cell:hover {
+  border-color: var(--border-strong);
+}
+.wm-cell.is-on {
+  background: var(--neon-cyan-dim);
+  border-color: var(--neon-cyan);
+  box-shadow: 0 0 6px var(--neon-cyan-dim);
+}
+
+/* ---- Toggles ------------------------------------------------------------ */
+.toggle {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.toggle__label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-muted);
+}
+
+/* ---- Chart -------------------------------------------------------------- */
+.chart {
+  position: relative;
+  height: 100%;
+  min-height: 0;
+}
+.chart__host {
+  height: 100%;
+  width: 100%;
+}
+.chart__empty {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  text-align: center;
+  color: var(--ink-muted);
+  pointer-events: none;
+  padding: 20px;
+}
+.chart__tip {
+  position: absolute;
+  transform: translate(14px, 14px);
+  pointer-events: none;
+  z-index: 10;
+  min-width: 150px;
+  padding: 8px 10px;
+  background: rgba(10, 14, 22, 0.94);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(4px);
+}
+.chart__tip-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  font-size: 13px;
+}
+.chart__tip-swatch {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+}
+.chart__tip-dye {
+  margin-left: auto;
+  color: var(--ink-muted);
+  font-size: 11px;
+}
+.chart__tip-tbl {
+  width: 100%;
+  font-size: 12px;
+  border-collapse: collapse;
+}
+.chart__tip-tbl td {
+  padding: 1px 0;
+}
+.chart__tip-tbl td:first-child {
+  color: var(--ink-muted);
+  padding-right: 14px;
+}
+.chart__tip-tbl td:last-child {
+  text-align: right;
+  color: var(--ink);
+}
+
+/* ---- Raw files view ----------------------------------------------------- */
+.raw {
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) 1fr;
+  height: 100%;
+  min-height: 0;
+}
+.raw__list {
+  overflow-y: auto;
+  border-right: 1px solid var(--border);
+  background: var(--panel);
+  padding: 8px;
+}
+.raw__grouphead {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--neon-cyan);
+  padding: 10px 6px 4px;
+}
+.raw__item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  padding: 4px 6px;
+  font-size: 11px;
+  color: var(--ink-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border-radius: 4px;
+}
+.raw__item:hover {
+  background: var(--raised);
+}
+.raw__item.is-active {
+  background: var(--neon-cyan-dim);
+  color: var(--ink);
+}
+.raw__viewer {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+.raw__toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.raw__fname {
+  font-size: 12px;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.raw__size {
+  color: var(--ink-muted);
+  font-size: 11px;
+}
+.raw__modes {
+  margin-left: auto;
+}
+.raw__dump {
+  flex: 1;
+  margin: 0;
+  overflow: auto;
+  padding: 12px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink-2);
+  white-space: pre;
+}
+.raw__more {
+  margin: 10px;
+  align-self: flex-start;
+}
+
+/* Narrow: stack raw list above viewer. */
+@container appmain (inline-size < 640px) {
+  .raw {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(120px, 30%) 1fr;
+  }
+  .raw__list {
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+}

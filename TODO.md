@@ -26,20 +26,28 @@ Additional typed parsers for the archive files currently reachable only via the 
 
 ## Web app (`apps/web`)
 
-Currently an empty scaffold. Planned:
+React + Vite + uPlot app shipped (v1). Done:
 
-- [ ] Vite app depending on `@zpcrweb/core`.
-- [ ] Drag-and-drop / file-upload of a `.zpcr`.
-- [ ] Run overview (metadata, protocol, cycle count, block/serial info).
-- [ ] Amplification-curve chart (per channel, per well; well selector / plate view).
+- [x] Vite app depending on `@zpcrweb/core`.
+- [x] Drag-and-drop + click file upload; multiple files; switch between them.
+- [x] IndexedDB persistence of files + per-file view settings; delete from storage.
+- [x] Run overview (metadata, protocol, cycle count, block/serial info).
+- [x] Amplification-curve chart (per channel, per well; channel bar + 8×12 well matrix with
+      row/column toggles; Raw ↔ ΔRFU; Linear ↔ Log; hover tooltip with mean/min/max/std).
+- [x] **Raw file browser** over the archive API — hex/ASCII + text viewer for every entry.
+- [x] Responsive (container queries) from large desktop down to mobile.
+
+Still planned:
+
 - [ ] Plate heatmap per cycle.
-- [ ] **Raw file browser** using the low-level archive API — list every entry with a
-      text / hex viewer, so unparsed files are still inspectable.
 - [ ] Full visualizers replacing the raw viewers as typed parsers land above.
+- [ ] Confirm channel → dye mapping from the `.Dcal` calibration files (currently a hint).
 
 ## Testing / infra
 
 - [ ] Add a browser-mode Vitest run to prove isomorphism in a real browser environment.
+- [ ] Add Playwright e2e tests for the web app (only if UI bugs prove frequent — per the
+      logic-in-library principle, app logic is minimal and the library carries the tests).
 - [ ] Add more sample `.zpcr` files (different block types, channel counts, cycle counts)
       as they become available.
 - [ ] CI workflow (install / typecheck / test / build).
