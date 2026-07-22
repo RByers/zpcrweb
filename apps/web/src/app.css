@@ -286,8 +286,22 @@
   font-family: var(--font-mono);
   color: var(--ink-2);
 }
-.refcal__tbl .refcal__drift-big {
+.refcal__drift-big {
   color: var(--neon-magenta);
+}
+.refcal__controls {
+  margin-bottom: 10px;
+}
+.refcal__grid th {
+  white-space: nowrap;
+}
+.refcal__grid tbody th {
+  color: var(--ink-2);
+}
+.refcal__legend {
+  margin: 8px 0 0;
+  font-size: 11px;
+  color: var(--ink-muted);
 }
 
 /* ---- Curves view -------------------------------------------------------- */
