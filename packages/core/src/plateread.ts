@@ -16,25 +16,13 @@ export const COLUMNS = 12;
 /** Rows per channel including the trailing reference row. */
 export const ROWS = 9;
 
-const CYCLE_OFFSET = 0x120;
-const BLOCK_TEMP_OFFSET = 0x133;
-const TIMESTAMP_OFFSET = 0x182;
-const TIMESTAMP_MAX_LEN = 64;
-
-/** WELLDATA float array start (immediately after its int32 count at 0x1A4). */
-const WELLDATA_OFFSET = 0x1a8;
-/**
- * DARKDATA float array start (one record per channel). Like WELLDATA it is framed as
- * `[int32 count][float32 × count]`; the count (24) sits at 0x2A28 — immediately after
- * WELLDATA's 648×16 bytes — so the data begins 4 bytes later at 0x2A2C.
- */
-const DARKDATA_OFFSET = 0x2a2c;
-/** Each record is four float32 values: mean, std, min, max. */
+/** Each WELLDATA/DARKDATA record is four float32 values: mean, std, min, max. */
 const RECORD_SIZE = 16;
 
 const WELL_COUNT = CHANNELS * WELLS_PER_CHANNEL; // 648
 
 function readRecord(view: DataView, offset: number): WellReading {
+  // The fluorescence arrays are little-endian (unlike the big-endian metadata).
   return {
     mean: view.getFloat32(offset, true),
     std: view.getFloat32(offset + 4, true),
@@ -46,20 +34,6 @@ function readRecord(view: DataView, offset: number): WellReading {
 /** Compute the flat WELLDATA record index for a channel/row/col coordinate. */
 export function wellIndex(channel: number, row: number, col: number): number {
   return channel * WELLS_PER_CHANNEL + row * COLUMNS + col;
-}
-
-/** Best-effort read of the NUL-terminated timestamp string in the header. */
-function readTimestamp(bytes: Uint8Array): string | undefined {
-  const end = Math.min(bytes.length, TIMESTAMP_OFFSET + TIMESTAMP_MAX_LEN);
-  let str = "";
-  for (let i = TIMESTAMP_OFFSET; i < end; i++) {
-    const byte = bytes[i] as number;
-    if (byte === 0) break;
-    if (byte < 0x20 || byte >= 0x7f) return undefined; // not printable ASCII → give up
-    str += String.fromCharCode(byte);
-  }
-  if (str.length === 0 || Number.isNaN(Date.parse(str))) return undefined;
-  return str;
 }
 
 /**
@@ -76,26 +50,30 @@ export function decodePlateRead(
 ): PlateRead {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
 
-  // Prefer the file's own descriptor dictionary (self-describing schema); fall back to the
-  // fixed offsets if it can't be parsed. Scalars in the dictionary are big-endian; the
-  // WELLDATA/DARKDATA float arrays are little-endian.
+  // The file's own descriptor dictionary (self-describing schema) locates every field.
+  // Scalars in the dictionary are big-endian; the WELLDATA/DARKDATA float arrays are
+  // little-endian. Array descriptors point at the int32 count; the float data starts 4
+  // bytes later.
   const fields = fieldMap(parseDescriptors(bytes));
   const wellField = fields.get("WELLDATA");
   const darkField = fields.get("DARKDATA");
-  // Array descriptors point at the int32 count; the float data starts 4 bytes later.
-  const wellStart = wellField ? wellField.offset + 4 : WELLDATA_OFFSET;
-  const darkStart = darkField ? darkField.offset + 4 : DARKDATA_OFFSET;
+  if (!wellField || !darkField) {
+    throw new Error(`${fileName}: not a valid .Plateread (missing WELLDATA/DARKDATA)`);
+  }
+  const wellStart = wellField.offset + 4;
+  const darkStart = darkField.offset + 4;
 
-  const cycle = fields.get("CYCLE")?.int ?? view.getInt32(CYCLE_OFFSET, true);
+  const cycle = fields.get("CYCLE")?.int ?? 0;
 
-  const blockTempRaw =
-    fields.get("BLOCKTEMP")?.float ?? view.getFloat32(BLOCK_TEMP_OFFSET, true);
+  const blockTempRaw = fields.get("BLOCKTEMP")?.float;
   const blockTempC =
-    blockTempRaw > -50 && blockTempRaw < 200 ? blockTempRaw : undefined;
+    blockTempRaw != null && blockTempRaw > -50 && blockTempRaw < 200
+      ? blockTempRaw
+      : undefined;
 
   const dateTime = fields.get("DATETIME")?.text;
   const timestamp =
-    dateTime && !Number.isNaN(Date.parse(dateTime)) ? dateTime : readTimestamp(bytes);
+    dateTime && !Number.isNaN(Date.parse(dateTime)) ? dateTime : undefined;
 
   const wells: WellReading[] = new Array(WELL_COUNT);
   for (let i = 0; i < WELL_COUNT; i++) {
