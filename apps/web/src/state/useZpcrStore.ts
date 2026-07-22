@@ -27,6 +27,8 @@ export interface FileSettings {
   subtractDark: boolean;
   /** Min/max envelope bands mode. */
   bands: BandsMode;
+  /** Selected protocol step (`STEP` value), or null to use the first step. */
+  step: number | null;
 }
 
 /** A file loaded and parsed in memory. */
@@ -58,6 +60,7 @@ function defaultSettings(): FileSettings {
     scale: "linear",
     subtractDark: false,
     bands: "auto",
+    step: null,
   };
 }
 
@@ -71,6 +74,7 @@ function toStored(id: string, s: FileSettings): StoredSettings {
     scale: s.scale,
     subtractDark: s.subtractDark,
     bands: s.bands,
+    step: s.step ?? null,
   };
 }
 
@@ -83,6 +87,7 @@ function fromStored(s: StoredSettings): FileSettings {
     scale: s.scale ?? "linear",
     subtractDark: s.subtractDark ?? false,
     bands: s.bands ?? "auto",
+    step: s.step ?? null,
   };
 }
 

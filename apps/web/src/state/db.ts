@@ -28,6 +28,7 @@ export interface StoredSettings {
   scale: "linear" | "log";
   subtractDark: boolean;
   bands: "off" | "auto" | "on";
+  step: number | null;
 }
 
 function openDb(): Promise<IDBDatabase> {

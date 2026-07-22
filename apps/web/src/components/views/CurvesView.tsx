@@ -18,27 +18,43 @@ interface Props {
 }
 
 export function CurvesView({ zpcr, settings, onChange }: Props) {
-  // Full curve set including the reference row; derived once per file.
+  const steps = useMemo(() => zpcr.steps(), [zpcr]);
+  // Only channels actually scanned (CHANNELMASK) are offered/plotted.
+  const available = useMemo(() => zpcr.channels(), [zpcr]);
+  // Selected step: the stored one if still valid, else the first step.
+  const activeStep =
+    settings.step != null && steps.some((s) => s.step === settings.step)
+      ? settings.step
+      : (steps[0]?.step ?? undefined);
+
+  // Full curve set for the active step, including the reference row.
   const allCurves = useMemo<WellCurve[]>(
-    () => zpcr.curves({ includeReference: true }),
-    [zpcr],
+    () => zpcr.curves({ includeReference: true, step: activeStep }),
+    [zpcr, activeStep],
   );
-  const darkCurves = useMemo<DarkCurve[]>(() => zpcr.darkCurves(), [zpcr]);
+  const darkCurves = useMemo<DarkCurve[]>(
+    () => zpcr.darkCurves(activeStep),
+    [zpcr, activeStep],
+  );
 
   const visible = useMemo(
     () =>
       allCurves.filter(
         (c) =>
+          available.includes(c.channel) &&
           settings.enabledChannels.has(c.channel) &&
           settings.enabledWells.has(wellKey(c.row, c.col)),
       ),
-    [allCurves, settings.enabledChannels, settings.enabledWells],
+    [allCurves, available, settings.enabledChannels, settings.enabledWells],
   );
 
-  // Dark lines/subtraction only concern the enabled channels.
+  // Dark lines/subtraction only concern the enabled, available channels.
   const enabledDark = useMemo(
-    () => darkCurves.filter((d) => settings.enabledChannels.has(d.channel)),
-    [darkCurves, settings.enabledChannels],
+    () =>
+      darkCurves.filter(
+        (d) => available.includes(d.channel) && settings.enabledChannels.has(d.channel),
+      ),
+    [darkCurves, available, settings.enabledChannels],
   );
 
   const toggleChannel = (ch: number) => {
@@ -52,9 +68,33 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
   return (
     <div className="curves">
       <aside className="curves__rail">
+        {steps.length > 1 && (
+          <div className="rail__section">
+            <div className="rail__title">Plate-read step</div>
+            <div className="segmented segmented--sm stepsel">
+              {steps.map((s, i) => (
+                <button
+                  key={s.step}
+                  className={
+                    "segmented__item" + (s.step === activeStep ? " is-active" : "")
+                  }
+                  onClick={() => onChange({ step: s.step })}
+                  title={`Protocol STEP ${s.step}, ${s.readCount} cycles`}
+                >
+                  {i} · {s.readCount}c
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div className="rail__section">
           <div className="rail__title">Channels</div>
-          <ChannelBar enabled={settings.enabledChannels} onToggle={toggleChannel} />
+          <ChannelBar
+            enabled={settings.enabledChannels}
+            available={available}
+            onToggle={toggleChannel}
+          />
         </div>
 
         <div className="rail__section">

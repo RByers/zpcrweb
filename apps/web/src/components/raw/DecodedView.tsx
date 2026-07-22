@@ -81,7 +81,8 @@ function ProtocolDecoded({ zpcr, name }: Props) {
     .filter((s) => s.length > 0);
   return (
     <div className="decoded">
-      <ol className="decoded__steps mono">
+      {/* Zero-based line numbers so GOTO targets line up. */}
+      <ol className="decoded__steps mono" start={0}>
         {lines.map((step, i) => (
           <li key={i}>{step};</li>
         ))}

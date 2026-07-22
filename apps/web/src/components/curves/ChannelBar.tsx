@@ -2,13 +2,15 @@ import { CHANNEL_INFO } from "../../lib/channelColors";
 
 interface Props {
   enabled: Set<number>;
+  /** Channel indices to offer (from CHANNELMASK); others are hidden. */
+  available: number[];
   onToggle: (channel: number) => void;
 }
 
-export function ChannelBar({ enabled, onToggle }: Props) {
+export function ChannelBar({ enabled, available, onToggle }: Props) {
   return (
     <div className="chanbar">
-      {CHANNEL_INFO.map((c) => {
+      {CHANNEL_INFO.filter((c) => available.includes(c.index)).map((c) => {
         const on = enabled.has(c.index);
         return (
           <button
