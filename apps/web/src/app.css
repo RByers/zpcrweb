@@ -782,16 +782,24 @@
   color: var(--ink-muted);
 }
 
-/* Protocol steps */
-.decoded__steps {
-  margin: 0;
-  padding-left: 2.4em;
+/* Protocol steps: thermal steps numbered 1-based (GOTO targets), setup lines unnumbered. */
+.decoded__proto {
   display: flex;
   flex-direction: column;
   gap: 3px;
   color: var(--ink);
 }
-.decoded__steps li::marker {
+.decoded__protoline {
+  display: flex;
+  gap: 12px;
+}
+.decoded__protonum {
+  flex: 0 0 2.2em;
+  text-align: right;
+  color: var(--neon-cyan);
+  font-variant-numeric: tabular-nums;
+}
+.decoded__protoline.is-setup {
   color: var(--ink-muted);
 }
 

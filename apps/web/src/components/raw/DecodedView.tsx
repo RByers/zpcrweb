@@ -72,21 +72,38 @@ function RunInfoTable({ zpcr, name }: Props) {
   );
 }
 
-/** ProtocolRunDefinition is a `;`-separated program — break it onto one step per line. */
+/** Leading setup directives that are not numbered protocol steps. */
+const PROTOCOL_SETUP = /^(METHOD|HOTLID|VOLUME)\b/i;
+
+/**
+ * ProtocolRunDefinition is a `;`-separated program. Number the thermal steps 1-based
+ * (skipping the METHOD/HOTLID/VOLUME setup directives) so `GOTO N,M` points exactly at
+ * step N — e.g. `GOTO 2,44` → step 2.
+ */
 function ProtocolDecoded({ zpcr, name }: Props) {
   const text = zpcr.archive.text(name).trim();
   const lines = text
     .split(";")
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
+  let stepNo = 0;
   return (
     <div className="decoded">
-      {/* Zero-based line numbers so GOTO targets line up. */}
-      <ol className="decoded__steps mono" start={0}>
-        {lines.map((step, i) => (
-          <li key={i}>{step};</li>
-        ))}
-      </ol>
+      <div className="decoded__proto mono">
+        {lines.map((line, i) => {
+          const setup = PROTOCOL_SETUP.test(line);
+          const num = setup ? "" : String((stepNo += 1));
+          return (
+            <div
+              key={i}
+              className={"decoded__protoline" + (setup ? " is-setup" : "")}
+            >
+              <span className="decoded__protonum">{num}</span>
+              <span>{line};</span>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
