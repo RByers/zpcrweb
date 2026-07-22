@@ -24,32 +24,19 @@ Additional typed parsers for the archive files currently reachable only via the 
       trailing descriptor dictionary (§4). Promote from best-effort to fully typed.
 - [ ] **`FactoryRefRowCal`** — parse the factory reference-row calibration array in
       `RunInfo.xml` into typed per-well records.
+- [ ] Parse the .pltd file and try to decode how they define plates (flourophores, targets and samples per well).
+- [ ] Parse the .prcl file and try to decode how it defines a protocol. Does it map exactly to the textual definition in ProtocolRunDefinition.txt?
 
 ## Web app (`apps/web`)
 
-React + Vite + uPlot app shipped (v1). Done:
-
-- [x] Vite app depending on `@zpcrweb/core`.
-- [x] Drag-and-drop + click file upload; multiple files; switch between them.
-- [x] IndexedDB persistence of files + per-file view settings; delete from storage.
-- [x] Run overview (metadata, protocol, cycle count, block/serial info).
-- [x] Amplification-curve chart (per channel, per well; channel bar + 8×12 well matrix with
-      row/column toggles; Raw ↔ ΔRFU; Linear ↔ Log; hover tooltip with mean/min/max/std).
-- [x] **Raw file browser** over the archive API — hex/ASCII + text viewer for every entry.
-- [x] Responsive (container queries) from large desktop down to mobile.
-
-- [x] Reference row (R) in the well matrix (off by default, dashed).
-- [x] Dark (LED-off) background: dashed per-channel lines, or subtract from curves.
-- [x] Decoded Raw-files views: plateread tables, RunInfo key/value table, protocol steps,
-      pretty-printed + highlighted runlog.xml. Per-file default mode (decoded/text/hex).
-
 Still planned:
 
+- [ ] Generate a nice simple but clear favicon
 - [ ] Visualize calibration files
-- [ ] Add a plate editor which allows setting the flourophores, tube-types (white / clear) used per well.  Used for calibration adjustments and fluorophore display. Allow saving/naming plate files and applying them to runs. Remember the plate setting applied to each loaded run. Have an easy mechanism to copy/paste settings from one well to another or to all wells on a column/row/plate, or to duplicate a column/row across multiple columns/rows (eg. using click drag to select a region simple to copy/paste operations in spreadsheets)
+- [ ] Add a plate editor which allows setting the flourophores used per well, as well as the tube types for the plate (clear / white).  Used for calibration adjustments and fluorophore display. Allow saving/naming plate files and applying them to runs. Remember the plate setting applied to each loaded run. Have an easy mechanism to copy/paste settings from one well to another or to all wells on a column/row/plate, or to duplicate a column/row across multiple columns/rows (eg. using click drag to select a region simple to copy/paste operations in spreadsheets)
 - [ ] Optionally allow writing the target and sample names per well in the plate editor, again with easy copy paste of some form. Then use these in the curves visualization (eg. on hover).
 - [ ] Add an option to apply flourophore-specific calibration to the run based on the calibration file data.
-- [ ] Plate heatmap per cycle.
+- [ ] Plate heatmap per cycle. 
 - [ ] Full visualizers replacing the raw viewers as typed parsers land above (`.alf`,
       `.Dcal`, and the remaining plaintext status files).
 
