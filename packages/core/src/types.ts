@@ -101,6 +101,10 @@ export interface WellCurve {
   max: number[];
 }
 
+// Re-exported so the Zpcr interface can reference them without a circular import.
+import type { RefWellCal, RefCalComparison } from "./refcal.js";
+export type { RefWellCal, RefCalComparison } from "./refcal.js";
+
 /** A per-channel dark (LED-off background) reading across cycles, from DARKDATA. */
 export interface DarkCurve {
   /** Optical channel 0–5. */
@@ -157,4 +161,8 @@ export interface Zpcr {
   curves(options?: CurveOptions): WellCurve[];
   /** The per-channel dark (LED-off background) reading across cycles. */
   darkCurves(): DarkCurve[];
+  /** Factory calibration of the reference row, from `RunInfo.xml`'s `FactoryRefRowCal`. */
+  factoryRefCal(): RefWellCal[];
+  /** Live reference row vs factory calibration, per channel/column (optical drift). */
+  refCalComparison(): RefCalComparison[];
 }

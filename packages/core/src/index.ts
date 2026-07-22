@@ -12,6 +12,7 @@ export { zpcrFromFile } from "./node.js";
 export { hexDump } from "./hex.js";
 export { deltaBaseline, subtractSeries } from "./analysis.js";
 export { toCurves, toDarkCurves, wellLabel, REFERENCE_ROW } from "./pivot.js";
+export { parseFactoryRefRowCal, compareRefToCal } from "./refcal.js";
 export {
   parseRunInfo,
   parseRunInfoRaw,
@@ -38,4 +39,6 @@ export type {
   CurveOptions,
   ArchiveAccess,
   HexDumpOptions,
+  RefWellCal,
+  RefCalComparison,
 } from "./types.js";

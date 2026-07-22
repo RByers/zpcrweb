@@ -1,4 +1,5 @@
 import type { Zpcr } from "@zpcrweb/core";
+import { RefCalPanel } from "./RefCalPanel";
 
 function safeText(zpcr: Zpcr, name: string): string | null {
   return zpcr.archive.entries.includes(name) ? zpcr.archive.text(name).trim() : null;
@@ -44,6 +45,9 @@ export function OverviewView({ zpcr }: { zpcr: Zpcr }) {
           <pre className="overview__pre mono">{protocol}</pre>
         </section>
       )}
+
+      <RefCalPanel zpcr={zpcr} />
+
 
       <section className="overview__block">
         <h2 className="overview__h">Run identity</h2>

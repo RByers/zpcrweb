@@ -275,6 +275,20 @@
   color: var(--ink-2);
   word-break: break-all;
 }
+.refcal__note {
+  margin: 0 0 10px;
+  max-width: 80ch;
+  color: var(--ink-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.refcal__note code {
+  font-family: var(--font-mono);
+  color: var(--ink-2);
+}
+.refcal__tbl .refcal__drift-big {
+  color: var(--neon-magenta);
+}
 
 /* ---- Curves view -------------------------------------------------------- */
 .curves {

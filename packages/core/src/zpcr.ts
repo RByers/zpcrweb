@@ -7,6 +7,7 @@ import {
 } from "./plateread.js";
 import { parseRunInfo } from "./runinfo.js";
 import { toCurves, toDarkCurves } from "./pivot.js";
+import { compareRefToCal, parseFactoryRefRowCal } from "./refcal.js";
 
 const RUNINFO_NAME = "RunInfo.xml";
 const textDecoder = new TextDecoder("utf-8");
@@ -43,6 +44,21 @@ export function parseZpcr(data: Uint8Array | ArrayBuffer): Zpcr {
     archive,
     curves: (options?: CurveOptions) => toCurves(reads, options),
     darkCurves: () => toDarkCurves(reads),
+    factoryRefCal: () =>
+      parseFactoryRefRowCal(
+        metadata.raw["FactoryRefRowCal"] ?? "",
+        metadata.channelCount,
+        metadata.numberPlateColumns,
+      ),
+    refCalComparison: () =>
+      compareRefToCal(
+        reads,
+        parseFactoryRefRowCal(
+          metadata.raw["FactoryRefRowCal"] ?? "",
+          metadata.channelCount,
+          metadata.numberPlateColumns,
+        ),
+      ),
   };
 }
 
