@@ -35,7 +35,17 @@ export function toCurves(
       const isReference = row === REFERENCE_ROW;
       if (isReference && !includeReference) continue;
       for (let col = 0; col < COLUMNS; col++) {
-        const mean = reads.map((r) => r.get(channel, row, col).mean);
+        const mean: number[] = [];
+        const std: number[] = [];
+        const min: number[] = [];
+        const max: number[] = [];
+        for (const read of reads) {
+          const reading = read.get(channel, row, col);
+          mean.push(reading.mean);
+          std.push(reading.std);
+          min.push(reading.min);
+          max.push(reading.max);
+        }
         curves.push({
           channel,
           row,
@@ -44,6 +54,9 @@ export function toCurves(
           isReference,
           cycles,
           mean,
+          std,
+          min,
+          max,
         });
       }
     }

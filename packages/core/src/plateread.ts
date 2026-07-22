@@ -22,8 +22,12 @@ const TIMESTAMP_MAX_LEN = 64;
 
 /** WELLDATA float array start (immediately after its int32 count at 0x1A4). */
 const WELLDATA_OFFSET = 0x1a8;
-/** DARKDATA float array start (one record per channel). */
-const DARKDATA_OFFSET = 0x2a28;
+/**
+ * DARKDATA float array start (one record per channel). Like WELLDATA it is framed as
+ * `[int32 count][float32 × count]`; the count (24) sits at 0x2A28 — immediately after
+ * WELLDATA's 648×16 bytes — so the data begins 4 bytes later at 0x2A2C.
+ */
+const DARKDATA_OFFSET = 0x2a2c;
 /** Each record is four float32 values: mean, std, min, max. */
 const RECORD_SIZE = 16;
 

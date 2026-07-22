@@ -39,6 +39,19 @@ describe("well-centric curves (pivot)", () => {
     expect(curve.mean[44]).toBeCloseTo(6852.1, 0);
     expect(curve.mean[44]!).toBeGreaterThan(curve.mean[0]!);
   });
+
+  it("carries per-cycle stats (std/min/max) aligned with mean", () => {
+    const curve = zpcr.curves({ channel: 2 }).find((c) => c.wellLabel === "A3")!;
+    expect(curve.std).toHaveLength(45);
+    expect(curve.min).toHaveLength(45);
+    expect(curve.max).toHaveLength(45);
+    // stats bracket the mean at each cycle
+    for (let i = 0; i < curve.cycles.length; i++) {
+      expect(curve.min[i]!).toBeLessThanOrEqual(curve.mean[i]!);
+      expect(curve.max[i]!).toBeGreaterThanOrEqual(curve.mean[i]!);
+      expect(curve.std[i]!).toBeGreaterThanOrEqual(0);
+    }
+  });
 });
 
 describe("wellLabel", () => {

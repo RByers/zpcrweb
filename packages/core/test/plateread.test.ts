@@ -13,6 +13,20 @@ describe("plateread decoding", () => {
     }
   });
 
+  it("decodes DARKDATA as sane background readings (correct offset)", () => {
+    // Guards the DARKDATA offset: reading 4 bytes early yields the int32 count (24) as the
+    // first float. Correct records have mean≈1880–2130 with min<=mean<=max and small std.
+    const dark = zpcr.reads[0]!.dark;
+    expect(dark[0]!.mean).toBeCloseTo(2125.2, 0);
+    for (const d of dark) {
+      expect(d.mean).toBeGreaterThan(1000);
+      expect(d.min).toBeLessThanOrEqual(d.mean);
+      expect(d.max).toBeGreaterThanOrEqual(d.mean);
+      expect(d.std).toBeGreaterThan(0);
+      expect(d.std).toBeLessThan(100);
+    }
+  });
+
   it("reads cycle numbers 1..45 in ascending order", () => {
     expect(zpcr.reads.map((r) => r.cycle)).toEqual(
       Array.from({ length: 45 }, (_, i) => i + 1),

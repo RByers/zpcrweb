@@ -93,6 +93,12 @@ export interface WellCurve {
   cycles: number[];
   /** Mean fluorescence per cycle, aligned with {@link cycles}. */
   mean: number[];
+  /** Standard deviation per cycle, aligned with {@link cycles}. */
+  std: number[];
+  /** Minimum raw sample per cycle, aligned with {@link cycles}. */
+  min: number[];
+  /** Maximum raw sample per cycle, aligned with {@link cycles}. */
+  max: number[];
 }
 
 /** Options for {@link Zpcr.curves}. */

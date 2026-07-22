@@ -10,6 +10,7 @@ export { parseZpcr, zpcrFromBlob } from "./zpcr.js";
 export { zpcrFromFile } from "./node.js";
 
 export { hexDump } from "./hex.js";
+export { deltaBaseline } from "./analysis.js";
 export { toCurves, wellLabel, REFERENCE_ROW } from "./pivot.js";
 export {
   parseRunInfo,
