@@ -6,7 +6,7 @@ import {
   type WellCurve,
 } from "@zpcrweb/core";
 import { channelColor, channelDye } from "../channelColors";
-import type { Baseline, Scale } from "../../state/useZpcrStore";
+import type { Baseline, BandsMode, Scale } from "../../state/useZpcrStore";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
@@ -58,6 +58,7 @@ export interface BuildChartConfig {
   baseline: Baseline;
   scale: Scale;
   subtractDark: boolean;
+  bands: BandsMode;
   width: number;
   height: number;
   onHover: (t: TooltipData | null) => void;
@@ -135,10 +136,9 @@ export function buildChart(cfg: BuildChartConfig): {
     }
   }
 
-  // Min/max envelope band when exactly one well curve is shown.
-  let band: BandData | null = null;
-  if (wellCurves.length === 1) {
-    const c = wellCurves[0]!;
+  // Min/max envelope bands. Auto shows them only when a single well (one row/col) is
+  // selected, regardless of how many channels — so each channel's curve gets its own band.
+  const computeBand = (c: WellCurve): BandData => {
     const darkMean = darkByChannel.get(c.channel)?.mean;
     const base = subtractDark && darkMean ? subtractSeries(c.mean, darkMean) : c.mean;
     const plottedMean = transform(base);
@@ -151,8 +151,13 @@ export function buildChart(cfg: BuildChartConfig): {
       min.push(scale === "log" && mn <= 0 ? null : mn);
       max.push(scale === "log" && mx <= 0 ? null : mx);
     }
-    band = { color: channelColor(c.channel), cycles: c.cycles, min, max };
-  }
+    return { color: channelColor(c.channel), cycles: c.cycles, min, max };
+  };
+
+  const distinctWells = new Set(wellCurves.map((c) => `${c.row},${c.col}`));
+  const showBands =
+    cfg.bands === "on" || (cfg.bands === "auto" && distinctWells.size === 1);
+  const bands: BandData[] = showBands ? wellCurves.map(computeBand) : [];
 
   const options: uPlot.Options = {
     width: cfg.width,
@@ -196,7 +201,7 @@ export function buildChart(cfg: BuildChartConfig): {
     cursor: { focus: { prox: 24 }, points: { size: 6 } },
     focus: { alpha: 0.12 },
     legend: { show: false },
-    plugins: [overlayPlugin(meta, band, cfg.onHover)],
+    plugins: [overlayPlugin(meta, bands, cfg.onHover)],
   };
 
   return { data: rows as uPlot.AlignedData, options };
@@ -215,11 +220,11 @@ function yLabel(baseline: Baseline, subtractDark: boolean): string {
  */
 function overlayPlugin(
   meta: SeriesMeta[],
-  band: BandData | null,
+  bands: BandData[],
   onHover: (t: TooltipData | null) => void,
 ): uPlot.Plugin {
   let svg: SVGSVGElement;
-  let bandPath: SVGPathElement;
+  let bandGroup: SVGGElement;
   let group: SVGGElement;
   let vline: SVGLineElement;
   let capMax: SVGLineElement;
@@ -246,11 +251,8 @@ function overlayPlugin(
           overflow: "visible",
           zIndex: "5",
         });
-        bandPath = document.createElementNS(SVG_NS, "path");
-        bandPath.setAttribute("fill", band ? band.color : "none");
-        bandPath.setAttribute("fill-opacity", "0.13");
-        bandPath.setAttribute("stroke", "none");
-        svg.appendChild(bandPath);
+        bandGroup = document.createElementNS(SVG_NS, "g");
+        svg.appendChild(bandGroup);
 
         group = document.createElementNS(SVG_NS, "g");
         group.style.display = "none";
@@ -266,24 +268,34 @@ function overlayPlugin(
       },
 
       draw: (u: uPlot) => {
-        if (!band) {
-          bandPath?.setAttribute("d", "");
-          return;
+        // Sync one <path> child per band, then set each envelope path.
+        while (bandGroup.childElementCount > bands.length) {
+          bandGroup.lastElementChild!.remove();
         }
-        const top: string[] = [];
-        const bot: string[] = [];
-        for (let i = 0; i < band.cycles.length; i++) {
-          const mx = band.max[i];
-          const mn = band.min[i];
-          if (mx == null || mn == null) continue;
-          const x = u.valToPos(band.cycles[i]!, "x");
-          top.push(`${x},${u.valToPos(mx, "y")}`);
-          bot.push(`${x},${u.valToPos(mn, "y")}`);
+        while (bandGroup.childElementCount < bands.length) {
+          const p = document.createElementNS(SVG_NS, "path");
+          p.setAttribute("fill-opacity", "0.13");
+          p.setAttribute("stroke", "none");
+          bandGroup.appendChild(p);
         }
-        bandPath.setAttribute(
-          "d",
-          top.length ? `M${top.join("L")}L${bot.reverse().join("L")}Z` : "",
-        );
+        bands.forEach((band, bi) => {
+          const path = bandGroup.children[bi] as SVGPathElement;
+          path.setAttribute("fill", band.color);
+          const top: string[] = [];
+          const bot: string[] = [];
+          for (let i = 0; i < band.cycles.length; i++) {
+            const mx = band.max[i];
+            const mn = band.min[i];
+            if (mx == null || mn == null) continue;
+            const x = u.valToPos(band.cycles[i]!, "x");
+            top.push(`${x},${u.valToPos(mx, "y")}`);
+            bot.push(`${x},${u.valToPos(mn, "y")}`);
+          }
+          path.setAttribute(
+            "d",
+            top.length ? `M${top.join("L")}L${bot.reverse().join("L")}Z` : "",
+          );
+        });
       },
 
       setCursor: (u: uPlot) => {

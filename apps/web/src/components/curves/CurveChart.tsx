@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import uPlot from "uplot";
 import type { DarkCurve, WellCurve } from "@zpcrweb/core";
-import type { Baseline, Scale } from "../../state/useZpcrStore";
+import type { Baseline, BandsMode, Scale } from "../../state/useZpcrStore";
 import { buildChart, type TooltipData } from "../../lib/uplot/chart";
 
 interface Props {
@@ -10,9 +10,10 @@ interface Props {
   baseline: Baseline;
   scale: Scale;
   subtractDark: boolean;
+  bands: BandsMode;
 }
 
-export function CurveChart({ curves, darkCurves, baseline, scale, subtractDark }: Props) {
+export function CurveChart({ curves, darkCurves, baseline, scale, subtractDark, bands }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const plotRef = useRef<uPlot | null>(null);
   const [tip, setTip] = useState<TooltipData | null>(null);
@@ -31,6 +32,7 @@ export function CurveChart({ curves, darkCurves, baseline, scale, subtractDark }
       baseline,
       scale,
       subtractDark,
+      bands,
       width,
       height,
       onHover: setTip,
@@ -43,7 +45,7 @@ export function CurveChart({ curves, darkCurves, baseline, scale, subtractDark }
       plotRef.current?.destroy();
       plotRef.current = null;
     };
-  }, [curves, darkCurves, baseline, scale, subtractDark]);
+  }, [curves, darkCurves, baseline, scale, subtractDark, bands]);
 
   // Keep the plot sized to its container.
   useEffect(() => {

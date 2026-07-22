@@ -27,6 +27,7 @@ export interface StoredSettings {
   baseline: "raw" | "delta";
   scale: "linear" | "log";
   subtractDark: boolean;
+  bands: "off" | "auto" | "on";
 }
 
 function openDb(): Promise<IDBDatabase> {

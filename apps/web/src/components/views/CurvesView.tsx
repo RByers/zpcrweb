@@ -3,6 +3,7 @@ import type { Zpcr, WellCurve, DarkCurve } from "@zpcrweb/core";
 import {
   wellKey,
   type Baseline,
+  type BandsMode,
   type FileSettings,
   type Scale,
 } from "../../state/useZpcrStore";
@@ -92,6 +93,16 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
             value={settings.subtractDark ? "on" : "off"}
             onChange={(v) => onChange({ subtractDark: v === "on" })}
           />
+          <Toggle
+            label="Min/max band"
+            options={[
+              ["off", "Off"],
+              ["auto", "Auto"],
+              ["on", "On"],
+            ]}
+            value={settings.bands}
+            onChange={(v) => onChange({ bands: v as BandsMode })}
+          />
         </div>
 
         <div className="rail__stat mono">
@@ -112,6 +123,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
           baseline={settings.baseline}
           scale={settings.scale}
           subtractDark={settings.subtractDark}
+          bands={settings.bands}
         />
       </section>
     </div>

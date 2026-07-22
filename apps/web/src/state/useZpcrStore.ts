@@ -13,6 +13,8 @@ import {
 export type ViewId = "overview" | "curves" | "raw";
 export type Baseline = "raw" | "delta";
 export type Scale = "linear" | "log";
+/** Min/max envelope bands: always off, always on, or auto (only when one well selected). */
+export type BandsMode = "off" | "auto" | "on";
 
 /** Per-file view settings, in-memory form (Sets for cheap toggling). */
 export interface FileSettings {
@@ -23,6 +25,8 @@ export interface FileSettings {
   scale: Scale;
   /** Subtract each channel's dark (LED-off) background from its curves. */
   subtractDark: boolean;
+  /** Min/max envelope bands mode. */
+  bands: BandsMode;
 }
 
 /** A file loaded and parsed in memory. */
@@ -53,6 +57,7 @@ function defaultSettings(): FileSettings {
     baseline: "raw",
     scale: "linear",
     subtractDark: false,
+    bands: "auto",
   };
 }
 
@@ -65,6 +70,7 @@ function toStored(id: string, s: FileSettings): StoredSettings {
     baseline: s.baseline,
     scale: s.scale,
     subtractDark: s.subtractDark,
+    bands: s.bands,
   };
 }
 
@@ -76,6 +82,7 @@ function fromStored(s: StoredSettings): FileSettings {
     baseline: s.baseline ?? "raw",
     scale: s.scale ?? "linear",
     subtractDark: s.subtractDark ?? false,
+    bands: s.bands ?? "auto",
   };
 }
 
