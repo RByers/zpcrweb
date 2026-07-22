@@ -112,7 +112,7 @@ export function RunLogTable({ zpcr, name }: Props) {
                 }
               >
                 {shownColumns.map((c) => (
-                  <td key={c} className={c === "Msg" ? "runlog__msg" : ""} title={cellText(entry, c)}>
+                  <td key={c} className={c === "TS" ? "runlog__ts" : ""}>
                     {cellText(entry, c)}
                   </td>
                 ))}

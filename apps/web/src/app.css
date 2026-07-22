@@ -871,7 +871,8 @@
   border-radius: var(--radius-sm);
 }
 .runlog__tbl {
-  width: 100%;
+  /* No width:100% — columns size to content so TS stays narrow and long Msg values make
+     the wrapper scroll horizontally instead of stretching every column. */
   border-collapse: collapse;
   font-size: 12px;
 }
@@ -902,10 +903,8 @@
 .runlog__row:hover {
   background: var(--raised);
 }
-.runlog__msg {
-  max-width: 64ch;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.runlog__ts {
+  white-space: nowrap;
 }
 /* Severity accents (left edge on the first cell). */
 .runlog__row td:first-child {
@@ -930,8 +929,8 @@
   position: fixed;
   z-index: 30;
   pointer-events: none;
-  max-width: 440px;
-  max-height: 300px;
+  max-width: min(560px, 90vw);
+  max-height: 80vh;
   overflow: hidden;
   padding: 10px 12px;
   background: rgba(10, 14, 22, 0.96);
@@ -939,7 +938,10 @@
   border-radius: var(--radius-sm);
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
   backdrop-filter: blur(4px);
-  white-space: pre;
+  /* Wrap long values (e.g. the Msg field) instead of clipping them horizontally, while
+     keeping the XML indentation. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
   font-size: 11px;
   line-height: 1.45;
 }
