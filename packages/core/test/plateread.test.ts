@@ -55,7 +55,9 @@ describe("plateread decoding", () => {
 
   it("exposes block temperature and timestamp from the header", () => {
     const last = zpcr.reads[44]!;
-    expect(last.blockTempC).toBeCloseTo(97.98, 1);
+    // BLOCKTEMP (big-endian, from the descriptor dictionary) ≈ 60 °C — the plate read
+    // happens at the 60 °C step, not the 95 °C denature.
+    expect(last.blockTempC).toBeCloseTo(59.99, 1);
     expect(last.timestamp).toBe("Tue, 21 Jul 2026 06:22:23 GMT");
   });
 

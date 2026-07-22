@@ -1,4 +1,5 @@
 import type { PlateRead, WellReading } from "./types.js";
+import { fieldMap, parseDescriptors } from "./descriptors.js";
 
 /**
  * Binary decoder for Bio-Rad CFX `.Plateread` files. See `plateread.md` for the full
@@ -75,22 +76,35 @@ export function decodePlateRead(
 ): PlateRead {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
 
-  const cycle = view.getInt32(CYCLE_OFFSET, true);
+  // Prefer the file's own descriptor dictionary (self-describing schema); fall back to the
+  // fixed offsets if it can't be parsed. Scalars in the dictionary are big-endian; the
+  // WELLDATA/DARKDATA float arrays are little-endian.
+  const fields = fieldMap(parseDescriptors(bytes));
+  const wellField = fields.get("WELLDATA");
+  const darkField = fields.get("DARKDATA");
+  // Array descriptors point at the int32 count; the float data starts 4 bytes later.
+  const wellStart = wellField ? wellField.offset + 4 : WELLDATA_OFFSET;
+  const darkStart = darkField ? darkField.offset + 4 : DARKDATA_OFFSET;
 
-  const blockTempRaw = view.getFloat32(BLOCK_TEMP_OFFSET, true);
+  const cycle = fields.get("CYCLE")?.int ?? view.getInt32(CYCLE_OFFSET, true);
+
+  const blockTempRaw =
+    fields.get("BLOCKTEMP")?.float ?? view.getFloat32(BLOCK_TEMP_OFFSET, true);
   const blockTempC =
     blockTempRaw > -50 && blockTempRaw < 200 ? blockTempRaw : undefined;
 
-  const timestamp = readTimestamp(bytes);
+  const dateTime = fields.get("DATETIME")?.text;
+  const timestamp =
+    dateTime && !Number.isNaN(Date.parse(dateTime)) ? dateTime : readTimestamp(bytes);
 
   const wells: WellReading[] = new Array(WELL_COUNT);
   for (let i = 0; i < WELL_COUNT; i++) {
-    wells[i] = readRecord(view, WELLDATA_OFFSET + i * RECORD_SIZE);
+    wells[i] = readRecord(view, wellStart + i * RECORD_SIZE);
   }
 
   const dark: WellReading[] = new Array(CHANNELS);
   for (let i = 0; i < CHANNELS; i++) {
-    dark[i] = readRecord(view, DARKDATA_OFFSET + i * RECORD_SIZE);
+    dark[i] = readRecord(view, darkStart + i * RECORD_SIZE);
   }
 
   return {

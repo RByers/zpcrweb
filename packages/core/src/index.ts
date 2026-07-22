@@ -14,6 +14,11 @@ export { deltaBaseline, subtractSeries } from "./analysis.js";
 export { toCurves, toDarkCurves, wellLabel, REFERENCE_ROW } from "./pivot.js";
 export { parseFactoryRefRowCal, compareRefToCal } from "./refcal.js";
 export {
+  decodePlateReadDetail,
+  parseDescriptors,
+  fieldMap,
+} from "./descriptors.js";
+export {
   parseRunInfo,
   parseRunInfoRaw,
   popcount,
@@ -42,3 +47,4 @@ export type {
   RefWellCal,
   RefCalComparison,
 } from "./types.js";
+export type { PlatereadField, PlatereadDetail } from "./descriptors.js";

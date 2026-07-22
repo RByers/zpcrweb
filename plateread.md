@@ -5,12 +5,20 @@ Bio-Rad CFX96 (`"96FX"` block, serial `CT019138`) real-time qPCR run
 (`20260720_211747_CT019138_Luna_noRT`). One `.Plateread` file is written per plate read,
 i.e. once per PCR cycle. This run had 45 reads (protocol `... PLATEREAD; GOTO 2,44`).
 
-> **Status:** the fluorescence table — the payload the user cares about — is fully decoded and
-> verified. Some scalar-header fields and the trailing descriptor dictionary are described but not
-> every byte is pinned down.
+> **Status:** fully decoded. The file is **self-describing**: a trailing **descriptor
+> dictionary** (§4) lists every field's absolute offset, byte length, and type. Using it, all
+> scalar-header fields, strings, and the WELLDATA/DARKDATA arrays decode exactly — no offsets
+> need to be hardcoded (they were originally, and still serve as a fallback).
 
-All multi-byte numbers are **little-endian**. Fluorescence and temperature values are
-**IEEE-754 32-bit floats**; counters/lengths are **int32**.
+**Endianness is mixed.** The metadata — version words, the scalar header, and the descriptor
+dictionary — is **big-endian**. The **WELLDATA and DARKDATA float arrays are little-endian**
+(they read as native DSP output). Fluorescence and temperature values are IEEE-754 32-bit
+floats; counters/lengths are int32.
+
+> The original reverse-engineering assumed all-little-endian and read the scalar header at
+> approximate misaligned offsets — which made e.g. block temperature come out as ~98 °C. Reading
+> the descriptor-declared offsets **big-endian** instead gives the correct **60 °C** (the plate
+> read happens at the 60 °C step), and every other scalar then matches `RunInfo.xml`/the protocol.
 
 ---
 
@@ -94,44 +102,72 @@ empty/flat.
 
 ---
 
-## 3. Scalar metadata header (`0x11C`–`0x1A3`)
+## 3. Scalar metadata header (`0x000`–`0x1A3`)
 
-Serialized C-struct-style, mixing int32 fields, float temperatures, and a length-prefixed
-timestamp string, so it is **not uniformly 4-byte aligned**. Confirmed fields:
+Everything up to WELLDATA is described by the descriptor dictionary (§4): each field's exact
+offset and length come from the file itself, and **the values are big-endian**. The header is
+byte-packed (variable-length strings shift later fields off 4-byte alignment), which is why it
+looked misaligned until read via the descriptors.
 
-| Offset | Type | Field | Read01 | Read45 |
-|--------|------|-------|--------|--------|
-| `0x11C` | int32 | step identification | 3 | 3 |
-| `0x120` | int32 | **cycle number** | 1 | 45 |
-| `0x128`/`0x12C` | int32 | scan/step index + cycle repeat | 2 / 1 | 2 / 45 |
-| `~0x133` | float | block temperature (~98 °C region) | — | 97.98 |
-| `~0x12F,0x137,0x13F` | float | ambient / shuttle / lid temps (~32 °C) | — | 32.0 |
-| `0x148`–`0x17C` | int16/int32 | LED currents (6 ch) + fan/lid state | — | — |
-| `0x182` | string | timestamp, length-prefixed | — | `Tue, 21 Jul 2026 06:22:23 GMT` |
+The three big-endian words at `0x000` are the version/magic: `1, 2, 0`
+(`ICFFPRFILEVERSION`-ish / `PLATEREADVERSION` = 2 / `CRC` = 0).
 
-The cycle number at `0x120`/`0x12C` was the decisive tell: it is the only header int that tracks
-1→45 across the file series.
+Decoded values for Read45 (offset from the descriptor dictionary; BE int / BE float):
+
+| Field | Offset | Len | Value | Notes |
+|-------|--------|-----|-------|-------|
+| `PLATEREADVERSION` | `0x04` | 4 | 2 | |
+| `RUNGUID` | `0x0C` | 9 | `CT019138` | string |
+| `ALPHASERIALNUMBER` | `0x15` | 8 | `SG16130` | (shuttle) |
+| `BASESERIALNUMBER` | `0x1D` | 9 | `CT019138` | |
+| `HEADSERIALNUMBER` | `0x26` | 11 | `785BR13647` | (ORM) |
+| `FIRMWAREVERSIONS` | `0x31` | 227 | `PXA270 - '0001', …` | banner string |
+| `RETRIEVALTYPE` | `0x119` | 4 | 3 | |
+| `SCANINDEX` | `0x11D` | 4 | 45 | |
+| `CYCLE` | `0x129` | 4 | **45** | tracks 1→45 across the series |
+| `BLOCKTEMP` | `0x132` | 4 | **59.99 °C** | float — the 60 °C plate-read step |
+| `AMBIENTTEMP` | `0x136` | 4 | 32.0 °C | |
+| `SHUTTLETEMP` | `0x13A` | 4 | 45.08 °C | matches `ShuttleTargetTemperature=45` |
+| `SAMPLETEMP` | `0x13E` | 4 | 60.0 °C | |
+| `LIDTEMP` | `0x142` | 4 | 105.1 °C | matches `HOTLID 105` |
+| `LEDCURRENT01..06` | `0x146`+4·n | 4 | 92,97,76,123,185,161 | = `LEDDACValsCal` |
+| `CHANNELMASK` | `0x176` | 4 | 63 | = `ScanMask` (6 channels) |
+| `NUMBERCOLUMNS` | `0x17A` | 4 | 12 | |
+| `NUMBERROWS` | `0x17E` | 4 | **9** | 8 sample rows + 1 reference row |
+| `DATETIME` | `0x182` | 30 | `Tue, 21 Jul 2026 06:22:23 GMT` | NUL-terminated string |
+| `DELTATIME` | `0x1A0` | 4 | 0 | |
+
+`STEP` and `STEPIDENTIFICATION` both point at `0x121` (they alias the same 4 bytes).
 
 ---
 
-## 4. Descriptor dictionary (`0x2AB0`–end)
+## 4. Descriptor dictionary (`0x2AB9`–end) — the authoritative schema
 
-The tail of the file is a self-describing schema: a list of **field-name slots** (each name in a
-fixed ~`0x108`-byte slot) followed by descriptors. Field names appear in this order:
+The tail of the file, immediately after the FILEPATH string, is a **self-describing schema**:
+a list of **field-name slots**. Each slot is a NUL-padded field name followed **255 bytes
+later** by a 9-byte descriptor:
 
 ```
-ICFFPRFILEVERSION, PLATEREADVERSION, CRC, RUNGUID, ALPHASERIALNUMBER,
-BASESERIALNUMBER, HEADSERIALNUMBER, FIRMWAREVERSIONS, SHUTTLEPARAM, SCANMODE,
-RETRIEVALTYPE, SCANINDEX, STEPIDENTIFICATION, STEP, CYCLE, ERRORNUMBER,
-ERRORDESCRIPTION, BLOCKTEMP, AMBIENTTEMP, SHUTTLETEMP, SAMPLETEMP, LIDTEMP,
-LEDCURRENT01..06, FANSTATE, FANOFFTEMP, FANONTEMP, LIDSTATE, LIDFORCE,
-LIDPOSITION, CHANNELMASK, NUMBERCOLUMNS, NUMBERROWS, DATETIME, DELTATIME,
-WELLDATA, DARKDATA, FILEPATH
+[uint32 offset][uint32 length][uint8 type]      offset/length are ABSOLUTE file bytes
 ```
 
-A descriptor carries `[uint32 length][uint32 dataOffset (relative to base 0x1A4)][uint8 type]`
-plus the name/name-pointer. `CHANNELMASK`, `NUMBERCOLUMNS` (12), `NUMBERROWS` (8) corroborate the
-6×108 grid derived above.
+Field names appear in this order (`ICFFPRFILEVERSION, PLATEREADVERSION, CRC, RUNGUID,
+ALPHASERIALNUMBER, BASESERIALNUMBER, HEADSERIALNUMBER, FIRMWAREVERSIONS, SHUTTLEPARAM,
+SCANMODE, RETRIEVALTYPE, SCANINDEX, STEPIDENTIFICATION, STEP, CYCLE, ERRORNUMBER,
+ERRORDESCRIPTION, BLOCKTEMP, AMBIENTTEMP, SHUTTLETEMP, SAMPLETEMP, LIDTEMP, LEDCURRENT01..06,
+FANSTATE, FANOFFTEMP, FANONTEMP, LIDSTATE, LIDFORCE, LIDPOSITION, CHANNELMASK, NUMBERCOLUMNS,
+NUMBERROWS, DATETIME, DELTATIME, WELLDATA, DARKDATA, FILEPATH`).
+
+The **offsets are absolute and exact**, verified against the data:
+
+- `WELLDATA` → offset `0x1A4`, length `10372` (= 4-byte count + 648×16 data). Float data at
+  `0x1A8`.
+- `DARKDATA` → offset `0x2A28`, length `100` (= count + 6×16). Float data at `0x2A2C`.
+- `FILEPATH` → offset `0x2A8C`, length `45`.
+- `DATETIME`, the serials, and every scalar likewise point at their exact bytes.
+
+So the dictionary can drive decoding directly, with no hardcoded offsets. The array descriptors
+point at the `int32` count; the float payload starts 4 bytes later.
 
 ---
 
@@ -156,12 +192,15 @@ print(rec(2, 0, 2))   # -> ~6852
 
 ## 6. Open items / caveats
 
-- **Channel → dye mapping** is not determinable from the `.Plateread` payload alone; channels are
-  stored in scan order 0–5. The run's calibration (`.Dcal`) files list the dye set
-  (FAM, HEX, VIC/Cal Gold 540, ROX/Tex 615/Cal Orange 560, Cy5, Quasar 670/705). In this data the
-  amplifying dye is channel index 2.
-- Exact byte alignment of individual temperature/LED-current fields in §3 is approximate.
-- The `0x000`–`0x00B` version words read most naturally as big-endian; everything from the payload
-  onward is little-endian.
+- **Channel → dye mapping** is not in the `.Plateread` payload; channels are stored in scan order
+  0–5. The run's calibration (`.Dcal`) files list the dye set. In this data the amplifying dye is
+  channel index 2 (Texas Red in the CFX 5-dye layout). Channel index 5 is a real sixth optical
+  channel (FRET) — not dark/reference data.
+- **Scalar offsets and endianness are now resolved** (§3/§4): every field is read at its
+  descriptor-declared offset, big-endian. The temperatures, LED currents, and states all match
+  `RunInfo.xml`/the protocol.
+- `type` is `1` for every descriptor in the observed files; its full meaning is unconfirmed, so
+  the decoder treats length (4 → scalar, else string/array) rather than the type tag.
 - `DARKDATA` (6 records, one per channel) is the LED-off/background reading used for baseline
-  subtraction; same 4-float record layout as `WELLDATA`.
+  subtraction; same 4-float record layout as `WELLDATA`. **Both arrays are little-endian**, unlike
+  the big-endian metadata.
