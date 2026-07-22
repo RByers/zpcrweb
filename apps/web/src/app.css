@@ -772,3 +772,128 @@
 .xml-punct {
   color: var(--ink-muted);
 }
+
+/* ---- Runlog table ------------------------------------------------------- */
+.runlog {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.runlog__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 20px;
+}
+.runlog__group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.runlog__grouplabel {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-muted);
+}
+.runlog__chip {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 11px;
+  color: var(--ink-muted);
+  background: transparent;
+}
+.runlog__chip.is-on {
+  color: var(--ink);
+  border-color: color-mix(in srgb, var(--neon-cyan) 55%, transparent);
+  background: var(--neon-cyan-dim);
+}
+.runlog__count {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--ink-muted);
+}
+.runlog__tblwrap {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.runlog__tbl {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.runlog__tbl thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  text-align: left;
+  padding: 6px 10px;
+  background: var(--raised);
+  color: var(--ink-muted);
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.runlog__tbl td {
+  padding: 4px 10px;
+  border-bottom: 1px solid rgba(120, 200, 255, 0.05);
+  color: var(--ink-2);
+  vertical-align: top;
+  white-space: nowrap;
+}
+.runlog__row {
+  cursor: default;
+}
+.runlog__row:hover {
+  background: var(--raised);
+}
+.runlog__msg {
+  max-width: 64ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Severity accents (left edge on the first cell). */
+.runlog__row td:first-child {
+  border-left: 2px solid transparent;
+}
+.sev-warning td:first-child {
+  border-left-color: var(--good);
+  border-left-color: #eab308;
+}
+.sev-error td:first-child,
+.sev-critical td:first-child,
+.sev-fatal td:first-child {
+  border-left-color: var(--danger);
+}
+.sev-error td,
+.sev-critical td,
+.sev-fatal td {
+  color: #ffb3b3;
+}
+
+.runlog__tip {
+  position: fixed;
+  z-index: 30;
+  pointer-events: none;
+  max-width: 440px;
+  max-height: 300px;
+  overflow: hidden;
+  padding: 10px 12px;
+  background: rgba(10, 14, 22, 0.96);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+  white-space: pre;
+  font-size: 11px;
+  line-height: 1.45;
+}
