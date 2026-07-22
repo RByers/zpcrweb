@@ -1,0 +1,9 @@
+{
+  "name": "@zpcrweb/web",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Web app for visualizing Bio-Rad CFX .zpcr files (scaffold)",
+  "dependencies": {
+    "@zpcrweb/core": "*"
+  }
+}

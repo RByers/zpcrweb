@@ -1,0 +1,16 @@
+{
+  "name": "zpcrweb",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Library and web app for reading Bio-Rad CFX qPCR .zpcr files",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "build": "npm run build -w @zpcrweb/core",
+    "test": "npm run test -w @zpcrweb/core",
+    "typecheck": "npm run typecheck -w @zpcrweb/core"
+  },
+  "license": "MIT"
+}
