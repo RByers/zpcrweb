@@ -1,6 +1,6 @@
-import { useState } from "react";
-import type { PlateRead } from "@zpcrweb/core";
-import { CHANNEL_INFO, channelColor, channelDye } from "../../lib/channelColors";
+import { useMemo, useState } from "react";
+import { decodePlateReadDetail, type PlateRead, type Zpcr } from "@zpcrweb/core";
+import { channelColor } from "../../lib/channelColors";
 
 type Stat = "mean" | "std" | "min" | "max";
 const STATS: Stat[] = ["mean", "std", "min", "max"];
@@ -8,35 +8,91 @@ const ROW_LABELS = ["A", "B", "C", "D", "E", "F", "G", "H", "R"];
 const COLS = 12;
 
 /**
- * Fully decoded view of a single `.Plateread`: the scalar header, the DARKDATA table, and
- * the WELLDATA fluorescence table as a per-channel plate grid (any of the four stats).
+ * Fully decoded view of a single `.Plateread`. Everything comes from the file's own
+ * descriptor dictionary (self-describing schema), so no offsets are hardcoded here: the
+ * version words, every named field with its offset/length/type and decoded value, the
+ * DARKDATA table, and the WELLDATA fluorescence grid.
  */
-export function DecodedPlateread({ read }: { read: PlateRead }) {
-  const [channel, setChannel] = useState(2); // amplifying channel in the sample run
+export function DecodedPlateread({ zpcr, read }: { zpcr: Zpcr; read: PlateRead }) {
+  const [channel, setChannel] = useState(2);
   const [stat, setStat] = useState<Stat>("mean");
 
-  const header: [string, string][] = [
-    ["File", read.fileName],
-    ["Read index", String(read.index)],
-    ["Cycle", String(read.cycle)],
-    ["Block temp", read.blockTempC != null ? `${read.blockTempC.toFixed(2)} °C` : "—"],
-    ["Timestamp", read.timestamp ?? "—"],
-  ];
+  const bytes = useMemo(() => zpcr.archive.bytes(read.fileName), [zpcr, read.fileName]);
+  const detail = useMemo(() => decodePlateReadDetail(bytes), [bytes]);
+  const channelCount = read.dark.length;
 
   const fmt = (v: number) => (stat === "std" ? v.toFixed(2) : v.toFixed(1));
 
   return (
     <div className="decoded">
       <section className="decoded__block">
-        <h3 className="decoded__h">Header</h3>
+        <h3 className="decoded__h">File structure</h3>
         <dl className="decoded__dl mono">
-          {header.map(([k, v]) => (
-            <div className="decoded__pair" key={k}>
-              <dt>{k}</dt>
-              <dd>{v}</dd>
-            </div>
-          ))}
+          <div className="decoded__pair">
+            <dt>Size</dt>
+            <dd>{detail.size.toLocaleString()} B</dd>
+          </div>
+          <div className="decoded__pair">
+            <dt>Version</dt>
+            <dd>{detail.versionWords.join(" · ")} (BE)</dd>
+          </div>
+          <div className="decoded__pair">
+            <dt>Cycle</dt>
+            <dd>{read.cycle}</dd>
+          </div>
+          <div className="decoded__pair">
+            <dt>Timestamp</dt>
+            <dd>{read.timestamp ?? "—"}</dd>
+          </div>
         </dl>
+      </section>
+
+      <section className="decoded__block">
+        <h3 className="decoded__h">
+          Descriptor dictionary — every field, from the file's own schema
+        </h3>
+        <p className="decoded__hint mono">
+          Scalars are big-endian; the WELLDATA/DARKDATA float arrays are little-endian.
+          Fields with an unclear purpose are shown with their raw value.
+        </p>
+        <div className="decoded__gridwrap">
+          <table className="decoded__tbl decoded__fields mono">
+            <thead>
+              <tr>
+                <th>Field</th>
+                <th>Offset</th>
+                <th>Len</th>
+                <th>Type</th>
+                <th>int (BE)</th>
+                <th>float (BE)</th>
+                <th>text / hex</th>
+              </tr>
+            </thead>
+            <tbody>
+              {detail.fields.map((f) => (
+                <tr key={f.name}>
+                  <td className="decoded__fname">{f.name}</td>
+                  <td>0x{f.offset.toString(16)}</td>
+                  <td>{f.length}</td>
+                  <td>{f.type}</td>
+                  <td>{f.length === 4 ? f.int : ""}</td>
+                  <td>
+                    {f.length === 4 && f.float !== undefined
+                      ? f.float.toFixed(Math.abs(f.float) < 1000 ? 3 : 0)
+                      : ""}
+                  </td>
+                  <td className="decoded__ftext">
+                    {f.text !== undefined
+                      ? f.text
+                      : f.length > 4
+                        ? `«${f.length} B» 0x${f.hex}`
+                        : ""}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </section>
 
       <section className="decoded__block">
@@ -45,7 +101,6 @@ export function DecodedPlateread({ read }: { read: PlateRead }) {
           <thead>
             <tr>
               <th>Ch</th>
-              <th>Dye</th>
               <th>mean</th>
               <th>std</th>
               <th>min</th>
@@ -56,13 +111,9 @@ export function DecodedPlateread({ read }: { read: PlateRead }) {
             {read.dark.map((d, i) => (
               <tr key={i}>
                 <td>
-                  <span
-                    className="decoded__swatch"
-                    style={{ background: channelColor(i) }}
-                  />
+                  <span className="decoded__swatch" style={{ background: channelColor(i) }} />
                   C{i + 1}
                 </td>
-                <td>{channelDye(i)}</td>
                 <td>{d.mean.toFixed(1)}</td>
                 <td>{d.std.toFixed(2)}</td>
                 <td>{d.min.toFixed(1)}</td>
@@ -77,14 +128,13 @@ export function DecodedPlateread({ read }: { read: PlateRead }) {
         <h3 className="decoded__h">WELLDATA — fluorescence table (6 ch × 108 wells)</h3>
         <div className="decoded__controls">
           <div className="segmented segmented--sm">
-            {CHANNEL_INFO.map((c) => (
+            {Array.from({ length: channelCount }, (_, i) => (
               <button
-                key={c.index}
-                className={"segmented__item" + (channel === c.index ? " is-active" : "")}
-                onClick={() => setChannel(c.index)}
-                title={c.dye}
+                key={i}
+                className={"segmented__item" + (channel === i ? " is-active" : "")}
+                onClick={() => setChannel(i)}
               >
-                C{c.index + 1}
+                C{i + 1}
               </button>
             ))}
           </div>
@@ -100,7 +150,7 @@ export function DecodedPlateread({ read }: { read: PlateRead }) {
             ))}
           </div>
           <span className="decoded__ctxt mono">
-            C{channel + 1} · {channelDye(channel)} · {stat}
+            C{channel + 1} · {stat}
           </span>
         </div>
 

@@ -286,8 +286,11 @@
   font-family: var(--font-mono);
   color: var(--ink-2);
 }
-.refcal__drift-big {
+/* Higher specificity than `.decoded__grid td` so the highlight wins. */
+.refcal__grid td.refcal__drift-big,
+.refcal__tbl td.refcal__drift-big {
   color: var(--neon-magenta);
+  font-weight: 600;
 }
 .refcal__controls {
   margin-bottom: 10px;
@@ -703,6 +706,21 @@
   border-radius: 2px;
   margin-right: 6px;
   vertical-align: baseline;
+}
+.decoded__hint {
+  margin: 0 0 8px;
+  color: var(--ink-muted);
+  font-size: 11px;
+  max-width: 90ch;
+}
+.decoded__fields td:first-child,
+.decoded__fname {
+  color: var(--neon-cyan);
+}
+.decoded__ftext {
+  max-width: 44ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* WELLDATA grid */
