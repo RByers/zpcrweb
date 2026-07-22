@@ -8,6 +8,8 @@ visualizer for everything** inside a `.zpcr` archive.
 Additional typed parsers for the archive files currently reachable only via the low-level
 `archive` API (raw bytes / text / hex):
 
+- [ ] Parse the calibration files and try to infer how to use them. Do they include cross-talk information for subtracting a fraction of one channel from another? Search the web for any academic literature on how crosstalk elimination is done in practice. 
+- [ ] baseline subtraction / Cq (Ct) calculation helpers derived from the curves.
 - [ ] **Protocol** — `ProtocolName.txt`, `ProtocolRunDefinition.txt`
       (e.g. `METHOD CALC;HOTLID 105,30;VOLUME 20;TEMP …;PLATEREAD;GOTO 2,44;END`). Parse
       into structured steps + cycling program.
@@ -22,7 +24,6 @@ Additional typed parsers for the archive files currently reachable only via the 
       trailing descriptor dictionary (§4). Promote from best-effort to fully typed.
 - [ ] **`FactoryRefRowCal`** — parse the factory reference-row calibration array in
       `RunInfo.xml` into typed per-well records.
-- [ ] Optional: baseline subtraction / Cq (Ct) calculation helpers derived from the curves.
 
 ## Web app (`apps/web`)
 
@@ -44,12 +45,13 @@ React + Vite + uPlot app shipped (v1). Done:
 
 Still planned:
 
+- [ ] Visualize calibration files
+- [ ] Add a plate editor which allows setting the flourophores, tube-types (white / clear) used per well.  Used for calibration adjustments and fluorophore display. Allow saving/naming plate files and applying them to runs. Remember the plate setting applied to each loaded run. Have an easy mechanism to copy/paste settings from one well to another or to all wells on a column/row/plate, or to duplicate a column/row across multiple columns/rows (eg. using click drag to select a region simple to copy/paste operations in spreadsheets)
+- [ ] Optionally allow writing the target and sample names per well in the plate editor, again with easy copy paste of some form. Then use these in the curves visualization (eg. on hover).
+- [ ] Add an option to apply flourophore-specific calibration to the run based on the calibration file data.
 - [ ] Plate heatmap per cycle.
 - [ ] Full visualizers replacing the raw viewers as typed parsers land above (`.alf`,
       `.Dcal`, and the remaining plaintext status files).
-- [ ] Confirm channel → dye mapping from the `.Dcal` calibration files (currently a hint;
-      C6 = FRET is an inference).
-- [ ] Decode `FactoryRefRowCal` / reference-well calibration into typed per-well records.
 
 ## Testing / infra
 
