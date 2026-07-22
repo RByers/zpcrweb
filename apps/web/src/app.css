@@ -133,6 +133,14 @@
   color: var(--ink);
   box-shadow: inset 0 -2px 0 var(--neon-cyan);
 }
+.segmented__item:disabled {
+  color: var(--ink-muted);
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.segmented__item:disabled:hover {
+  background: transparent;
+}
 .segmented--sm .segmented__item {
   padding: 3px 9px;
   font-size: 12px;
