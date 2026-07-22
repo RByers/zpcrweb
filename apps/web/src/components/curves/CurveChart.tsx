@@ -1,25 +1,23 @@
 import { useEffect, useRef, useState } from "react";
 import uPlot from "uplot";
-import type { WellCurve } from "@zpcrweb/core";
+import type { DarkCurve, WellCurve } from "@zpcrweb/core";
 import type { Baseline, Scale } from "../../state/useZpcrStore";
-import {
-  buildChartData,
-  buildChartOptions,
-  type TooltipData,
-} from "../../lib/uplot/chart";
+import { buildChart, type TooltipData } from "../../lib/uplot/chart";
 
 interface Props {
   curves: WellCurve[];
+  darkCurves: DarkCurve[];
   baseline: Baseline;
   scale: Scale;
+  subtractDark: boolean;
 }
 
-export function CurveChart({ curves, baseline, scale }: Props) {
+export function CurveChart({ curves, darkCurves, baseline, scale, subtractDark }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const plotRef = useRef<uPlot | null>(null);
   const [tip, setTip] = useState<TooltipData | null>(null);
 
-  // (Re)build the plot whenever the data or scale/baseline change.
+  // (Re)build the plot whenever the data or options change.
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
@@ -27,17 +25,25 @@ export function CurveChart({ curves, baseline, scale }: Props) {
     const width = Math.max(320, Math.floor(rect.width));
     const height = Math.max(240, Math.floor(rect.height));
 
-    const { data, meta } = buildChartData(curves, baseline, scale);
-    const opts = buildChartOptions(meta, baseline, scale, width, height, setTip);
+    const { data, options } = buildChart({
+      wellCurves: curves,
+      darkCurves,
+      baseline,
+      scale,
+      subtractDark,
+      width,
+      height,
+      onHover: setTip,
+    });
 
     plotRef.current?.destroy();
-    plotRef.current = new uPlot(opts, data, host);
+    plotRef.current = new uPlot(options, data, host);
 
     return () => {
       plotRef.current?.destroy();
       plotRef.current = null;
     };
-  }, [curves, baseline, scale]);
+  }, [curves, darkCurves, baseline, scale, subtractDark]);
 
   // Keep the plot sized to its container.
   useEffect(() => {
@@ -70,7 +76,7 @@ export function CurveChart({ curves, baseline, scale }: Props) {
         >
           <div className="chart__tip-head">
             <span className="chart__tip-swatch" style={{ background: tip.color }} />
-            <strong>{tip.wellLabel}</strong>
+            <strong>{tip.kind === "dark" ? "dark" : tip.label}</strong>
             <span className="chart__tip-dye">
               C{tip.channel + 1} · {tip.dye}
             </span>

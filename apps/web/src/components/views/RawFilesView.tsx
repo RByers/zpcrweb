@@ -1,7 +1,8 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { Zpcr } from "@zpcrweb/core";
+import { DecodedView, decodedKind } from "../raw/DecodedView";
 
-type Mode = "hex" | "text";
+type Mode = "decoded" | "text" | "hex";
 
 function group(name: string): string {
   if (/\.Plateread$/i.test(name)) return "Plate reads";
@@ -12,6 +13,13 @@ function group(name: string): string {
 
 const GROUP_ORDER = ["Metadata", "Plate reads", "Calibration", "Other"];
 const TEXTUAL = /\.(xml|txt|alf)$/i;
+
+/** Best default mode for a file: decoded if a decoder exists, else text for text, else hex. */
+function defaultMode(name: string): Mode {
+  if (decodedKind(name)) return "decoded";
+  if (TEXTUAL.test(name)) return "text";
+  return "hex";
+}
 
 export function RawFilesView({ zpcr }: { zpcr: Zpcr }) {
   const groups = useMemo(() => {
@@ -29,14 +37,21 @@ export function RawFilesView({ zpcr }: { zpcr: Zpcr }) {
   const [selected, setSelected] = useState<string>(
     () => zpcr.archive.entries.find((n) => /RunInfo\.xml$/i.test(n)) ?? zpcr.archive.entries[0] ?? "",
   );
-  const [mode, setMode] = useState<Mode>("hex");
+  const [mode, setMode] = useState<Mode>(() => defaultMode(selected));
   const [limit, setLimit] = useState(4096);
 
+  // Reset to the file's best default mode whenever the selection changes.
+  useEffect(() => {
+    setMode(defaultMode(selected));
+    setLimit(4096);
+  }, [selected]);
+
   const isTextual = TEXTUAL.test(selected);
+  const hasDecoded = decodedKind(selected) !== null;
   const size = selected ? zpcr.archive.bytes(selected).length : 0;
 
-  const body = useMemo(() => {
-    if (!selected) return "";
+  const rawBody = useMemo(() => {
+    if (!selected || mode === "decoded") return "";
     if (mode === "text" && isTextual) return zpcr.archive.text(selected);
     return zpcr.archive.hexDump(selected, { maxBytes: limit });
   }, [zpcr, selected, mode, limit, isTextual]);
@@ -51,10 +66,7 @@ export function RawFilesView({ zpcr }: { zpcr: Zpcr }) {
               <button
                 key={name}
                 className={"raw__item mono" + (name === selected ? " is-active" : "")}
-                onClick={() => {
-                  setSelected(name);
-                  setLimit(4096);
-                }}
+                onClick={() => setSelected(name)}
                 title={name}
               >
                 {name}
@@ -70,10 +82,12 @@ export function RawFilesView({ zpcr }: { zpcr: Zpcr }) {
           <span className="raw__size mono">{size.toLocaleString()} B</span>
           <div className="segmented segmented--sm raw__modes">
             <button
-              className={"segmented__item" + (mode === "hex" ? " is-active" : "")}
-              onClick={() => setMode("hex")}
+              className={"segmented__item" + (mode === "decoded" ? " is-active" : "")}
+              onClick={() => setMode("decoded")}
+              disabled={!hasDecoded}
+              title={hasDecoded ? "" : "No decoder for this file"}
             >
-              Hex
+              Decoded
             </button>
             <button
               className={"segmented__item" + (mode === "text" ? " is-active" : "")}
@@ -83,13 +97,28 @@ export function RawFilesView({ zpcr }: { zpcr: Zpcr }) {
             >
               Text
             </button>
+            <button
+              className={"segmented__item" + (mode === "hex" ? " is-active" : "")}
+              onClick={() => setMode("hex")}
+            >
+              Hex
+            </button>
           </div>
         </div>
-        <pre className="raw__dump mono">{body}</pre>
-        {mode === "hex" && limit < size && (
-          <button className="raw__more" onClick={() => setLimit((l) => l + 8192)}>
-            Show more ({(size - limit).toLocaleString()} B remaining)
-          </button>
+
+        {mode === "decoded" ? (
+          <div className="raw__decoded">
+            <DecodedView zpcr={zpcr} name={selected} />
+          </div>
+        ) : (
+          <>
+            <pre className="raw__dump mono">{rawBody}</pre>
+            {mode === "hex" && limit < size && (
+              <button className="raw__more" onClick={() => setLimit((l) => l + 8192)}>
+                Show more ({(size - limit).toLocaleString()} B remaining)
+              </button>
+            )}
+          </>
         )}
       </section>
     </div>

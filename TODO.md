@@ -37,11 +37,19 @@ React + Vite + uPlot app shipped (v1). Done:
 - [x] **Raw file browser** over the archive API — hex/ASCII + text viewer for every entry.
 - [x] Responsive (container queries) from large desktop down to mobile.
 
+- [x] Reference row (R) in the well matrix (off by default, dashed).
+- [x] Dark (LED-off) background: dashed per-channel lines, or subtract from curves.
+- [x] Decoded Raw-files views: plateread tables, RunInfo key/value table, protocol steps,
+      pretty-printed + highlighted runlog.xml. Per-file default mode (decoded/text/hex).
+
 Still planned:
 
 - [ ] Plate heatmap per cycle.
-- [ ] Full visualizers replacing the raw viewers as typed parsers land above.
-- [ ] Confirm channel → dye mapping from the `.Dcal` calibration files (currently a hint).
+- [ ] Full visualizers replacing the raw viewers as typed parsers land above (`.alf`,
+      `.Dcal`, and the remaining plaintext status files).
+- [ ] Confirm channel → dye mapping from the `.Dcal` calibration files (currently a hint;
+      C6 = FRET is an inference).
+- [ ] Decode `FactoryRefRowCal` / reference-well calibration into typed per-well records.
 
 ## Testing / infra
 

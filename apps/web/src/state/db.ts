@@ -26,6 +26,7 @@ export interface StoredSettings {
   enabledWells: string[]; // "row,col" keys
   baseline: "raw" | "delta";
   scale: "linear" | "log";
+  subtractDark: boolean;
 }
 
 function openDb(): Promise<IDBDatabase> {

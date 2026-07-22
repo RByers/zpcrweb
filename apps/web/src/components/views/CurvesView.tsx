@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import type { Zpcr, WellCurve } from "@zpcrweb/core";
+import type { Zpcr, WellCurve, DarkCurve } from "@zpcrweb/core";
 import {
   wellKey,
   type Baseline,
@@ -17,11 +17,12 @@ interface Props {
 }
 
 export function CurvesView({ zpcr, settings, onChange }: Props) {
-  // Full curve set (no reference row); derived once per file.
+  // Full curve set including the reference row; derived once per file.
   const allCurves = useMemo<WellCurve[]>(
-    () => zpcr.curves({ includeReference: false }),
+    () => zpcr.curves({ includeReference: true }),
     [zpcr],
   );
+  const darkCurves = useMemo<DarkCurve[]>(() => zpcr.darkCurves(), [zpcr]);
 
   const visible = useMemo(
     () =>
@@ -31,6 +32,12 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
           settings.enabledWells.has(wellKey(c.row, c.col)),
       ),
     [allCurves, settings.enabledChannels, settings.enabledWells],
+  );
+
+  // Dark lines/subtraction only concern the enabled channels.
+  const enabledDark = useMemo(
+    () => darkCurves.filter((d) => settings.enabledChannels.has(d.channel)),
+    [darkCurves, settings.enabledChannels],
   );
 
   const toggleChannel = (ch: number) => {
@@ -76,10 +83,20 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
             value={settings.scale}
             onChange={(v) => onChange({ scale: v as Scale })}
           />
+          <Toggle
+            label="Dark (LED-off)"
+            options={[
+              ["off", "Show"],
+              ["on", "Subtract"],
+            ]}
+            value={settings.subtractDark ? "on" : "off"}
+            onChange={(v) => onChange({ subtractDark: v === "on" })}
+          />
         </div>
 
         <div className="rail__stat mono">
           {visible.length} / {allCurves.length} curves
+          {!settings.subtractDark && " + dark"}
         </div>
         {logDelta && (
           <div className="rail__note mono">
@@ -91,8 +108,10 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
       <section className="curves__plot">
         <CurveChart
           curves={visible}
+          darkCurves={enabledDark}
           baseline={settings.baseline}
           scale={settings.scale}
+          subtractDark={settings.subtractDark}
         />
       </section>
     </div>

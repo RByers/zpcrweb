@@ -48,23 +48,51 @@ exposed as a clear affordance on each file chip.
   `zpcr.metadata` and `zpcr.archive.text()`.
 - **Curves** — the centerpiece (see below).
 - **Raw files** — groups `zpcr.archive.entries` (Metadata / Plate reads / Calibration /
-  Other) and renders any file via `archive.hexDump()` (hex+ASCII, paginated with "Show
-  more") or `archive.text()` for textual files. This makes every file inspectable until
-  typed parsers land for the rest.
+  Other). Each file opens in its **best default mode** (`RawFilesView.defaultMode`) with
+  Decoded / Text / Hex always switchable: a typed **Decoded** view where one exists, else
+  **Text** for textual files, else **Hex** (`archive.hexDump`, paginated). See below.
+
+### Decoded views (`components/raw/DecodedView.tsx`)
+
+A small router keyed on the file name (`decodedKind`):
+
+- **`.Plateread`** → header (cycle, block temp, timestamp) + the DARKDATA table + the
+  WELLDATA fluorescence table as a per-channel plate grid with a stat selector
+  (mean/std/min/max). Reads straight from the decoded `PlateRead` (found by `fileName`).
+- **`RunInfo.xml`** → a two-column key/value table (it is just a flat `KeyValuePairs` blob;
+  parsed with `parseRunInfoRaw`).
+- **`ProtocolRunDefinition.txt`** → one step per line (split on `;`), numbered.
+- **other `.xml`** (e.g. `runlog.xml`) → pretty-printed, syntax-highlighted XML
+  (`lib/xmlFormat.tsx`). runlog.xml is not single-rooted (a BOM, an empty header element,
+  then many sibling `<Log>` records with no wrapper), so the formatter strips the BOM/XML
+  declaration, wraps the body in a synthetic root for `DOMParser`, and renders that root's
+  children — degrading to raw text on a parse error.
+
+XML formatting is a *presentation* concern (not `.zpcr` decoding), so it lives in the app,
+not the library.
 
 ## Curves view
 
-Data flows `zpcr.curves({ includeReference:false })` → filter by enabled channels+wells →
-`lib/uplot/chart.ts` builds uPlot data/options → `CurveChart` renders + overlays a tooltip.
+Data flows `zpcr.curves({ includeReference:true })` + `zpcr.darkCurves()` → filter by
+enabled channels/wells → `lib/uplot/chart.ts` `buildChart()` → `CurveChart` renders +
+overlays a tooltip.
 
 - **Selection:** a channel bar (6 dye-labelled toggles) and an 8×12 well matrix whose row
-  (A–H) and column (1–12) headers toggle whole rows/columns, plus an all/none corner.
+  (A–H) and column (1–12) headers toggle whole rows/columns, plus an all/none corner. A
+  **reference row (R)** sits below H — the per-channel reference-well readings, toggled like
+  any well but **off by default** and drawn **dashed**.
 - **Transforms:** Raw ↔ ΔRFU (`deltaBaseline`) and Linear ↔ Log (uPlot `distr: 3`).
-  - *Log + ΔRFU:* ΔRFU values go ≤ 0, which is undefined on a log axis, so non-positive
-    points are rendered as gaps (`null`) and an inline note explains it. The other three
-    combinations are unaffected.
-- **Hover/tap tooltip:** a uPlot cursor plugin finds the nearest series and reports well
-  label, channel/dye, cycle, and mean/min/max/std for that point.
+  - *Log + ΔRFU:* ΔRFU values go ≤ 0, undefined on a log axis, so non-positive points are
+    gaps (`null`) with an inline note. The other three combinations are unaffected.
+- **Dark (LED-off) background:** `zpcr.darkCurves()` gives one background series per channel.
+  - *Show* (default): one **dashed** dark line per present channel, transformed like the
+    curves — so you see where each channel's background sits.
+  - *Subtract*: each curve is `subtractSeries(mean, dark[channel])` before ΔRFU/scale (the
+    dark lines are dropped and the y-axis label gains "− dark"). Both `subtractSeries` and
+    `deltaBaseline` are tested library functions.
+- **X axis:** integer cycles only — a tick per cycle, gridline + label every 5.
+- **Hover/tap tooltip:** a uPlot cursor plugin finds the nearest series (well curve, dark, or
+  reference) and reports its label, channel/dye, cycle, and mean/min/max/std.
 
 ## Color encoding (see `lib/channelColors.ts`)
 

@@ -21,6 +21,8 @@ export interface FileSettings {
   enabledWells: Set<string>; // "row,col"
   baseline: Baseline;
   scale: Scale;
+  /** Subtract each channel's dark (LED-off) background from its curves. */
+  subtractDark: boolean;
 }
 
 /** A file loaded and parsed in memory. */
@@ -46,9 +48,11 @@ function defaultSettings(): FileSettings {
     // Channels 1–5 (the standard dye set) on by default; channel 6 (FRET) is off — it is a
     // real optical channel but standard runs don't use it. The user can toggle it on.
     enabledChannels: new Set([0, 1, 2, 3, 4]),
+    // Sample rows A–H by default; the reference row (row 8) is off until enabled.
     enabledWells: wells,
     baseline: "raw",
     scale: "linear",
+    subtractDark: false,
   };
 }
 
@@ -60,6 +64,7 @@ function toStored(id: string, s: FileSettings): StoredSettings {
     enabledWells: [...s.enabledWells],
     baseline: s.baseline,
     scale: s.scale,
+    subtractDark: s.subtractDark,
   };
 }
 
@@ -70,6 +75,7 @@ function fromStored(s: StoredSettings): FileSettings {
     enabledWells: new Set(s.enabledWells),
     baseline: s.baseline ?? "raw",
     scale: s.scale ?? "linear",
+    subtractDark: s.subtractDark ?? false,
   };
 }
 
