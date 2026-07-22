@@ -18,3 +18,12 @@ export function deltaBaseline(values: number[], baselineIndex = 0): number[] {
   const baseline = values[baselineIndex] ?? values[0] ?? 0;
   return values.map((v) => v - baseline);
 }
+
+/**
+ * Element-wise subtraction of one series from another, `a[i] - b[i]`. Used to subtract a
+ * per-cycle background (e.g. a channel's dark reading) from a well's curve. Missing entries
+ * in `b` are treated as 0; the result matches the length of `a`.
+ */
+export function subtractSeries(a: number[], b: number[]): number[] {
+  return a.map((v, i) => v - (b[i] ?? 0));
+}

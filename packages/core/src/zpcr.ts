@@ -6,7 +6,7 @@ import {
   plateReadNumber,
 } from "./plateread.js";
 import { parseRunInfo } from "./runinfo.js";
-import { toCurves } from "./pivot.js";
+import { toCurves, toDarkCurves } from "./pivot.js";
 
 const RUNINFO_NAME = "RunInfo.xml";
 const textDecoder = new TextDecoder("utf-8");
@@ -42,6 +42,7 @@ export function parseZpcr(data: Uint8Array | ArrayBuffer): Zpcr {
     reads,
     archive,
     curves: (options?: CurveOptions) => toCurves(reads, options),
+    darkCurves: () => toDarkCurves(reads),
   };
 }
 

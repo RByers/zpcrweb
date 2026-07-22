@@ -101,6 +101,22 @@ export interface WellCurve {
   max: number[];
 }
 
+/** A per-channel dark (LED-off background) reading across cycles, from DARKDATA. */
+export interface DarkCurve {
+  /** Optical channel 0–5. */
+  channel: number;
+  /** Cycle numbers, ascending — aligned index-for-index with the value arrays. */
+  cycles: number[];
+  /** Dark mean per cycle. */
+  mean: number[];
+  /** Dark std per cycle. */
+  std: number[];
+  /** Dark min per cycle. */
+  min: number[];
+  /** Dark max per cycle. */
+  max: number[];
+}
+
 /** Options for {@link Zpcr.curves}. */
 export interface CurveOptions {
   /** Restrict to a single channel; omit for all channels. */
@@ -139,4 +155,6 @@ export interface Zpcr {
   archive: ArchiveAccess;
   /** Pivot the run-centric reads into well-centric amplification curves. */
   curves(options?: CurveOptions): WellCurve[];
+  /** The per-channel dark (LED-off background) reading across cycles. */
+  darkCurves(): DarkCurve[];
 }

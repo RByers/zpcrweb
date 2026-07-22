@@ -1,4 +1,4 @@
-import type { CurveOptions, PlateRead, WellCurve } from "./types.js";
+import type { CurveOptions, DarkCurve, PlateRead, WellCurve } from "./types.js";
 import { CHANNELS, COLUMNS, ROWS } from "./plateread.js";
 
 /** Reference row index (row 8): holds real optical readings, not a sample row. */
@@ -60,6 +60,30 @@ export function toCurves(
         });
       }
     }
+  }
+  return curves;
+}
+
+/**
+ * Pivot the per-read DARKDATA into one curve per channel: the LED-off background reading
+ * across cycles. Useful as a baseline reference or for background subtraction.
+ */
+export function toDarkCurves(reads: PlateRead[]): DarkCurve[] {
+  const cycles = reads.map((r) => r.cycle);
+  const curves: DarkCurve[] = [];
+  for (let channel = 0; channel < CHANNELS; channel++) {
+    const mean: number[] = [];
+    const std: number[] = [];
+    const min: number[] = [];
+    const max: number[] = [];
+    for (const read of reads) {
+      const d = read.dark[channel];
+      mean.push(d?.mean ?? NaN);
+      std.push(d?.std ?? NaN);
+      min.push(d?.min ?? NaN);
+      max.push(d?.max ?? NaN);
+    }
+    curves.push({ channel, cycles, mean, std, min, max });
   }
   return curves;
 }
