@@ -111,7 +111,3 @@ npm run build               # build the library (ESM + CJS + .d.ts)
 npm run typecheck           # typecheck the library
 npm run dev -w @zpcrweb/web  # run the web app
 ```
-
-## License
-
-MIT

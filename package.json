@@ -12,5 +12,5 @@
     "test": "npm run test -w @zpcrweb/core",
     "typecheck": "npm run typecheck -w @zpcrweb/core"
   },
-  "license": "MIT"
+  "license": "GPL-3.0-or-later"
 }
