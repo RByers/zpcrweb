@@ -27,7 +27,9 @@ This is an npm-workspaces monorepo:
 
 - Decompresses a `.zpcr` archive in memory (via [`fflate`](https://github.com/101arrowz/fflate)).
 - Decodes every `.Plateread` file into the full 6-channel × 108-well fluorescence table
-  (mean / std / min / max per well), plus cycle number, block temperature, and timestamp.
+  (mean / std / min / max per well), plus cycle number, protocol step, timestamp, and
+  **every temperature the file carries** (block, ambient, shuttle, sample, lid, and the fan
+  set points) — extracted generically from the file's own schema, not a fixed list.
 - Parses `RunInfo.xml` into typed run metadata (grid size, scan mask → channel count,
   serials, start time, …), with the full raw key/value map preserved.
 - Pivots the per-cycle data into **well-centric amplification curves** ready to plot.
@@ -73,6 +75,8 @@ const zpcr = await zpcrFromBlob(file);
 | `Zpcr.metadata` | Typed `RunMetadata` from `RunInfo.xml` |
 | `Zpcr.reads` | Ordered `PlateRead[]` (one per cycle) with `.get(channel,row,col)` |
 | `Zpcr.curves(opts)` | Well-centric `WellCurve[]` amplification curves |
+| `Zpcr.darkCurves(step)` | Per-channel dark (LED-off) background across cycles |
+| `Zpcr.temperatureCurves(step)` | Per-field `TemperatureCurve[]` (°C per cycle) |
 | `Zpcr.archive` | Low-level `entries` / `bytes` / `text` / `hexDump` access |
 
 See [`ARCHITECTURE.md`](./ARCHITECTURE.md) for design details and

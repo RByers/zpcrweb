@@ -57,13 +57,20 @@ raw bytes ─▶ fflate.unzipSync ─▶ { name: Uint8Array }
 ```
 
 - **`archive.ts`** — decompress + the low-level `ArchiveAccess` facade.
-- **`plateread.ts`** — `DataView`-based little-endian decoder for the fixed 22037-byte
-  `.Plateread` layout (WELLDATA at `0x1A8`, DARKDATA at `0x2A28`, cycle at `0x120`, block
-  temp at `0x133`, timestamp at `0x182`). Header temp/timestamp are read best-effort and
-  guarded (returned only when they validate).
+- **`descriptors.ts`** — parses the `.Plateread` trailing **descriptor dictionary**, the
+  file's own schema mapping field names → offset/length/type. Every other field lookup goes
+  through it, so no offsets are hardcoded.
+- **`plateread.ts`** — `DataView`-based decoder for the 22037-byte `.Plateread` layout,
+  driven by the dictionary: mixed-endian (big-endian scalars, little-endian WELLDATA /
+  DARKDATA float arrays). Scalars are guarded (returned only when they validate).
 - **`runinfo.ts`** — a small regex scan over the flat `<KeyValuePairs>` list. No XML
   dependency: the structure is regular and self-closing `<Value />` maps to `""`.
-- **`pivot.ts`** — transforms run-centric reads into well-centric curves.
+- **`temps.ts`** — pulls temperatures out of the descriptor dictionary. It matches on the
+  field *name* (anything containing `TEMP`) rather than a hardcoded list, so a firmware that
+  emits, say, per-row block temperatures surfaces them with no code change. Measured floats
+  and int set points are told apart by plausibility (see the module comment).
+- **`pivot.ts`** — transforms run-centric reads into well-centric curves, per-channel dark
+  curves, and per-field temperature series.
 - **`zpcr.ts`** — orchestrates the above into the public `Zpcr` object.
 
 ## Two output shapes

@@ -3,9 +3,11 @@ import {
   deltaBaseline,
   subtractSeries,
   type DarkCurve,
+  type TemperatureCurve,
   type WellCurve,
 } from "@zpcrweb/core";
 import { channelColor, channelDye } from "../channelColors";
+import { tempColor } from "../tempColors";
 import type { Baseline, BandsMode, Scale } from "../../state/useZpcrStore";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -18,7 +20,8 @@ function logSafe(values: number[], scale: Scale): (number | null)[] {
 
 /** Per-series metadata, index-aligned with uPlot series (offset by the x row). */
 interface SeriesMeta {
-  kind: "well" | "dark";
+  kind: "well" | "dark" | "temp";
+  /** Optical channel for well/dark series; -1 for temperature series. */
   channel: number;
   label: string;
   isReference: boolean;
@@ -38,8 +41,9 @@ interface BandData {
 }
 
 export interface TooltipData {
-  kind: "well" | "dark";
+  kind: "well" | "dark" | "temp";
   label: string;
+  /** Optical channel for well/dark series; -1 for temperature series. */
   channel: number;
   dye: string;
   color: string;
@@ -55,6 +59,8 @@ export interface TooltipData {
 export interface BuildChartConfig {
   wellCurves: WellCurve[];
   darkCurves: DarkCurve[];
+  /** Temperature series to plot on the right-hand °C axis (empty to hide the axis). */
+  tempCurves: TemperatureCurve[];
   baseline: Baseline;
   scale: Scale;
   subtractDark: boolean;
@@ -66,13 +72,18 @@ export interface BuildChartConfig {
 
 const REF_DASH = [3, 3];
 const DARK_DASH = [8, 5];
+const TEMP_DASH = [5, 4];
+const SETPOINT_DASH = [2, 4];
+/** uPlot scale key for the right-hand temperature axis. */
+const TEMP_SCALE = "temp";
 
 export function buildChart(cfg: BuildChartConfig): {
   data: uPlot.AlignedData;
   options: uPlot.Options;
 } {
-  const { wellCurves, darkCurves, baseline, scale, subtractDark } = cfg;
-  const cycles = wellCurves[0]?.cycles ?? darkCurves[0]?.cycles ?? [];
+  const { wellCurves, darkCurves, tempCurves, baseline, scale, subtractDark } = cfg;
+  const cycles =
+    wellCurves[0]?.cycles ?? darkCurves[0]?.cycles ?? tempCurves[0]?.cycles ?? [];
 
   const darkByChannel = new Map<number, DarkCurve>();
   for (const d of darkCurves) darkByChannel.set(d.channel, d);
@@ -136,6 +147,31 @@ export function buildChart(cfg: BuildChartConfig): {
     }
   }
 
+  // Temperatures ride the right-hand °C axis so they can share the x axis with the curves
+  // without distorting the RFU scale.
+  tempCurves.forEach((t, i) => {
+    rows.push(t.celsius);
+    meta.push({
+      kind: "temp",
+      channel: -1,
+      label: t.label,
+      isReference: false,
+      cycles: t.cycles,
+      mean: t.celsius.map((v) => v ?? NaN),
+      std: [],
+      min: [],
+      max: [],
+    });
+    series.push({
+      label: `${t.label} (°C)`,
+      scale: TEMP_SCALE,
+      stroke: tempColor(i, t.kind),
+      width: t.kind === "setpoint" ? 1 : 1.5,
+      dash: t.kind === "setpoint" ? SETPOINT_DASH : TEMP_DASH,
+      points: { show: false },
+    });
+  });
+
   // Min/max envelope bands. Auto shows them only when a single well (one row/col) is
   // selected, regardless of how many channels — so each channel's curve gets its own band.
   const computeBand = (c: WellCurve): BandData => {
@@ -166,6 +202,14 @@ export function buildChart(cfg: BuildChartConfig): {
     scales: {
       x: { time: false },
       y: { distr: scale === "log" ? 3 : 1 },
+      // Padded a little so the temperature traces don't sit flush against the plot edges.
+      [TEMP_SCALE]: {
+        distr: 1,
+        range: (_u, min, max) => {
+          const pad = Math.max(0.5, (max - min) * 0.15);
+          return [min - pad, max + pad];
+        },
+      },
     },
     axes: [
       {
@@ -196,6 +240,21 @@ export function buildChart(cfg: BuildChartConfig): {
         labelFont: "12px system-ui",
         font: "11px ui-monospace, monospace",
         size: 62,
+      },
+      // Right-hand temperature axis — only drawn when temperatures are shown.
+      {
+        scale: TEMP_SCALE,
+        side: 1,
+        show: tempCurves.length > 0,
+        stroke: "#7f93b5",
+        grid: { show: false },
+        ticks: { stroke: "rgba(120,200,255,0.12)", width: 1 },
+        values: (_u, splits) => splits.map((v) => v.toFixed(1)),
+        label: "Temperature (°C)",
+        labelSize: 30,
+        labelFont: "12px system-ui",
+        font: "11px ui-monospace, monospace",
+        size: 58,
       },
     ],
     cursor: { focus: { prox: 24 }, points: { size: 6 } },
@@ -310,8 +369,10 @@ function overlayPlugin(
         let bestDist = Infinity;
         for (let s = 1; s < u.series.length; s++) {
           const val = (u.data[s] as (number | null)[])[idx];
-          if (val == null) continue;
-          const py = u.valToPos(val, "y");
+          if (val == null || Number.isNaN(val)) continue;
+          // Temperature series live on the right-hand scale, so project through the
+          // series' own scale rather than assuming "y".
+          const py = u.valToPos(val, u.series[s]!.scale ?? "y");
           const dist = Math.abs(py - top);
           if (dist < bestDist) {
             bestDist = dist;
@@ -326,6 +387,27 @@ function overlayPlugin(
         }
 
         const plotted = (u.data[best] as (number | null)[])[idx] as number;
+
+        if (m.kind === "temp") {
+          // A temperature is a single scalar per read — no min/max/σ to whisker.
+          group.style.display = "none";
+          onHover({
+            kind: "temp",
+            label: m.label,
+            channel: -1,
+            dye: "",
+            color: (u.series[best]!.stroke as string) ?? "#8aa0c0",
+            cycle: m.cycles[idx] ?? 0,
+            mean: plotted,
+            min: plotted,
+            max: plotted,
+            std: 0,
+            left,
+            top,
+          });
+          return;
+        }
+
         const offset = plotted - (m.mean[idx] ?? 0);
         const x = u.valToPos(m.cycles[idx] ?? 0, "x");
         const yMax = u.valToPos((m.max[idx] ?? 0) + offset, "y");

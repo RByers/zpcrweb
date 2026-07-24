@@ -29,6 +29,8 @@ export interface StoredSettings {
   subtractDark: boolean;
   bands: "off" | "auto" | "on";
   step: number | null;
+  /** Temperature field keys plotted on the right axis, e.g. `["BLOCKTEMP"]`. */
+  temps?: string[];
 }
 
 function openDb(): Promise<IDBDatabase> {

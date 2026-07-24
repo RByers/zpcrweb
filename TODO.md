@@ -19,9 +19,9 @@ Additional typed parsers for the archive files currently reachable only via the 
 - [ ] **`.Dcal` dye calibration files** — one per dye/plate-type (FAM, HEX, VIC/Cal Gold
       540, ROX/Tex 615/Cal Orange 560, Cy5, Quasar 670/705, …). Needed for the
       **channel → dye mapping**, which the `.Plateread` payload alone cannot provide.
-- [ ] **Plateread header** — pin down the remaining approximate byte offsets from
-      `plateread.md` §3 (ambient/shuttle/lid temps, LED currents ×6, fan/lid state) and the
-      trailing descriptor dictionary (§4). Promote from best-effort to fully typed.
+- [ ] **Plateread header** — LED currents ×6 and fan/lid state are decoded via the
+      descriptor dictionary but only reachable through `decodePlateReadDetail`; promote them
+      to the typed `PlateRead` surface like the temperatures now are.
 - [ ] **`FactoryRefRowCal`** — parse the factory reference-row calibration array in
       `RunInfo.xml` into typed per-well records.
 - [ ] Parse the .pltd file and try to decode how they define plates (flourophores, targets and samples per well).

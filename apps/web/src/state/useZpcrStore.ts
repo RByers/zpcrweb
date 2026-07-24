@@ -29,6 +29,11 @@ export interface FileSettings {
   bands: BandsMode;
   /** Selected protocol step (`STEP` value), or null to use the first step. */
   step: number | null;
+  /**
+   * Temperature field keys (e.g. `BLOCKTEMP`) plotted on the chart's right axis. Empty
+   * hides the temperature axis entirely.
+   */
+  temps: Set<string>;
 }
 
 /** A file loaded and parsed in memory. */
@@ -61,6 +66,8 @@ function defaultSettings(): FileSettings {
     subtractDark: false,
     bands: "auto",
     step: null,
+    // Temperatures are off by default — they are instrument context, not the measurement.
+    temps: new Set<string>(),
   };
 }
 
@@ -75,6 +82,7 @@ function toStored(id: string, s: FileSettings): StoredSettings {
     subtractDark: s.subtractDark,
     bands: s.bands,
     step: s.step ?? null,
+    temps: [...s.temps],
   };
 }
 
@@ -88,6 +96,7 @@ function fromStored(s: StoredSettings): FileSettings {
     subtractDark: s.subtractDark ?? false,
     bands: s.bands ?? "auto",
     step: s.step ?? null,
+    temps: new Set(s.temps ?? []),
   };
 }
 

@@ -139,6 +139,33 @@ Decoded values for Read45 (offset from the descriptor dictionary; BE int / BE fl
 
 `STEP` and `STEPIDENTIFICATION` both point at `0x121` (they alias the same 4 bytes).
 
+### Temperatures
+
+Five **measured** temperatures (big-endian float32 °C) and two **set points** (big-endian
+int32 °C) are all the file carries:
+
+| Field | Kind | Read45 | Cross-check |
+|-------|------|--------|-------------|
+| `BLOCKTEMP` | measured | 59.99 | the protocol's 60 °C plate-read step |
+| `AMBIENTTEMP` | measured | 32.00 | — |
+| `SHUTTLETEMP` | measured | 45.08 | `ShuttleTargetTemperature=45` in `RunInfo.xml` |
+| `SAMPLETEMP` | measured | 60.00 | block target |
+| `LIDTEMP` | measured | 105.10 | `HOTLID 105` |
+| `FANOFFTEMP` | set point | 35 | `FanControlOffTemperature=35` |
+| `FANONTEMP` | set point | 40 | `FanControlOnTemperature=40` |
+
+The two kinds share a type tag (1) and are distinguished only by plausibility: an int set
+point like `35` reinterpreted as float32 is a denormal (~4.9e-44), and a measured `59.99`
+reinterpreted as int32 is in the billions, so at most one reading ever lands in a sane
+temperature range. `temps.ts` extracts **any** field whose name contains `TEMP`, so a
+firmware emitting more (see §6) needs no decoder change.
+
+**There are no per-row or per-zone block temperatures.** The CFX96 reports one block
+temperature for the whole block; every byte of the file is accounted for by the dictionary
+(§4), and neither the `.alf` run log, `runlog.xml`, nor `RunInfo.xml` carries per-row values
+either. Both sample archives — a 2019 qualification run and a 2026 amplification run, both
+`PLATEREADVERSION 2` — have exactly the same 42 dictionary fields.
+
 ---
 
 ## 4. Descriptor dictionary (`0x2AB9`–end) — the authoritative schema
@@ -192,6 +219,10 @@ print(rec(2, 0, 2))   # -> ~6852
 
 ## 6. Open items / caveats
 
+- **Per-row temperatures** were looked for and are not present in any file of either sample
+  archive (see §3). If a different block type or firmware emits them, the name-based
+  extraction picks them up automatically; `ROWTEMPA`-style names are already labelled and
+  tagged with their row letter.
 - **Channel → dye mapping** is not in the `.Plateread` payload; channels are stored in scan order
   0–5. The run's calibration (`.Dcal`) files list the dye set. In this data the amplifying dye is
   channel index 2 (Texas Red in the CFX 5-dye layout). Channel index 5 is a real sixth optical

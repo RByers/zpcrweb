@@ -1,19 +1,29 @@
 import { useEffect, useRef, useState } from "react";
 import uPlot from "uplot";
-import type { DarkCurve, WellCurve } from "@zpcrweb/core";
+import type { DarkCurve, TemperatureCurve, WellCurve } from "@zpcrweb/core";
 import type { Baseline, BandsMode, Scale } from "../../state/useZpcrStore";
 import { buildChart, type TooltipData } from "../../lib/uplot/chart";
 
 interface Props {
   curves: WellCurve[];
   darkCurves: DarkCurve[];
+  /** Temperature series for the right-hand °C axis; empty hides that axis. */
+  tempCurves: TemperatureCurve[];
   baseline: Baseline;
   scale: Scale;
   subtractDark: boolean;
   bands: BandsMode;
 }
 
-export function CurveChart({ curves, darkCurves, baseline, scale, subtractDark, bands }: Props) {
+export function CurveChart({
+  curves,
+  darkCurves,
+  tempCurves,
+  baseline,
+  scale,
+  subtractDark,
+  bands,
+}: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const plotRef = useRef<uPlot | null>(null);
   const [tip, setTip] = useState<TooltipData | null>(null);
@@ -29,6 +39,7 @@ export function CurveChart({ curves, darkCurves, baseline, scale, subtractDark, 
     const { data, options } = buildChart({
       wellCurves: curves,
       darkCurves,
+      tempCurves,
       baseline,
       scale,
       subtractDark,
@@ -45,7 +56,7 @@ export function CurveChart({ curves, darkCurves, baseline, scale, subtractDark, 
       plotRef.current?.destroy();
       plotRef.current = null;
     };
-  }, [curves, darkCurves, baseline, scale, subtractDark, bands]);
+  }, [curves, darkCurves, tempCurves, baseline, scale, subtractDark, bands]);
 
   // Keep the plot sized to its container.
   useEffect(() => {
@@ -79,9 +90,11 @@ export function CurveChart({ curves, darkCurves, baseline, scale, subtractDark, 
           <div className="chart__tip-head">
             <span className="chart__tip-swatch" style={{ background: tip.color }} />
             <strong>{tip.kind === "dark" ? "dark" : tip.label}</strong>
-            <span className="chart__tip-dye">
-              C{tip.channel + 1} · {tip.dye}
-            </span>
+            {tip.kind !== "temp" && (
+              <span className="chart__tip-dye">
+                C{tip.channel + 1} · {tip.dye}
+              </span>
+            )}
           </div>
           <table className="chart__tip-tbl mono">
             <tbody>
@@ -89,22 +102,31 @@ export function CurveChart({ curves, darkCurves, baseline, scale, subtractDark, 
                 <td>cycle</td>
                 <td>{tip.cycle}</td>
               </tr>
-              <tr>
-                <td>mean</td>
-                <td>{tip.mean.toFixed(1)}</td>
-              </tr>
-              <tr>
-                <td>min</td>
-                <td>{tip.min.toFixed(1)}</td>
-              </tr>
-              <tr>
-                <td>max</td>
-                <td>{tip.max.toFixed(1)}</td>
-              </tr>
-              <tr>
-                <td>std</td>
-                <td>{tip.std.toFixed(2)}</td>
-              </tr>
+              {tip.kind === "temp" ? (
+                <tr>
+                  <td>temp</td>
+                  <td>{tip.mean.toFixed(2)} °C</td>
+                </tr>
+              ) : (
+                <>
+                  <tr>
+                    <td>mean</td>
+                    <td>{tip.mean.toFixed(1)}</td>
+                  </tr>
+                  <tr>
+                    <td>min</td>
+                    <td>{tip.min.toFixed(1)}</td>
+                  </tr>
+                  <tr>
+                    <td>max</td>
+                    <td>{tip.max.toFixed(1)}</td>
+                  </tr>
+                  <tr>
+                    <td>std</td>
+                    <td>{tip.std.toFixed(2)}</td>
+                  </tr>
+                </>
+              )}
             </tbody>
           </table>
         </div>

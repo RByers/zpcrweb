@@ -1,5 +1,6 @@
 import type { PlateRead, WellReading } from "./types.js";
 import { fieldMap, parseDescriptors } from "./descriptors.js";
+import { extractTemps } from "./temps.js";
 
 /**
  * Binary decoder for Bio-Rad CFX `.Plateread` files. See `plateread.md` for the full
@@ -54,7 +55,8 @@ export function decodePlateRead(
   // Scalars in the dictionary are big-endian; the WELLDATA/DARKDATA float arrays are
   // little-endian. Array descriptors point at the int32 count; the float data starts 4
   // bytes later.
-  const fields = fieldMap(parseDescriptors(bytes));
+  const descriptors = parseDescriptors(bytes);
+  const fields = fieldMap(descriptors);
   const wellField = fields.get("WELLDATA");
   const darkField = fields.get("DARKDATA");
   if (!wellField || !darkField) {
@@ -67,11 +69,10 @@ export function decodePlateRead(
   const step = fields.get("STEP")?.int ?? 0;
   const channelMask = fields.get("CHANNELMASK")?.int ?? 0;
 
-  const blockTempRaw = fields.get("BLOCKTEMP")?.float;
-  const blockTempC =
-    blockTempRaw != null && blockTempRaw > -50 && blockTempRaw < 200
-      ? blockTempRaw
-      : undefined;
+  // Every `*TEMP*` field in the dictionary, so per-row block temperatures (if a firmware
+  // version ever emits them) need no code change here.
+  const temps = extractTemps(descriptors);
+  const blockTempC = temps.find((t) => t.key === "BLOCKTEMP")?.celsius;
 
   const dateTime = fields.get("DATETIME")?.text;
   const timestamp =
@@ -94,6 +95,7 @@ export function decodePlateRead(
     channelMask,
     fileName,
     blockTempC,
+    temps,
     timestamp,
     wells,
     dark,

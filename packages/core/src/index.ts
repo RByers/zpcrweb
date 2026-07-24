@@ -14,12 +14,14 @@ export { deltaBaseline, subtractSeries } from "./analysis.js";
 export {
   toCurves,
   toDarkCurves,
+  toTemperatureCurves,
   toSteps,
   toChannels,
   wellLabel,
   REFERENCE_ROW,
 } from "./pivot.js";
 export { parseFactoryRefRowCal, compareRefToCal } from "./refcal.js";
+export { extractTemps, tempLabel, tempRow } from "./temps.js";
 export {
   decodePlateReadDetail,
   parseDescriptors,
@@ -48,6 +50,9 @@ export type {
   WellReading,
   WellCurve,
   DarkCurve,
+  PlateReadTemp,
+  TemperatureCurve,
+  TempKind,
   CurveOptions,
   PlateReadStep,
   ArchiveAccess,

@@ -19,6 +19,39 @@ export interface WellReading {
   max: number;
 }
 
+/** Whether a temperature is an instrument reading or a configured threshold. */
+export type TempKind = "measured" | "setpoint";
+
+/** One temperature field from a plateread's descriptor dictionary. */
+export interface PlateReadTemp {
+  /** Raw field name, e.g. `BLOCKTEMP`. Stable identity across reads. */
+  key: string;
+  /** Human label, e.g. `Block`; derived for unknown fields (`ROWTEMPA` → `Row A`). */
+  label: string;
+  /** Plate row letter (`A`–`H`) for per-row block temperatures, else undefined. */
+  row?: string;
+  /** Temperature in °C. */
+  celsius: number;
+  /** Measured value vs a configured set point (the fan on/off thresholds). */
+  kind: TempKind;
+}
+
+/** A temperature series across the reads of a run — one field, one value per cycle. */
+export interface TemperatureCurve {
+  /** Field name, e.g. `BLOCKTEMP`. */
+  key: string;
+  /** Human label, e.g. `Block`. */
+  label: string;
+  /** Plate row letter (`A`–`H`) for per-row block temperatures, else undefined. */
+  row?: string;
+  /** Measured value vs a configured set point. */
+  kind: TempKind;
+  /** Cycle numbers, ascending — aligned index-for-index with {@link celsius}. */
+  cycles: number[];
+  /** °C per cycle, aligned with {@link cycles}; null where the read lacked the field. */
+  celsius: (number | null)[];
+}
+
 /** One plate read == one PCR cycle == one `.Plateread` file, fully decoded. */
 export interface PlateRead {
   /** 1-based position in the ordered read series (by filename suffix). */
@@ -39,6 +72,12 @@ export interface PlateRead {
   fileName: string;
   /** Block temperature in °C, if it could be read from the header (best-effort). */
   blockTempC?: number;
+  /**
+   * Every temperature in the file's descriptor dictionary, in file order — any field whose
+   * name contains `TEMP`, so per-row block temperatures would appear here automatically.
+   * Observed CFX96 firmware emits block/ambient/shuttle/sample/lid plus the fan set points.
+   */
+  temps: PlateReadTemp[];
   /** Read timestamp string from the header, if present (best-effort). */
   timestamp?: string;
   /**
@@ -181,6 +220,8 @@ export interface Zpcr {
   curves(options?: CurveOptions): WellCurve[];
   /** The per-channel dark (LED-off background) reading across cycles. */
   darkCurves(step?: number): DarkCurve[];
+  /** Every temperature field's series across cycles, for plotting against the curves. */
+  temperatureCurves(step?: number): TemperatureCurve[];
   /** Distinct protocol PLATEREAD steps, in first-appearance order. */
   steps(): PlateReadStep[];
   /** Optical channel indices that hold data, from `CHANNELMASK` (e.g. `[0]` or `[0..5]`). */

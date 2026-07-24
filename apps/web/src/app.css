@@ -335,6 +335,25 @@
   color: var(--ink-muted);
   margin-bottom: 8px;
 }
+.rail__title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.rail__link {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--neon-cyan);
+  opacity: 0.75;
+}
+.rail__link:hover {
+  background: transparent;
+  opacity: 1;
+}
 .rail__row {
   display: flex;
   gap: 16px;

@@ -3,6 +3,8 @@ import type {
   DarkCurve,
   PlateRead,
   PlateReadStep,
+  PlateReadTemp,
+  TemperatureCurve,
   WellCurve,
 } from "./types.js";
 import { CHANNELS, COLUMNS, ROWS } from "./plateread.js";
@@ -121,4 +123,41 @@ export function toDarkCurves(allReads: PlateRead[], step?: number): DarkCurve[] 
     curves.push({ channel, cycles, mean, std, min, max });
   }
   return curves;
+}
+
+/**
+ * Pivot the per-read temperatures into one series per temperature field, in the order the
+ * fields appear in the files. The key set is the union across reads, so a field missing from
+ * some reads still yields a series (with `null` gaps) rather than being dropped.
+ */
+export function toTemperatureCurves(
+  allReads: PlateRead[],
+  step?: number,
+): TemperatureCurve[] {
+  const reads =
+    step === undefined ? allReads : allReads.filter((r) => r.step === step);
+  const cycles = reads.map((r) => r.cycle);
+
+  // Union of keys in first-appearance order, keeping each key's label/kind metadata.
+  const order: string[] = [];
+  const info = new Map<string, PlateReadTemp>();
+  for (const read of reads) {
+    for (const t of read.temps) {
+      if (!info.has(t.key)) order.push(t.key);
+      info.set(t.key, t);
+    }
+  }
+
+  return order.map((key) => {
+    const meta = info.get(key) as PlateReadTemp;
+    const celsius = reads.map((r) => r.temps.find((t) => t.key === key)?.celsius ?? null);
+    return {
+      key,
+      label: meta.label,
+      row: meta.row,
+      kind: meta.kind,
+      cycles,
+      celsius,
+    };
+  });
 }

@@ -90,9 +90,19 @@ overlays a tooltip.
   - *Subtract*: each curve is `subtractSeries(mean, dark[channel])` before ΔRFU/scale (the
     dark lines are dropped and the y-axis label gains "− dark"). Both `subtractSeries` and
     `deltaBaseline` are tested library functions.
+- **Temperatures (right axis):** `zpcr.temperatureCurves(step)` gives one series per
+  temperature field in the platereads. Chips in the rail toggle each one (all off by
+  default, since they are instrument context rather than the measurement) and preview its
+  latest value. Selected series are drawn **dashed** on a second uPlot scale with its own
+  right-hand °C axis, which appears only when something is selected — so the RFU scale is
+  never distorted by a 105 °C lid. Set points (fan on/off thresholds) are dimmed and
+  labelled as such. Colors come from `lib/tempColors.ts`, a cool ramp deliberately outside
+  the dye palette.
 - **X axis:** integer cycles only — a tick per cycle, gridline + label every 5.
-- **Hover/tap tooltip:** a uPlot cursor plugin finds the nearest series (well curve, dark, or
-  reference) and reports its label, channel/dye, cycle, and mean/min/max/std.
+- **Hover/tap tooltip:** a uPlot cursor plugin finds the nearest series (well curve, dark,
+  reference, or temperature) and reports its label, channel/dye, cycle, and mean/min/max/std
+  — or, for a temperature, just its °C. The search projects each series through **its own**
+  scale, so proximity is measured in pixels across both axes.
 
 ## Color encoding (see `lib/channelColors.ts`)
 
