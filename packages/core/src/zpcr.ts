@@ -1,5 +1,6 @@
-import type { CurveOptions, PlateRead, Zpcr } from "./types.js";
+import type { CurveOptions, PlateRead, PltdEntry, Zpcr } from "./types.js";
 import { createArchiveAccess, unzipArchive } from "./archive.js";
+import { isPltdName, parsePltd } from "./pltd.js";
 import {
   decodePlateRead,
   isPlateReadName,
@@ -53,6 +54,13 @@ export function parseZpcr(data: Uint8Array | ArrayBuffer): Zpcr {
     temperatureCurves: (step?: number) => toTemperatureCurves(reads, step),
     steps: () => toSteps(reads),
     channels: () => toChannels(reads),
+    plates: (password?: string): PltdEntry[] =>
+      archive.entries
+        .filter(isPltdName)
+        .map((name) => ({
+          name,
+          pltd: parsePltd(files[name] as Uint8Array, password ? { password } : undefined),
+        })),
     factoryRefCal: () =>
       parseFactoryRefRowCal(
         metadata.raw["FactoryRefRowCal"] ?? "",

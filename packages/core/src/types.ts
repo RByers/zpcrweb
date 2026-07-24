@@ -153,6 +153,15 @@ export interface WellCurve {
 // Re-exported so the Zpcr interface can reference them without a circular import.
 import type { RefWellCal, RefCalComparison } from "./refcal.js";
 export type { RefWellCal, RefCalComparison } from "./refcal.js";
+import type { Pltd } from "./pltd.js";
+
+/** A `.pltd` archive entry paired with its decoded plate definition. */
+export interface PltdEntry {
+  /** Archive entry name, e.g. `Qualification_Plate_96.pltd`. */
+  name: string;
+  /** The parsed container + plate (see {@link Pltd}). */
+  pltd: Pltd;
+}
 
 /** A per-channel dark (LED-off background) reading across cycles, from DARKDATA. */
 export interface DarkCurve {
@@ -224,6 +233,11 @@ export interface Zpcr {
   temperatureCurves(step?: number): TemperatureCurve[];
   /** Distinct protocol PLATEREAD steps, in first-appearance order. */
   steps(): PlateReadStep[];
+  /**
+   * Decode every `.pltd` plate-definition entry in the archive. Encrypted entries need the
+   * `password` (this library ships none); without it each entry reports `needsPassword`.
+   */
+  plates(password?: string): PltdEntry[];
   /** Optical channel indices that hold data, from `CHANNELMASK` (e.g. `[0]` or `[0..5]`). */
   channels(): number[];
   /** Factory calibration of the reference row, from `RunInfo.xml`'s `FactoryRefRowCal`. */

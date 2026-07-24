@@ -71,6 +71,12 @@ raw bytes ─▶ fflate.unzipSync ─▶ { name: Uint8Array }
   and int set points are told apart by plausibility (see the module comment).
 - **`pivot.ts`** — transforms run-centric reads into well-centric curves, per-channel dark
   curves, and per-field temperature series.
+- **`pltd.ts`** — decodes `.pltd` plate-definition entries into a typed `PlateDefinition`
+  (`zpcr.plates()`): each `.pltd` is a single-entry ZIP whose payload is ZipCrypto-encrypted
+  and DEFLATE/DEFLATE64-compressed, wrapping a `<platesetup2>` XML plate map. See
+  [`pltd.md`](./pltd.md). `fflate` covers neither ZipCrypto nor DEFLATE64, so those are
+  handled in-house by **`zipcrypto.ts`** (traditional PKWARE decrypt) and **`inflate.ts`**
+  (a small DEFLATE/DEFLATE64 inflater) — no new runtime dependency.
 - **`zpcr.ts`** — orchestrates the above into the public `Zpcr` object.
 
 ## Two output shapes

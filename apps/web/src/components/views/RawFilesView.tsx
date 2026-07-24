@@ -1,17 +1,19 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Zpcr } from "@zpcrweb/core";
 import { DecodedView, decodedKind } from "../raw/DecodedView";
+import { PlateXml } from "../raw/DecodedPlate";
 
 type Mode = "decoded" | "text" | "hex";
 
 function group(name: string): string {
   if (/\.Plateread$/i.test(name)) return "Plate reads";
+  if (/\.pltd$/i.test(name)) return "Plate setup";
   if (/\.Dcal$/i.test(name)) return "Calibration";
   if (/\.(xml|txt|alf)$/i.test(name)) return "Metadata";
   return "Other";
 }
 
-const GROUP_ORDER = ["Metadata", "Plate reads", "Calibration", "Other"];
+const GROUP_ORDER = ["Metadata", "Plate setup", "Plate reads", "Calibration", "Other"];
 const TEXTUAL = /\.(xml|txt|alf)$/i;
 
 /** Best default mode for a file: decoded if a decoder exists, else text for text, else hex. */
@@ -46,15 +48,18 @@ export function RawFilesView({ zpcr }: { zpcr: Zpcr }) {
     setLimit(4096);
   }, [selected]);
 
-  const isTextual = TEXTUAL.test(selected);
+  // `.pltd` is binary (an encrypted ZIP), but its "Text" view is the decrypted XML payload.
+  const isPltd = /\.pltd$/i.test(selected);
+  const isTextual = TEXTUAL.test(selected) || isPltd;
   const hasDecoded = decodedKind(selected) !== null;
   const size = selected ? zpcr.archive.bytes(selected).length : 0;
 
   const rawBody = useMemo(() => {
     if (!selected || mode === "decoded") return "";
+    if (mode === "text" && isPltd) return ""; // rendered via <PlateXml>, not raw text
     if (mode === "text" && isTextual) return zpcr.archive.text(selected);
     return zpcr.archive.hexDump(selected, { maxBytes: limit });
-  }, [zpcr, selected, mode, limit, isTextual]);
+  }, [zpcr, selected, mode, limit, isTextual, isPltd]);
 
   return (
     <div className="raw">
@@ -93,9 +98,9 @@ export function RawFilesView({ zpcr }: { zpcr: Zpcr }) {
               className={"segmented__item" + (mode === "text" ? " is-active" : "")}
               onClick={() => setMode("text")}
               disabled={!isTextual}
-              title={isTextual ? "" : "Binary file — hex only"}
+              title={isPltd ? "Decrypted XML" : isTextual ? "" : "Binary file — hex only"}
             >
-              Text
+              {isPltd ? "XML" : "Text"}
             </button>
             <button
               className={"segmented__item" + (mode === "hex" ? " is-active" : "")}
@@ -109,6 +114,10 @@ export function RawFilesView({ zpcr }: { zpcr: Zpcr }) {
         {mode === "decoded" ? (
           <div className="raw__decoded">
             <DecodedView zpcr={zpcr} name={selected} />
+          </div>
+        ) : mode === "text" && isPltd ? (
+          <div className="raw__decoded">
+            <PlateXml zpcr={zpcr} name={selected} />
           </div>
         ) : (
           <>

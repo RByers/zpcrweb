@@ -24,7 +24,8 @@ Additional typed parsers for the archive files currently reachable only via the 
       to the typed `PlateRead` surface like the temperatures now are.
 - [ ] **`FactoryRefRowCal`** — parse the factory reference-row calibration array in
       `RunInfo.xml` into typed per-well records.
-- [ ] Parse the .pltd file and try to decode how they define plates (flourophores, targets and samples per well).
+- [x] Parse the .pltd file and try to decode how they define plates (flourophores, targets
+      and samples per well). Done — see [`pltd.md`](./pltd.md) and `parsePltd` / `zpcr.plates()`.
 - [ ] Parse the .prcl file and try to decode how it defines a protocol. Does it map exactly to the textual definition in ProtocolRunDefinition.txt?
 
 ## Web app (`apps/web`)

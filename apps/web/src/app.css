@@ -972,3 +972,104 @@
   font-size: 11px;
   line-height: 1.45;
 }
+
+/* Plate setup (.pltd) decoded view */
+.plate__fluors {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  margin-top: 10px;
+}
+.plate__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--raised);
+  font-size: 11px;
+}
+.plate__chipch {
+  color: var(--ink-muted);
+}
+.plate__grid {
+  table-layout: fixed;
+}
+.plate__grid td.plate__well {
+  width: 58px;
+  height: 40px;
+  padding: 2px 4px;
+  text-align: left;
+  vertical-align: top;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: outline-color 0.1s;
+  outline: 2px solid transparent;
+  outline-offset: -2px;
+}
+.plate__grid td.plate__well.is-empty {
+  background: var(--plane);
+  cursor: default;
+}
+.plate__grid td.plate__well.is-sel {
+  outline-color: var(--neon-cyan);
+}
+.plate__well:hover:not(.is-empty) {
+  outline-color: var(--border-strong);
+}
+.plate__welltype {
+  display: block;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+.plate__dots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  margin-top: 3px;
+}
+.plate__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+.plate__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin-top: 12px;
+  font-size: 11px;
+  color: var(--ink-2);
+}
+.plate__legitem {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.plate__legdot {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+}
+.plate__pwform {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 10px;
+}
+.plate__pwinput {
+  flex: 0 1 320px;
+  padding: 6px 10px;
+  background: var(--plane);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--ink);
+  font-size: 12px;
+}
+.plate__pwinput:focus {
+  outline: none;
+  border-color: var(--neon-cyan);
+}

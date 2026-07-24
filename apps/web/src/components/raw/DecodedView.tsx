@@ -1,12 +1,14 @@
 import { useMemo } from "react";
 import { parseRunInfoRaw, type Zpcr } from "@zpcrweb/core";
 import { DecodedPlateread } from "./DecodedPlateread";
+import { DecodedPlate } from "./DecodedPlate";
 import { RunLogTable } from "./RunLogTable";
 import { formatXml } from "../../lib/xmlFormat";
 
 /** Which typed decoder (if any) applies to an archive entry. */
 export type DecodedKind =
   | "plateread"
+  | "plate"
   | "runinfo"
   | "runlog"
   | "protocol"
@@ -15,6 +17,7 @@ export type DecodedKind =
 
 export function decodedKind(name: string): DecodedKind {
   if (/\.Plateread$/i.test(name)) return "plateread";
+  if (/\.pltd$/i.test(name)) return "plate";
   if (/RunInfo\.xml$/i.test(name)) return "runinfo";
   if (/runlog\.xml$/i.test(name)) return "runlog";
   if (/ProtocolRunDefinition\.txt$/i.test(name)) return "protocol";
@@ -36,6 +39,7 @@ export function DecodedView({ zpcr, name }: Props) {
     return <DecodedPlateread zpcr={zpcr} read={read} />;
   }
 
+  if (kind === "plate") return <DecodedPlate zpcr={zpcr} name={name} />;
   if (kind === "runinfo") return <RunInfoTable zpcr={zpcr} name={name} />;
   if (kind === "runlog") return <RunLogTable zpcr={zpcr} name={name} />;
   if (kind === "protocol") return <ProtocolDecoded zpcr={zpcr} name={name} />;

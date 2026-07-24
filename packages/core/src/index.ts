@@ -42,6 +42,9 @@ export {
   COLUMNS,
   ROWS,
 } from "./plateread.js";
+export { parsePltd, isPltdName } from "./pltd.js";
+export { zipCryptoDecrypt } from "./zipcrypto.js";
+export { inflateRaw } from "./inflate.js";
 
 export type {
   Zpcr,
@@ -59,5 +62,16 @@ export type {
   HexDumpOptions,
   RefWellCal,
   RefCalComparison,
+  PltdEntry,
 } from "./types.js";
 export type { PlatereadField, PlatereadDetail } from "./descriptors.js";
+export type {
+  Pltd,
+  PltdContainer,
+  PltdOptions,
+  PlateDefinition,
+  WellDefinition,
+  WellFluor,
+  PlateFluor,
+  SampleType,
+} from "./pltd.js";
