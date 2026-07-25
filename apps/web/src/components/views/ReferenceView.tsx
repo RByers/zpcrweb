@@ -23,7 +23,7 @@ interface Props {
  * live line as drift from the factory value (`live − factory`) rather than drift from the
  * run's own first cycle, so the (now redundant, always-zero) factory line is hidden instead.
  */
-export function DiagnosticsView({ zpcr, settings, onChange }: Props) {
+export function ReferenceView({ zpcr, settings, onChange }: Props) {
   const steps = useMemo(() => zpcr.steps(), [zpcr]);
   const available = useMemo(() => zpcr.channels(), [zpcr]);
   const activeStep =
@@ -98,8 +98,8 @@ export function DiagnosticsView({ zpcr, settings, onChange }: Props) {
   };
 
   return (
-    <div className="diagnostics">
-      <div className="diagnostics__chart">
+    <div className="reference">
+      <div className="reference__chart">
         <aside className="curves__rail">
           {steps.length > 1 && (
             <div className="rail__section">

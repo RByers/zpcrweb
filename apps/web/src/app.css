@@ -329,11 +329,11 @@
   color: var(--ink-muted);
 }
 
-/* ---- Diagnostics view ----------------------------------------------------
+/* ---- Reference view --------------------------------------------------------
    Reuses the Curves view's rail+plot grid (`.curves`), but sits inside a page that also
    scrolls to the reference-vs-factory table below it, so the chart gets a fixed height
    instead of `.curves`' `height: 100%`. */
-.diagnostics {
+.reference {
   height: 100%;
   overflow: auto;
   padding: clamp(12px, 3cqi, 28px);
@@ -341,7 +341,7 @@
   flex-direction: column;
   gap: 22px;
 }
-.diagnostics__chart {
+.reference__chart {
   display: grid;
   grid-template-columns: minmax(260px, 320px) 1fr;
   height: 520px;
@@ -427,7 +427,7 @@
   .curves__plot {
     min-height: 60cqb;
   }
-  .diagnostics__chart {
+  .reference__chart {
     grid-template-columns: 1fr;
     grid-template-rows: auto 1fr;
     height: auto;

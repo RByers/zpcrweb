@@ -3,7 +3,7 @@ import type { ViewId } from "../state/useZpcrStore";
 const VIEWS: { id: ViewId; label: string }[] = [
   { id: "overview", label: "Overview" },
   { id: "curves", label: "Curves" },
-  { id: "diagnostics", label: "Diagnostics" },
+  { id: "reference", label: "Reference" },
   { id: "plates", label: "Plates" },
   { id: "raw", label: "Raw files" },
 ];

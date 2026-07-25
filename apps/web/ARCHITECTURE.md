@@ -2,7 +2,7 @@
 
 The web app (`@zpcrweb/web`) is a browser UI over [`@zpcrweb/core`](../../packages/core). It
 loads one or more `.zpcr` and/or `.pcrd` files, switches between them, and explores each
-through five views: Overview, Curves, Diagnostics, Plates, and Raw.
+through five views: Overview, Curves, Reference, Plates, and Raw.
 
 ## Two formats, mostly one UI
 
@@ -10,7 +10,7 @@ through five views: Overview, Curves, Diagnostics, Plates, and Raw.
 [`ARCHITECTURE.md`](../../ARCHITECTURE.md#two-input-formats-one-output-shape)), so most of the
 app is format-agnostic:
 
-- `OverviewView`, `CurvesView`, and `DiagnosticsView` take a plain `Zpcr` — they don't know or
+- `OverviewView`, `CurvesView`, and `ReferenceView` take a plain `Zpcr` — they don't know or
   care whether it came from a `.zpcr` archive or a decoded `.pcrd` document. `OverviewView`'s
   protocol tile reads `zpcr.protocolText` (a real field on `Zpcr`, not a by-name file lookup),
   so it works identically either way.
@@ -94,7 +94,7 @@ exposed as a clear affordance on each file chip.
 - **Overview** — run metadata as stat tiles + the thermal protocol text, read from
   `zpcr.metadata` and `zpcr.protocolText`.
 - **Curves** — the centerpiece (see below).
-- **Diagnostics** — reference row vs factory calibration (see below).
+- **Reference** — reference row vs factory calibration (see below).
 - **Plates** — `PlatesView` (`components/views/PlatesView.tsx`): the visual, color-coded plate
   map (`components/plate/PlateViewer.tsx`) for every plate attached to the run, via
   `zpcr.plates()`. A sidebar lists plates when there's more than one (multiple `.pltd` entries
@@ -200,7 +200,7 @@ format's real elements without either one faking the other's schema.
 Data flows `zpcr.curves({ includeReference:false })` + `zpcr.darkCurves()` → filter by
 enabled channels/wells → `lib/uplot/chart.ts` `buildChart()` → `CurveChart` renders +
 overlays a tooltip. The reference row is excluded here — it has its own chart in the
-**Diagnostics** view (below), so `Toggle` (`components/Toggle.tsx`) and `CurveChart` are the
+**Reference** view (below), so `Toggle` (`components/Toggle.tsx`) and `CurveChart` are the
 only pieces the two views share.
 
 - **Selection:** a channel bar (6 dye-labelled toggles) and an 8×12 well matrix (`WellMatrix`)
@@ -227,9 +227,9 @@ only pieces the two views share.
   mean/min/max/std — or, for a temperature, just its °C. The search projects each series
   through **its own** scale, so proximity is measured in pixels across both axes.
 
-## Diagnostics view
+## Reference view
 
-`DiagnosticsView` (`components/views/DiagnosticsView.tsx`) is the reference row's own chart,
+`ReferenceView` (`components/views/ReferenceView.tsx`) is the reference row's own chart,
 plus the reference-vs-factory-calibration table (`RefCalPanel`) below it. It reuses the same
 rail+chart layout and `CurveChart` component as the Curves view, but with its own selection
 state (`enabledRefCols`, a `RefColBar` chip bar mirroring `ChannelBar`) rather than a well

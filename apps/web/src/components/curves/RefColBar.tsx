@@ -8,7 +8,7 @@ interface Props {
 }
 
 /** Reference-column chip bar, styled like {@link ChannelBar} but selecting plate columns
- * (R1–R12) instead of optical channels — see the Diagnostics view. Each chip also carries a
+ * (R1–R12) instead of optical channels — see the Reference view. Each chip also carries a
  * small "only" button that isolates that one column. */
 export function RefColBar({ enabled, columns, onToggle, onOnly }: Props) {
   return (

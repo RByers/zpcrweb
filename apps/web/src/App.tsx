@@ -6,7 +6,7 @@ import { ViewSelector } from "./components/ViewSelector";
 import { PasswordPrompt } from "./components/PasswordPrompt";
 import { OverviewView } from "./components/views/OverviewView";
 import { CurvesView } from "./components/views/CurvesView";
-import { DiagnosticsView } from "./components/views/DiagnosticsView";
+import { ReferenceView } from "./components/views/ReferenceView";
 import { PlatesView } from "./components/views/PlatesView";
 import { RawFilesView } from "./components/views/RawFilesView";
 import { PcrdRawView } from "./components/views/PcrdRawView";
@@ -78,8 +78,8 @@ export function App() {
                 onChange={store.updateSettings}
               />
             )}
-            {view === "diagnostics" && (
-              <DiagnosticsView
+            {view === "reference" && (
+              <ReferenceView
                 zpcr={zpcr}
                 settings={settings}
                 onChange={store.updateSettings}

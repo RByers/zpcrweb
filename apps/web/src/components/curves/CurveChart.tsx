@@ -7,7 +7,7 @@ import { buildChart, type FactoryCurve, type PlotCurve, type TooltipData } from 
 interface Props {
   curves: PlotCurve[];
   darkCurves: DarkCurve[];
-  /** Factory-calibration reference overlay (diagnostics view); empty draws none. */
+  /** Factory-calibration reference overlay (Reference view); empty draws none. */
   factoryCurves?: FactoryCurve[];
   /** Temperature series for the right-hand °C axis; empty hides that axis. */
   tempCurves: TemperatureCurve[];

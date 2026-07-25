@@ -12,7 +12,7 @@ interface Props {
 /**
  * 8×12 plate selection grid. Cells toggle a single well; the row letter (A–H) and column
  * number (1–12) headers toggle a whole row/column; the corner toggles all wells. The
- * reference row is shown separately, in the Diagnostics view.
+ * reference row is shown separately, in the Reference view.
  */
 export function WellMatrix({ enabled, onChange }: Props) {
   const sampleKeys = () => {

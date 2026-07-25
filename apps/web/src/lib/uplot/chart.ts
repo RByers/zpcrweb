@@ -35,7 +35,7 @@ function logSafe(values: number[], scale: Scale): (number | null)[] {
 }
 
 /** A factory-calibration reference value, overlaid as a dotted flat line per (channel, col) —
- * see the diagnostics view. Purely a display overlay, like {@link DarkCurve}. */
+ * see the Reference view. Purely a display overlay, like {@link DarkCurve}. */
 export interface FactoryCurve {
   channel: number;
   col: number;
@@ -92,7 +92,7 @@ export interface BuildChartConfig {
    * display overlay — never subtracted from `wellCurves`. */
   darkCurves: DarkCurve[];
   /** Factory-calibration reference values to overlay as dotted flat lines, matched to
-   * `wellCurves` by (channel, col); empty draws none. See the diagnostics view. */
+   * `wellCurves` by (channel, col); empty draws none. See the Reference view. */
   factoryCurves: FactoryCurve[];
   /** Temperature series to plot on the right-hand °C axis (empty to hide the axis). */
   tempCurves: TemperatureCurve[];

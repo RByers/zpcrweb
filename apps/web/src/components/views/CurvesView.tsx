@@ -49,7 +49,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
       : (steps[0]?.step ?? undefined);
 
   // Full curve set for the active step. The reference row is shown separately, in the
-  // Diagnostics view — see RefColBar/DiagnosticsView.
+  // Reference view — see RefColBar/ReferenceView.
   const allCurves = useMemo<WellCurve[]>(
     () => zpcr.curves({ includeReference: false, step: activeStep }),
     [zpcr, activeStep],
