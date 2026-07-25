@@ -397,13 +397,22 @@
 }
 .rail__details > summary {
   cursor: pointer;
-  list-style-position: outside;
+  list-style: none;
 }
-.rail__details > summary::marker {
-  color: var(--ink-muted);
+.rail__details > summary::-webkit-details-marker {
+  display: none;
 }
 .rail__details > summary > .rail__link {
   cursor: default;
+}
+.rail__chevron {
+  display: inline-block;
+  margin-right: 6px;
+  color: var(--ink-muted);
+  transition: transform 0.15s ease;
+}
+.rail__details[open] > summary > span > .rail__chevron {
+  transform: rotate(90deg);
 }
 .rail__link {
   border: 0;

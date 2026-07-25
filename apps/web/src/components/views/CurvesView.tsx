@@ -541,7 +541,12 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
         {allTemps.length > 0 && (
           <details className="rail__section rail__details">
             <summary className="rail__title">
-              Temperature (right axis)
+              <span>
+                <span className="rail__chevron" aria-hidden="true">
+                  ▸
+                </span>
+                Temperature (right axis)
+              </span>
               <button
                 className="rail__link"
                 onClick={(e) => {
