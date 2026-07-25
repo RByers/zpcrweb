@@ -11,7 +11,7 @@
  *
  * Decrypted and inflated, the entry is a UTF-8 XML `<platesetup2>` document describing the
  * plate: its dye layers (one per fluorophore), and, per well, the loaded fluorophores, the
- * per-fluor target/gene, the sample name/condition, sample type, replicate and (for
+ * per-fluor target/gene, the sample name, sample type, replicate and (for
  * standards) a quantity. See `pltd.md` for the full format.
  */
 
@@ -75,12 +75,8 @@ export interface WellDefinition {
   sampleType: SampleType;
   /** Original `wellSampleType` code (e.g. `wcSample`). */
   sampleTypeRaw: string;
-  /** Sample name (`sampleId`), when set. */
-  sampleName?: string;
-  /** Biological condition / group name (`conditionName`), when set. */
-  condition?: string;
-  /** Second condition (`condition2Name`), when set. */
-  condition2?: string;
+  /** Sample name (`conditionName`), when set. */
+  sample?: string;
   /** Replicate number (`replicateNumber`), when set (the sentinel −1 is treated as unset). */
   replicate?: number;
   /** Standard concentration (`sampleQuantity`), when a finite number (NaN is treated as unset). */
@@ -131,8 +127,8 @@ export interface PlateDefinition {
   fluors: PlateFluor[];
   /** All declared target/gene names (`geneNameList`). */
   targets: string[];
-  /** All declared sample/condition names (`conditionNameList`). */
-  conditions: string[];
+  /** All declared sample names (`conditionNameList`). */
+  samples: string[];
   /** Wells in row-major order (length `rows * columns`). */
   wells: WellDefinition[];
   /** Header metadata (created/modified dates, app versions, guid, …) as raw strings. */
@@ -201,7 +197,7 @@ export function parsePlatesetup2(xml: string): PlateDefinition {
   const targets = allTagAttrs(xml, "geneName")
     .map((a) => a.shortName ?? "")
     .filter((s) => s.length > 0);
-  const conditions = allTagAttrs(xml, "conditionName")
+  const samples = allTagAttrs(xml, "conditionName")
     .map((a) => a.shortName ?? "")
     .filter((s) => s.length > 0);
 
@@ -244,9 +240,7 @@ export function parsePlatesetup2(xml: string): PlateDefinition {
         well.sampleTypeRaw = rawType;
         well.sampleType = toSampleType(rawType);
       }
-      if (w.sampleId) well.sampleName = w.sampleId;
-      if (w.conditionName) well.condition = w.conditionName;
-      if (w.condition2Name) well.condition2 = w.condition2Name;
+      if (w.conditionName) well.sample = w.conditionName;
       const rep = Number(w.replicateNumber);
       if (Number.isInteger(rep) && rep >= 0) well.replicate = rep;
       const qty = Number(w.sampleQuantity);
@@ -278,7 +272,7 @@ export function parsePlatesetup2(xml: string): PlateDefinition {
     standardUnits: root.standardUnits ?? "",
     fluors,
     targets,
-    conditions,
+    samples,
     wells,
     meta,
   };

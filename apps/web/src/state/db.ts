@@ -51,6 +51,8 @@ export interface StoredSettings {
   calibrationBackground?: "none" | "dark" | "plate";
   /** Fluorophore (or, in target view mode, target) names hidden from the dye-space view. */
   disabledFluors?: string[];
+  /** Curves view: sample names hidden from the plotted curves. */
+  disabledSamples?: string[];
   /** When true, dye-space curves are drawn for every enabled well/fluor pair, even ones the
    * plate definition doesn't actually load into that well. Off by default. */
   showUnloadedFluors?: boolean;

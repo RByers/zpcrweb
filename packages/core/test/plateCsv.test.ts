@@ -6,10 +6,13 @@ import { readCfxPassword } from "./secrets.js";
 const PW = readCfxPassword();
 
 function syntheticPlate(): PlateDefinition {
+  const samples: string[] = [];
   const wells = Array.from({ length: 8 * 12 }, (_, index) => {
     const row = Math.floor(index / 12);
     const col = index % 12;
     const loaded = col < 2;
+    const sample = loaded ? `Sample, "quoted" ${row}-${col}` : undefined;
+    if (sample) samples.push(sample);
     return {
       index,
       row,
@@ -24,8 +27,7 @@ function syntheticPlate(): PlateDefinition {
         : [],
       sampleType: loaded ? ("unknown" as const) : ("empty" as const),
       sampleTypeRaw: loaded ? "wcSample" : "wcEmpty",
-      sampleName: loaded ? `Sample, "quoted" ${row}-${col}` : undefined,
-      condition: loaded ? "Cond;A" : undefined,
+      sample,
       replicate: loaded ? 1 : undefined,
       quantity: loaded ? 1000 : undefined,
     };
@@ -43,7 +45,7 @@ function syntheticPlate(): PlateDefinition {
       { fluor: "HEX", channel: 1 },
     ],
     targets: ["GeneA"],
-    conditions: ["Cond;A"],
+    samples,
     wells,
     meta: {},
   };
@@ -69,8 +71,8 @@ describe("plate CSV round-trip", () => {
       "# fluors: FAM:0",
       "# rows: 1",
       "# columns: 1",
-      "Well,SampleType,SampleName,Condition,Condition2,Replicate,Quantity,Fluors",
-      "A1,unknown,,,,,,HEX",
+      "Well,SampleType,Sample,Replicate,Quantity,Fluors",
+      "A1,unknown,,,,HEX",
     ].join("\r\n");
     expect(() => parsePlateCsv(csv)).toThrow(/unknown fluor/);
   });

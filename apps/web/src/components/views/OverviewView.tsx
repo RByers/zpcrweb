@@ -32,7 +32,7 @@ export function OverviewView({
   const [password] = usePltdPassword();
   const plate = useMemo(() => zpcr.plates(password || undefined)[0]?.pltd.plate ?? null, [zpcr, password]);
   const targets = useMemo(() => (plate ? plateTargets(plate) : []), [plate]);
-  const samples = plate?.conditions ?? [];
+  const samples = plate?.samples ?? [];
 
   const tiles: Tile[] = [
     { label: "Block", value: m.blockDescription || "—" },

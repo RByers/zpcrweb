@@ -26,7 +26,7 @@ function syntheticPlate(name: string): PlateDefinition {
     standardUnits: "",
     fluors: [],
     targets: [],
-    conditions: [],
+    samples: [],
     wells,
     meta: {},
   };

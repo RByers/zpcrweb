@@ -185,7 +185,7 @@ exposed as a clear affordance on each file chip.
   side once there's room, stacked (well detail below the grid) on narrow containers.
   Cell mode: a Compact/Detailed toggle controls what each well cell shows. Compact is the
   original abbreviation + per-fluor channel-color dots. Detailed (the default) writes the
-  well's `condition` and each loaded fluor's `target` directly into the cell, the target text
+  well's `sample` and each loaded fluor's `target` directly into the cell, the target text
   colored by that fluor's channel (`channelColor`) — trading grid density for being able to
   read sample identity and target without opening the click-through well detail panel.
 - **Raw** — `RawFilesView` for `.zpcr`, `PcrdRawView` for `.pcrd` (see "Raw views" below).
@@ -201,7 +201,7 @@ exposed as a clear affordance on each file chip.
   `.pltd` entry (password-gated) or parses a `.plt.csv` entry (`parsePlateCsv`, no password
   needed), either way rendering the same `PlateTable` (`components/raw/PlateTable.tsx`) from
   the same `PlateDefinition` object model: one row per well, in plate order, with sample
-  type/name/condition/replicate/quantity and fluor→target columns. Plain tabular data,
+  type/name/replicate/quantity and fluor→target columns. Plain tabular data,
   deliberately not the color-coded grid — see the **Plates** tab for that.
 - **`RunInfo.xml`** → `RunInfoTable`, a two-column key/value table (it is just a flat
   `KeyValuePairs` blob; parsed with `parseRunInfoRaw`). Takes plain `text`, so `PcrdRawView`
@@ -350,6 +350,13 @@ only pieces the two views share.
   never distorted by a 105 °C lid. Set points (fan on/off thresholds) are dimmed and
   labelled as such. Colors come from `lib/tempColors.ts`, a cool ramp deliberately outside
   the dye palette.
+- **Samples:** a collapsible rail section (collapsed by default, like Temperatures) listing every
+  distinct `WellDefinition.sample` name actually assigned to a well on the plate (`pltd.md`'s
+  `conditionName` — despite the XML attribute name, this is the sample name CFX Manager's UI
+  shows). `SampleBar` chips toggle an opt-out set (`disabledSamples`, all shown by default,
+  mirroring `disabledFluors`); a well with no `sample` set is never hidden by this filter, since
+  there's no chip for it. Applies to both channel- and dye-space curves alike (`sampleVisible()`,
+  consulted by both `visibleChannel` and `visibleFluor`).
 - **X axis:** integer cycles only — a tick per cycle, gridline + label every 5.
 - **Hover/tap tooltip:** a uPlot cursor plugin finds the nearest series (well curve, dark,
   factory overlay, or temperature) and reports its label, channel/dye, cycle, and

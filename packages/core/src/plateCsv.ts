@@ -142,9 +142,7 @@ function cellToFluors(cell: string, channelByFluor: Map<string, number>): WellFl
 const HEADER_COLUMNS = [
   "Well",
   "SampleType",
-  "SampleName",
-  "Condition",
-  "Condition2",
+  "Sample",
   "Replicate",
   "Quantity",
   "Fluors",
@@ -168,9 +166,7 @@ export function plateToCsv(plate: PlateDefinition): string {
     out += csvRow([
       w.label,
       w.sampleType,
-      w.sampleName ?? "",
-      w.condition ?? "",
-      w.condition2 ?? "",
+      w.sample ?? "",
       w.replicate !== undefined ? String(w.replicate) : "",
       w.quantity !== undefined ? String(w.quantity) : "",
       fluorsToCell(w.fluors),
@@ -258,7 +254,7 @@ export function parsePlateCsv(text: string): PlateDefinition {
   });
 
   const targets = new Set<string>();
-  const conditions = new Set<string>();
+  const samples = new Set<string>();
   dataRows.forEach((r, i) => {
     const { row, col } = parsedLabels[i]!;
     const wellIndex = row * columns + col;
@@ -271,9 +267,7 @@ export function parsePlateCsv(text: string): PlateDefinition {
       : "empty";
     const fluorCell = r[idx.Fluors!] ?? "";
     const wellFluors = cellToFluors(fluorCell, channelByFluor);
-    const sampleName = (r[idx.SampleName!] ?? "").trim() || undefined;
-    const condition = (r[idx.Condition!] ?? "").trim() || undefined;
-    const condition2 = (r[idx.Condition2!] ?? "").trim() || undefined;
+    const sample = (r[idx.Sample!] ?? "").trim() || undefined;
     const replicateRaw = (r[idx.Replicate!] ?? "").trim();
     const replicate = replicateRaw === "" ? undefined : Number(replicateRaw);
     const quantityRaw = (r[idx.Quantity!] ?? "").trim();
@@ -288,15 +282,12 @@ export function parsePlateCsv(text: string): PlateDefinition {
       fluors: wellFluors,
       sampleType,
       sampleTypeRaw: SAMPLE_TYPE_TO_RAW[sampleType] ?? sampleTypeCell,
-      sampleName,
-      condition,
-      condition2,
+      sample,
       replicate,
       quantity,
     };
     for (const f of wellFluors) if (f.target) targets.add(f.target);
-    if (condition) conditions.add(condition);
-    if (condition2) conditions.add(condition2);
+    if (sample) samples.add(sample);
   });
 
   return {
@@ -310,7 +301,7 @@ export function parsePlateCsv(text: string): PlateDefinition {
     standardUnits: meta.standardUnits ?? "",
     fluors,
     targets: [...targets],
-    conditions: [...conditions],
+    samples: [...samples],
     wells,
     meta: {},
   };

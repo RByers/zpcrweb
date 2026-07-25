@@ -6,7 +6,7 @@ import { ROW_LABELS, SAMPLE_TYPE_META } from "../../lib/sampleType";
 /**
  * The visual plate map for any {@link PlateDefinition}: an 8×12 grid coloured by sample type,
  * each well showing its loaded fluorophores (channel dots); click a well for its full detail
- * (fluors → targets, sample, condition, replicate, quantity). Used both by the "Plates" tab
+ * (fluors → targets, sample, replicate, quantity). Used both by the "Plates" tab
  * (for a `.zpcr`'s embedded `.pltd` entries) and a `.pcrd`'s already-decrypted `plateSetup2`
  * subtree — same component either way, only the source of the {@link PlateDefinition} differs.
  */
@@ -133,9 +133,7 @@ function WellCell({
   const title = [
     well.label,
     meta.label,
-    well.sampleName && `Sample: ${well.sampleName}`,
-    well.condition && `Condition: ${well.condition}`,
-    well.condition2 && well.condition2,
+    well.sample && `Sample: ${well.sample}`,
     well.replicate !== undefined && `Rep ${well.replicate}`,
     well.quantity !== undefined && `Qty ${well.quantity}`,
     well.fluors.length
@@ -172,7 +170,7 @@ function WellCell({
       ) : (
         well.loaded && (
           <>
-            {well.condition && <span className="plate__wellcond">{well.condition}</span>}
+            {well.sample && <span className="plate__wellsample">{well.sample}</span>}
             <span className="plate__welltargets">
               {well.fluors.map((f) => (
                 <span key={f.channel} className="plate__target" style={{ color: channelColor(f.channel) }}>
@@ -197,9 +195,7 @@ function WellDetail({ well }: { well: WellDefinition }) {
       </h3>
       <dl className="decoded__dl mono">
         <Pair k="Loaded" v={well.loaded ? "yes" : "no (empty tube)"} />
-        {well.sampleName && <Pair k="Sample" v={well.sampleName} />}
-        {well.condition && <Pair k="Condition" v={well.condition} />}
-        {well.condition2 && <Pair k="Condition 2" v={well.condition2} />}
+        {well.sample && <Pair k="Sample" v={well.sample} />}
         {well.replicate !== undefined && <Pair k="Replicate" v={String(well.replicate)} />}
         {well.quantity !== undefined && <Pair k="Quantity" v={String(well.quantity)} />}
       </dl>

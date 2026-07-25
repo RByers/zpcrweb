@@ -41,7 +41,6 @@ export function PlateTable({ plate, sourceHint }: { plate: PlateDefinition; sour
                 <th>Well</th>
                 <th>Type</th>
                 <th>Sample</th>
-                <th>Condition</th>
                 <th>Rep</th>
                 <th>Qty</th>
                 <th>Fluors → targets</th>
@@ -57,12 +56,7 @@ export function PlateTable({ plate, sourceHint }: { plate: PlateDefinition; sour
                       <span className="decoded__swatch" style={{ background: meta.color }} />
                       {meta.label}
                     </td>
-                    <td>{w.sampleName ?? <span className="decoded__empty">∅</span>}</td>
-                    <td>
-                      {[w.condition, w.condition2].filter(Boolean).join(" / ") || (
-                        <span className="decoded__empty">∅</span>
-                      )}
-                    </td>
+                    <td>{w.sample ?? <span className="decoded__empty">∅</span>}</td>
                     <td>{w.replicate ?? ""}</td>
                     <td>{w.quantity ?? ""}</td>
                     <td>

@@ -43,7 +43,7 @@ export interface AnalysisRow {
   row: number;
   col: number;
   wellLabel: string;
-  sampleName: string;
+  sample: string;
   threshold: number;
   noise: number;
   amplified: boolean;
@@ -205,7 +205,7 @@ export function AnalysisView({ zpcr, settings, onChange }: Props) {
       row: number;
       col: number;
       wellLabel: string;
-      sampleName: string;
+      sample: string;
       cycles: number[];
       correctedValues: number[];
       noise: number;
@@ -230,7 +230,7 @@ export function AnalysisView({ zpcr, settings, onChange }: Props) {
           row: w.row,
           col: w.col,
           wellLabel: w.label,
-          sampleName: w.sampleName ?? "",
+          sample: w.sample ?? "",
           cycles: curve.cycles,
           correctedValues: baseline.correctedValues,
           noise: baseline.noise,
@@ -270,7 +270,7 @@ export function AnalysisView({ zpcr, settings, onChange }: Props) {
           row: p.row,
           col: p.col,
           wellLabel: p.wellLabel,
-          sampleName: p.sampleName,
+          sample: p.sample,
           threshold,
           noise: p.noise,
           amplified: p.amplified,
@@ -307,7 +307,7 @@ export function AnalysisView({ zpcr, settings, onChange }: Props) {
     for (const r of rows) {
       csv += csvRow([
         r.wellLabel,
-        r.sampleName,
+        r.sample,
         r.fluor,
         r.target,
         channelLabel(r.channel),
@@ -459,7 +459,7 @@ export function AnalysisView({ zpcr, settings, onChange }: Props) {
                   className={"analysis__row" + (r.cq == null ? " is-unamplified" : "")}
                 >
                   <td>{r.wellLabel}</td>
-                  <td>{r.sampleName || "—"}</td>
+                  <td>{r.sample || "—"}</td>
                   <td>{r.fluor}</td>
                   {usingTargets && <td>{r.target}</td>}
                   <td>{algorithm === "Threshold" ? r.threshold.toFixed(1) : "—"}</td>

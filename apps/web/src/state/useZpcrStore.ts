@@ -94,6 +94,9 @@ export interface FileSettings {
    * opt-out set, like `enabledChannels` inverted — new entries default to shown without needing
    * to know their names up front). */
   disabledFluors: Set<string>;
+  /** Curves view: sample names (`PlateDefinition.samples`) hidden from the plotted curves — an
+   * opt-out set, like {@link disabledFluors}. New samples default to shown. */
+  disabledSamples: Set<string>;
   /** When true, draw a dye-space curve for every enabled well/fluor pair regardless of whether
    * the plate definition actually loads that fluor into that well. Off by default — the normal
    * behavior only draws curves pltd.md's per-well dye layers actually cover. */
@@ -212,6 +215,7 @@ function defaultSettings(): FileSettings {
     // software's own RFU scale. See `calibration.md` §4.2/§8 and CalibrationBackground.
     calibrationBackground: "none",
     disabledFluors: new Set<string>(),
+    disabledSamples: new Set<string>(),
     showUnloadedFluors: false,
     analysisDisabledTargets: new Set<string>(),
     analysisCqAlgorithm: "Threshold",
@@ -238,6 +242,7 @@ function toStored(id: string, s: FileSettings): StoredSettings {
     calibrationNormalization: s.calibrationNormalization,
     calibrationBackground: s.calibrationBackground,
     disabledFluors: [...s.disabledFluors],
+    disabledSamples: [...s.disabledSamples],
     showUnloadedFluors: s.showUnloadedFluors,
     analysisDisabledTargets: [...s.analysisDisabledTargets],
     analysisCqAlgorithm: s.analysisCqAlgorithm,
@@ -262,6 +267,7 @@ function fromStored(s: StoredSettings): FileSettings {
     calibrationNormalization: s.calibrationNormalization ?? "global",
     calibrationBackground: s.calibrationBackground ?? "none",
     disabledFluors: new Set(s.disabledFluors ?? []),
+    disabledSamples: new Set(s.disabledSamples ?? []),
     showUnloadedFluors: s.showUnloadedFluors ?? false,
     temps: new Set(s.temps ?? []),
     analysisDisabledTargets: new Set(s.analysisDisabledTargets ?? []),

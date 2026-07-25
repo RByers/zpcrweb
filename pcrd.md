@@ -155,7 +155,7 @@ and 96 `<wellSample>`), `analysisSets`, `TraceStyles`, `ExcludeSampleTypes`. The
 
 The sample carries plate data that neither `.zpcr` in `samples/` has (this run's archive
 contains no `.pltd` at all): `rows=8 columns=12 dyes=3 plateName="BR Clear"
-scanMode="AllChannelsScan"`, targets `HRV Ma, HMPV Ma, RSV Ma, ENT rc, PIV3 Bo`, conditions
+scanMode="AllChannelsScan"`, targets `HRV Ma, HMPV Ma, RSV Ma, ENT rc, PIV3 Bo`, samples
 `S181, S137`, dye layers `FAM, Texas Red, Cy5`.
 
 ### 2.4 `protocol2` — the thermal protocol

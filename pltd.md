@@ -2,7 +2,7 @@
 
 Reverse-engineered from the `.pltd` files bundled inside `.zpcr` archives produced by a
 Bio-Rad CFX96 (`CT019138`). A `.pltd` describes a **plate setup**: which fluorophores are
-loaded in each of the 96 wells, the per-fluor target/gene, the sample name/condition, the
+loaded in each of the 96 wells, the per-fluor target/gene, the sample name, the
 sample type, replicate number and — for standards — a quantity.
 
 > **Status:** fully decoded. Every `.pltd` in the sample set (32 distinct files, 2019–2023,
@@ -35,7 +35,7 @@ Decrypted and inflated, the entry is a UTF-8 (BOM-prefixed) XML document rooted 
   <geneNameList>          <!-- the TARGETS -->
     <geneName shortName="DNA" fullName="DNA" geneColor="-16777011" …/>
   </geneNameList>
-  <conditionNameList>     <!-- the SAMPLES / conditions -->
+  <conditionNameList>     <!-- the SAMPLES -->
     <conditionName shortName="Std 0" fullName="Std 0" geneColor="…"/>
   </conditionNameList>
   <dyeLayersList>         <!-- one <dyeLayer> per FLUOROPHORE -->
@@ -130,11 +130,15 @@ layers whose `<wellSample>` for that `plateIndex` has `wellLoadedFluor="True"`.
 |-----------|---------|
 | `wellLoadedFluor` | `True` if **this** dye is loaded in the well. |
 | `geneName` | **Target** for this well **+ this fluor** (per-layer). |
-| `sampleId` | **Sample name** (often empty; see `conditionName`). |
-| `conditionName`, `condition2Name` | Biological condition/group labels (e.g. `Std 0`, `1:200K`). |
+| `conditionName` | **Sample name** (e.g. `Std 0`, `1:200K`) — despite the XML attribute name, this is what CFX Manager's UI shows as the well's "Sample". |
 | `wellSampleType` | Sample type — see enum below. |
 | `replicateNumber` | Replicate; `-1` = unset. |
-| `sampleQuantity` | Standard concentration; `NaN` = unset (standards may also use `condition*` dilution labels). |
+| `sampleQuantity` | Standard concentration; `NaN` = unset (standards may also use dilution-style sample names). |
+
+Two attributes exist in the XML but are not imported into this library's data model:
+`sampleId` (a separate, usually-empty sample identifier distinct from `conditionName`) and
+`condition2Name` (a second condition label of unknown purpose). Neither is exposed on
+`WellDefinition`.
 
 A well is **loaded** iff at least one dye layer sets `wellLoadedFluor="True"`; otherwise it is
 an empty tube.
@@ -160,8 +164,8 @@ an empty tube.
 ## 3. Typed model
 
 `parsePltd()` returns the container metadata plus a `PlateDefinition` with `fluors` (dye
-layers), `targets`, `conditions`, and `wells[]` — each `WellDefinition` carrying its loaded
-`fluors` (with per-fluor `target`), `sampleType`, `sampleName`, `condition(s)`, `replicate`
+layers), `targets`, `samples`, and `wells[]` — each `WellDefinition` carrying its loaded
+`fluors` (with per-fluor `target`), `sampleType`, `sample`, `replicate`
 and `quantity`. The vessel type is exposed as `PlateDefinition.plateName` (§2) — the value to
 match against a `.Dcal`'s plate field when selecting calibration — and the plate's own
 user-facing identity as `PlateDefinition.identityKey` (§2). On a wrong/missing password the

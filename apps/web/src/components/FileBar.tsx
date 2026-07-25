@@ -58,7 +58,7 @@ function HoverCard({
   const protocolName = zpcr?.protocol()?.name;
   const cycles = zpcr?.reads.length;
   const targets = plate ? plateTargets(plate) : [];
-  const samples = plate?.conditions ?? [];
+  const samples = plate?.samples ?? [];
 
   return (
     <div className="filecard mono" style={style}>

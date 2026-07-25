@@ -32,6 +32,7 @@ import {
 } from "../../lib/fluorCurves";
 import { ChannelBar } from "../curves/ChannelBar";
 import { FluorBar, type FluorChip } from "../curves/FluorBar";
+import { SampleBar } from "../curves/SampleBar";
 import { WellMatrix } from "../curves/WellMatrix";
 import { CurveChart } from "../curves/CurveChart";
 import { TempBar } from "../curves/TempBar";
@@ -84,19 +85,6 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
   const visibleTemps = useMemo(
     () => allTemps.filter((t) => settings.temps.has(t.key)),
     [allTemps, settings.temps],
-  );
-
-  // ---- Channel-space (raw) curves --------------------------------------------------------
-
-  const visibleChannel = useMemo(
-    () =>
-      allCurves.filter(
-        (c) =>
-          available.includes(c.channel) &&
-          settings.enabledChannels.has(c.channel) &&
-          settings.enabledWells.has(wellKey(c.row, c.col)),
-      ),
-    [allCurves, available, settings.enabledChannels, settings.enabledWells],
   );
 
   // Dark lines/subtraction only concern the enabled, available channels.
@@ -331,6 +319,58 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
     return m;
   }, [plate]);
 
+  // Per-well sample name (pltd.md's `conditionName`, exposed as `WellDefinition.sample`) — for
+  // the Samples rail section's chips and for filtering plotted curves by sample.
+  const wellSample = useMemo(() => {
+    const m = new Map<string, string>();
+    if (plate) {
+      for (const w of plate.wells) if (w.sample) m.set(wellKey(w.row, w.col), w.sample);
+    }
+    return m;
+  }, [plate]);
+
+  // Distinct sample names actually assigned to a well on this plate, in plate order — declared
+  // names with no well (`plate.samples`) are left out since there'd be nothing to toggle.
+  const sampleList = useMemo(() => {
+    const seen = new Set<string>();
+    const list: string[] = [];
+    if (plate) {
+      for (const w of plate.wells) {
+        if (w.sample && !seen.has(w.sample)) {
+          seen.add(w.sample);
+          list.push(w.sample);
+        }
+      }
+    }
+    return list;
+  }, [plate]);
+
+  const sampleVisible = (row: number, col: number): boolean => {
+    const sample = wellSample.get(wellKey(row, col));
+    return !sample || !settings.disabledSamples.has(sample);
+  };
+
+  const toggleSample = (name: string) => {
+    const next = new Set(settings.disabledSamples);
+    next.has(name) ? next.delete(name) : next.add(name);
+    onChange({ disabledSamples: next });
+  };
+
+  // ---- Channel-space (raw) curves --------------------------------------------------------
+
+  const visibleChannel = useMemo(
+    () =>
+      allCurves.filter(
+        (c) =>
+          available.includes(c.channel) &&
+          settings.enabledChannels.has(c.channel) &&
+          settings.enabledWells.has(wellKey(c.row, c.col)) &&
+          sampleVisible(c.row, c.col),
+      ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [allCurves, available, settings.enabledChannels, settings.enabledWells, settings.disabledSamples, wellSample],
+  );
+
   const visibleFluor = useMemo(
     () =>
       allFluorCurves.filter(
@@ -338,14 +378,17 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
           settings.enabledWells.has(wellKey(c.row, c.col)) &&
           !settings.disabledFluors.has(labelForFluorCurve(c.row, c.col, c.dye)) &&
           (settings.showUnloadedFluors ||
-            (wellFluors.get(wellKey(c.row, c.col))?.has(c.dye) ?? false)),
+            (wellFluors.get(wellKey(c.row, c.col))?.has(c.dye) ?? false)) &&
+          sampleVisible(c.row, c.col),
       ),
     [
       allFluorCurves,
       settings.enabledWells,
       settings.disabledFluors,
       settings.showUnloadedFluors,
+      settings.disabledSamples,
       wellFluors,
+      wellSample,
       fluorViewMode,
       wellFluorTargets,
     ],
@@ -589,6 +632,32 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
             onHoverWell={(label) => setHoverHighlight(label ? { kind: "well", label } : null)}
           />
         </div>
+
+        {sampleList.length > 0 && (
+          <details className="rail__section rail__details">
+            <summary className="rail__title">
+              <span>
+                <span className="rail__chevron" aria-hidden="true">
+                  ▸
+                </span>
+                Samples
+              </span>
+              <button
+                className="rail__link"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onChange({
+                    disabledSamples:
+                      settings.disabledSamples.size > 0 ? new Set<string>() : new Set(sampleList),
+                  });
+                }}
+              >
+                {settings.disabledSamples.size > 0 ? "all" : "none"}
+              </button>
+            </summary>
+            <SampleBar items={sampleList} disabled={settings.disabledSamples} onToggle={toggleSample} />
+          </details>
+        )}
 
         {allTemps.length > 0 && (
           <details className="rail__section rail__details">
