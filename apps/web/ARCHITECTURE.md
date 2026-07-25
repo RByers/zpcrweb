@@ -155,11 +155,10 @@ a minimal IndexedDB wrapper with two object stores:
   reference columns. `baseline` (Reference view's factory-relative ΔRFU/Drift %) and `curveView`
   (the Curves view's display mode — baselining itself is never stored, since it's always the
   auto-detected linear fit) are independent settings — see "Two baseline concepts" under
-  Reference view. The Analysis view adds four of its own: `analysisDisabledTargets[]` (an
+  Reference view. The Analysis view adds three of its own: `analysisDisabledTargets[]` (an
   opt-out target filter, like `disabledFluors`), `analysisCqAlgorithm`
-  (`"Threshold"`/`"NoThreshold"`, default `"Threshold"`), `analysisThresholdOverrides`
-  (`[target, value][]`, manual per-target threshold RFU), and `analysisMinDeltaRfu` (an absolute
-  endpoint-ΔRFU floor for reporting a Cq at all, default 100) — see "Analysis view" below. Writes
+  (`"Threshold"`/`"NoThreshold"`, default `"Threshold"`), and `analysisThresholdOverrides`
+  (`[target, value][]`, manual per-target threshold RFU) — see "Analysis view" below. Writes
   are debounced. Older records may still carry the retired `curveBaseline`/`curveBaselineRange`
   fields (`state/db.ts`); `useZpcrStore.ts`'s `fromStored()` migrates `curveBaseline: "raw"` to
   `curveView: "absolute"` (anything else to `"relative"`) and drops the region override entirely.
@@ -357,12 +356,6 @@ only pieces the two views share.
   fitted line itself, e.g. `"2000 + 4c"` (`c` = cycle number), via `lib/cq.ts`'s
   `formatBaselineFormula()` over `CurveBaselineResult.baselineFit` (`{ slope, intercept }`,
   `packages/core/src/analysis.ts`), not a single diagnostic RFU number.
-- **Minimum ΔRFU squelch (`analysisMinDeltaRfu` setting, Analysis view, default 100):** an
-  absolute-RFU floor on top of §7's noise-relative `isAmplified` squelch — a well whose rise
-  clears the noise-multiple bar but is still tiny in absolute terms reports no Cq.
-  `computeCq()`'s `deltaRfu`/`minDeltaRfu` options (`packages/core/src/threshold.ts`) do the
-  check; both `CurvesView`'s chart markers and `AnalysisView`'s table pass the same setting, so a
-  curve's Cq always agrees between the two.
 - **Dark (LED-off) background:** `zpcr.darkCurves()` gives one background series per channel.
   A pure display overlay — it never alters the plotted well curves, min/max bands, or the
   y-axis label. The "Show dark" toggle: off (default) draws nothing; on draws one **dotted**
@@ -502,21 +495,14 @@ already-validated Curves view.
   className="rail__details">`, chevron rotates open, no separate show/hide button) — a blank
   input falls back to the auto value, shown as the input's placeholder. `"NoThreshold"` (§6.2,
   2nd-derivative inflection) needs no threshold at all.
-- **Minimum ΔRFU (`analysisMinDeltaRfu` setting, default 100):** a plain number input in the
-  rail, next to the Cq mode toggle. Passed to `computeCq()` alongside each row's own `deltaRfu`
-  — a well whose endpoint ΔRFU falls below it reports no Cq regardless of algorithm, on top of
-  §7's noise-relative `isAmplified` squelch. `CurvesView` passes the same setting into its own
-  Cq computation, so a curve's on-chart marker and its Analysis-table Cq never disagree over
-  this gate either.
 - **Amplification / greying:** a row renders at reduced opacity
-  (`.analysis__row.is-unamplified`) whenever it has no Cq (`cq == null`) — because `isAmplified`
-  (§7 — total rise under 10× baseline noise) failed, the endpoint ΔRFU fell below
-  `analysisMinDeltaRfu`, or, in Threshold mode, the curve never crossed (or didn't end above) the
-  resolved threshold. Keying greying on the Cq result itself, not a separately-cached
-  amplification flag, is what makes greying react live to switching Cq mode or editing a
-  threshold/ΔRFU override — all change `cq` (and therefore the row's styling) through the same
-  `rows` `useMemo`, no separate invalidation needed. A row is never hidden, so a well's
-  disqualification is visible instead of silently dropped from the table.
+  (`.analysis__row.is-unamplified`) whenever it has no Cq (`cq == null`) — either because
+  `isAmplified` (§7 — total rise under 10× baseline noise) failed, or, in Threshold mode, the
+  curve never crossed (or didn't end above) the resolved threshold. Keying greying on the Cq
+  result itself, not a separately-cached amplification flag, is what makes greying react live to
+  switching Cq mode or editing a threshold override — both change `cq` (and therefore the row's
+  styling) through the same `rows` `useMemo`, no separate invalidation needed. A row is never
+  hidden, so a well's disqualification is visible instead of silently dropped from the table.
 - **Table/CSV columns, same order in both:** well, sample (`WellDefinition.sampleName`, the
   same field `PlateTable`'s "Sample" column shows), fluor, target (only when `usingTargets`;
   the CSV always includes it, since it's harmless there even when identical to fluor),

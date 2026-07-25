@@ -68,9 +68,6 @@ export interface StoredSettings {
   analysisCqAlgorithm?: "Threshold" | "NoThreshold";
   /** Manual per-target threshold overrides (RFU), as `[target, value]` pairs. */
   analysisThresholdOverrides?: [string, number][];
-  /** Minimum endpoint ΔRFU for a well to report a Cq. Absent on records written before this
-   * setting existed, which then default to 100. */
-  analysisMinDeltaRfu?: number;
 }
 
 function openDb(): Promise<IDBDatabase> {

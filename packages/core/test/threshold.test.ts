@@ -223,29 +223,6 @@ describe("computeCq", () => {
     expect(computeCq(cycles, values, { threshold: 200, noise: 5 })).not.toBeNull();
   });
 
-  it("squelches a well whose ΔRFU falls below minDeltaRfu, for both algorithms", () => {
-    const cycles = Array.from({ length: 40 }, (_, i) => i + 1);
-    const values = sigmoid(cycles, 25).map((v) => v * 0.02); // real shape, tiny amplitude
-    expect(computeCq(cycles, values, { threshold: 4, deltaRfu: 40, minDeltaRfu: 100 })).toBeNull();
-    expect(
-      computeCq(cycles, values, { algorithm: "NoThreshold", deltaRfu: 40, minDeltaRfu: 100 }),
-    ).toBeNull();
-  });
-
-  it("does not apply the minDeltaRfu gate unless both deltaRfu and minDeltaRfu are given", () => {
-    const cycles = Array.from({ length: 40 }, (_, i) => i + 1);
-    const values = sigmoid(cycles, 25);
-    expect(computeCq(cycles, values, { threshold: 200, minDeltaRfu: 100 })).not.toBeNull();
-  });
-
-  it("passes a well whose ΔRFU clears minDeltaRfu", () => {
-    const cycles = Array.from({ length: 40 }, (_, i) => i + 1);
-    const values = sigmoid(cycles, 25);
-    expect(
-      computeCq(cycles, values, { threshold: 200, deltaRfu: 5000, minDeltaRfu: 100 }),
-    ).not.toBeNull();
-  });
-
   it("produces a plausible Cq on the real B3/channel-0 curve end to end", () => {
     const zpcr = parseZpcr(readSampleBytes());
     const curve = zpcr.curves({ channel: 0 }).find((c) => c.wellLabel === "B3")!;

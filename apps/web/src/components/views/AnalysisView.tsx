@@ -186,7 +186,6 @@ export function AnalysisView({ zpcr, settings, onChange }: Props) {
   };
 
   const algorithm: CqAlgorithm = settings.analysisCqAlgorithm;
-  const minDeltaRfu = settings.analysisMinDeltaRfu;
 
   // ---- Build one row per active (target, well) pair --------------------------------------
 
@@ -261,8 +260,6 @@ export function AnalysisView({ zpcr, settings, onChange }: Props) {
           algorithm,
           threshold: algorithm === "Threshold" ? threshold : undefined,
           noise: p.noise,
-          deltaRfu: p.deltaRfu,
-          minDeltaRfu,
         });
         return {
           target: p.target,
@@ -290,7 +287,6 @@ export function AnalysisView({ zpcr, settings, onChange }: Props) {
     usingTargets,
     groupInfos,
     algorithm,
-    minDeltaRfu,
   ]);
 
   const download = () => {
@@ -413,21 +409,6 @@ export function AnalysisView({ zpcr, settings, onChange }: Props) {
                     </div>
                   </details>
                 )}
-
-                <div className="rail__section rail__row">
-                  <label className="analysis__threshold-row mono">
-                    <span>Min ΔRFU</span>
-                    <input
-                      type="number"
-                      value={settings.analysisMinDeltaRfu}
-                      onChange={(e) => {
-                        const raw = Number(e.currentTarget.value);
-                        onChange({ analysisMinDeltaRfu: Number.isFinite(raw) ? raw : 0 });
-                      }}
-                      title="Minimum endpoint ΔRFU for a well to report a Cq at all"
-                    />
-                  </label>
-                </div>
 
                 <div className="rail__note mono">
                   Baseline: always an auto-detected linear fit (see the Curves view's "Draw

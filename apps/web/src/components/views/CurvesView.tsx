@@ -59,7 +59,6 @@ function computeCurveMetrics(
   curves: { cycles: number[]; mean: number[]; dyeLabel: string }[],
   algorithm: CqAlgorithm,
   thresholdOverrides: Map<string, number>,
-  minDeltaRfu: number,
 ): { cq: number | null; baselineFormula: string }[] {
   if (curves.length === 0) return [];
   const baselines = curves.map((c) => baselineCorrectCurve(c.cycles, c.mean, ANALYSIS_BASELINE_MODE));
@@ -80,8 +79,6 @@ function computeCurveMetrics(
       algorithm,
       threshold: algorithm === "Threshold" ? threshold : undefined,
       noise: b.noise,
-      deltaRfu: b.deltaRfu,
-      minDeltaRfu,
     });
     return { cq, baselineFormula: formatBaselineFormula(b.baselineFit) };
   });
@@ -541,14 +538,8 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
   // (always auto-linear) baseline this chart itself plots with — so a curve's marker always
   // matches what the Analysis table would report for it.
   const curveMetrics = useMemo(
-    () =>
-      computeCurveMetrics(
-        baseCurves,
-        settings.analysisCqAlgorithm,
-        settings.analysisThresholdOverrides,
-        settings.analysisMinDeltaRfu,
-      ),
-    [baseCurves, settings.analysisCqAlgorithm, settings.analysisThresholdOverrides, settings.analysisMinDeltaRfu],
+    () => computeCurveMetrics(baseCurves, settings.analysisCqAlgorithm, settings.analysisThresholdOverrides),
+    [baseCurves, settings.analysisCqAlgorithm, settings.analysisThresholdOverrides],
   );
 
   const plotCurves: PlotCurve[] = baseCurves.map((c, i) => ({
@@ -563,14 +554,8 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
   // Cq in a hover card can legitimately differ from its Cq on the chart once a filter narrows
   // what's plotted — the card is summarizing the plate, not re-deriving the chart's own marker.
   const allCurveMetrics = useMemo(
-    () =>
-      computeCurveMetrics(
-        allBaseCurves,
-        settings.analysisCqAlgorithm,
-        settings.analysisThresholdOverrides,
-        settings.analysisMinDeltaRfu,
-      ),
-    [allBaseCurves, settings.analysisCqAlgorithm, settings.analysisThresholdOverrides, settings.analysisMinDeltaRfu],
+    () => computeCurveMetrics(allBaseCurves, settings.analysisCqAlgorithm, settings.analysisThresholdOverrides),
+    [allBaseCurves, settings.analysisCqAlgorithm, settings.analysisThresholdOverrides],
   );
 
   const allPlotCurves: PlotCurve[] = allBaseCurves.map((c, i) => ({

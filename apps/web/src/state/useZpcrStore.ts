@@ -110,11 +110,6 @@ export interface FileSettings {
    * {@link analysisCqAlgorithm} is `"Threshold"`. A target with no entry uses the auto threshold
    * (`threshold.md` §5.1: 3.2 × median baseline noise across that target's wells). */
   analysisThresholdOverrides: Map<string, number>;
-  /** Minimum endpoint ΔRFU (`CurveBaselineResult.deltaRfu`) for a well to report a Cq at all —
-   * an absolute-RFU floor alongside the noise-relative amplification squelch, so a well whose
-   * rise is technically a few multiples of noise but still tiny in absolute terms doesn't get a
-   * spurious Cq. Default **100**. */
-  analysisMinDeltaRfu: number;
 }
 
 /** A file loaded into memory — bytes only. Parsing is derived (see {@link ZpcrStore.runs}),
@@ -230,7 +225,6 @@ function defaultSettings(): FileSettings {
     analysisDisabledTargets: new Set<string>(),
     analysisCqAlgorithm: "Threshold",
     analysisThresholdOverrides: new Map<string, number>(),
-    analysisMinDeltaRfu: 100,
   };
 }
 
@@ -258,7 +252,6 @@ function toStored(id: string, s: FileSettings): StoredSettings {
     analysisDisabledTargets: [...s.analysisDisabledTargets],
     analysisCqAlgorithm: s.analysisCqAlgorithm,
     analysisThresholdOverrides: [...s.analysisThresholdOverrides],
-    analysisMinDeltaRfu: s.analysisMinDeltaRfu,
   };
 }
 
@@ -288,7 +281,6 @@ function fromStored(s: StoredSettings): FileSettings {
     analysisDisabledTargets: new Set(s.analysisDisabledTargets ?? []),
     analysisCqAlgorithm: s.analysisCqAlgorithm ?? "Threshold",
     analysisThresholdOverrides: new Map(s.analysisThresholdOverrides ?? []),
-    analysisMinDeltaRfu: s.analysisMinDeltaRfu ?? 100,
   };
 }
 
