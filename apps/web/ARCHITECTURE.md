@@ -351,6 +351,44 @@ only pieces the two views share.
       per-curve region and "fixes" it). Showing the true region as the preview means putting the
       slider back to what's displayed actually reproduces auto's behavior, rather than silently
       trading it for a very different fixed region that merely looks the same in the UI.
+      *This still only reproduces auto for the one curve `previewRange` was computed from* —
+      auto genuinely tailors a region per curve, so when several curves are plotted at once,
+      typing in the exact previewed numbers only matches auto's behavior for the first curve;
+      every other curve's own auto region can differ, and manual mode has no way to show (or
+      apply) more than one region at a time — an inherent limit of "one region, every curve"
+      rather than something the preview fix could close.
+    - *Why a narrow manual region can move a real curve's Cq drastically, not just a flat one's:*
+      confirmed with a real amplifying well (`20260720_Luna_noRT.pcrd`, well B3/FAM/HRV Ma, true
+      Cq ≈ 31.6). Under **Linear** mode, forcing the region to 2–9 barely moves it (Cq 30.3) —
+      Linear fits and removes a trend line, so a short window's slightly-different fit still
+      cancels most of the same drift. Under **Constant** mode, the same 2–9 override drops Cq to
+      **15.8** — nowhere near truth. `RawBaseLineSubtracted` only subtracts the region's mean, so
+      it never removes this well's real, slow pre-amplification drift (this well's own trace
+      rises ~70 RFU from cycle 1 to 29 well before any real amplification). Auto's own detected
+      region for this curve happens to span nearly that entire flat run (1–32), so the *same*
+      drift is baked into its own `baselineNoise` estimate, inflating the auto-threshold enough
+      to roughly cancel out; a manual 2–9 window only samples 8 essentially-flat, low-noise
+      cycles, so `baselineNoise` comes out tiny (6.8 vs. auto's 33.7), `resolveThreshold`'s
+      `3.2 × noise` threshold shrinks correspondingly (21.8 vs. 107.8 — there is no fixed RFU
+      floor by default, see `AutoThresholdOptions.minThreshold`), and the same un-removed drift
+      then crosses that too-small threshold at cycle ~16 instead of ~32. In short: the threshold
+      is *proportional to whatever noise the chosen region happens to show*, not a fixed offset
+      above the baseline — so narrowing the region to something that looks unusually quiet
+      silently shrinks the bar a real (but slow) signal has to clear. Prefer Linear over Constant
+      when hand-picking a region for exactly this reason.
+    - *Debugging aid — dimmed pre-region segment:* each well curve's line is drawn via a
+      `series.stroke` callback (`baselineDimStroke` in `chart.ts`) rather than a fixed color: a
+      `CanvasGradient` renders the portion before `baselineRegion.beginCycle` at 70% opacity and
+      the rest at full opacity, using two color stops placed at (almost) the same pixel x so the
+      transition is a hard edge, not a fade — recomputed every redraw so it tracks pan/zoom.
+      `PlotCurve.baselineRegionBegin` (`null` in `"raw"` mode, where no region is actually
+      applied) carries the region from `CurvesView`'s `curveMetrics` through to the chart. Makes
+      it visible at a glance which part of a curve a given region excludes — useful because (a)
+      a manual region is one fixed window forced onto every curve regardless of that curve's own
+      shape, and (b) `autoBaselineRegion` itself runs its onset detection on a *smoothed* copy of
+      the curve (see §2 above) while the line actually drawn is the raw, noisier data — so the
+      boundary an auto-detected region lands on doesn't always look obviously "right" by eye on
+      the plotted trace alone.
 - **Dark (LED-off) background:** `zpcr.darkCurves()` gives one background series per channel.
   A pure display overlay — it never alters the plotted well curves, min/max bands, or the
   y-axis label. The "Show dark" toggle: off (default) draws nothing; on draws one **dotted**

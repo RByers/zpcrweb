@@ -494,6 +494,10 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
     ...c,
     cq: curveMetrics[i]?.cq ?? null,
     baselineRfu: curveMetrics[i]?.baselineRfu ?? null,
+    // Meaningless in "raw" mode — no baseline region is actually subtracted, so there's
+    // nothing to dim as "before" it.
+    baselineRegionBegin:
+      settings.curveBaseline === "raw" ? null : (curveMetrics[i]?.baselineRegion.beginCycle ?? null),
   }));
 
   // ---- Rail hover cards -------------------------------------------------------------------

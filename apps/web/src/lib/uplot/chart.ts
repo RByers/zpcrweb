@@ -20,6 +20,49 @@ import type {
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
+/** Opacity for the portion of a well curve before its baseline region starts — see
+ * {@link baselineDimStroke}. */
+const PRE_BASELINE_ALPHA = 0.7;
+
+function hexToRgba(hex: string, alpha: number): string {
+  const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex);
+  if (!m) return hex;
+  const [r, g, b] = [m[1]!, m[2]!, m[3]!].map((h) => parseInt(h, 16));
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
+/**
+ * A `series.stroke` function (uPlot supports a dynamic stroke callback in place of a fixed
+ * color) that renders a well curve at reduced opacity ({@link PRE_BASELINE_ALPHA}) for cycles
+ * before `beginCycle` — the baseline region's start — and full opacity from there on. Debugging
+ * aid for the baseline-region slider: since {@link autoBaselineRegion} runs on a *smoothed* copy
+ * of the curve while the actually-plotted line is raw, and a manual region applies globally
+ * across curves whose real shapes differ, it's easy to lose track of which portion of a given
+ * curve the current region actually excludes. Built as a horizontal `CanvasGradient` (two
+ * coincident color stops at the region's pixel x-position for a hard edge) so it tracks pan/zoom
+ * for free — uPlot calls `stroke` fresh on every redraw.
+ */
+function baselineDimStroke(
+  color: string,
+  beginCycle: number,
+): (u: uPlot, seriesIdx: number) => string | CanvasGradient {
+  return (u: uPlot) => {
+    const left = u.bbox.left;
+    const width = u.bbox.width;
+    if (width <= 0) return color;
+    const beginPx = u.valToPos(beginCycle, "x", true);
+    const frac = Math.min(1, Math.max(0, (beginPx - left) / width));
+    if (frac <= 0) return color; // Region starts at/before the visible range: nothing to dim.
+    const grad = u.ctx.createLinearGradient(left, 0, left + width, 0);
+    const dim = hexToRgba(color, PRE_BASELINE_ALPHA);
+    grad.addColorStop(0, dim);
+    grad.addColorStop(frac, dim);
+    grad.addColorStop(Math.min(1, frac + 0.0001), color);
+    grad.addColorStop(1, color);
+    return grad;
+  };
+}
+
 /**
  * One plotted curve, already resolved to a display label by the caller — either a plain channel
  * ("C1", channel-space) or a fluorophore name (dye-space, after color separation). Chart code
@@ -50,6 +93,12 @@ export interface PlotCurve {
   /** Sample name (`pltd.md`'s `conditionName`, `WellDefinition.sample`) for this curve's well,
    * when the plate assigns one — drives the rail's "sample" highlight/hover-card lookup. */
   sample?: string;
+  /** Diagnostic: the baseline region's start cycle (`CurveBaselineResult.baselineRegion.beginCycle`)
+   * actually used for this curve — draws the portion of the line before it at reduced opacity
+   * (see `baselineDimStroke`), so it's visually obvious which part of the curve precedes (and so
+   * was excluded from) the baseline fit. `null`/undefined draws the line at full opacity
+   * throughout (e.g. `"raw"` baseline mode, where no region is applied). */
+  baselineRegionBegin?: number | null;
 }
 
 /** Values <= 0 are undefined on a log axis; render them as gaps. */
@@ -296,9 +345,13 @@ export function buildChart(cfg: BuildChartConfig): {
       baselineRfu: curve.baselineRfu,
       sample: curve.sample,
     });
+    const color = channelColor(curve.channel);
     series.push({
       label: `${curve.wellLabel} · ${curve.dyeLabel}`,
-      stroke: channelColor(curve.channel),
+      stroke:
+        curve.baselineRegionBegin != null
+          ? baselineDimStroke(color, curve.baselineRegionBegin)
+          : color,
       width: 1,
       dash: curve.isReference ? REF_DASH : undefined,
       points: { show: false },
