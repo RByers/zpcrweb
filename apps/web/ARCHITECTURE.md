@@ -18,7 +18,10 @@ app is format-agnostic:
   not a by-name file lookup), so both the name and — when the format provides one — the step
   table work identically either way; when there's no step list it falls back to
   `zpcr.protocolText` rendered through the same `ProtocolDecoded` line-numbering the Raw view
-  uses (see below).
+  uses (see below). `OverviewView` additionally takes the raw `RunResult` (not derivable from
+  `Zpcr` alone) for its "Encrypted" block: a `.pcrd`'s own `container.encrypted` for a `.pcrd`,
+  or any embedded `.pltd`/`.prcl` entry's `container.encrypted` (via `zpcr.plates()`/
+  `zpcr.protocols()`) for a `.zpcr` — see `lib/encryptionStatus.ts`.
 - `DecodedPlateread` (the `.Plateread` typed view) shows the WELLDATA/DARKDATA tables from the
   already-decoded `PlateRead` object either way; it only conditionally shows the binary-only
   "descriptor dictionary" section (`decodePlateReadDetail` finds nothing when there's no
@@ -167,7 +170,12 @@ exposed as a clear affordance on each file chip.
 ## Views
 
 - **Overview** — run metadata as stat tiles + the thermal protocol text, read from
-  `zpcr.metadata` and `zpcr.protocolText`.
+  `zpcr.metadata` and `zpcr.protocolText`, plus an "Encrypted" block (see above) showing
+  green "No" when nothing in the file is encrypted, orange "Yes" with the password used when
+  encrypted content was successfully decrypted, or red "Yes" when it wasn't. The file bar's
+  per-chip dot (`components/FileBar.tsx`) mirrors the same three states/colors, computed the
+  same way for `.pltd`/`.csv` chips via `lib/encryptionStatus.ts`'s
+  `plateFileEncryptionStatus`.
 - **Curves** — the centerpiece (see below).
 - **Analysis** — per-target/well Cq and ΔRFU table (see below).
 - **Reference** — reference row vs factory calibration (see below).

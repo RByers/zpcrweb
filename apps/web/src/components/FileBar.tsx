@@ -4,6 +4,11 @@ import type { LoadedFile, PlateFileResult, RunResult } from "../state/useZpcrSto
 import { usePltdPassword } from "../state/pltdPassword";
 import { channelColor } from "../lib/channelColors";
 import { plateTargets } from "../lib/plateTargets";
+import {
+  plateFileEncryptionStatus,
+  runEncryptionStatus,
+  type EncryptionStatus,
+} from "../lib/encryptionStatus";
 
 interface Props {
   files: LoadedFile[];
@@ -17,6 +22,19 @@ interface Props {
 /** Shorten `20260720_211747_CT019138_Luna_noRT.zpcr` to something legible. */
 function label(f: LoadedFile): string {
   return f.name.replace(/\.(zpcr|pcrd|pltd|plt\.csv|csv)$/i, "");
+}
+
+/** Encryption status for a loaded file's dot color — mirrors the Overview panel's "Encrypted"
+ * block (see `encryptionStatus.ts`): green (not encrypted), orange (encrypted, decrypted with
+ * the current password), red (encrypted, not yet opened). */
+function fileEncryptionStatus(
+  f: LoadedFile,
+  run: RunResult | undefined,
+  plateFile: PlateFileResult | undefined,
+  password: string,
+): EncryptionStatus {
+  if (f.kind === "pltd" || f.kind === "csv") return plateFileEncryptionStatus(plateFile, password);
+  return runEncryptionStatus(run, password);
 }
 
 /** Chip badge: well count for a standalone plate file, or a lock/error/loading glyph while a
@@ -133,6 +151,7 @@ function FileChip({
 }) {
   const mainRef = useRef<HTMLButtonElement>(null);
   const [cardPos, setCardPos] = useState<{ top: number; left: number } | null>(null);
+  const encStatus = fileEncryptionStatus(f, run, plateFile, password);
 
   return (
     <div className={"filechip" + (isActive ? " is-active" : "")}>
@@ -153,7 +172,7 @@ function FileChip({
         }}
         onBlur={() => setCardPos(null)}
       >
-        <span className="filechip__dot" />
+        <span className={`filechip__dot filechip__dot--${encStatus.kind}`} />
         <span className="filechip__name mono">{label(f)}</span>
         <span className="filechip__meta mono">{meta(f, run, plateFile)}</span>
       </button>

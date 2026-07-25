@@ -191,9 +191,25 @@
   background: var(--ink-muted);
   flex: 0 0 auto;
 }
-.filechip.is-active .filechip__dot {
-  background: var(--neon-cyan);
-  box-shadow: 0 0 8px var(--neon-cyan);
+/* Dot color mirrors the Overview panel's "Encrypted" block: green (not encrypted), orange
+   (encrypted, decrypted with the current password), red (encrypted, not yet opened). */
+.filechip__dot--none {
+  background: var(--good);
+}
+.filechip__dot--decrypted {
+  background: var(--warn);
+}
+.filechip__dot--locked {
+  background: var(--danger);
+}
+.filechip.is-active .filechip__dot--none {
+  box-shadow: 0 0 8px var(--good);
+}
+.filechip.is-active .filechip__dot--decrypted {
+  box-shadow: 0 0 8px var(--warn);
+}
+.filechip.is-active .filechip__dot--locked {
+  box-shadow: 0 0 8px var(--danger);
 }
 .filechip__name {
   font-size: 12px;
@@ -416,6 +432,26 @@
   margin: 0;
   color: var(--ink-2);
   word-break: break-all;
+}
+.overview__enc {
+  font-size: 15px;
+  font-weight: 600;
+}
+.overview__enc--none {
+  color: var(--good);
+}
+.overview__enc--decrypted {
+  color: var(--warn);
+}
+.overview__enc--locked {
+  color: var(--danger);
+  font-size: 22px;
+}
+.overview__enc-password {
+  margin-top: 4px;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--ink-muted);
 }
 .overview__platelists {
   display: flex;

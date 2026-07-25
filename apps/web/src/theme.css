@@ -31,6 +31,7 @@
   /* State */
   --danger: #ff5a5a;
   --good: #3ddc84;
+  --warn: #ffa53d;
 
   /* Type */
   --font-ui: system-ui, -apple-system, "Segoe UI", sans-serif;

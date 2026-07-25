@@ -9,6 +9,7 @@ import {
   type NormalizationMode,
   type PcrdContainer,
   type PlateDefinition,
+  type PltdContainer,
   type Zpcr,
 } from "@zpcrweb/core";
 import type { CalibrationBackground } from "../lib/fluorCurves";
@@ -168,12 +169,20 @@ export interface PlateFileResult {
   plate: PlateDefinition | null;
   needsPassword: boolean;
   error: string | null;
+  /** `.pltd` container metadata (including `encrypted`), available even before/without a
+   * working password. Undefined for a `.csv`, which has no such container. */
+  container?: PltdContainer;
 }
 
 function parsePlateBytes(kind: PlateFileKind, bytes: Uint8Array, password: string): PlateFileResult {
   if (kind === "pltd") {
     const pltd = parsePltd(bytes, password ? { password } : undefined);
-    return { plate: pltd.plate ?? null, needsPassword: !!pltd.needsPassword, error: pltd.error ?? null };
+    return {
+      plate: pltd.plate ?? null,
+      needsPassword: !!pltd.needsPassword,
+      error: pltd.error ?? null,
+      container: pltd.container,
+    };
   }
   try {
     return { plate: parsePlateCsv(new TextDecoder().decode(bytes)), needsPassword: false, error: null };

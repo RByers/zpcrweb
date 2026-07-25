@@ -7,6 +7,8 @@ import { downloadBytes } from "../../lib/download";
 import { usePltdPassword } from "../../state/pltdPassword";
 import { plateTargets } from "../../lib/plateTargets";
 import { channelColor } from "../../lib/channelColors";
+import { runEncryptionStatus } from "../../lib/encryptionStatus";
+import type { RunResult } from "../../state/useZpcrStore";
 
 interface Tile {
   label: string;
@@ -16,11 +18,15 @@ interface Tile {
 export function OverviewView({
   zpcr,
   file,
+  run,
 }: {
   zpcr: Zpcr;
   /** The active run's own name/bytes — downloaded verbatim, so this is also how a `.zpcr`
    * attached via the Plates view's upload control gets back onto disk (see `PlatesView`). */
   file: { name: string; bytes: Uint8Array };
+  /** The same run result the app resolved `zpcr` from — carries `.pcrd` container metadata
+   * (`encrypted`) that `zpcr` alone doesn't expose; see {@link runEncryptionStatus}. */
+  run: RunResult;
 }) {
   const m = zpcr.metadata;
   const reads = zpcr.reads;
@@ -31,6 +37,7 @@ export function OverviewView({
 
   const [password] = usePltdPassword();
   const plate = useMemo(() => zpcr.plates(password || undefined)[0]?.pltd.plate ?? null, [zpcr, password]);
+  const encStatus = useMemo(() => runEncryptionStatus(run, password), [run, password]);
   const targets = useMemo(() => (plate ? plateTargets(plate) : []), [plate]);
   const samples = plate?.samples ?? [];
 
@@ -118,6 +125,18 @@ export function OverviewView({
           </div>
         </section>
       )}
+
+      <section className="overview__block">
+        <h2 className="overview__h">Encrypted</h2>
+        {encStatus.kind === "none" && <div className="overview__enc overview__enc--none">No</div>}
+        {encStatus.kind === "decrypted" && (
+          <div className="overview__enc overview__enc--decrypted">
+            Yes
+            <div className="overview__enc-password mono">password: {encStatus.password}</div>
+          </div>
+        )}
+        {encStatus.kind === "locked" && <div className="overview__enc overview__enc--locked">Yes</div>}
+      </section>
 
       <section className="overview__block">
         <h2 className="overview__h">Run identity</h2>
