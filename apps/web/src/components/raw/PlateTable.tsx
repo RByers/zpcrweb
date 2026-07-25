@@ -66,10 +66,10 @@ export function PlateTable({ plate, sourceHint }: { plate: PlateDefinition; sour
                     <td>{w.replicate ?? ""}</td>
                     <td>{w.quantity ?? ""}</td>
                     <td>
-                      {w.fluors.length
-                        ? w.fluors.map((f, i) => (
+                      {w.fluors.length ? (
+                        <span className="plate__fluors plate__fluors--inline">
+                          {w.fluors.map((f) => (
                             <span key={f.channel} className="plate__chip mono">
-                              {i > 0 && ", "}
                               <span
                                 className="decoded__swatch"
                                 style={{ background: channelColor(f.channel) }}
@@ -77,8 +77,11 @@ export function PlateTable({ plate, sourceHint }: { plate: PlateDefinition; sour
                               {f.fluor}
                               {f.target ? `→${f.target}` : ""}
                             </span>
-                          ))
-                        : <span className="decoded__empty">∅</span>}
+                          ))}
+                        </span>
+                      ) : (
+                        <span className="decoded__empty">∅</span>
+                      )}
                     </td>
                   </tr>
                 );

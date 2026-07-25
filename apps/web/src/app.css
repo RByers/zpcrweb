@@ -998,6 +998,10 @@
   gap: 6px 10px;
   margin-top: 10px;
 }
+.plate__fluors--inline {
+  margin-top: 0;
+  gap: 4px 6px;
+}
 .plate__chip {
   display: inline-flex;
   align-items: center;
