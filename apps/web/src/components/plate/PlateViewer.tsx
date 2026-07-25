@@ -22,10 +22,11 @@ export function PlateViewer({ plate, sourceHint }: { plate: PlateDefinition; sou
       <div className="plateviewer__main">
         <section className="decoded__block">
           <h3 className="decoded__h">
-            {plate.plateName || "Plate"} — {plate.rows}×{plate.columns}, {plate.dyeCount}{" "}
-            {plate.dyeCount === 1 ? "dye" : "dyes"}
+            {plate.identityKey || plate.plateName || "Plate"} — {plate.rows}×{plate.columns},{" "}
+            {plate.dyeCount} {plate.dyeCount === 1 ? "dye" : "dyes"}
           </h3>
           <dl className="decoded__dl mono">
+            <Pair k="Vessel" v={plate.plateName || "—"} />
             <Pair k="Scan mode" v={plate.scanMode || "—"} />
             <Pair k="Plate type" v={plate.plateType || "—"} />
             <Pair k="Std units" v={plate.standardUnits || "—"} />

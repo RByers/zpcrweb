@@ -28,7 +28,9 @@ export function PlateDownloadButton({ plate, pltd }: Props) {
   const canDownload = !!pltd || !!plate;
   if (!canDownload) return null;
 
-  const csvName = `${sanitize(plate?.plateName || pltd?.name.replace(/\.(pltd|plt\.csv)$/i, "") || "plate")}.plt.csv`;
+  // identityKey (the plate setup's own identity) is the right user-facing name — plateName is
+  // only a vessel/plastic type (see PlateDefinition.plateName's doc comment).
+  const csvName = `${sanitize(plate?.identityKey || pltd?.name.replace(/\.(pltd|plt\.csv)$/i, "") || plate?.plateName || "plate")}.plt.csv`;
 
   const close = () => {
     if (detailsRef.current) detailsRef.current.open = false;

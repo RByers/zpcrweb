@@ -155,6 +155,7 @@ export function plateToCsv(plate: PlateDefinition): string {
   const fluorsHeader = plate.fluors.map((f) => `${escapeFluorPart(f.fluor)}:${f.channel}`).join(",");
   let out = "";
   out += `# zpcrweb plate definition\r\n`;
+  if (plate.identityKey) out += `# identityKey: ${plate.identityKey}\r\n`;
   out += `# plateName: ${plate.plateName}\r\n`;
   out += `# plateType: ${plate.plateType}\r\n`;
   out += `# scanMode: ${plate.scanMode}\r\n`;
@@ -300,6 +301,7 @@ export function parsePlateCsv(text: string): PlateDefinition {
 
   return {
     plateName: meta.plateName ?? "",
+    identityKey: meta.identityKey || undefined,
     rows: rowsCount,
     columns,
     dyeCount: fluors.length,

@@ -103,6 +103,18 @@ One cross-format note: the `.pcrd` document embeds this same schema but spells t
 `<plateSetup2>` (capital S) where a `.pltd` uses `<platesetup2>`. The attribute is `plateName` in
 both. Match the element name case-insensitively if one code path handles both.
 
+### Plate identity — `identifier/@identityKey`
+
+The root element's first child, `<identifier identityKey="…"/>`, carries the plate setup's own
+identity — typically the source `.pltd` file name it was created/last saved from (e.g.
+`Qualification_Plate_96.pltd`), or, for a plate authored inline in a saved experiment, that
+experiment's own file name (e.g. `FirstExperiment.pltd` inside a `.pcrd`'s embedded
+`<plateSetup2>`). **This, not `plateName`, is the closest thing to a user-facing plate name** —
+`plateName` is a vessel/plastic type (see above), never an identity, despite the similar-looking
+attribute names. `parsePlatesetup2` exposes this as `PlateDefinition.identityKey` (`undefined`
+when the element is absent). Present and populated in every sample inspected, `.pltd` and `.pcrd`
+alike.
+
 ### Dye layers → fluorophores
 
 There is **one `<dyeLayer>` per fluorophore**, in channel order. Its `<fluor>` gives the
@@ -151,6 +163,8 @@ an empty tube.
 layers), `targets`, `conditions`, and `wells[]` — each `WellDefinition` carrying its loaded
 `fluors` (with per-fluor `target`), `sampleType`, `sampleName`, `condition(s)`, `replicate`
 and `quantity`. The vessel type is exposed as `PlateDefinition.plateName` (§2) — the value to
-match against a `.Dcal`'s plate field when selecting calibration. On a wrong/missing password the container is still returned with an `error`
-so callers can fall back to a raw hex view. The web app's **Raw files → Plate setup** panel
-renders both a colour-coded plate map and the pretty-printed decrypted XML.
+match against a `.Dcal`'s plate field when selecting calibration — and the plate's own
+user-facing identity as `PlateDefinition.identityKey` (§2). On a wrong/missing password the
+container is still returned with an `error` so callers can fall back to a raw hex view. The web
+app's **Raw files → Plate setup** panel renders both a colour-coded plate map and the
+pretty-printed decrypted XML.

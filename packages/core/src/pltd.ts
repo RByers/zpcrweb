@@ -103,8 +103,18 @@ export interface PlateDefinition {
    * Vessel type (`plateName`) — the plastic the reaction sits in, not a user-chosen label:
    * `BR Clear`, `BR White` or `MJ White`. Matches a `.Dcal`'s plate field (compare
    * case-insensitively) and so selects which calibration data applies. See `pltd.md` §2.
+   * For a user-facing plate/setup name, see {@link identityKey} instead — despite the
+   * confusingly similar name, `plateName` is never that.
    */
   plateName: string;
+  /**
+   * The plate setup's own identity (`identifier/@identityKey`) — typically the source
+   * `.pltd` file name the setup was created/last saved from (e.g.
+   * `Qualification_Plate_96.pltd`), the closest thing to a user-facing plate name. Distinct
+   * from {@link plateName}, which is a vessel/plastic type, not an identity. Undefined when
+   * the XML carries no `<identifier>` element. See `pltd.md` §2.
+   */
+  identityKey?: string;
   /** Row count (typically 8). */
   rows: number;
   /** Column count (typically 12). */
@@ -186,6 +196,7 @@ export function parsePlatesetup2(xml: string): PlateDefinition {
   const columns = Number(root.columns ?? 12) || 12;
 
   const meta = firstTagAttrs(xml, "header");
+  const identityKey = firstTagAttrs(xml, "identifier").identityKey || undefined;
 
   const targets = allTagAttrs(xml, "geneName")
     .map((a) => a.shortName ?? "")
@@ -258,6 +269,7 @@ export function parsePlatesetup2(xml: string): PlateDefinition {
 
   return {
     plateName: root.plateName ?? "",
+    identityKey,
     rows,
     columns,
     dyeCount: Number(root.dyes ?? fluors.length) || fluors.length,
