@@ -504,7 +504,7 @@ function overlayPlugin(
           width: "100%",
           height: "100%",
           pointerEvents: "none",
-          overflow: "visible",
+          overflow: "hidden",
           zIndex: "5",
         });
         bandGroup = document.createElementNS(SVG_NS, "g");
