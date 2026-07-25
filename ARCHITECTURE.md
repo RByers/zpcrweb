@@ -7,10 +7,12 @@ Key design points for the zpcrweb project. For the `.Plateread` binary format it
 
 Every reverse-engineered Bio-Rad file format (or sub-format, like the shared ICFF container)
 gets its own top-level `*.md` doc — [`plateread.md`](./plateread.md), [`dcal.md`](./dcal.md),
-[`pltd.md`](./pltd.md), [`pcrd.md`](./pcrd.md), [`icff.md`](./icff.md). Each doc is
-self-contained (layout, fields, status) and ends with a pointer to the `packages/core/src`
-module that implements it, so the doc is always the entry point for understanding *and*
-changing a decoder. See [`CLAUDE.md`](./CLAUDE.md) for the full doc ↔ code table.
+[`pltd.md`](./pltd.md), [`pcrd.md`](./pcrd.md), [`icff.md`](./icff.md). The one non-format
+exception is [`calibration.md`](./calibration.md), which documents the channel→dye
+color-separation algorithm built on top of `.Dcal` rather than a byte layout. Each doc is
+self-contained and ends with a pointer to the `packages/core/src` module that implements it, so
+the doc is always the entry point for understanding *and* changing a decoder. See
+[`CLAUDE.md`](./CLAUDE.md) for the full doc ↔ code table.
 
 ## Goals
 
@@ -115,6 +117,9 @@ raw bytes ─▶ fflate.unzipSync ─▶ { name: Uint8Array }
 - **`dcal.ts`** — decodes `.Dcal` pure-dye calibration entries (`zpcr.calibrations()`): one
   dye's fluorescence response across all 6 channels at 4 block temperatures, plus a matching
   empty-plate baseline, also on top of the ICFF index. See [`dcal.md`](./dcal.md).
+- **`calibration.ts`** — channel→dye color separation built on top of `.Dcal` data: per-dye
+  response curves, a channel×dye calibration matrix, and a solve via `linalg.ts`'s
+  pseudo-inverse. See [`calibration.md`](./calibration.md).
 - **`runinfo.ts`** — a small regex scan over the flat `<KeyValuePairs>` list. No XML
   dependency: the structure is regular and self-closing `<Value />` maps to `""`.
 - **`temps.ts`** — pulls temperatures out of the `.Plateread` ICFF index. It matches on the

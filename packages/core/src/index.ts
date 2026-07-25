@@ -41,7 +41,15 @@ export {
 } from "./plateread.js";
 export { parsePltd, isPltdName } from "./pltd.js";
 export { parseDcal, findDcalBlock, isDcalName } from "./dcal.js";
-export { parsePcrd, isPcrdName, pcrdFromBlob } from "./pcrd.js"
+export { parsePcrd, isPcrdName, pcrdFromBlob } from "./pcrd.js";
+export {
+  buildDyeResponseCurve,
+  interpolateResponse,
+  buildCalibrationMatrix,
+  preprocessChannelReadings,
+  separateChannels,
+  separateDyes,
+} from "./calibration.js";
 export { zipCryptoDecrypt } from "./zipcrypto.js";
 export { inflateRaw } from "./inflate.js";
 
@@ -77,4 +85,12 @@ export type {
   SampleType,
 } from "./pltd.js";
 export type { Dcal, DcalBlock, DcalSecurity, DcalSerials } from "./dcal.js";
-export type { Pcrd, PcrdContainer, PcrdOptions } from "./pcrd.js"
+export type { Pcrd, PcrdContainer, PcrdOptions } from "./pcrd.js";
+export type {
+  ResponseKnot,
+  DyeResponseCurve,
+  NormalizationMode,
+  CalibrationMatrix,
+  ChannelPreprocessOptions,
+  ColorSeparationResult,
+} from "./calibration.js";
