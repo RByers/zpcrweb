@@ -384,36 +384,43 @@ call is wasted work.
 
 ## 8. Limitations / open items
 
-- **The absolute RFU scale does not yet reproduce the instrument software's, and the gap is not
-  in §§2–5.** Worked example, from the committed `20260720_Luna_noRT.pcrd`, well B3 (FAM/Texas
-  Red/Cy5), cycle 45, block 59.99 °C:
+- **The absolute RFU scale does not yet reproduce the instrument software's, and the residual
+  looks like a per-well gain rather than anything in §§2–5.** Worked example, from the committed
+  `20260720_Luna_noRT.pcrd`, well B3 (FAM/Texas Red/Cy5), block 59.99 °C:
 
-  | Quantity | Value |
-  |---|---|
-  | Raw channel 1 mean | 9069.7 |
-  | Separated FAM, no background subtracted | 8965.4 |
-  | Separated FAM, dark subtracted (dark = 2123.9) | 6845.9 |
-  | Separated FAM, empty plate subtracted (empty = 2516) | ≈6459 |
-  | **CFX Manager's reported End RFU** | **8169** |
+  | Quantity | Cycle 1 | Cycle 45 |
+  |---|---|---|
+  | Raw channel 1 mean | 3336.7 | 9069.7 |
+  | Separated FAM, no background subtracted | 3273.5 | 8965.4 |
+  | Separated FAM, dark subtracted (dark = 2123.9) | 1152.5 | 6845.9 |
+  | Separated FAM, empty plate subtracted (empty = 2516) | ≈765 | ≈6459 |
+  | **CFX Manager's own curve** | **just over 3000** | **8169** (its End RFU) |
 
-  None of the three matches. Two facts constrain what the remainder can be:
+  The cycle-1 reading settles two questions at once:
 
-  1. **The choice of background cannot be the whole story.** All three options are additive
-     constants, so all three give the *same* cycle-1→45 amplitude, ≈5670 RFU — set by the raw
-     channel-1 amplitude of 5733. If 8169 is a baseline-subtracted end point, the instrument's
-     curve has ≈1.44× our amplitude, and **no choice available anywhere in §§2–5 can produce
-     that**: §3's normalization cancels (§5.1), the temperature the curves are sampled at
-     cancels, and even hypothesising a large channel-6 FAM response — the one row the `.Dcal`
-     leaves empty — caps the achievable amplitude near 6200 rather than raising it.
-  2. **If instead 8169 is an absolute end point**, the instrument removed ≈900 RFU of channel-1
-     background where we remove 0, 2124 or 2516. No quantity in the file matches: dark is 2124,
-     the empty plate 2516, the §4.1 reference level 2259, the reference row's factory-vs-live
-     drift only +37, and `wellFactorsCollection` is the synthesized identity table (§4.1), so
-     the gain correction is inactive and cannot supply a multiplier either.
+  1. **CFX's End RFU is an absolute end point, not a baseline-subtracted one** — its curve
+     starts near 3000, not near zero. So the amplitude argument that would have been needed
+     otherwise (≈1.44× ours, unreachable anywhere in §§2–5) does not arise.
+  2. **`none` is the right background default.** Only the no-subtraction curve starts in the
+     right place; dark subtraction starts at 1152 and empty-plate subtraction at ≈765, both far
+     below what the instrument plots. This is what §4.2's default rests on — note that it is an
+     empirical match, and that it is *not* the choice §4.2's own coordinate argument prefers.
 
-  Until a reference point settles which of the two readings of "End RFU" is right, `none` is the
-  library's default: it is the option closest to the instrument's number, and it keeps the
-  reported value on the same scale as the raw channel data it came from.
+  What is left is a near-constant **≈0.91 ratio** (8169/8965.4 at cycle 45; a pure scale would
+  put cycle 1 at 2983). Everything §§2–5 could contribute has been ruled out: §3's normalization
+  cancels exactly (§5.1), the temperature the curves are sampled at cancels, the `.Dcal`
+  response is bit-identical across all 108 wells so the well-0 read below is not it, and the
+  channel-6 row the `.Dcal` leaves empty is a zero row, which contributes nothing to a
+  least-squares solve whether it is present or dropped.
+
+  That leaves a **per-well, per-channel gain** — §4.1's well factors — as the leading
+  explanation: `1/1.0975 ≈ 0.91`, or ≈1.13 read as a pivoted correction against this scan's
+  reference level of 2259. This file cannot confirm it, because its `wellFactorsCollection` is
+  the synthesized identity table (§4.1) — which would mean CFX Manager derives the factors from
+  the run rather than reading them back, something this project has no evidence for either way.
+  **The test that would settle it:** compare CFX's End RFU against this library's for the *same
+  fluor in several different wells*. A ratio that varies well to well confirms a per-well gain;
+  a ratio that stays at 0.91 means the remaining error is a global scale convention after all.
 
 - **The absolute RFU scale is a convention.** §5.1's `columnNorm` factor puts the output on an RFU
   scale that is self-consistent, stable across normalization modes, and the right order of
