@@ -1,4 +1,5 @@
 import { wellLabel, type PlateRead, type Zpcr } from "@zpcrweb/core";
+import { channelLabel } from "./channelColors";
 
 /**
  * Client-side "Save As" for the Raw files view: text/XML entries download verbatim, decoded
@@ -104,13 +105,13 @@ export function plateReadToCsv(read: PlateRead): string {
       const well = wellLabel(row, col);
       for (let ch = 0; ch < channelCount; ch++) {
         const r = read.get(ch, row, col);
-        out += csvRow([well, `C${ch + 1}`, String(r.mean), String(r.min), String(r.max), String(r.std)]);
+        out += csvRow([well, channelLabel(ch), String(r.mean), String(r.min), String(r.max), String(r.std)]);
       }
     }
   }
   for (let ch = 0; ch < channelCount; ch++) {
     const d = read.dark[ch]!;
-    out += csvRow(["dark", `C${ch + 1}`, String(d.mean), String(d.min), String(d.max), String(d.std)]);
+    out += csvRow(["dark", channelLabel(ch), String(d.mean), String(d.min), String(d.max), String(d.std)]);
   }
   return out;
 }
