@@ -436,11 +436,13 @@ already-validated Curves view.
   switching Cq mode or editing a threshold override — both change `cq` (and therefore the row's
   styling) through the same `rows` `useMemo`, no separate invalidation needed. A row is never
   hidden, so a well's disqualification is visible instead of silently dropped from the table.
-- **CSV download:** built directly from the table's rows (target, fluor, channel, well,
-  threshold, Cq, ΔRFU, amplified), via the shared `csvRow()` quoting helper
-  (`lib/download.ts`, exported for reuse) and `downloadText()` — filename
-  `<run name>_analysis.csv`, the same `dataFile`-derived naming `plateReadCsvFilename` uses for
-  the Raw view's per-cycle export.
+- **Table/CSV columns, same order in both:** well, sample (`WellDefinition.sampleName`, the
+  same field `PlateTable`'s "Sample" column shows), fluor, target (only when `usingTargets`;
+  the CSV always includes it, since it's harmless there even when identical to fluor),
+  channel, threshold, Cq, ΔRFU, amplified. The CSV is built directly from the table's rows via
+  the shared `csvRow()` quoting helper (`lib/download.ts`, exported for reuse) and
+  `downloadText()` — filename `<run name>_analysis.csv`, the same `dataFile`-derived naming
+  `plateReadCsvFilename` uses for the Raw view's per-cycle export.
 - **Curves view integration:** the same Cq computation (algorithm + per-group threshold) runs
   in `CurvesView` for every currently-plotted curve, grouped by whatever label is currently
   shown (channel, fluorophore, or target — see the Curves view's tooltip bullet above), so a

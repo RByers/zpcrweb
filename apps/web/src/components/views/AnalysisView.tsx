@@ -43,6 +43,7 @@ export interface AnalysisRow {
   row: number;
   col: number;
   wellLabel: string;
+  sampleName: string;
   threshold: number;
   noise: number;
   amplified: boolean;
@@ -204,6 +205,7 @@ export function AnalysisView({ zpcr, settings, onChange }: Props) {
       row: number;
       col: number;
       wellLabel: string;
+      sampleName: string;
       cycles: number[];
       correctedValues: number[];
       noise: number;
@@ -228,6 +230,7 @@ export function AnalysisView({ zpcr, settings, onChange }: Props) {
           row: w.row,
           col: w.col,
           wellLabel: w.label,
+          sampleName: w.sampleName ?? "",
           cycles: curve.cycles,
           correctedValues: baseline.correctedValues,
           noise: baseline.noise,
@@ -267,6 +270,7 @@ export function AnalysisView({ zpcr, settings, onChange }: Props) {
           row: p.row,
           col: p.col,
           wellLabel: p.wellLabel,
+          sampleName: p.sampleName,
           threshold,
           noise: p.noise,
           amplified: p.amplified,
@@ -289,13 +293,24 @@ export function AnalysisView({ zpcr, settings, onChange }: Props) {
   ]);
 
   const download = () => {
-    let csv = csvRow(["target", "fluor", "channel", "well", "threshold", "cq", "deltaRfu", "amplified"]);
+    let csv = csvRow([
+      "well",
+      "sample",
+      "fluor",
+      "target",
+      "channel",
+      "threshold",
+      "cq",
+      "deltaRfu",
+      "amplified",
+    ]);
     for (const r of rows) {
       csv += csvRow([
-        r.target,
-        r.fluor,
-        channelLabel(r.channel),
         r.wellLabel,
+        r.sampleName,
+        r.fluor,
+        r.target,
+        channelLabel(r.channel),
         r.threshold.toFixed(1),
         r.cq != null ? r.cq.toFixed(3) : "",
         r.deltaRfu.toFixed(1),
@@ -428,9 +443,10 @@ export function AnalysisView({ zpcr, settings, onChange }: Props) {
           <table className="analysis__tbl runlog__tbl">
             <thead>
               <tr>
-                <th>{usingTargets ? "Target" : "Fluorophore"}</th>
-                {usingTargets && <th>Fluor</th>}
                 <th>Well</th>
+                <th>Sample</th>
+                <th>Fluor</th>
+                {usingTargets && <th>Target</th>}
                 <th>Threshold</th>
                 <th>Cq</th>
                 <th>ΔRFU</th>
@@ -442,9 +458,10 @@ export function AnalysisView({ zpcr, settings, onChange }: Props) {
                   key={`${r.target}-${r.wellLabel}`}
                   className={"analysis__row" + (r.cq == null ? " is-unamplified" : "")}
                 >
-                  <td>{r.target}</td>
-                  {usingTargets && <td>{r.fluor}</td>}
                   <td>{r.wellLabel}</td>
+                  <td>{r.sampleName || "—"}</td>
+                  <td>{r.fluor}</td>
+                  {usingTargets && <td>{r.target}</td>}
                   <td>{algorithm === "Threshold" ? r.threshold.toFixed(1) : "—"}</td>
                   <td>{r.cq != null ? r.cq.toFixed(2) : "—"}</td>
                   <td>{r.deltaRfu.toFixed(1)}</td>
