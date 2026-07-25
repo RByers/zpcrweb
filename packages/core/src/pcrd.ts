@@ -171,6 +171,12 @@ function decodePcrdPlateRead(el: XmlElement, index: number): PlateRead {
     }),
   );
 
+  const headerFields = hdr
+    ? splitElements(hdr)
+        .filter((e) => e.name.toLowerCase() !== "drkcrnt")
+        .map((e) => ({ name: e.name, value: unescapeXml(e.inner) }))
+    : undefined;
+
   const cycle = num("Cycle");
   // Not a real file — there's no `.Plateread` inside a `.pcrd`. `PlateRead.fileName` still
   // needs some stable, human-readable value; this is honest about not being one, unlike a
@@ -189,6 +195,7 @@ function decodePcrdPlateRead(el: XmlElement, index: number): PlateRead {
     blockTempC: temps.find((t) => t.key === "BLOCKTEMP")?.celsius,
     temps,
     timestamp,
+    headerFields,
     wells,
     dark,
     get(channel, row, col) {

@@ -81,6 +81,13 @@ export interface PlateRead {
   /** Read timestamp string from the header, if present (best-effort). */
   timestamp?: string;
   /**
+   * Every child element of `Hdr/PlateReadDataHeader`, name and text content, in document
+   * order — only populated for a `.pcrd`-origin read (see `pcrd.md` §2.2), which has no
+   * binary descriptor dictionary to show instead. `DrkCrnt` (the nested DARKDATA array,
+   * shown separately via {@link dark}) is omitted.
+   */
+  headerFields?: { name: string; value: string }[];
+  /**
    * The full WELLDATA fluorescence table, channel-major: 6 channels × 108 wells = 648
    * records. Index with `record = channel * 108 + row * 12 + col`, or use {@link get}.
    */

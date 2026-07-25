@@ -21,7 +21,10 @@ app is format-agnostic:
   already-decoded `PlateRead` object either way; it only conditionally shows the binary-only
   "descriptor dictionary" section (`decodePlateReadDetail` finds nothing when there's no
   matching binary archive entry — always the case for a `.pcrd`-origin read, since a `.pcrd`
-  has no archive entries at all — which is the signal used to hide that section).
+  has no archive entries at all — which is the signal used to hide that section). In its place,
+  a `.pcrd`-origin read shows a key/value table of `PlateRead.headerFields` — the
+  `Hdr/PlateReadDataHeader` XML element's own child elements, name and text content, decoded
+  once in `pcrd.ts` rather than re-parsed in the component.
 - `RunInfoTable` and `ProtocolDecoded` (`components/raw/DecodedView.tsx`) take plain
   `text: string` rather than `(zpcr, name)`, so both `RawFilesView` (`.zpcr`'s real files, by
   name) and `PcrdRawView` (a `.pcrd`'s real XML nodes, by direct reference) can feed them

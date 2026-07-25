@@ -58,11 +58,32 @@ export function DecodedPlateread({ zpcr, read }: { zpcr: Zpcr; read: PlateRead }
             <dd>{read.timestamp ?? "—"}</dd>
           </div>
         </dl>
-        {!isBinary && (
-          <p className="decoded__hint mono">
-            This read comes from a .pcrd document (plate-read data as text, not the binary
-            .Plateread layout) — no descriptor dictionary to show.
-          </p>
+        {!isBinary && read.headerFields && read.headerFields.length > 0 && (
+          <>
+            <p className="decoded__hint mono">
+              This read comes from a .pcrd document (plate-read data as text, not the binary
+              .Plateread layout) — the fields below are the document's own
+              PlateReadDataHeader element.
+            </p>
+            <div className="decoded__gridwrap">
+              <table className="decoded__tbl mono">
+                <thead>
+                  <tr>
+                    <th>Field</th>
+                    <th>Value</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {read.headerFields.map((f) => (
+                    <tr key={f.name}>
+                      <td className="decoded__fname">{f.name}</td>
+                      <td className="decoded__ftext">{f.value}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
       </section>
 
