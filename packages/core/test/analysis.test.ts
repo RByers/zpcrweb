@@ -121,6 +121,50 @@ describe("baselineCorrectCurve", () => {
     expect(result.amplified).toBe(false);
   });
 
+  // Recorded from well E9 of `20230829_135443_CT019138_SINGLE_STEP_.zpcr` — an NRT control that
+  // really does amplify, but late (from ~cycle 32) and still climbing when the run ends at 40, on
+  // a baseline that drifts *down* ~6.5 RFU/cycle. Curvature's second-derivative peak lands at
+  // cycle ~37 on a curve shaped like this, so onset used to be read there and the baseline ran to
+  // cycle 35 — five cycles into the rise, fitted at +0.87 RFU/cycle, the wrong sign.
+  const lateCycles = Array.from({ length: 40 }, (_, i) => i + 1);
+  const lateValues = [
+    5403, 5411, 5407, 5388, 5382, 5381, 5365, 5349, 5339, 5328, 5314, 5314, 5307, 5301, 5299, 5285,
+    5286, 5284, 5271, 5266, 5264, 5262, 5248, 5250, 5245, 5236, 5231, 5227, 5235, 5241, 5262, 5317,
+    5418, 5606, 5986, 6703, 8002, 10149, 13116, 15985,
+  ];
+
+  it("keeps the baseline out of a late, run-truncated amplification", () => {
+    const result = baselineCorrectCurve(lateCycles, lateValues, "LinearBaseLineNormalized");
+    expect(result.baselineValid).toBe(true);
+    expect(result.baselineRegion.endCycle).toBeLessThan(32);
+    // The fitted baseline follows the curve's real downward drift instead of being dragged up by
+    // the rise — the sign error that pushed the corrected curve's first cycles above threshold.
+    expect(result.baselineFit.slope).toBeLessThan(0);
+    expect(result.correctedValues[0]!).toBeLessThan(result.noise);
+  });
+
+  it("gives that well a Cq even in a group of otherwise flat wells", () => {
+    // Its threshold group is the untargeted NTC/NRT catch-all, whose median noise — and so whose
+    // auto threshold — is set by the flat wells. The well used to drop out of the results entirely.
+    const flatish = (level: number) => lateCycles.map((c) => level - c * 0.5 + Math.sin(c) * 2);
+    const table = computeCqTable([
+      { key: "4,8,SYBR", group: "(none)", cycles: lateCycles, values: lateValues },
+      ...[5200, 5300, 5400, 5500].map((level, i) => ({
+        key: `1,${i},SYBR`,
+        group: "(none)",
+        cycles: lateCycles,
+        values: flatish(level),
+      })),
+    ]);
+    const e9 = table.get("4,8,SYBR")!;
+    expect(e9.amplified).toBe(true);
+    expect(e9.cq).not.toBeNull();
+    // Somewhere in the rise, not cycle 1-2 (baseline noise crossing a low threshold).
+    expect(e9.cq!).toBeGreaterThan(20);
+    // The flat plate-mates still get none.
+    for (let i = 0; i < 4; i++) expect(table.get(`1,${i},SYBR`)!.cq).toBeNull();
+  });
+
   it("suppresses Cq via computeCq's baselineValid option for that same well", () => {
     const result = baselineCorrectCurve(ntcCycles, ntcValues, "LinearBaseLineNormalized");
     const cq = computeCq(ntcCycles, result.correctedValues, {
@@ -178,8 +222,11 @@ describe("computeCqTable", () => {
       curve("0,0,FAM", "GeneA", amp(10)), // duplicate key: ignored
     ]);
     expect(table.size).toBe(2);
-    // The first entry won: its Cq reflects the onset-25 curve, not the onset-10 one.
-    expect(table.get("0,0,FAM")!.cq).toBeGreaterThan(15);
+    // The first entry won: its Cq reflects the onset-25 curve, not the onset-10 one — compared
+    // against what the onset-25 curve scores on its own rather than an absolute cycle, since the
+    // auto threshold (and so the Cq) depends on the whole group.
+    const alone = computeCqTable([curve("0,0,FAM", "GeneA", amp(25)), curve("0,1,FAM", "GeneA", amp(28))]);
+    expect(table.get("0,0,FAM")!.cq).toBe(alone.get("0,0,FAM")!.cq);
   });
 
   it("shares one threshold across a group and gives each curve its own Cq", () => {

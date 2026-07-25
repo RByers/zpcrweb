@@ -92,14 +92,24 @@ export interface CqCrossingOptions {
 }
 
 /**
- * §6.1: `algorithmCtDetection="Threshold"`. Finds the first cycle at or above `threshold` and
- * log-interpolates between it and the previous cycle for a fractional Cq, falling back to linear
- * interpolation when either bracketing value is `<= 0` (the logarithm is undefined). Handles all
- * of §6.1's edge cases explicitly:
+ * §6.1: `algorithmCtDetection="Threshold"`. Finds where the curve crosses `threshold` for real and
+ * log-interpolates between the bracketing cycles for a fractional Cq, falling back to linear
+ * interpolation when either bracketing value is `<= 0` (the logarithm is undefined).
  *
- * - Starts at or above threshold ⇒ `null` (a failed baseline, not an early Cq).
+ * "For real" means the start of the curve's **final** run above the threshold, not the first cycle
+ * that touches it: with `requireEndsAboveThreshold` on (the default, per the doc), any earlier
+ * excursion that falls back below is by definition not the amplification the trace ends in, so
+ * taking the first touch would report baseline noise flickering across a low threshold as a Cq of
+ * 1–2 for a well that actually amplifies at cycle 30. Where the two rules agree — a clean sigmoid
+ * that crosses once — they give the identical answer.
+ *
+ * Edge cases:
+ *
+ * - Above threshold at every cycle (nothing below to cross *from*) ⇒ `null` (a failed baseline,
+ *   not an early Cq).
  * - Never crosses ⇒ `null` (no amplification).
- * - Ends below threshold ⇒ `null`, unless `requireEndsAboveThreshold` is turned off.
+ * - Ends below threshold ⇒ `null`, unless `requireEndsAboveThreshold` is turned off — in which case
+ *   the first crossing is used, there being no final above-threshold run to anchor to.
  */
 export function findThresholdCrossing(
   cycles: number[],
@@ -109,17 +119,30 @@ export function findThresholdCrossing(
 ): number | null {
   const requireEndsAboveThreshold = options.requireEndsAboveThreshold ?? true;
   if (values.length === 0) return null;
-  if (values[0]! >= threshold) return null;
 
   let crossIndex = -1;
-  for (let i = 1; i < values.length; i++) {
-    if (values[i]! >= threshold) {
-      crossIndex = i;
-      break;
+  if (requireEndsAboveThreshold) {
+    if (values.at(-1)! < threshold) return null;
+    // The final run above threshold begins just after the last sub-threshold cycle.
+    let lastBelow = -1;
+    for (let i = values.length - 1; i >= 0; i--) {
+      if (values[i]! < threshold) {
+        lastBelow = i;
+        break;
+      }
+    }
+    if (lastBelow < 0) return null;
+    crossIndex = lastBelow + 1;
+  } else {
+    if (values[0]! >= threshold) return null;
+    for (let i = 1; i < values.length; i++) {
+      if (values[i]! >= threshold) {
+        crossIndex = i;
+        break;
+      }
     }
   }
-  if (crossIndex < 0) return null;
-  if (requireEndsAboveThreshold && values.at(-1)! < threshold) return null;
+  if (crossIndex < 0 || crossIndex >= values.length) return null;
 
   const prev = values[crossIndex - 1]!;
   const curr = values[crossIndex]!;

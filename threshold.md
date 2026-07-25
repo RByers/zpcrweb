@@ -117,17 +117,33 @@ Set `autoCalculateBaseline`. Two strategies are worth implementing; they differ 
 where amplification starts.
 
 **(a) Curvature / peak-detection.** Amplification onset is where the curve stops being flat, which
-is where its **second derivative peaks**. Compute the discrete second difference of the smoothed
-curve, find its maximum, and end the baseline some margin before that cycle. This is robust for
+is located from a **peak in its second derivative**. Compute the discrete second difference of the
+smoothed curve, find its maximum, and end the baseline some margin before onset. This is robust for
 clean sigmoidal curves and is the natural companion to the Cq definition in §6.
 
 Refinements worth having, with reasonable defaults:
 
 - **Reject secondary peaks.** Ignore a candidate peak whose height is below ~**0.3** of the
   largest peak, and treat two peaks closer than ~**4** cycles as one.
+- **Take onset at the peak's *foot*, not the peak.** The second derivative peaks where the curve
+  is accelerating hardest, which is already inside the exponential phase; on a curve whose rise is
+  still climbing when the run ends, the peak lands within a cycle or two of the last cycle. Walk
+  back from the peak to where the second difference has fallen to ~**5 %** of it — the cycle where
+  the curve first departs flat, which is what "onset" means here.
 - **Require flatness.** Accept the region only if its residual after a straight-line fit is within
   ~**3.5 %** of the curve's total span (*relative flatness*), and its deviation from linearity is
   within ~**3 %** (*relative linearity*). If it fails, walk the end cycle back and retry.
+
+  Note what this check can and cannot catch: because the bounds are relative to the curve's
+  *whole span*, a well rising 10,000 RFU can carry several hundred RFU of ramp inside its
+  "baseline" and still pass comfortably. It is a backstop against a grossly wrong region, not a
+  substitute for locating onset correctly in the first place — which is why the foot refinement
+  above matters. Observed on every late-amplifying NRT/NTC well of
+  `20230829_135443_CT019138_SINGLE_STEP_.zpcr`: with onset read at the peak, well E9 (amplifying
+  from ~cycle 32, run ending at 40) was given a baseline of cycles 1–35, fitted at **+0.87**
+  RFU/cycle against a true drift of **−6.5**. Subtracting that lifts the corrected curve's *first*
+  cycles above the threshold, which §6.1 reads as a failed baseline — so the well reported no Cq at
+  all, silently, despite obvious amplification.
 
 **(b) Regression / iterative extension.** Fit a straight line to a short initial region, then
 extend it one cycle at a time while each new point stays within a confidence band of the fit
@@ -207,7 +223,12 @@ Two refinements that matter in practice:
   subset of the population rather than every well.
 - **Floor the threshold.** If a plate contains only flat wells, the noise estimate collapses and
   the threshold approaches zero, so every well "crosses" at cycle 1. Impose a minimum absolute
-  RFU.
+  RFU. `autoThreshold()` takes a `minThreshold` but defaults it to **0**, i.e. no floor, because no
+  defensible value has been pinned down yet — see §9. The effect is visible on real data: once §3.2
+  picks a *tight* baseline, the residual noise is genuinely small, so `3.2 × noise` lands a few RFU
+  above baseline on a curve that rises by thousands, and Cq comes out well before the visible
+  take-off. The reported Cq is then self-consistent but systematically early relative to what an
+  instrument using a fixed threshold (§5.2) would report for the same well.
 
 > A direct consequence, worth stating plainly: **a Cq is a property of a well *and the group it
 > was computed with*, not of the well's curve alone.** Change the set of wells in the group and the
@@ -233,8 +254,9 @@ override as authoritative and skip §5.1 entirely.
 
 ### 6.1 `Threshold` — the crossing (observed default)
 
-Find the first cycle whose baseline-corrected value is at or above the threshold, then
-**interpolate between it and the previous cycle** to get a fractional cycle. Interpolating in the
+Find where the curve crosses the threshold — the start of its **final** run above it, see the
+"ends below threshold" case below — then **interpolate between that cycle and the previous one** to
+get a fractional cycle. Interpolating in the
 log domain matches the underlying exponential and is the better default:
 
 ```
@@ -260,6 +282,13 @@ Edge cases, all of which must be handled explicitly:
   Cq. Report no Cq and flag the well.
 - **Ends below threshold.** A curve that crosses and then falls back is suspect. Reference
   implementations expose a "no Cq if the trace ends under the threshold" option; default it on.
+- **Crosses, falls back, then crosses again.** With that option on, only the last crossing can be
+  the amplification the trace ends in, so anchor Cq to the start of the *final* above-threshold
+  run rather than the first cycle that touches the threshold. On a clean single-crossing sigmoid
+  the two rules coincide. This matters whenever the threshold sits near a well's own baseline
+  noise — which happens by construction to a genuinely amplifying well grouped (per §5.1) with
+  mostly-flat ones, since the group's median noise sets the threshold: taking the first touch then
+  reports a Cq of 1–2 for a well that amplifies at cycle 30.
 
 ### 6.2 `NoThreshold` — curve fitting
 
@@ -334,6 +363,12 @@ For an implementation aiming to match a reference instrument:
   `threshold.ts` covers §5–§7 (threshold determination, both Cq algorithms, the amplification
   squelch). Not implemented: the `pDriftCorrection` reference-normalization baseline modes and
   `LinearBaseLineNormalizedCurveFit`'s refinement.
+- **No threshold floor.** §5.1 calls for one and `autoThreshold()` accepts a `minThreshold`, but
+  its default is 0. This is now the weakest link in the chain: with baseline detection no longer
+  eating into the rise, `3.2 × median baseline noise` is a very low bar, and it is what sets how
+  early every Cq lands. A floor expressed as an absolute RFU is instrument-dependent; a floor
+  expressed relative to the group's amplification span (a few percent of median ΔRFU, say) would
+  scale, but neither has been checked against a reference instrument.
 - **Not validated.** These algorithms are specified to be *reasonable and precise*, but no Cq —
   and, for the baseline stages now implemented, no baseline region or corrected curve either —
   has been compared against a reference instrument's own reported values for the same well. Until

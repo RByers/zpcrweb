@@ -214,17 +214,40 @@ export interface CurvatureBaselineOptions {
   maxRelativeLinearity?: number;
   /** Cycles of margin between the detected onset and the baseline's end. Default **2** — not pinned down by the doc. */
   margin?: number;
+  /**
+   * Fraction of the peak's own height at which the walk back from that peak stops — the *foot* of
+   * the curvature rise. Default **0.05**.
+   *
+   * The second derivative peaks where the curve is accelerating hardest, which on a real
+   * amplification curve is already well inside the exponential phase, not at its start; on a curve
+   * whose rise is still climbing when the run ends, the peak lands within a cycle or two of the
+   * last cycle. Taking the peak itself as onset therefore hands back a "baseline" containing
+   * several cycles of amplification, and §3.2's flatness walk-back below doesn't rescue it because
+   * those bounds are relative to the curve's *whole span*: on a well rising 10,000 RFU, a region
+   * carrying the first few hundred RFU of the ramp is comfortably within 3.5% of the span. Fitting
+   * a line through that produces a baseline sloping the wrong way, and the corrected curve then
+   * starts *above* the threshold, which §6.1 reads as a failed baseline and reports no Cq for —
+   * the well silently drops out of the results (observed across every late-amplifying NRT/NTC well
+   * of `20230829_135443_CT019138_SINGLE_STEP_.zpcr`: E9 amplifies from ~cycle 32 and was given a
+   * baseline of cycles 1–35, fitted at +0.87 RFU/cycle against a true −6.5).
+   *
+   * Walking back from the peak to where the second difference is only a few percent of it lands on
+   * the cycle where the curve first departs flat, which is what §3.2 means by onset.
+   */
+  onsetFootFraction?: number;
   constraints?: BaselineRegionConstraints;
 }
 
 /**
- * §3.2(a): amplification onset is where the curve's second derivative peaks. Computes the
- * discrete second difference of `values` (pass an already-{@link smoothCurve}d curve — this
- * function does no smoothing of its own), finds the earliest strong peak after filtering
- * secondary peaks, and walks the baseline's end cycle back from `onset − margin` until the
- * region passes the §3.2 flatness/linearity checks (or exhausts down to the minimum width).
- * Returns `null` if no confident onset or no passing region is found — callers should fall back
- * to {@link findBaselineByRegression}.
+ * §3.2(a): amplification onset is where the curve stops being flat, located from a peak in its
+ * second derivative. Computes the discrete second difference of `values` (pass an
+ * already-{@link smoothCurve}d curve — this function does no smoothing of its own), finds the
+ * earliest strong peak after filtering secondary peaks, walks back from that peak to the foot of
+ * its rise ({@link CurvatureBaselineOptions.onsetFootFraction} — the peak itself sits inside the
+ * exponential phase, not at its start), and then walks the baseline's end cycle back from
+ * `onset − margin` until the region passes the §3.2 flatness/linearity checks (or exhausts down to
+ * the minimum width). Returns `null` if no confident onset or no passing region is found — callers
+ * should fall back to {@link findBaselineByRegression}.
  */
 export function findBaselineByCurvature(
   cycles: number[],
@@ -236,6 +259,7 @@ export function findBaselineByCurvature(
   const maxRelativeFlatness = options.maxRelativeFlatness ?? 0.035;
   const maxRelativeLinearity = options.maxRelativeLinearity ?? 0.03;
   const margin = options.margin ?? 2;
+  const onsetFootFraction = options.onsetFootFraction ?? 0.05;
   const minBegin = options.constraints?.minBeginCycle ?? 1;
   const minWidth = options.constraints?.minWidth ?? 3;
 
@@ -266,7 +290,13 @@ export function findBaselineByCurvature(
   }
   if (merged.length === 0) return null;
 
-  const onsetCycle = cycles[merged[0]!.index]!;
+  // Onset is the foot of the earliest strong peak's rise, not the peak itself — see
+  // `onsetFootFraction`.
+  const peakIndex = merged[0]!.index;
+  const footLevel = merged[0]!.height * onsetFootFraction;
+  let onsetIndex = peakIndex;
+  while (onsetIndex > 0 && secondDiff[onsetIndex]! > footLevel) onsetIndex--;
+  const onsetCycle = cycles[onsetIndex]!;
 
   for (let endCycle = onsetCycle - margin; endCycle - minBegin + 1 >= minWidth; endCycle--) {
     const region = { beginCycle: minBegin, endCycle };

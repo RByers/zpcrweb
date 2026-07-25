@@ -165,6 +165,10 @@ raw bytes ─▶ fflate.unzipSync ─▶ { name: Uint8Array }
   pipeline scale-invariant.
 - **`baseline.ts`** — the baseline stages (§2–§4, plus the §7 validation gate) of a dye curve's Cq
   analysis: smoothing, automatic/manual baseline-region selection, baseline subtraction, and
+  `validateBaselineRegion()`. Curvature-based selection reads onset at the *foot* of the
+  second-derivative peak rather than the peak itself, which otherwise sits inside the exponential
+  phase and hands back a "baseline" containing part of the rise — the flatness bounds are relative
+  to the curve's whole span and so don't catch it on a high-amplitude well. The gate is
   `validateBaselineRegion()`, which re-checks whichever region was actually chosen (including
   `findBaselineByRegression`'s fallback, whose local fit-and-extend can lock onto a region that's
   a good line by itself but a poor description of the whole curve) against §3.2's
@@ -174,7 +178,9 @@ raw bytes ─▶ fflate.unzipSync ─▶ { name: Uint8Array }
 - **`threshold.ts`** — the threshold and Cq stages (§5–§7) that finish what `baseline.ts` starts:
   per-fluorophore noise/threshold estimation (manual override or auto, floored and computed from
   the median of a well subset), the §6.1 threshold-crossing Cq (log-interpolated, with a linear
-  fallback and the §6.1 edge cases), the §6.2 curve-shape (`NoThreshold`) Cq via
+  fallback and the §6.1 edge cases — anchored to the *final* above-threshold run, so baseline noise
+  flickering over a low group threshold can't be read as a cycle-1 Cq), the §6.2 curve-shape
+  (`NoThreshold`) Cq via
   second-derivative maximum, and the §7 amplification squelch — now gated first by
   `baseline.ts`'s baseline-validation result (`computeCq()`'s `baselineValid` option). `computeCq()`
   ties both algorithms together. See [`threshold.md`](./threshold.md).

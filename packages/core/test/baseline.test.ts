@@ -148,6 +148,17 @@ describe("findBaselineByCurvature", () => {
     expect(region!.endCycle - region!.beginCycle + 1).toBeGreaterThanOrEqual(3);
   });
 
+  it("stays out of the rise when amplification is late and the run ends mid-climb", () => {
+    // The second difference of a truncated exponential is still climbing at the last cycle, so its
+    // peak lands near the end of the run: taking the peak itself as onset would put the baseline
+    // several cycles into the rise. See `onsetFootFraction`.
+    const cycles = Array.from({ length: 40 }, (_, i) => i + 1);
+    const values = cycles.map((c) => 5400 - c * 6 + Math.exp((c - 32) * 0.75) * 20);
+    const region = findBaselineByCurvature(cycles, smoothCurve(values))!;
+    expect(region).not.toBeNull();
+    expect(region.endCycle).toBeLessThan(32);
+  });
+
   it("finds a plausible baseline on the real B3/channel-0 amplification curve", () => {
     const zpcr = parseZpcr(readSampleBytes());
     const curve = zpcr.curves({ channel: 0 }).find((c) => c.wellLabel === "B3")!;

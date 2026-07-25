@@ -151,6 +151,25 @@ describe("findThresholdCrossing", () => {
     expect(findThresholdCrossing([], [], 10)).toBeNull();
   });
 
+  it("ignores an early excursion that falls back, taking the final crossing", () => {
+    // Baseline noise flicking over a low threshold before the real rise: the first touch is at
+    // cycle 2, but the curve is back under threshold at 3-5 and only takes off at 6.
+    const cycles = [1, 2, 3, 4, 5, 6, 7, 8];
+    const values = [0, 12, 4, -2, 3, 40, 400, 4000];
+    const cq = findThresholdCrossing(cycles, values, 10)!;
+    expect(cq).toBeGreaterThan(5);
+    expect(cq).toBeLessThanOrEqual(6);
+  });
+
+  it("still reports the sole crossing of a clean single-crossing curve", () => {
+    const cycles = [1, 2, 3, 4, 5];
+    const values = [1, 2, 4, 40, 400];
+    expect(findThresholdCrossing(cycles, values, 10)).toBeCloseTo(
+      findThresholdCrossing(cycles, values, 10, { requireEndsAboveThreshold: false })!,
+      10,
+    );
+  });
+
   it("finds a plausible crossing on the real B3/channel-0 curve", () => {
     const zpcr = parseZpcr(readSampleBytes());
     const curve = zpcr.curves({ channel: 0 }).find((c) => c.wellLabel === "B3")!;
