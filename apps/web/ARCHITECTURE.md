@@ -2,7 +2,7 @@
 
 The web app (`@zpcrweb/web`) is a browser UI over [`@zpcrweb/core`](../../packages/core). It
 loads one or more `.zpcr` and/or `.pcrd` files, switches between them, and explores each
-through four views: Overview, Curves, Plates, and Raw.
+through five views: Overview, Curves, Diagnostics, Plates, and Raw.
 
 ## Two formats, mostly one UI
 
@@ -10,10 +10,10 @@ through four views: Overview, Curves, Plates, and Raw.
 [`ARCHITECTURE.md`](../../ARCHITECTURE.md#two-input-formats-one-output-shape)), so most of the
 app is format-agnostic:
 
-- `OverviewView` and `CurvesView` take a plain `Zpcr` — they don't know or care whether it came
-  from a `.zpcr` archive or a decoded `.pcrd` document. `OverviewView`'s protocol tile reads
-  `zpcr.protocolText` (a real field on `Zpcr`, not a by-name file lookup), so it works
-  identically either way.
+- `OverviewView`, `CurvesView`, and `DiagnosticsView` take a plain `Zpcr` — they don't know or
+  care whether it came from a `.zpcr` archive or a decoded `.pcrd` document. `OverviewView`'s
+  protocol tile reads `zpcr.protocolText` (a real field on `Zpcr`, not a by-name file lookup),
+  so it works identically either way.
 - `DecodedPlateread` (the `.Plateread` typed view) shows the WELLDATA/DARKDATA tables from the
   already-decoded `PlateRead` object either way; it only conditionally shows the binary-only
   "descriptor dictionary" section (`decodePlateReadDetail` finds nothing when there's no
@@ -80,8 +80,9 @@ stores:
   survive reloads and are re-parsed (`parseZpcr` or `parsePcrd`, by `kind`) on load. `id` is a
   `name:size` key, which also dedupes re-adding the same file. `kind` defaults to `"zpcr"` for
   records written before `.pcrd` support existed.
-- `settings` — `{ fileId, view, enabledChannels[], enabledWells[], baseline, scale }`, so
-  each file remembers its enabled wells/channels and last view. Writes are debounced.
+- `settings` — `{ fileId, view, enabledChannels[], enabledWells[], enabledRefCols[], baseline,
+  scale }`, so each file remembers its enabled wells/channels/reference columns and last view.
+  Writes are debounced.
 
 Deleting a file removes both its `files` and `settings` records and drops it from memory —
 exposed as a clear affordance on each file chip.
@@ -91,6 +92,7 @@ exposed as a clear affordance on each file chip.
 - **Overview** — run metadata as stat tiles + the thermal protocol text, read from
   `zpcr.metadata` and `zpcr.protocolText`.
 - **Curves** — the centerpiece (see below).
+- **Diagnostics** — reference row vs factory calibration (see below).
 - **Plates** — `PlatesView` (`components/views/PlatesView.tsx`): the visual, color-coded plate
   map (`components/plate/PlateViewer.tsx`) for every plate attached to the run, via
   `zpcr.plates()`. A sidebar lists plates when there's more than one (multiple `.pltd` entries
@@ -193,14 +195,14 @@ format's real elements without either one faking the other's schema.
 
 ## Curves view
 
-Data flows `zpcr.curves({ includeReference:true })` + `zpcr.darkCurves()` → filter by
+Data flows `zpcr.curves({ includeReference:false })` + `zpcr.darkCurves()` → filter by
 enabled channels/wells → `lib/uplot/chart.ts` `buildChart()` → `CurveChart` renders +
-overlays a tooltip.
+overlays a tooltip. The reference row is excluded here — it has its own chart in the
+**Diagnostics** view (below), so `Toggle` (`components/Toggle.tsx`) and `CurveChart` are the
+only pieces the two views share.
 
-- **Selection:** a channel bar (6 dye-labelled toggles) and an 8×12 well matrix whose row
-  (A–H) and column (1–12) headers toggle whole rows/columns, plus an all/none corner. A
-  **reference row (R)** sits below H — the per-channel reference-well readings, toggled like
-  any well but **off by default** and drawn **dashed**.
+- **Selection:** a channel bar (6 dye-labelled toggles) and an 8×12 well matrix (`WellMatrix`)
+  whose row (A–H) and column (1–12) headers toggle whole rows/columns, plus an all/none corner.
 - **Transforms:** Raw ↔ ΔRFU (`deltaBaseline`) and Linear ↔ Log (uPlot `distr: 3`).
   - *Log + ΔRFU:* ΔRFU values go ≤ 0, undefined on a log axis, so non-positive points are
     gaps (`null`) with an inline note. The other three combinations are unaffected.
@@ -219,9 +221,33 @@ overlays a tooltip.
   the dye palette.
 - **X axis:** integer cycles only — a tick per cycle, gridline + label every 5.
 - **Hover/tap tooltip:** a uPlot cursor plugin finds the nearest series (well curve, dark,
-  reference, or temperature) and reports its label, channel/dye, cycle, and mean/min/max/std
-  — or, for a temperature, just its °C. The search projects each series through **its own**
-  scale, so proximity is measured in pixels across both axes.
+  factory overlay, or temperature) and reports its label, channel/dye, cycle, and
+  mean/min/max/std — or, for a temperature, just its °C. The search projects each series
+  through **its own** scale, so proximity is measured in pixels across both axes.
+
+## Diagnostics view
+
+`DiagnosticsView` (`components/views/DiagnosticsView.tsx`) is the reference row's own chart,
+plus the reference-vs-factory-calibration table (`RefCalPanel`) below it. It reuses the same
+rail+chart layout and `CurveChart` component as the Curves view, but with its own selection
+state (`enabledRefCols`, a `RefColBar` chip bar mirroring `ChannelBar`) rather than a well
+matrix, since every plotted curve here is a reference well.
+
+- **Live curves:** `zpcr.curves({ includeReference:true })`, filtered to `isReference` wells,
+  by enabled channel and reference column. Plotted **solid** — `isReference` is forced to
+  `false` when building each `PlotCurve`, since the dashed style that marks a reference well on
+  the main Curves view has no meaning on a chart where every well *is* the reference row.
+- **Factory overlay:** `zpcr.factoryRefCal()` gives one `(channel, col) → mean` value per
+  reference well (`RunInfo.xml`'s `FactoryRefRowCal`; see `packages/core/src/refcal.ts`). Each
+  is expanded to a flat line (`mean` repeated once per cycle) and passed to `CurveChart` as
+  `factoryCurves`, an overlay concept added to
+  `lib/uplot/chart.ts`'s `buildChart()` — matched to a well curve's series by `channel,col` key
+  and drawn **dotted**, exactly the same "pure display overlay, never subtracted" pattern the
+  Dark toggle uses on the main Curves view (`darkCurves`), just keyed by column as well as
+  channel since the factory value differs per reference well rather than per channel alone.
+- **`RefCalPanel`** (`components/views/RefCalPanel.tsx`, unchanged, just relocated from
+  Overview): the col×channel drift/factory/live grid, from `zpcr.refCalComparison()` — a
+  run-averaged summary alongside the chart's per-cycle detail.
 
 ## Color encoding (see `lib/channelColors.ts`)
 

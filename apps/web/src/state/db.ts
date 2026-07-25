@@ -26,6 +26,8 @@ export interface StoredSettings {
   view: string;
   enabledChannels: number[];
   enabledWells: string[]; // "row,col" keys
+  /** Reference columns (0-based) shown in the Diagnostics chart. */
+  enabledRefCols?: number[];
   baseline: "raw" | "delta";
   scale: "linear" | "log";
   showDark: boolean;

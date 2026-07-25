@@ -6,6 +6,7 @@ import { ViewSelector } from "./components/ViewSelector";
 import { PasswordPrompt } from "./components/PasswordPrompt";
 import { OverviewView } from "./components/views/OverviewView";
 import { CurvesView } from "./components/views/CurvesView";
+import { DiagnosticsView } from "./components/views/DiagnosticsView";
 import { PlatesView } from "./components/views/PlatesView";
 import { RawFilesView } from "./components/views/RawFilesView";
 import { PcrdRawView } from "./components/views/PcrdRawView";
@@ -72,6 +73,13 @@ export function App() {
             {view === "overview" && <OverviewView zpcr={zpcr} />}
             {view === "curves" && (
               <CurvesView
+                zpcr={zpcr}
+                settings={settings}
+                onChange={store.updateSettings}
+              />
+            )}
+            {view === "diagnostics" && (
+              <DiagnosticsView
                 zpcr={zpcr}
                 settings={settings}
                 onChange={store.updateSettings}

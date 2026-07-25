@@ -34,9 +34,18 @@ function logSafe(values: number[], scale: Scale): (number | null)[] {
   return values.map((v) => (v <= 0 ? null : v));
 }
 
+/** A factory-calibration reference value, overlaid as a dotted flat line per (channel, col) —
+ * see the diagnostics view. Purely a display overlay, like {@link DarkCurve}. */
+export interface FactoryCurve {
+  channel: number;
+  col: number;
+  /** Constant factory mean, repeated once per cycle so it aligns with the x axis. */
+  mean: number[];
+}
+
 /** Per-series metadata, index-aligned with uPlot series (offset by the x row). */
 interface SeriesMeta {
-  kind: "well" | "dark" | "temp";
+  kind: "well" | "dark" | "factory" | "temp";
   /** Optical channel for well/dark series; -1 for temperature series. */
   channel: number;
   label: string;
@@ -58,7 +67,7 @@ interface BandData {
 }
 
 export interface TooltipData {
-  kind: "well" | "dark" | "temp";
+  kind: "well" | "dark" | "factory" | "temp";
   label: string;
   /** Optical channel for well/dark series; -1 for temperature series. */
   channel: number;
@@ -78,6 +87,9 @@ export interface BuildChartConfig {
   /** Dark (LED-off) background series to overlay as dotted lines; empty draws none. Purely a
    * display overlay — never subtracted from `wellCurves`. */
   darkCurves: DarkCurve[];
+  /** Factory-calibration reference values to overlay as dotted flat lines, matched to
+   * `wellCurves` by (channel, col); empty draws none. See the diagnostics view. */
+  factoryCurves: FactoryCurve[];
   /** Temperature series to plot on the right-hand °C axis (empty to hide the axis). */
   tempCurves: TemperatureCurve[];
   baseline: Baseline;
@@ -90,6 +102,7 @@ export interface BuildChartConfig {
 
 const REF_DASH = [3, 3];
 const DARK_DOT = [1, 3];
+const FACTORY_DOT = [1, 3];
 const TEMP_DASH = [5, 4];
 const SETPOINT_DASH = [2, 4];
 /** uPlot scale key for the right-hand temperature axis. */
@@ -99,7 +112,7 @@ export function buildChart(cfg: BuildChartConfig): {
   data: uPlot.AlignedData;
   options: uPlot.Options;
 } {
-  const { wellCurves, darkCurves, tempCurves, baseline, scale } = cfg;
+  const { wellCurves, darkCurves, factoryCurves, tempCurves, baseline, scale } = cfg;
   const cycles =
     wellCurves[0]?.cycles ?? darkCurves[0]?.cycles ?? tempCurves[0]?.cycles ?? [];
 
@@ -158,6 +171,35 @@ export function buildChart(cfg: BuildChartConfig): {
       stroke: channelColor(channel),
       width: 2,
       dash: DARK_DOT,
+      points: { show: false },
+    });
+  }
+
+  const factoryByKey = new Map<string, FactoryCurve>();
+  for (const f of factoryCurves) factoryByKey.set(`${f.channel},${f.col}`, f);
+
+  const presentPairs = new Set(wellCurves.map((c) => `${c.channel},${c.col}`));
+  for (const key of presentPairs) {
+    const factory = factoryByKey.get(key);
+    if (!factory) continue;
+    rows.push(logSafe(transform(factory.mean), scale));
+    meta.push({
+      kind: "factory",
+      channel: factory.channel,
+      label: "factory",
+      dyeLabel: channelLabel(factory.channel),
+      isReference: false,
+      cycles,
+      mean: factory.mean,
+      std: factory.mean.map(() => 0),
+      min: factory.mean,
+      max: factory.mean,
+    });
+    series.push({
+      label: `factory · ${channelLabel(factory.channel)} col ${factory.col + 1}`,
+      stroke: channelColor(factory.channel),
+      width: 2,
+      dash: FACTORY_DOT,
       points: { show: false },
     });
   }

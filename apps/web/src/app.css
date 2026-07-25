@@ -307,6 +307,28 @@
   color: var(--ink-muted);
 }
 
+/* ---- Diagnostics view ----------------------------------------------------
+   Reuses the Curves view's rail+plot grid (`.curves`), but sits inside a page that also
+   scrolls to the reference-vs-factory table below it, so the chart gets a fixed height
+   instead of `.curves`' `height: 100%`. */
+.diagnostics {
+  height: 100%;
+  overflow: auto;
+  padding: clamp(12px, 3cqi, 28px);
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+.diagnostics__chart {
+  display: grid;
+  grid-template-columns: minmax(260px, 320px) 1fr;
+  height: 520px;
+  min-height: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
 /* ---- Curves view -------------------------------------------------------- */
 .curves {
   display: grid;
@@ -382,6 +404,11 @@
   }
   .curves__plot {
     min-height: 60cqb;
+  }
+  .diagnostics__chart {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr;
+    height: auto;
   }
 }
 
@@ -465,21 +492,6 @@
   border-color: var(--neon-cyan);
   box-shadow: 0 0 6px var(--neon-cyan-dim);
 }
-/* Reference row: dashed to signal it is not a sample well. */
-.wm-cell--ref {
-  border-style: dashed;
-  margin-top: 4px;
-}
-.wm-cell--ref.is-on {
-  background: var(--neon-magenta-dim);
-  border-color: var(--neon-magenta);
-  box-shadow: 0 0 6px var(--neon-magenta-dim);
-}
-.wm-head--ref {
-  color: var(--neon-magenta);
-  margin-top: 4px;
-}
-
 /* ---- Toggles ------------------------------------------------------------ */
 .toggle {
   display: flex;

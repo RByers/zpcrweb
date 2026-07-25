@@ -28,6 +28,7 @@ import { WellMatrix } from "../curves/WellMatrix";
 import { CurveChart } from "../curves/CurveChart";
 import { TempBar } from "../curves/TempBar";
 import { PasswordPrompt } from "../PasswordPrompt";
+import { Toggle } from "../Toggle";
 import type { PlotCurve } from "../../lib/uplot/chart";
 
 interface Props {
@@ -47,9 +48,10 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
       ? settings.step
       : (steps[0]?.step ?? undefined);
 
-  // Full curve set for the active step, including the reference row.
+  // Full curve set for the active step. The reference row is shown separately, in the
+  // Diagnostics view — see RefColBar/DiagnosticsView.
   const allCurves = useMemo<WellCurve[]>(
-    () => zpcr.curves({ includeReference: true, step: activeStep }),
+    () => zpcr.curves({ includeReference: false, step: activeStep }),
     [zpcr, activeStep],
   );
   const darkCurves = useMemo<DarkCurve[]>(
@@ -407,38 +409,6 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
           bands={calibrationOn ? "off" : settings.bands}
         />
       </section>
-    </div>
-  );
-}
-
-function Toggle({
-  label,
-  options,
-  value,
-  onChange,
-  disabled,
-}: {
-  label: string;
-  options: [string, string][];
-  value: string;
-  onChange: (v: string) => void;
-  disabled?: boolean;
-}) {
-  return (
-    <div className="toggle">
-      <div className="toggle__label">{label}</div>
-      <div className="segmented segmented--sm">
-        {options.map(([val, text]) => (
-          <button
-            key={val}
-            className={"segmented__item" + (value === val ? " is-active" : "")}
-            disabled={disabled}
-            onClick={() => onChange(val)}
-          >
-            {text}
-          </button>
-        ))}
-      </div>
     </div>
   );
 }

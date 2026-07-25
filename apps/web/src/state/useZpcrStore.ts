@@ -19,7 +19,7 @@ import { usePltdPassword } from "./pltdPassword";
 
 export type FileKind = "zpcr" | "pcrd";
 
-export type ViewId = "overview" | "curves" | "plates" | "raw";
+export type ViewId = "overview" | "curves" | "diagnostics" | "plates" | "raw";
 export type Baseline = "raw" | "delta";
 export type Scale = "linear" | "log";
 /** Min/max envelope bands: always off, always on, or auto (only when one well selected). */
@@ -30,6 +30,8 @@ export interface FileSettings {
   view: ViewId;
   enabledChannels: Set<number>;
   enabledWells: Set<string>; // "row,col"
+  /** Reference columns (0-based) shown in the Diagnostics chart. */
+  enabledRefCols: Set<number>;
   baseline: Baseline;
   scale: Scale;
   /** Overlay each channel's dark (LED-off) background as a dotted line. Channel-space only —
@@ -117,8 +119,9 @@ function defaultSettings(): FileSettings {
     // Channels 1–5 (the standard dye set) on by default; channel 6 (FRET) is off — it is a
     // real optical channel but standard runs don't use it. The user can toggle it on.
     enabledChannels: new Set([0, 1, 2, 3, 4]),
-    // Sample rows A–H by default; the reference row (row 8) is off until enabled.
     enabledWells: wells,
+    // All 12 reference columns on by default in the Diagnostics chart.
+    enabledRefCols: new Set(Array.from({ length: 12 }, (_, c) => c)),
     baseline: "raw",
     scale: "linear",
     showDark: false,
@@ -139,6 +142,7 @@ function toStored(id: string, s: FileSettings): StoredSettings {
     view: s.view,
     enabledChannels: [...s.enabledChannels],
     enabledWells: [...s.enabledWells],
+    enabledRefCols: [...s.enabledRefCols],
     baseline: s.baseline,
     scale: s.scale,
     showDark: s.showDark,
@@ -156,6 +160,7 @@ function fromStored(s: StoredSettings): FileSettings {
     view: (s.view as ViewId) ?? "curves",
     enabledChannels: new Set(s.enabledChannels),
     enabledWells: new Set(s.enabledWells),
+    enabledRefCols: new Set(s.enabledRefCols ?? Array.from({ length: 12 }, (_, c) => c)),
     baseline: s.baseline ?? "raw",
     scale: s.scale ?? "linear",
     showDark: s.showDark ?? false,

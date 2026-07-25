@@ -2,11 +2,13 @@ import { useEffect, useRef, useState } from "react";
 import uPlot from "uplot";
 import type { DarkCurve, TemperatureCurve } from "@zpcrweb/core";
 import type { Baseline, BandsMode, Scale } from "../../state/useZpcrStore";
-import { buildChart, type PlotCurve, type TooltipData } from "../../lib/uplot/chart";
+import { buildChart, type FactoryCurve, type PlotCurve, type TooltipData } from "../../lib/uplot/chart";
 
 interface Props {
   curves: PlotCurve[];
   darkCurves: DarkCurve[];
+  /** Factory-calibration reference overlay (diagnostics view); empty draws none. */
+  factoryCurves?: FactoryCurve[];
   /** Temperature series for the right-hand °C axis; empty hides that axis. */
   tempCurves: TemperatureCurve[];
   baseline: Baseline;
@@ -17,6 +19,7 @@ interface Props {
 export function CurveChart({
   curves,
   darkCurves,
+  factoryCurves = [],
   tempCurves,
   baseline,
   scale,
@@ -37,6 +40,7 @@ export function CurveChart({
     const { data, options } = buildChart({
       wellCurves: curves,
       darkCurves,
+      factoryCurves,
       tempCurves,
       baseline,
       scale,
@@ -53,7 +57,7 @@ export function CurveChart({
       plotRef.current?.destroy();
       plotRef.current = null;
     };
-  }, [curves, darkCurves, tempCurves, baseline, scale, bands]);
+  }, [curves, darkCurves, factoryCurves, tempCurves, baseline, scale, bands]);
 
   // Keep the plot sized to its container.
   useEffect(() => {
@@ -86,7 +90,7 @@ export function CurveChart({
         >
           <div className="chart__tip-head">
             <span className="chart__tip-swatch" style={{ background: tip.color }} />
-            <strong>{tip.kind === "dark" ? "dark" : tip.label}</strong>
+            <strong>{tip.kind === "dark" || tip.kind === "factory" ? tip.kind : tip.label}</strong>
             {tip.kind !== "temp" && (
               <span className="chart__tip-dye">
                 C{tip.channel + 1} · {tip.dye}
