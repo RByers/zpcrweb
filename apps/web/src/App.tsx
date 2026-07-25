@@ -33,7 +33,7 @@ export function App() {
     );
   }
 
-  const view = settings.view;
+  const { view } = store;
   const zpcr = activeRun?.zpcr ?? null;
 
   return (
@@ -41,10 +41,7 @@ export function App() {
       <header className="app__header">
         <span className="app__logo mono">zpcr//web</span>
         {zpcr && (
-          <ViewSelector
-            value={view}
-            onChange={(v) => store.updateSettings({ view: v })}
-          />
+          <ViewSelector value={view} onChange={store.setView} />
         )}
         <div className="app__header-spacer" />
         <DropZone onFiles={store.addFiles} />

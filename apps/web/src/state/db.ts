@@ -1,7 +1,7 @@
 /**
  * Thin IndexedDB wrapper — no dependencies. Persists loaded `.zpcr` files (raw bytes, so
  * they survive reloads and are re-parsed on demand) and per-file view settings (which
- * channels/wells are enabled, baseline/scale mode, last view).
+ * channels/wells are enabled, baseline/scale mode).
  */
 
 const DB_NAME = "zpcrweb";
@@ -23,7 +23,6 @@ export interface StoredFile {
 /** Persisted per-file view settings. */
 export interface StoredSettings {
   fileId: string;
-  view: string;
   enabledChannels: number[];
   enabledWells: string[]; // "row,col" keys
   /** Reference columns (0-based) shown in the Reference view. */

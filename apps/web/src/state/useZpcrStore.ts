@@ -42,7 +42,6 @@ export type FluorViewMode = "fluorophore" | "target";
 
 /** Per-file view settings, in-memory form (Sets for cheap toggling). */
 export interface FileSettings {
-  view: ViewId;
   enabledChannels: Set<number>;
   enabledWells: Set<string>; // "row,col"
   /** Reference columns (0-based) shown in the Reference chart. */
@@ -150,7 +149,6 @@ function defaultSettings(): FileSettings {
     for (let col = 0; col < 12; col++) wells.add(wellKey(row, col));
   }
   return {
-    view: "curves",
     // Channels 1–5 (the standard dye set) on by default; channel 6 (FRET) is off — it is a
     // real optical channel but standard runs don't use it. The user can toggle it on.
     enabledChannels: new Set([0, 1, 2, 3, 4]),
@@ -184,7 +182,6 @@ function defaultSettings(): FileSettings {
 function toStored(id: string, s: FileSettings): StoredSettings {
   return {
     fileId: id,
-    view: s.view,
     enabledChannels: [...s.enabledChannels],
     enabledWells: [...s.enabledWells],
     enabledRefCols: [...s.enabledRefCols],
@@ -207,7 +204,6 @@ function toStored(id: string, s: FileSettings): StoredSettings {
 
 function fromStored(s: StoredSettings): FileSettings {
   return {
-    view: (s.view as ViewId) ?? "curves",
     enabledChannels: new Set(s.enabledChannels),
     enabledWells: new Set(s.enabledWells),
     enabledRefCols: new Set(s.enabledRefCols ?? Array.from({ length: 12 }, (_, c) => c)),
@@ -244,6 +240,10 @@ export interface ZpcrStore {
   runs: Map<string, RunResult>;
   activeRun: RunResult | null;
   settings: FileSettings | null;
+  /** Selected top-level view (Overview/Curves/…) — global across all loaded files, not
+   * per-file, so switching files doesn't reset it. */
+  view: ViewId;
+  setView: (v: ViewId) => void;
   loading: boolean;
   error: string | null;
   addFiles: (files: FileList | File[]) => Promise<void>;
@@ -256,6 +256,7 @@ export function useZpcrStore(): ZpcrStore {
   const [files, setFiles] = useState<LoadedFile[]>([]);
   const [settingsMap, setSettingsMap] = useState<Record<string, FileSettings>>({});
   const [activeId, setActiveId] = useState<string | null>(null);
+  const [view, setView] = useState<ViewId>("curves");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const saveTimers = useRef<Record<string, number>>({});
@@ -383,6 +384,8 @@ export function useZpcrStore(): ZpcrStore {
     runs,
     activeRun,
     settings,
+    view,
+    setView,
     loading,
     error,
     addFiles,

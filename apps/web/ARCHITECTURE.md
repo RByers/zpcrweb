@@ -56,8 +56,9 @@ carries `documentXml` for a successfully-decoded `.pcrd` — the full raw docume
 
 ## Stack
 
-- **React 18 API on the Preact runtime + Vite + TypeScript** — SPA, no router (view state is
-  per-file, in the store). Source (`.tsx`) uses the standard React API; `vite.config.ts` aliases
+- **React 18 API on the Preact runtime + Vite + TypeScript** — SPA, no router (the selected
+  view is global, in-memory-only state in the store, shared across all loaded files). Source
+  (`.tsx`) uses the standard React API; `vite.config.ts` aliases
   `react`/`react-dom`/`react/jsx-runtime` to `preact/compat`/`preact/jsx-runtime`, so no `react`
   or `react-dom` package is installed — only `@types/react`/`@types/react-dom` for typechecking.
   This cut the production bundle from 327 KB to 198 KB (111 KB to 72 KB gzipped) with no source
@@ -88,18 +89,19 @@ written inline in a component.
 ## State & persistence
 
 `state/useZpcrStore.ts` is the single store hook. It holds the list of loaded (not yet parsed)
-files, the active file id, a per-file settings map, and the derived `runs` map (see "The
-`.pcrd` password gate" above). `state/db.ts` is a minimal IndexedDB wrapper with two object
-stores:
+files, the active file id, a per-file settings map, the derived `runs` map (see "The `.pcrd`
+password gate" above), and the globally-selected view (`view`/`setView`, plain `useState` —
+not persisted, and not part of the per-file settings map, so switching files never changes
+which view is showing). `state/db.ts` is a minimal IndexedDB wrapper with two object stores:
 
 - `files` — `{ id, name, size, addedAt, bytes, kind }`; **raw bytes** are stored so files
   survive reloads and are re-parsed (`parseZpcr` or `parsePcrd`, by `kind`) on load. `id` is a
   `name:size` key, which also dedupes re-adding the same file. `kind` defaults to `"zpcr"` for
   records written before `.pcrd` support existed.
-- `settings` — `{ fileId, view, enabledChannels[], enabledWells[], enabledRefCols[], baseline,
-  curveBaseline, scale }`, so each file remembers its enabled wells/channels/reference columns
-  and last view. `baseline` (Reference view's factory-relative ΔRFU/Drift %) and `curveBaseline`
-  (Curves view's library baseline-subtraction mode) are independent settings — see "Two baseline
+- `settings` — `{ fileId, enabledChannels[], enabledWells[], enabledRefCols[], baseline,
+  curveBaseline, scale }`, so each file remembers its enabled wells/channels/reference columns.
+  `baseline` (Reference view's factory-relative ΔRFU/Drift %) and `curveBaseline` (Curves
+  view's library baseline-subtraction mode) are independent settings — see "Two baseline
   concepts" under Reference view. Writes are debounced.
 
 Deleting a file removes both its `files` and `settings` records and drops it from memory —
