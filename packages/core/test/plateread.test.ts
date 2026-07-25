@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseZpcr } from "../src/index.js";
+import { decodePlateReadDetail, parseZpcr } from "../src/index.js";
 import { readSampleBytes } from "./sample.js";
 
 describe("plateread decoding", () => {
@@ -66,5 +66,30 @@ describe("plateread decoding", () => {
     expect(() => read.get(6, 0, 0)).toThrow(/channel/);
     expect(() => read.get(0, 9, 0)).toThrow(/row/);
     expect(() => read.get(0, 0, 12)).toThrow(/col/);
+  });
+});
+
+describe("decodePlateReadDetail", () => {
+  it("decodes version words + fields from a real .Plateread", () => {
+    const zpcr = parseZpcr(readSampleBytes());
+    const bytes = zpcr.archive.bytes(zpcr.reads[0]!.fileName);
+    const detail = decodePlateReadDetail(bytes);
+    expect(detail.versionWords).toHaveLength(3);
+    expect(detail.fields.length).toBeGreaterThan(0);
+  });
+
+  it("degrades gracefully (no throw) on buffers too short to be a real .Plateread", () => {
+    // A .pcrd-derived PlateRead has no binary archive entry at all — DecodedPlateread.tsx
+    // calls this with an empty buffer in that case, so it must never throw.
+    expect(decodePlateReadDetail(new Uint8Array(0))).toEqual({
+      size: 0,
+      versionWords: [],
+      fields: [],
+    });
+    expect(decodePlateReadDetail(new Uint8Array(11))).toEqual({
+      size: 11,
+      versionWords: [],
+      fields: [],
+    });
   });
 });

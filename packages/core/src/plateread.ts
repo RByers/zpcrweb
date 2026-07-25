@@ -137,13 +137,15 @@ export interface PlatereadDetail {
   fields: IcffEntry[];
 }
 
-/** Fully decode a `.Plateread` file's structure (version words + ICFF index entries). */
+/** Fully decode a `.Plateread` file's structure (version words + ICFF index entries). Tolerant
+ * of a buffer too short to be a real `.Plateread` (e.g. empty bytes for a format with no
+ * binary layout at all) — `versionWords` is empty and `fields` is `[]` rather than throwing,
+ * matching `parseIcff`'s own graceful degradation just below. */
 export function decodePlateReadDetail(bytes: Uint8Array): PlatereadDetail {
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  const versionWords = [
-    view.getInt32(0, false),
-    view.getInt32(4, false),
-    view.getInt32(8, false),
-  ];
+  const versionWords: number[] = [];
+  if (bytes.length >= 12) {
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    versionWords.push(view.getInt32(0, false), view.getInt32(4, false), view.getInt32(8, false));
+  }
   return { size: bytes.length, versionWords, fields: parseIcff(bytes) };
 }
