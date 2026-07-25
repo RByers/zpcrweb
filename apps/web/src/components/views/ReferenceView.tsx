@@ -140,7 +140,7 @@ export function ReferenceView({ zpcr, settings, onChange }: Props) {
               options={[
                 ["raw", "Raw"],
                 ["delta", "ΔRFU"],
-                ["percent", "%"],
+                ["percent", "Drift %"],
               ]}
               value={settings.baseline}
               onChange={(v) => onChange({ baseline: v as Baseline })}
@@ -161,7 +161,7 @@ export function ReferenceView({ zpcr, settings, onChange }: Props) {
             {settings.baseline === "delta"
               ? " · ΔRFU from factory"
               : settings.baseline === "percent"
-                ? " · % of factory"
+                ? " · % drift from factory"
                 : ` · ${factoryCurves.length} factory`}
           </div>
         </aside>

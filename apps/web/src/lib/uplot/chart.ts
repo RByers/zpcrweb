@@ -54,9 +54,10 @@ function applyAdjust(values: number[], adjust: Adjust[]): number[] {
 /**
  * Per-cycle adjust for a well curve. ΔRFU plots drift from the matching factory value when one
  * exists (`shift = -factory`), else drift from the run's own first cycle (deltaBaseline's
- * behavior). "%" plots the value as a percentage of the matching factory value; with no factory
- * value to divide by, it has no defined meaning, so it falls back to raw (identity) like ΔRFU
- * falls back to deltaBaseline.
+ * behavior). "Drift %" plots `(live/factory - 1) * 100` — the same % deviation from factory
+ * `RefCalPanel`'s "Drift %" stat shows, just per cycle instead of run-averaged, so the origin
+ * is 0 (unchanged from factory), not 100. With no factory value to divide by, it has no
+ * defined meaning, so it falls back to raw (identity) like ΔRFU falls back to deltaBaseline.
  */
 function wellAdjust(values: number[], factory: number[] | undefined, baseline: Baseline): Adjust[] {
   if (baseline === "delta" && factory) {
@@ -69,7 +70,7 @@ function wellAdjust(values: number[], factory: number[] | undefined, baseline: B
   if (baseline === "percent" && factory) {
     return values.map((_, i) => {
       const f = factory[i] ?? 0;
-      return { scale: f !== 0 ? 100 / f : 1, shift: 0 };
+      return { scale: f !== 0 ? 100 / f : 1, shift: f !== 0 ? -100 : 0 };
     });
   }
   return values.map(() => IDENTITY_ADJUST);
@@ -241,10 +242,11 @@ export function buildChart(cfg: BuildChartConfig): {
     });
   }
 
-  // The factory line is redundant (and misleading — it'd plot as a flat 0) once ΔRFU is
-  // computed relative to it above, so it's only drawn against the raw/percent baselines —
-  // under "%" it plots as a flat 100, a visible reference for "on-spec".
-  if (baseline !== "delta") {
+  // The factory line is redundant once a well curve is already plotted relative to it: ΔRFU
+  // would show it as a flat 0, and "%" as a flat 100 — both constant and uninformative — so
+  // it's only drawn against the raw baseline, where it's the only way to see the factory
+  // reference at all.
+  if (baseline === "raw") {
     const presentPairs = new Set(wellCurves.map((c) => `${c.channel},${c.col}`));
     for (const key of presentPairs) {
       const factory = factoryByKey.get(key);
@@ -398,7 +400,7 @@ export function buildChart(cfg: BuildChartConfig): {
 
 function yLabel(baseline: Baseline): string {
   if (baseline === "delta") return "ΔRFU (mean)";
-  if (baseline === "percent") return "RFU (% of factory)";
+  if (baseline === "percent") return "Drift (%)";
   return "RFU (mean)";
 }
 

@@ -270,10 +270,12 @@ quickly isolating a single reference well's drift.
   reference well (`RunInfo.xml`'s `FactoryRefRowCal`; see `packages/core/src/refcal.ts`). Each
   is expanded to a flat line (`mean` repeated once per cycle) and passed to `CurveChart` as
   `factoryCurves`, an overlay concept added to `lib/uplot/chart.ts`'s `buildChart()` — matched
-  to a well curve's series by `channel,col` key and drawn **dotted** in the Raw and `%`
-  baselines, exactly the same "pure display overlay, never subtracted" pattern the Dark toggle
-  uses on the main Curves view (`darkCurves`), just keyed by column as well as channel since the
-  factory value differs per reference well rather than per channel alone. The tooltip shows
+  to a well curve's series by `channel,col` key and drawn **dotted** only in the Raw baseline
+  (ΔRFU and Drift % both plot the well curve relative to it, so the factory line would be a
+  flat, uninformative constant), exactly the same "pure display overlay, never subtracted"
+  pattern the Dark toggle uses on the main Curves view (`darkCurves`), just keyed by column as
+  well as channel since the factory value differs per reference well rather than per channel
+  alone. The tooltip shows
   the matched column (`R{n}`) alongside the channel/dye for a factory series, since a factory
   line's identity isn't otherwise visible the way a well curve's label is.
 - **Three baselines, one `{scale, shift}` model:** `buildChart()` maps each raw value to
@@ -282,14 +284,16 @@ quickly isolating a single reference well's drift.
   curve's own first cycle (`shift = -mean[0]`, matching library `deltaBaseline`); here, a well
   curve with a matching `factoryCurves` entry instead subtracts the factory value
   (`shift = -factory`) so the comparison the view exists to show isn't buried under the run's
-  own baseline drift — and the factory line itself is skipped in that mode (it would otherwise
-  be a flat, redundant 0). "%" is multiplicative (`scale = 100/factory, shift:0`), so the
-  factory line plots as a flat 100 rather than being skipped. Well curves with no matching
+  own baseline drift. "Drift %" is `(live/factory - 1) * 100` — `scale = 100/factory,
+  shift = -100` — the same % deviation `RefCalPanel`'s "Drift %" stat shows (run-averaged
+  there, per-cycle here), so its origin is 0 like ΔRFU's, not 100. Well curves with no matching
   factory value — none exist in this view today, but the fallback is generic — use identity for
-  both ΔRFU (falling back to the plain `deltaBaseline` shift) and `%` (no factory to divide by,
-  so it renders as raw). The same `{scale, shift}` per point is stored on each series' metadata
-  and reused by the hover whisker and min/max band, so they reposition correctly under a
-  multiplicative baseline instead of assuming ΔRFU's additive offset.
+  both ΔRFU (falling back to the plain `deltaBaseline` shift) and Drift % (no factory to divide
+  by, so it renders as raw). The factory line itself is only drawn under the raw baseline —
+  under ΔRFU or Drift % it would be a flat, redundant 0, now that the well curve is already
+  plotted relative to it. The same `{scale, shift}` per point is stored on each series'
+  metadata and reused by the hover whisker and min/max band, so they reposition correctly under
+  a multiplicative baseline instead of assuming ΔRFU's additive offset.
 - **`RefCalPanel`** (`components/views/RefCalPanel.tsx`, relocated from Overview): the
   col×channel drift/factory/live grid, from `zpcr.refCalComparison()` — a run-averaged summary
   alongside the chart's per-cycle detail. Laid out as `.refcal`, a two-column flex row (text +
