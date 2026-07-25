@@ -1,8 +1,15 @@
-import { useEffect, useMemo, useState } from "react";
-import type { Zpcr } from "@zpcrweb/core";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { parsePltd, parsePrcl, type Zpcr } from "@zpcrweb/core";
 import { DecodedView, decodedKind } from "../raw/DecodedView";
 import { PlateXml } from "../raw/DecodedPlate";
 import { ProtocolXml } from "../raw/DecodedProtocol";
+import { usePltdPassword } from "../../state/pltdPassword";
+import { decodedToCsv, downloadText } from "../../lib/download";
+
+/** Drop the archive entry's extension, e.g. "RunInfo.xml" -> "RunInfo". */
+function baseName(name: string): string {
+  return name.replace(/\.[^./\\]+$/, "");
+}
 
 type Mode = "decoded" | "text" | "hex";
 
@@ -66,6 +73,40 @@ export function RawFilesView({ zpcr }: { zpcr: Zpcr }) {
     return zpcr.archive.hexDump(selected, { maxBytes: limit });
   }, [zpcr, selected, mode, limit, isTextual, isPltd, isPrcl]);
 
+  // What "Text"/"XML" mode is currently showing, for the download button — re-derives the
+  // decrypted payload independently of <PlateXml>/<ProtocolXml> (same pattern those components
+  // already use themselves), since neither exposes its decoded XML string upward.
+  const [password] = usePltdPassword();
+  const textDownload = useMemo(() => {
+    if (mode !== "text" || !selected) return null;
+    if (isPltd) {
+      const pltd = parsePltd(zpcr.archive.bytes(selected), password ? { password } : undefined);
+      return pltd.xml ? { content: pltd.xml, ext: "xml" } : null;
+    }
+    if (isPrcl) {
+      const prcl = parsePrcl(zpcr.archive.bytes(selected), password ? { password } : undefined);
+      if (prcl.container.format === "text") {
+        return prcl.protocol ? { content: prcl.protocol.runDefinition, ext: "txt" } : null;
+      }
+      return prcl.xml ? { content: prcl.xml, ext: "xml" } : null;
+    }
+    if (isTextual) return { content: rawBody, ext: "txt" };
+    return null;
+  }, [mode, selected, isPltd, isPrcl, isTextual, zpcr, password, rawBody]);
+
+  const decodedRef = useRef<HTMLDivElement>(null);
+  const canDownload = mode === "decoded" ? hasDecoded : textDownload !== null;
+
+  const handleDownload = () => {
+    if (mode === "decoded") {
+      if (!decodedRef.current) return;
+      downloadText(`${baseName(selected)}.csv`, decodedToCsv(decodedRef.current), "text/csv");
+    } else if (textDownload) {
+      const name = isPltd || isPrcl ? `${baseName(selected)}.${textDownload.ext}` : selected;
+      downloadText(name, textDownload.content, textDownload.ext === "xml" ? "application/xml" : "text/plain");
+    }
+  };
+
   return (
     <div className="raw">
       <aside className="raw__list">
@@ -114,10 +155,18 @@ export function RawFilesView({ zpcr }: { zpcr: Zpcr }) {
               Hex
             </button>
           </div>
+          <button
+            className="raw__download"
+            onClick={handleDownload}
+            disabled={!canDownload}
+            title={mode === "decoded" ? "Download table as CSV" : "Download as a file"}
+          >
+            Download
+          </button>
         </div>
 
         {mode === "decoded" ? (
-          <div className="raw__decoded">
+          <div className="raw__decoded" ref={decodedRef}>
             <DecodedView zpcr={zpcr} name={selected} />
           </div>
         ) : mode === "text" && isPltd ? (

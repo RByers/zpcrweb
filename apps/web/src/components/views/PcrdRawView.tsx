@@ -1,7 +1,8 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { Zpcr } from "@zpcrweb/core";
-import { parseXmlFragment, XmlTree } from "../../lib/xmlTree";
+import { parseXmlFragment, serializeXmlPretty, XmlTree } from "../../lib/xmlTree";
 import { logEntriesFromElements, summarizeRunLog } from "../../lib/runlog";
+import { decodedToCsv, downloadText } from "../../lib/download";
 import { DecodedPlateread } from "../raw/DecodedPlateread";
 import { PlateTable } from "../raw/PlateTable";
 import { RunInfoTable, ProtocolDecoded } from "../raw/DecodedView";
@@ -128,6 +129,32 @@ function entryKey(entry: NavEntry): string {
   return entry.kind;
 }
 
+/** The XML subtree(s) the "XML" mode renders for a nav entry — mirrors the `mode === "xml"`
+ * branches of {@link PcrdRawContent}, kept separate so the download button can grab the same
+ * roots without rendering. */
+function xmlRootsFor(doc: PcrdDocument, entry: NavEntry): Element[] {
+  switch (entry.kind) {
+    case "document":
+      return [doc.root];
+    case "plateSetup":
+      return doc.plateSetup2El ? [doc.plateSetup2El] : [];
+    case "protocol":
+      return doc.protocol2El ? [doc.protocol2El] : [];
+    case "plateRead": {
+      const el = doc.plateReadEls[entry.index];
+      return el ? [el] : [];
+    }
+    case "calibration":
+      return doc.calibrationEl ? [doc.calibrationEl] : [];
+    case "runInfo":
+      return doc.runInfoEl ? [doc.runInfoEl] : [];
+    case "log":
+      return doc.logEls;
+    case "other":
+      return [entry.el];
+  }
+}
+
 export function PcrdRawView({ zpcr, documentXml }: { zpcr: Zpcr; documentXml: string }) {
   const doc = useMemo(() => {
     // parseXmlFragment always wraps the parsed content in a synthetic root (needed for
@@ -156,6 +183,20 @@ export function PcrdRawView({ zpcr, documentXml }: { zpcr: Zpcr; documentXml: st
     entry.kind === "plateRead" ||
     entry.kind === "runInfo" ||
     entry.kind === "log";
+
+  const decodedRef = useRef<HTMLDivElement>(null);
+  const canDownload = mode === "xml" ? xmlRootsFor(doc, selected).length > 0 : hasDecoded(selected);
+
+  const handleDownload = () => {
+    const fname = entryLabel(selected, doc).replace(/[^\w.-]+/g, "_");
+    if (mode === "xml") {
+      const roots = xmlRootsFor(doc, selected);
+      if (roots.length === 0) return;
+      downloadText(`${fname}.xml`, serializeXmlPretty(roots), "application/xml");
+    } else if (decodedRef.current) {
+      downloadText(`${fname}.csv`, decodedToCsv(decodedRef.current), "text/csv");
+    }
+  };
 
   return (
     <div className="raw">
@@ -198,9 +239,17 @@ export function PcrdRawView({ zpcr, documentXml }: { zpcr: Zpcr; documentXml: st
               XML
             </button>
           </div>
+          <button
+            className="raw__download"
+            onClick={handleDownload}
+            disabled={!canDownload}
+            title={mode === "decoded" ? "Download table as CSV" : "Download as a file"}
+          >
+            Download
+          </button>
         </div>
 
-        <div className="raw__decoded">
+        <div className="raw__decoded" ref={decodedRef}>
           <PcrdRawContent zpcr={zpcr} doc={doc} entry={selected} mode={mode} />
         </div>
       </section>

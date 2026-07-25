@@ -153,3 +153,40 @@ export function XmlTreeFromString({ xml }: { xml: string }) {
   if (roots.length === 0) return <pre className="decoded__xml mono">{xml}</pre>;
   return <XmlTree roots={roots} />;
 }
+
+function escapeText(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function escapeAttr(s: string): string {
+  return escapeText(s).replace(/"/g, "&quot;");
+}
+
+function serializeNode(el: Element, depth: number, lines: string[]): void {
+  const indent = "  ".repeat(depth);
+  const attrs = Array.from(el.attributes)
+    .map((a) => ` ${a.name}="${escapeAttr(a.value)}"`)
+    .join("");
+  const children = Array.from(el.children);
+  if (children.length === 0) {
+    const text = (el.textContent ?? "").trim();
+    lines.push(
+      text === ""
+        ? `${indent}<${el.tagName}${attrs} />`
+        : `${indent}<${el.tagName}${attrs}>${escapeText(text)}</${el.tagName}>`,
+    );
+    return;
+  }
+  lines.push(`${indent}<${el.tagName}${attrs}>`);
+  for (const c of children) serializeNode(c, depth + 1, lines);
+  lines.push(`${indent}</${el.tagName}>`);
+}
+
+/** Pretty-print a set of top-level XML elements as indented text (2 spaces/level), fully
+ * expanded — used for downloading a `.pcrd` document subtree, which `<XmlTree>` only ever
+ * renders lazily/collapsibly. */
+export function serializeXmlPretty(roots: Element[]): string {
+  const lines: string[] = [];
+  for (const r of roots) serializeNode(r, 0, lines);
+  return lines.join("\n");
+}

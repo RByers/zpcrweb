@@ -645,6 +645,24 @@
   margin: 10px;
   align-self: flex-start;
 }
+.raw__download {
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--ink-2);
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.raw__download:hover:not(:disabled) {
+  background: var(--raised);
+  color: var(--ink);
+}
+.raw__download:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
 
 /* Narrow: stack raw list above viewer. */
 @container appmain (inline-size < 640px) {
