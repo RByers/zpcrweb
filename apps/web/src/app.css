@@ -651,6 +651,77 @@
   }
 }
 
+/* ---- Plates view ---------------------------------------------------------
+ * Flex, not `.raw`'s grid: the plate-list sidebar is conditional (only shown for
+ * multiple plates), and a grid's fixed column tracks would strand the lone
+ * `.plateview__main` child in the narrow first track when there's no sidebar to
+ * fill the other one. Flex lets the single child claim the full width naturally. */
+.plateview {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+}
+.plateview__list {
+  flex: 0 0 clamp(220px, 22cqi, 280px);
+  overflow-y: auto;
+}
+.plateview__main {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: 14px 16px;
+  /* Own container context so the plateviewer's internal layout responds to the
+     space actually available to it, independent of whether the sidebar above is showing. */
+  container: platemain / inline-size;
+}
+
+@container appmain (inline-size < 640px) {
+  .plateview {
+    flex-direction: column;
+  }
+  .plateview__list {
+    flex: 0 0 auto;
+    max-height: 30%;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+}
+
+/* PlateViewer: grid + header on the left, selected-well detail on the right once there's
+ * room — stacked below on narrow containers instead of pushing the page into a long scroll. */
+.plateviewer {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  font-size: 12px;
+  align-items: flex-start;
+}
+.plateviewer__main {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  min-width: 0;
+  width: 100%;
+}
+.plateviewer__detail {
+  width: 100%;
+}
+
+@container platemain (inline-size >= 720px) {
+  .plateviewer {
+    flex-direction: row;
+  }
+  .plateviewer__main {
+    flex: 1;
+  }
+  .plateviewer__detail {
+    flex: 0 0 320px;
+    position: sticky;
+    top: 0;
+  }
+}
+
 /* ---- Decoded view ------------------------------------------------------- */
 .raw__decoded {
   flex: 1;
