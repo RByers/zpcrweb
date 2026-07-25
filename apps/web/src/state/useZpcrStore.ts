@@ -61,6 +61,10 @@ export interface RunResult {
   error: string | null;
   /** `.pcrd` container metadata, available even before/without a working password. */
   container?: PcrdContainer;
+  /** A `.pcrd`'s full raw decrypted document — there's no inner-file archive to browse (see
+   * `Zpcr.archive`'s doc comment), so the app's `.pcrd` raw view renders this directly as a
+   * real XML tree. Undefined for `.zpcr` (and for a `.pcrd` before/without a working password). */
+  documentXml?: string;
 }
 
 function parseRun(bytes: Uint8Array, kind: FileKind, password: string): RunResult {
@@ -77,6 +81,7 @@ function parseRun(bytes: Uint8Array, kind: FileKind, password: string): RunResul
     needsPassword: !!pcrd.needsPassword,
     error: pcrd.error ?? null,
     container: pcrd.container,
+    documentXml: pcrd.xml,
   };
 }
 

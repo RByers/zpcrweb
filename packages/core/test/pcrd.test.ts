@@ -92,15 +92,16 @@ describe.skipIf(!PW)("pcrd — decode (requires CFX_PLTD_PASSWORD)", () => {
     expect(plate.fluors.map((f) => f.fluor)).toEqual(["FAM", "Texas Red", "Cy5"]);
   });
 
-  it("exposes not-yet-decoded subtrees for raw exploration via the virtual archive", () => {
+  it("exposes the real protocol text via protocolText and reports an empty archive", () => {
     const zpcr = parsePcrd(readBytes(PCRD_PATH), { password: PW }).zpcr!;
-    expect(zpcr.archive.entries).toContain("RunInfo.xml");
-    expect(zpcr.archive.entries).toContain("ProtocolRunDefinition.txt");
-    expect(zpcr.archive.entries).toContain("runlog.xml");
-    expect(zpcr.archive.entries).toContain("Read00001.Plateread");
-    expect(zpcr.archive.entries).toContain("calibrationCollection.xml");
-    expect(zpcr.archive.entries).toContain("dataAnalysisParameters.xml");
-    expect(zpcr.archive.text("ProtocolRunDefinition.txt")).toContain("METHOD CALC");
-    expect(zpcr.archive.text("dataAnalysisParameters.xml").length).toBeGreaterThan(0);
+    expect(zpcr.protocolText).toContain("METHOD CALC");
+    expect(zpcr.archive.entries).toEqual([]);
+  });
+
+  it("exposes not-yet-decoded subtrees verbatim in the full raw document (Pcrd.xml)", () => {
+    const pcrd = parsePcrd(readBytes(PCRD_PATH), { password: PW });
+    expect(pcrd.xml).toContain("<experimentalData2");
+    expect(pcrd.xml).toContain("calibrationCollection");
+    expect(pcrd.xml).toContain("dataAnalysisParameters");
   });
 });

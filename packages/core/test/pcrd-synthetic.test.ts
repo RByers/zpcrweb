@@ -222,23 +222,30 @@ describe("pcrd — synthetic round trip (no real password needed)", () => {
     const zpcr = parsePcrd(zipBytes, { password }).zpcr!;
     const plates = zpcr.plates();
     expect(plates).toHaveLength(1);
+    expect(plates[0]!.name).toBe("plateSetup2");
     expect(plates[0]!.pltd.plate!.plateName).toBe("Test Plate");
     expect(plates[0]!.pltd.plate!.fluors).toEqual([{ fluor: "FAM", channel: 0, fluorId: "1" }]);
   });
 
-  it("exposes the virtual archive, including not-yet-decoded subtrees", () => {
+  it("exposes the real protocol text via protocolText, not a fake archive entry", () => {
     const zpcr = parsePcrd(zipBytes, { password }).zpcr!;
-    expect(zpcr.archive.entries).toContain("Read00001.Plateread");
-    expect(zpcr.archive.entries).toContain("Read00002.Plateread");
-    expect(zpcr.archive.entries).toContain("RunInfo.xml");
-    expect(zpcr.archive.entries).toContain("ProtocolRunDefinition.txt");
-    expect(zpcr.archive.entries).toContain("runlog.xml");
-    expect(zpcr.archive.entries).toContain("plateSetup2.xml");
-    expect(zpcr.archive.entries).toContain("dataAnalysisParameters.xml");
-    expect(zpcr.archive.entries).toContain("calibrationCollection.xml");
-    expect(zpcr.archive.text("ProtocolRunDefinition.txt")).toContain("METHOD CALC");
-    expect(zpcr.archive.text("dataAnalysisParameters.xml")).toContain("selectedStepNumber");
-    expect(zpcr.archive.hexDump("Read00001.Plateread").length).toBeGreaterThan(0);
+    expect(zpcr.protocolText).toContain("METHOD CALC");
+  });
+
+  it("reports an honestly-empty archive — a .pcrd has no inner files", () => {
+    const zpcr = parsePcrd(zipBytes, { password }).zpcr!;
+    expect(zpcr.archive.entries).toEqual([]);
+    expect(() => zpcr.archive.text("anything")).toThrow();
+    expect(() => zpcr.archive.bytes("anything")).toThrow();
+    expect(() => zpcr.archive.hexDump("anything")).toThrow();
+  });
+
+  it("exposes not-yet-decoded subtrees verbatim in the full raw document (Pcrd.xml)", () => {
+    const pcrd = parsePcrd(zipBytes, { password });
+    expect(pcrd.xml).toContain("<experimentalData2");
+    expect(pcrd.xml).toContain("dataAnalysisParameters");
+    expect(pcrd.xml).toContain("selectedStepNumber");
+    expect(pcrd.xml).toContain("calibrationCollection");
   });
 
   it("reports an error (not needsPassword) on a wrong password", () => {

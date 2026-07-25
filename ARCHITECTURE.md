@@ -65,24 +65,29 @@ than let that difference leak into every consumer, `parsePcrd` decodes straight 
   plate reads are decoded from `<PlateRead>` XML elements (`decodePcrdPlateRead` in `pcrd.ts`)
   into the identical `PlateRead` interface `decodePlateRead` produces from the binary
   `.Plateread` layout — same `wells`/`dark`/`temps`/`get()`, different source bytes.
-- **`Zpcr.archive`** — for a `.pcrd`, this is a *virtual* archive: there are no real inner
-  files, so `pcrd.ts` synthesizes pseudo-entries from the document's XML subtrees. Where a
-  `.zpcr` equivalent exists, the pseudo-entry is named to match it exactly (`RunInfo.xml`,
-  `ProtocolRunDefinition.txt`, `runlog.xml`, `Read00001.Plateread`, …), so the web app's
-  existing per-file-type routing (`decodedKind` in `apps/web`) needs no format-specific
-  branching. Subtrees with no `.zpcr` equivalent and no dedicated decoder yet
-  (`dataAnalysisParameters`, `calibrationCollection`, `PersistedData`, …) are still exposed
-  verbatim as `<name>.xml` entries — raw exploration for data this library hasn't interpreted.
+- **`Zpcr.archive`** — a `.pcrd` has no inner files at all (it's one XML document, not an
+  archive), so for a `.pcrd`-derived `Zpcr` this is an honestly empty `ArchiveAccess`:
+  `entries` is `[]` and the accessors throw. This library does **not** pretend a `.pcrd` has
+  files matching `.zpcr`'s names — the web app instead browses the document's real XML
+  structure directly (see `apps/web/ARCHITECTURE.md`), using the full raw document text
+  returned as `Pcrd.xml` alongside `zpcr`.
+- **`Zpcr.protocolText`** — the thermal protocol's one-line program, sourced from the real
+  `ProtocolRunDefinition.txt` file (`.zpcr`) or the `protocol2` element's `runDefinition`
+  attribute (`.pcrd`) — the one piece of `.pcrd` data that needed lifting into a proper `Zpcr`
+  field (rather than a fake archive entry) because a real `.zpcr` consumer (`OverviewView`)
+  already depended on reading it by name.
 - **`Zpcr.plates()`** — a `.pcrd` embeds exactly one plate (`plateSetup2`), already decrypted
   along with the rest of the document. `pcrd.ts` reuses `pltd.ts`'s `parsePlatesetup2` (the
   same `<platesetup2>`/`<plateSetup2>` schema, differing only in root-tag case) and wraps it in
-  a synthetic `PltdEntry` with no password step, so `zpcr.plates()` behaves the same for both
-  formats even though only a `.zpcr`'s *embedded* `.pltd` entries actually need a password.
+  a `PltdEntry` with no password step, so `zpcr.plates()` behaves the same for both formats
+  even though only a `.zpcr`'s *embedded* `.pltd` entries actually need a password.
 
 The one place formats stay genuinely distinct is the top-level decrypt step: `parsePcrd`
-returns `{ container, needsPassword?, error?, zpcr? }` (mirroring `parsePltd`'s `Pltd` shape)
-because the whole document — not just an embedded plate — is ZipCrypto-encrypted and needs a
-password before any of the above exists.
+returns `{ container, needsPassword?, error?, xml?, zpcr? }` (mirroring `parsePltd`'s `Pltd`
+shape) because the whole document — not just an embedded plate — is ZipCrypto-encrypted and
+needs a password before any of the above exists. `xml` is the full raw decrypted document,
+independent of `zpcr` — the app's only way to browse subtrees this module doesn't decode
+(`dataAnalysisParameters`, `calibrationCollection`, `PersistedData`, …).
 
 ## Why fflate
 
@@ -142,7 +147,8 @@ raw bytes ─▶ fflate.unzipSync ─▶ { name: Uint8Array }
   `plateReadDataVector` → each `plateRead`) without a full DOM parse.
 - **`pcrd.ts`** — decodes a `.pcrd` (see `pcrd.md` and "Two input formats" above) into a `Zpcr`.
   Shares its container/decrypt/inflate path with `pltd.ts` via `zipsingle.ts`/`zipcrypto.ts`/
-  `inflate.ts`; its own code is XML traversal (`xmlLite.ts`) plus building the virtual archive.
+  `inflate.ts`; its own code is XML traversal (`xmlLite.ts`) to build `PlateRead[]`, the
+  embedded plate, and `protocolText` — `Zpcr.archive` is a trivial empty stub (see above).
 - **`zpcr.ts`** — orchestrates the above into the public `Zpcr` object (the `.zpcr` path;
   `pcrd.ts` builds the equivalent object directly for `.pcrd`).
 
@@ -159,12 +165,12 @@ Both are provided because they serve different consumers:
 
 ## Low-level archive API
 
-Full visualizers for every remaining file type (protocol, `.alf`, `runlog.xml`) are
+Full visualizers for every remaining `.zpcr` file type (protocol, `.alf`, `runlog.xml`) are
 future work. Until then, `Zpcr.archive` lets the UI show the raw `bytes`, decoded `text`, or a
-canonical `hexDump` of any archive entry — real files for a `.zpcr`, synthesized pseudo-files
-for a `.pcrd` (see "Two input formats" above). This means the app can present *something*
+canonical `hexDump` of any real archive entry. This means the app can present *something*
 useful for every file from day one, and new typed parsers can be layered in without changing
-the low-level contract.
+the low-level contract. This is `.zpcr`-only — a `.pcrd`'s `archive` is empty by design (see
+"Two input formats" above); its raw exploration is a real XML tree, not a file list.
 
 ## Coordinate convention
 
