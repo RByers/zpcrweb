@@ -23,12 +23,15 @@ import type {
   PlateRead,
   PlateReadTemp,
   PltdEntry,
+  PrclEntry,
   RunMetadata,
   WellReading,
   Zpcr,
 } from "./types.js";
 import type { PlateDefinition } from "./pltd.js";
 import { parsePlatesetup2 } from "./pltd.js";
+import type { ProtocolDocument } from "./prcl.js";
+import { parseProtocol2 } from "./prcl.js";
 import { zipCryptoDecrypt } from "./zipcrypto.js";
 import { inflateRaw } from "./inflate.js";
 import { parseSingleEntryZip } from "./zipsingle.js";
@@ -415,6 +418,10 @@ function buildZpcr(root: XmlElement[]): Zpcr {
     ? parsePlatesetup2(`<plateSetup2${attrsToString(plateSetup2.attrs)}>${plateSetup2.inner}</plateSetup2>`)
     : undefined;
 
+  const protocol: ProtocolDocument | undefined = protocol2
+    ? parseProtocol2(`<protocol2${attrsToString(protocol2.attrs)}>${protocol2.inner}</protocol2>`)
+    : undefined;
+
   const archive = buildVirtualArchive(
     root,
     reads,
@@ -445,6 +452,28 @@ function buildZpcr(root: XmlElement[]): Zpcr {
         ]
       : [];
 
+  const protocols = (): PrclEntry[] =>
+    protocol2 && protocol
+      ? [
+          {
+            name: "protocol2.xml",
+            prcl: {
+              container: {
+                format: "zip",
+                innerName: "protocol2 (embedded in .pcrd)",
+                compressionMethod: 8,
+                encrypted: false,
+                crc32: 0,
+                compressedSize: 0,
+                uncompressedSize: protocol2.inner.length,
+              },
+              protocol,
+              xml: archive.text("protocol2.xml"),
+            },
+          },
+        ]
+      : [];
+
   return {
     metadata,
     reads,
@@ -455,6 +484,7 @@ function buildZpcr(root: XmlElement[]): Zpcr {
     steps: () => toSteps(reads),
     channels: () => toChannels(reads),
     plates,
+    protocols,
     // A .pcrd's calibrationCollection subtree covers the same ground as .Dcal files (see
     // pcrd.md §3.6) but in an unrelated XML schema, not yet decoded into DcalEntry -- it's
     // still reachable verbatim via archive.text("calibrationCollection.xml") for now.

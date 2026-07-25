@@ -40,6 +40,7 @@ export {
   ROWS,
 } from "./plateread.js";
 export { parsePltd, isPltdName } from "./pltd.js";
+export { parsePrcl, parseProtocol2, isPrclName } from "./prcl.js";
 export { parseDcal, findDcalBlock, isDcalName } from "./dcal.js";
 export { parsePcrd, isPcrdName, pcrdFromBlob } from "./pcrd.js";
 export {
@@ -70,6 +71,7 @@ export type {
   RefWellCal,
   RefCalComparison,
   PltdEntry,
+  PrclEntry,
   DcalEntry,
 } from "./types.js";
 export type { IcffEntry } from "./icff.js";
@@ -85,6 +87,17 @@ export type {
   SampleType,
 } from "./pltd.js";
 export type { Dcal, DcalBlock, DcalSecurity, DcalSerials } from "./dcal.js";
+export type {
+  Prcl,
+  PrclContainer,
+  PrclOptions,
+  ProtocolDocument,
+  ProtocolStep,
+  TemperatureStep,
+  GradientStep,
+  MeltCurveStep,
+  GotoStep,
+} from "./prcl.js";
 export type { Pcrd, PcrdContainer, PcrdOptions } from "./pcrd.js";
 export type {
   ResponseKnot,

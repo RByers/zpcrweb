@@ -1,6 +1,7 @@
-import type { CurveOptions, DcalEntry, PlateRead, PltdEntry, Zpcr } from "./types.js";
+import type { CurveOptions, DcalEntry, PlateRead, PltdEntry, PrclEntry, Zpcr } from "./types.js";
 import { createArchiveAccess, unzipArchive } from "./archive.js";
 import { isPltdName, parsePltd } from "./pltd.js";
+import { isPrclName, parsePrcl } from "./prcl.js";
 import { isDcalName, parseDcal } from "./dcal.js";
 import {
   decodePlateRead,
@@ -61,6 +62,13 @@ export function parseZpcr(data: Uint8Array | ArrayBuffer): Zpcr {
         .map((name) => ({
           name,
           pltd: parsePltd(files[name] as Uint8Array, password ? { password } : undefined),
+        })),
+    protocols: (password?: string): PrclEntry[] =>
+      archive.entries
+        .filter(isPrclName)
+        .map((name) => ({
+          name,
+          prcl: parsePrcl(files[name] as Uint8Array, password ? { password } : undefined),
         })),
     calibrations: (): DcalEntry[] =>
       archive.entries

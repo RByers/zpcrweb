@@ -14,9 +14,11 @@ is in each well" half.
 > installation, covering hold/cycle, gradient, melt, genotyping, conventional and real-time
 > protocols.
 >
-> **Not yet implemented** — there is no `prcl.ts` in `packages/core/src`. This document is the
-> specification to implement against; everything below was read out of real files using the
-> existing `zipsingle.ts` + `zipcrypto.ts` + `inflate.ts`.
+> Implemented by `packages/core/src/prcl.ts` (`parsePrcl(bytes)`, plus `parseProtocol2(xml)` for
+> the standalone `<protocol2>` fragment `pcrd.ts` reuses), on top of the existing `zipsingle.ts` +
+> `zipcrypto.ts` + `inflate.ts`. Both container variants below are sniffed and handled — the ZIP
+> variant using variant B's container quirks (`zipcrypto.md` §"variant B": leading spanning
+> marker, data descriptor) same as `.pltd`.
 
 ---
 

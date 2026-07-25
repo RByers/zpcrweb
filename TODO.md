@@ -26,8 +26,8 @@ Additional typed parsers for the archive files currently reachable only via the 
       `RunInfo.xml` into typed per-well records.
 - [x] Parse the .pltd file and try to decode how they define plates (flourophores, targets
       and samples per well). Done — see [`pltd.md`](./pltd.md) and `parsePltd` / `zpcr.plates()`.
-- [ ] Parse the .prcl file and try to decode how it defines a protocol. **Format is decoded —
-      see [`prcl.md`](./prcl.md); implementation (`prcl.ts` / `zpcr.protocols()`) still to do.**
+- [x] Parse the .prcl file and try to decode how it defines a protocol. Done — see
+      [`prcl.md`](./prcl.md) and `parsePrcl` / `zpcr.protocols()`.
       On the original question: it does *not* map exactly to `ProtocolRunDefinition.txt`. The
       `.prcl` embeds the same text grammar in its `runDefinition` attribute, but the archive's
       `.txt` differs in the `PLATEREAD` operand (`#h81` vs `#h3F`) and the terminator — the

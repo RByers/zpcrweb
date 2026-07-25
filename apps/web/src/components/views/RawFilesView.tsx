@@ -2,18 +2,20 @@ import { useEffect, useMemo, useState } from "react";
 import type { Zpcr } from "@zpcrweb/core";
 import { DecodedView, decodedKind } from "../raw/DecodedView";
 import { PlateXml } from "../raw/DecodedPlate";
+import { ProtocolXml } from "../raw/DecodedProtocol";
 
 type Mode = "decoded" | "text" | "hex";
 
 function group(name: string): string {
   if (/\.Plateread$/i.test(name)) return "Plate reads";
   if (/\.pltd$/i.test(name) || name === "plateSetup2.xml") return "Plate setup";
+  if (/\.prcl$/i.test(name) || name === "protocol2.xml") return "Protocol";
   if (/\.Dcal$/i.test(name) || name === "calibrationCollection.xml") return "Calibration";
   if (/\.(xml|txt|alf)$/i.test(name)) return "Metadata";
   return "Other";
 }
 
-const GROUP_ORDER = ["Metadata", "Plate setup", "Plate reads", "Calibration", "Other"];
+const GROUP_ORDER = ["Metadata", "Plate setup", "Protocol", "Plate reads", "Calibration", "Other"];
 const TEXTUAL = /\.(xml|txt|alf)$/i;
 
 /** Best default mode for a file: decoded if a decoder exists, else text for text, else hex. */
@@ -48,18 +50,21 @@ export function RawFilesView({ zpcr }: { zpcr: Zpcr }) {
     setLimit(4096);
   }, [selected]);
 
-  // `.pltd` is binary (an encrypted ZIP), but its "Text" view is the decrypted XML payload.
+  // `.pltd`/`.prcl` are usually binary (an encrypted ZIP), but their "Text" view is the
+  // decrypted XML payload (or, for a plaintext `.prcl`, the raw runDefinition — see prcl.md
+  // §1.1, handled inside <ProtocolXml> itself).
   const isPltd = /\.pltd$/i.test(selected);
-  const isTextual = TEXTUAL.test(selected) || isPltd;
+  const isPrcl = /\.prcl$/i.test(selected);
+  const isTextual = TEXTUAL.test(selected) || isPltd || isPrcl;
   const hasDecoded = decodedKind(selected) !== null;
   const size = selected ? zpcr.archive.bytes(selected).length : 0;
 
   const rawBody = useMemo(() => {
     if (!selected || mode === "decoded") return "";
-    if (mode === "text" && isPltd) return ""; // rendered via <PlateXml>, not raw text
+    if (mode === "text" && (isPltd || isPrcl)) return ""; // rendered via <PlateXml>/<ProtocolXml>
     if (mode === "text" && isTextual) return zpcr.archive.text(selected);
     return zpcr.archive.hexDump(selected, { maxBytes: limit });
-  }, [zpcr, selected, mode, limit, isTextual, isPltd]);
+  }, [zpcr, selected, mode, limit, isTextual, isPltd, isPrcl]);
 
   return (
     <div className="raw">
@@ -98,9 +103,9 @@ export function RawFilesView({ zpcr }: { zpcr: Zpcr }) {
               className={"segmented__item" + (mode === "text" ? " is-active" : "")}
               onClick={() => setMode("text")}
               disabled={!isTextual}
-              title={isPltd ? "Decrypted XML" : isTextual ? "" : "Binary file — hex only"}
+              title={isPltd || isPrcl ? "Decrypted XML" : isTextual ? "" : "Binary file — hex only"}
             >
-              {isPltd ? "XML" : "Text"}
+              {isPltd || isPrcl ? "XML" : "Text"}
             </button>
             <button
               className={"segmented__item" + (mode === "hex" ? " is-active" : "")}
@@ -118,6 +123,10 @@ export function RawFilesView({ zpcr }: { zpcr: Zpcr }) {
         ) : mode === "text" && isPltd ? (
           <div className="raw__decoded">
             <PlateXml zpcr={zpcr} name={selected} />
+          </div>
+        ) : mode === "text" && isPrcl ? (
+          <div className="raw__decoded">
+            <ProtocolXml zpcr={zpcr} name={selected} />
           </div>
         ) : (
           <>

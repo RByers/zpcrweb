@@ -155,6 +155,7 @@ import type { RefWellCal, RefCalComparison } from "./refcal.js";
 export type { RefWellCal, RefCalComparison } from "./refcal.js";
 import type { Pltd } from "./pltd.js";
 import type { Dcal } from "./dcal.js";
+import type { Prcl } from "./prcl.js";
 
 /** A `.pltd` archive entry paired with its decoded plate definition. */
 export interface PltdEntry {
@@ -162,6 +163,14 @@ export interface PltdEntry {
   name: string;
   /** The parsed container + plate (see {@link Pltd}). */
   pltd: Pltd;
+}
+
+/** A `.prcl` archive entry paired with its decoded protocol. */
+export interface PrclEntry {
+  /** Archive entry name, e.g. `Short Qualification_Plate_96.prcl`. */
+  name: string;
+  /** The parsed container + protocol (see {@link Prcl}). */
+  prcl: Prcl;
 }
 
 /** A `.Dcal` archive entry paired with its decoded pure-dye calibration. */
@@ -247,6 +256,12 @@ export interface Zpcr {
    * `password` (this library ships none); without it each entry reports `needsPassword`.
    */
   plates(password?: string): PltdEntry[];
+  /**
+   * Decode every `.prcl` protocol entry in the archive. Not every archive includes one
+   * (`prcl.md` §1). Encrypted entries need the `password` (this library ships none); without
+   * it each entry reports `needsPassword`.
+   */
+  protocols(password?: string): PrclEntry[];
   /** Decode every `.Dcal` pure-dye calibration entry in the archive (unencrypted). */
   calibrations(): DcalEntry[];
   /** Optical channel indices that hold data, from `CHANNELMASK` (e.g. `[0]` or `[0..5]`). */
