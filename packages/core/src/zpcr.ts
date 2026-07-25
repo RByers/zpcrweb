@@ -1,7 +1,15 @@
-import type { CurveOptions, DcalEntry, PlateRead, PltdEntry, PrclEntry, Zpcr } from "./types.js";
+import type {
+  CurveOptions,
+  DcalEntry,
+  PlateRead,
+  PltdEntry,
+  PrclEntry,
+  ProtocolDocument,
+  Zpcr,
+} from "./types.js";
 import { createArchiveAccess, unzipArchive } from "./archive.js";
 import { isPltdName, parsePltd } from "./pltd.js";
-import { isPrclName, parsePrcl } from "./prcl.js";
+import { isPrclName, parsePrcl, protocolDocumentFromRunDefinition } from "./prcl.js";
 import { isDcalName, parseDcal } from "./dcal.js";
 import {
   decodePlateRead,
@@ -20,6 +28,7 @@ import { compareRefToCal, parseFactoryRefRowCal } from "./refcal.js";
 
 const RUNINFO_NAME = "RunInfo.xml";
 const PROTOCOL_NAME = "ProtocolRunDefinition.txt";
+const PROTOCOL_NAME_TXT = "ProtocolName.txt";
 const textDecoder = new TextDecoder("utf-8");
 
 /** Normalize the accepted isomorphic input types into a `Uint8Array`. */
@@ -53,6 +62,16 @@ export function parseZpcr(data: Uint8Array | ArrayBuffer): Zpcr {
     reads,
     archive,
     protocolText: archive.entries.includes(PROTOCOL_NAME) ? archive.text(PROTOCOL_NAME) : "",
+    protocol: (): ProtocolDocument | undefined => {
+      const protocolText = archive.entries.includes(PROTOCOL_NAME)
+        ? archive.text(PROTOCOL_NAME)
+        : "";
+      if (!protocolText) return undefined;
+      const name = archive.entries.includes(PROTOCOL_NAME_TXT)
+        ? archive.text(PROTOCOL_NAME_TXT).trim()
+        : "";
+      return protocolDocumentFromRunDefinition(name, protocolText);
+    },
     curves: (options?: CurveOptions) => toCurves(reads, options),
     darkCurves: (step?: number) => toDarkCurves(reads, step),
     temperatureCurves: (step?: number) => toTemperatureCurves(reads, step),

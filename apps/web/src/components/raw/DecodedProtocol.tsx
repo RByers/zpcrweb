@@ -1,14 +1,9 @@
 import { useMemo } from "react";
-import {
-  parsePrcl,
-  type Prcl,
-  type ProtocolDocument,
-  type ProtocolStep,
-  type Zpcr,
-} from "@zpcrweb/core";
+import { parsePrcl, type Prcl, type ProtocolDocument, type Zpcr } from "@zpcrweb/core";
 import { usePltdPassword } from "../../state/pltdPassword";
 import { PasswordPrompt } from "../PasswordPrompt";
 import { ProtocolDecoded } from "./DecodedView";
+import { ProtocolStepsTable } from "./ProtocolSteps";
 import { XmlTreeFromString } from "../../lib/xmlTree";
 
 /** Decode a `.prcl` with the client-stored password (shared with `.pltd`/`.pcrd`, see
@@ -66,30 +61,14 @@ export function DecodedProtocol({ zpcr, name }: { zpcr: Zpcr; name: string }) {
   return <ProtocolDetail protocol={prcl.protocol} sourceHint={sourceHint} />;
 }
 
-/** Human-readable text for one step, GOTO-target-friendly (`Step N` matches `stepNumber`). */
-function stepSummary(step: ProtocolStep): string {
-  switch (step.kind) {
-    case "temperature":
-      return `Hold ${step.tempC}°C for ${step.holdSeconds}s`;
-    case "gradient":
-      return `Gradient ${step.lowTempC}–${step.highTempC}°C for ${step.holdSeconds}s`;
-    case "melt":
-      return (
-        `Melt ${step.startTempC}°C → ${step.endTempC ?? "?"}°C, ` +
-        `+${step.incrementC}°C/step, hold ${step.holdSeconds}s`
-      );
-    case "goto":
-      return `Goto step ${step.targetStep}, repeat ${step.repeats}× more (${step.repeats + 1} total passes)`;
-  }
-}
-
 /**
  * The decoded protocol for a {@link ProtocolDocument}: root settings (lid, volume, real-time)
  * plus the ordered step table when one was parsed from the XML `protocol2` payload, or the
  * flat `;`-separated `runDefinition` text (via the shared {@link ProtocolDecoded}) for the
- * plaintext variant (`prcl.md` §1.1), which carries no XML step list.
+ * plaintext variant (`prcl.md` §1.1), which carries no XML step list. Exported so
+ * `PcrdRawView.tsx` can render a `.pcrd`'s embedded `protocol2` the same way.
  */
-function ProtocolDetail({
+export function ProtocolDetail({
   protocol,
   sourceHint,
 }: {
@@ -126,24 +105,7 @@ function ProtocolDetail({
       {protocol.steps ? (
         <section className="decoded__block">
           <h3 className="decoded__h">Steps</h3>
-          <table className="decoded__tbl mono">
-            <thead>
-              <tr>
-                <th>#</th>
-                <th>Step</th>
-                <th>Read</th>
-              </tr>
-            </thead>
-            <tbody>
-              {protocol.steps.map((step) => (
-                <tr key={step.stepNumber}>
-                  <td>{step.stepNumber}</td>
-                  <td style={{ textAlign: "left", whiteSpace: "normal" }}>{stepSummary(step)}</td>
-                  <td>{step.kind !== "goto" && step.plateRead ? "●" : ""}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <ProtocolStepsTable steps={protocol.steps} />
         </section>
       ) : (
         <section className="decoded__block">

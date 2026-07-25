@@ -12,8 +12,11 @@ app is format-agnostic:
 
 - `OverviewView`, `CurvesView`, and `ReferenceView` take a plain `Zpcr` — they don't know or
   care whether it came from a `.zpcr` archive or a decoded `.pcrd` document. `OverviewView`'s
-  protocol tile reads `zpcr.protocolText` (a real field on `Zpcr`, not a by-name file lookup),
-  so it works identically either way.
+  protocol tile and thermal-protocol block read `zpcr.protocol()` (a real accessor on `Zpcr`,
+  not a by-name file lookup), so both the name and — when the format provides one — the step
+  table work identically either way; when there's no step list it falls back to
+  `zpcr.protocolText` rendered through the same `ProtocolDecoded` line-numbering the Raw view
+  uses (see below).
 - `DecodedPlateread` (the `.Plateread` typed view) shows the WELLDATA/DARKDATA tables from the
   already-decoded `PlateRead` object either way; it only conditionally shows the binary-only
   "descriptor dictionary" section (`decodePlateReadDetail` finds nothing when there's no
@@ -132,7 +135,16 @@ exposed as a clear affordance on each file chip.
   `KeyValuePairs` blob; parsed with `parseRunInfoRaw`). Takes plain `text`, so `PcrdRawView`
   reuses it directly for a `.pcrd`'s `protocolRunInfo/RunInfo` subtree (same schema).
 - **`ProtocolRunDefinition.txt`** → `ProtocolDecoded`, one step per line (split on `;`),
-  numbered. Also takes plain `text` and is reused by `PcrdRawView` for `zpcr.protocolText`.
+  numbered. Also takes plain `text` and is reused by `OverviewView` for the flat-text fallback
+  (a `.zpcr`'s protocol, or any archive without a structured step list).
+- **`.prcl`** → `DecodedProtocol` (`components/raw/DecodedProtocol.tsx`), which decrypts the
+  entry and renders `ProtocolDetail`: root settings (lid/volume/real-time) plus, when the XML
+  `protocol2` payload parsed into a step list, a numbered step table via the shared
+  `ProtocolStepsTable`/`stepSummary` (`components/raw/ProtocolSteps.tsx`) — reused verbatim by
+  `PcrdRawView`'s **Protocol** node and `OverviewView`'s thermal-protocol block, so all three
+  format the same `ProtocolStep[]` identically (GOTO-target-friendly numbering, a `●` read
+  marker). Falls back to `ProtocolDecoded` on `runDefinition` for the plaintext `.prcl` variant
+  (`prcl.md` §1.1), which carries no XML step list.
 - **other `.xml`** (e.g. `runlog.xml`) → the shared collapsible `XmlTreeFromString`
   (`lib/xmlTree.tsx` — see "Raw views" below).
 
@@ -174,7 +186,9 @@ groups: **Document** (the whole tree, shown first/by default — large subtrees 
 the user's request to see the real document rather than a fabricated file list), **Plate
 setup** (`plateSetup2` → `PlateTable`, same component `.zpcr`'s embedded `.pltd` uses — the
 color-coded grid lives in the **Plates** tab instead, fed by the same `zpcr.plates()`),
-**Protocol** (`protocol2` → `ProtocolDecoded` fed `zpcr.protocolText`), **Plate reads** (one
+**Protocol** (`protocol2` → `ProtocolDetail` fed `zpcr.protocol()`, the same full name +
+settings + step-table view `.prcl` entries get — no password needed, since a `.pcrd`'s protocol
+isn't a separate encrypted file), **Plate reads** (one
 entry per real `<plateRead>`, labeled by its actual cycle number, → `DecodedPlateread` fed
 `zpcr.reads[i]` directly — no filename indirection), **Calibration** (`calibrationCollection`
 — XML only, no decoder yet), **Run info** (`protocolRunInfo/RunInfo` → `RunInfoTable`), **Log**

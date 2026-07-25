@@ -220,26 +220,42 @@ function isPlaintextPrcl(bytes: Uint8Array): boolean {
   return PLAINTEXT_PREFIX.every((b, i) => bytes[i] === b);
 }
 
-function parsePlaintextPrcl(bytes: Uint8Array): Prcl {
-  const raw = textDecoder.decode(stripBomBytes(bytes)).replace(/\r\n/g, "\n").trim();
-  const runDefinition = raw.replace(PLAINTEXT_HEADER, "").trim();
+/**
+ * Best-effort {@link ProtocolDocument} for a bare `;`-delimited run-definition string with no
+ * XML step list to parse from — the plaintext `.prcl` variant (`prcl.md` §1.1) and a `.zpcr`'s
+ * `ProtocolRunDefinition.txt` share this exact grammar, so `zpcr.ts`'s `protocol()` reuses this
+ * too. `lidTemperatureC`/`shutoffTemperatureC`/`volumeUl` are recovered from the text via the
+ * same `HOTLID`/`VOLUME` directives the full XML form exposes as attributes; everything else
+ * this grammar doesn't carry (real-time flag, email-on-complete, …) is left at its default.
+ */
+export function protocolDocumentFromRunDefinition(
+  name: string,
+  runDefinition: string,
+): ProtocolDocument {
   const hotlid = /HOTLID\s+([\d.]+)\s*,\s*([\d.]+)/i.exec(runDefinition);
   const volume = /VOLUME\s+([\d.]+)/i.exec(runDefinition);
 
   return {
+    name,
+    lidTemperatureC: hotlid ? Number(hotlid[1]) : NaN,
+    useDefaultLidTemperature: false,
+    shutoffLidEnabled: false,
+    shutoffTemperatureC: hotlid ? Number(hotlid[2]) : NaN,
+    volumeUl: volume ? Number(volume[1]) : NaN,
+    isRealTime: false,
+    isEmailWhenComplete: false,
+    runDefinition,
+    meta: {},
+  };
+}
+
+function parsePlaintextPrcl(bytes: Uint8Array): Prcl {
+  const raw = textDecoder.decode(stripBomBytes(bytes)).replace(/\r\n/g, "\n").trim();
+  const runDefinition = raw.replace(PLAINTEXT_HEADER, "").trim();
+
+  return {
     container: { format: "text" },
-    protocol: {
-      name: "",
-      lidTemperatureC: hotlid ? Number(hotlid[1]) : NaN,
-      useDefaultLidTemperature: false,
-      shutoffLidEnabled: false,
-      shutoffTemperatureC: hotlid ? Number(hotlid[2]) : NaN,
-      volumeUl: volume ? Number(volume[1]) : NaN,
-      isRealTime: false,
-      isEmailWhenComplete: false,
-      runDefinition,
-      meta: {},
-    },
+    protocol: protocolDocumentFromRunDefinition("", runDefinition),
   };
 }
 

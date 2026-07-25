@@ -26,6 +26,7 @@ import type {
   PlateReadTemp,
   PltdEntry,
   PrclEntry,
+  ProtocolDocument,
   RunMetadata,
   WellFactors,
   WellReading,
@@ -33,6 +34,7 @@ import type {
 } from "./types.js";
 import type { PlateDefinition } from "./pltd.js";
 import { parsePlatesetup2 } from "./pltd.js";
+import { parseProtocol2 } from "./prcl.js";
 import type { Dcal, DcalBlock } from "./dcal.js";
 import { zipCryptoDecrypt } from "./zipcrypto.js";
 import { inflateRaw } from "./inflate.js";
@@ -568,6 +570,13 @@ function buildZpcr(root: XmlElement[]): Zpcr {
     reads,
     archive: EMPTY_ARCHIVE,
     protocolText,
+    // The embedded `protocol2` element is the same schema a real `.prcl`'s XML payload uses
+    // (prcl.ts's `parseProtocol2`, reused here) — full name + settings + step list, no password
+    // needed, unlike `protocols()` below.
+    protocol: (): ProtocolDocument | undefined =>
+      protocol2
+        ? parseProtocol2(`<protocol2${attrsToString(protocol2.attrs)}>${protocol2.inner}</protocol2>`)
+        : undefined,
     curves: (options?: CurveOptions) => toCurves(reads, options),
     darkCurves: (step?: number) => toDarkCurves(reads, step),
     temperatureCurves: (step?: number) => toTemperatureCurves(reads, step),

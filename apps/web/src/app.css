@@ -249,17 +249,6 @@
   color: var(--neon-cyan);
   margin: 0 0 8px;
 }
-.overview__pre {
-  margin: 0;
-  padding: 14px;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  color: var(--ink-2);
-  white-space: pre-wrap;
-  word-break: break-word;
-  font-size: 12px;
-}
 .overview__dl {
   display: grid;
   grid-template-columns: max-content 1fr;

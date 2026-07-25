@@ -179,6 +179,14 @@ The sample: 95 °C/60 s, 95 °C/10 s, 60 °C/30 s, then goto step 1 × 44 — i.
 the 45 plate reads. Step numbers are 0-based here while `runDefinition`'s `GOTO 2,44` is
 1-based. Melt/other step types are expected but not present in this sample.
 
+`protocol2`'s own `identifier identityKey="…"` and `header name="…"` (same schema as a
+`.prcl`'s, `prcl.md` §2.2) are the only source of a protocol *name* inside a `.pcrd` — there is
+no separate friendly-name file the way `.zpcr` has `ProtocolName.txt`. In the sample both read
+`Unknown.prcl`, the generic name CFX Manager gives an ad-hoc/unsaved protocol; a run against a
+protocol that was saved to a named `.prcl` file would presumably carry that file's name here
+instead. `zpcr.protocol()` (see the root `ARCHITECTURE.md`) exposes this via `parseProtocol2`,
+reused unchanged from `prcl.ts`.
+
 ### 2.5 Analysis and application state (mostly not interpreted)
 
 No `.zpcr` equivalent — this is what CFX Manager adds on top of the raw run:

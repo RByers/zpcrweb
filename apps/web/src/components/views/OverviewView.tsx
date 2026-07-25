@@ -1,8 +1,6 @@
 import type { Zpcr } from "@zpcrweb/core";
-
-function safeText(zpcr: Zpcr, name: string): string | null {
-  return zpcr.archive.entries.includes(name) ? zpcr.archive.text(name).trim() : null;
-}
+import { ProtocolDecoded } from "../raw/DecodedView";
+import { ProtocolStepsTable } from "../raw/ProtocolSteps";
 
 interface Tile {
   label: string;
@@ -12,8 +10,9 @@ interface Tile {
 export function OverviewView({ zpcr }: { zpcr: Zpcr }) {
   const m = zpcr.metadata;
   const reads = zpcr.reads;
-  const protocol = zpcr.protocolText || null;
-  const protocolName = safeText(zpcr, "ProtocolName.txt");
+  const protocolText = zpcr.protocolText || null;
+  const protocol = zpcr.protocol();
+  const protocolName = protocol?.name || null;
   const lastTemp = reads.at(-1)?.blockTempC;
 
   const tiles: Tile[] = [
@@ -38,11 +37,18 @@ export function OverviewView({ zpcr }: { zpcr: Zpcr }) {
         ))}
       </section>
 
-      {protocol && (
+      {protocol?.steps ? (
         <section className="overview__block">
           <h2 className="overview__h">Thermal protocol</h2>
-          <pre className="overview__pre mono">{protocol}</pre>
+          <ProtocolStepsTable steps={protocol.steps} />
         </section>
+      ) : (
+        protocolText && (
+          <section className="overview__block">
+            <h2 className="overview__h">Thermal protocol</h2>
+            <ProtocolDecoded text={protocolText} />
+          </section>
+        )
       )}
 
       <section className="overview__block">

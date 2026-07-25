@@ -76,6 +76,16 @@ than let that difference leak into every consumer, `parsePcrd` decodes straight 
   attribute (`.pcrd`) — the one piece of `.pcrd` data that needed lifting into a proper `Zpcr`
   field (rather than a fake archive entry) because a real `.zpcr` consumer (`OverviewView`)
   already depended on reading it by name.
+- **`Zpcr.protocol()`** — a typed `ProtocolDocument` (name, lid/volume settings, and — when
+  available — the ordered step list), to whatever fidelity each format allows without a
+  password. A `.pcrd` embeds the full `<protocol2>` XML unencrypted, so this is a full decode
+  via `prcl.ts`'s `parseProtocol2` (name comes from the embedded protocol's own
+  `identifier`/`header`, e.g. `Unknown.prcl` for an ad-hoc unsaved protocol — not the `.pcrd`'s
+  own filename, which isn't guaranteed to match). A `.zpcr`'s real protocol XML lives inside a
+  possibly-encrypted `.prcl` archive entry (see `protocols()` below), so `protocol()` instead
+  returns a best-effort document built from `protocolText` alone via
+  `protocolDocumentFromRunDefinition` (name from `ProtocolName.txt`, lid/volume recovered from
+  the `HOTLID`/`VOLUME` directives, no step list).
 - **`Zpcr.plates()`** — a `.pcrd` embeds exactly one plate (`plateSetup2`), already decrypted
   along with the rest of the document. `pcrd.ts` reuses `pltd.ts`'s `parsePlatesetup2` (the
   same `<platesetup2>`/`<plateSetup2>` schema, differing only in root-tag case) and wraps it in

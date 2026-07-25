@@ -5,7 +5,8 @@ import { logEntriesFromElements, summarizeRunLog } from "../../lib/runlog";
 import { decodedToCsv, downloadText } from "../../lib/download";
 import { DecodedPlateread } from "../raw/DecodedPlateread";
 import { PlateTable } from "../raw/PlateTable";
-import { RunInfoTable, ProtocolDecoded } from "../raw/DecodedView";
+import { RunInfoTable } from "../raw/DecodedView";
+import { ProtocolDetail } from "../raw/DecodedProtocol";
 import { RunLogTable } from "../raw/RunLogTable";
 
 /**
@@ -300,7 +301,9 @@ function PcrdRawContent({
 
   if (entry.kind === "protocol") {
     if (mode === "xml") return <XmlTree roots={doc.protocol2El ? [doc.protocol2El] : []} />;
-    return <ProtocolDecoded text={zpcr.protocolText} />;
+    const protocol = zpcr.protocol();
+    if (!protocol) return <div className="decoded__na mono">No protocol embedded in this document.</div>;
+    return <ProtocolDetail protocol={protocol} sourceHint="embedded in .pcrd document" />;
   }
 
   if (entry.kind === "plateRead") {

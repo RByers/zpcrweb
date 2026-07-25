@@ -181,7 +181,8 @@ import type { RefWellCal, RefCalComparison } from "./refcal.js";
 export type { RefWellCal, RefCalComparison } from "./refcal.js";
 import type { Pltd } from "./pltd.js";
 import type { Dcal } from "./dcal.js";
-import type { Prcl } from "./prcl.js";
+import type { Prcl, ProtocolDocument } from "./prcl.js";
+export type { ProtocolDocument, ProtocolStep } from "./prcl.js";
 
 /** A `.pltd` archive entry paired with its decoded plate definition. */
 export interface PltdEntry {
@@ -281,6 +282,17 @@ export interface Zpcr {
    * attribute (`.pcrd`) — the same real data either way. Empty string if unavailable.
    */
   protocolText: string;
+  /**
+   * The run's thermal-cycling protocol, decoded to whatever fidelity the source format
+   * allows. For a `.pcrd`, this is a full decode (name + settings + ordered step list) of the
+   * embedded `protocol2` XML — no password needed, since a `.pcrd`'s protocol isn't a separate
+   * encrypted file. For a `.zpcr`, this is a best-effort {@link ProtocolDocument} built from
+   * {@link protocolText} alone (name from the real `ProtocolName.txt`, settings recovered from
+   * the `HOTLID`/`VOLUME` directives; no step list — decode a `.prcl` archive entry via
+   * {@link protocols} for that, which needs the password). Undefined when {@link protocolText}
+   * is empty.
+   */
+  protocol(): ProtocolDocument | undefined;
   /** Pivot the run-centric reads into well-centric amplification curves. */
   curves(options?: CurveOptions): WellCurve[];
   /** The per-channel dark (LED-off background) reading across cycles. */
