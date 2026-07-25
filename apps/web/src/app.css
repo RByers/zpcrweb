@@ -265,6 +265,67 @@
   font-size: 11px;
   color: var(--ink-muted);
 }
+.curvecard {
+  pointer-events: none;
+  min-width: 160px;
+  max-width: 280px;
+  max-height: 260px;
+  overflow-y: auto;
+  padding: 10px 12px;
+  background: rgba(10, 14, 22, 0.96);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(4px);
+}
+.curvecard__title {
+  font-size: 11px;
+  color: var(--ink);
+  margin-bottom: 2px;
+  word-break: break-all;
+}
+.curvecard__subtitle {
+  font-size: 10px;
+  color: var(--ink-muted);
+  margin-bottom: 6px;
+}
+.curvecard__tbl {
+  border-collapse: collapse;
+  font-size: 11px;
+  width: 100%;
+}
+.curvecard__tbl td {
+  padding: 1px 0;
+  vertical-align: middle;
+}
+.curvecard__swatch-cell {
+  width: 12px;
+}
+.curvecard__swatch {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+.curvecard__label {
+  color: var(--ink-2);
+  padding-right: 10px;
+  white-space: nowrap;
+}
+.curvecard__sub {
+  display: block;
+  font-size: 10px;
+  color: var(--ink-muted);
+}
+.curvecard__cq {
+  color: var(--ink);
+  text-align: right;
+  white-space: nowrap;
+}
+.curvecard__empty {
+  font-size: 11px;
+  color: var(--ink-muted);
+}
 .filechip__del {
   display: inline-flex;
   align-items: center;

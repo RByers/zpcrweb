@@ -1,6 +1,7 @@
 import type { SampleType } from "@zpcrweb/core";
 import { wellKey } from "../../state/useZpcrStore";
 import { SAMPLE_TYPE_META } from "../../lib/sampleType";
+import { useHoverCard, type HoverCardData } from "./HoverCard";
 
 const ROWS = 8;
 const COLS = 12;
@@ -16,6 +17,8 @@ interface Props {
   /** Hovering a well cell (by its `"A1"`-style label, or `null` on leave) — drives the
    * curve-chart highlight. */
   onHoverWell?: (label: string | null) => void;
+  /** Hover-card content for a well's `"A1"`-style label, or `null`/undefined to show none. */
+  cardData?: (label: string) => HoverCardData | null | undefined;
 }
 
 /**
@@ -23,7 +26,8 @@ interface Props {
  * number (1–12) headers toggle a whole row/column; the corner toggles all wells. The
  * reference row is shown separately, in the Reference view.
  */
-export function WellMatrix({ enabled, onChange, wellTypes, onHoverWell }: Props) {
+export function WellMatrix({ enabled, onChange, wellTypes, onHoverWell, cardData }: Props) {
+  const { show, hide, node } = useHoverCard(cardData ?? (() => null));
   const sampleKeys = () => {
     const keys: string[] = [];
     for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) keys.push(wellKey(r, c));
@@ -83,8 +87,15 @@ export function WellMatrix({ enabled, onChange, wellTypes, onHoverWell }: Props)
                 : undefined
             }
             onClick={() => toggleWell(r, c)}
-            onMouseEnter={() => onHoverWell?.(`${label}${c + 1}`)}
-            onMouseLeave={() => onHoverWell?.(null)}
+            onMouseEnter={(e) => {
+              const wellLabel = `${label}${c + 1}`;
+              onHoverWell?.(wellLabel);
+              show(wellLabel, e.currentTarget);
+            }}
+            onMouseLeave={() => {
+              onHoverWell?.(null);
+              hide();
+            }}
             aria-pressed={on}
             aria-label={`Well ${label}${c + 1}`}
             title={meta ? `${label}${c + 1} — ${meta.label}` : undefined}
@@ -111,6 +122,7 @@ export function WellMatrix({ enabled, onChange, wellTypes, onHoverWell }: Props)
       ))}
 
       {Array.from({ length: ROWS }, (_, r) => renderRow(r, ROW_LETTERS[r]!))}
+      {node}
     </div>
   );
 }

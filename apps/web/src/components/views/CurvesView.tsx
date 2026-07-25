@@ -21,7 +21,7 @@ import {
   type Scale,
 } from "../../state/useZpcrStore";
 import { usePltdPassword } from "../../state/pltdPassword";
-import { channelLabel } from "../../lib/channelColors";
+import { channelColor, channelLabel } from "../../lib/channelColors";
 import {
   computeFluorCurves,
   matchFluorCalibrations,
@@ -33,6 +33,7 @@ import {
 import { ChannelBar } from "../curves/ChannelBar";
 import { FluorBar, type FluorChip } from "../curves/FluorBar";
 import { SampleBar } from "../curves/SampleBar";
+import type { HoverCardData, HoverCardRow } from "../curves/HoverCard";
 import { WellMatrix } from "../curves/WellMatrix";
 import { CurveChart } from "../curves/CurveChart";
 import { TempBar } from "../curves/TempBar";
@@ -421,6 +422,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
             std: c.cycles.map(() => 0),
             min: c.mean,
             max: c.mean,
+            sample: wellSample.get(wellKey(c.row, c.col)),
           }))
         : visibleChannel.map((c) => ({
             channel: c.channel,
@@ -434,9 +436,10 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
             std: c.std,
             min: c.min,
             max: c.max,
+            sample: wellSample.get(wellKey(c.row, c.col)),
           })),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [calibrationOn, visibleFluor, visibleChannel, fluorViewMode, wellFluorTargets],
+    [calibrationOn, visibleFluor, visibleChannel, fluorViewMode, wellFluorTargets, wellSample],
   );
 
   // Cq markers (`threshold.md` §6), one per plotted curve, computed per the Analysis view's
@@ -492,6 +495,64 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
     cq: curveMetrics[i]?.cq ?? null,
     baselineRfu: curveMetrics[i]?.baselineRfu ?? null,
   }));
+
+  // ---- Rail hover cards -------------------------------------------------------------------
+  // Each card lists exactly what's plotted (`plotCurves`, already filtered by every rail
+  // control) for the hovered chip/cell, so its Cq values always agree with the chart's own
+  // markers. A row's color is its curve's channel, matching the chip/legend coloring elsewhere.
+
+  const cardForWell = (label: string): HoverCardData | null => {
+    const well = plate?.wells.find((w) => w.label === label);
+    if (!well) return null;
+    const rows: HoverCardRow[] = plotCurves
+      .filter((c) => c.wellLabel === label)
+      .map((c) => ({
+        key: `${c.dyeLabel}-${c.channel}`,
+        label: c.dyeLabel,
+        cq: c.cq ?? null,
+        color: channelColor(c.channel),
+      }));
+    return { title: `Well ${label}`, subtitle: well.sample ? `Sample: ${well.sample}` : undefined, rows };
+  };
+
+  const cardForDyeLabel = (dyeLabel: string): HoverCardData | null => {
+    const matches = plotCurves.filter((c) => c.dyeLabel === dyeLabel);
+    if (matches.length === 0) return null;
+    const rows: HoverCardRow[] = matches.map((c) => ({
+      key: `${c.row},${c.col}`,
+      label: c.wellLabel,
+      sublabel: c.sample,
+      cq: c.cq ?? null,
+      color: channelColor(c.channel),
+    }));
+    return { title: dyeLabel, subtitle: `${rows.length} well${rows.length === 1 ? "" : "s"}`, rows };
+  };
+
+  const cardForChannel = (channel: number): HoverCardData | null => {
+    const matches = plotCurves.filter((c) => c.channel === channel);
+    if (matches.length === 0) return null;
+    const rows: HoverCardRow[] = matches.map((c) => ({
+      key: `${c.row},${c.col}`,
+      label: c.wellLabel,
+      sublabel: c.sample,
+      cq: c.cq ?? null,
+      color: channelColor(channel),
+    }));
+    return { title: channelLabel(channel), subtitle: `${rows.length} well${rows.length === 1 ? "" : "s"}`, rows };
+  };
+
+  const cardForSample = (sample: string): HoverCardData | null => {
+    const matches = plotCurves.filter((c) => c.sample === sample);
+    if (matches.length === 0) return null;
+    const rows: HoverCardRow[] = matches.map((c) => ({
+      key: `${c.row},${c.col}-${c.dyeLabel}`,
+      label: c.dyeLabel,
+      sublabel: c.wellLabel,
+      cq: c.cq ?? null,
+      color: channelColor(c.channel),
+    }));
+    return { title: sample, subtitle: `${rows.length} curve${rows.length === 1 ? "" : "s"}`, rows };
+  };
 
   // The Baseline range slider's non-manual preview: rather than a static example range, show
   // the *actual* auto-detected region for the first plotted curve — auto-detection runs per
@@ -610,6 +671,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
                 disabled={settings.disabledFluors}
                 onToggle={toggleFluor}
                 onHover={(key) => setHoverHighlight(key ? { kind: "target", dyeLabel: key } : null)}
+                cardData={cardForDyeLabel}
               />
               <div className="rail__row" style={{ marginTop: 8 }}>
                 <Switch
@@ -626,6 +688,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
               available={available}
               onToggle={toggleChannel}
               onHover={(ch) => setHoverHighlight(ch != null ? { kind: "channel", channel: ch } : null)}
+              cardData={cardForChannel}
             />
           )}
         </div>
@@ -646,6 +709,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
             onChange={(next) => onChange({ enabledWells: next })}
             wellTypes={wellTypes}
             onHoverWell={(label) => setHoverHighlight(label ? { kind: "well", label } : null)}
+            cardData={cardForWell}
           />
         </div>
 
@@ -671,7 +735,13 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
                 {settings.disabledSamples.size > 0 ? "all" : "none"}
               </button>
             </summary>
-            <SampleBar items={sampleList} disabled={settings.disabledSamples} onToggle={toggleSample} />
+            <SampleBar
+              items={sampleList}
+              disabled={settings.disabledSamples}
+              onToggle={toggleSample}
+              onHover={(sample) => setHoverHighlight(sample ? { kind: "sample", sample } : null)}
+              cardData={cardForSample}
+            />
           </details>
         )}
 

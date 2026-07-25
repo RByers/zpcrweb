@@ -47,6 +47,9 @@ export interface PlotCurve {
    * `CurveBaselineResult.baselineRfu`) — surfaced in the tooltip so a surprising Cq can be
    * traced back to what baseline region/level was really applied. */
   baselineRfu?: number | null;
+  /** Sample name (`pltd.md`'s `conditionName`, `WellDefinition.sample`) for this curve's well,
+   * when the plate assigns one — drives the rail's "sample" highlight/hover-card lookup. */
+  sample?: string;
 }
 
 /** Values <= 0 are undefined on a log axis; render them as gaps. */
@@ -145,7 +148,8 @@ export interface FactoryCurve {
 export type HighlightMatch =
   | { kind: "target"; dyeLabel: string }
   | { kind: "well"; label: string }
-  | { kind: "channel"; channel: number };
+  | { kind: "channel"; channel: number }
+  | { kind: "sample"; sample: string };
 
 /** Per-series metadata, index-aligned with uPlot series (offset by the x row). */
 export interface SeriesMeta {
@@ -169,6 +173,8 @@ export interface SeriesMeta {
   cq?: number | null;
   /** See {@link PlotCurve.baselineRfu}. */
   baselineRfu?: number | null;
+  /** See {@link PlotCurve.sample}. */
+  sample?: string;
 }
 
 /** Min/max envelope for a single isolated well (drawn as a shaded band). */
@@ -288,6 +294,7 @@ export function buildChart(cfg: BuildChartConfig): {
       adjust,
       cq: curve.cq,
       baselineRfu: curve.baselineRfu,
+      sample: curve.sample,
     });
     series.push({
       label: `${curve.wellLabel} · ${curve.dyeLabel}`,
@@ -521,7 +528,8 @@ export function applyHighlight(u: uPlot, meta: SeriesMeta[], match: HighlightMat
       (m.kind === "well" &&
         ((match.kind === "well" && m.label === match.label) ||
           (match.kind === "target" && m.dyeLabel === match.dyeLabel) ||
-          (match.kind === "channel" && m.channel === match.channel)));
+          (match.kind === "channel" && m.channel === match.channel) ||
+          (match.kind === "sample" && m.sample === match.sample)));
     u.series[i + 1]!.alpha = isMatch ? 1 : 0.12;
   });
   u.redraw(false, false);

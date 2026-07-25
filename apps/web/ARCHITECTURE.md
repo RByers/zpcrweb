@@ -372,6 +372,21 @@ only pieces the two views share.
   mirroring `disabledFluors`); a well with no `sample` set is never hidden by this filter, since
   there's no chip for it. Applies to both channel- and dye-space curves alike (`sampleVisible()`,
   consulted by both `visibleChannel` and `visibleFluor`).
+- **Rail hover highlight and hover cards:** hovering a chip/cell in any rail section (channel,
+  fluorophore/target, well, or sample) dims every plotted curve that doesn't match, via
+  `HighlightMatch`/`applyHighlight` (`lib/uplot/chart.ts`) — a `"sample"` match variant joins the
+  pre-existing `"target"`/`"well"`/`"channel"` ones, keyed by the well's `PlotCurve.sample` (which
+  `CurvesView` fills in from the `wellSample` map alongside every other per-curve field). Each of
+  `ChannelBar`/`FluorBar`/`WellMatrix`/`SampleBar` also renders a small floating hover card (see
+  `components/curves/HoverCard.tsx`'s `useHoverCard` hook — a fixed-position portal to
+  `document.body`, positioned from the hovered element's own bounding rect, mirroring `FileBar`'s
+  file-chip card) listing exactly what's plotted for that chip/cell and its Cq: hovering a well
+  lists its targets/fluors with Cq (plus its sample, in the card's subtitle); hovering a
+  target/fluor lists its wells (with sample) and Cq; hovering a channel lists its wells (with
+  sample) and Cq; hovering a sample lists its targets/fluors (with well) and Cq. The card data is
+  built from `plotCurves` itself (`CurvesView`'s `cardForWell`/`cardForDyeLabel`/
+  `cardForChannel`/`cardForSample`), so it always agrees with what the chart is actually drawing
+  and marking, never a separately-recomputed Cq.
 - **X axis:** integer cycles only — a tick per cycle, gridline + label every 5.
 - **Hover/tap tooltip:** a uPlot cursor plugin finds the nearest series (well curve, dark,
   factory overlay, or temperature) and reports its label, channel/dye, cycle, and

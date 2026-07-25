@@ -1,4 +1,5 @@
 import { channelColor } from "../../lib/channelColors";
+import { useHoverCard, type HoverCardData } from "./HoverCard";
 
 /** One chip's worth of data — a fluorophore or, in target view mode, a target/gene. */
 export interface FluorChip {
@@ -24,6 +25,8 @@ interface Props {
   onToggle: (key: string) => void;
   /** Hovering a chip (by its `key`, or `null` on leave) — drives the curve-chart highlight. */
   onHover?: (key: string | null) => void;
+  /** Hover-card content for a chip's `key`, or `null`/undefined to show none. */
+  cardData?: (key: string) => HoverCardData | null | undefined;
 }
 
 /**
@@ -31,7 +34,8 @@ interface Props {
  * its primary channel. Multiple items sharing a channel simply share a color, distinguished by
  * their label.
  */
-export function FluorBar({ items, disabled, onToggle, onHover }: Props) {
+export function FluorBar({ items, disabled, onToggle, onHover, cardData }: Props) {
+  const { show, hide, node } = useHoverCard(cardData ?? (() => null));
   return (
     <div className="chanbar">
       {items.map((f) => {
@@ -41,8 +45,14 @@ export function FluorBar({ items, disabled, onToggle, onHover }: Props) {
             key={f.key}
             className={"chanchip" + (on ? " is-on" : "") + (!f.calibrated ? " is-disabled" : "")}
             onClick={() => f.calibrated && onToggle(f.key)}
-            onMouseEnter={() => onHover?.(f.key)}
-            onMouseLeave={() => onHover?.(null)}
+            onMouseEnter={(e) => {
+              onHover?.(f.key);
+              show(f.key, e.currentTarget);
+            }}
+            onMouseLeave={() => {
+              onHover?.(null);
+              hide();
+            }}
             disabled={!f.calibrated}
             aria-pressed={on}
             title={!f.calibrated ? `${f.label}: no calibration data for this tube type` : f.label}
@@ -56,6 +66,7 @@ export function FluorBar({ items, disabled, onToggle, onHover }: Props) {
           </button>
         );
       })}
+      {node}
     </div>
   );
 }
