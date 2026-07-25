@@ -2,7 +2,7 @@ import { useMemo, useRef, useState } from "react";
 import type { Zpcr } from "@zpcrweb/core";
 import { parseXmlFragment, serializeXmlPretty, XmlTree } from "../../lib/xmlTree";
 import { logEntriesFromElements, summarizeRunLog } from "../../lib/runlog";
-import { decodedToCsv, downloadText } from "../../lib/download";
+import { decodedToCsv, downloadText, plateReadCsvFilename, plateReadToCsv } from "../../lib/download";
 import { DownloadIcon } from "../DownloadIcon";
 import { DecodedPlateread } from "../raw/DecodedPlateread";
 import { PlateTable } from "../raw/PlateTable";
@@ -195,6 +195,9 @@ export function PcrdRawView({ zpcr, documentXml }: { zpcr: Zpcr; documentXml: st
       const roots = xmlRootsFor(doc, selected);
       if (roots.length === 0) return;
       downloadText(`${fname}.xml`, serializeXmlPretty(roots), "application/xml");
+    } else if (selected.kind === "plateRead") {
+      const read = zpcr.reads[selected.index];
+      if (read) downloadText(plateReadCsvFilename(zpcr, read), plateReadToCsv(read), "text/csv");
     } else if (decodedRef.current) {
       downloadText(`${fname}.csv`, decodedToCsv(decodedRef.current), "text/csv");
     }

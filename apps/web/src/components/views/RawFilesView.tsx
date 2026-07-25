@@ -4,7 +4,7 @@ import { DecodedView, decodedKind } from "../raw/DecodedView";
 import { PlateXml } from "../raw/DecodedPlate";
 import { ProtocolXml } from "../raw/DecodedProtocol";
 import { usePltdPassword } from "../../state/pltdPassword";
-import { decodedToCsv, downloadText } from "../../lib/download";
+import { decodedToCsv, downloadText, plateReadCsvFilename, plateReadToCsv } from "../../lib/download";
 import { DownloadIcon } from "../DownloadIcon";
 
 /** Drop the archive entry's extension, e.g. "RunInfo.xml" -> "RunInfo". */
@@ -100,6 +100,11 @@ export function RawFilesView({ zpcr }: { zpcr: Zpcr }) {
 
   const handleDownload = () => {
     if (mode === "decoded") {
+      if (decodedKind(selected) === "plateread") {
+        const read = zpcr.reads.find((r) => r.fileName === selected);
+        if (read) downloadText(plateReadCsvFilename(zpcr, read), plateReadToCsv(read), "text/csv");
+        return;
+      }
       if (!decodedRef.current) return;
       downloadText(`${baseName(selected)}.csv`, decodedToCsv(decodedRef.current), "text/csv");
     } else if (textDownload) {

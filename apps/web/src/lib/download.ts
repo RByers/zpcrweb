@@ -1,7 +1,12 @@
+import { wellLabel, type PlateRead, type Zpcr } from "@zpcrweb/core";
+
 /**
  * Client-side "Save As" for the Raw files view: text/XML entries download verbatim, decoded
  * table entries are flattened to CSV from the rendered DOM (see {@link decodedToCsv}) so the
  * export always matches whatever the table/segmented-control state currently shows on screen.
+ * The one exception is a decoded `.Plateread` (see {@link plateReadToCsv}): its on-screen table
+ * only ever shows one channel/stat slice at a time, so the CSV is built straight from the
+ * decoded data instead, to include every well and channel.
  */
 
 /** Trigger a browser download of `content` as `filename`. */
@@ -80,4 +85,44 @@ export function decodedToCsv(container: Element): string {
     }
   }
   return out;
+}
+
+const PLATE_ROWS = 9; // A-H plus the reference row (see `wellLabel`/`REFERENCE_ROW` in @zpcrweb/core)
+const PLATE_COLS = 12;
+
+/**
+ * Every WELLDATA + DARKDATA reading in a `.Plateread`, as one flat table: one row per
+ * (well, channel) plus one row per channel's dark (LED-off background) reading. Dark readings
+ * have no well position, so they use the well value `"dark"` instead — still keeping their real
+ * channel, since DARKDATA is itself recorded per channel.
+ */
+export function plateReadToCsv(read: PlateRead): string {
+  const channelCount = read.dark.length;
+  let out = csvRow(["well", "channel", "mean", "min", "max", "stddev"]);
+  for (let row = 0; row < PLATE_ROWS; row++) {
+    for (let col = 0; col < PLATE_COLS; col++) {
+      const well = wellLabel(row, col);
+      for (let ch = 0; ch < channelCount; ch++) {
+        const r = read.get(ch, row, col);
+        out += csvRow([well, `C${ch + 1}`, String(r.mean), String(r.min), String(r.max), String(r.std)]);
+      }
+    }
+  }
+  for (let ch = 0; ch < channelCount; ch++) {
+    const d = read.dark[ch]!;
+    out += csvRow(["dark", `C${ch + 1}`, String(d.mean), String(d.min), String(d.max), String(d.std)]);
+  }
+  return out;
+}
+
+function sanitizeFilePart(s: string): string {
+  return s.replace(/[\\/:*?"<>|]+/g, "_").trim();
+}
+
+/** `<run name>_cycle<N>.csv` — the run name is the instrument-recorded data file name
+ * (`RunInfo.xml`'s `DataFile` key, `zpcr.metadata.dataFile`), since a `Zpcr` carries no other
+ * run-identifying field (see `packages/core/src/types.ts`'s `RunMetadata`). */
+export function plateReadCsvFilename(zpcr: Zpcr, read: PlateRead): string {
+  const runName = sanitizeFilePart(zpcr.metadata.dataFile.replace(/\.(zpcr|pcrd)$/i, "")) || "run";
+  return `${runName}_cycle${read.cycle}.csv`;
 }
