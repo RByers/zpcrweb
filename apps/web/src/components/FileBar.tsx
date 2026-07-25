@@ -9,8 +9,8 @@ interface Props {
 }
 
 /** Shorten `20260720_211747_CT019138_Luna_noRT.zpcr` to something legible. */
-function label(f: LoadedFile, run: RunResult | undefined): string {
-  return run?.zpcr?.metadata.dataFile || f.name.replace(/\.(zpcr|pcrd)$/i, "");
+function label(f: LoadedFile): string {
+  return f.name.replace(/\.(zpcr|pcrd)$/i, "");
 }
 
 export function FileBar({ files, runs, activeId, onSelect, onRemove }: Props) {
@@ -32,14 +32,14 @@ export function FileBar({ files, runs, activeId, onSelect, onRemove }: Props) {
               title={f.name}
             >
               <span className="filechip__dot" />
-              <span className="filechip__name mono">{label(f, run)}</span>
+              <span className="filechip__name mono">{label(f)}</span>
               <span className="filechip__meta mono">
                 {locked ? (run?.needsPassword ? "🔒" : run?.error ? "⚠" : "…") : `${run.zpcr!.reads.length}c`}
               </span>
             </button>
             <button
               className="filechip__del"
-              aria-label={`Delete ${label(f, run)} from storage`}
+              aria-label={`Delete ${label(f)} from storage`}
               title="Delete from storage"
               onClick={(e) => {
                 e.stopPropagation();
