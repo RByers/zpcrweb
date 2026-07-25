@@ -24,7 +24,7 @@ export type DecodedKind =
 
 export function decodedKind(name: string): DecodedKind {
   if (/\.Plateread$/i.test(name)) return "plateread";
-  if (/\.pltd$/i.test(name)) return "plate";
+  if (/\.pltd$/i.test(name) || /\.plt\.csv$/i.test(name)) return "plate";
   if (/\.prcl$/i.test(name)) return "prcl";
   if (/\.dcal$/i.test(name)) return "dcal";
   if (/RunInfo\.xml$/i.test(name)) return "runinfo";

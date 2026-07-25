@@ -183,10 +183,12 @@ exposed as a clear affordance on each file chip.
 - **`.Plateread`** → header (cycle, block temp, timestamp) + the DARKDATA table + the
   WELLDATA fluorescence table as a per-channel plate grid with a stat selector
   (mean/std/min/max). Reads straight from the decoded `PlateRead` (found by `fileName`).
-- **`.pltd`** → `DecodedPlate` (`components/raw/DecodedPlate.tsx`), which decrypts the entry
-  and renders `PlateTable` (`components/raw/PlateTable.tsx`) — one row per well, in plate
-  order, with sample type/name/condition/replicate/quantity and fluor→target columns. Plain
-  tabular data, deliberately not the color-coded grid — see the **Plates** tab for that.
+- **`.pltd`/`.plt.csv`** → `DecodedPlate` (`components/raw/DecodedPlate.tsx`) — decrypts a
+  `.pltd` entry (password-gated) or parses a `.plt.csv` entry (`parsePlateCsv`, no password
+  needed), either way rendering the same `PlateTable` (`components/raw/PlateTable.tsx`) from
+  the same `PlateDefinition` object model: one row per well, in plate order, with sample
+  type/name/condition/replicate/quantity and fluor→target columns. Plain tabular data,
+  deliberately not the color-coded grid — see the **Plates** tab for that.
 - **`RunInfo.xml`** → `RunInfoTable`, a two-column key/value table (it is just a flat
   `KeyValuePairs` blob; parsed with `parseRunInfoRaw`). Takes plain `text`, so `PcrdRawView`
   reuses it directly for a `.pcrd`'s `protocolRunInfo/RunInfo` subtree (same schema).

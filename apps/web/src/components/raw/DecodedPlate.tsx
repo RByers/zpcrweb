@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { parsePltd, type Pltd, type Zpcr } from "@zpcrweb/core";
+import { isPlateCsvName, parsePlateCsv, parsePltd, type Pltd, type Zpcr } from "@zpcrweb/core";
 import { PlateTable } from "./PlateTable";
 import { XmlTreeFromString } from "../../lib/xmlTree";
 import { usePltdPassword } from "../../state/pltdPassword";
@@ -38,12 +38,14 @@ function UndecodedNote({ pltd }: { pltd: Pltd }) {
 }
 
 /**
- * `.pltd` archive entry → decoded plate data, handling the password prompt. Renders the raw
- * plate data as a table (see {@link PlateTable}) — for the color-coded visual plate map, see
- * the "Plates" tab. The decrypted `<platesetup2>` XML is available separately via the Raw files
- * "Text" mode (see {@link PlateXml}).
+ * `.pltd` or `.plt.csv` archive entry → decoded plate data, using the same {@link PlateTable}
+ * (and so the same `PlateDefinition` object model) either way — for the color-coded visual
+ * plate map, see the "Plates" tab. The decrypted `<platesetup2>` XML (`.pltd` only) is
+ * available separately via the Raw files "Text"/"XML" mode (see {@link PlateXml}).
  */
 export function DecodedPlate({ zpcr, name }: { zpcr: Zpcr; name: string }) {
+  if (isPlateCsvName(name)) return <DecodedPlateCsv zpcr={zpcr} name={name} />;
+
   const { pltd, setPassword } = usePltdEntry(zpcr, name);
 
   if (pltd.needsPassword || pltd.error) {
@@ -62,6 +64,20 @@ export function DecodedPlate({ zpcr, name }: { zpcr: Zpcr; name: string }) {
       sourceHint={`${container.innerName} · ${container.compressionMethod === 9 ? "DEFLATE64" : "DEFLATE"} · decrypted`}
     />
   );
+}
+
+/** A `.plt.csv` entry decoded via {@link parsePlateCsv} — plain UTF-8 text, no password/
+ * decryption step needed, unlike `.pltd`. */
+function DecodedPlateCsv({ zpcr, name }: { zpcr: Zpcr; name: string }) {
+  const plate = useMemo(() => {
+    try {
+      return parsePlateCsv(zpcr.archive.text(name));
+    } catch {
+      return null;
+    }
+  }, [zpcr, name]);
+  if (!plate) return <div className="decoded__na mono">Could not parse {name} as a plate CSV.</div>;
+  return <PlateTable plate={plate} sourceHint={`${name} · zpcrweb plate CSV`} />;
 }
 
 /** The decrypted `<platesetup2>` XML, pretty-printed (Raw files "Text" mode for `.pltd`). */
