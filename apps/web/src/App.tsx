@@ -88,7 +88,7 @@ export function App() {
           </div>
         ) : (
           <>
-            {view === "overview" && <OverviewView zpcr={zpcr} />}
+            {view === "overview" && <OverviewView zpcr={zpcr} file={active} />}
             {view === "curves" && (
               <CurvesView
                 zpcr={zpcr}

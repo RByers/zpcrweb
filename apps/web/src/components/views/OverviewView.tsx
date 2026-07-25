@@ -1,13 +1,23 @@
 import type { Zpcr } from "@zpcrweb/core";
 import { ProtocolDecoded } from "../raw/DecodedView";
 import { ProtocolStepsTable } from "../raw/ProtocolSteps";
+import { DownloadIcon } from "../DownloadIcon";
+import { downloadBytes } from "../../lib/download";
 
 interface Tile {
   label: string;
   value: string;
 }
 
-export function OverviewView({ zpcr }: { zpcr: Zpcr }) {
+export function OverviewView({
+  zpcr,
+  file,
+}: {
+  zpcr: Zpcr;
+  /** The active run's own name/bytes — downloaded verbatim, so this is also how a `.zpcr`
+   * attached via the Plates view's upload control gets back onto disk (see `PlatesView`). */
+  file: { name: string; bytes: Uint8Array };
+}) {
   const m = zpcr.metadata;
   const reads = zpcr.reads;
   const protocolText = zpcr.protocolText || null;
@@ -28,6 +38,17 @@ export function OverviewView({ zpcr }: { zpcr: Zpcr }) {
 
   return (
     <div className="overview">
+      <div className="overview__toolbar">
+        <button
+          className="raw__download"
+          onClick={() => downloadBytes(file.name, file.bytes)}
+          aria-label={`Download ${file.name}`}
+          title="Download original file"
+        >
+          <DownloadIcon />
+        </button>
+      </div>
+
       <section className="overview__tiles">
         {tiles.map((t) => (
           <div className="tile" key={t.label}>

@@ -198,7 +198,6 @@
   font-size: 11px;
   color: var(--ink-muted);
 }
-.filechip__dl,
 .filechip__del {
   display: inline-flex;
   align-items: center;
@@ -208,10 +207,6 @@
   padding: 0 9px;
   color: var(--ink-muted);
   font-size: 11px;
-}
-.filechip__dl:hover {
-  background: var(--raised);
-  color: var(--ink);
 }
 .filechip__del:hover {
   background: rgba(255, 90, 90, 0.16);
@@ -226,6 +221,10 @@
   display: flex;
   flex-direction: column;
   gap: 22px;
+}
+.overview__toolbar {
+  display: flex;
+  justify-content: flex-end;
 }
 .overview__tiles {
   display: grid;

@@ -1,6 +1,4 @@
 import type { LoadedFile, PlateFileResult, RunResult } from "../state/useZpcrStore";
-import { downloadBytes } from "../lib/download";
-import { DownloadIcon } from "./DownloadIcon";
 
 interface Props {
   files: LoadedFile[];
@@ -48,17 +46,6 @@ export function FileBar({ files, runs, plateFiles, activeId, onSelect, onRemove 
               <span className="filechip__dot" />
               <span className="filechip__name mono">{label(f)}</span>
               <span className="filechip__meta mono">{meta(f, run, plateFile)}</span>
-            </button>
-            <button
-              className="filechip__dl"
-              aria-label={`Download ${f.name}`}
-              title="Download original file"
-              onClick={(e) => {
-                e.stopPropagation();
-                downloadBytes(f.name, f.bytes);
-              }}
-            >
-              <DownloadIcon />
             </button>
             <button
               className="filechip__del"
