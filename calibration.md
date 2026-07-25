@@ -39,6 +39,14 @@ Four stages, covered in turn below:
 3. Apply the same **corrections** a raw reading needs before separation (§4).
 4. **Solve** the matrix equation for per-dye concentrations (§5).
 
+**Scope note:** §§2–5 are everything needed to turn one raw 6-channel reading into per-dye
+concentrations — the numeric core of what CFX Manager does when it produces a calibrated result
+from a `.zpcr` run. They do *not* cover the rest of what CFX Manager does when it opens a `.zpcr`
+and writes out a `.pcrd`: embedding the run's `.Dcal` files as `calibrationCollection`, embedding
+a (for a `.zpcr`-sourced run, identity) `wellFactorsCollection`, and populating the analysis-state
+subtrees ([`pcrd.md`](./pcrd.md) §§2.5–2.6) — those are container/format concerns, not part of the
+separation algorithm, and are documented there instead of duplicated here.
+
 ## 2. Building a per-dye response curve
 
 For one dye, at each of the four calibration temperatures, the pure-dye response on a channel is
@@ -137,8 +145,12 @@ every scan alongside the real wells. Both [`plateread.md`](./plateread.md) and
 [`dcal.md`](./dcal.md) describe the resulting geometry; this section is about what analysis does
 with it.
 
-Of that whole reference row, the calibration path uses exactly **one position per channel — the
-first** — as that scan's reference level. It is:
+The reference row has **12 positions per channel**, one per plate column (R1–R12) — the full
+width of a 96-well block's row — and every one of them is decoded and available. Of those 12, the
+calibration path uses exactly **one — column 0 (R1)** — as that scan's reference level. The other
+11 are not averaged in, not compared against each other, and not otherwise consulted by this
+correction; they exist in the decoded data purely for the diagnostic use described below. That one
+position is:
 
 - **per-channel** — each optical channel gets its own reference value;
 - **per-scan** — re-read every cycle, so it tracks slow changes in the optics over a run rather
@@ -175,13 +187,19 @@ is `AllChannelsScan` (so `SnrWF`, had it been saved, is the set that would have 
 `.zpcr` archive has no equivalent file**, so a run read from one never has a gain correction to
 apply, and its reference level correspondingly has no effect.
 
-The remaining reference positions are recorded in the plate read but are not consumed by this
-path. Runs also carry a **factory calibration of the full reference row** in their metadata; that
-is recorded for comparison purposes, not used in the per-cycle correction. Comparing it against
-the live reference readings is a useful **diagnostic of optical drift** — LED aging, detector or
-filter changes since the instrument was calibrated — which is exactly what this library's
-reference-calibration comparison surfaces. Be careful not to confuse that diagnostic sense of
-"drift" with the analysis option of the same name (§6).
+**It would be reasonable to expect more: that the instrument compares all 12 live reference
+columns against a factory-measured baseline, every cycle, to derive a per-channel correction
+factor that tracks optical drift in real time.** That is not what happens, in this library or (as
+far as the decoded formats show) in the source instrument software. What the run's metadata
+carries instead is a **factory calibration of the full reference row** — one static value per
+(channel, column), recorded once, not per cycle — and the only thing built from it is a
+**diagnostic**: this library's reference-calibration comparison averages each column's *live*
+readings across the *entire run* (not per cycle) and reports the delta against that column's
+factory value, as a drift indicator for a human to look at. Nothing consumes that comparison's
+output as an input to §4 — the gain correction in this section is the only place drift-tracking
+actually happens, and it runs through the single per-cycle black-level pivot above, not through
+this diagnostic. Be careful not to confuse that diagnostic sense of "drift" with the analysis
+option of the same name (§6).
 
 ### 4.2 Dark data (LED off)
 
