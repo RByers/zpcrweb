@@ -5,7 +5,8 @@
 **No pull requests in this repo.** Work is committed directly onto branches and then merged into main. 
 
 - Create worktrees on branches forked from the local `main` branch and do development there.
-- Merge feature/worktree branches into `main` locally. After doing so delete the worktree and branch.
+- When work is complete, rebase the branch onto `main` and verify that tests pass.
+- Then merge feature/worktree branches into `main` locally (should fast-forward). After doing so delete the worktree and branch.
 - Don't open PRs, and don't push anything upstream to the `origin` or make any branches from there.
 
 ### Worktree base ref
