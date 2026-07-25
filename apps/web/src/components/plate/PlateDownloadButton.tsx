@@ -9,6 +9,13 @@ function sanitize(s: string): string {
   return s.replace(/[\\/:*?"<>|]+/g, "_").trim() || "plate";
 }
 
+/** Drop a trailing `.pltd`/`.csv`/`.plt.csv` extension — `identityKey` and archive entry names
+ * are typically a source file name (e.g. `FirstExperiment.pltd`), and the `.plt.csv` we write
+ * shouldn't stack a second extension on top of it. */
+function stripPlateExt(s: string): string {
+  return s.replace(/\.(pltd|plt\.csv|csv)$/i, "");
+}
+
 interface Props {
   plate: PlateDefinition | undefined;
   /** Raw `.pltd` bytes + archive entry name, when the current plate is backed by a real
@@ -29,8 +36,10 @@ export function PlateDownloadButton({ plate, pltd }: Props) {
   if (!canDownload) return null;
 
   // identityKey (the plate setup's own identity) is the right user-facing name — plateName is
-  // only a vessel/plastic type (see PlateDefinition.plateName's doc comment).
-  const csvName = `${sanitize(plate?.identityKey || pltd?.name.replace(/\.(pltd|plt\.csv)$/i, "") || plate?.plateName || "plate")}.plt.csv`;
+  // only a vessel/plastic type (see PlateDefinition.plateName's doc comment). identityKey and
+  // the archive entry name are typically a source file name, hence stripPlateExt.
+  const csvBaseName = plate?.identityKey || pltd?.name || plate?.plateName || "plate";
+  const csvName = `${sanitize(stripPlateExt(csvBaseName))}.plt.csv`;
 
   const close = () => {
     if (detailsRef.current) detailsRef.current.open = false;
