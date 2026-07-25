@@ -63,6 +63,15 @@ export {
   autoBaselineRegion,
   subtractBaseline,
 } from "./baseline.js";
+export {
+  baselineNoise,
+  autoThreshold,
+  resolveThreshold,
+  isAmplified,
+  findThresholdCrossing,
+  findInflectionCq,
+  computeCq,
+} from "./threshold.js";
 
 export type {
   Zpcr,
@@ -129,3 +138,11 @@ export type {
   AutoBaselineOptions,
   BaselineMode,
 } from "./baseline.js";
+export type {
+  AutoThresholdOptions,
+  ThresholdOptions,
+  AmplificationOptions,
+  CqCrossingOptions,
+  CqAlgorithm,
+  CqOptions,
+} from "./threshold.js";

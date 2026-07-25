@@ -142,8 +142,14 @@ raw bytes ─▶ fflate.unzipSync ─▶ { name: Uint8Array }
   and its singular-value floor are **relative**, which is what makes the color-separation
   pipeline scale-invariant.
 - **`baseline.ts`** — the baseline stages (§2–§4) of a dye curve's Cq analysis: smoothing,
-  automatic/manual baseline-region selection, and baseline subtraction. Stops short of
-  thresholding and Cq themselves, which remain unimplemented. See [`threshold.md`](./threshold.md).
+  automatic/manual baseline-region selection, and baseline subtraction. See
+  [`threshold.md`](./threshold.md).
+- **`threshold.ts`** — the threshold and Cq stages (§5–§7) that finish what `baseline.ts` starts:
+  per-fluorophore noise/threshold estimation (manual override or auto, floored and computed from
+  the median of a well subset), the §6.1 threshold-crossing Cq (log-interpolated, with a linear
+  fallback and the §6.1 edge cases), the §6.2 curve-shape (`NoThreshold`) Cq via
+  second-derivative maximum, and the §7 amplification squelch. `computeCq()` ties both algorithms
+  together. See [`threshold.md`](./threshold.md).
 - **`runinfo.ts`** — a small regex scan over the flat `<KeyValuePairs>` list. No XML
   dependency: the structure is regular and self-closing `<Value />` maps to `""`.
 - **`temps.ts`** — pulls temperatures out of the `.Plateread` ICFF index. It matches on the

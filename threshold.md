@@ -14,15 +14,17 @@ Cq (also written Ct) — takes four more stages:
 Cq is the (fractional) cycle number at which a well's signal becomes reliably distinguishable from
 its own noise. Everything below exists to make that judgement reproducible.
 
-> **Status: baselining implemented (§2–§4); thresholding and Cq are still specification only
-> (§5–§6).** `packages/core/src/baseline.ts` implements smoothing, baseline-region selection
-> (both automatic strategies) and baseline subtraction (the `Raw`/`RawBaseLineSubtracted`/
-> `LinearBaseLineNormalized` modes); nothing computes a threshold or a Cq yet. This document
-> specifies reasonable algorithms and the option space a faithful implementation needs, so that
-> the numbers can be compared against a reference instrument's own output rather than invented.
-> The option names and default values quoted are those a real CFX run persists — they are
-> observable in the committed sample `samples/20260720_Luna_noRT.pcrd`, whose analysis parameters
-> are described in [`pcrd.md`](./pcrd.md) §2.5.
+> **Status: implemented (§2–§7), not yet validated against a reference instrument.**
+> `packages/core/src/baseline.ts` implements smoothing, baseline-region selection (both automatic
+> strategies) and baseline subtraction (the `Raw`/`RawBaseLineSubtracted`/
+> `LinearBaseLineNormalized` modes). `packages/core/src/threshold.ts` implements threshold
+> determination (manual override or auto, §5), both Cq algorithms (threshold crossing and
+> curve-shape inflection, §6) and the amplification squelch (§7). This document specifies
+> reasonable algorithms and the option space a faithful implementation needs, so that the numbers
+> can be compared against a reference instrument's own output rather than invented. The option
+> names and default values quoted are those a real CFX run persists — they are observable in the
+> committed sample `samples/20260720_Luna_noRT.pcrd`, whose analysis parameters are described in
+> [`pcrd.md`](./pcrd.md) §2.5.
 
 ---
 
@@ -178,6 +180,9 @@ the instrument shows any drift over the run, and reduces to the constant form wh
 
 ## 5. The threshold
 
+> Implemented by `baselineNoise()`, `autoThreshold()` and `resolveThreshold()` in
+> `packages/core/src/threshold.ts`.
+
 ### 5.1 Automatic
 
 Set `autoCalculateThreshold`. The principle: the threshold should sit just above the noise floor
@@ -212,6 +217,9 @@ recomputed per run makes Cq values drift between plates. An implementation shoul
 override as authoritative and skip §5.1 entirely.
 
 ## 6. Cq — two algorithms
+
+> Implemented by `findThresholdCrossing()` (§6.1), `findInflectionCq()` (§6.2) and `computeCq()`
+> (dispatches between them, and applies the §7 squelch) in `packages/core/src/threshold.ts`.
 
 `algorithmCtDetection` selects between them.
 
@@ -268,10 +276,13 @@ Two guards worth implementing, both of which change reported results:
 - **Squelch unamplified traces.** Before assigning Cq, classify each well as amplified or not
   (e.g. total rise below a few multiples of baseline noise ⇒ not amplified) and suppress Cq for
   the rest. Without this, noise on a flat well eventually crosses a low auto threshold and
-  produces a spurious late Cq.
+  produces a spurious late Cq. Implemented by `isAmplified()` in `packages/core/src/threshold.ts`
+  (default multiplier **10**, not pinned by the doc); `computeCq()` applies it automatically when
+  given a `noise` estimate.
 - **Validate the baseline.** If the chosen region fails the flatness/linearity checks of §3.2, the
   Cq derived from it is unreliable however clean the crossing looks. Surface it rather than
-  silently reporting a number.
+  silently reporting a number. **Not implemented** — callers of `threshold.ts` currently need to
+  check this themselves against `findBaselineByCurvature`'s pass/fail behaviour.
 
 ## 8. Recommended defaults
 
@@ -292,8 +303,10 @@ For an implementation aiming to match a reference instrument:
 ## 9. Open items
 
 - **Partially implemented.** `baseline.ts` covers §2–§4 (smoothing, baseline region, baseline
-  subtraction). Thresholding (§5) and Cq (§6) are still unimplemented, as are the `pDriftCorrection`
-  reference-normalization baseline modes and `LinearBaseLineNormalizedCurveFit`'s refinement.
+  subtraction) and `threshold.ts` covers §5–§7 (threshold determination, both Cq algorithms, the
+  amplification squelch). Not implemented: the `pDriftCorrection` reference-normalization
+  baseline modes, `LinearBaseLineNormalizedCurveFit`'s refinement, and the §7 baseline-validation
+  gate (surfacing a Cq derived from a region that failed the §3.2 flatness/linearity checks).
 - **Not validated.** These algorithms are specified to be *reasonable and precise*, but no Cq —
   and, for the baseline stages now implemented, no baseline region or corrected curve either —
   has been compared against a reference instrument's own reported values for the same well. Until
