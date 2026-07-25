@@ -2,13 +2,10 @@
 
 ## Git workflow
 
-**No pull requests in this repo.** Work is committed directly to the trunk branch and pushed
-to the `origin` GitHub remote (`git@github.com:RByers/zpcrweb.git`).
+**No pull requests in this repo.** Work is committed directly onto branches and then merged into main. 
 
-- The trunk branch here is named **`main`** (not `master`) — it is the only branch pushed
-  upstream.
-- Merge feature/worktree branches into `main` locally, then `git push origin main`.
-- Don't open PRs, and don't push side branches upstream.
+- Merge feature/worktree branches into `main` locally. After doing so delete the worktree and branch.
+- Don't open PRs, and don't push anything upstream to the `origin`
 
 ## Format documentation
 
