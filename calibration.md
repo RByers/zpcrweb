@@ -385,43 +385,46 @@ call is wasted work.
 ## 8. Limitations / open items
 
 - **The absolute RFU scale does not yet reproduce the instrument software's: a per-dye
-  multiplicative constant is missing.** Measurements from the committed
-  `20260720_Luna_noRT.pcrd` (block 59.99 °C), against CFX Manager's own figures for the same
-  run — `none` background, i.e. what this library reports by default:
+  multiplicative constant is missing.** Reference measurements from the committed
+  `20260720_Luna_noRT.pcrd` (block 59.99 °C, `none` background — i.e. what this library reports
+  by default) against CFX Manager's own figures for the same run. End RFU is from its endpoint
+  table (exact); cycle-1 values were read off its chart (approximate):
 
-  | Well | Dye | Cycle | This library | CFX Manager |
-  |---|---|---|---|---|
-  | B3 | FAM | 1 | 3273.5 | "just over 3000" (chart) |
-  | B3 | FAM | 45 | 8965.4 | **8169** (End RFU) |
-  | C3 | FAM | 45 | 2295 | **2115** (End RFU) |
+  | Well | Dye | Cycle 45, here | CFX End RFU | here ÷ CFX | Cycle 1, here | CFX chart |
+  |---|---|---|---|---|---|---|
+  | B3 | FAM | 8965.4 | 8169 | **1.0975** | 3273.5 | just over 3000 |
+  | C3 | FAM | 2295 | 2115 | **1.0850** | — | — |
+  | C3 | Cy5 | 3707 | 4038 | **0.9180** | 2337 | just over 2600 |
+  | D3 | Texas Red | 6238 | 6232 | **1.0009** | 4018 | a bit over 4000 |
 
-  The two exact points fit `CFX = 0.9077 × ours + 32` — a **pure scale of ≈0.908 with no
-  additive term**, which then predicts 3003 for B3 cycle 1, matching the third observation.
-  Two things follow directly:
+  A **pure per-dye scale with no additive term** fits all seven observations: dividing this
+  library's cycle-1 values by the same per-dye ratio gives 2982, 2546 and 4014, against chart
+  readings of "just over 3000", "just over 2600" and "a bit over 4000". Three things follow:
 
-  1. **`none` is the right background (§4.2).** A wrong background choice would show up as a
-     non-zero intercept in that fit, and the intercept is ≈0. Subtracting dark or the empty
-     plate would move cycle 1 to 1152 or ≈765, against an observed ≈3000.
-  2. **It is not a per-well gain.** B3 and C3 give the same factor to within half a percent, so
-     §4.1's well factors — the earlier leading hypothesis — cannot be the explanation.
+  1. **`none` is the right background (§4.2).** The fit needs no additive term at all. A
+     different background choice would show up as an offset, and dark or empty-plate subtraction
+     would put B3/FAM's cycle 1 at 1152 or ≈765 against an observed ≈3000.
+  2. **The constant is per-dye, not global** — Texas Red matches to 0.1% while FAM is 9.8% high
+     and Cy5 8.2% low — **and not per-well**: FAM's two wells agree to ≈1%.
+  3. **Curve shape, and therefore Cq, is unaffected**, since a per-dye scale is constant across
+     cycles. This is a reporting-scale defect only.
 
-  What the ≈0.908 *is* remains open. It is not anything in §§2–5: §3's normalization cancels
-  exactly (§5.1), the temperature the curves are sampled at cancels, the `.Dcal` response is
-  bit-identical across all 108 wells, the empty channel-6 row is a zero row and so a no-op in a
-  least-squares solve, and it is not the other vessel type's calibration (`BR White` runs ≈4×
-  larger, not 0.9×). For FAM it would mean a scale of 3587 where §5.1 uses a `columnNorm` of
-  3950.8.
+  The mechanism is **not yet identified**, and the following are ruled out by measurement on
+  this file: §3's normalization (cancels exactly, §5.1); the temperature the curves are sampled
+  at (cancels — and no single reference temperature fits both FAM, which would need ≈70 °C, and
+  Cy5, which would need ≈57 °C); the well `0` sample below (the `.Dcal` response is bit-identical
+  across all 108 wells); the empty channel-6 row (a zero row is a no-op in a least-squares
+  solve); the other vessel type (`BR White` runs ≈4× larger, not 0.9×); §4.1's well factors
+  (this run's `wellFactorsCollection` really is the identity table — `snrSaved` and `flyovrSaved`
+  are both `False` — and a well factor derived from each well's cycle-1 reading against the plate
+  mean gives 1.44/1.02/1.11/2.02 where 1.098/1.085/0.918/1.001 is needed); a `factory`-flagged
+  alternative calibration block (each `.Dcal` here holds exactly 8 blocks, 4 temperatures ×
+  dye/empty, with no second set); and re-weighting the least-squares rows, tried three ways
+  (by `‖M row‖`, by 1/reading and by 1/std², none of which lands near the observed pattern).
 
-  **Whether the constant is per-dye or global is not yet settled**, and it matters, because a
-  global constant is a one-line change to §5.1 while a per-dye one implies the scale is derived
-  from each dye's calibration in some way not yet identified. The one Cy5 observation available
-  (well C3, reported as rising from near zero to ≈3100) does not fit a 0.908 scale of this
-  library's 2337→3707, and cannot be reconciled with the raw data either: channel 4's raw
-  amplitude in that well is 1366, so an amplitude of ≈3100 would need a 2.27× gain that no
-  quantity in the calibration supplies. That figure was read off a chart rather than the
-  endpoint table, so it may be a baseline-subtracted curve — resolving it needs the same
-  *endpoint-table* End RFU that the FAM numbers above came from, for Cy5 in C3 and for
-  Texas Red in D3 (this library: 4018→6238).
+  Worth noting as a lead: Texas Red — the one dye that matches — is also the one whose response
+  is essentially flat in temperature (4758/4769/4744/4761 across 20–80 °C), while FAM and Cy5
+  both fall with temperature and miss in *opposite* directions.
 
 - **The absolute RFU scale is a convention.** §5.1's `columnNorm` factor puts the output on an RFU
   scale that is self-consistent, stable across normalization modes, and the right order of
