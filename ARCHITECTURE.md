@@ -6,11 +6,11 @@ Key design points for the zpcrweb project. For the `.Plateread` binary format it
 ## Format documentation
 
 Every reverse-engineered Bio-Rad file format (or sub-format, like the shared ICFF container)
-gets its own top-level `*.md` doc — [`plateread.md`](./plateread.md), [`pltd.md`](./pltd.md),
-[`pcrd.md`](./pcrd.md), [`icff.md`](./icff.md). Each doc is self-contained (layout, fields,
-status) and ends with a pointer to the `packages/core/src` module that implements it, so the
-doc is always the entry point for understanding *and* changing a decoder. See
-[`CLAUDE.md`](./CLAUDE.md) for the full doc ↔ code table.
+gets its own top-level `*.md` doc — [`plateread.md`](./plateread.md), [`dcal.md`](./dcal.md),
+[`pltd.md`](./pltd.md), [`pcrd.md`](./pcrd.md), [`icff.md`](./icff.md). Each doc is
+self-contained (layout, fields, status) and ends with a pointer to the `packages/core/src`
+module that implements it, so the doc is always the entry point for understanding *and*
+changing a decoder. See [`CLAUDE.md`](./CLAUDE.md) for the full doc ↔ code table.
 
 ## Goals
 
@@ -66,15 +66,19 @@ raw bytes ─▶ fflate.unzipSync ─▶ { name: Uint8Array }
 ```
 
 - **`archive.ts`** — decompress + the low-level `ArchiveAccess` facade.
-- **`descriptors.ts`** — parses the `.Plateread` trailing **descriptor dictionary**, the
-  file's own schema mapping field names → offset/length/type. Every other field lookup goes
-  through it, so no offsets are hardcoded.
-- **`plateread.ts`** — `DataView`-based decoder for the 22037-byte `.Plateread` layout,
-  driven by the dictionary: mixed-endian (big-endian scalars, little-endian WELLDATA /
-  DARKDATA float arrays). Scalars are guarded (returned only when they validate).
+- **`icff.ts`** — parses the trailing **ICFF index** shared by `.Plateread` and `.Dcal`: a
+  footer points at a list of field-name slots, each mapping to an offset/length in the file.
+  Every other field lookup in those two formats goes through it, so no offsets are hardcoded.
+  See [`icff.md`](./icff.md).
+- **`plateread.ts`** — `DataView`-based decoder for the 22037-byte `.Plateread` layout, driven
+  by the ICFF index: mixed-endian (big-endian scalars, little-endian WELLDATA / DARKDATA float
+  arrays). Scalars are guarded (returned only when they validate).
+- **`dcal.ts`** — decodes `.Dcal` pure-dye calibration entries (`zpcr.calibrations()`): one
+  dye's fluorescence response across all 6 channels at 4 block temperatures, plus a matching
+  empty-plate baseline, also on top of the ICFF index. See [`dcal.md`](./dcal.md).
 - **`runinfo.ts`** — a small regex scan over the flat `<KeyValuePairs>` list. No XML
   dependency: the structure is regular and self-closing `<Value />` maps to `""`.
-- **`temps.ts`** — pulls temperatures out of the descriptor dictionary. It matches on the
+- **`temps.ts`** — pulls temperatures out of the `.Plateread` ICFF index. It matches on the
   field *name* (anything containing `TEMP`) rather than a hardcoded list, so a firmware that
   emits, say, per-row block temperatures surfaces them with no code change. Measured floats
   and int set points are told apart by plausibility (see the module comment).
@@ -101,17 +105,17 @@ Both are provided because they serve different consumers:
 
 ## Low-level archive API
 
-Full visualizers for every file type (protocol, `.alf`, `runlog.xml`, `.Dcal`) are future
-work. Until then, `Zpcr.archive` lets the UI show the raw `bytes`, decoded `text`, or a
-canonical `hexDump` of any archive entry. This means the app can present *something* useful
-for every file from day one, and new typed parsers can be layered in without changing the
-low-level contract.
+Full visualizers for every file type (protocol, `.alf`, `runlog.xml`) are future work. Until
+then, `Zpcr.archive` lets the UI show the raw `bytes`, decoded `text`, or a canonical `hexDump`
+of any archive entry. This means the app can present *something* useful for every file from day
+one, and new typed parsers can be layered in without changing the low-level contract.
 
 ## Coordinate convention
 
 Wells are addressed as `(channel, row, col)`:
 
-- `channel` 0–5 (scan order; dye mapping requires calibration files — future work).
+- `channel` 0–5, scan order. The channel→dye mapping itself lives in `.Dcal` calibration
+  files (`PRIMARYCHANNEL`), not `.Plateread` — see [`dcal.md`](./dcal.md).
 - `row` 0–7 = plate rows A–H; `row` 8 = the reference row.
 - `col` 0–11 = plate columns 1–12.
 - Flat WELLDATA index: `channel * 108 + row * 12 + col`.
