@@ -102,8 +102,7 @@ export interface FileSettings {
    * {@link disabledFluors}). Also gates which curves the Curves view marks with a Cq marker. */
   analysisDisabledTargets: Set<string>;
   /** Analysis view's Cq determination algorithm (`threshold.md` §6); see {@link CqAlgorithm}.
-   * Defaults to `"NoThreshold"` (second-derivative/inflection) — no threshold to tune before a
-   * table full of Cqs shows up. */
+   * Defaults to `"Threshold"` — the observed instrument default (§6's own default too). */
   analysisCqAlgorithm: CqAlgorithm;
   /** Manual per-target threshold override (RFU), keyed by target name — only consulted when
    * {@link analysisCqAlgorithm} is `"Threshold"`. A target with no entry uses the auto threshold
@@ -215,7 +214,7 @@ function defaultSettings(): FileSettings {
     disabledFluors: new Set<string>(),
     showUnloadedFluors: false,
     analysisDisabledTargets: new Set<string>(),
-    analysisCqAlgorithm: "NoThreshold",
+    analysisCqAlgorithm: "Threshold",
     analysisThresholdOverrides: new Map<string, number>(),
   };
 }
@@ -266,7 +265,7 @@ function fromStored(s: StoredSettings): FileSettings {
     showUnloadedFluors: s.showUnloadedFluors ?? false,
     temps: new Set(s.temps ?? []),
     analysisDisabledTargets: new Set(s.analysisDisabledTargets ?? []),
-    analysisCqAlgorithm: s.analysisCqAlgorithm ?? "NoThreshold",
+    analysisCqAlgorithm: s.analysisCqAlgorithm ?? "Threshold",
     analysisThresholdOverrides: new Map(s.analysisThresholdOverrides ?? []),
   };
 }

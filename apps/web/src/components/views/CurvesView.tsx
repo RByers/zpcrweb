@@ -11,6 +11,7 @@ import {
   type TemperatureCurve,
 } from "@zpcrweb/core";
 import { libBaselineMode } from "../../lib/cq";
+import { computeWellTypes } from "../../lib/wellTypes";
 import {
   wellKey,
   type BandsMode,
@@ -118,17 +119,9 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
   const plate = plateEntry?.pltd.plate;
   const calibrations = useMemo(() => zpcr.calibrations(), [zpcr]);
 
-  // Per-well sample type (from the plate definition), for coloring the well-selection grid to
-  // match the Plates view. A well not actually loaded shows as "empty" (grey) regardless of its
-  // configured sampleType — mirroring PlateViewer, which likewise gates its sample-type color on
-  // `loaded` rather than `sampleType !== "empty"` (a well can be assigned a real sampleType like
-  // "unknown" in the plate design without ending up loaded with a fluor for this run).
-  const wellTypes = useMemo(() => {
-    if (!plate) return undefined;
-    const m = new Map<string, (typeof plate.wells)[number]["sampleType"]>();
-    for (const w of plate.wells) m.set(wellKey(w.row, w.col), w.loaded ? w.sampleType : "empty");
-    return m;
-  }, [plate]);
+  // Per-well sample type, for coloring the well-selection grid to match the Plates view — see
+  // `computeWellTypes`; shared with AnalysisView's well matrix.
+  const wellTypes = useMemo(() => computeWellTypes(plate), [plate]);
 
   const fullWellSet = useMemo(() => {
     const s = new Set<string>();

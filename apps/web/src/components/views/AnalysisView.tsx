@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import {
   baselineCorrectCurve,
   buildCalibrationMatrix,
@@ -12,6 +12,7 @@ import {
 } from "@zpcrweb/core";
 import { wellKey, type FileSettings } from "../../state/useZpcrStore";
 import { libBaselineMode } from "../../lib/cq";
+import { computeWellTypes } from "../../lib/wellTypes";
 import { usePltdPassword } from "../../state/pltdPassword";
 import { channelLabel } from "../../lib/channelColors";
 import {
@@ -79,19 +80,7 @@ export function AnalysisView({ zpcr, settings, onChange }: Props) {
   );
   const calibratedFluors = useMemo(() => fluorCals.filter((f) => f.curve), [fluorCals]);
   const calibrationAvailable = calibratedFluors.length > 0;
-
-  // Target/gene name assigned to each (well, fluor) pair — same as CurvesView's target mode.
-  const wellFluorTargets = useMemo(() => {
-    const m = new Map<string, Map<string, string>>();
-    if (plate) {
-      for (const w of plate.wells) {
-        const inner = new Map<string, string>();
-        for (const wf of w.fluors) if (wf.target) inner.set(wf.fluor, wf.target);
-        m.set(wellKey(w.row, w.col), inner);
-      }
-    }
-    return m;
-  }, [plate]);
+  const wellTypes = useMemo(() => computeWellTypes(plate), [plate]);
 
   const targetInfos = useMemo(() => {
     if (!plate) return [];
@@ -112,16 +101,27 @@ export function AnalysisView({ zpcr, settings, onChange }: Props) {
     return [...seen.values()];
   }, [plate, fluorCals]);
 
+  // No per-well target assigned anywhere on the plate: group by fluorophore instead, mirroring
+  // CurvesView's Fluorophore view mode, so the Analysis table still has something to group on.
+  const usingTargets = targetInfos.length > 0;
+  const groupInfos = useMemo(
+    () =>
+      usingTargets
+        ? targetInfos
+        : fluorCals.map((f) => ({ target: f.fluor, fluor: f.fluor, channel: f.channel, curve: f.curve })),
+    [usingTargets, targetInfos, fluorCals],
+  );
+
   const chipItems: FluorChip[] = useMemo(
     () =>
-      targetInfos.map((t) => ({
-        key: t.target,
-        label: t.target,
-        sublabel: t.fluor,
-        channel: t.channel,
-        calibrated: !!t.curve,
+      groupInfos.map((g) => ({
+        key: g.target,
+        label: g.target,
+        sublabel: usingTargets ? g.fluor : channelLabel(g.channel),
+        channel: g.channel,
+        calibrated: !!g.curve,
       })),
-    [targetInfos],
+    [groupInfos, usingTargets],
   );
 
   const stepTemperatureC = useMemo(() => {
@@ -215,13 +215,14 @@ export function AnalysisView({ zpcr, settings, onChange }: Props) {
       if (!w.loaded) continue;
       if (!settings.enabledWells.has(wellKey(w.row, w.col))) continue;
       for (const wf of w.fluors) {
-        if (!wf.target || settings.analysisDisabledTargets.has(wf.target)) continue;
+        const group = usingTargets ? wf.target : wf.fluor;
+        if (!group || settings.analysisDisabledTargets.has(group)) continue;
         const curve = curveByWellDye.get(`${w.row},${w.col},${wf.fluor}`);
         if (!curve) continue;
-        const info = targetInfos.find((t) => t.target === wf.target);
+        const info = groupInfos.find((g) => g.target === group);
         const baseline = baselineCorrectCurve(curve.cycles, curve.mean, baselineMode, manualRegion);
         prepped.push({
-          target: wf.target,
+          target: group,
           fluor: wf.fluor,
           channel: info?.channel ?? wf.channel,
           row: w.row,
@@ -280,13 +281,12 @@ export function AnalysisView({ zpcr, settings, onChange }: Props) {
     settings.enabledWells,
     settings.analysisDisabledTargets,
     settings.analysisThresholdOverrides,
-    targetInfos,
+    usingTargets,
+    groupInfos,
     baselineMode,
     manualRegion,
     algorithm,
   ]);
-
-  const [showThresholds, setShowThresholds] = useState(false);
 
   const download = () => {
     let csv = csvRow(["target", "fluor", "channel", "well", "threshold", "cq", "deltaRfu", "amplified"]);
@@ -329,7 +329,7 @@ export function AnalysisView({ zpcr, settings, onChange }: Props) {
             {plate && calibrationAvailable && (
               <>
                 <div className="rail__section">
-                  <div className="rail__title">Targets</div>
+                  <div className="rail__title">{usingTargets ? "Targets" : "Fluorophores"}</div>
                   <FluorBar
                     items={chipItems}
                     disabled={settings.analysisDisabledTargets}
@@ -342,6 +342,7 @@ export function AnalysisView({ zpcr, settings, onChange }: Props) {
                   <WellMatrix
                     enabled={settings.enabledWells}
                     onChange={(next) => onChange({ enabledWells: next })}
+                    wellTypes={wellTypes}
                   />
                 </div>
 
@@ -349,8 +350,8 @@ export function AnalysisView({ zpcr, settings, onChange }: Props) {
                   <Toggle
                     label="Cq mode"
                     options={[
-                      ["NoThreshold", "2nd derivative"],
                       ["Threshold", "Threshold"],
+                      ["NoThreshold", "2nd derivative"],
                     ]}
                     value={algorithm}
                     onChange={(v) => onChange({ analysisCqAlgorithm: v as CqAlgorithm })}
@@ -358,41 +359,41 @@ export function AnalysisView({ zpcr, settings, onChange }: Props) {
                 </div>
 
                 {algorithm === "Threshold" && (
-                  <div className="rail__section">
-                    <div className="rail__title">
-                      Threshold overrides
-                      <button className="rail__link" onClick={() => setShowThresholds((v) => !v)}>
-                        {showThresholds ? "hide" : "edit"}
-                      </button>
+                  <details className="rail__section rail__details">
+                    <summary className="rail__title">
+                      <span>
+                        <span className="rail__chevron" aria-hidden="true">
+                          ▸
+                        </span>
+                        Threshold overrides
+                      </span>
+                    </summary>
+                    <div className="analysis__thresholds">
+                      {groupInfos
+                        .filter((g) => !settings.analysisDisabledTargets.has(g.target) && g.curve)
+                        .map((g) => {
+                          const auto = rows.find((r) => r.target === g.target)?.threshold;
+                          const override = settings.analysisThresholdOverrides.get(g.target);
+                          return (
+                            <label key={g.target} className="analysis__threshold-row mono">
+                              <span>{g.target}</span>
+                              <input
+                                type="number"
+                                placeholder={auto != null ? auto.toFixed(1) : "auto"}
+                                value={override ?? ""}
+                                onChange={(e) => {
+                                  const next = new Map(settings.analysisThresholdOverrides);
+                                  const raw = e.currentTarget.value;
+                                  if (raw === "") next.delete(g.target);
+                                  else next.set(g.target, Number(raw));
+                                  onChange({ analysisThresholdOverrides: next });
+                                }}
+                              />
+                            </label>
+                          );
+                        })}
                     </div>
-                    {showThresholds && (
-                      <div className="analysis__thresholds">
-                        {targetInfos
-                          .filter((t) => !settings.analysisDisabledTargets.has(t.target) && t.curve)
-                          .map((t) => {
-                            const auto = rows.find((r) => r.target === t.target)?.threshold;
-                            const override = settings.analysisThresholdOverrides.get(t.target);
-                            return (
-                              <label key={t.target} className="analysis__threshold-row mono">
-                                <span>{t.target}</span>
-                                <input
-                                  type="number"
-                                  placeholder={auto != null ? auto.toFixed(1) : "auto"}
-                                  value={override ?? ""}
-                                  onChange={(e) => {
-                                    const next = new Map(settings.analysisThresholdOverrides);
-                                    const raw = e.currentTarget.value;
-                                    if (raw === "") next.delete(t.target);
-                                    else next.set(t.target, Number(raw));
-                                    onChange({ analysisThresholdOverrides: next });
-                                  }}
-                                />
-                              </label>
-                            );
-                          })}
-                      </div>
-                    )}
-                  </div>
+                  </details>
                 )}
 
                 <div className="rail__note mono">
@@ -427,8 +428,8 @@ export function AnalysisView({ zpcr, settings, onChange }: Props) {
           <table className="analysis__tbl runlog__tbl">
             <thead>
               <tr>
-                <th>Target</th>
-                <th>Fluor</th>
+                <th>{usingTargets ? "Target" : "Fluorophore"}</th>
+                {usingTargets && <th>Fluor</th>}
                 <th>Well</th>
                 <th>Threshold</th>
                 <th>Cq</th>
@@ -439,10 +440,10 @@ export function AnalysisView({ zpcr, settings, onChange }: Props) {
               {rows.map((r) => (
                 <tr
                   key={`${r.target}-${r.wellLabel}`}
-                  className={"analysis__row" + (r.amplified ? "" : " is-unamplified")}
+                  className={"analysis__row" + (r.cq == null ? " is-unamplified" : "")}
                 >
                   <td>{r.target}</td>
-                  <td>{r.fluor}</td>
+                  {usingTargets && <td>{r.fluor}</td>}
                   <td>{r.wellLabel}</td>
                   <td>{algorithm === "Threshold" ? r.threshold.toFixed(1) : "—"}</td>
                   <td>{r.cq != null ? r.cq.toFixed(2) : "—"}</td>

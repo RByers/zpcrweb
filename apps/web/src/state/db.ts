@@ -57,7 +57,7 @@ export interface StoredSettings {
   /** Analysis view: target/gene names hidden from the Cq/ΔRFU table. */
   analysisDisabledTargets?: string[];
   /** Analysis view's Cq determination algorithm. Absent on records written before this setting
-   * existed, which then default to `"NoThreshold"`. */
+   * existed, which then default to `"Threshold"`. */
   analysisCqAlgorithm?: "Threshold" | "NoThreshold";
   /** Manual per-target threshold overrides (RFU), as `[target, value]` pairs. */
   analysisThresholdOverrides?: [string, number][];

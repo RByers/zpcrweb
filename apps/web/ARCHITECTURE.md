@@ -140,7 +140,7 @@ a minimal IndexedDB wrapper with two object stores:
   (Curves view's library baseline-subtraction mode) are independent settings — see "Two baseline
   concepts" under Reference view. The Analysis view adds three of its own:
   `analysisDisabledTargets[]` (an opt-out target filter, like `disabledFluors`),
-  `analysisCqAlgorithm` (`"Threshold"`/`"NoThreshold"`, default `"NoThreshold"`), and
+  `analysisCqAlgorithm` (`"Threshold"`/`"NoThreshold"`, default `"Threshold"`), and
   `analysisThresholdOverrides` (`[target, value][]`, manual per-target threshold RFU) — see
   "Analysis view" below. Writes are debounced.
 
@@ -392,7 +392,8 @@ only pieces the two views share.
 `AnalysisView` (`components/views/AnalysisView.tsx`) is a table of one row per active
 (target, well) pair — Cq and endpoint ΔRFU, per `threshold.md` §5–§7 — reusing `CurvesView`'s
 rail layout (`FluorBar` for the target filter, `WellMatrix` — sharing the same
-`settings.enabledWells` — for the well filter) but with its own target opt-out set
+`settings.enabledWells` **and** the same per-well sample-type coloring via `lib/wellTypes.ts`'s
+`computeWellTypes()` — for the well filter) but with its own target opt-out set
 (`analysisDisabledTargets`, since a target filtered out of the table shouldn't also hide it
 from Curves' Fluorophore view mode). It only operates in dye space: computing a per-target
 curve needs channel→dye color separation (`calibration.md`), so the rail shows an explanatory
@@ -403,10 +404,14 @@ UI-orchestration glue over the real transforms in `lib/fluorCurves.ts`, not anal
 their own, so the duplication trades a little repetition for not risking a regression in the
 already-validated Curves view.
 
-- **One row per (target, well):** built from `PlateDefinition.wells[].fluors[]` — each
-  `WellFluor` with a `target` set, in a `loaded` well that's in `settings.enabledWells` and
-  whose target isn't in `analysisDisabledTargets`, paired with that well/dye's `FluorCurve`
-  from `computeFluorCurves`.
+- **One row per (target, well) — or (fluorophore, well) with no targets assigned:** built from
+  `PlateDefinition.wells[].fluors[]`, in a `loaded` well that's in `settings.enabledWells`.
+  Grouping normally keys on `WellFluor.target`; if no well on the plate has a target assigned at
+  all (`targetInfos` empty — a plate that was never annotated with target/gene names), the rail
+  and table fall back to grouping by fluorophore instead (`usingTargets` flag, `groupInfos`),
+  mirroring `CurvesView`'s Fluorophore view mode — the rail's "Targets" section relabels itself
+  "Fluorophores" and the table drops the now-redundant Fluor column. Either way the opt-out set
+  (`analysisDisabledTargets`) and threshold overrides are keyed by whichever grouping is active.
 - **Baseline:** reused verbatim from the Curves view's own settings (`curveBaseline`/
   `curveBaselineRange`) via `lib/cq.ts`'s `libBaselineMode()`, mapped to `baseline.ts`'s
   `BaselineMode` the same way `chart.ts`'s `algorithmAdjust()` does — so a row's ΔRFU and Cq
@@ -415,16 +420,22 @@ already-validated Curves view.
   shared library entry point: baseline region (auto or `curveBaselineRange`'s manual override),
   corrected values, `baselineNoise`, `isAmplified`, and ΔRFU (endpoint corrected value minus the
   baseline region's mean) in one call.
-- **Cq algorithm (`analysisCqAlgorithm` setting):** `"NoThreshold"` (2nd-derivative inflection,
-  `threshold.md` §6.2) is the default — no threshold to tune before the table populates.
-  `"Threshold"` (§6.1) needs a threshold per target: §5.1's `resolveThreshold` over the median
-  `baselineNoise` across that target's own wells, overridable per target via
-  `analysisThresholdOverrides` (a "Threshold overrides" rail section, shown only in Threshold
-  mode) — a blank input falls back to the auto value, shown as the input's placeholder.
-- **Amplification / greying:** a row whose curve fails `isAmplified` (§7 — total rise under
-  10× baseline noise) renders at reduced opacity (`.analysis__row.is-unamplified`) rather than
-  being hidden, so a flat well's absence from qualification is visible instead of silently
-  dropped from the table.
+- **Cq algorithm (`analysisCqAlgorithm` setting):** `"Threshold"` (§6.1) is the default — the
+  observed instrument default, and §6's own. It needs a threshold per group: §5.1's
+  `resolveThreshold` over the median `baselineNoise` across that group's own wells, overridable
+  per group via `analysisThresholdOverrides` — a "Threshold overrides" rail section shown only
+  in Threshold mode, collapsible exactly like the Curves view's Temperature section (`<details
+  className="rail__details">`, chevron rotates open, no separate show/hide button) — a blank
+  input falls back to the auto value, shown as the input's placeholder. `"NoThreshold"` (§6.2,
+  2nd-derivative inflection) needs no threshold at all.
+- **Amplification / greying:** a row renders at reduced opacity
+  (`.analysis__row.is-unamplified`) whenever it has no Cq (`cq == null`) — either because
+  `isAmplified` (§7 — total rise under 10× baseline noise) failed, or, in Threshold mode, the
+  curve never crossed (or didn't end above) the resolved threshold. Keying greying on the Cq
+  result itself, not a separately-cached amplification flag, is what makes greying react live to
+  switching Cq mode or editing a threshold override — both change `cq` (and therefore the row's
+  styling) through the same `rows` `useMemo`, no separate invalidation needed. A row is never
+  hidden, so a well's disqualification is visible instead of silently dropped from the table.
 - **CSV download:** built directly from the table's rows (target, fluor, channel, well,
   threshold, Cq, ΔRFU, amplified), via the shared `csvRow()` quoting helper
   (`lib/download.ts`, exported for reuse) and `downloadText()` — filename
