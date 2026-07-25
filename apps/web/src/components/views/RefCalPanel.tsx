@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import type { Zpcr, RefCalComparison } from "@zpcrweb/core";
-import { CHANNEL_INFO, channelColor } from "../../lib/channelColors";
+import { CHANNEL_INFO, channelColor, channelLabel } from "../../lib/channelColors";
 
 type Stat = "drift" | "factory" | "live";
 const STATS: { id: Stat; label: string }[] = [
@@ -83,7 +83,7 @@ export function RefCalPanel({ zpcr }: { zpcr: Zpcr }) {
                     className="decoded__swatch"
                     style={{ background: channelColor(ch.index) }}
                   />
-                  C{ch.index + 1}
+                  {channelLabel(ch.index)}
                 </th>
               ))}
             </tr>

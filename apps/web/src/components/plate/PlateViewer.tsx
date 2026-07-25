@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { PlateDefinition, WellDefinition } from "@zpcrweb/core";
-import { channelColor } from "../../lib/channelColors";
+import { channelColor, channelLabel } from "../../lib/channelColors";
 import { ROW_LABELS, SAMPLE_TYPE_META } from "../../lib/sampleType";
 
 /**
@@ -35,7 +35,7 @@ export function PlateViewer({ plate, sourceHint }: { plate: PlateDefinition; sou
             {plate.fluors.map((f) => (
               <span key={f.channel + f.fluor} className="plate__chip mono">
                 <span className="decoded__swatch" style={{ background: channelColor(f.channel) }} />
-                {f.fluor} <span className="plate__chipch">C{f.channel + 1}</span>
+                {f.fluor} <span className="plate__chipch">{channelLabel(f.channel)}</span>
               </span>
             ))}
           </div>
@@ -218,7 +218,7 @@ function WellDetail({ well }: { well: WellDefinition }) {
                   <span className="decoded__swatch" style={{ background: channelColor(f.channel) }} />
                   {f.fluor}
                 </td>
-                <td>C{f.channel + 1}</td>
+                <td>{channelLabel(f.channel)}</td>
                 <td>{f.target ?? <span className="decoded__empty">∅</span>}</td>
               </tr>
             ))}

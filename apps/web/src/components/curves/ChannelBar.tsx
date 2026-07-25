@@ -1,4 +1,4 @@
-import { CHANNEL_INFO } from "../../lib/channelColors";
+import { CHANNEL_INFO, channelLabel } from "../../lib/channelColors";
 
 interface Props {
   enabled: Set<number>;
@@ -22,7 +22,7 @@ export function ChannelBar({ enabled, available, onToggle }: Props) {
           >
             <span className="chanchip__swatch" />
             <span className="chanchip__label">
-              <span className="chanchip__ch mono">C{c.index + 1}</span>
+              <span className="chanchip__ch mono">{channelLabel(c.index)}</span>
             </span>
           </button>
         );

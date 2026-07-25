@@ -1,4 +1,4 @@
-import { channelColor } from "../../lib/channelColors";
+import { channelColor, channelLabel } from "../../lib/channelColors";
 import type { FluorCalibration } from "../../lib/fluorCurves";
 
 interface Props {
@@ -34,7 +34,7 @@ export function FluorBar({ fluors, disabled, onToggle }: Props) {
             <span className="chanchip__swatch" />
             <span className="chanchip__label">
               <span className="chanchip__ch mono">{f.fluor}</span>
-              <span className="chanchip__dye">C{f.channel + 1}</span>
+              <span className="chanchip__dye">{channelLabel(f.channel)}</span>
             </span>
           </button>
         );

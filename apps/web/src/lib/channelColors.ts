@@ -12,7 +12,7 @@
  *
  * Channel space and dye space are deliberately kept apart (see `fluorCurves.ts`): which dye, if
  * any, is actually read on a given channel depends on the plate and its calibration, not on the
- * channel index, so no dye name is attached here. A channel is always just "C1"–"C6" in this
+ * channel index, so no dye name is attached here. A channel is always just "Ch1"–"Ch6" in this
  * module; fluorophore names appear only once color separation has actually resolved them, in
  * the calibration ("Fluorophores") view.
  *
@@ -39,7 +39,10 @@ export function channelColor(index: number): string {
   return CHANNEL_INFO[index]?.color ?? "#8aa0c0";
 }
 
-/** Display label for a channel in channel-space views — always "C1"–"C6", never a dye guess. */
+/**
+ * Display label for a channel in channel-space views — always "Ch1"–"Ch6", never a dye guess.
+ * "Ch" rather than "C" to avoid ambiguity with a well column/position.
+ */
 export function channelLabel(index: number): string {
-  return `C${index + 1}`;
+  return `Ch${index + 1}`;
 }

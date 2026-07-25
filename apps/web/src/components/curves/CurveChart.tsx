@@ -9,6 +9,7 @@ import type {
   Scale,
 } from "../../state/useZpcrStore";
 import { buildChart, type FactoryCurve, type PlotCurve, type TooltipData } from "../../lib/uplot/chart";
+import { channelLabel } from "../../lib/channelColors";
 
 interface Props {
   curves: PlotCurve[];
@@ -118,7 +119,7 @@ export function CurveChart({
             <strong>{tip.kind === "dark" || tip.kind === "factory" ? tip.kind : tip.label}</strong>
             {tip.kind !== "temp" && (
               <span className="chart__tip-dye">
-                C{tip.channel + 1} · {tip.dye}
+                {channelLabel(tip.channel)} · {tip.dye}
                 {tip.kind === "factory" && ` · R${tip.col + 1}`}
               </span>
             )}

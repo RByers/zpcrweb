@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { decodePlateReadDetail, type PlateRead, type Zpcr } from "@zpcrweb/core";
-import { channelColor } from "../../lib/channelColors";
+import { channelColor, channelLabel } from "../../lib/channelColors";
 
 type Stat = "mean" | "std" | "min" | "max";
 const STATS: Stat[] = ["mean", "std", "min", "max"];
@@ -149,7 +149,7 @@ export function DecodedPlateread({ zpcr, read }: { zpcr: Zpcr; read: PlateRead }
               <tr key={i}>
                 <td>
                   <span className="decoded__swatch" style={{ background: channelColor(i) }} />
-                  C{i + 1}
+                  {channelLabel(i)}
                 </td>
                 <td>{d.mean.toFixed(1)}</td>
                 <td>{d.std.toFixed(2)}</td>
@@ -171,7 +171,7 @@ export function DecodedPlateread({ zpcr, read }: { zpcr: Zpcr; read: PlateRead }
                 className={"segmented__item" + (channel === i ? " is-active" : "")}
                 onClick={() => setChannel(i)}
               >
-                C{i + 1}
+                {channelLabel(i)}
               </button>
             ))}
           </div>
@@ -187,7 +187,7 @@ export function DecodedPlateread({ zpcr, read }: { zpcr: Zpcr; read: PlateRead }
             ))}
           </div>
           <span className="decoded__ctxt mono">
-            C{channel + 1} · {stat}
+            {channelLabel(channel)} · {stat}
           </span>
         </div>
 
