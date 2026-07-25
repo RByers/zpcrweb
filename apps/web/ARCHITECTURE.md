@@ -56,7 +56,13 @@ carries `documentXml` for a successfully-decoded `.pcrd` — the full raw docume
 
 ## Stack
 
-- **React 18 + Vite + TypeScript** — SPA, no router (view state is per-file, in the store).
+- **React 18 API on the Preact runtime + Vite + TypeScript** — SPA, no router (view state is
+  per-file, in the store). Source (`.tsx`) uses the standard React API; `vite.config.ts` aliases
+  `react`/`react-dom`/`react/jsx-runtime` to `preact/compat`/`preact/jsx-runtime`, so no `react`
+  or `react-dom` package is installed — only `@types/react`/`@types/react-dom` for typechecking.
+  This cut the production bundle from 327 KB to 198 KB (111 KB to 72 KB gzipped) with no source
+  changes; revisit if a future dependency needs a real React internal the compat shim doesn't
+  cover.
 - **uPlot** — canvas charting. Chosen because a run can produce ~648 line series
   (6 channels × 108 wells); uPlot renders that volume smoothly with native log scales and a
   fast cursor, where an SVG library would stutter.
