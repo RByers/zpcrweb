@@ -8,16 +8,17 @@ analysis state, collapsed into a single XML file.
 
 > **Status:** container fully decoded; payload structurally mapped and cross-validated against
 > the `.zpcr` for the same run. All 45 plate reads decode, and every fluorescence and dark-current
-> value is bit-for-bit identical to the corresponding binary `.Plateread` (§3.1). The analysis-state
-> subtrees (§3.5) are mapped but not interpreted.
+> value is bit-for-bit identical to the corresponding binary `.Plateread` (§2.1). The analysis-state
+> subtrees (§2.5) are mapped but not interpreted.
 
 ---
 
-## 1. Container — identical to `.pltd`
+## 1. Container and encryption — identical to `.pltd`
 
-A `.pcrd` is the **same single-entry encrypted ZIP** as a `.pltd`/`.prcl`
-([`pltd.md`](./pltd.md) §1), with a GUID-named inner entry whose extension echoes the outer
-file. The sample is **variant B**, field for field:
+A `.pcrd` is the **same single-entry encrypted ZIP** as a `.pltd`/`.prcl` — see
+[`zipcrypto.md`](./zipcrypto.md) for the container variants, encryption and the shared fixed
+password. It has a GUID-named inner entry whose extension echoes the outer file. The sample is
+**variant B**, field for field:
 
 | Field | Value |
 |-------|-------|
@@ -28,26 +29,15 @@ file. The sample is **variant B**, field for field:
 | Extra field | UTF-16 copy of the filename (`NU`/`NUCX`) |
 | Entry name | `3106341c-b0f0-4dbe-ae82-ac668ff98fdb.pcrd` |
 
-Parse via the **central directory**, as with `.pltd` — under variant B the local header's
-CRC/sizes are zero placeholders and the real values live in the central-directory record.
-The existing `zipcrypto.ts` + `inflate.ts` handle this container unchanged; only the payload
-parser differs.
-
 Deflate64 (method 9) has not been observed in a `.pcrd` yet, but the writer is the same ZIP
 library that emits it for `.pltd`, so assume both methods are possible.
 
-## 2. Encryption — same fixed password as `.pltd`
+Confirmed on the sample: decrypting yields 2,482,825 bytes whose CRC32 matches the central
+directory exactly, using the same fixed standard-mode password as `.pltd`/`.prcl`. A single
+password entry unlocks plate definitions, protocols and data files alike. The existing
+`zipcrypto.ts` + `inflate.ts` handle this container unchanged; only the payload parser differs.
 
-Traditional PKWARE (ZipCrypto), 12-byte encryption header, and — confirmed on the sample —
-**the same fixed standard-mode password** used for `.pltd`/`.prcl`. A single password entry
-unlocks plate definitions, protocols and data files alike.
-
-As with `.pltd`, **this project does not ship the password**; see
-[`pltd.md`](./pltd.md) §2 for how to recover it from a licensed CFX Manager installation.
-
-Decrypting the sample yields 2,482,825 bytes whose CRC32 matches the central directory exactly.
-
-## 3. Payload — the `<experimentalData2>` XML
+## 2. Payload — the `<experimentalData2>` XML
 
 The inflated entry is a UTF-8 (BOM-prefixed) XML document, ~2.4 MB, on a single line with no
 line terminators. Its root gathers what the `.zpcr` spreads across many files:
@@ -82,7 +72,7 @@ line terminators. Its root gathers what the `.zpcr` spreads across many files:
 | `plateSetup2` | the `.pltd` payload (`<platesetup2>`) |
 | `protocol2` | the `.prcl` payload |
 | `runData/plateReadDataVector` | `Read000NN.Plateread` (one `<plateRead>` each) |
-| `runData/calibrationCollection` | the 28 `*.Dcal` files (§3.6) |
+| `runData/calibrationCollection` | the 28 `*.Dcal` files (§2.6) |
 | `protocolRunInfo/RunInfo` | `RunInfo.xml` |
 | `log` (repeated) | `runlog.xml` |
 | `wellFactorsCollection`, `dataAnalysisParameters`, `PersistedData`, `qcAnalysisParameters`, `precisionMeltCalibration` | **no equivalent** — application analysis/UI state |
@@ -91,7 +81,7 @@ line terminators. Its root gathers what the `.zpcr` spreads across many files:
 Note the case difference: the root child is `plateSetup2` (capital `S`) while the standalone
 `.pltd` root is `platesetup2` (all lower). The child schemas are otherwise the same.
 
-### 3.1 `runData` — the plate reads
+### 2.1 `runData` — the plate reads
 
 `<runData channelCount="6" wellsCount="96">` holds one `<plateRead>` wrapper per cycle, each
 containing a `<PlateRead V="1">` with:
@@ -99,7 +89,7 @@ containing a `<PlateRead V="1">` with:
 | Child | Contents |
 |-------|----------|
 | `SerVersion` | serializer version (`2`) |
-| `Hdr/PlateReadDataHeader` | the binary file's scalar header, one element per field (§3.2) |
+| `Hdr/PlateReadDataHeader` | the binary file's scalar header, one element per field (§2.2) |
 | `Data/PAr` | **WELLDATA** — the fluorescence table, as text |
 | `Unique`, `Time`, `Name`, `Interp` | wrapper bookkeeping (`Time="-1"`, `Interp="False"` on all 45) |
 
@@ -128,7 +118,7 @@ The first tuple of cycle 1 reads `2272.885, 7.044312, 2258, 2287` from both.
 > count of `2592` comes out as `537526272`. The float payloads therefore start at `0x1A8` and
 > `0x2A2C`.
 
-### 3.2 `PlateReadDataHeader` — the scalar header as elements
+### 2.2 `PlateReadDataHeader` — the scalar header as elements
 
 42 child elements, each a scalar with text content — the same fields
 [`plateread.md`](./plateread.md) §3 recovers from the binary header via its descriptor
@@ -149,14 +139,14 @@ cycle 1 of the sample:
 | `BlockTmp` | `59.99` | `Offset` | `0` |
 | `ShtTmp`, `AmbTmp` | `44.4`, `28` | `FWVersions` | firmware banner string |
 | `ChNum` | `0` | `ShuttleParams` | empty |
-| `NumCols`, `NumRows` | `12`, `9` | `DrkCrnt` | DARKDATA (§3.1) |
+| `NumCols`, `NumRows` | `12`, `9` | `DrkCrnt` | DARKDATA (§2.1) |
 
 `BlockTmp = 59.99` confirms `plateread.md`'s big-endian correction — the read happens at the
 60 °C step. `NumRows = 9` is the 8 plate rows plus the reference row.
 
-### 3.3 `plateSetup2` — the plate definition
+### 2.3 `plateSetup2` — the plate definition
 
-Same schema as the `.pltd` payload ([`pltd.md`](./pltd.md) §3): `geneNameList`,
+Same schema as the `.pltd` payload ([`pltd.md`](./pltd.md) §2): `geneNameList`,
 `conditionNameList`, `dyeLayersList` (one `<dyeLayer>` per fluorophore, each with a `<fluor>`
 and 96 `<wellSample>`), `analysisSets`, `TraceStyles`, `ExcludeSampleTypes`. The same
 `wellSampleType` enum applies.
@@ -166,7 +156,7 @@ contains no `.pltd` at all): `rows=8 columns=12 dyes=3 plateName="BR Clear"
 scanMode="AllChannelsScan"`, targets `HRV Ma, HMPV Ma, RSV Ma, ENT rc, PIV3 Bo`, conditions
 `S181, S137`, dye layers `FAM, Texas Red, Cy5`.
 
-### 3.4 `protocol2` — the thermal protocol
+### 2.4 `protocol2` — the thermal protocol
 
 Same payload as a `.prcl`. Attributes carry the run-level settings
 (`lidTemperature="105"`, `volume="20"`, `shutoffTemperature="30"`, `isRealTime`, …) and the
@@ -187,7 +177,7 @@ The sample: 95 °C/60 s, 95 °C/10 s, 60 °C/30 s, then goto step 1 × 44 — i.
 the 45 plate reads. Step numbers are 0-based here while `runDefinition`'s `GOTO 2,44` is
 1-based. Melt/other step types are expected but not present in this sample.
 
-### 3.5 Analysis and application state (not interpreted)
+### 2.5 Analysis and application state (not interpreted)
 
 No `.zpcr` equivalent — this is what CFX Manager adds on top of the raw run:
 
@@ -207,7 +197,7 @@ No `.zpcr` equivalent — this is what CFX Manager adds on top of the raw run:
 These subtrees use a distinct serializer convention: a `V="1"` attribute on the wrapper, a
 `SerVersion` text child, and sometimes a `___TypeInfo` child naming the .NET type.
 
-### 3.6 `calibrationCollection` — the embedded `.Dcal` data
+### 2.6 `calibrationCollection` — the embedded `.Dcal` data
 
 **The single largest subtree: ~1.4 MB serialized, 56% of the whole document.** It absorbs what
 the `.zpcr` keeps as 28 separate `*.Dcal` files (`FAM_BR Clear.Dcal`, `Cy5_BR White.Dcal`, …).
@@ -225,7 +215,7 @@ The `Name` values line up with the `.Dcal` filename stems, and the `_BR Clear` /
 split corresponds to plate type. Not decoded further — the sample's amplification data needs
 none of it.
 
-### 3.7 Provenance
+### 2.7 Provenance
 
 - **`header`** — `currentVersion="06.10"`, the original Windows path, `createdDate`/`modifiedDate`,
   `guid`, and the writing application: `BioRadCFXManager.exe` version `3.1.1621.0826`, with
@@ -245,7 +235,7 @@ Interestingly the first log entry names the data file as
 
 ---
 
-## 4. Implementation notes
+## 3. Implementation notes
 
 - The container needs no new code: the `.pltd` path (central-directory parse → ZipCrypto →
   inflate) applies unchanged. Only dispatch on the payload root element.
