@@ -237,7 +237,7 @@ describe("pcrd — decoded structure (real document, re-wrapped, no secret neede
   });
 
   it("decodes calibrations() from calibrationCollection, matching the .zpcr's real .Dcal files", () => {
-    const zpcr = parsePcrd(readBytes(PCRD_PATH), { password: PW }).zpcr!;
+    const zpcr = pcrd.zpcr!;
     const reference = parseZpcr(readBytes(ZPCR_PATH));
 
     const entries = zpcr.calibrations();
@@ -276,7 +276,7 @@ describe("pcrd — decoded structure (real document, re-wrapped, no secret neede
   });
 
   it("recovers the calibration timestamp/operator the .pcrd's copy carries (unlike this run's .zpcr .Dcal snapshot)", () => {
-    const zpcr = parsePcrd(readBytes(PCRD_PATH), { password: PW }).zpcr!;
+    const zpcr = pcrd.zpcr!;
     const fam = zpcr
       .calibrations()
       .find((e) => e.dcal.dye === "FAM" && e.dcal.plate === "BR Clear")!.dcal;
