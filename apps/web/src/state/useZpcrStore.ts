@@ -20,7 +20,19 @@ import { usePltdPassword } from "./pltdPassword";
 export type FileKind = "zpcr" | "pcrd";
 
 export type ViewId = "overview" | "curves" | "reference" | "plates" | "raw";
+/** Reference view only — drift relative to the factory calibration value; see `ReferenceView`. */
 export type Baseline = "raw" | "delta" | "percent";
+/**
+ * Curves view only — the `threshold.md` §4 baseline-subtraction modes implemented by
+ * `packages/core/src/baseline.ts`: `"raw"` plots the curve unmodified, `"constant"` subtracts
+ * the mean of an auto-detected baseline region (`RawBaseLineSubtracted`), and `"linear"` fits
+ * and subtracts a line over that region (`LinearBaseLineNormalized`) — the recommended default
+ * per §8, since it also removes baseline drift rather than just an offset.
+ */
+export type CurveBaselineMode = "raw" | "constant" | "linear";
+/** Manual override of the baseline region (1-based, inclusive `[beginCycle, endCycle]`), or
+ * `null` to auto-detect it per curve (`autoBaselineRegion`) — the default. */
+export type CurveBaselineRange = [number, number] | null;
 export type Scale = "linear" | "log";
 /** Min/max envelope bands: always off, always on, or auto (only when one well selected). */
 export type BandsMode = "off" | "auto" | "on";
@@ -33,6 +45,10 @@ export interface FileSettings {
   /** Reference columns (0-based) shown in the Reference chart. */
   enabledRefCols: Set<number>;
   baseline: Baseline;
+  /** Curves view's baseline-subtraction mode; see {@link CurveBaselineMode}. */
+  curveBaseline: CurveBaselineMode;
+  /** Manual baseline-region override for the Curves view; see {@link CurveBaselineRange}. */
+  curveBaselineRange: CurveBaselineRange;
   scale: Scale;
   /** Overlay each channel's dark (LED-off) background as a dotted line. Channel-space only —
    * see the "What actually gets plotted" note in CurvesView. */
@@ -123,6 +139,11 @@ function defaultSettings(): FileSettings {
     // All 12 reference columns on by default in the Reference view.
     enabledRefCols: new Set(Array.from({ length: 12 }, (_, c) => c)),
     baseline: "raw",
+    // Linear baseline subtraction (auto-detected region) is threshold.md §8's recommended
+    // default — it removes drift, not just offset, and matches the observed instrument default.
+    curveBaseline: "linear",
+    // null: auto-detect the baseline region per curve, same as leaving the slider untouched.
+    curveBaselineRange: null,
     scale: "linear",
     showDark: false,
     bands: "auto",
@@ -144,6 +165,8 @@ function toStored(id: string, s: FileSettings): StoredSettings {
     enabledWells: [...s.enabledWells],
     enabledRefCols: [...s.enabledRefCols],
     baseline: s.baseline,
+    curveBaseline: s.curveBaseline,
+    curveBaselineRange: s.curveBaselineRange,
     scale: s.scale,
     showDark: s.showDark,
     bands: s.bands,
@@ -162,6 +185,8 @@ function fromStored(s: StoredSettings): FileSettings {
     enabledWells: new Set(s.enabledWells),
     enabledRefCols: new Set(s.enabledRefCols ?? Array.from({ length: 12 }, (_, c) => c)),
     baseline: s.baseline ?? "raw",
+    curveBaseline: s.curveBaseline ?? "linear",
+    curveBaselineRange: s.curveBaselineRange ?? null,
     scale: s.scale ?? "linear",
     showDark: s.showDark ?? false,
     bands: s.bands ?? "auto",

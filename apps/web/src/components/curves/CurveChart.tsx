@@ -1,7 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import uPlot from "uplot";
 import type { DarkCurve, TemperatureCurve } from "@zpcrweb/core";
-import type { Baseline, BandsMode, Scale } from "../../state/useZpcrStore";
+import type {
+  Baseline,
+  BandsMode,
+  CurveBaselineMode,
+  CurveBaselineRange,
+  Scale,
+} from "../../state/useZpcrStore";
 import { buildChart, type FactoryCurve, type PlotCurve, type TooltipData } from "../../lib/uplot/chart";
 
 interface Props {
@@ -12,6 +18,11 @@ interface Props {
   /** Temperature series for the right-hand °C axis; empty hides that axis. */
   tempCurves: TemperatureCurve[];
   baseline: Baseline;
+  /** Curves-view baseline algorithm (`threshold.md` §4); pass `"raw"` from the Reference view,
+   * whose baselining is entirely factory-relative (`baseline` above). */
+  curveBaselineMode: CurveBaselineMode;
+  /** Manual baseline-region override (the rail's slider); pass `null` from the Reference view. */
+  curveBaselineRange: CurveBaselineRange;
   scale: Scale;
   bands: BandsMode;
 }
@@ -22,6 +33,8 @@ export function CurveChart({
   factoryCurves = [],
   tempCurves,
   baseline,
+  curveBaselineMode,
+  curveBaselineRange,
   scale,
   bands,
 }: Props) {
@@ -43,6 +56,8 @@ export function CurveChart({
       factoryCurves,
       tempCurves,
       baseline,
+      curveBaselineMode,
+      curveBaselineRange,
       scale,
       bands,
       width,
@@ -57,7 +72,17 @@ export function CurveChart({
       plotRef.current?.destroy();
       plotRef.current = null;
     };
-  }, [curves, darkCurves, factoryCurves, tempCurves, baseline, scale, bands]);
+  }, [
+    curves,
+    darkCurves,
+    factoryCurves,
+    tempCurves,
+    baseline,
+    curveBaselineMode,
+    curveBaselineRange,
+    scale,
+    bands,
+  ]);
 
   // Keep the plot sized to its container.
   useEffect(() => {

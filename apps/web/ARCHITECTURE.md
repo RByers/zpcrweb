@@ -68,7 +68,9 @@ carries `documentXml` for a successfully-decoded `.pcrd` — the full raw docume
 thin presentation + persistence shell. Concretely:
 
 - Curve derivation and the per-cycle stats (mean/std/min/max) come from `zpcr.curves()`.
-- ΔRFU baselining is `deltaBaseline()` from the library — the app never subtracts itself.
+- Curves-view baselining (`threshold.md` §2–§4 — smoothing, auto baseline-region detection,
+  and constant/linear subtraction) is `packages/core/src/baseline.ts` — the app never invents
+  its own baseline math, only calls `autoBaselineRegion`/`subtractBaseline` per curve.
 - The app only owns view state (which channels/wells are selected, view/baseline/scale
   toggles), rendering, and IndexedDB storage.
 
@@ -89,8 +91,10 @@ stores:
   `name:size` key, which also dedupes re-adding the same file. `kind` defaults to `"zpcr"` for
   records written before `.pcrd` support existed.
 - `settings` — `{ fileId, view, enabledChannels[], enabledWells[], enabledRefCols[], baseline,
-  scale }`, so each file remembers its enabled wells/channels/reference columns and last view.
-  Writes are debounced.
+  curveBaseline, scale }`, so each file remembers its enabled wells/channels/reference columns
+  and last view. `baseline` (Reference view's factory-relative ΔRFU/Drift %) and `curveBaseline`
+  (Curves view's library baseline-subtraction mode) are independent settings — see "Two baseline
+  concepts" under Reference view. Writes are debounced.
 
 Deleting a file removes both its `files` and `settings` records and drops it from memory —
 exposed as a clear affordance on each file chip.
@@ -222,14 +226,45 @@ only pieces the two views share.
 
 - **Selection:** a channel bar (6 dye-labelled toggles) and an 8×12 well matrix (`WellMatrix`)
   whose row (A–H) and column (1–12) headers toggle whole rows/columns, plus an all/none corner.
-- **Transforms:** Raw ↔ ΔRFU (`deltaBaseline`) and Linear ↔ Log (uPlot `distr: 3`).
-  - *Log + ΔRFU:* ΔRFU values go ≤ 0, undefined on a log axis, so non-positive points are
-    gaps (`null`) with an inline note. The other three combinations are unaffected.
+- **Baseline (`curveBaseline` setting):** Raw / Constant / Linear — the `threshold.md` §4
+  subtraction modes implemented by `packages/core/src/baseline.ts`, selected per curve by
+  `chart.ts`'s `algorithmAdjust()`: find the flat pre-amplification region — either the rail's
+  baseline-range slider override (`curveBaselineRange`, see below) or, when unset,
+  `autoBaselineRegion` on a smoothed copy of the curve (falling back to cycles 2–9 if detection
+  finds nothing confident) — and subtract it via the library's `subtractBaseline` — the mean of
+  the region for "Constant", a fitted line for "Linear". "Linear" is the default (`threshold.md`
+  §8's recommendation, since it removes drift as well as offset). This is a genuinely different
+  concept from the Reference view's ΔRFU/Drift %, which are factory-relative, not a fitted
+  baseline — see "Two baseline concepts" under Reference view below. Also Linear ↔ Log (uPlot
+  `distr: 3`).
+  - *Log + baseline:* Constant/Linear-corrected values can go ≤ 0, undefined on a log axis, so
+    non-positive points are gaps (`null`) with an inline note. Raw is unaffected.
+  - *Region-finding is fragile at low sample counts:* `findBaselineByRegression`'s "extend while
+    within `k` std errors" loop estimates that std error from the current window, which starts
+    at `initialWidth` points (default **5**, giving 3 degrees of freedom). A width of 3 (1
+    degree of freedom) was tried first and produced an unstable, sometimes near-zero std-error
+    estimate — an unlucky tight 3-point fit would flag the very next point of a genuinely flat,
+    noisy curve as a false "departure," truncating the region to 3–4 cycles. That short region
+    then fed a linear fit extrapolated across the whole run, turning tiny slope error into a
+    large, visibly sloped baseline on a curve that's flat in the Raw view. `kStdErrors` was
+    raised to **5** alongside it for the same reason. See the regression test in
+    `packages/core/test/baseline.test.ts` ("doesn't truncate a flat, realistically-noisy curve
+    …") using real recorded noise from an actual flat well.
+  - **Manual region override (`curveBaselineRange` setting, `BaselineRangeSlider`):** a
+    double-ended cycle slider — two overlaid native `<input type="range">` elements sharing one
+    visual track/fill, each keeping its own keyboard/touch handling for free — lets a user pin
+    `[beginCycle, endCycle]` instead of trusting auto-detection, for whenever the auto-detected
+    region looks wrong. `null` (the default) means auto-detect, same as before this setting
+    existed; the slider shows the fallback 2–9 preview (clamped to the run) while in that state,
+    labelled "(auto)", and an "auto" link resets an override back to `null`. Applies globally
+    across every plotted curve — unlike auto-detection, which runs per curve — mirroring how the
+    real instrument's `baselineBeginRepeat`/`baselineEndRepeat` is a per-analysis-group setting,
+    not a per-well one.
 - **Dark (LED-off) background:** `zpcr.darkCurves()` gives one background series per channel.
   A pure display overlay — it never alters the plotted well curves, min/max bands, or the
   y-axis label. Off (default) draws nothing; On draws one **dotted** dark line per present
-  channel, transformed like the curves (so it still tracks ΔRFU/log). Channel-space only,
-  like the min/max bands, so the toggle only appears when color separation is off.
+  channel, transformed like the curves (so it still tracks the baseline mode/log). Channel-space
+  only, like the min/max bands, so the toggle only appears when color separation is off.
 - **Temperatures (right axis):** `zpcr.temperatureCurves(step)` gives one series per
   temperature field in the platereads. Chips in the rail toggle each one (all off by
   default, since they are instrument context rather than the measurement) and preview its
@@ -278,22 +313,21 @@ quickly isolating a single reference well's drift.
   alone. The tooltip shows
   the matched column (`R{n}`) alongside the channel/dye for a factory series, since a factory
   line's identity isn't otherwise visible the way a well curve's label is.
-- **Three baselines, one `{scale, shift}` model:** `buildChart()` maps each raw value to
+- **Two baseline concepts, one `{scale, shift}` model:** `buildChart()` maps each raw value to
   plotted space as `raw * scale + shift`, computed per cycle by `wellAdjust()`. "Raw" is the
-  identity (`scale:1, shift:0`). "ΔRFU" is additive: on the main Curves view it subtracts each
-  curve's own first cycle (`shift = -mean[0]`, matching library `deltaBaseline`); here, a well
-  curve with a matching `factoryCurves` entry instead subtracts the factory value
-  (`shift = -factory`) so the comparison the view exists to show isn't buried under the run's
-  own baseline drift. "Drift %" is `(live/factory - 1) * 100` — `scale = 100/factory,
-  shift = -100` — the same % deviation `RefCalPanel`'s "Drift %" stat shows (run-averaged
-  there, per-cycle here), so its origin is 0 like ΔRFU's, not 100. Well curves with no matching
-  factory value — none exist in this view today, but the fallback is generic — use identity for
-  both ΔRFU (falling back to the plain `deltaBaseline` shift) and Drift % (no factory to divide
-  by, so it renders as raw). The factory line itself is only drawn under the raw baseline —
-  under ΔRFU or Drift % it would be a flat, redundant 0, now that the well curve is already
-  plotted relative to it. The same `{scale, shift}` per point is stored on each series'
-  metadata and reused by the hover whisker and min/max band, so they reposition correctly under
-  a multiplicative baseline instead of assuming ΔRFU's additive offset.
+  identity (`scale:1, shift:0`). Here (Reference view), "ΔRFU" and "Drift %" are both
+  factory-relative: a well curve with a matching `factoryCurves` entry subtracts the factory
+  value (`shift = -factory`) for ΔRFU, or maps to `(live/factory - 1) * 100`
+  (`scale = 100/factory, shift = -100`) for Drift % — the same % deviation `RefCalPanel`'s
+  "Drift %" stat shows (run-averaged there, per-cycle here), so its origin is 0 like ΔRFU's, not
+  100. A well curve with no matching factory value — none exist in this view today, but the
+  fallback is generic — falls through to the *other* baseline concept, `curveBaselineMode` (see
+  "Curves view baselining" below); this view always passes `curveBaselineMode: "raw"`, so that
+  fallback is the identity. The factory line itself is only drawn under the raw baseline — under
+  ΔRFU or Drift % it would be a flat, redundant 0, now that the well curve is already plotted
+  relative to it. The same `{scale, shift}` per point is stored on each series' metadata and
+  reused by the hover whisker and min/max band, so they reposition correctly under a
+  multiplicative baseline instead of assuming ΔRFU's additive offset.
 - **`RefCalPanel`** (`components/views/RefCalPanel.tsx`, relocated from Overview): the
   col×channel drift/factory/live grid, from `zpcr.refCalComparison()` — a run-averaged summary
   alongside the chart's per-cycle detail. Laid out as `.refcal`, a two-column flex row (text +

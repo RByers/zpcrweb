@@ -29,6 +29,11 @@ export interface StoredSettings {
   /** Reference columns (0-based) shown in the Reference view. */
   enabledRefCols?: number[];
   baseline: "raw" | "delta" | "percent";
+  /** Curves view's baseline-subtraction mode (`threshold.md` §4); absent on records written
+   * before this setting existed. */
+  curveBaseline?: "raw" | "constant" | "linear";
+  /** Manual `[beginCycle, endCycle]` baseline-region override, or `null`/absent to auto-detect. */
+  curveBaselineRange?: [number, number] | null;
   scale: "linear" | "log";
   showDark: boolean;
   bands: "off" | "auto" | "on";

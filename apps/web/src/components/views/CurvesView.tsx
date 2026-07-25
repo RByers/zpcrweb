@@ -10,8 +10,8 @@ import {
 } from "@zpcrweb/core";
 import {
   wellKey,
-  type Baseline,
   type BandsMode,
+  type CurveBaselineMode,
   type FileSettings,
   type Scale,
 } from "../../state/useZpcrStore";
@@ -28,9 +28,16 @@ import { FluorBar } from "../curves/FluorBar";
 import { WellMatrix } from "../curves/WellMatrix";
 import { CurveChart } from "../curves/CurveChart";
 import { TempBar } from "../curves/TempBar";
+import { BaselineRangeSlider } from "../curves/BaselineRangeSlider";
 import { PasswordPrompt } from "../PasswordPrompt";
 import { Toggle } from "../Toggle";
 import type { PlotCurve } from "../../lib/uplot/chart";
+
+/** Fallback baseline-region preview shown while auto-detecting, mirroring `chart.ts`'s
+ * `fallbackRegion` (threshold.md §3.1/§8's default cycles 2–9), clamped to the run. */
+function defaultRangePreview(maxCycle: number): [number, number] {
+  return [Math.min(2, maxCycle), Math.min(9, maxCycle)];
+}
 
 interface Props {
   zpcr: Zpcr;
@@ -237,7 +244,8 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
     onChange({ disabledFluors: next });
   };
 
-  const logDelta = settings.scale === "log" && settings.baseline === "delta";
+  const logBaselined = settings.scale === "log" && settings.curveBaseline !== "raw";
+  const maxCycle = steps.find((s) => s.step === activeStep)?.readCount ?? 1;
 
   return (
     <div className="curves">
@@ -376,10 +384,11 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
             label="Baseline"
             options={[
               ["raw", "Raw"],
-              ["delta", "ΔRFU"],
+              ["constant", "Constant"],
+              ["linear", "Linear"],
             ]}
-            value={settings.baseline}
-            onChange={(v) => onChange({ baseline: v as Baseline })}
+            value={settings.curveBaseline}
+            onChange={(v) => onChange({ curveBaseline: v as CurveBaselineMode })}
           />
           <Toggle
             label="Scale"
@@ -415,15 +424,28 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
           )}
         </div>
 
+        {settings.curveBaseline !== "raw" && (
+          <div className="rail__section">
+            <BaselineRangeSlider
+              min={1}
+              max={maxCycle}
+              value={settings.curveBaselineRange ?? defaultRangePreview(maxCycle)}
+              isManual={settings.curveBaselineRange != null}
+              onChange={(range) => onChange({ curveBaselineRange: range })}
+              onReset={() => onChange({ curveBaselineRange: null })}
+            />
+          </div>
+        )}
+
         <div className="rail__stat mono">
           {plotCurves.length} / {calibrationOn ? allFluorCurves.length : allCurves.length}{" "}
           curves
           {!calibrationOn && settings.showDark && " + dark"}
           {visibleTemps.length > 0 && ` + ${visibleTemps.length} temp`}
         </div>
-        {logDelta && (
+        {logBaselined && (
           <div className="rail__note mono">
-            Log + ΔRFU: non-positive points are hidden (gaps).
+            Log + baseline: non-positive points are hidden (gaps).
           </div>
         )}
       </aside>
@@ -433,7 +455,9 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
           curves={plotCurves}
           darkCurves={!calibrationOn && settings.showDark ? enabledDark : []}
           tempCurves={visibleTemps}
-          baseline={settings.baseline}
+          baseline="raw"
+          curveBaselineMode={settings.curveBaseline}
+          curveBaselineRange={settings.curveBaselineRange}
           scale={settings.scale}
           bands={calibrationOn ? "off" : settings.bands}
         />

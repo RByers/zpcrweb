@@ -202,6 +202,23 @@ describe("findBaselineByRegression", () => {
   it("returns null when there aren't enough cycles for the initial fit", () => {
     expect(findBaselineByRegression([1, 2], [10, 20], { initialWidth: 3 })).toBeNull();
   });
+
+  it("doesn't truncate a flat, realistically-noisy curve into a too-short region", () => {
+    // A too-narrow initial window (e.g. width 3, one degree of freedom) makes the residual
+    // std-error estimate unstable enough that a lucky tight initial fit flags the very next
+    // noisy-but-flat point as a false departure, truncating the region far too early — this is
+    // real point-to-point noise recorded from an actual flat (no-amplification) well.
+    const cycles = Array.from({ length: 45 }, (_, i) => i + 1);
+    const values = [
+      2270.9, 2269.8, 2269.1, 2267.7, 2267.7, 2267.8, 2268.5, 2268.0, 2267.8, 2267.2, 2267.6,
+      2267.5, 2268.0, 2267.7, 2267.9, 2267.1, 2267.1, 2266.5, 2266.7, 2266.6, 2266.8, 2266.8,
+      2267.1, 2267.1, 2267.2, 2267.0, 2267.0, 2266.3, 2265.3, 2264.8, 2265.3, 2266.2, 2266.8,
+      2267.3, 2267.4, 2267.4, 2266.8, 2266.5, 2266.0, 2265.8, 2266.1, 2266.5, 2267.4, 2267.5,
+      2268.1,
+    ];
+    const region = findBaselineByRegression(cycles, values);
+    expect(region).toEqual({ beginCycle: 1, endCycle: 45 });
+  });
 });
 
 describe("autoBaselineRegion", () => {

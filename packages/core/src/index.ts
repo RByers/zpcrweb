@@ -10,7 +10,7 @@ export { parseZpcr, zpcrFromBlob } from "./zpcr.js";
 export { zpcrFromFile, pcrdFromFile } from "./node.js";
 
 export { hexDump } from "./hex.js";
-export { deltaBaseline, subtractSeries } from "./analysis.js";
+export { subtractSeries } from "./analysis.js";
 export {
   toCurves,
   toDarkCurves,

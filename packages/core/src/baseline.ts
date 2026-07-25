@@ -265,9 +265,15 @@ export function findBaselineByCurvature(
 }
 
 export interface RegressionBaselineOptions {
-  /** Width of the initial region a line is first fit to. Default **3**. */
+  /** Width of the initial region a line is first fit to. Default **5** — below that, the
+   * residual-std-error estimate has too few degrees of freedom (width 3 gives just 1) to be
+   * reliable, so an unlucky tight initial fit flags the very next noisy-but-flat point as a
+   * false departure and truncates the region far too early — which then gets used for a linear
+   * fit extrapolated across the whole run, turning a small slope-estimation error into a large,
+   * spurious drift over many cycles. */
   initialWidth?: number;
-  /** How many standard errors of the fit a new point may depart before it's rejected. Default **3**. */
+  /** How many standard errors of the fit a new point may depart before it's rejected. Default
+   * **5** — extra margin against that same low-degrees-of-freedom instability. */
   kStdErrors?: number;
   constraints?: BaselineRegionConstraints;
 }
@@ -283,8 +289,8 @@ export function findBaselineByRegression(
   values: number[],
   options: RegressionBaselineOptions = {},
 ): BaselineRegion | null {
-  const initialWidth = options.initialWidth ?? 3;
-  const k = options.kStdErrors ?? 3;
+  const initialWidth = options.initialWidth ?? 5;
+  const k = options.kStdErrors ?? 5;
   const minBegin = options.constraints?.minBeginCycle ?? 1;
 
   const beginIdx = cycles.findIndex((c) => c >= minBegin);

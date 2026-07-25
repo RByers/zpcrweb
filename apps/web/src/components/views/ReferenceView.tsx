@@ -20,8 +20,10 @@ interface Props {
  * reference column) for the live reads, and — in the Raw baseline — a dotted flat line for
  * the matching `FactoryRefRowCal` value, the same dotted-overlay pattern as the Dark toggle
  * on the main Curves view (see `chart.ts`'s `factoryCurves`). Switching to ΔRFU replots the
- * live line as drift from the factory value (`live − factory`) rather than drift from the
- * run's own first cycle, so the (now redundant, always-zero) factory line is hidden instead.
+ * live line as drift from the factory value (`live − factory`), so the (now redundant,
+ * always-zero) factory line is hidden instead. This view's baselining is always
+ * factory-relative — see `chart.ts`'s `curveBaselineMode`, which the main Curves view uses
+ * instead and which this view always passes `"raw"` (a no-op).
  */
 export function ReferenceView({ zpcr, settings, onChange }: Props) {
   const steps = useMemo(() => zpcr.steps(), [zpcr]);
@@ -173,6 +175,8 @@ export function ReferenceView({ zpcr, settings, onChange }: Props) {
             factoryCurves={factoryCurves}
             tempCurves={[]}
             baseline={settings.baseline}
+            curveBaselineMode="raw"
+            curveBaselineRange={null}
             scale={settings.scale}
             bands="off"
           />

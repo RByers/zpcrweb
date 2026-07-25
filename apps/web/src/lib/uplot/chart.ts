@@ -1,8 +1,22 @@
 import uPlot from "uplot";
-import type { DarkCurve, TemperatureCurve } from "@zpcrweb/core";
+import {
+  autoBaselineRegion,
+  clampBaselineRegion,
+  smoothCurve,
+  subtractBaseline,
+  type BaselineMode as CoreBaselineMode,
+  type DarkCurve,
+  type TemperatureCurve,
+} from "@zpcrweb/core";
 import { channelColor, channelLabel } from "../channelColors";
 import { tempColor } from "../tempColors";
-import type { Baseline, BandsMode, Scale } from "../../state/useZpcrStore";
+import type {
+  Baseline,
+  BandsMode,
+  CurveBaselineMode,
+  CurveBaselineRange,
+  Scale,
+} from "../../state/useZpcrStore";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
@@ -51,21 +65,54 @@ function applyAdjust(values: number[], adjust: Adjust[]): number[] {
   return values.map((v, i) => v * adjust[i]!.scale + adjust[i]!.shift);
 }
 
+/** Fallback baseline region (`threshold.md` §3.1/§8) when auto-detection finds no confident
+ * onset — cycles 2–9, clamped to the run's actual cycle count. */
+function fallbackRegion(cycles: number[]) {
+  return clampBaselineRegion({ beginCycle: 2, endCycle: 9 }, cycles);
+}
+
 /**
- * Per-cycle adjust for a well curve. ΔRFU plots drift from the matching factory value when one
- * exists (`shift = -factory`), else drift from the run's own first cycle (deltaBaseline's
- * behavior). "Drift %" plots `(live/factory - 1) * 100` — the same % deviation from factory
- * `RefCalPanel`'s "Drift %" stat shows, just per cycle instead of run-averaged, so the origin
- * is 0 (unchanged from factory), not 100. With no factory value to divide by, it has no
- * defined meaning, so it falls back to raw (identity) like ΔRFU falls back to deltaBaseline.
+ * Curves-view baselining (`threshold.md` §2–§4, `packages/core/src/baseline.ts`): find the flat
+ * pre-amplification region — either `manualRange` (the rail's baseline-range slider, clamped to
+ * the run's actual cycles) or, when unset, auto-detected per curve on a smoothed copy (for
+ * robust onset detection — see §2) — and subtract it from the curve's own raw values via the
+ * library's `subtractBaseline`. `"raw"` skips this entirely.
  */
-function wellAdjust(values: number[], factory: number[] | undefined, baseline: Baseline): Adjust[] {
+function algorithmAdjust(
+  cycles: number[],
+  values: number[],
+  mode: CurveBaselineMode,
+  manualRange: CurveBaselineRange,
+): Adjust[] {
+  if (mode === "raw" || values.length === 0) return values.map(() => IDENTITY_ADJUST);
+
+  const region = manualRange
+    ? clampBaselineRegion({ beginCycle: manualRange[0], endCycle: manualRange[1] }, cycles)
+    : (autoBaselineRegion(cycles, smoothCurve(values)) ?? fallbackRegion(cycles));
+  const libMode: CoreBaselineMode = mode === "constant" ? "RawBaseLineSubtracted" : "LinearBaseLineNormalized";
+  const corrected = subtractBaseline(cycles, values, region, libMode);
+  return values.map((v, i) => ({ scale: 1, shift: (corrected[i] ?? v) - v }));
+}
+
+/**
+ * Per-cycle adjust for a well curve. ΔRFU plots drift from the matching factory value
+ * (`shift = -factory`); "Drift %" plots `(live/factory - 1) * 100` — the same % deviation from
+ * factory `RefCalPanel`'s "Drift %" stat shows, just per cycle instead of run-averaged, so the
+ * origin is 0 (unchanged from factory), not 100. Both are Reference-view-only concepts — see
+ * `ReferenceView` — and only apply when a factory value exists; everywhere else (including a
+ * Reference-view channel with no factory match) baselining is `curveBaselineMode`'s library
+ * algorithm, which for `"raw"` is the identity.
+ */
+function wellAdjust(
+  cycles: number[],
+  values: number[],
+  factory: number[] | undefined,
+  baseline: Baseline,
+  curveBaselineMode: CurveBaselineMode,
+  curveBaselineRange: CurveBaselineRange,
+): Adjust[] {
   if (baseline === "delta" && factory) {
     return values.map((_, i) => ({ scale: 1, shift: -(factory[i] ?? 0) }));
-  }
-  if (baseline === "delta") {
-    const shift = -(values[0] ?? 0);
-    return values.map(() => ({ scale: 1, shift }));
   }
   if (baseline === "percent" && factory) {
     return values.map((_, i) => {
@@ -73,7 +120,7 @@ function wellAdjust(values: number[], factory: number[] | undefined, baseline: B
       return { scale: f !== 0 ? 100 / f : 1, shift: f !== 0 ? -100 : 0 };
     });
   }
-  return values.map(() => IDENTITY_ADJUST);
+  return algorithmAdjust(cycles, values, curveBaselineMode, curveBaselineRange);
 }
 
 /** A factory-calibration reference value, overlaid as a dotted flat line per (channel, col) —
@@ -142,6 +189,12 @@ export interface BuildChartConfig {
   /** Temperature series to plot on the right-hand °C axis (empty to hide the axis). */
   tempCurves: TemperatureCurve[];
   baseline: Baseline;
+  /** Curves-view baseline algorithm; `ReferenceView` always passes `"raw"` (its baselining is
+   * entirely the factory-relative `baseline` above). */
+  curveBaselineMode: CurveBaselineMode;
+  /** Manual baseline-region override (the rail's slider), or `null` to auto-detect per curve.
+   * `ReferenceView` always passes `null`. */
+  curveBaselineRange: CurveBaselineRange;
   scale: Scale;
   bands: BandsMode;
   width: number;
@@ -161,7 +214,8 @@ export function buildChart(cfg: BuildChartConfig): {
   data: uPlot.AlignedData;
   options: uPlot.Options;
 } {
-  const { wellCurves, darkCurves, factoryCurves, tempCurves, baseline, scale } = cfg;
+  const { wellCurves, darkCurves, factoryCurves, tempCurves, baseline, curveBaselineMode, curveBaselineRange, scale } =
+    cfg;
   const cycles =
     wellCurves[0]?.cycles ?? darkCurves[0]?.cycles ?? tempCurves[0]?.cycles ?? [];
 
@@ -171,12 +225,10 @@ export function buildChart(cfg: BuildChartConfig): {
   const factoryByKey = new Map<string, FactoryCurve>();
   for (const f of factoryCurves) factoryByKey.set(`${f.channel},${f.col}`, f);
 
-  // Dark/temp series have no factory match, so "%" has no meaning for them — deltaBaseline
-  // still applies under ΔRFU, but percent falls back to identity (raw values).
+  // Dark curves have no factory match, so the factory-relative baseline modes never apply to
+  // them — only the curves-view algorithm mode does.
   const nonWellAdjust = (values: number[]): Adjust[] =>
-    baseline === "delta"
-      ? values.map(() => ({ scale: 1, shift: -(values[0] ?? 0) }))
-      : values.map(() => IDENTITY_ADJUST);
+    algorithmAdjust(cycles, values, curveBaselineMode, curveBaselineRange);
 
   const rows: (number | null)[][] = [cycles.map((c) => c)];
   const meta: SeriesMeta[] = [];
@@ -187,7 +239,14 @@ export function buildChart(cfg: BuildChartConfig): {
 
   for (const curve of wellCurves) {
     const factory = factoryByKey.get(`${curve.channel},${curve.col}`);
-    const adjust = wellAdjust(curve.mean, factory?.mean, baseline);
+    const adjust = wellAdjust(
+      curve.cycles,
+      curve.mean,
+      factory?.mean,
+      baseline,
+      curveBaselineMode,
+      curveBaselineRange,
+    );
     wellAdjusts.push(adjust);
     rows.push(logSafe(applyAdjust(curve.mean, adjust), scale));
     meta.push({
@@ -251,7 +310,7 @@ export function buildChart(cfg: BuildChartConfig): {
     for (const key of presentPairs) {
       const factory = factoryByKey.get(key);
       if (!factory) continue;
-      const adjust = wellAdjust(factory.mean, factory.mean, baseline);
+      const adjust = wellAdjust(cycles, factory.mean, factory.mean, baseline, curveBaselineMode, curveBaselineRange);
       rows.push(logSafe(applyAdjust(factory.mean, adjust), scale));
       meta.push({
         kind: "factory",
@@ -367,7 +426,7 @@ export function buildChart(cfg: BuildChartConfig): {
         stroke: "#8aa0c0",
         grid: { stroke: "rgba(120,200,255,0.06)", width: 1 },
         ticks: { stroke: "rgba(120,200,255,0.12)", width: 1 },
-        label: yLabel(baseline),
+        label: yLabel(baseline, curveBaselineMode),
         labelSize: 30,
         labelFont: "12px system-ui",
         font: "11px ui-monospace, monospace",
@@ -398,9 +457,11 @@ export function buildChart(cfg: BuildChartConfig): {
   return { data: rows as uPlot.AlignedData, options };
 }
 
-function yLabel(baseline: Baseline): string {
+function yLabel(baseline: Baseline, curveBaselineMode: CurveBaselineMode): string {
   if (baseline === "delta") return "ΔRFU (mean)";
   if (baseline === "percent") return "Drift (%)";
+  if (curveBaselineMode === "constant") return "RFU (baseline subtracted)";
+  if (curveBaselineMode === "linear") return "RFU (linear baseline)";
   return "RFU (mean)";
 }
 
