@@ -665,7 +665,7 @@
 }
 .chart__tip {
   position: absolute;
-  transform: translate(14px, 14px);
+  transform: translate(14px, 22px);
   pointer-events: none;
   z-index: 10;
   min-width: 150px;

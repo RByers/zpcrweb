@@ -466,10 +466,13 @@ function yLabel(baseline: Baseline, curveBaselineMode: CurveBaselineMode): strin
 }
 
 /**
- * Cursor plugin that (1) reports the nearest series for the tooltip, (2) draws an on-hover
- * whisker for the focused point — the min–max range with caps and a ±1σ box — and (3) draws
- * a shaded min/max envelope when a single well is isolated. Rendered as an SVG overlay on
- * the plot area, so it shares uPlot's coordinate system and updates on redraw/hover.
+ * Cursor plugin that (1) reports the nearest series for the text tooltip, (2) draws an
+ * on-hover whisker for the nearest series' point — the min–max range with caps and a ±1σ
+ * box — and (3) draws a shaded min/max envelope when a single well is isolated. The whisker
+ * tracks uPlot's own hover-point markers (shown across the whole hovered column, not gated
+ * by vertical distance), while the text tooltip stays proximity-gated. Rendered as an SVG
+ * overlay on the plot area, so it shares uPlot's coordinate system and updates on
+ * redraw/hover.
  */
 function overlayPlugin(
   meta: SeriesMeta[],
@@ -574,32 +577,41 @@ function overlayPlugin(
           }
         }
         const m = best > 0 ? meta[best - 1] : undefined;
-        if (!m || bestDist > 24) {
+        if (!m) {
           onHover(null);
           group.style.display = "none";
           return;
         }
+        // The whisker tracks uPlot's own hover-point markers, which are drawn per series
+        // for the whole hovered column regardless of vertical distance from the cursor.
+        // The text hovercard stays proximity-gated so it doesn't follow the mouse across
+        // the whole chart height.
+        const near = bestDist <= 24;
 
         const plotted = (u.data[best] as (number | null)[])[idx] as number;
 
         if (m.kind === "temp") {
           // A temperature is a single scalar per read — no min/max/σ to whisker.
           group.style.display = "none";
-          onHover({
-            kind: "temp",
-            label: m.label,
-            channel: -1,
-            col: -1,
-            dye: "",
-            color: (u.series[best]!.stroke as string) ?? "#8aa0c0",
-            cycle: m.cycles[idx] ?? 0,
-            mean: plotted,
-            min: plotted,
-            max: plotted,
-            std: 0,
-            left,
-            top,
-          });
+          onHover(
+            near
+              ? {
+                  kind: "temp",
+                  label: m.label,
+                  channel: -1,
+                  col: -1,
+                  dye: "",
+                  color: (u.series[best]!.stroke as string) ?? "#8aa0c0",
+                  cycle: m.cycles[idx] ?? 0,
+                  mean: plotted,
+                  min: plotted,
+                  max: plotted,
+                  std: 0,
+                  left,
+                  top,
+                }
+              : null,
+          );
           return;
         }
 
@@ -631,21 +643,25 @@ function overlayPlugin(
           group.style.display = "none";
         }
 
-        onHover({
-          kind: m.kind,
-          label: m.label,
-          channel: m.channel,
-          col: m.col,
-          dye: m.dyeLabel,
-          color,
-          cycle: m.cycles[idx] ?? 0,
-          mean: m.mean[idx] ?? 0,
-          min: m.min[idx] ?? 0,
-          max: m.max[idx] ?? 0,
-          std: m.std[idx] ?? 0,
-          left,
-          top,
-        });
+        onHover(
+          near
+            ? {
+                kind: m.kind,
+                label: m.label,
+                channel: m.channel,
+                col: m.col,
+                dye: m.dyeLabel,
+                color,
+                cycle: m.cycles[idx] ?? 0,
+                mean: m.mean[idx] ?? 0,
+                min: m.min[idx] ?? 0,
+                max: m.max[idx] ?? 0,
+                std: m.std[idx] ?? 0,
+                left,
+                top,
+              }
+            : null,
+        );
       },
     },
   };
