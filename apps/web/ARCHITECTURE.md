@@ -299,9 +299,18 @@ only pieces the two views share.
   (restricted to the scanned channels, so its RFU scale factors are measured over the right
   rows), and solves every well/cycle — see [`calibration.md`](../../calibration.md). `CurvesView`
   assembles the §4 corrections that go in first: the per-scan reference level from the reference
-  row, the per-scan dark level from `DARKDATA`, and the per-well gain factors when the run has
-  them (a `.pcrd` thing — a `.zpcr` carries none, so only the dark subtraction bites there). The
-  normalization selector is a numerical-conditioning knob and does not change the RFU scale.
+  row, the additive background, and the per-well gain factors when the run has them (a `.pcrd`
+  thing — a `.zpcr` carries none, so only the background subtraction bites there). The
+  **"Background" toggle** picks that background per `calibration.md` §4.2 — `None` (the default,
+  the option closest to the instrument software's own RFU), `Dark` (the plate read's per-cycle
+  `DARKDATA`), or `Plate` (the `.Dcal` empty-plate level for this vessel type, interpolated to
+  the step's block temperature — the choice consistent with the matrix's own zero point). All
+  three shift a dye curve by a constant, so they move reported RFU but never shape or Cq.
+
+  There is deliberately **no normalization selector**: `calibration.md` §5.1 divides the column
+  scaling back out, so every mode reports identical RFU for any full-column-rank matrix, and the
+  control could not do anything observable. The `calibrationNormalization` setting still exists
+  (fixed at `global`) for the rank-deficient case and for stored-record round-tripping.
   `computeFluorCurves` solves every well against every calibrated plate fluor, but `CurvesView`
   only plots a line when all three hold: the well is enabled, the fluor (or, in target mode,
   its target — see below) isn't disabled, and — per `pltd.md`'s per-well dye layers

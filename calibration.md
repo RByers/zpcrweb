@@ -10,7 +10,9 @@ the plate, estimate how much each dye actually contributed.
 > **Status:** implements the algorithm below in full (§§2–5), including preprocessing (§4) —
 > [`packages/core/src/calibration.ts`](./packages/core/src/calibration.ts) (linear algebra in
 > [`linalg.ts`](./packages/core/src/linalg.ts)), tested against the calibration data in the
-> committed sample archives. The one open item is the *absolute* RFU scale convention (§8).
+> committed sample archives. The open item is the *absolute* RFU scale: which additive
+> background belongs in §4.2, and a residual gap against CFX Manager's own reported RFU that
+> no §§2–5 choice explains — both worked through in §8.
 
 ---
 
@@ -95,6 +97,10 @@ changes is which directions fall below the pseudo-inverse's singular-value floor
 to matter for an ill-conditioned or rank-deficient matrix — that is the whole reason to keep the
 setting.
 
+A practical consequence: for any well-posed plate (at least as many scanned channels as dyes)
+switching modes provably changes nothing you can see, so this is an internal conditioning knob,
+not a user-facing analysis choice — the web app deliberately doesn't offer it as one.
+
 One genuine exception survives: when there are **more dyes than channels**, the system is
 underdetermined and the pseudo-inverse returns the minimum-norm solution. Column scaling changes
 *which* solution has minimum norm, so `column` can legitimately disagree with `none`/`global`
@@ -119,10 +125,10 @@ order matters:
    When it's off, the reference level is not merely inert — it is never read from the plate read at
    all, for any purpose. It exists solely to feed this one calculation.
 
-3. **Dark-current subtraction** (§4.2), if enabled:
+3. **Background subtraction** (§4.2), if enabled:
 
    ```
-   corrected = corrected − darkLevel
+   corrected = corrected − backgroundLevel
    ```
 
 The result is the corrected channel vector that goes into §5.
@@ -203,27 +209,46 @@ a human to look at, surfaced in a calibration/service view rather than fed into 
 Be careful not to confuse that diagnostic sense of "drift" with the analysis option of the same
 name (§6).
 
-### 4.2 Dark data (LED off)
+### 4.2 The additive background: which zero point?
 
-Dark data is a separate, genuinely additive background: a reading taken with the **excitation
-source off**, capturing detector dark current and electronic offset — signal present regardless
-of illumination. It is stored per plate read as **one record per channel, not per well** (see
-[`plateread.md`](./plateread.md)'s `DARKDATA`), because the offset is a property of the detection
-channel rather than of any plate position.
+Distinct from the reference level, there is a genuinely additive background to remove — and
+there are **two different candidates for it**. They are alternatives, not stages: subtracting
+both would double-count. Whichever is chosen is **subtracted outright** from every channel
+reading, after the gain correction.
 
-Because it is a true additive offset, it is handled the obvious way: **subtracted outright** from
-every channel reading, after the gain correction. It is gated by its own enable flag, and skipped
-entirely when a plate read carries no dark record.
+**Dark data (LED off).** A reading taken with the **excitation source off**, capturing detector
+dark current and electronic offset — signal present regardless of illumination. Stored per plate
+read as **one record per channel, not per well** (see [`plateread.md`](./plateread.md)'s
+`DARKDATA`), because the offset is a property of the detection channel rather than of any plate
+position. Re-read every cycle. Skipped entirely when a plate read carries no dark record.
 
-The two mechanisms are complementary and should not be conflated:
+**The empty-plate background.** The `.Dcal` `empty` blocks (§2), read as absolute values rather
+than differenced away — the fluorescence of an empty vessel of this plate type at this block
+temperature. It is *larger* than the dark level, by the plate/optics autofluorescence a LED-off
+reading cannot see: on the committed sample, channel 1 at 60 °C reads ≈2516 empty-plate against
+≈2124 dark, a ≈390 RFU gap. Static per run (a calibration constant), not per cycle.
 
-| | Reference level (§4.1) | Dark data (§4.2) |
-|---|---|---|
-| Illumination | LED **on** | LED **off** |
-| Granularity | Per channel, per scan, from a physical plate position | Per channel, per scan, no plate position |
-| Captures | Optical/common-mode level through the real light path | Detector dark current + electronic offset |
-| Applied as | **Pivot** for gain scaling — removed then restored | **Subtracted** outright |
-| Net effect if gain correction is off | None | Still subtracted |
+**The empty-plate reading is the coordinate-consistent choice**, and this is the single most
+important thing to get right here. §2 defines every matrix column as `dyeReading − emptyReading`,
+so the matrix's origin — the point where all dye concentrations are zero — *is* the empty plate.
+Feeding it a reading measured from a different origin mixes coordinate systems: the leftover
+constant is unmixed into the dyes as though it were signal, lifting every dye's whole curve by a
+fixed amount. Subtracting the dark level alone removes part of that constant, not all of it, and
+is the one option that is consistent with neither origin.
+
+That is the argument from the math. It is **not** what matches observed instrument output, which
+is why the choice is exposed rather than settled — see §8, and note that all three options shift
+a curve by a constant and so change reported RFU but never curve shape, ΔRq or Cq.
+
+The reference level is a different mechanism again, and should not be conflated with either:
+
+| | Reference level (§4.1) | Dark data (§4.2) | Empty plate (§4.2) |
+|---|---|---|---|
+| Illumination | LED **on** | LED **off** | LED **on** |
+| Source | Reference row, per scan | `DARKDATA`, per scan | `.Dcal` `empty` blocks, static |
+| Captures | Optical/common-mode level through the real light path | Detector dark current + electronic offset | Dark current **plus** plate/optics autofluorescence |
+| Applied as | **Pivot** for gain scaling — removed then restored | **Subtracted** outright | **Subtracted** outright |
+| Net effect if gain correction is off | None | Still subtracted | Still subtracted |
 
 ## 5. Solving for dye concentrations
 
@@ -318,7 +343,10 @@ delta-baseline helper, which is a display transform rather than a baseline-fitti
 ```ts
 import {
   buildDyeResponseCurve,
+  buildPlateBackgroundCurve,
+  averagePlateBackground,
   buildCalibrationMatrix,
+  interpolateResponse,
   preprocessChannelReadings,
   separateChannels,
   separateDyes,
@@ -330,11 +358,19 @@ const curves = dcals.map((dcal) => buildDyeResponseCurve(dcal));
 // Sample those curves at this reading's block temperature, over the scanned channels (§3).
 const matrix = buildCalibrationMatrix(curves, blockTemperatureC, { channels: zpcr.channels() });
 
-// Apply the same corrections a live reading needs (§4).
+// The empty-plate origin those columns are measured from (§4.2) — every dye's .Dcal measures
+// the same physical empty plate, so average them rather than trusting one file.
+const background = averagePlateBackground(dcals.map((d) => buildPlateBackgroundCurve(d)))!;
+const backgroundLevel = zpcr
+  .channels()
+  .map((ch) => interpolateResponse(background.channels[ch] ?? [], blockTemperatureC));
+
+// Apply the same corrections a live reading needs (§4). `backgroundLevel` takes either the
+// empty-plate level above or the plate read's DARKDATA — one or the other, never both.
 const corrected = preprocessChannelReadings(rawChannelMeans, {
   referenceLevel,
   wellFactor,
-  darkLevel,
+  backgroundLevel,
 });
 
 // Solve (§5). `concentrations` is per-dye RFU, independent of the normalization mode above.
@@ -347,6 +383,37 @@ calibration matrix across many wells or cycles at the same temperature, since re
 call is wasted work.
 
 ## 8. Limitations / open items
+
+- **The absolute RFU scale does not yet reproduce the instrument software's, and the gap is not
+  in §§2–5.** Worked example, from the committed `20260720_Luna_noRT.pcrd`, well B3 (FAM/Texas
+  Red/Cy5), cycle 45, block 59.99 °C:
+
+  | Quantity | Value |
+  |---|---|
+  | Raw channel 1 mean | 9069.7 |
+  | Separated FAM, no background subtracted | 8965.4 |
+  | Separated FAM, dark subtracted (dark = 2123.9) | 6845.9 |
+  | Separated FAM, empty plate subtracted (empty = 2516) | ≈6459 |
+  | **CFX Manager's reported End RFU** | **8169** |
+
+  None of the three matches. Two facts constrain what the remainder can be:
+
+  1. **The choice of background cannot be the whole story.** All three options are additive
+     constants, so all three give the *same* cycle-1→45 amplitude, ≈5670 RFU — set by the raw
+     channel-1 amplitude of 5733. If 8169 is a baseline-subtracted end point, the instrument's
+     curve has ≈1.44× our amplitude, and **no choice available anywhere in §§2–5 can produce
+     that**: §3's normalization cancels (§5.1), the temperature the curves are sampled at
+     cancels, and even hypothesising a large channel-6 FAM response — the one row the `.Dcal`
+     leaves empty — caps the achievable amplitude near 6200 rather than raising it.
+  2. **If instead 8169 is an absolute end point**, the instrument removed ≈900 RFU of channel-1
+     background where we remove 0, 2124 or 2516. No quantity in the file matches: dark is 2124,
+     the empty plate 2516, the §4.1 reference level 2259, the reference row's factory-vs-live
+     drift only +37, and `wellFactorsCollection` is the synthesized identity table (§4.1), so
+     the gain correction is inactive and cannot supply a multiplier either.
+
+  Until a reference point settles which of the two readings of "End RFU" is right, `none` is the
+  library's default: it is the option closest to the instrument's number, and it keeps the
+  reported value on the same scale as the raw channel data it came from.
 
 - **The absolute RFU scale is a convention.** §5.1's `columnNorm` factor puts the output on an RFU
   scale that is self-consistent, stable across normalization modes, and the right order of

@@ -6,7 +6,6 @@ import {
   type WellCurve,
   type DarkCurve,
   type TemperatureCurve,
-  type NormalizationMode,
 } from "@zpcrweb/core";
 import {
   wellKey,
@@ -21,7 +20,9 @@ import { channelLabel } from "../../lib/channelColors";
 import {
   computeFluorCurves,
   matchFluorCalibrations,
+  plateBackgroundLevels,
   resolveTubeType,
+  type CalibrationBackground,
   type FluorCorrections,
 } from "../../lib/fluorCurves";
 import { ChannelBar } from "../curves/ChannelBar";
@@ -256,24 +257,35 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
     );
   }, [calibratedFluors, stepTemperatureC, settings.calibrationNormalization, available]);
 
-  // The §4 corrections applied to every raw reading before the solve. Both levels are read
-  // per scan, so these are `[channelIndex][cycle]` tables aligned with `available`.
+  // The §4 corrections applied to every raw reading before the solve. The levels are read per
+  // scan, so these are `[channelIndex][cycle]` tables aligned with `available`.
   const corrections = useMemo<FluorCorrections>(() => {
     const reads = zpcr.reads.filter((r) => r.step === activeStep);
     // §4.1: one position of the reference row — the first — per channel, LED on.
     const referenceLevel = available.map((ch) =>
       reads.map((r) => r.get(ch, REFERENCE_ROW, 0).mean),
     );
-    // §4.2: the per-channel LED-off background, from the same reads' DARKDATA.
+    // §4.2: whichever additive background the user picked, as a per-cycle table. `dark` varies
+    // per scan (DARKDATA is re-read every cycle); `plate` is one temperature-interpolated
+    // constant, broadcast across the cycles so both take the same code path downstream.
     const darkByChannel = new Map(darkCurves.map((d) => [d.channel, d]));
-    const darkLevel = available.map((ch) => darkByChannel.get(ch)?.mean ?? []);
+    const plateLevels =
+      settings.calibrationBackground === "plate"
+        ? plateBackgroundLevels(zpcr.calibrations(), tube, stepTemperatureC, available)
+        : undefined;
+    const backgroundLevel =
+      settings.calibrationBackground === "dark"
+        ? available.map((ch) => darkByChannel.get(ch)?.mean ?? [])
+        : plateLevels
+          ? plateLevels.map((level) => reads.map(() => level))
+          : undefined;
     // §4.1: per-well gain factors, only ever present in a `.pcrd` (a `.zpcr` stores none), and
     // only when that run actually saved a set — otherwise the gain correction stays inactive
     // and the reference level correctly has no effect of its own.
     const factors = zpcr.wellFactors;
     return {
       referenceLevel,
-      darkLevel,
+      backgroundLevel,
       wellFactor: factors
         ? (row, col) => {
             const perChannel = factors.get(row, col);
@@ -281,7 +293,22 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
           }
         : undefined,
     };
-  }, [zpcr, activeStep, available, darkCurves]);
+  }, [
+    zpcr,
+    activeStep,
+    available,
+    darkCurves,
+    settings.calibrationBackground,
+    tube,
+    stepTemperatureC,
+  ]);
+
+  // Whether the "Plate" background is actually backed by data — a file can carry .Dcal entries
+  // for other vessel types than this plate's, in which case that mode silently subtracts nothing.
+  const plateBackgroundAvailable = useMemo(
+    () => plateBackgroundLevels(zpcr.calibrations(), tube, stepTemperatureC, available) != null,
+    [zpcr, tube, stepTemperatureC, available],
+  );
 
   // The separation solve is real work (one pseudo-inverse per well per cycle) — skip it
   // entirely while the feature is off rather than computing curves nobody will see.
@@ -431,20 +458,29 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
                     }
                   />
                 </div>
+                {/* Where a "Normalization" toggle used to sit. It was a no-op by construction:
+                    calibration.md §5.1 divides the column scaling back out, so every mode
+                    reports identical RFU unless the matrix is rank-deficient. The setting still
+                    exists (see FileSettings) — it just isn't a user-facing choice. */}
                 {calibrationOn && (
                   <div className="rail__row">
                     <Toggle
-                      label="Normalization"
+                      label="Background"
                       options={[
-                        ["global", "Global"],
-                        ["column", "Per-dye"],
                         ["none", "None"],
+                        ["dark", "Dark"],
+                        ["plate", "Plate"],
                       ]}
-                      value={settings.calibrationNormalization}
+                      value={settings.calibrationBackground}
                       onChange={(v) =>
-                        onChange({ calibrationNormalization: v as NormalizationMode })
+                        onChange({ calibrationBackground: v as CalibrationBackground })
                       }
                     />
+                  </div>
+                )}
+                {calibrationOn && settings.calibrationBackground === "plate" && !plateBackgroundAvailable && (
+                  <div className="rail__note mono">
+                    No {tube} empty-plate calibration in this file — no background subtracted.
                   </div>
                 )}
                 {calibrationOn && !calibrationAvailable && (

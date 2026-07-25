@@ -6,6 +6,7 @@ import {
   type PcrdContainer,
   type Zpcr,
 } from "@zpcrweb/core";
+import type { CalibrationBackground } from "../lib/fluorCurves";
 import {
   deleteFile,
   fileId,
@@ -73,8 +74,16 @@ export interface FileSettings {
   /** When color separation is on, group/label curves by fluorophore or by target/gene (each
    * target listed separately, still colored by its channel/fluorophore — see `pltd.md`). */
   fluorViewMode: FluorViewMode;
-  /** Calibration matrix column normalization; see `calibration.md` §3. */
+  /**
+   * Calibration matrix column normalization; see `calibration.md` §3. Deliberately **not**
+   * exposed in the UI: §5.1 divides the scaling back out, so all three modes report identical
+   * RFU for any full-column-rank matrix — it only changes conditioning, which matters solely
+   * for a rank-deficient one (more dyes than scanned channels). Kept as a setting so that case
+   * stays reachable, and so stored records keep round-tripping.
+   */
   calibrationNormalization: NormalizationMode;
+  /** Which additive background comes off a reading before the solve; see `calibration.md` §4.2. */
+  calibrationBackground: CalibrationBackground;
   /** Fluorophore (or, in target view mode, target) names hidden from the dye-space curves (an
    * opt-out set, like `enabledChannels` inverted — new entries default to shown without needing
    * to know their names up front). */
@@ -164,6 +173,9 @@ function defaultSettings(): FileSettings {
     calibration: null,
     fluorViewMode: "fluorophore",
     calibrationNormalization: "global",
+    // No background subtraction by default — the choice that stays closest to the instrument
+    // software's own RFU scale. See `calibration.md` §4.2/§8 and CalibrationBackground.
+    calibrationBackground: "none",
     disabledFluors: new Set<string>(),
     showUnloadedFluors: false,
   };
@@ -187,6 +199,7 @@ function toStored(id: string, s: FileSettings): StoredSettings {
     calibration: s.calibration,
     fluorViewMode: s.fluorViewMode,
     calibrationNormalization: s.calibrationNormalization,
+    calibrationBackground: s.calibrationBackground,
     disabledFluors: [...s.disabledFluors],
     showUnloadedFluors: s.showUnloadedFluors,
   };
@@ -208,6 +221,7 @@ function fromStored(s: StoredSettings): FileSettings {
     calibration: s.calibration ?? null,
     fluorViewMode: s.fluorViewMode ?? "fluorophore",
     calibrationNormalization: s.calibrationNormalization ?? "global",
+    calibrationBackground: s.calibrationBackground ?? "none",
     disabledFluors: new Set(s.disabledFluors ?? []),
     showUnloadedFluors: s.showUnloadedFluors ?? false,
     temps: new Set(s.temps ?? []),

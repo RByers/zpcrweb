@@ -44,8 +44,12 @@ export interface StoredSettings {
   calibration?: boolean | null;
   /** When color separation is on, group/label curves by fluorophore or by target/gene. */
   fluorViewMode?: "fluorophore" | "target";
-  /** Calibration normalization mode; see `calibration.md` §3. */
+  /** Calibration normalization mode; see `calibration.md` §3. Not user-facing — see the
+   * FileSettings field of the same name for why. */
   calibrationNormalization?: "none" | "column" | "global";
+  /** Additive background removed before color separation; see `calibration.md` §4.2. Absent on
+   * records written before this setting existed, which then take the "none" default. */
+  calibrationBackground?: "none" | "dark" | "plate";
   /** Fluorophore (or, in target view mode, target) names hidden from the dye-space view. */
   disabledFluors?: string[];
   /** When true, dye-space curves are drawn for every enabled well/fluor pair, even ones the

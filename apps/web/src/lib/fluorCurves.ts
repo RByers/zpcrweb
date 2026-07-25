@@ -1,6 +1,9 @@
 import {
+  averagePlateBackground,
   buildCalibrationMatrix,
   buildDyeResponseCurve,
+  buildPlateBackgroundCurve,
+  interpolateResponse,
   preprocessChannelReadings,
   separateChannels,
   type CalibrationMatrix,
@@ -71,6 +74,44 @@ export function matchFluorCalibrations(
 }
 
 /**
+ * Which additive background comes off a raw reading before the solve — `calibration.md` §4.2.
+ * The three are mutually exclusive, and the choice moves the whole dye-space curve up or down
+ * by a constant, so it changes reported RFU but never Cq or curve shape:
+ *
+ * - `none` — subtract nothing. The plate's constant background stays in the reading and is
+ *   unmixed into the dyes along with the signal, so every curve sits high by that amount. This
+ *   is the default because it is what reproduces the instrument software's own RFU scale most
+ *   closely on the runs checked so far (see `calibration.md` §8).
+ * - `dark` — subtract the plate read's LED-off `DARKDATA`. Removes detector dark current only,
+ *   leaving the plate/optics autofluorescence behind.
+ * - `plate` — subtract the `.Dcal` empty-plate reading. The **coordinate-consistent** choice:
+ *   the calibration matrix's columns are `dye − empty`, so this is the only option that puts
+ *   the reading in the same coordinates as the matrix.
+ */
+export type CalibrationBackground = "none" | "dark" | "plate";
+
+/**
+ * The empty-plate background for `tube` at `temperatureC`, over `channels` — the `plate`
+ * option of {@link CalibrationBackground}. Averaged across every matching dye's `.Dcal`, which
+ * each measure the same physical empty plate. Returns `undefined` when the archive has no
+ * calibration for this tube type.
+ */
+export function plateBackgroundLevels(
+  calibrations: DcalEntry[],
+  tube: TubeType,
+  temperatureC: number,
+  channels: number[],
+): number[] | undefined {
+  const wantedTube = tube.trim().toLowerCase();
+  const curves = calibrations
+    .filter(({ dcal }) => dcal.plate.trim().toLowerCase() === wantedTube)
+    .map(({ dcal }) => buildPlateBackgroundCurve(dcal));
+  const averaged = averagePlateBackground(curves);
+  if (!averaged) return undefined;
+  return channels.map((ch) => interpolateResponse(averaged.channels[ch] ?? [], temperatureC));
+}
+
+/**
  * The per-cycle, per-well corrections `calibration.md` §4 applies to a raw reading before the
  * solve. All three parts are optional and independent: a run may carry any combination.
  */
@@ -81,8 +122,12 @@ export interface FluorCorrections {
    * (§4.1); with no `wellFactor` it has no effect, by design.
    */
   referenceLevel?: number[][];
-  /** Per-channel dark (LED-off) level per cycle, same indexing — subtracted outright (§4.2). */
-  darkLevel?: number[][];
+  /**
+   * Per-channel additive background per cycle, same indexing — subtracted outright (§4.2).
+   * Either the LED-off dark reading or the empty-plate background, never both; which one (or
+   * neither) is the user-facing "Background" choice, see {@link CalibrationBackground}.
+   */
+  backgroundLevel?: number[][];
   /** One well's gain factors across `channels`, or undefined when the run has none (§4.1). */
   wellFactor?: (row: number, col: number) => number[] | undefined;
 }
@@ -151,7 +196,7 @@ export function computeFluorCurves(
       const corrected = preprocessChannelReadings(raw, {
         referenceLevel: columnAt(corrections.referenceLevel, i),
         wellFactor,
-        darkLevel: columnAt(corrections.darkLevel, i),
+        backgroundLevel: columnAt(corrections.backgroundLevel, i),
       });
       const { concentrations } = separateChannels(matrix, corrected);
       concentrations.forEach((v, d) => {

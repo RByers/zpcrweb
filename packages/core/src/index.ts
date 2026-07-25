@@ -45,6 +45,8 @@ export { parseDcal, findDcalBlock, isDcalName } from "./dcal.js";
 export { parsePcrd, isPcrdName, pcrdFromBlob } from "./pcrd.js";
 export {
   buildDyeResponseCurve,
+  buildPlateBackgroundCurve,
+  averagePlateBackground,
   interpolateResponse,
   buildCalibrationMatrix,
   preprocessChannelReadings,
@@ -122,6 +124,7 @@ export type { Pcrd, PcrdContainer, PcrdOptions } from "./pcrd.js";
 export type {
   ResponseKnot,
   DyeResponseCurve,
+  PlateBackgroundCurve,
   NormalizationMode,
   CalibrationMatrix,
   ChannelPreprocessOptions,
