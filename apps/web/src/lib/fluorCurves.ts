@@ -18,7 +18,11 @@ import {
  * whole plate/step, and running the solve for every well/cycle.
  */
 
-/** The two physical tube/plate types Bio-Rad calibrates against — see `dcal.md`. */
+/**
+ * The two physical tube/plate types this UI offers — see `dcal.md`. `plateName` (`pltd.md`
+ * §2) has a third legacy value, `MJ White`, not modeled here; a plate using it falls back to
+ * `BR Clear` like any other unrecognized value.
+ */
 export type TubeType = "BR Clear" | "BR White";
 
 /** A plate's tube type is usually exactly `plateName`; default to Clear when it isn't. */
@@ -45,9 +49,13 @@ export function matchFluorCalibrations(
   calibrations: DcalEntry[],
   tube: TubeType,
 ): FluorCalibration[] {
+  // Case-insensitive: shipped .Dcal/calibrationCollection data is inconsistent between
+  // display-cased ("BR White") and upper-cased ("BR WHITE") forms of the same tube type —
+  // see pltd.md's vessel-type section.
+  const wantedTube = tube.trim().toLowerCase();
   const byDye = new Map<string, Dcal>();
   for (const { dcal } of calibrations) {
-    if (dcal.plate === tube) byDye.set(dcal.dye, dcal);
+    if (dcal.plate.trim().toLowerCase() === wantedTube) byDye.set(dcal.dye, dcal);
   }
   const seen = new Map<string, FluorCalibration>();
   for (const f of plateFluors) {
