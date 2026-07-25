@@ -1,7 +1,18 @@
 import { deflateRawSync } from "node:zlib";
 import { randomBytes } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, resolve } from "node:path";
 import { describe, it, expect } from "vitest";
-import { isPrclName, parsePcrd, parsePrcl, parseProtocol2 } from "../src/index.js";
+import { isPrclName, parsePcrd, parsePrcl, parseProtocol2, parseZpcr } from "../src/index.js";
+import { readMultistepBytes } from "./sample.js";
+import { readCfxPassword } from "./secrets.js";
+
+const here = dirname(fileURLToPath(import.meta.url));
+function sampleText(name: string): string {
+  return readFileSync(resolve(here, "../../../samples", name), "utf-8");
+}
+const PW = readCfxPassword();
 
 // --- Minimal ZipCrypto encryption + single-entry ZIP builder, mirroring zipcrypto.ts's
 // decrypt algorithm in reverse. Test-only: the library never needs to *write* CFX files.
@@ -253,6 +264,40 @@ describe("parsePrcl — synthetic ZIP round trip (no real password needed)", () 
     expect(prcl.needsPassword).toBeUndefined();
     expect(prcl.protocol).toBeUndefined();
     expect(prcl.error).toBeDefined();
+  });
+});
+
+// The decoded protocol structure is exercised against the plaintext XML extracted from a real
+// sample (committed as samples/Short Qualification_Plate_96.prcl.xml) — no decryption, no
+// secret needed. Only the pipeline test below (decrypt → inflate) needs the real password.
+describe("parseProtocol2 — real sample (plaintext, no secret needed)", () => {
+  const doc = parseProtocol2(sampleText("Short Qualification_Plate_96.prcl.xml"));
+
+  it("parses root attributes and identity", () => {
+    expect(doc.name).toBe("Short Qualification_Plate_96.prcl");
+    expect(doc.lidTemperatureC).toBe(105);
+    expect(doc.volumeUl).toBe(20);
+    expect(doc.runDefinition).toContain("PLATEREAD #h3F");
+  });
+
+  it("parses the ordered step list, including a melt step with an explicit end temp", () => {
+    const steps = doc.steps!;
+    expect(steps).toHaveLength(5);
+    expect(steps[2]).toMatchObject({ kind: "temperature", tempC: 57.5, plateRead: true });
+    expect(steps[3]).toEqual({ kind: "goto", stepNumber: 3, targetStep: 1, repeats: 1 });
+    expect(steps[4]).toMatchObject({
+      kind: "melt",
+      startTempC: 56.5,
+      endTempC: 91.5,
+      incrementC: 5,
+    });
+  });
+});
+
+describe.skipIf(!PW)("prcl — decryption pipeline (requires secrets.json)", () => {
+  it("decrypts the real .prcl entry to the same plaintext committed in samples/", () => {
+    const prcl = parseZpcr(readMultistepBytes()).protocols(PW)[0]!.prcl;
+    expect(prcl.xml).toBe(sampleText("Short Qualification_Plate_96.prcl.xml"));
   });
 });
 

@@ -1,14 +1,18 @@
+import { deflateRawSync } from "node:zlib";
+import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { describe, it, expect } from "vitest";
 import { parsePcrd, parseZpcr } from "../src/index.js";
+import { readCfxPassword } from "./secrets.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
 // Same fixture the .md docs cross-validate against: the CFX Manager saved-experiment document
 // for the run also committed as samples/20260720.zpcr.
 const PCRD_PATH = resolve(here, "../../../samples/20260720_Luna_noRT.pcrd");
+const PCRD_XML_PATH = resolve(here, "../../../samples/20260720_Luna_noRT.pcrd.xml");
 const ZPCR_PATH = resolve(here, "../../../samples/20260720.zpcr");
 
 function readBytes(path: string): Uint8Array {
@@ -16,10 +20,7 @@ function readBytes(path: string): Uint8Array {
   return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
 }
 
-// The decryption password is NOT committed to this repo — same fixed password as .pltd/.prcl
-// (see pltd.md §2, pcrd.md §2). Supply it via the environment to run the decode assertions
-// locally (`CFX_PLTD_PASSWORD=… npm test`); container-level assertions run without it.
-const PW = process.env.CFX_PLTD_PASSWORD;
+const PW = readCfxPassword();
 
 describe("pcrd — container + password handling (no secret needed)", () => {
   it("decodes the container and reports needsPassword without a password", () => {
@@ -39,9 +40,141 @@ describe("pcrd — container + password handling (no secret needed)", () => {
   });
 });
 
-describe.skipIf(!PW)("pcrd — decode (requires CFX_PLTD_PASSWORD)", () => {
+// --- Minimal ZipCrypto encryption + single-entry ZIP builder, mirroring zipcrypto.ts's
+// decrypt algorithm in reverse. Test-only: the library never needs to *write* CFX files.
+// (Duplicated from pcrd-synthetic.test.ts/prcl.test.ts — kept self-contained per file.) Used
+// here to re-wrap the committed plaintext sample (extracted once, for real, using the real
+// password — see the pipeline test below) under a throwaway test password, so the decode
+// assertions exercise the exact real-world document without needing the real secret.
+
+const CRC_TABLE = (() => {
+  const table = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    table[n] = c >>> 0;
+  }
+  return table;
+})();
+function crc32Byte(crc: number, byte: number): number {
+  return (CRC_TABLE[(crc ^ byte) & 0xff]! ^ (crc >>> 8)) >>> 0;
+}
+function crc32(bytes: Uint8Array): number {
+  let c = 0xffffffff;
+  for (const b of bytes) c = crc32Byte(c, b);
+  return (c ^ 0xffffffff) >>> 0;
+}
+
+class EncryptKeys {
+  k0 = 0x12345678;
+  k1 = 0x23456789;
+  k2 = 0x34567890;
+  constructor(password: string) {
+    for (let i = 0; i < password.length; i++) this.update(password.charCodeAt(i) & 0xff);
+  }
+  update(byte: number): void {
+    this.k0 = crc32Byte(this.k0, byte);
+    this.k1 = (Math.imul((this.k1 + (this.k0 & 0xff)) >>> 0, 134775813) + 1) >>> 0;
+    this.k2 = crc32Byte(this.k2, this.k1 >>> 24);
+  }
+  encryptByte(plain: number): number {
+    const temp = (this.k2 | 2) & 0xffff;
+    const keystream = (Math.imul(temp, temp ^ 1) >>> 8) & 0xff;
+    const cipher = (plain ^ keystream) & 0xff;
+    this.update(plain);
+    return cipher;
+  }
+}
+
+function zipCryptoEncrypt(data: Uint8Array, password: string, entryCrc: number): Uint8Array {
+  const keys = new EncryptKeys(password);
+  const header = randomBytes(12);
+  header[11] = (entryCrc >>> 24) & 0xff;
+  const out = new Uint8Array(12 + data.length);
+  for (let i = 0; i < 12; i++) out[i] = keys.encryptByte(header[i]!);
+  for (let i = 0; i < data.length; i++) out[12 + i] = keys.encryptByte(data[i]!);
+  return out;
+}
+
+function u16(n: number): Uint8Array {
+  return new Uint8Array([n & 0xff, (n >> 8) & 0xff]);
+}
+function u32(n: number): Uint8Array {
+  return new Uint8Array([n & 0xff, (n >> 8) & 0xff, (n >> 16) & 0xff, (n >>> 24) & 0xff]);
+}
+function concat(...parts: Uint8Array[]): Uint8Array {
+  const total = parts.reduce((n, p) => n + p.length, 0);
+  const out = new Uint8Array(total);
+  let o = 0;
+  for (const p of parts) {
+    out.set(p, o);
+    o += p.length;
+  }
+  return out;
+}
+
+/** Re-wrap `plaintext` as a single-entry encrypted `.pcrd`-shaped ZIP, for test use only. */
+function buildSyntheticPcrd(plaintext: Uint8Array, password: string): Uint8Array {
+  const entryCrc = crc32(plaintext);
+  const compressed = deflateRawSync(plaintext, { level: 6 });
+  const encrypted = zipCryptoEncrypt(compressed, password, entryCrc);
+  const name = new TextEncoder().encode("20260720_211747_CT019138_Luna_noRT.pcrd");
+
+  const localHeader = concat(
+    new Uint8Array([0x50, 0x4b, 0x03, 0x04]),
+    u16(20),
+    u16(0x0001),
+    u16(8),
+    u16(0),
+    u16(0),
+    u32(entryCrc),
+    u32(encrypted.length),
+    u32(plaintext.length),
+    u16(name.length),
+    u16(0),
+    name,
+  );
+  const cdEntry = concat(
+    new Uint8Array([0x50, 0x4b, 0x01, 0x02]),
+    u16(45),
+    u16(20),
+    u16(0x0001),
+    u16(8),
+    u16(0),
+    u16(0),
+    u32(entryCrc),
+    u32(encrypted.length),
+    u32(plaintext.length),
+    u16(name.length),
+    u16(0),
+    u16(0),
+    u16(0),
+    u16(0),
+    u32(0),
+    u32(0),
+    name,
+  );
+  const cdOffset = localHeader.length + encrypted.length;
+  const eocd = concat(
+    new Uint8Array([0x50, 0x4b, 0x05, 0x06]),
+    u16(0),
+    u16(0),
+    u16(1),
+    u16(1),
+    u32(cdEntry.length),
+    u32(cdOffset),
+    u16(0),
+  );
+  return concat(localHeader, encrypted, cdEntry, eocd);
+}
+
+describe("pcrd — decoded structure (real document, re-wrapped, no secret needed)", () => {
+  const password = "synthetic-test-password";
+  const plaintext = readBytes(PCRD_XML_PATH);
+  const zipBytes = buildSyntheticPcrd(plaintext, password);
+  const pcrd = parsePcrd(zipBytes, { password });
+
   it("decodes into the same Zpcr shape as the matching .zpcr, cross-validated field for field", () => {
-    const pcrd = parsePcrd(readBytes(PCRD_PATH), { password: PW });
     expect(pcrd.error).toBeUndefined();
     const zpcr = pcrd.zpcr!;
     const reference = parseZpcr(readBytes(ZPCR_PATH));
@@ -72,7 +205,7 @@ describe.skipIf(!PW)("pcrd — decode (requires CFX_PLTD_PASSWORD)", () => {
   });
 
   it("pivots into curves/darkCurves/temperatureCurves like a .zpcr", () => {
-    const zpcr = parsePcrd(readBytes(PCRD_PATH), { password: PW }).zpcr!;
+    const zpcr = pcrd.zpcr!;
     const curves = zpcr.curves();
     expect(curves.length).toBeGreaterThan(0);
     expect(curves[0]!.cycles).toHaveLength(45);
@@ -82,7 +215,7 @@ describe.skipIf(!PW)("pcrd — decode (requires CFX_PLTD_PASSWORD)", () => {
   });
 
   it("decodes the embedded plate setup via plates()", () => {
-    const zpcr = parsePcrd(readBytes(PCRD_PATH), { password: PW }).zpcr!;
+    const zpcr = pcrd.zpcr!;
     const plates = zpcr.plates();
     expect(plates).toHaveLength(1);
     const plate = plates[0]!.pltd.plate!;
@@ -93,13 +226,12 @@ describe.skipIf(!PW)("pcrd — decode (requires CFX_PLTD_PASSWORD)", () => {
   });
 
   it("exposes the real protocol text via protocolText and reports an empty archive", () => {
-    const zpcr = parsePcrd(readBytes(PCRD_PATH), { password: PW }).zpcr!;
+    const zpcr = pcrd.zpcr!;
     expect(zpcr.protocolText).toContain("METHOD CALC");
     expect(zpcr.archive.entries).toEqual([]);
   });
 
   it("exposes not-yet-decoded subtrees verbatim in the full raw document (Pcrd.xml)", () => {
-    const pcrd = parsePcrd(readBytes(PCRD_PATH), { password: PW });
     expect(pcrd.xml).toContain("<experimentalData2");
     expect(pcrd.xml).toContain("dataAnalysisParameters");
   });
@@ -151,5 +283,13 @@ describe.skipIf(!PW)("pcrd — decode (requires CFX_PLTD_PASSWORD)", () => {
     expect(fam.security.date?.getUTCFullYear()).toBe(2026);
     expect(fam.security.username).toBe("Bio-Rad Service");
     expect(fam.security.app).toBe("BioRadCFXManager");
+  });
+});
+
+describe.skipIf(!PW)("pcrd — decryption pipeline (requires secrets.json)", () => {
+  it("decrypts the real .pcrd file to the same plaintext committed in samples/", () => {
+    const pcrd = parsePcrd(readBytes(PCRD_PATH), { password: PW });
+    expect(pcrd.error).toBeUndefined();
+    expect(pcrd.xml).toBe(new TextDecoder("utf-8").decode(readBytes(PCRD_XML_PATH)));
   });
 });

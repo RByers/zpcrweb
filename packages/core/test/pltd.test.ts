@@ -2,19 +2,23 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { describe, it, expect } from "vitest";
-import { parsePltd, parseZpcr } from "../src/index.js";
+import { parsePlatesetup2, parsePltd, parseZpcr } from "../src/index.js";
 import { readMultistepBytes } from "./sample.js";
+import { readCfxPassword } from "./secrets.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 function fixture(name: string): Uint8Array {
   const buf = readFileSync(resolve(here, "fixtures", name));
   return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
 }
+function fixtureText(name: string): string {
+  return readFileSync(resolve(here, "fixtures", name), "utf-8");
+}
+function sampleText(name: string): string {
+  return readFileSync(resolve(here, "../../../samples", name), "utf-8");
+}
 
-// The decryption password is NOT committed to this repo. Supply it via the environment to
-// run the decode assertions locally (`CFX_PLTD_PASSWORD=… npm test`); container-level and
-// password-handling assertions run without it.
-const PW = process.env.CFX_PLTD_PASSWORD;
+const PW = readCfxPassword();
 
 describe("pltd — container + password handling (no secret needed)", () => {
   const zpcr = parseZpcr(readMultistepBytes());
@@ -45,9 +49,12 @@ describe("pltd — container + password handling (no secret needed)", () => {
   });
 });
 
-describe.skipIf(!PW)("pltd — decode (requires CFX_PLTD_PASSWORD)", () => {
-  it("decodes the method-8 plate via the archive", () => {
-    const plate = parseZpcr(readMultistepBytes()).plates(PW)[0]!.pltd.plate!;
+// The decoded plate structure is exercised against the plaintext XML extracted from each
+// sample (committed in samples/ and test/fixtures/) — no decryption, no secret needed. Only
+// the pipeline test below (decrypt → inflate) needs the real password.
+describe("pltd — decoded plate structure (plaintext samples, no secret needed)", () => {
+  it("decodes the method-8 plate (Qualification_Plate_96.pltd)", () => {
+    const plate = parsePlatesetup2(sampleText("Qualification_Plate_96.pltd.xml"));
     expect(plate.plateName).toBe("BR White");
     expect(plate.rows).toBe(8);
     expect(plate.columns).toBe(12);
@@ -61,8 +68,8 @@ describe.skipIf(!PW)("pltd — decode (requires CFX_PLTD_PASSWORD)", () => {
     expect(a1.fluors).toEqual([{ fluor: "SYBR", channel: 0, target: undefined }]);
   });
 
-  it("decodes the method-9 (DEFLATE64) multi-dye fixture", () => {
-    const plate = parsePltd(fixture("quickplate_allchannels.pltd"), { password: PW }).plate!;
+  it("decodes the method-9 (DEFLATE64) multi-dye fixture (quickplate_allchannels.pltd)", () => {
+    const plate = parsePlatesetup2(fixtureText("quickplate_allchannels.pltd.xml"));
     expect(plate.plateName).toBe("BR Clear");
     expect(plate.scanMode).toBe("AllChannelsScan");
     expect(plate.dyeCount).toBe(5);
@@ -82,5 +89,17 @@ describe.skipIf(!PW)("pltd — decode (requires CFX_PLTD_PASSWORD)", () => {
       "Cy5",
       "Quasar 705",
     ]);
+  });
+});
+
+describe.skipIf(!PW)("pltd — decryption pipeline (requires secrets.json)", () => {
+  it("decrypts the method-8 entry to the same plaintext committed in samples/", () => {
+    const pltd = parseZpcr(readMultistepBytes()).plates(PW)[0]!.pltd;
+    expect(pltd.xml).toBe(sampleText("Qualification_Plate_96.pltd.xml"));
+  });
+
+  it("decrypts the method-9 (DEFLATE64) entry to the same plaintext committed fixture", () => {
+    const pltd = parsePltd(fixture("quickplate_allchannels.pltd"), { password: PW });
+    expect(pltd.xml).toBe(fixtureText("quickplate_allchannels.pltd.xml"));
   });
 });

@@ -39,7 +39,7 @@ export {
   COLUMNS,
   ROWS,
 } from "./plateread.js";
-export { parsePltd, isPltdName } from "./pltd.js";
+export { parsePltd, parsePlatesetup2, isPltdName } from "./pltd.js";
 export { parsePrcl, parseProtocol2, isPrclName } from "./prcl.js";
 export { parseDcal, findDcalBlock, isDcalName } from "./dcal.js";
 export { parsePcrd, isPcrdName, pcrdFromBlob } from "./pcrd.js";

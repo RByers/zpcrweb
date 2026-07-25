@@ -11,8 +11,11 @@ Whenever changes are made, review and update all ARCHITECTURE.md files to be a c
 
 ## Secrets
 
-Local-only secrets (e.g. the CFX file decryption password) live in `SECRETS.md`, which is
-gitignored and never committed.
+Local-only secrets (the CFX file decryption password) live in `secrets.json`, which is
+gitignored and never committed — `{ "cfxPassword": "…" }`. Tests load it via
+`packages/core/test/secrets.ts`; only tests that explicitly exercise the decryption pipeline
+need it (`describe.skipIf(!PW)` blocks) — everything else runs against the plaintext samples
+committed in `samples/` and `packages/core/test/fixtures/`.
 
 ## Format documentation
 
