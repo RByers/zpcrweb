@@ -11,7 +11,7 @@ import {
   type Zpcr,
 } from "@zpcrweb/core";
 import { wellKey, type FileSettings } from "../../state/useZpcrStore";
-import { libBaselineMode } from "../../lib/cq";
+import { ANALYSIS_BASELINE_MODE, formatBaselineFormula } from "../../lib/cq";
 import { computeWellTypes } from "../../lib/wellTypes";
 import { usePltdPassword } from "../../state/pltdPassword";
 import { channelLabel } from "../../lib/channelColors";
@@ -44,10 +44,10 @@ export interface AnalysisRow {
   col: number;
   wellLabel: string;
   sample: string;
-  /** Diagnostic: mean raw RFU over the baseline region actually used for this curve (see
-   * `CurveBaselineResult.baselineRfu`) — helps explain a surprising threshold/Cq when the
-   * baseline region isn't what was expected. */
-  baselineRfu: number;
+  /** Diagnostic: the linear baseline actually fitted for this curve (see
+   * `CurveBaselineResult.baselineFit`), rendered as a formula (e.g. "2000 + 4c") — helps explain
+   * a surprising threshold/Cq. */
+  baselineFormula: string;
   threshold: number;
   noise: number;
   amplified: boolean;
@@ -185,15 +185,8 @@ export function AnalysisView({ zpcr, settings, onChange }: Props) {
     onChange({ analysisDisabledTargets: next });
   };
 
-  const baselineMode = libBaselineMode(settings.curveBaseline);
-  const manualRegion = useMemo<{ beginCycle: number; endCycle: number } | null>(
-    () =>
-      settings.curveBaselineRange
-        ? { beginCycle: settings.curveBaselineRange[0], endCycle: settings.curveBaselineRange[1] }
-        : null,
-    [settings.curveBaselineRange],
-  );
   const algorithm: CqAlgorithm = settings.analysisCqAlgorithm;
+  const minDeltaRfu = settings.analysisMinDeltaRfu;
 
   // ---- Build one row per active (target, well) pair --------------------------------------
 
@@ -210,7 +203,7 @@ export function AnalysisView({ zpcr, settings, onChange }: Props) {
       col: number;
       wellLabel: string;
       sample: string;
-      baselineRfu: number;
+      baselineFormula: string;
       cycles: number[];
       correctedValues: number[];
       noise: number;
@@ -227,7 +220,7 @@ export function AnalysisView({ zpcr, settings, onChange }: Props) {
         const curve = curveByWellDye.get(`${w.row},${w.col},${wf.fluor}`);
         if (!curve) continue;
         const info = groupInfos.find((g) => g.target === group);
-        const baseline = baselineCorrectCurve(curve.cycles, curve.mean, baselineMode, manualRegion);
+        const baseline = baselineCorrectCurve(curve.cycles, curve.mean, ANALYSIS_BASELINE_MODE);
         prepped.push({
           target: group,
           fluor: wf.fluor,
@@ -236,7 +229,7 @@ export function AnalysisView({ zpcr, settings, onChange }: Props) {
           col: w.col,
           wellLabel: w.label,
           sample: w.sample ?? "",
-          baselineRfu: baseline.baselineRfu,
+          baselineFormula: formatBaselineFormula(baseline.baselineFit),
           cycles: curve.cycles,
           correctedValues: baseline.correctedValues,
           noise: baseline.noise,
@@ -268,6 +261,8 @@ export function AnalysisView({ zpcr, settings, onChange }: Props) {
           algorithm,
           threshold: algorithm === "Threshold" ? threshold : undefined,
           noise: p.noise,
+          deltaRfu: p.deltaRfu,
+          minDeltaRfu,
         });
         return {
           target: p.target,
@@ -277,7 +272,7 @@ export function AnalysisView({ zpcr, settings, onChange }: Props) {
           col: p.col,
           wellLabel: p.wellLabel,
           sample: p.sample,
-          baselineRfu: p.baselineRfu,
+          baselineFormula: p.baselineFormula,
           threshold,
           noise: p.noise,
           amplified: p.amplified,
@@ -294,9 +289,8 @@ export function AnalysisView({ zpcr, settings, onChange }: Props) {
     settings.analysisThresholdOverrides,
     usingTargets,
     groupInfos,
-    baselineMode,
-    manualRegion,
     algorithm,
+    minDeltaRfu,
   ]);
 
   const download = () => {
@@ -306,7 +300,7 @@ export function AnalysisView({ zpcr, settings, onChange }: Props) {
       "fluor",
       "target",
       "channel",
-      "baselineRfu",
+      "baseline",
       "threshold",
       "cq",
       "deltaRfu",
@@ -319,7 +313,7 @@ export function AnalysisView({ zpcr, settings, onChange }: Props) {
         r.fluor,
         r.target,
         channelLabel(r.channel),
-        r.baselineRfu.toFixed(1),
+        r.baselineFormula,
         r.threshold.toFixed(1),
         r.cq != null ? r.cq.toFixed(3) : "",
         r.deltaRfu.toFixed(1),
@@ -420,8 +414,24 @@ export function AnalysisView({ zpcr, settings, onChange }: Props) {
                   </details>
                 )}
 
+                <div className="rail__section rail__row">
+                  <label className="analysis__threshold-row mono">
+                    <span>Min ΔRFU</span>
+                    <input
+                      type="number"
+                      value={settings.analysisMinDeltaRfu}
+                      onChange={(e) => {
+                        const raw = Number(e.currentTarget.value);
+                        onChange({ analysisMinDeltaRfu: Number.isFinite(raw) ? raw : 0 });
+                      }}
+                      title="Minimum endpoint ΔRFU for a well to report a Cq at all"
+                    />
+                  </label>
+                </div>
+
                 <div className="rail__note mono">
-                  Baseline: {settings.curveBaseline} (set in Curves view).
+                  Baseline: always an auto-detected linear fit (see the Curves view's "Draw
+                  baseline" toggle).
                 </div>
 
                 <div className="rail__section">
@@ -456,7 +466,7 @@ export function AnalysisView({ zpcr, settings, onChange }: Props) {
                 <th>Sample</th>
                 <th>Fluor</th>
                 {usingTargets && <th>Target</th>}
-                <th>Baseline RFU</th>
+                <th>Baseline</th>
                 <th>Threshold</th>
                 <th>Cq</th>
                 <th>ΔRFU</th>
@@ -472,7 +482,7 @@ export function AnalysisView({ zpcr, settings, onChange }: Props) {
                   <td>{r.sample || "—"}</td>
                   <td>{r.fluor}</td>
                   {usingTargets && <td>{r.target}</td>}
-                  <td>{r.baselineRfu.toFixed(1)}</td>
+                  <td className="mono">{r.baselineFormula}</td>
                   <td>{algorithm === "Threshold" ? r.threshold.toFixed(1) : "—"}</td>
                   <td>{r.cq != null ? r.cq.toFixed(2) : "—"}</td>
                   <td>{r.deltaRfu.toFixed(1)}</td>

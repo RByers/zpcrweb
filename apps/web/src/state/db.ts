@@ -28,11 +28,16 @@ export interface StoredSettings {
   /** Reference columns (0-based) shown in the Reference view. */
   enabledRefCols?: number[];
   baseline: "raw" | "delta" | "percent";
-  /** Curves view's baseline-subtraction mode (`threshold.md` §4); absent on records written
-   * before this setting existed. */
+  /** Curves view's display mode; absent on records written before this setting existed
+   * (falls back via {@link curveBaseline}, below). */
+  curveView?: "relative" | "absolute";
+  /** Overlay the auto-detected linear baseline on each curve. Absent on older records, which
+   * then default to off. */
+  drawBaseline?: boolean;
+  /** Retired three-way baseline-subtraction mode (`threshold.md` §4) — kept only so older
+   * records can be migrated to {@link curveView} (`"raw"` → `"absolute"`, else `"relative"`);
+   * baselining itself is no longer configurable, always an auto-detected linear fit. */
   curveBaseline?: "raw" | "constant" | "linear";
-  /** Manual `[beginCycle, endCycle]` baseline-region override, or `null`/absent to auto-detect. */
-  curveBaselineRange?: [number, number] | null;
   scale: "linear" | "log";
   showDark: boolean;
   bands: "off" | "auto" | "on";
@@ -63,6 +68,9 @@ export interface StoredSettings {
   analysisCqAlgorithm?: "Threshold" | "NoThreshold";
   /** Manual per-target threshold overrides (RFU), as `[target, value]` pairs. */
   analysisThresholdOverrides?: [string, number][];
+  /** Minimum endpoint ΔRFU for a well to report a Cq. Absent on records written before this
+   * setting existed, which then default to 100. */
+  analysisMinDeltaRfu?: number;
 }
 
 function openDb(): Promise<IDBDatabase> {

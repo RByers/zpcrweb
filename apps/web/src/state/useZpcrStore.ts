@@ -31,16 +31,13 @@ export type ViewId = "overview" | "curves" | "plates" | "analysis" | "reference"
 /** Reference view only — drift relative to the factory calibration value; see `ReferenceView`. */
 export type Baseline = "raw" | "delta" | "percent";
 /**
- * Curves view only — the `threshold.md` §4 baseline-subtraction modes implemented by
- * `packages/core/src/baseline.ts`: `"raw"` plots the curve unmodified, `"constant"` subtracts
- * the mean of an auto-detected baseline region (`RawBaseLineSubtracted`), and `"linear"` fits
- * and subtracts a line over that region (`LinearBaseLineNormalized`) — the recommended default
- * per §8, since it also removes baseline drift rather than just an offset.
+ * Curves view only — what the chart plots each curve as. Baselining itself is never
+ * configurable: it's always an auto-detected linear baseline (`threshold.md` §4's
+ * `LinearBaseLineNormalized`, region from `autoBaselineRegion`) — `"relative"` plots the
+ * baseline-corrected curve, `"absolute"` plots the raw curve unmodified. Cq/analysis always use
+ * the baseline-corrected values regardless of which is shown.
  */
-export type CurveBaselineMode = "raw" | "constant" | "linear";
-/** Manual override of the baseline region (1-based, inclusive `[beginCycle, endCycle]`), or
- * `null` to auto-detect it per curve (`autoBaselineRegion`) — the default. */
-export type CurveBaselineRange = [number, number] | null;
+export type CurveView = "relative" | "absolute";
 export type Scale = "linear" | "log";
 /** Min/max envelope bands: always off, always on, or auto (only when one well selected). */
 export type BandsMode = "off" | "auto" | "on";
@@ -54,10 +51,11 @@ export interface FileSettings {
   /** Reference columns (0-based) shown in the Reference chart. */
   enabledRefCols: Set<number>;
   baseline: Baseline;
-  /** Curves view's baseline-subtraction mode; see {@link CurveBaselineMode}. */
-  curveBaseline: CurveBaselineMode;
-  /** Manual baseline-region override for the Curves view; see {@link CurveBaselineRange}. */
-  curveBaselineRange: CurveBaselineRange;
+  /** Curves view's display mode; see {@link CurveView}. */
+  curveView: CurveView;
+  /** Curves view: overlay the auto-detected linear baseline itself on each curve, at 50%
+   * opacity of the curve's own color. Off by default. */
+  drawBaseline: boolean;
   scale: Scale;
   /** Overlay each channel's dark (LED-off) background as a dotted line. Channel-space only —
    * see the "What actually gets plotted" note in CurvesView. */
@@ -111,6 +109,11 @@ export interface FileSettings {
    * {@link analysisCqAlgorithm} is `"Threshold"`. A target with no entry uses the auto threshold
    * (`threshold.md` §5.1: 3.2 × median baseline noise across that target's wells). */
   analysisThresholdOverrides: Map<string, number>;
+  /** Minimum endpoint ΔRFU (`CurveBaselineResult.deltaRfu`) for a well to report a Cq at all —
+   * an absolute-RFU floor alongside the noise-relative amplification squelch, so a well whose
+   * rise is technically a few multiples of noise but still tiny in absolute terms doesn't get a
+   * spurious Cq. Default **100**. */
+  analysisMinDeltaRfu: number;
 }
 
 /** A file loaded into memory — bytes only. Parsing is derived (see {@link ZpcrStore.runs}),
@@ -196,11 +199,9 @@ function defaultSettings(): FileSettings {
     // All 12 reference columns on by default in the Reference view.
     enabledRefCols: new Set(Array.from({ length: 12 }, (_, c) => c)),
     baseline: "raw",
-    // Linear baseline subtraction (auto-detected region) is threshold.md §8's recommended
-    // default — it removes drift, not just offset, and matches the observed instrument default.
-    curveBaseline: "linear",
-    // null: auto-detect the baseline region per curve, same as leaving the slider untouched.
-    curveBaselineRange: null,
+    // Relative (baseline-corrected) is threshold.md §8's recommended default.
+    curveView: "relative",
+    drawBaseline: false,
     scale: "linear",
     showDark: false,
     bands: "auto",
@@ -220,6 +221,7 @@ function defaultSettings(): FileSettings {
     analysisDisabledTargets: new Set<string>(),
     analysisCqAlgorithm: "Threshold",
     analysisThresholdOverrides: new Map<string, number>(),
+    analysisMinDeltaRfu: 100,
   };
 }
 
@@ -230,8 +232,8 @@ function toStored(id: string, s: FileSettings): StoredSettings {
     enabledWells: [...s.enabledWells],
     enabledRefCols: [...s.enabledRefCols],
     baseline: s.baseline,
-    curveBaseline: s.curveBaseline,
-    curveBaselineRange: s.curveBaselineRange,
+    curveView: s.curveView,
+    drawBaseline: s.drawBaseline,
     scale: s.scale,
     showDark: s.showDark,
     bands: s.bands,
@@ -247,6 +249,7 @@ function toStored(id: string, s: FileSettings): StoredSettings {
     analysisDisabledTargets: [...s.analysisDisabledTargets],
     analysisCqAlgorithm: s.analysisCqAlgorithm,
     analysisThresholdOverrides: [...s.analysisThresholdOverrides],
+    analysisMinDeltaRfu: s.analysisMinDeltaRfu,
   };
 }
 
@@ -256,8 +259,11 @@ function fromStored(s: StoredSettings): FileSettings {
     enabledWells: new Set(s.enabledWells),
     enabledRefCols: new Set(s.enabledRefCols ?? Array.from({ length: 12 }, (_, c) => c)),
     baseline: s.baseline ?? "raw",
-    curveBaseline: s.curveBaseline ?? "linear",
-    curveBaselineRange: s.curveBaselineRange ?? null,
+    // Old records may carry the retired three-way curveBaseline setting ("raw"/"constant"/
+    // "linear"): "raw" maps to the new absolute view, anything else to relative — constant
+    // baselining itself is gone (see baseline.ts's `LinearBaseLineNormalized`-only pipeline).
+    curveView: s.curveView ?? (s.curveBaseline === "raw" ? "absolute" : "relative"),
+    drawBaseline: s.drawBaseline ?? false,
     scale: s.scale ?? "linear",
     showDark: s.showDark ?? false,
     bands: s.bands ?? "auto",
@@ -273,6 +279,7 @@ function fromStored(s: StoredSettings): FileSettings {
     analysisDisabledTargets: new Set(s.analysisDisabledTargets ?? []),
     analysisCqAlgorithm: s.analysisCqAlgorithm ?? "Threshold",
     analysisThresholdOverrides: new Map(s.analysisThresholdOverrides ?? []),
+    analysisMinDeltaRfu: s.analysisMinDeltaRfu ?? 100,
   };
 }
 

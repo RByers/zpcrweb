@@ -87,11 +87,15 @@ box.
 thin presentation + persistence shell. Concretely:
 
 - Curve derivation and the per-cycle stats (mean/std/min/max) come from `zpcr.curves()`.
-- Curves-view baselining (`threshold.md` §2–§4 — smoothing, auto baseline-region detection,
-  and constant/linear subtraction) is `packages/core/src/baseline.ts` — the app never invents
-  its own baseline math, only calls `autoBaselineRegion`/`subtractBaseline` per curve.
-- The app only owns view state (which channels/wells are selected, view/baseline/scale
-  toggles), rendering, and IndexedDB storage.
+- Baselining (`threshold.md` §2–§4 — smoothing, auto baseline-region detection, and linear
+  subtraction) is `packages/core/src/baseline.ts` — the app never invents its own baseline math,
+  only calls `autoBaselineRegion`/`subtractBaseline`/`fitLinearBaseline` per curve. It is not a
+  user-configurable choice: every Cq/analysis computation always uses the auto-detected linear
+  baseline (`LinearBaseLineNormalized`); the app's `CurveView` setting only picks what the Curves
+  chart *displays* (the corrected curve, or the raw one), and a separate `drawBaseline` toggle
+  optionally overlays the fitted line itself.
+- The app only owns view state (which channels/wells are selected, view/scale toggles),
+  rendering, and IndexedDB storage.
 
 Consequence for testing: there are **no app-level tests yet** — coverage rides on the
 library's suite. If UI bugs prove frequent we can add Playwright e2e later (tracked in the
@@ -144,14 +148,18 @@ a minimal IndexedDB wrapper with two object stores:
   separate override record to keep in sync, see above). `kind` defaults to `"zpcr"` for records
   written before `.pcrd` support existed.
 - `settings` — `{ fileId, enabledChannels[], enabledWells[], enabledRefCols[], baseline,
-  curveBaseline, scale, … }`, so each file remembers its enabled wells/channels/reference
-  columns. `baseline` (Reference view's factory-relative ΔRFU/Drift %) and `curveBaseline`
-  (Curves view's library baseline-subtraction mode) are independent settings — see "Two baseline
-  concepts" under Reference view. The Analysis view adds three of its own:
-  `analysisDisabledTargets[]` (an opt-out target filter, like `disabledFluors`),
-  `analysisCqAlgorithm` (`"Threshold"`/`"NoThreshold"`, default `"Threshold"`), and
-  `analysisThresholdOverrides` (`[target, value][]`, manual per-target threshold RFU) — see
-  "Analysis view" below. Writes are debounced.
+  curveView, drawBaseline, scale, … }`, so each file remembers its enabled wells/channels/
+  reference columns. `baseline` (Reference view's factory-relative ΔRFU/Drift %) and `curveView`
+  (the Curves view's display mode — baselining itself is never stored, since it's always the
+  auto-detected linear fit) are independent settings — see "Two baseline concepts" under
+  Reference view. The Analysis view adds four of its own: `analysisDisabledTargets[]` (an
+  opt-out target filter, like `disabledFluors`), `analysisCqAlgorithm`
+  (`"Threshold"`/`"NoThreshold"`, default `"Threshold"`), `analysisThresholdOverrides`
+  (`[target, value][]`, manual per-target threshold RFU), and `analysisMinDeltaRfu` (an absolute
+  endpoint-ΔRFU floor for reporting a Cq at all, default 100) — see "Analysis view" below. Writes
+  are debounced. Older records may still carry the retired `curveBaseline`/`curveBaselineRange`
+  fields (`state/db.ts`); `useZpcrStore.ts`'s `fromStored()` migrates `curveBaseline: "raw"` to
+  `curveView: "absolute"` (anything else to `"relative"`) and drops the region override entirely.
 
 Deleting a file removes both its `files` and `settings` records and drops it from memory —
 exposed as a clear affordance on each file chip.
@@ -302,95 +310,51 @@ only pieces the two views share.
   non-empty wells. `CurvesView` applies that same non-empty-wells set as the one-time default
   the first time a file's plate loads (only while the selection still looks like the untouched
   "all wells" default, so a previously customized selection is left alone).
-- **Baseline (`curveBaseline` setting):** Raw / Constant / Linear — the `threshold.md` §4
-  subtraction modes implemented by `packages/core/src/baseline.ts`, selected per curve by
-  `chart.ts`'s `algorithmAdjust()`: find the flat pre-amplification region — either the rail's
-  baseline-range slider override (`curveBaselineRange`, see below) or, when unset,
-  `autoBaselineRegion` on a smoothed copy of the curve (falling back to cycles 2–9 if detection
-  finds nothing confident) — and subtract it via the library's `subtractBaseline` — the mean of
-  the region for "Constant", a fitted line for "Linear". "Linear" is the default (`threshold.md`
-  §8's recommendation, since it removes drift as well as offset). This is a genuinely different
-  concept from the Reference view's ΔRFU/Drift %, which are factory-relative, not a fitted
-  baseline — see "Two baseline concepts" under Reference view below. Also Linear ↔ Log (uPlot
-  `distr: 3`).
-  - *Log + baseline:* Constant/Linear-corrected values can go ≤ 0, undefined on a log axis, so
-    each curve is shifted up by a constant (a "min-1" baseline, `logFloor` in `lib/uplot/chart.ts`)
-    so its own minimum reads 1, with an inline note. A no-op when the curve is already positive
-    (Raw is unaffected).
-  - *Region-finding is fragile at low sample counts:* `findBaselineByRegression`'s "extend while
-    within `k` std errors" loop estimates that std error from the current window, which starts
-    at `initialWidth` points (default **5**, giving 3 degrees of freedom). A width of 3 (1
-    degree of freedom) was tried first and produced an unstable, sometimes near-zero std-error
-    estimate — an unlucky tight 3-point fit would flag the very next point of a genuinely flat,
-    noisy curve as a false "departure," truncating the region to 3–4 cycles. That short region
-    then fed a linear fit extrapolated across the whole run, turning tiny slope error into a
-    large, visibly sloped baseline on a curve that's flat in the Raw view. `kStdErrors` was
-    raised to **5** alongside it for the same reason. See the regression test in
-    `packages/core/test/baseline.test.ts` ("doesn't truncate a flat, realistically-noisy curve
-    …") using real recorded noise from an actual flat well.
-  - **Manual region override (`curveBaselineRange` setting, `BaselineRangeSlider`):** a
-    double-ended cycle slider — two overlaid native `<input type="range">` elements sharing one
-    visual track/fill, each keeping its own keyboard/touch handling for free — lets a user pin
-    `[beginCycle, endCycle]` instead of trusting auto-detection, for whenever the auto-detected
-    region looks wrong. `null` (the default) means auto-detect, same as before this setting
-    existed, labelled "(auto)"; an "auto" link resets an override back to `null`. Applies
-    globally across every plotted curve — unlike auto-detection, which runs per curve —
-    mirroring how the real instrument's `baselineBeginRepeat`/`baselineEndRepeat` is a
-    per-analysis-group setting, not a per-well one.
-    - *The preview must show the real region, not a generic example:* while `null`, the slider
-      shows `previewRange` — the *actual* auto-detected `baselineRegion` of the first plotted
-      curve (from `curveMetrics`, the same per-curve `baselineCorrectCurve()` pass that computes
-      Cq — see "Analysis view integration" below), falling back to the static 2–9
-      (`defaultRangePreview`) only when there's no curve to compute one from. Earlier this
-      always showed the static 2–9 example regardless of what auto-detection actually did — and
-      for a curve with no confident onset, `autoBaselineRegion`'s regression fallback can extend
-      the "flat" region across most or all of the run (a real recorded case: cycles 1–45 of a
-      45-cycle run), nothing like 2–9. A user who nudged the slider and dragged it back to the
-      displayed "2–9" was then locking in an *explicit* 2–9 override — a far narrower window
-      than the curve's real auto baseline — which under- or over-estimates `baselineNoise`
-      relative to the true full-curve noise and can flip a correctly-unamplified flat curve into
-      a spurious "amplified" verdict with a bogus early Cq (clicking "auto" restores the correct
-      per-curve region and "fixes" it). Showing the true region as the preview means putting the
-      slider back to what's displayed actually reproduces auto's behavior, rather than silently
-      trading it for a very different fixed region that merely looks the same in the UI.
-      *This still only reproduces auto for the one curve `previewRange` was computed from* —
-      auto genuinely tailors a region per curve, so when several curves are plotted at once,
-      typing in the exact previewed numbers only matches auto's behavior for the first curve;
-      every other curve's own auto region can differ, and manual mode has no way to show (or
-      apply) more than one region at a time — an inherent limit of "one region, every curve"
-      rather than something the preview fix could close.
-    - *Why a narrow manual region can move a real curve's Cq drastically, not just a flat one's:*
-      confirmed with a real amplifying well (`20260720_Luna_noRT.pcrd`, well B3/FAM/HRV Ma, true
-      Cq ≈ 31.6). Under **Linear** mode, forcing the region to 2–9 barely moves it (Cq 30.3) —
-      Linear fits and removes a trend line, so a short window's slightly-different fit still
-      cancels most of the same drift. Under **Constant** mode, the same 2–9 override drops Cq to
-      **15.8** — nowhere near truth. `RawBaseLineSubtracted` only subtracts the region's mean, so
-      it never removes this well's real, slow pre-amplification drift (this well's own trace
-      rises ~70 RFU from cycle 1 to 29 well before any real amplification). Auto's own detected
-      region for this curve happens to span nearly that entire flat run (1–32), so the *same*
-      drift is baked into its own `baselineNoise` estimate, inflating the auto-threshold enough
-      to roughly cancel out; a manual 2–9 window only samples 8 essentially-flat, low-noise
-      cycles, so `baselineNoise` comes out tiny (6.8 vs. auto's 33.7), `resolveThreshold`'s
-      `3.2 × noise` threshold shrinks correspondingly (21.8 vs. 107.8 — there is no fixed RFU
-      floor by default, see `AutoThresholdOptions.minThreshold`), and the same un-removed drift
-      then crosses that too-small threshold at cycle ~16 instead of ~32. In short: the threshold
-      is *proportional to whatever noise the chosen region happens to show*, not a fixed offset
-      above the baseline — so narrowing the region to something that looks unusually quiet
-      silently shrinks the bar a real (but slow) signal has to clear. Prefer Linear over Constant
-      when hand-picking a region for exactly this reason.
-    - *Debugging aid — dimmed pre-region segment:* each well curve's line is drawn via a
-      `series.stroke` callback (`baselineDimStroke` in `chart.ts`) rather than a fixed color: a
-      `CanvasGradient` renders the portion before `baselineRegion.beginCycle` at 70% opacity and
-      the rest at full opacity, using two color stops placed at (almost) the same pixel x so the
-      transition is a hard edge, not a fade — recomputed every redraw so it tracks pan/zoom.
-      `PlotCurve.baselineRegionBegin` (`null` in `"raw"` mode, where no region is actually
-      applied) carries the region from `CurvesView`'s `curveMetrics` through to the chart. Makes
-      it visible at a glance which part of a curve a given region excludes — useful because (a)
-      a manual region is one fixed window forced onto every curve regardless of that curve's own
-      shape, and (b) `autoBaselineRegion` itself runs its onset detection on a *smoothed* copy of
-      the curve (see §2 above) while the line actually drawn is the raw, noisier data — so the
-      boundary an auto-detected region lands on doesn't always look obviously "right" by eye on
-      the plotted trace alone.
+- **Baseline is always automatic — no mode or region is user-configurable.** Every curve is
+  baseline-corrected with `packages/core/src/baseline.ts`'s `LinearBaseLineNormalized`: find the
+  flat pre-amplification region with `autoBaselineRegion` on a smoothed copy of the curve
+  (falling back to cycles 2–9 if detection finds nothing confident — `threshold.md` §2–§3), fit
+  a line to it (`fitLinearBaseline`), and subtract it (`subtractBaseline`). There used to be a
+  three-way mode selector (Raw/Constant/Linear) plus a manual region-override slider; both were
+  removed — the manual-region override, in particular, made it easy to silently understate a
+  region's real noise and produce a spuriously early or missed Cq (see the git history around
+  the retired `BaselineRangeSlider`/`curveBaselineRange` for the worked example that motivated
+  dropping it). `findBaselineByRegression`'s "extend while within `k` std errors" loop still
+  needs an `initialWidth` of at least **5** points (3 degrees of freedom) and `kStdErrors: 5` for
+  the same low-sample-count instability reason — see the regression test in
+  `packages/core/test/baseline.test.ts` ("doesn't truncate a flat, realistically-noisy curve …").
+- **`CurveView` setting (`"relative"` default / `"absolute"`):** what the chart *displays* —
+  `"relative"` plots the baseline-corrected curve, `"absolute"` plots the curve's raw RFU
+  unmodified. This is purely a display choice: Cq/ΔRFU/noise/threshold in both the chart's own
+  markers and the Analysis table are always computed from the corrected values regardless of
+  which is shown (`lib/cq.ts`'s `ANALYSIS_BASELINE_MODE` constant, fixed at
+  `LinearBaseLineNormalized`). This is a genuinely different concept from the Reference view's
+  ΔRFU/Drift %, which are factory-relative, not a fitted baseline — see "Two baseline concepts"
+  under Reference view below. Also Relative ↔ Log (uPlot `distr: 3`).
+  - *Log + baseline:* a relative (baseline-corrected) curve can go ≤ 0, undefined on a log axis,
+    so each curve is shifted up by a constant (a "min-1" baseline, `logFloor` in
+    `lib/uplot/chart.ts`) so its own minimum reads 1, with an inline note. A no-op when the curve
+    is already positive (absolute view is unaffected).
+- **`drawBaseline` setting (off by default):** overlays each well curve's own fitted baseline
+  line as a separate uPlot series, at 50% opacity of the curve's own color
+  (`hexToRgba(color, BASELINE_LINE_ALPHA)` in `chart.ts`) — plotted through the *same* per-cycle
+  `Adjust` the well curve itself uses, so it reads correctly in either view: the real trend line
+  under Absolute, a near-zero reference line under Relative (subtracting a line from itself is
+  ~0). These overlay series are appended after every well series (never interleaved), so the
+  Cq-marker code — which assumes well curve `i` lives at row/series index `i + 1` — doesn't need
+  to know about them, and they're explicitly excluded from the cursor hit-test loop
+  (`SeriesMeta.kind === "baseline"`) since they carry no tooltip of their own.
+- **Baseline formula display:** wherever a baseline is shown or exported — the chart tooltip's
+  "baseline" row, the Analysis table's "Baseline" column, its CSV export — it's rendered as the
+  fitted line itself, e.g. `"2000 + 4c"` (`c` = cycle number), via `lib/cq.ts`'s
+  `formatBaselineFormula()` over `CurveBaselineResult.baselineFit` (`{ slope, intercept }`,
+  `packages/core/src/analysis.ts`), not a single diagnostic RFU number.
+- **Minimum ΔRFU squelch (`analysisMinDeltaRfu` setting, Analysis view, default 100):** an
+  absolute-RFU floor on top of §7's noise-relative `isAmplified` squelch — a well whose rise
+  clears the noise-multiple bar but is still tiny in absolute terms reports no Cq.
+  `computeCq()`'s `deltaRfu`/`minDeltaRfu` options (`packages/core/src/threshold.ts`) do the
+  check; both `CurvesView`'s chart markers and `AnalysisView`'s table pass the same setting, so a
+  curve's Cq always agrees between the two.
 - **Dark (LED-off) background:** `zpcr.darkCurves()` gives one background series per channel.
   A pure display overlay — it never alters the plotted well curves, min/max bands, or the
   y-axis label. The "Show dark" toggle: off (default) draws nothing; on draws one **dotted**
@@ -443,12 +407,15 @@ only pieces the two views share.
   factory overlay, or temperature) and reports its label, channel/dye, cycle, and
   mean/min/max/std — or, for a temperature, just its °C. The search projects each series
   through **its own** scale, so proximity is measured in pixels across both axes. A well
-  series also carries `baselineRfu` and `cq` (see "Analysis view" below); when defined, the
-  tooltip adds a "baseline" row (the diagnostic mean-raw-RFU-over-the-region value — see
-  `CurveBaselineResult.baselineRfu`) right before a Cq row, and the chart draws a small ring on
-  the curve at its (interpolated) Cq position — the same marker logic (`cqMarkers` in
-  `buildChart()`) that makes an unamplified or off-curve well show no marker at all.
-- **Color separation (dye space) and the "View" mode selector:** `lib/fluorCurves.ts` matches
+  series also carries `baselineFormula` and `cq` (see "Analysis view" below); when defined, the
+  tooltip adds a "baseline" row (the fitted linear baseline, rendered as a formula — see
+  `CurveBaselineResult.baselineFit`/`formatBaselineFormula()` above) right before a Cq row, and
+  the chart draws a small ring on the curve at its (interpolated) Cq position — the same marker
+  logic (`cqMarkers` in `buildChart()`) that makes an unamplified or off-curve well show no
+  marker at all.
+- **Color separation (dye space) and the channel/fluorophore/target selector** (also labelled
+  "View" in the rail, distinct from the baseline `CurveView` toggle above): `lib/fluorCurves.ts`
+  matches
   the plate's fluorophores to this run's `.Dcal` data, builds one calibration matrix per step
   (restricted to the scanned channels, so its RFU scale factors are measured over the right
   rows), and solves every well/cycle — see [`calibration.md`](../../calibration.md). `CurvesView`
@@ -510,14 +477,15 @@ already-validated Curves view.
   mirroring `CurvesView`'s Fluorophore view mode — the rail's "Targets" section relabels itself
   "Fluorophores" and the table drops the now-redundant Fluor column. Either way the opt-out set
   (`analysisDisabledTargets`) and threshold overrides are keyed by whichever grouping is active.
-- **Baseline:** reused verbatim from the Curves view's own settings (`curveBaseline`/
-  `curveBaselineRange`) via `lib/cq.ts`'s `libBaselineMode()`, mapped to `baseline.ts`'s
-  `BaselineMode` the same way `chart.ts`'s `algorithmAdjust()` does — so a row's ΔRFU and Cq
-  are computed from the same region/subtraction the Curves chart plots, not a second
-  independent baseline choice. `baselineCorrectCurve` (`packages/core/src/analysis.ts`) is the
-  shared library entry point: baseline region (auto or `curveBaselineRange`'s manual override),
-  corrected values, `baselineNoise`, `isAmplified`, and ΔRFU (endpoint corrected value minus the
-  baseline region's mean) in one call.
+- **Baseline:** always the auto-detected linear fit — `baselineCorrectCurve()`
+  (`packages/core/src/analysis.ts`) is the shared library entry point, called with
+  `lib/cq.ts`'s fixed `ANALYSIS_BASELINE_MODE` constant (`"LinearBaseLineNormalized"`, no region
+  argument — baselining isn't user-configurable at all here, see "Baseline is always automatic"
+  under Curves view): auto-detected baseline region, corrected values, `baselineNoise`,
+  `isAmplified`, ΔRFU (endpoint corrected value minus the baseline region's mean), and
+  `baselineFit` (the fitted `{ slope, intercept }`, rendered via `formatBaselineFormula()`) in
+  one call. Since the same call and the same fixed mode run in both `CurvesView` and
+  `AnalysisView`, a row's ΔRFU/Cq always matches the chart's own marker for that curve.
 - **Cq algorithm (`analysisCqAlgorithm` setting):** `"Threshold"` (§6.1) is the default — the
   observed instrument default, and §6's own. It needs a threshold per group: §5.1's
   `resolveThreshold` over the median `baselineNoise` across that group's own wells, overridable
@@ -526,22 +494,29 @@ already-validated Curves view.
   className="rail__details">`, chevron rotates open, no separate show/hide button) — a blank
   input falls back to the auto value, shown as the input's placeholder. `"NoThreshold"` (§6.2,
   2nd-derivative inflection) needs no threshold at all.
+- **Minimum ΔRFU (`analysisMinDeltaRfu` setting, default 100):** a plain number input in the
+  rail, next to the Cq mode toggle. Passed to `computeCq()` alongside each row's own `deltaRfu`
+  — a well whose endpoint ΔRFU falls below it reports no Cq regardless of algorithm, on top of
+  §7's noise-relative `isAmplified` squelch. `CurvesView` passes the same setting into its own
+  Cq computation, so a curve's on-chart marker and its Analysis-table Cq never disagree over
+  this gate either.
 - **Amplification / greying:** a row renders at reduced opacity
-  (`.analysis__row.is-unamplified`) whenever it has no Cq (`cq == null`) — either because
-  `isAmplified` (§7 — total rise under 10× baseline noise) failed, or, in Threshold mode, the
-  curve never crossed (or didn't end above) the resolved threshold. Keying greying on the Cq
-  result itself, not a separately-cached amplification flag, is what makes greying react live to
-  switching Cq mode or editing a threshold override — both change `cq` (and therefore the row's
-  styling) through the same `rows` `useMemo`, no separate invalidation needed. A row is never
-  hidden, so a well's disqualification is visible instead of silently dropped from the table.
+  (`.analysis__row.is-unamplified`) whenever it has no Cq (`cq == null`) — because `isAmplified`
+  (§7 — total rise under 10× baseline noise) failed, the endpoint ΔRFU fell below
+  `analysisMinDeltaRfu`, or, in Threshold mode, the curve never crossed (or didn't end above) the
+  resolved threshold. Keying greying on the Cq result itself, not a separately-cached
+  amplification flag, is what makes greying react live to switching Cq mode or editing a
+  threshold/ΔRFU override — all change `cq` (and therefore the row's styling) through the same
+  `rows` `useMemo`, no separate invalidation needed. A row is never hidden, so a well's
+  disqualification is visible instead of silently dropped from the table.
 - **Table/CSV columns, same order in both:** well, sample (`WellDefinition.sampleName`, the
   same field `PlateTable`'s "Sample" column shows), fluor, target (only when `usingTargets`;
   the CSV always includes it, since it's harmless there even when identical to fluor),
-  [channel — CSV only, not shown in the table], baseline RFU
-  (`CurveBaselineResult.baselineRfu`, the same diagnostic the Curves view's tooltip shows —
-  placed just before threshold since threshold/noise are derived from the same baseline
-  region), threshold, Cq, ΔRFU, amplified. The CSV is built directly from the table's rows via
-  the shared `csvRow()` quoting helper (`lib/download.ts`, exported for reuse) and
+  [channel — CSV only, not shown in the table], baseline (`CurveBaselineResult.baselineFit`,
+  rendered as a formula via `formatBaselineFormula()` — the same value the Curves view's
+  tooltip shows — placed just before threshold since threshold/noise are derived from the same
+  baseline region), threshold, Cq, ΔRFU, amplified. The CSV is built directly from the table's
+  rows via the shared `csvRow()` quoting helper (`lib/download.ts`, exported for reuse) and
   `downloadText()` — filename `<run name>_analysis.csv`, the same `dataFile`-derived naming
   `plateReadCsvFilename` uses for the Raw view's per-cycle export.
 - **Curves view integration:** the same Cq computation (algorithm + per-group threshold) runs
@@ -585,9 +560,9 @@ quickly isolating a single reference well's drift.
   (`scale = 100/factory, shift = -100`) for Drift % — the same % deviation `RefCalPanel`'s
   "Drift %" stat shows (run-averaged there, per-cycle here), so its origin is 0 like ΔRFU's, not
   100. A well curve with no matching factory value — none exist in this view today, but the
-  fallback is generic — falls through to the *other* baseline concept, `curveBaselineMode` (see
-  "Curves view baselining" below); this view always passes `curveBaselineMode: "raw"`, so that
-  fallback is the identity. The factory line itself is only drawn under the raw baseline — under
+  fallback is generic — falls through to the *other* baseline concept, `curveView` (see "Baseline
+  is always automatic" under Curves view above); this view always passes `curveView: "absolute"`,
+  so that fallback is the identity. The factory line itself is only drawn under the raw baseline — under
   ΔRFU or Drift % it would be a flat, redundant 0, now that the well curve is already plotted
   relative to it. The same `{scale, shift}` per point is stored on each series' metadata and
   reused by the hover whisker and min/max band, so they reposition correctly under a

@@ -2,65 +2,27 @@ import uPlot from "uplot";
 import {
   autoBaselineRegion,
   clampBaselineRegion,
+  fitLinearBaseline,
   smoothCurve,
   subtractBaseline,
-  type BaselineMode as CoreBaselineMode,
+  type BaselineRegion,
   type DarkCurve,
   type TemperatureCurve,
 } from "@zpcrweb/core";
 import { channelColor, channelLabel } from "../channelColors";
 import { tempColor } from "../tempColors";
-import type {
-  Baseline,
-  BandsMode,
-  CurveBaselineMode,
-  CurveBaselineRange,
-  Scale,
-} from "../../state/useZpcrStore";
+import type { Baseline, BandsMode, CurveView, Scale } from "../../state/useZpcrStore";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
-/** Opacity for the portion of a well curve before its baseline region starts — see
- * {@link baselineDimStroke}. */
-const PRE_BASELINE_ALPHA = 0.7;
+/** Opacity of the "draw baseline" overlay line, relative to its curve's own color. */
+const BASELINE_LINE_ALPHA = 0.5;
 
 function hexToRgba(hex: string, alpha: number): string {
   const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex);
   if (!m) return hex;
   const [r, g, b] = [m[1]!, m[2]!, m[3]!].map((h) => parseInt(h, 16));
   return `rgba(${r},${g},${b},${alpha})`;
-}
-
-/**
- * A `series.stroke` function (uPlot supports a dynamic stroke callback in place of a fixed
- * color) that renders a well curve at reduced opacity ({@link PRE_BASELINE_ALPHA}) for cycles
- * before `beginCycle` — the baseline region's start — and full opacity from there on. Debugging
- * aid for the baseline-region slider: since {@link autoBaselineRegion} runs on a *smoothed* copy
- * of the curve while the actually-plotted line is raw, and a manual region applies globally
- * across curves whose real shapes differ, it's easy to lose track of which portion of a given
- * curve the current region actually excludes. Built as a horizontal `CanvasGradient` (two
- * coincident color stops at the region's pixel x-position for a hard edge) so it tracks pan/zoom
- * for free — uPlot calls `stroke` fresh on every redraw.
- */
-function baselineDimStroke(
-  color: string,
-  beginCycle: number,
-): (u: uPlot, seriesIdx: number) => string | CanvasGradient {
-  return (u: uPlot) => {
-    const left = u.bbox.left;
-    const width = u.bbox.width;
-    if (width <= 0) return color;
-    const beginPx = u.valToPos(beginCycle, "x", true);
-    const frac = Math.min(1, Math.max(0, (beginPx - left) / width));
-    if (frac <= 0) return color; // Region starts at/before the visible range: nothing to dim.
-    const grad = u.ctx.createLinearGradient(left, 0, left + width, 0);
-    const dim = hexToRgba(color, PRE_BASELINE_ALPHA);
-    grad.addColorStop(0, dim);
-    grad.addColorStop(frac, dim);
-    grad.addColorStop(Math.min(1, frac + 0.0001), color);
-    grad.addColorStop(1, color);
-    return grad;
-  };
 }
 
 /**
@@ -84,21 +46,16 @@ export interface PlotCurve {
   min: number[];
   max: number[];
   /** Cq (`threshold.md` §6), computed per the Analysis view's settings — `null`/undefined when
-   * unamplified or not computable. Drives the chart's Cq marker and its tooltip row. */
+   * unamplified, squelched by the minimum-ΔRFU gate, or not computable. Drives the chart's Cq
+   * marker and its tooltip row. */
   cq?: number | null;
-  /** Diagnostic: mean raw RFU over the baseline region actually used for this curve (see
-   * `CurveBaselineResult.baselineRfu`) — surfaced in the tooltip so a surprising Cq can be
-   * traced back to what baseline region/level was really applied. */
-  baselineRfu?: number | null;
+  /** Diagnostic: the linear baseline actually fitted for this curve (`CurveBaselineResult.
+   * baselineFit`), rendered as a formula (e.g. "2000 + 4c") — surfaced in the tooltip so a
+   * surprising Cq can be traced back to the baseline that was really applied. */
+  baselineFormula?: string | null;
   /** Sample name (`pltd.md`'s `conditionName`, `WellDefinition.sample`) for this curve's well,
    * when the plate assigns one — drives the rail's "sample" highlight/hover-card lookup. */
   sample?: string;
-  /** Diagnostic: the baseline region's start cycle (`CurveBaselineResult.baselineRegion.beginCycle`)
-   * actually used for this curve — draws the portion of the line before it at reduced opacity
-   * (see `baselineDimStroke`), so it's visually obvious which part of the curve precedes (and so
-   * was excluded from) the baseline fit. `null`/undefined draws the line at full opacity
-   * throughout (e.g. `"raw"` baseline mode, where no region is applied). */
-  baselineRegionBegin?: number | null;
 }
 
 /** Values <= 0 are undefined on a log axis; render them as gaps. Should be a no-op once
@@ -149,25 +106,25 @@ function fallbackRegion(cycles: number[]) {
 }
 
 /**
- * Curves-view baselining (`threshold.md` §2–§4, `packages/core/src/baseline.ts`): find the flat
- * pre-amplification region — either `manualRange` (the rail's baseline-range slider, clamped to
- * the run's actual cycles) or, when unset, auto-detected per curve on a smoothed copy (for
- * robust onset detection — see §2) — and subtract it from the curve's own raw values via the
- * library's `subtractBaseline`. `"raw"` skips this entirely.
+ * The flat pre-amplification region for a curve (`threshold.md` §2–§3,
+ * `packages/core/src/baseline.ts`) — always auto-detected on a smoothed copy (for robust onset
+ * detection — see §2), falling back to cycles 2–9 if detection finds nothing confident. No
+ * manual override: baselining is no longer a user-configurable region.
  */
-function algorithmAdjust(
-  cycles: number[],
-  values: number[],
-  mode: CurveBaselineMode,
-  manualRange: CurveBaselineRange,
-): Adjust[] {
-  if (mode === "raw" || values.length === 0) return values.map(() => IDENTITY_ADJUST);
+function resolveBaselineRegion(cycles: number[], values: number[]): BaselineRegion {
+  return autoBaselineRegion(cycles, smoothCurve(values)) ?? fallbackRegion(cycles);
+}
 
-  const region = manualRange
-    ? clampBaselineRegion({ beginCycle: manualRange[0], endCycle: manualRange[1] }, cycles)
-    : (autoBaselineRegion(cycles, smoothCurve(values)) ?? fallbackRegion(cycles));
-  const libMode: CoreBaselineMode = mode === "constant" ? "RawBaseLineSubtracted" : "LinearBaseLineNormalized";
-  const corrected = subtractBaseline(cycles, values, region, libMode);
+/**
+ * Curves-view baselining (`threshold.md` §2–§4, `packages/core/src/baseline.ts`): `"relative"`
+ * finds the auto-detected baseline region and subtracts the fitted line from it
+ * (`LinearBaseLineNormalized`); `"absolute"` skips this entirely and plots the curve unmodified.
+ */
+function algorithmAdjust(cycles: number[], values: number[], view: CurveView): Adjust[] {
+  if (view === "absolute" || values.length === 0) return values.map(() => IDENTITY_ADJUST);
+
+  const region = resolveBaselineRegion(cycles, values);
+  const corrected = subtractBaseline(cycles, values, region, "LinearBaseLineNormalized");
   return values.map((v, i) => ({ scale: 1, shift: (corrected[i] ?? v) - v }));
 }
 
@@ -177,16 +134,15 @@ function algorithmAdjust(
  * factory `RefCalPanel`'s "Drift %" stat shows, just per cycle instead of run-averaged, so the
  * origin is 0 (unchanged from factory), not 100. Both are Reference-view-only concepts — see
  * `ReferenceView` — and only apply when a factory value exists; everywhere else (including a
- * Reference-view channel with no factory match) baselining is `curveBaselineMode`'s library
- * algorithm, which for `"raw"` is the identity.
+ * Reference-view channel with no factory match) baselining is `curveView`'s library algorithm,
+ * which for `"absolute"` is the identity.
  */
 function wellAdjust(
   cycles: number[],
   values: number[],
   factory: number[] | undefined,
   baseline: Baseline,
-  curveBaselineMode: CurveBaselineMode,
-  curveBaselineRange: CurveBaselineRange,
+  curveView: CurveView,
 ): Adjust[] {
   if (baseline === "delta" && factory) {
     return values.map((_, i) => ({ scale: 1, shift: -(factory[i] ?? 0) }));
@@ -197,7 +153,7 @@ function wellAdjust(
       return { scale: f !== 0 ? 100 / f : 1, shift: f !== 0 ? -100 : 0 };
     });
   }
-  return algorithmAdjust(cycles, values, curveBaselineMode, curveBaselineRange);
+  return algorithmAdjust(cycles, values, curveView);
 }
 
 /** A factory-calibration reference value, overlaid as a dotted flat line per (channel, col) —
@@ -220,7 +176,10 @@ export type HighlightMatch =
 
 /** Per-series metadata, index-aligned with uPlot series (offset by the x row). */
 export interface SeriesMeta {
-  kind: "well" | "dark" | "factory" | "temp";
+  /** `"baseline"` is the "draw baseline" overlay line — a pure display series, excluded from
+   * cursor hit-testing (see `setCursor` below) since it carries no meaningful tooltip of its
+   * own. */
+  kind: "well" | "dark" | "factory" | "temp" | "baseline";
   /** Optical channel for well/dark series; -1 for temperature series. */
   channel: number;
   /** Reference/plate column, for a factory-overlay series; -1 for every other kind. */
@@ -238,8 +197,8 @@ export interface SeriesMeta {
   adjust: Adjust[];
   /** See {@link PlotCurve.cq}. */
   cq?: number | null;
-  /** See {@link PlotCurve.baselineRfu}. */
-  baselineRfu?: number | null;
+  /** See {@link PlotCurve.baselineFormula}. */
+  baselineFormula?: string | null;
   /** See {@link PlotCurve.sample}. */
   sample?: string;
 }
@@ -270,8 +229,8 @@ export interface TooltipData {
   top: number;
   /** See {@link PlotCurve.cq}. */
   cq?: number | null;
-  /** See {@link PlotCurve.baselineRfu}. */
-  baselineRfu?: number | null;
+  /** See {@link PlotCurve.baselineFormula}. */
+  baselineFormula?: string | null;
 }
 
 export interface BuildChartConfig {
@@ -285,12 +244,12 @@ export interface BuildChartConfig {
   /** Temperature series to plot on the right-hand °C axis (empty to hide the axis). */
   tempCurves: TemperatureCurve[];
   baseline: Baseline;
-  /** Curves-view baseline algorithm; `ReferenceView` always passes `"raw"` (its baselining is
+  /** Curves-view display mode; `ReferenceView` always passes `"absolute"` (its baselining is
    * entirely the factory-relative `baseline` above). */
-  curveBaselineMode: CurveBaselineMode;
-  /** Manual baseline-region override (the rail's slider), or `null` to auto-detect per curve.
-   * `ReferenceView` always passes `null`. */
-  curveBaselineRange: CurveBaselineRange;
+  curveView: CurveView;
+  /** Overlay each well curve's auto-detected linear baseline, at 50% opacity of its own color.
+   * `ReferenceView` always passes `false`. */
+  drawBaseline: boolean;
   scale: Scale;
   bands: BandsMode;
   width: number;
@@ -311,8 +270,7 @@ export function buildChart(cfg: BuildChartConfig): {
   options: uPlot.Options;
   meta: SeriesMeta[];
 } {
-  const { wellCurves, darkCurves, factoryCurves, tempCurves, baseline, curveBaselineMode, curveBaselineRange, scale } =
-    cfg;
+  const { wellCurves, darkCurves, factoryCurves, tempCurves, baseline, curveView, scale } = cfg;
   const cycles =
     wellCurves[0]?.cycles ?? darkCurves[0]?.cycles ?? tempCurves[0]?.cycles ?? [];
 
@@ -324,8 +282,7 @@ export function buildChart(cfg: BuildChartConfig): {
 
   // Dark curves have no factory match, so the factory-relative baseline modes never apply to
   // them — only the curves-view algorithm mode does.
-  const nonWellAdjust = (values: number[]): Adjust[] =>
-    algorithmAdjust(cycles, values, curveBaselineMode, curveBaselineRange);
+  const nonWellAdjust = (values: number[]): Adjust[] => algorithmAdjust(cycles, values, curveView);
 
   const rows: (number | null)[][] = [cycles.map((c) => c)];
   const meta: SeriesMeta[] = [];
@@ -338,14 +295,7 @@ export function buildChart(cfg: BuildChartConfig): {
     const factory = factoryByKey.get(`${curve.channel},${curve.col}`);
     const adjust = logFloor(
       curve.mean,
-      wellAdjust(
-        curve.cycles,
-        curve.mean,
-        factory?.mean,
-        baseline,
-        curveBaselineMode,
-        curveBaselineRange,
-      ),
+      wellAdjust(curve.cycles, curve.mean, factory?.mean, baseline, curveView),
       scale,
     );
     wellAdjusts.push(adjust);
@@ -364,19 +314,51 @@ export function buildChart(cfg: BuildChartConfig): {
       max: curve.max,
       adjust,
       cq: curve.cq,
-      baselineRfu: curve.baselineRfu,
+      baselineFormula: curve.baselineFormula,
       sample: curve.sample,
     });
-    const color = channelColor(curve.channel);
     series.push({
       label: `${curve.wellLabel} · ${curve.dyeLabel}`,
-      stroke:
-        curve.baselineRegionBegin != null
-          ? baselineDimStroke(color, curve.baselineRegionBegin)
-          : color,
+      stroke: channelColor(curve.channel),
       width: 1,
       dash: curve.isReference ? REF_DASH : undefined,
       points: { show: false },
+    });
+  }
+
+  // "Draw baseline": overlay each well curve's own auto-detected linear baseline (the same fit
+  // `algorithmAdjust` subtracts under "relative") as a separate series at reduced opacity of the
+  // curve's own color — plotted through the curve's own adjust, so it reads correctly in either
+  // view (the actual trend line under "absolute"; a near-zero reference line under "relative",
+  // since subtracting it from itself is ~0). Appended after every well series (not interleaved)
+  // so the Cq-marker loop below can keep assuming well curve i lives at row/series index i + 1.
+  if (cfg.drawBaseline) {
+    wellCurves.forEach((curve, i) => {
+      const adjust = wellAdjusts[i]!;
+      const region = resolveBaselineRegion(curve.cycles, curve.mean);
+      const fit = fitLinearBaseline(curve.cycles, curve.mean, region);
+      const baselineRaw = curve.cycles.map((c) => fit.intercept + fit.slope * c);
+      rows.push(logSafe(applyAdjust(baselineRaw, adjust), scale));
+      meta.push({
+        kind: "baseline",
+        channel: curve.channel,
+        col: -1,
+        label: curve.wellLabel,
+        dyeLabel: curve.dyeLabel,
+        isReference: false,
+        cycles: curve.cycles,
+        mean: baselineRaw,
+        std: [],
+        min: [],
+        max: [],
+        adjust,
+      });
+      series.push({
+        label: `${curve.wellLabel} · ${curve.dyeLabel} baseline`,
+        stroke: hexToRgba(channelColor(curve.channel), BASELINE_LINE_ALPHA),
+        width: 1,
+        points: { show: false },
+      });
     });
   }
 
@@ -449,7 +431,7 @@ export function buildChart(cfg: BuildChartConfig): {
       if (!factory) continue;
       const adjust = logFloor(
         factory.mean,
-        wellAdjust(cycles, factory.mean, factory.mean, baseline, curveBaselineMode, curveBaselineRange),
+        wellAdjust(cycles, factory.mean, factory.mean, baseline, curveView),
         scale,
       );
       rows.push(logSafe(applyAdjust(factory.mean, adjust), scale));
@@ -567,7 +549,7 @@ export function buildChart(cfg: BuildChartConfig): {
         stroke: "#8aa0c0",
         grid: { stroke: "rgba(120,200,255,0.06)", width: 1 },
         ticks: { stroke: "rgba(120,200,255,0.12)", width: 1 },
-        label: yLabel(baseline, curveBaselineMode),
+        label: yLabel(baseline, curveView),
         labelSize: 30,
         labelFont: "12px system-ui",
         font: "11px ui-monospace, monospace",
@@ -619,11 +601,10 @@ export function applyHighlight(u: uPlot, meta: SeriesMeta[], match: HighlightMat
   u.redraw(false, false);
 }
 
-function yLabel(baseline: Baseline, curveBaselineMode: CurveBaselineMode): string {
+function yLabel(baseline: Baseline, curveView: CurveView): string {
   if (baseline === "delta") return "ΔRFU (mean)";
   if (baseline === "percent") return "Drift (%)";
-  if (curveBaselineMode === "constant") return "RFU (baseline subtracted)";
-  if (curveBaselineMode === "linear") return "RFU (linear baseline)";
+  if (curveView === "relative") return "RFU (linear baseline)";
   return "RFU (mean)";
 }
 
@@ -752,6 +733,8 @@ function overlayPlugin(
         let best = -1;
         let bestDist = Infinity;
         for (let s = 1; s < u.series.length; s++) {
+          // The "draw baseline" overlay is a pure display line, not something to hover.
+          if (meta[s - 1]?.kind === "baseline") continue;
           const val = (u.data[s] as (number | null)[])[idx];
           if (val == null || Number.isNaN(val)) continue;
           // Temperature series live on the right-hand scale, so project through the
@@ -833,7 +816,8 @@ function overlayPlugin(
         onHover(
           near
             ? {
-                kind: m.kind,
+                // Never "baseline" here — that kind is skipped in the hit-test loop above.
+                kind: m.kind as TooltipData["kind"],
                 label: m.label,
                 channel: m.channel,
                 col: m.col,
@@ -847,7 +831,7 @@ function overlayPlugin(
                 left,
                 top,
                 cq: m.cq,
-                baselineRfu: m.baselineRfu,
+                baselineFormula: m.baselineFormula,
               }
             : null,
         );

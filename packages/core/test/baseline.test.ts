@@ -9,6 +9,7 @@ import {
   findBaselineByRegression,
   autoBaselineRegion,
   subtractBaseline,
+  fitLinearBaseline,
 } from "../src/index.js";
 import { readSampleBytes } from "./sample.js";
 
@@ -249,6 +250,30 @@ describe("autoBaselineRegion", () => {
   });
 });
 
+describe("fitLinearBaseline", () => {
+  const cycles = [1, 2, 3, 4, 5];
+
+  it("recovers the exact line for noise-free data", () => {
+    const values = cycles.map((c) => 2 * c + 3);
+    const fit = fitLinearBaseline(cycles, values, { beginCycle: 1, endCycle: 5 });
+    expect(fit.slope).toBeCloseTo(2, 6);
+    expect(fit.intercept).toBeCloseTo(3, 6);
+  });
+
+  it("fits only over the given region, ignoring points outside it", () => {
+    const values = [10, 10, 10, 1000, 1000]; // flat, then a jump outside the region
+    const fit = fitLinearBaseline(cycles, values, { beginCycle: 1, endCycle: 3 });
+    expect(fit.slope).toBeCloseTo(0, 6);
+    expect(fit.intercept).toBeCloseTo(10, 6);
+  });
+
+  it("returns the zero line when no cycle falls within the region", () => {
+    const values = [10, 20, 30, 40, 50];
+    const fit = fitLinearBaseline(cycles, values, { beginCycle: 100, endCycle: 200 });
+    expect(fit).toEqual({ slope: 0, intercept: 0 });
+  });
+});
+
 describe("subtractBaseline", () => {
   const cycles = [1, 2, 3, 4, 5];
 
@@ -289,6 +314,14 @@ describe("subtractBaseline", () => {
     const values = [10, 20, 30, 40, 50];
     subtractBaseline(cycles, values, { beginCycle: 1, endCycle: 3 }, "LinearBaseLineNormalized");
     expect(values).toEqual([10, 20, 30, 40, 50]);
+  });
+
+  it("uses fitLinearBaseline's own fit, so subtracting it leaves the region at zero", () => {
+    const values = [50, 50, 50, 80, 120];
+    const region = { beginCycle: 1, endCycle: 3 };
+    const fit = fitLinearBaseline(cycles, values, region);
+    const out = subtractBaseline(cycles, values, region, "LinearBaseLineNormalized");
+    expect(out[0]).toBeCloseTo(values[0]! - (fit.slope * cycles[0]! + fit.intercept), 6);
   });
 
   it("brings the real B3/channel-0 baseline region close to zero after linear subtraction", () => {

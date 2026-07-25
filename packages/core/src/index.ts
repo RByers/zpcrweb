@@ -66,6 +66,7 @@ export {
   findBaselineByRegression,
   autoBaselineRegion,
   subtractBaseline,
+  fitLinearBaseline,
 } from "./baseline.js";
 export {
   baselineNoise,
@@ -143,6 +144,7 @@ export type {
   RegressionBaselineOptions,
   AutoBaselineOptions,
   BaselineMode,
+  LinearBaselineFit,
 } from "./baseline.js";
 export type {
   AutoThresholdOptions,

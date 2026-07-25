@@ -5,19 +5,18 @@ import {
   computeCq,
   resolveThreshold,
   REFERENCE_ROW,
-  type BaselineMode,
   type CqAlgorithm,
   type Zpcr,
   type WellCurve,
   type DarkCurve,
   type TemperatureCurve,
 } from "@zpcrweb/core";
-import { libBaselineMode } from "../../lib/cq";
+import { ANALYSIS_BASELINE_MODE, formatBaselineFormula } from "../../lib/cq";
 import { computeWellTypes } from "../../lib/wellTypes";
 import {
   wellKey,
   type BandsMode,
-  type CurveBaselineMode,
+  type CurveView,
   type FileSettings,
   type FluorViewMode,
   type Scale,
@@ -39,19 +38,11 @@ import type { HoverCardData, HoverCardRow } from "../curves/HoverCard";
 import { WellMatrix } from "../curves/WellMatrix";
 import { CurveChart } from "../curves/CurveChart";
 import { TempBar } from "../curves/TempBar";
-import { BaselineRangeSlider } from "../curves/BaselineRangeSlider";
 import { PasswordPrompt } from "../PasswordPrompt";
 import { Toggle } from "../Toggle";
 import { Switch } from "../Switch";
 import { ResetIcon } from "../ResetIcon";
 import type { HighlightMatch, PlotCurve } from "../../lib/uplot/chart";
-
-/** Last-resort baseline-region preview for when there's no plotted curve to compute a real
- * auto-detected region from (see `previewRange` below) — mirrors `chart.ts`'s `fallbackRegion`
- * (threshold.md §3.1/§8's default cycles 2–9), clamped to the run. */
-function defaultRangePreview(maxCycle: number): [number, number] {
-  return [Math.min(2, maxCycle), Math.min(9, maxCycle)];
-}
 
 /** Baseline + Cq for a set of curves, grouped by `dyeLabel` (`threshold.md` §5.1: one threshold
  * per group, from the median baseline noise across that group's own curves) — factored out so
@@ -61,16 +52,17 @@ function defaultRangePreview(maxCycle: number): [number, number] {
  * independent — a group's threshold in the "all curves" run is computed across the whole plate,
  * not just what's currently selected, so it won't match the chart's own Cq for the same curve
  * when a filter has narrowed the plotted set; that's expected, not a bug, since the hover card's
- * job is to summarize the whole plate, not to double as an alternate chart legend. */
+ * job is to summarize the whole plate, not to double as an alternate chart legend. Baselining
+ * itself is never a parameter here — always the auto-detected linear baseline, regardless of
+ * what the chart currently *displays* (see `CurveView`). */
 function computeCurveMetrics(
   curves: { cycles: number[]; mean: number[]; dyeLabel: string }[],
-  cqBaselineMode: BaselineMode,
-  cqManualRegion: { beginCycle: number; endCycle: number } | null,
   algorithm: CqAlgorithm,
   thresholdOverrides: Map<string, number>,
-): { cq: number | null; baselineRfu: number | null; baselineRegion: { beginCycle: number; endCycle: number } }[] {
+  minDeltaRfu: number,
+): { cq: number | null; baselineFormula: string }[] {
   if (curves.length === 0) return [];
-  const baselines = curves.map((c) => baselineCorrectCurve(c.cycles, c.mean, cqBaselineMode, cqManualRegion));
+  const baselines = curves.map((c) => baselineCorrectCurve(c.cycles, c.mean, ANALYSIS_BASELINE_MODE));
   const noisesByLabel = new Map<string, number[]>();
   curves.forEach((c, i) => {
     const list = noisesByLabel.get(c.dyeLabel) ?? [];
@@ -88,8 +80,10 @@ function computeCurveMetrics(
       algorithm,
       threshold: algorithm === "Threshold" ? threshold : undefined,
       noise: b.noise,
+      deltaRfu: b.deltaRfu,
+      minDeltaRfu,
     });
-    return { cq, baselineRfu: b.baselineRfu, baselineRegion: b.baselineRegion };
+    return { cq, baselineFormula: formatBaselineFormula(b.baselineFit) };
   });
 }
 
@@ -544,36 +538,23 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
 
   // Cq markers (`threshold.md` §6), one per plotted curve, computed per the Analysis view's
   // settings — same algorithm, same per-group (dye/target/channel label) threshold, same
-  // baseline settings this chart itself plots with — so a curve's marker always matches what
-  // the Analysis table would report for it.
-  const cqBaselineMode = libBaselineMode(settings.curveBaseline);
-  const cqManualRegion = useMemo<{ beginCycle: number; endCycle: number } | null>(
-    () =>
-      settings.curveBaselineRange
-        ? { beginCycle: settings.curveBaselineRange[0], endCycle: settings.curveBaselineRange[1] }
-        : null,
-    [settings.curveBaselineRange],
-  );
+  // (always auto-linear) baseline this chart itself plots with — so a curve's marker always
+  // matches what the Analysis table would report for it.
   const curveMetrics = useMemo(
     () =>
       computeCurveMetrics(
         baseCurves,
-        cqBaselineMode,
-        cqManualRegion,
         settings.analysisCqAlgorithm,
         settings.analysisThresholdOverrides,
+        settings.analysisMinDeltaRfu,
       ),
-    [baseCurves, cqBaselineMode, cqManualRegion, settings.analysisCqAlgorithm, settings.analysisThresholdOverrides],
+    [baseCurves, settings.analysisCqAlgorithm, settings.analysisThresholdOverrides, settings.analysisMinDeltaRfu],
   );
 
   const plotCurves: PlotCurve[] = baseCurves.map((c, i) => ({
     ...c,
     cq: curveMetrics[i]?.cq ?? null,
-    baselineRfu: curveMetrics[i]?.baselineRfu ?? null,
-    // Meaningless in "raw" mode — no baseline region is actually subtracted, so there's
-    // nothing to dim as "before" it.
-    baselineRegionBegin:
-      settings.curveBaseline === "raw" ? null : (curveMetrics[i]?.baselineRegion.beginCycle ?? null),
+    baselineFormula: curveMetrics[i]?.baselineFormula ?? null,
   }));
 
   // Same Cq computation, but over every curve on the plate (see `allBaseCurves`) — powers the
@@ -585,18 +566,17 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
     () =>
       computeCurveMetrics(
         allBaseCurves,
-        cqBaselineMode,
-        cqManualRegion,
         settings.analysisCqAlgorithm,
         settings.analysisThresholdOverrides,
+        settings.analysisMinDeltaRfu,
       ),
-    [allBaseCurves, cqBaselineMode, cqManualRegion, settings.analysisCqAlgorithm, settings.analysisThresholdOverrides],
+    [allBaseCurves, settings.analysisCqAlgorithm, settings.analysisThresholdOverrides, settings.analysisMinDeltaRfu],
   );
 
   const allPlotCurves: PlotCurve[] = allBaseCurves.map((c, i) => ({
     ...c,
     cq: allCurveMetrics[i]?.cq ?? null,
-    baselineRfu: allCurveMetrics[i]?.baselineRfu ?? null,
+    baselineFormula: allCurveMetrics[i]?.baselineFormula ?? null,
   }));
 
   // ---- Rail hover cards -------------------------------------------------------------------
@@ -681,16 +661,6 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
     return { title: sample, rows };
   };
 
-  // The Baseline range slider's non-manual preview: rather than a static example range, show
-  // the *actual* auto-detected region for the first plotted curve — auto-detection runs per
-  // curve and, for a curve with no clear onset, can span nearly the whole run (see
-  // `autoBaselineRegion`), often nothing like the generic 2–9 example. Showing the real number
-  // means dragging the slider back to what's displayed reproduces what auto was already doing,
-  // rather than silently locking in a very different, much narrower region.
-  const previewRange: [number, number] | null = curveMetrics[0]
-    ? [curveMetrics[0].baselineRegion.beginCycle, curveMetrics[0].baselineRegion.endCycle]
-    : null;
-
   const toggleTemp = (key: string) => {
     const next = new Set(settings.temps);
     next.has(key) ? next.delete(key) : next.add(key);
@@ -709,8 +679,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
     onChange({ disabledFluors: next });
   };
 
-  const logBaselined = settings.scale === "log" && settings.curveBaseline !== "raw";
-  const maxCycle = steps.find((s) => s.step === activeStep)?.readCount ?? 1;
+  const logBaselined = settings.scale === "log" && settings.curveView === "relative";
 
   return (
     <div className="curves">
@@ -904,29 +873,21 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
 
         <div className="rail__section rail__row">
           <Toggle
-            label="Baseline"
+            label="View"
             options={[
-              ["raw", "Raw"],
-              ["constant", "Constant"],
-              ["linear", "Linear"],
+              ["relative", "Relative"],
+              ["absolute", "Absolute"],
             ]}
-            value={settings.curveBaseline}
-            onChange={(v) => onChange({ curveBaseline: v as CurveBaselineMode })}
+            value={settings.curveView}
+            onChange={(v) => onChange({ curveView: v as CurveView })}
+          />
+          <Switch
+            label="Draw baseline"
+            checked={settings.drawBaseline}
+            onChange={(v) => onChange({ drawBaseline: v })}
+            title="Overlay each curve's auto-detected linear baseline at 50% opacity"
           />
         </div>
-
-        {settings.curveBaseline !== "raw" && (
-          <div className="rail__section">
-            <BaselineRangeSlider
-              min={1}
-              max={maxCycle}
-              value={settings.curveBaselineRange ?? previewRange ?? defaultRangePreview(maxCycle)}
-              isManual={settings.curveBaselineRange != null}
-              onChange={(range) => onChange({ curveBaselineRange: range })}
-              onReset={() => onChange({ curveBaselineRange: null })}
-            />
-          </div>
-        )}
 
         <div className="rail__section rail__row">
           <Toggle
@@ -1006,8 +967,8 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
           darkCurves={!calibrationOn && settings.showDark ? enabledDark : []}
           tempCurves={visibleTemps}
           baseline="raw"
-          curveBaselineMode={settings.curveBaseline}
-          curveBaselineRange={settings.curveBaselineRange}
+          curveView={settings.curveView}
+          drawBaseline={settings.drawBaseline}
           scale={settings.scale}
           bands={calibrationOn ? "off" : settings.bands}
           highlight={hoverHighlight}

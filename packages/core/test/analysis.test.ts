@@ -21,27 +21,22 @@ describe("subtractSeries", () => {
 });
 
 describe("baselineCorrectCurve", () => {
-  // Flat baseline (cycles 1-9) then an exponential rise plateauing by cycle 25.
-  const cycles = Array.from({ length: 30 }, (_, i) => i + 1);
-  const values = cycles.map((c) => (c <= 9 ? 100 : Math.min(5000, 100 + 5 * 2 ** (c - 9))));
+  // A clean sigmoid (flat ~100 well before onset, plateauing ~5100 by the end) — the same shape
+  // `baseline.test.ts`'s curvature-detection tests use, so auto-detection's region choice here is
+  // already covered by those tests. Baseline region selection is always automatic now (no manual
+  // override).
+  const cycles = Array.from({ length: 40 }, (_, i) => i + 1);
+  const values = cycles.map((c) => 100 + 5000 / (1 + Math.exp(-(c - 25) * 0.5)));
 
-  it("reports near-zero noise for a manually-pinned flat region", () => {
-    const result = baselineCorrectCurve(cycles, values, "RawBaseLineSubtracted", {
-      beginCycle: 1,
-      endCycle: 9,
-    });
-    expect(result.noise).toBeCloseTo(0, 6);
+  it("reports noise much smaller than the curve's overall rise", () => {
+    const result = baselineCorrectCurve(cycles, values, "RawBaseLineSubtracted");
+    expect(result.noise).toBeLessThan(200);
   });
 
   it("flags a real rise as amplified with a large positive ΔRFU", () => {
-    const result = baselineCorrectCurve(cycles, values, "RawBaseLineSubtracted", {
-      beginCycle: 1,
-      endCycle: 9,
-    });
+    const result = baselineCorrectCurve(cycles, values, "RawBaseLineSubtracted");
     expect(result.amplified).toBe(true);
     expect(result.deltaRfu).toBeGreaterThan(1000);
-    // Baseline-subtracted: the flat region should sit near zero.
-    expect(result.correctedValues[0]).toBeCloseTo(0, 3);
   });
 
   it("does not flag a flat, noisy curve as amplified", () => {
@@ -50,29 +45,28 @@ describe("baselineCorrectCurve", () => {
     expect(result.amplified).toBe(false);
   });
 
-  it("honors a manual baseline region override", () => {
-    const result = baselineCorrectCurve(cycles, values, "RawBaseLineSubtracted", {
-      beginCycle: 1,
-      endCycle: 5,
-    });
-    expect(result.baselineRegion).toEqual({ beginCycle: 1, endCycle: 5 });
-  });
-
-  it("computes ΔRFU from raw values (no subtraction) in Raw mode", () => {
-    const result = baselineCorrectCurve(cycles, values, "Raw", { beginCycle: 1, endCycle: 9 });
+  it("computes a large positive ΔRFU from raw values (no subtraction) in Raw mode", () => {
+    const result = baselineCorrectCurve(cycles, values, "Raw");
     expect(result.correctedValues).toEqual(values);
-    // Endpoint (5000) minus the mean of the flat baseline region (100).
-    expect(result.deltaRfu).toBeCloseTo(4900, 6);
+    // Endpoint (~5100) minus the mean of the flat baseline region (~100).
+    expect(result.deltaRfu).toBeGreaterThan(4800);
   });
 
   it("reports baselineRfu as the mean raw value over the baseline region, unaffected by mode", () => {
-    const raw = baselineCorrectCurve(cycles, values, "Raw", { beginCycle: 1, endCycle: 9 });
-    const subtracted = baselineCorrectCurve(cycles, values, "RawBaseLineSubtracted", {
-      beginCycle: 1,
-      endCycle: 9,
-    });
-    expect(raw.baselineRfu).toBeCloseTo(100, 6);
-    expect(subtracted.baselineRfu).toBeCloseTo(100, 6);
+    const raw = baselineCorrectCurve(cycles, values, "Raw");
+    const subtracted = baselineCorrectCurve(cycles, values, "RawBaseLineSubtracted");
+    expect(raw.baselineRfu).toBeCloseTo(subtracted.baselineRfu, 6);
+    expect(raw.baselineRfu).toBeLessThan(300);
+  });
+
+  it("exposes the fitted linear baseline (slope, intercept) for display", () => {
+    const result = baselineCorrectCurve(cycles, values, "LinearBaseLineNormalized");
+    // Loose bounds: the exact region auto-detection settles on is covered by
+    // `baseline.test.ts`'s curvature/regression tests — this just checks the fit is exposed and
+    // plausible (well below the curve's ~5100 plateau), not the algorithm's exact boundary.
+    expect(result.baselineFit.intercept).toBeGreaterThan(-100);
+    expect(result.baselineFit.intercept).toBeLessThan(500);
+    expect(Math.abs(result.baselineFit.slope)).toBeLessThan(50);
   });
 });
 

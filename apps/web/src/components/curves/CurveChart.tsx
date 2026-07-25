@@ -1,13 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import uPlot from "uplot";
 import type { DarkCurve, TemperatureCurve } from "@zpcrweb/core";
-import type {
-  Baseline,
-  BandsMode,
-  CurveBaselineMode,
-  CurveBaselineRange,
-  Scale,
-} from "../../state/useZpcrStore";
+import type { Baseline, BandsMode, CurveView, Scale } from "../../state/useZpcrStore";
 import {
   applyHighlight,
   buildChart,
@@ -31,11 +25,12 @@ interface Props {
   /** Temperature series for the right-hand °C axis; empty hides that axis. */
   tempCurves: TemperatureCurve[];
   baseline: Baseline;
-  /** Curves-view baseline algorithm (`threshold.md` §4); pass `"raw"` from the Reference view,
+  /** Curves-view display mode (`threshold.md` §4); pass `"absolute"` from the Reference view,
    * whose baselining is entirely factory-relative (`baseline` above). */
-  curveBaselineMode: CurveBaselineMode;
-  /** Manual baseline-region override (the rail's slider); pass `null` from the Reference view. */
-  curveBaselineRange: CurveBaselineRange;
+  curveView: CurveView;
+  /** Overlay each curve's auto-detected linear baseline at 50% opacity; pass `false` from the
+   * Reference view. */
+  drawBaseline: boolean;
   scale: Scale;
   bands: BandsMode;
   /** Rail-driven highlight (hovering a target/fluor chip or a well-grid cell); `null` shows
@@ -49,8 +44,8 @@ export function CurveChart({
   factoryCurves = NO_FACTORY_CURVES,
   tempCurves,
   baseline,
-  curveBaselineMode,
-  curveBaselineRange,
+  curveView,
+  drawBaseline,
   scale,
   bands,
   highlight = null,
@@ -79,8 +74,8 @@ export function CurveChart({
       factoryCurves,
       tempCurves,
       baseline,
-      curveBaselineMode,
-      curveBaselineRange,
+      curveView,
+      drawBaseline,
       scale,
       bands,
       width,
@@ -103,8 +98,8 @@ export function CurveChart({
     factoryCurves,
     tempCurves,
     baseline,
-    curveBaselineMode,
-    curveBaselineRange,
+    curveView,
+    drawBaseline,
     scale,
     bands,
   ]);
@@ -181,10 +176,10 @@ export function CurveChart({
                     <td>std</td>
                     <td>{tip.std.toFixed(2)}</td>
                   </tr>
-                  {tip.kind === "well" && tip.baselineRfu != null && (
+                  {tip.kind === "well" && tip.baselineFormula != null && (
                     <tr>
                       <td>baseline</td>
-                      <td>{tip.baselineRfu.toFixed(1)}</td>
+                      <td>{tip.baselineFormula}</td>
                     </tr>
                   )}
                   {tip.kind === "well" && tip.cq != null && (

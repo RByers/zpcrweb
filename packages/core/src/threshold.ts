@@ -176,17 +176,32 @@ export interface CqOptions {
   noise?: number;
   amplification?: AmplificationOptions;
   crossing?: CqCrossingOptions;
+  /** Endpoint ΔRFU for this curve (e.g. `CurveBaselineResult.deltaRfu`), paired with
+   * {@link minDeltaRfu} — an absolute-RFU squelch alongside {@link isAmplified}'s noise-relative
+   * one, for a well whose rise clears the noise-multiple bar but is still too small in absolute
+   * terms to trust as a real amplification. Both must be given for the gate to apply. */
+  deltaRfu?: number;
+  /** Minimum {@link deltaRfu} for a well to report a Cq at all; below it, `computeCq` returns
+   * `null` regardless of algorithm. */
+  minDeltaRfu?: number;
 }
 
 /**
- * §6 + §7 combined: apply the §7 amplification squelch (when `noise` is given), then compute Cq
- * with whichever algorithm `options.algorithm` selects — {@link findThresholdCrossing} or
+ * §6 + §7 combined: apply the §7 amplification squelch (when `noise` is given) and the
+ * minimum-ΔRFU squelch (when `deltaRfu`/`minDeltaRfu` are both given), then compute Cq with
+ * whichever algorithm `options.algorithm` selects — {@link findThresholdCrossing} or
  * {@link findInflectionCq}. `cycles`/`values` should already be baseline-corrected
  * ({@link subtractBaseline} in `baseline.ts`).
  */
 export function computeCq(cycles: number[], values: number[], options: CqOptions = {}): number | null {
   const algorithm = options.algorithm ?? "Threshold";
   if (options.noise !== undefined && !isAmplified(values, options.noise, options.amplification)) return null;
+  if (
+    options.deltaRfu !== undefined &&
+    options.minDeltaRfu !== undefined &&
+    options.deltaRfu < options.minDeltaRfu
+  )
+    return null;
 
   if (algorithm === "Threshold") {
     if (options.threshold === undefined) {

@@ -343,10 +343,35 @@ export function autoBaselineRegion(
  */
 export type BaselineMode = "Raw" | "RawBaseLineSubtracted" | "LinearBaseLineNormalized";
 
+/** A fitted baseline line, `rfu = intercept + slope * cycle` — the coefficients behind
+ * `LinearBaseLineNormalized`'s subtraction, exposed so callers can display the line itself
+ * (e.g. as "2000 + 4c") rather than just the corrected result. */
+export interface LinearBaselineFit {
+  slope: number;
+  intercept: number;
+}
+
+/**
+ * Fit the linear baseline (§4's `LinearBaseLineNormalized`) over `region`: ordinary least
+ * squares through the region's own points. Returns the zero line (`{ slope: 0, intercept: 0 }`)
+ * if no cycle in `values` falls within `region`.
+ */
+export function fitLinearBaseline(
+  cycles: number[],
+  values: number[],
+  region: BaselineRegion,
+): LinearBaselineFit {
+  const idx = regionIndices(cycles, region);
+  if (idx.length === 0) return { slope: 0, intercept: 0 };
+  const x = idx.map((i) => cycles[i]!);
+  const y = idx.map((i) => values[i]!);
+  return linearFit(x, y);
+}
+
 /**
  * Subtract the baseline (§4). `RawBaseLineSubtracted` subtracts the mean of the region;
- * `LinearBaseLineNormalized` fits a line to the region by ordinary least squares and subtracts it
- * across every cycle, removing drift as well as offset. If no cycle in `values` falls within
+ * `LinearBaseLineNormalized` fits a line to the region ({@link fitLinearBaseline}) and subtracts
+ * it across every cycle, removing drift as well as offset. If no cycle in `values` falls within
  * `region`, returns `values` unchanged.
  */
 export function subtractBaseline(
@@ -365,8 +390,6 @@ export function subtractBaseline(
     return values.map((v) => v - mean);
   }
 
-  const x = idx.map((i) => cycles[i]!);
-  const y = idx.map((i) => values[i]!);
-  const fit = linearFit(x, y);
+  const fit = fitLinearBaseline(cycles, values, region);
   return values.map((v, i) => v - (fit.slope * cycles[i]! + fit.intercept));
 }

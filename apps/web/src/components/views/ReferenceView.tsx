@@ -22,8 +22,8 @@ interface Props {
  * on the main Curves view (see `chart.ts`'s `factoryCurves`). Switching to ΔRFU replots the
  * live line as drift from the factory value (`live − factory`), so the (now redundant,
  * always-zero) factory line is hidden instead. This view's baselining is always
- * factory-relative — see `chart.ts`'s `curveBaselineMode`, which the main Curves view uses
- * instead and which this view always passes `"raw"` (a no-op).
+ * factory-relative — see `chart.ts`'s `curveView`, which the main Curves view uses instead and
+ * which this view always passes `"absolute"` (a no-op).
  */
 export function ReferenceView({ zpcr, settings, onChange }: Props) {
   const steps = useMemo(() => zpcr.steps(), [zpcr]);
@@ -175,8 +175,8 @@ export function ReferenceView({ zpcr, settings, onChange }: Props) {
             factoryCurves={factoryCurves}
             tempCurves={[]}
             baseline={settings.baseline}
-            curveBaselineMode="raw"
-            curveBaselineRange={null}
+            curveView="absolute"
+            drawBaseline={false}
             scale={settings.scale}
             bands="off"
           />
