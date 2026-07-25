@@ -290,11 +290,18 @@ Two guards worth implementing, both of which change reported results:
   well (`20230829_135443_CT019138_SINGLE_STEP_.zpcr`, well B5). Implemented by
   `validateBaselineRegion()` in `packages/core/src/baseline.ts`, which re-checks the final region
   (however it was chosen) against §3.2's flatness/linearity bounds, judged against the curve's
-  *whole* span rather than the region's own scatter. `baselineCorrectCurve()` in `analysis.ts`
-  runs it automatically and surfaces the result as `CurveBaselineResult.baselineValid`, forcing
-  `amplified` to `false` when invalid; `computeCq()`'s `baselineValid` option (typically fed from
-  that same field) reports no Cq outright when `false`, checked before the amplification squelch
-  above.
+  *whole* span rather than the region's own scatter. A region narrower than
+  `minValidationWidth` (default **5**) is extended up to that width before checking: any 3-4
+  point window of an otherwise-smooth curve fits a line almost exactly by construction (the same
+  too-few-degrees-of-freedom instability `findBaselineByRegression`'s `initialWidth` guards
+  against), so a too-narrow region — typically an artifact of a curvature-detected onset that
+  lands implausibly early — can pass flatness/linearity trivially on its own even though it's just
+  as unreliable as a wider mis-fit region; observed on a second real well in the same run (NRT
+  control, well E5), whose auto-detected region was only 3 cycles wide. `baselineCorrectCurve()`
+  in `analysis.ts` runs the gate automatically and surfaces the result as
+  `CurveBaselineResult.baselineValid`, forcing `amplified` to `false` when invalid; `computeCq()`'s
+  `baselineValid` option (typically fed from that same field) reports no Cq outright when `false`,
+  checked before the amplification squelch above.
 
 ## 8. Recommended defaults
 

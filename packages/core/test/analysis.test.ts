@@ -97,6 +97,24 @@ describe("baselineCorrectCurve", () => {
     expect(result.amplified).toBe(false);
   });
 
+  // Recorded from a real NRT (no-reverse-transcriptase) control well in the same run as the NTC
+  // above: another pure two-segment decay with no amplification, but here auto-detection settles
+  // on a region only 3 cycles wide (the enforced minimum) — narrow enough that it would pass the
+  // flatness/linearity check trivially without `validateBaselineRegion`'s minimum-width extension.
+  const nrtCycles = Array.from({ length: 40 }, (_, i) => i + 1);
+  const nrtValues = [
+    7925.1, 7916.3, 7908.9, 7892.9, 7885.7, 7877.8, 7858.1, 7852.1, 7835.1, 7830.0, 7824.5, 7813.5,
+    7814.3, 7805.0, 7799.6, 7791.2, 7795.4, 7783.5, 7776.4, 7770.4, 7771.5, 7765.2, 7753.6, 7753.9,
+    7748.3, 7742.6, 7737.2, 7730.6, 7730.2, 7725.8, 7728.6, 7720.7, 7712.9, 7713.0, 7705.2, 7698.2,
+    7700.0, 7699.9, 7690.4, 7683.2,
+  ];
+
+  it("flags an invalid baseline on a too-narrow-region NRT well instead of a spurious rise", () => {
+    const result = baselineCorrectCurve(nrtCycles, nrtValues, "LinearBaseLineNormalized");
+    expect(result.baselineValid).toBe(false);
+    expect(result.amplified).toBe(false);
+  });
+
   it("suppresses Cq via computeCq's baselineValid option for that same well", () => {
     const result = baselineCorrectCurve(ntcCycles, ntcValues, "LinearBaseLineNormalized");
     const cq = computeCq(ntcCycles, result.correctedValues, {

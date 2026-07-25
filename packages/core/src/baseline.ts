@@ -357,6 +357,10 @@ export interface BaselineValidationOptions {
   maxRelativeFlatness?: number;
   /** Max residual-from-fitted-line, relative to the curve's span, for the region to count as linear. Default **0.03**. */
   maxRelativeLinearity?: number;
+  /** Narrower regions are extended (capped at the curve's last cycle) up to this many cycles
+   * before the flatness/linearity check runs — see the rationale below. Default **5**, matching
+   * {@link RegressionBaselineOptions.initialWidth}'s default for the same reason. */
+  minValidationWidth?: number;
 }
 
 /**
@@ -370,7 +374,15 @@ export interface BaselineValidationOptions {
  * that region and extrapolating it across every remaining cycle then manufactures a spurious
  * rise out of pure slope-estimation error. Judging the region's residuals against the *whole*
  * curve's span (as this function does, via {@link regionFlatnessRatios}) catches that case, since
- * the mismatch shows up as the region failing flatness even though it looked fine in isolation.
+ * the mismatch shows up as the region failing flatness even though it looked fine in isolation —
+ * *unless* the region is narrower than `minValidationWidth`, in which case it's extended before
+ * checking: any 3-4 point window of an otherwise-smooth curve fits a line almost exactly by
+ * construction (too few degrees of freedom for the residual to mean anything — the same
+ * instability {@link findBaselineByRegression}'s `initialWidth` guards against), so a region that
+ * narrow can pass flatness/linearity trivially regardless of whether it describes the rest of the
+ * curve. This happens when a curvature-detected onset sits implausibly early (an artifact peak a
+ * few cycles in, itself caused by the same steep-then-shallow non-amplifying decay described
+ * above), capping the candidate region below any width the check could meaningfully trust.
  * `values` should cover every cycle — the same curve `region` was chosen from — not just the
  * region itself.
  */
@@ -382,7 +394,21 @@ export function validateBaselineRegion(
 ): boolean {
   const maxRelativeFlatness = options.maxRelativeFlatness ?? 0.035;
   const maxRelativeLinearity = options.maxRelativeLinearity ?? 0.03;
-  const stats = regionFlatnessRatios(cycles, values, region);
+  const minValidationWidth = options.minValidationWidth ?? 5;
+
+  const width = region.endCycle - region.beginCycle + 1;
+  const checkRegion =
+    width >= minValidationWidth
+      ? region
+      : {
+          beginCycle: region.beginCycle,
+          endCycle: Math.min(
+            cycles.length > 0 ? Math.max(...cycles) : region.endCycle,
+            region.beginCycle + minValidationWidth - 1,
+          ),
+        };
+
+  const stats = regionFlatnessRatios(cycles, values, checkRegion);
   return stats !== null && stats.relFlat <= maxRelativeFlatness && stats.relLin <= maxRelativeLinearity;
 }
 

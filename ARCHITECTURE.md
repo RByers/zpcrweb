@@ -168,7 +168,9 @@ raw bytes ─▶ fflate.unzipSync ─▶ { name: Uint8Array }
   `validateBaselineRegion()`, which re-checks whichever region was actually chosen (including
   `findBaselineByRegression`'s fallback, whose local fit-and-extend can lock onto a region that's
   a good line by itself but a poor description of the whole curve) against §3.2's
-  flatness/linearity bounds judged over the curve's full span. See [`threshold.md`](./threshold.md).
+  flatness/linearity bounds judged over the curve's full span — extending regions narrower than
+  `minValidationWidth` first, since a too-narrow window passes that check trivially regardless of
+  the curve. See [`threshold.md`](./threshold.md).
 - **`threshold.ts`** — the threshold and Cq stages (§5–§7) that finish what `baseline.ts` starts:
   per-fluorophore noise/threshold estimation (manual override or auto, floored and computed from
   the median of a well subset), the §6.1 threshold-crossing Cq (log-interpolated, with a linear

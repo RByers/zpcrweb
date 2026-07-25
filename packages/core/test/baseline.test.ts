@@ -278,6 +278,35 @@ describe("validateBaselineRegion", () => {
     expect(validateBaselineRegion(cycles, smoothed, region)).toBe(false);
   });
 
+  it("rejects a too-narrow region even though it trivially fits a line on its own", () => {
+    // Recorded from a real NRT (no-reverse-transcriptase) control well in the same run as the
+    // NTC above: another pure two-segment decay, no amplification anywhere. Here the curvature
+    // detector's onset estimate lands implausibly early (an artifact of the same steep-to-shallow
+    // transition), capping the candidate region at just 3 cycles — the enforced minimum. Any
+    // 3-point window of a smooth curve fits a line almost exactly by construction, so without
+    // extending the check to a wider, more trustworthy window first, this region would pass
+    // flatness/linearity despite being just as unreliable as the 5-cycle region above.
+    const cycles = Array.from({ length: 40 }, (_, i) => i + 1);
+    const values = [
+      7925.1, 7916.3, 7908.9, 7892.9, 7885.7, 7877.8, 7858.1, 7852.1, 7835.1, 7830.0, 7824.5,
+      7813.5, 7814.3, 7805.0, 7799.6, 7791.2, 7795.4, 7783.5, 7776.4, 7770.4, 7771.5, 7765.2,
+      7753.6, 7753.9, 7748.3, 7742.6, 7737.2, 7730.6, 7730.2, 7725.8, 7728.6, 7720.7, 7712.9,
+      7713.0, 7705.2, 7698.2, 7700.0, 7699.9, 7690.4, 7683.2,
+    ];
+    const smoothed = smoothCurve(values);
+    const region = autoBaselineRegion(cycles, smoothed)!;
+    expect(region).toEqual({ beginCycle: 1, endCycle: 3 });
+    expect(validateBaselineRegion(cycles, smoothed, region)).toBe(false);
+  });
+
+  it("doesn't extend a region that's already at least minValidationWidth wide", () => {
+    // A genuinely narrow-but-trustworthy region (5 cycles, the default minValidationWidth) that's
+    // actually flat over the whole span should still pass without being extended further.
+    const cycles = Array.from({ length: 20 }, (_, i) => i + 1);
+    const values = cycles.map(() => 1000);
+    expect(validateBaselineRegion(cycles, values, { beginCycle: 1, endCycle: 5 })).toBe(true);
+  });
+
   it("returns false for a region with fewer than 2 points in range", () => {
     const cycles = [1, 2, 3, 4, 5];
     const values = [10, 20, 30, 40, 50];
