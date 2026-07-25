@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { parseZpcr, type Zpcr } from "@zpcrweb/core";
+import { parsePcrd, parseZpcr, type PcrdContainer, type Zpcr } from "@zpcrweb/core";
 import {
   deleteFile,
   fileId,
@@ -9,6 +9,9 @@ import {
   putSettings,
   type StoredSettings,
 } from "./db";
+import { usePltdPassword } from "./pltdPassword";
+
+export type FileKind = "zpcr" | "pcrd";
 
 export type ViewId = "overview" | "curves" | "raw";
 export type Baseline = "raw" | "delta";
@@ -36,13 +39,45 @@ export interface FileSettings {
   temps: Set<string>;
 }
 
-/** A file loaded and parsed in memory. */
+/** A file loaded into memory — bytes only. Parsing is derived (see {@link ZpcrStore.runs}),
+ * since a `.pcrd`'s decode depends on the (mutable, shared) decryption password. */
 export interface LoadedFile {
   id: string;
   name: string;
   size: number;
   addedAt: number;
-  zpcr: Zpcr;
+  kind: FileKind;
+  bytes: Uint8Array;
+}
+
+/** The outcome of parsing one {@link LoadedFile} against the current password. */
+export interface RunResult {
+  /** The decoded run, once available (immediately for `.zpcr`; after a correct password for
+   * `.pcrd`). */
+  zpcr: Zpcr | null;
+  /** True when this is an encrypted `.pcrd` and no (or the wrong) password has been tried yet
+   * — distinct from `error`, which means a password was tried and failed. */
+  needsPassword: boolean;
+  error: string | null;
+  /** `.pcrd` container metadata, available even before/without a working password. */
+  container?: PcrdContainer;
+}
+
+function parseRun(bytes: Uint8Array, kind: FileKind, password: string): RunResult {
+  if (kind === "zpcr") {
+    try {
+      return { zpcr: parseZpcr(bytes), needsPassword: false, error: null };
+    } catch (e) {
+      return { zpcr: null, needsPassword: false, error: e instanceof Error ? e.message : String(e) };
+    }
+  }
+  const pcrd = parsePcrd(bytes, password ? { password } : undefined);
+  return {
+    zpcr: pcrd.zpcr ?? null,
+    needsPassword: !!pcrd.needsPassword,
+    error: pcrd.error ?? null,
+    container: pcrd.container,
+  };
 }
 
 export function wellKey(row: number, col: number): string {
@@ -100,10 +135,21 @@ function fromStored(s: StoredSettings): FileSettings {
   };
 }
 
+/** True for file names this app knows how to load. */
+function fileKind(name: string): FileKind | null {
+  if (/\.zpcr$/i.test(name)) return "zpcr";
+  if (/\.pcrd$/i.test(name)) return "pcrd";
+  return null;
+}
+
 export interface ZpcrStore {
   files: LoadedFile[];
   activeId: string | null;
   active: LoadedFile | null;
+  /** Parse result for every loaded file, keyed by id — recomputed when the shared
+   * decryption password changes, so a `.pcrd` unlocks reactively without reloading. */
+  runs: Map<string, RunResult>;
+  activeRun: RunResult | null;
   settings: FileSettings | null;
   loading: boolean;
   error: string | null;
@@ -120,6 +166,7 @@ export function useZpcrStore(): ZpcrStore {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const saveTimers = useRef<Record<string, number>>({});
+  const [password] = usePltdPassword();
 
   // Hydrate from IndexedDB on mount.
   useEffect(() => {
@@ -131,20 +178,14 @@ export function useZpcrStore(): ZpcrStore {
           getAllSettings(),
         ]);
         if (cancelled) return;
-        const loaded: LoadedFile[] = [];
-        for (const f of stored) {
-          try {
-            loaded.push({
-              id: f.id,
-              name: f.name,
-              size: f.size,
-              addedAt: f.addedAt,
-              zpcr: parseZpcr(new Uint8Array(f.bytes)),
-            });
-          } catch {
-            /* skip corrupt entries */
-          }
-        }
+        const loaded: LoadedFile[] = stored.map((f) => ({
+          id: f.id,
+          name: f.name,
+          size: f.size,
+          addedAt: f.addedAt,
+          kind: f.kind ?? "zpcr",
+          bytes: new Uint8Array(f.bytes),
+        }));
         loaded.sort((a, b) => a.addedAt - b.addedAt);
         const map: Record<string, FileSettings> = {};
         for (const s of storedSettings) map[s.fileId] = fromStored(s);
@@ -163,25 +204,25 @@ export function useZpcrStore(): ZpcrStore {
   }, []);
 
   const addFiles = useCallback(async (input: FileList | File[]) => {
-    const list = Array.from(input).filter((f) => /\.zpcr$/i.test(f.name));
+    const list = Array.from(input)
+      .map((file) => ({ file, kind: fileKind(file.name) }))
+      .filter((f): f is { file: File; kind: FileKind } => f.kind !== null);
     let lastId: string | null = null;
-    for (const file of list) {
+    for (const { file, kind } of list) {
       try {
         const buf = await file.arrayBuffer();
-        const zpcr = parseZpcr(new Uint8Array(buf));
+        const bytes = new Uint8Array(buf);
+        // Validate the container eagerly so obviously-bad files are rejected up front; a
+        // .pcrd's payload may still need a password, resolved reactively via `runs`.
+        if (kind === "zpcr") parseZpcr(bytes);
+        else parsePcrd(bytes);
         const id = fileId(file.name, file.size);
-        const record = {
-          id,
-          name: file.name,
-          size: file.size,
-          addedAt: Date.now(),
-          bytes: buf,
-        };
-        await putFile(record);
+        const addedAt = Date.now();
+        await putFile({ id, name: file.name, size: file.size, addedAt, bytes: buf, kind });
         lastId = id;
         setFiles((prev) => {
           const rest = prev.filter((f) => f.id !== id);
-          return [...rest, { id, name: file.name, size: file.size, addedAt: record.addedAt, zpcr }];
+          return [...rest, { id, name: file.name, size: file.size, addedAt, kind, bytes }];
         });
       } catch (e) {
         setError(`${file.name}: ${e instanceof Error ? e.message : String(e)}`);
@@ -234,10 +275,20 @@ export function useZpcrStore(): ZpcrStore {
     [files, activeId],
   );
 
+  const runs = useMemo(() => {
+    const map = new Map<string, RunResult>();
+    for (const f of files) map.set(f.id, parseRun(f.bytes, f.kind, password));
+    return map;
+  }, [files, password]);
+
+  const activeRun = activeId ? runs.get(activeId) ?? null : null;
+
   return {
     files,
     activeId,
     active,
+    runs,
+    activeRun,
     settings,
     loading,
     error,

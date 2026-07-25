@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { parseRunInfoRaw, type Zpcr } from "@zpcrweb/core";
 import { DecodedPlateread } from "./DecodedPlateread";
-import { DecodedPlate } from "./DecodedPlate";
+import { DecodedPlate, PlateDetail } from "./DecodedPlate";
 import { DecodedDcal } from "./DecodedDcal";
 import { RunLogTable } from "./RunLogTable";
 import { formatXml } from "../../lib/xmlFormat";
@@ -11,16 +11,23 @@ export type DecodedKind =
   | "plateread"
   | "plate"
   | "dcal"
+  | "plate2"
   | "runinfo"
   | "runlog"
   | "protocol"
   | "xml"
   | null;
 
+/** The one virtual entry name `.pcrd` uses for its already-decrypted `plateSetup2` subtree
+ * (see `pcrd.ts`'s virtual archive) — routed to {@link EmbeddedPlate} instead of the
+ * password-gated `.pltd` decoder, since a `.pcrd`'s plate needs no separate decryption. */
+const PCRD_PLATE_NAME = "plateSetup2.xml";
+
 export function decodedKind(name: string): DecodedKind {
   if (/\.Plateread$/i.test(name)) return "plateread";
   if (/\.pltd$/i.test(name)) return "plate";
   if (/\.dcal$/i.test(name)) return "dcal";
+  if (name === PCRD_PLATE_NAME) return "plate2";
   if (/RunInfo\.xml$/i.test(name)) return "runinfo";
   if (/runlog\.xml$/i.test(name)) return "runlog";
   if (/ProtocolRunDefinition\.txt$/i.test(name)) return "protocol";
@@ -44,12 +51,21 @@ export function DecodedView({ zpcr, name }: Props) {
 
   if (kind === "plate") return <DecodedPlate zpcr={zpcr} name={name} />;
   if (kind === "dcal") return <DecodedDcal zpcr={zpcr} name={name} />;
+  if (kind === "plate2") return <EmbeddedPlate zpcr={zpcr} name={name} />;
   if (kind === "runinfo") return <RunInfoTable zpcr={zpcr} name={name} />;
   if (kind === "runlog") return <RunLogTable zpcr={zpcr} name={name} />;
   if (kind === "protocol") return <ProtocolDecoded zpcr={zpcr} name={name} />;
   if (kind === "xml") return <XmlDecoded zpcr={zpcr} name={name} />;
 
   return <div className="decoded__na mono">No decoder for this file.</div>;
+}
+
+/** The `plateSetup2` subtree of a `.pcrd` document — already decrypted along with the rest
+ * of the document, so it renders straight through `zpcr.plates()` with no password step. */
+function EmbeddedPlate({ zpcr, name }: Props) {
+  const entry = zpcr.plates().find((p) => p.name === name);
+  if (!entry?.pltd.plate) return <div className="decoded__na mono">No plate for {name}.</div>;
+  return <PlateDetail plate={entry.pltd.plate} sourceHint="embedded in .pcrd document" />;
 }
 
 /** RunInfo.xml is a flat list of KeyValuePairs — render it as a two-column table. */

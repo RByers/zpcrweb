@@ -1,14 +1,17 @@
 import { useZpcrStore } from "./state/useZpcrStore";
+import { usePltdPassword } from "./state/pltdPassword";
 import { DropZone } from "./components/DropZone";
 import { FileBar } from "./components/FileBar";
 import { ViewSelector } from "./components/ViewSelector";
+import { PasswordPrompt } from "./components/PasswordPrompt";
 import { OverviewView } from "./components/views/OverviewView";
 import { CurvesView } from "./components/views/CurvesView";
 import { RawFilesView } from "./components/views/RawFilesView";
 
 export function App() {
   const store = useZpcrStore();
-  const { active, settings } = store;
+  const { active, activeRun, settings } = store;
+  const [, setPassword] = usePltdPassword();
 
   if (store.loading) {
     return <div className="splash mono">initializing…</div>;
@@ -28,36 +31,53 @@ export function App() {
   }
 
   const view = settings.view;
+  const zpcr = activeRun?.zpcr ?? null;
 
   return (
     <div className="app">
       <header className="app__header">
         <span className="app__logo mono">zpcr//web</span>
-        <ViewSelector
-          value={view}
-          onChange={(v) => store.updateSettings({ view: v })}
-        />
+        {zpcr && (
+          <ViewSelector
+            value={view}
+            onChange={(v) => store.updateSettings({ view: v })}
+          />
+        )}
         <div className="app__header-spacer" />
         <DropZone onFiles={store.addFiles} />
       </header>
 
       <FileBar
         files={store.files}
+        runs={store.runs}
         activeId={store.activeId}
         onSelect={store.setActive}
         onRemove={store.remove}
       />
 
       <main className="app__main">
-        {view === "overview" && <OverviewView zpcr={active.zpcr} />}
-        {view === "curves" && (
-          <CurvesView
-            zpcr={active.zpcr}
-            settings={settings}
-            onChange={store.updateSettings}
-          />
+        {!zpcr ? (
+          <div className="app__gate">
+            {activeRun?.needsPassword && (
+              <PasswordPrompt wrong={false} onSubmit={setPassword} />
+            )}
+            {activeRun?.error && (
+              <PasswordPrompt wrong={true} onSubmit={setPassword} />
+            )}
+          </div>
+        ) : (
+          <>
+            {view === "overview" && <OverviewView zpcr={zpcr} />}
+            {view === "curves" && (
+              <CurvesView
+                zpcr={zpcr}
+                settings={settings}
+                onChange={store.updateSettings}
+              />
+            )}
+            {view === "raw" && <RawFilesView zpcr={zpcr} />}
+          </>
         )}
-        {view === "raw" && <RawFilesView zpcr={active.zpcr} />}
       </main>
 
       {store.error && <div className="app__error mono">{store.error}</div>}
