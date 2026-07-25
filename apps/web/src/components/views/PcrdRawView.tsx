@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from "react";
-import type { Zpcr } from "@zpcrweb/core";
+import type { DcalEntry, Zpcr } from "@zpcrweb/core";
 import { parseXmlFragment, serializeXmlPretty, XmlTree } from "../../lib/xmlTree";
 import { logEntriesFromElements, summarizeRunLog } from "../../lib/runlog";
 import { decodedToCsv, downloadText, plateReadCsvFilename, plateReadToCsv } from "../../lib/download";
@@ -9,6 +9,7 @@ import { PlateTable } from "../raw/PlateTable";
 import { RunInfoTable } from "../raw/DecodedView";
 import { ProtocolDetail } from "../raw/DecodedProtocol";
 import { RunLogTable } from "../raw/RunLogTable";
+import { DecodedDcal } from "../raw/DecodedDcal";
 
 /**
  * The `.pcrd` counterpart to `RawFilesView` — but a `.pcrd` has no inner files, so this
@@ -24,7 +25,7 @@ type NavEntry =
   | { kind: "plateSetup" }
   | { kind: "protocol" }
   | { kind: "plateRead"; index: number }
-  | { kind: "calibration" }
+  | { kind: "calibration"; index: number }
   | { kind: "runInfo" }
   | { kind: "log" }
   | { kind: "other"; el: Element };
@@ -48,10 +49,32 @@ interface PcrdDocument {
   groups: NavGroup[];
   plateSetup2El?: Element;
   protocol2El?: Element;
-  calibrationEl?: Element;
+  calibrations: DcalEntry[];
+  calibrationDataEls: Element[];
   runInfoEl?: Element;
   logEls: Element[];
   plateReadEls: Element[];
+}
+
+/** The list of `<CalibrationData>` elements inside `<calibrationCollection>`, in the same
+ * `FactoryCals` then `UserCals` order — and same null-Dye/Plate filtering — as
+ * `zpcr.calibrations()` (`decodeCalibrationCollection` in `pcrd.ts`), so `calibrationDataEls[i]`
+ * is the raw-XML counterpart of `zpcr.calibrations()[i]`. */
+function findCalibrationDataEls(calibrationEl: Element): Element[] {
+  const coll = findChild(calibrationEl, "calibrationcollection");
+  const itemsFrom = (listEl: Element | undefined): Element[] => {
+    const ar = findChild(listEl, "ar");
+    if (!ar) return [];
+    return Array.from(ar.children)
+      .map((item) => findChild(item, "calibrationdata"))
+      .filter((el): el is Element => el !== undefined)
+      .filter((el) => {
+        const dye = findChild(el, "dye")?.textContent?.trim();
+        const plate = findChild(el, "plate")?.textContent?.trim();
+        return !!dye && !!plate;
+      });
+  };
+  return [...itemsFrom(findChild(coll, "factorycals")), ...itemsFrom(findChild(coll, "usercals"))];
 }
 
 function buildDocument(root: Element, zpcr: Zpcr): PcrdDocument {
@@ -64,6 +87,8 @@ function buildDocument(root: Element, zpcr: Zpcr): PcrdDocument {
   const runDataEl = byTag("rundata");
   const protocolRunInfoEl = byTag("protocolruninfo");
   const calibrationEl = findChild(runDataEl, "calibrationcollection");
+  const calibrationDataEls = calibrationEl ? findCalibrationDataEls(calibrationEl) : [];
+  const calibrations = zpcr.calibrations();
   const plateReadVectorEl = findChild(runDataEl, "platereaddatavector");
   const runInfoEl = findChild(protocolRunInfoEl, "runinfo");
   const logEls = children.filter((c) => c.tagName.toLowerCase() === "log");
@@ -100,10 +125,13 @@ function buildDocument(root: Element, zpcr: Zpcr): PcrdDocument {
       })),
     });
   }
-  if (calibrationEl) {
+  if (calibrations.length > 0) {
     groups.push({
       group: "Calibration",
-      items: [{ label: "calibrationCollection", entry: { kind: "calibration" } }],
+      items: calibrations.map((c, i) => ({
+        label: c.name,
+        entry: { kind: "calibration", index: i },
+      })),
     });
   }
   if (runInfoEl) {
@@ -122,11 +150,22 @@ function buildDocument(root: Element, zpcr: Zpcr): PcrdDocument {
     });
   }
 
-  return { root, groups, plateSetup2El, protocol2El, calibrationEl, runInfoEl, logEls, plateReadEls };
+  return {
+    root,
+    groups,
+    plateSetup2El,
+    protocol2El,
+    calibrations,
+    calibrationDataEls,
+    runInfoEl,
+    logEls,
+    plateReadEls,
+  };
 }
 
 function entryKey(entry: NavEntry): string {
   if (entry.kind === "plateRead") return `plateRead:${entry.index}`;
+  if (entry.kind === "calibration") return `calibration:${entry.index}`;
   if (entry.kind === "other") return `other:${entry.el.tagName}`;
   return entry.kind;
 }
@@ -158,8 +197,10 @@ function xmlRootsFor(doc: PcrdDocument, entry: NavEntry): Element[] {
       const el = doc.plateReadEls[entry.index];
       return el ? [el] : [];
     }
-    case "calibration":
-      return doc.calibrationEl ? [doc.calibrationEl] : [];
+    case "calibration": {
+      const el = doc.calibrationDataEls[entry.index];
+      return el ? [el] : [];
+    }
     case "runInfo":
       return doc.runInfoEl ? [doc.runInfoEl] : [];
     case "log":
@@ -204,6 +245,7 @@ export function PcrdRawView({
     entry.kind === "plateSetup" ||
     entry.kind === "protocol" ||
     entry.kind === "plateRead" ||
+    entry.kind === "calibration" ||
     entry.kind === "runInfo" ||
     entry.kind === "log";
 
@@ -322,7 +364,13 @@ function PcrdRawContent({
   }
 
   if (entry.kind === "calibration") {
-    return <XmlTree roots={doc.calibrationEl ? [doc.calibrationEl] : []} />;
+    if (mode === "xml") {
+      const el = doc.calibrationDataEls[entry.index];
+      return <XmlTree roots={el ? [el] : []} />;
+    }
+    const cal = doc.calibrations[entry.index];
+    if (!cal) return <div className="decoded__na mono">No decoded calibration.</div>;
+    return <DecodedDcal dcal={cal.dcal} />;
   }
 
   if (entry.kind === "runInfo") {

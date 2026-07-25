@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { parseRunInfoRaw, type Zpcr } from "@zpcrweb/core";
 import { DecodedPlateread } from "./DecodedPlateread";
 import { DecodedPlate } from "./DecodedPlate";
-import { DecodedDcal } from "./DecodedDcal";
+import { DecodedDcalFile } from "./DecodedDcal";
 import { DecodedProtocol } from "./DecodedProtocol";
 import { RunLogTable } from "./RunLogTable";
 import { parseRunLog } from "../../lib/runlog";
@@ -50,7 +50,7 @@ export function DecodedView({ zpcr, name }: Props) {
 
   if (kind === "plate") return <DecodedPlate zpcr={zpcr} name={name} />;
   if (kind === "prcl") return <DecodedProtocol zpcr={zpcr} name={name} />;
-  if (kind === "dcal") return <DecodedDcal zpcr={zpcr} name={name} />;
+  if (kind === "dcal") return <DecodedDcalFile zpcr={zpcr} name={name} />;
   if (kind === "runinfo") return <RunInfoTable text={zpcr.archive.text(name)} />;
   if (kind === "runlog") return <RunLogTable parsed={parseRunLog(zpcr.archive.text(name))} />;
   if (kind === "protocol") return <ProtocolDecoded text={zpcr.archive.text(name)} />;

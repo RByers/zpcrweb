@@ -201,8 +201,13 @@ color-coded grid lives in the **Plates** tab instead, fed by the same `zpcr.plat
 settings + step-table view `.prcl` entries get — no password needed, since a `.pcrd`'s protocol
 isn't a separate encrypted file), **Plate reads** (one
 entry per real `<plateRead>`, labeled by its actual cycle number, → `DecodedPlateread` fed
-`zpcr.reads[i]` directly — no filename indirection), **Calibration** (`calibrationCollection`
-— XML only, no decoder yet), **Run info** (`protocolRunInfo/RunInfo` → `RunInfoTable`), **Log**
+`zpcr.reads[i]` directly — no filename indirection), **Calibration** (one nav entry per
+`zpcr.calibrations()` entry — the same `DcalEntry[]` `.zpcr`'s real `.Dcal` files decode to,
+since `pcrd.ts`'s `parseCalibrationDataElement` produces the identical `Dcal` shape — each
+rendered with the same `DecodedDcal` component `RawFilesView` uses for a `.Dcal` archive entry;
+XML mode shows the matching `<CalibrationData>` subtree, found by walking
+`FactoryCals`/`UserCals` in the same order `decodeCalibrationCollection` does), **Run info**
+(`protocolRunInfo/RunInfo` → `RunInfoTable`), **Log**
 (every real `<log>` element, fed straight to `RunLogTable` — see below), **Other** (every
 remaining top-level element, one nav entry each — always current since it's discovered from
 the parsed document rather than a hardcoded list, so an unfamiliar future subtree still

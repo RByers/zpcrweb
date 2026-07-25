@@ -9,15 +9,15 @@ function fmtTemp(v?: number): string {
 }
 
 /**
- * Decoded view of a single `.Dcal`: the calibration's identity/provenance, a per-temperature
- * table of the dye and empty-plate channel response (well A1 — uniform across wells in every
- * file this library has decoded, see `dcal.md`), and the raw ICFF field list for anything not
- * surfaced above.
+ * Decoded view of a single {@link Dcal} — the calibration's identity/provenance, a
+ * per-temperature table of the dye and empty-plate channel response (well A1 — uniform across
+ * wells in every file this library has decoded, see `dcal.md`), and the raw ICFF field list for
+ * anything not surfaced above (empty for a `.pcrd`-derived `Dcal`, which has no ICFF index).
+ * Shared by `.zpcr`'s real `.Dcal` archive entries (via {@link DecodedDcalFile}) and a `.pcrd`'s
+ * `calibrationCollection` entries (already parsed by `zpcr.calibrations()`), since
+ * `parseCalibrationDataElement` produces the same shape as `parseDcal` — see `pcrd.md` §2.6.
  */
-export function DecodedDcal({ zpcr, name }: { zpcr: Zpcr; name: string }) {
-  const bytes = useMemo(() => zpcr.archive.bytes(name), [zpcr, name]);
-  const dcal = useMemo(() => parseDcal(bytes), [bytes]);
-
+export function DecodedDcal({ dcal }: { dcal: Dcal }) {
   const channels = Array.from({ length: dcal.channelCount }, (_, i) => i);
 
   return (
@@ -182,4 +182,11 @@ function Pair({ k, v }: { k: string; v: string }) {
       <dd>{v}</dd>
     </div>
   );
+}
+
+/** `.zpcr`'s real `.Dcal` archive entries: parses the file's bytes, then renders {@link DecodedDcal}. */
+export function DecodedDcalFile({ zpcr, name }: { zpcr: Zpcr; name: string }) {
+  const bytes = useMemo(() => zpcr.archive.bytes(name), [zpcr, name]);
+  const dcal = useMemo(() => parseDcal(bytes), [bytes]);
+  return <DecodedDcal dcal={dcal} />;
 }
