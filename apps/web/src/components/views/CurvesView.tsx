@@ -43,8 +43,9 @@ import { Switch } from "../Switch";
 import { ResetIcon } from "../ResetIcon";
 import type { HighlightMatch, PlotCurve } from "../../lib/uplot/chart";
 
-/** Fallback baseline-region preview shown while auto-detecting, mirroring `chart.ts`'s
- * `fallbackRegion` (threshold.md §3.1/§8's default cycles 2–9), clamped to the run. */
+/** Last-resort baseline-region preview for when there's no plotted curve to compute a real
+ * auto-detected region from (see `previewRange` below) — mirrors `chart.ts`'s `fallbackRegion`
+ * (threshold.md §3.1/§8's default cycles 2–9), clamped to the run. */
 function defaultRangePreview(maxCycle: number): [number, number] {
   return [Math.min(2, maxCycle), Math.min(9, maxCycle)];
 }
@@ -450,7 +451,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
         : null,
     [settings.curveBaselineRange],
   );
-  const cqByCurve = useMemo(() => {
+  const curveMetrics = useMemo(() => {
     if (baseCurves.length === 0) return [];
     const baselines = baseCurves.map((c) =>
       baselineCorrectCurve(c.cycles, c.mean, cqBaselineMode, cqManualRegion),
@@ -471,11 +472,12 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
     return baseCurves.map((c, i) => {
       const b = baselines[i]!;
       const threshold = thresholdByLabel.get(c.dyeLabel) ?? 0;
-      return computeCq(c.cycles, b.correctedValues, {
+      const cq = computeCq(c.cycles, b.correctedValues, {
         algorithm: settings.analysisCqAlgorithm,
         threshold: settings.analysisCqAlgorithm === "Threshold" ? threshold : undefined,
         noise: b.noise,
       });
+      return { cq, baselineRfu: b.baselineRfu, baselineRegion: b.baselineRegion };
     });
   }, [
     baseCurves,
@@ -485,7 +487,21 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
     settings.analysisThresholdOverrides,
   ]);
 
-  const plotCurves: PlotCurve[] = baseCurves.map((c, i) => ({ ...c, cq: cqByCurve[i] ?? null }));
+  const plotCurves: PlotCurve[] = baseCurves.map((c, i) => ({
+    ...c,
+    cq: curveMetrics[i]?.cq ?? null,
+    baselineRfu: curveMetrics[i]?.baselineRfu ?? null,
+  }));
+
+  // The Baseline range slider's non-manual preview: rather than a static example range, show
+  // the *actual* auto-detected region for the first plotted curve — auto-detection runs per
+  // curve and, for a curve with no clear onset, can span nearly the whole run (see
+  // `autoBaselineRegion`), often nothing like the generic 2–9 example. Showing the real number
+  // means dragging the slider back to what's displayed reproduces what auto was already doing,
+  // rather than silently locking in a very different, much narrower region.
+  const previewRange: [number, number] | null = curveMetrics[0]
+    ? [curveMetrics[0].baselineRegion.beginCycle, curveMetrics[0].baselineRegion.endCycle]
+    : null;
 
   const toggleTemp = (key: string) => {
     const next = new Set(settings.temps);
@@ -707,7 +723,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
             <BaselineRangeSlider
               min={1}
               max={maxCycle}
-              value={settings.curveBaselineRange ?? defaultRangePreview(maxCycle)}
+              value={settings.curveBaselineRange ?? previewRange ?? defaultRangePreview(maxCycle)}
               isManual={settings.curveBaselineRange != null}
               onChange={(range) => onChange({ curveBaselineRange: range })}
               onReset={() => onChange({ curveBaselineRange: null })}

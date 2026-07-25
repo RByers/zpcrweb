@@ -331,11 +331,26 @@ only pieces the two views share.
     visual track/fill, each keeping its own keyboard/touch handling for free — lets a user pin
     `[beginCycle, endCycle]` instead of trusting auto-detection, for whenever the auto-detected
     region looks wrong. `null` (the default) means auto-detect, same as before this setting
-    existed; the slider shows the fallback 2–9 preview (clamped to the run) while in that state,
-    labelled "(auto)", and an "auto" link resets an override back to `null`. Applies globally
-    across every plotted curve — unlike auto-detection, which runs per curve — mirroring how the
-    real instrument's `baselineBeginRepeat`/`baselineEndRepeat` is a per-analysis-group setting,
-    not a per-well one.
+    existed, labelled "(auto)"; an "auto" link resets an override back to `null`. Applies
+    globally across every plotted curve — unlike auto-detection, which runs per curve —
+    mirroring how the real instrument's `baselineBeginRepeat`/`baselineEndRepeat` is a
+    per-analysis-group setting, not a per-well one.
+    - *The preview must show the real region, not a generic example:* while `null`, the slider
+      shows `previewRange` — the *actual* auto-detected `baselineRegion` of the first plotted
+      curve (from `curveMetrics`, the same per-curve `baselineCorrectCurve()` pass that computes
+      Cq — see "Analysis view integration" below), falling back to the static 2–9
+      (`defaultRangePreview`) only when there's no curve to compute one from. Earlier this
+      always showed the static 2–9 example regardless of what auto-detection actually did — and
+      for a curve with no confident onset, `autoBaselineRegion`'s regression fallback can extend
+      the "flat" region across most or all of the run (a real recorded case: cycles 1–45 of a
+      45-cycle run), nothing like 2–9. A user who nudged the slider and dragged it back to the
+      displayed "2–9" was then locking in an *explicit* 2–9 override — a far narrower window
+      than the curve's real auto baseline — which under- or over-estimates `baselineNoise`
+      relative to the true full-curve noise and can flip a correctly-unamplified flat curve into
+      a spurious "amplified" verdict with a bogus early Cq (clicking "auto" restores the correct
+      per-curve region and "fixes" it). Showing the true region as the preview means putting the
+      slider back to what's displayed actually reproduces auto's behavior, rather than silently
+      trading it for a very different fixed region that merely looks the same in the UI.
 - **Dark (LED-off) background:** `zpcr.darkCurves()` gives one background series per channel.
   A pure display overlay — it never alters the plotted well curves, min/max bands, or the
   y-axis label. The "Show dark" toggle: off (default) draws nothing; on draws one **dotted**
@@ -362,10 +377,11 @@ only pieces the two views share.
   factory overlay, or temperature) and reports its label, channel/dye, cycle, and
   mean/min/max/std — or, for a temperature, just its °C. The search projects each series
   through **its own** scale, so proximity is measured in pixels across both axes. A well
-  series also carries a `cq` (see "Analysis view" below); when defined, the tooltip adds a Cq
-  row and the chart draws a small ring on the curve at its (interpolated) Cq position — the
-  same marker logic (`cqMarkers` in `buildChart()`) that makes an unamplified or off-curve
-  well show no marker at all.
+  series also carries `baselineRfu` and `cq` (see "Analysis view" below); when defined, the
+  tooltip adds a "baseline" row (the diagnostic mean-raw-RFU-over-the-region value — see
+  `CurveBaselineResult.baselineRfu`) right before a Cq row, and the chart draws a small ring on
+  the curve at its (interpolated) Cq position — the same marker logic (`cqMarkers` in
+  `buildChart()`) that makes an unamplified or off-curve well show no marker at all.
 - **Color separation (dye space) and the "View" mode selector:** `lib/fluorCurves.ts` matches
   the plate's fluorophores to this run's `.Dcal` data, builds one calibration matrix per step
   (restricted to the scanned channels, so its RFU scale factors are measured over the right
@@ -455,7 +471,10 @@ already-validated Curves view.
 - **Table/CSV columns, same order in both:** well, sample (`WellDefinition.sampleName`, the
   same field `PlateTable`'s "Sample" column shows), fluor, target (only when `usingTargets`;
   the CSV always includes it, since it's harmless there even when identical to fluor),
-  channel, threshold, Cq, ΔRFU, amplified. The CSV is built directly from the table's rows via
+  [channel — CSV only, not shown in the table], baseline RFU
+  (`CurveBaselineResult.baselineRfu`, the same diagnostic the Curves view's tooltip shows —
+  placed just before threshold since threshold/noise are derived from the same baseline
+  region), threshold, Cq, ΔRFU, amplified. The CSV is built directly from the table's rows via
   the shared `csvRow()` quoting helper (`lib/download.ts`, exported for reuse) and
   `downloadText()` — filename `<run name>_analysis.csv`, the same `dataFile`-derived naming
   `plateReadCsvFilename` uses for the Raw view's per-cycle export.

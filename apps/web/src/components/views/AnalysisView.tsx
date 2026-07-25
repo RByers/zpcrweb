@@ -44,6 +44,10 @@ export interface AnalysisRow {
   col: number;
   wellLabel: string;
   sample: string;
+  /** Diagnostic: mean raw RFU over the baseline region actually used for this curve (see
+   * `CurveBaselineResult.baselineRfu`) — helps explain a surprising threshold/Cq when the
+   * baseline region isn't what was expected. */
+  baselineRfu: number;
   threshold: number;
   noise: number;
   amplified: boolean;
@@ -206,6 +210,7 @@ export function AnalysisView({ zpcr, settings, onChange }: Props) {
       col: number;
       wellLabel: string;
       sample: string;
+      baselineRfu: number;
       cycles: number[];
       correctedValues: number[];
       noise: number;
@@ -231,6 +236,7 @@ export function AnalysisView({ zpcr, settings, onChange }: Props) {
           col: w.col,
           wellLabel: w.label,
           sample: w.sample ?? "",
+          baselineRfu: baseline.baselineRfu,
           cycles: curve.cycles,
           correctedValues: baseline.correctedValues,
           noise: baseline.noise,
@@ -271,6 +277,7 @@ export function AnalysisView({ zpcr, settings, onChange }: Props) {
           col: p.col,
           wellLabel: p.wellLabel,
           sample: p.sample,
+          baselineRfu: p.baselineRfu,
           threshold,
           noise: p.noise,
           amplified: p.amplified,
@@ -299,6 +306,7 @@ export function AnalysisView({ zpcr, settings, onChange }: Props) {
       "fluor",
       "target",
       "channel",
+      "baselineRfu",
       "threshold",
       "cq",
       "deltaRfu",
@@ -311,6 +319,7 @@ export function AnalysisView({ zpcr, settings, onChange }: Props) {
         r.fluor,
         r.target,
         channelLabel(r.channel),
+        r.baselineRfu.toFixed(1),
         r.threshold.toFixed(1),
         r.cq != null ? r.cq.toFixed(3) : "",
         r.deltaRfu.toFixed(1),
@@ -447,6 +456,7 @@ export function AnalysisView({ zpcr, settings, onChange }: Props) {
                 <th>Sample</th>
                 <th>Fluor</th>
                 {usingTargets && <th>Target</th>}
+                <th>Baseline RFU</th>
                 <th>Threshold</th>
                 <th>Cq</th>
                 <th>ΔRFU</th>
@@ -462,6 +472,7 @@ export function AnalysisView({ zpcr, settings, onChange }: Props) {
                   <td>{r.sample || "—"}</td>
                   <td>{r.fluor}</td>
                   {usingTargets && <td>{r.target}</td>}
+                  <td>{r.baselineRfu.toFixed(1)}</td>
                   <td>{algorithm === "Threshold" ? r.threshold.toFixed(1) : "—"}</td>
                   <td>{r.cq != null ? r.cq.toFixed(2) : "—"}</td>
                   <td>{r.deltaRfu.toFixed(1)}</td>

@@ -43,6 +43,10 @@ export interface PlotCurve {
   /** Cq (`threshold.md` §6), computed per the Analysis view's settings — `null`/undefined when
    * unamplified or not computable. Drives the chart's Cq marker and its tooltip row. */
   cq?: number | null;
+  /** Diagnostic: mean raw RFU over the baseline region actually used for this curve (see
+   * `CurveBaselineResult.baselineRfu`) — surfaced in the tooltip so a surprising Cq can be
+   * traced back to what baseline region/level was really applied. */
+  baselineRfu?: number | null;
 }
 
 /** Values <= 0 are undefined on a log axis; render them as gaps. */
@@ -163,6 +167,8 @@ export interface SeriesMeta {
   adjust: Adjust[];
   /** See {@link PlotCurve.cq}. */
   cq?: number | null;
+  /** See {@link PlotCurve.baselineRfu}. */
+  baselineRfu?: number | null;
 }
 
 /** Min/max envelope for a single isolated well (drawn as a shaded band). */
@@ -191,6 +197,8 @@ export interface TooltipData {
   top: number;
   /** See {@link PlotCurve.cq}. */
   cq?: number | null;
+  /** See {@link PlotCurve.baselineRfu}. */
+  baselineRfu?: number | null;
 }
 
 export interface BuildChartConfig {
@@ -279,6 +287,7 @@ export function buildChart(cfg: BuildChartConfig): {
       max: curve.max,
       adjust,
       cq: curve.cq,
+      baselineRfu: curve.baselineRfu,
     });
     series.push({
       label: `${curve.wellLabel} · ${curve.dyeLabel}`,
@@ -745,6 +754,7 @@ function overlayPlugin(
                 left,
                 top,
                 cq: m.cq,
+                baselineRfu: m.baselineRfu,
               }
             : null,
         );

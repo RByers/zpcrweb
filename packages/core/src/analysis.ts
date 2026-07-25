@@ -41,6 +41,14 @@ export interface CurveBaselineResult {
    * already centers the region near zero — computed explicitly so it stays correct for `"Raw"`
    * mode too, which does no subtraction). */
   deltaRfu: number;
+  /** Mean of the *raw* (uncorrected) `values` over `baselineRegion` — the actual RFU level a
+   * curve's baseline was anchored to. A diagnostic: two settings that *look* like they should
+   * agree (e.g. the same displayed cycle range, once as an auto-detected preview and once as an
+   * explicit manual override) can still land on a very different `baselineRegion` — auto-detection
+   * runs per curve and can span most or all of a flat curve's cycles, while a manual override is
+   * one fixed region applied to every curve — so `baselineRfu` lets a user confirm what was
+   * actually used, rather than inferring it from a possibly-surprising Cq. */
+  baselineRfu: number;
 }
 
 /**
@@ -72,6 +80,7 @@ export function baselineCorrectCurve(
   const baselineMean =
     idx.length > 0 ? idx.reduce((s, i) => s + correctedValues[i]!, 0) / idx.length : 0;
   const deltaRfu = (correctedValues.at(-1) ?? 0) - baselineMean;
+  const baselineRfu = idx.length > 0 ? idx.reduce((s, i) => s + values[i]!, 0) / idx.length : 0;
 
-  return { baselineRegion: region, correctedValues, noise, amplified, deltaRfu };
+  return { baselineRegion: region, correctedValues, noise, amplified, deltaRfu, baselineRfu };
 }

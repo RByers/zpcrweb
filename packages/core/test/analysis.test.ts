@@ -64,6 +64,16 @@ describe("baselineCorrectCurve", () => {
     // Endpoint (5000) minus the mean of the flat baseline region (100).
     expect(result.deltaRfu).toBeCloseTo(4900, 6);
   });
+
+  it("reports baselineRfu as the mean raw value over the baseline region, unaffected by mode", () => {
+    const raw = baselineCorrectCurve(cycles, values, "Raw", { beginCycle: 1, endCycle: 9 });
+    const subtracted = baselineCorrectCurve(cycles, values, "RawBaseLineSubtracted", {
+      beginCycle: 1,
+      endCycle: 9,
+    });
+    expect(raw.baselineRfu).toBeCloseTo(100, 6);
+    expect(subtracted.baselineRfu).toBeCloseTo(100, 6);
+  });
 });
 
 describe("darkCurves", () => {
