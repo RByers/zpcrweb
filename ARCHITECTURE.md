@@ -3,6 +3,15 @@
 Key design points for the zpcrweb project. For the `.Plateread` binary format itself, see
 [`plateread.md`](./plateread.md).
 
+## Format documentation
+
+Every reverse-engineered Bio-Rad file format (or sub-format, like the shared ICFF container)
+gets its own top-level `*.md` doc — [`plateread.md`](./plateread.md), [`pltd.md`](./pltd.md),
+[`pcrd.md`](./pcrd.md), [`icff.md`](./icff.md). Each doc is self-contained (layout, fields,
+status) and ends with a pointer to the `packages/core/src` module that implements it, so the
+doc is always the entry point for understanding *and* changing a decoder. See
+[`CLAUDE.md`](./CLAUDE.md) for the full doc ↔ code table.
+
 ## Goals
 
 - One parsing library, usable **unchanged** from both a Node app and a browser web app.
