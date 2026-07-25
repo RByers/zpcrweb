@@ -13,7 +13,7 @@ interface Tile {
 export function OverviewView({ zpcr }: { zpcr: Zpcr }) {
   const m = zpcr.metadata;
   const reads = zpcr.reads;
-  const protocol = safeText(zpcr, "ProtocolRunDefinition.txt");
+  const protocol = zpcr.protocolText || null;
   const protocolName = safeText(zpcr, "ProtocolName.txt");
   const lastTemp = reads.at(-1)?.blockTempC;
 

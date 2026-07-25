@@ -10,10 +10,12 @@
  * equivalent.
  *
  * {@link parsePcrd} decodes it into a {@link Zpcr} — the same public shape `parseZpcr`
- * produces — so callers and UI code work with either format interchangeably. Subtrees this
- * module does not specifically decode (`dataAnalysisParameters`, `calibrationCollection`,
- * `PersistedData`, …) are still reachable, verbatim, through the returned `archive`, keyed
- * by a synthetic `<name>.xml` entry — see {@link buildVirtualArchive}.
+ * produces — so callers and UI code work with either format interchangeably. A `.pcrd` has no
+ * inner files, so the returned `Zpcr.archive` is empty; subtrees this module does not
+ * specifically decode (`dataAnalysisParameters`, `calibrationCollection`, `PersistedData`, …)
+ * are still visible, verbatim, in the full raw document returned as {@link Pcrd.xml} — the web
+ * app's `.pcrd` raw view renders that as a real, navigable XML tree rather than pretending
+ * these subtrees are files.
  */
 
 import type {
@@ -30,8 +32,6 @@ import type {
 } from "./types.js";
 import type { PlateDefinition } from "./pltd.js";
 import { parsePlatesetup2 } from "./pltd.js";
-import type { ProtocolDocument } from "./prcl.js";
-import { parseProtocol2 } from "./prcl.js";
 import { zipCryptoDecrypt } from "./zipcrypto.js";
 import { inflateRaw } from "./inflate.js";
 import { parseSingleEntryZip } from "./zipsingle.js";
@@ -54,7 +54,6 @@ import {
   toTemperatureCurves,
 } from "./pivot.js";
 import { compareRefToCal, parseFactoryRefRowCal } from "./refcal.js";
-import { hexDump } from "./hex.js";
 
 const textDecoder = new TextDecoder("utf-8");
 
@@ -130,12 +129,6 @@ function parsePAr(text: string): WellReading[] {
   return records;
 }
 
-/** Synthetic filename matching the `.zpcr` naming, so existing `isPlateReadName`-style UI
- * logic (grouping, decoded-view routing) applies unchanged to a `.pcrd`'s virtual entries. */
-function pcrdReadFileName(index: number): string {
-  return `Read${String(index).padStart(5, "0")}.Plateread`;
-}
-
 /**
  * Decode one `<plateRead>` element's XML into a {@link PlateRead}, matching the shape
  * `decodePlateRead` produces from the binary `.Plateread` file for the same cycle — so both
@@ -174,14 +167,18 @@ function decodePcrdPlateRead(el: XmlElement, index: number): PlateRead {
     }),
   );
 
-  const fileName = pcrdReadFileName(index);
+  const cycle = num("Cycle");
+  // Not a real file — there's no `.Plateread` inside a `.pcrd`. `PlateRead.fileName` still
+  // needs some stable, human-readable value; this is honest about not being one, unlike a
+  // fabricated `.Plateread` name would be.
+  const fileName = `plateRead[cycle ${cycle}]`;
   const timestampRaw = scalar("Time");
   const timestamp =
     timestampRaw && !Number.isNaN(Date.parse(timestampRaw)) ? timestampRaw : undefined;
 
   return {
     index,
-    cycle: num("Cycle"),
+    cycle,
     step: num("Step"),
     channelMask: num("ChMask"),
     fileName,
@@ -200,120 +197,27 @@ function decodePcrdPlateRead(el: XmlElement, index: number): PlateRead {
 }
 
 // ---------------------------------------------------------------------------
-// Virtual archive — the document's subtrees exposed as pseudo files, with names chosen to
-// match their `.zpcr` equivalents so the existing decoded-view routing (`.Plateread`,
-// `RunInfo.xml`, `ProtocolRunDefinition.txt`, `runlog.xml`) applies with zero UI changes.
-// Everything else falls back to a generic `<name>.xml` entry — raw exploration for subtrees
-// with no dedicated decoder yet (`dataAnalysisParameters`, `calibrationCollection`, …).
+// Empty archive — a `.pcrd` has no inner files. Kept as a real `ArchiveAccess` (rather than
+// making `Zpcr.archive` optional, which would widen the shared interface) so a `.pcrd`-derived
+// `Zpcr` still satisfies the same public shape a `.zpcr` does; every accessor just reports
+// there's nothing here. See the module doc comment for where the real document content is.
 // ---------------------------------------------------------------------------
 
-/** Wrap the document's flat `<log …/>` entries into the `<Log>` element shape `runlog.xml`
- * uses (child elements, not attributes) so the app's existing runlog viewer applies as-is. */
-function synthesizeRunLog(root: XmlElement[]): string {
-  const logs = root.filter((e) => e.name.toLowerCase() === "log");
-  const attrToChild: [string, string][] = [
-    ["lgNm", "LgNm"],
-    ["level", "Level"],
-    ["ts", "TS"],
-    ["assemblyName", "ANm"],
-    ["sev", "Sev"],
-    ["data", "Data"],
-    ["tag", "Tag"],
-    ["msgNm", "MsgNm"],
-    ["msg", "Msg"],
-    ["stack", "Stack"],
-  ];
-  const esc = (s: string) =>
-    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  const body = logs
-    .map((log) => {
-      const children = attrToChild
-        .map(([attr, tag]) => {
-          const v = log.attrs[attr];
-          return v ? `<${tag}>${esc(v)}</${tag}>` : `<${tag} />`;
-        })
-        .join("");
-      return `<Log>${children}</Log>`;
-    })
-    .join("");
-  return `<BioRadDiagnosticLogFile></BioRadDiagnosticLogFile>${body}`;
-}
+const EMPTY_ARCHIVE_MESSAGE =
+  ".pcrd has no real archive entries — see Pcrd.xml / the app's .pcrd document view";
 
-interface VirtualEntry {
-  name: string;
-  text: string;
-}
-
-function buildVirtualArchive(
-  root: XmlElement[],
-  reads: PlateRead[],
-  readFragments: string[],
-  plateSetup2: XmlElement | undefined,
-  protocol2: XmlElement | undefined,
-  runInfoXml: string | undefined,
-): ArchiveAccess {
-  const entries: VirtualEntry[] = [];
-  const byLower = new Map<string, XmlElement>();
-  for (const el of root) byLower.set(el.name.toLowerCase(), el);
-
-  const runDefinition = protocol2?.attrs.runDefinition;
-  if (runDefinition) {
-    entries.push({ name: "ProtocolRunDefinition.txt", text: unescapeXml(runDefinition) });
-  }
-  if (runInfoXml) entries.push({ name: "RunInfo.xml", text: runInfoXml });
-  entries.push({ name: "runlog.xml", text: synthesizeRunLog(root) });
-  if (plateSetup2) entries.push({ name: "plateSetup2.xml", text: plateSetup2.inner });
-
-  reads.forEach((r, i) => {
-    entries.push({ name: r.fileName, text: readFragments[i] ?? "" });
-  });
-
-  // Everything else at the root, verbatim, for raw exploration — no dedicated decoder yet.
-  const SKIP = new Set([
-    "identifier",
-    "plateSetup2".toLowerCase(),
-    "protocol2",
-    "rundata",
-    "protocolruninfo",
-    "log",
-  ]);
-  for (const el of root) {
-    if (SKIP.has(el.name.toLowerCase())) continue;
-    entries.push({ name: `${el.name}.xml`, text: el.inner });
-  }
-  // `runData`'s own children not folded into plate reads: the calibration collection.
-  const runData = byLower.get("rundata");
-  if (runData) {
-    const cal = findElement(runData.inner, "calibrationCollection");
-    if (cal) entries.push({ name: "calibrationCollection.xml", text: cal.inner });
-  }
-  if (protocol2) entries.push({ name: "protocol2.xml", text: protocol2.inner });
-
-  const byName = new Map(entries.map((e) => [e.name, e.text]));
-  const bytesCache = new Map<string, Uint8Array>();
-  const encoder = new TextEncoder();
-
-  const get = (name: string): Uint8Array => {
-    let cached = bytesCache.get(name);
-    if (cached) return cached;
-    const text = byName.get(name);
-    if (text === undefined) throw new Error(`No such entry in .pcrd document: ${name}`);
-    cached = encoder.encode(text);
-    bytesCache.set(name, cached);
-    return cached;
-  };
-
-  return {
-    entries: entries.map((e) => e.name),
-    bytes: get,
-    text: (name) => {
-      const t = byName.get(name);
-      if (t === undefined) throw new Error(`No such entry in .pcrd document: ${name}`);
-      return t;
-    },
-    hexDump: (name, options) => hexDump(get(name), options),
-  };
-}
+const EMPTY_ARCHIVE: ArchiveAccess = {
+  entries: [],
+  bytes: () => {
+    throw new Error(EMPTY_ARCHIVE_MESSAGE);
+  },
+  text: () => {
+    throw new Error(EMPTY_ARCHIVE_MESSAGE);
+  },
+  hexDump: () => {
+    throw new Error(EMPTY_ARCHIVE_MESSAGE);
+  },
+};
 
 // ---------------------------------------------------------------------------
 // Public entry point
@@ -393,12 +297,10 @@ function buildZpcr(root: XmlElement[]): Zpcr {
   const plateReadVector = runData ? findElement(runData.inner, "plateReadDataVector") : undefined;
   const plateReadWrappers = plateReadVector ? splitElements(plateReadVector.inner) : [];
 
-  const readFragments: string[] = [];
   const reads: PlateRead[] = plateReadWrappers.map((wrapper, i) => {
     // wrapper is <plateRead>…</plateRead>; its one child is <PlateRead V="1">…</PlateRead>.
     const inner = splitElements(wrapper.inner)[0];
     const index = i + 1;
-    readFragments.push(wrapper.inner);
     return inner
       ? decodePcrdPlateRead(inner, index)
       : {
@@ -406,7 +308,7 @@ function buildZpcr(root: XmlElement[]): Zpcr {
           cycle: 0,
           step: 0,
           channelMask: 0,
-          fileName: pcrdReadFileName(index),
+          fileName: `plateRead[${index}]`,
           temps: [],
           wells: new Array(CHANNELS * WELLS_PER_CHANNEL).fill({ mean: NaN, std: NaN, min: NaN, max: NaN }) as WellReading[],
           dark: new Array(CHANNELS).fill({ mean: NaN, std: NaN, min: NaN, max: NaN }) as WellReading[],
@@ -418,24 +320,11 @@ function buildZpcr(root: XmlElement[]): Zpcr {
     ? parsePlatesetup2(`<plateSetup2${attrsToString(plateSetup2.attrs)}>${plateSetup2.inner}</plateSetup2>`)
     : undefined;
 
-  const protocol: ProtocolDocument | undefined = protocol2
-    ? parseProtocol2(`<protocol2${attrsToString(protocol2.attrs)}>${protocol2.inner}</protocol2>`)
-    : undefined;
-
-  const archive = buildVirtualArchive(
-    root,
-    reads,
-    readFragments,
-    plateSetup2,
-    protocol2,
-    runInfoXml,
-  );
-
   const plates = (): PltdEntry[] =>
     plateSetup2 && plate
       ? [
           {
-            name: "plateSetup2.xml",
+            name: "plateSetup2",
             pltd: {
               container: {
                 innerName: "plateSetup2 (embedded in .pcrd)",
@@ -446,48 +335,34 @@ function buildZpcr(root: XmlElement[]): Zpcr {
                 uncompressedSize: plateSetup2.inner.length,
               },
               plate,
-              xml: archive.text("plateSetup2.xml"),
+              xml: plateSetup2.inner,
             },
           },
         ]
       : [];
 
-  const protocols = (): PrclEntry[] =>
-    protocol2 && protocol
-      ? [
-          {
-            name: "protocol2.xml",
-            prcl: {
-              container: {
-                format: "zip",
-                innerName: "protocol2 (embedded in .pcrd)",
-                compressionMethod: 8,
-                encrypted: false,
-                crc32: 0,
-                compressedSize: 0,
-                uncompressedSize: protocol2.inner.length,
-              },
-              protocol,
-              xml: archive.text("protocol2.xml"),
-            },
-          },
-        ]
-      : [];
+  const runDefinition = protocol2?.attrs.runDefinition;
+  const protocolText = runDefinition ? unescapeXml(runDefinition) : "";
 
   return {
     metadata,
     reads,
-    archive,
+    archive: EMPTY_ARCHIVE,
+    protocolText,
     curves: (options?: CurveOptions) => toCurves(reads, options),
     darkCurves: (step?: number) => toDarkCurves(reads, step),
     temperatureCurves: (step?: number) => toTemperatureCurves(reads, step),
     steps: () => toSteps(reads),
     channels: () => toChannels(reads),
     plates,
-    protocols,
+    // A .pcrd's protocol2 subtree is exposed only via protocolText above (and, in the app,
+    // the .pcrd document view's raw XML) -- not typed-decoded into a PrclEntry the way a
+    // .zpcr's real .prcl archive entries are, since there's no separate password-gated file
+    // here to model.
+    protocols: (): PrclEntry[] => [],
     // A .pcrd's calibrationCollection subtree covers the same ground as .Dcal files (see
-    // pcrd.md §3.6) but in an unrelated XML schema, not yet decoded into DcalEntry -- it's
-    // still reachable verbatim via archive.text("calibrationCollection.xml") for now.
+    // pcrd.md §3.6) but in an unrelated XML schema, not yet decoded into DcalEntry -- browsable
+    // as raw XML in the app's .pcrd document view, not yet a typed decoder.
     calibrations: (): DcalEntry[] => [],
     factoryRefCal: () =>
       parseFactoryRefRowCal(

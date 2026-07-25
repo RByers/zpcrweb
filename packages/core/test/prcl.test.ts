@@ -264,25 +264,27 @@ describe("isPrclName", () => {
   });
 });
 
-describe("parsePcrd — embedded protocol2 via protocols()", () => {
-  it("exposes the .pcrd's protocol2 subtree with no separate password", () => {
-    // Reuses the same synthetic-ZIP builder as pcrd-synthetic.test.ts, inlined here to avoid
-    // a cross-file dependency for a one-off check that protocols() is wired up.
-    const xml =
-      `﻿<?xml version="1.0" encoding="utf-8"?><experimentalData2 exType="User">` +
-      `<identifier identityKey="synthetic.pcrd" /><header currentVersion="06.10" />` +
-      `${PROTOCOL2_XML.replace(/^<\?xml[^>]*>\s*/, "")}` +
-      `<runData channelCount="6" wellsCount="96"><plateReadDataVector /></runData>` +
-      `<protocolRunInfo><RunInfo><KeyValuePairs><Key>Identifier</Key><Value>T</Value></KeyValuePairs></RunInfo></protocolRunInfo>` +
-      `</experimentalData2>`;
-    const pw = "synthetic-pcrd-password";
-    const bytes = buildSyntheticPrcl(new TextEncoder().encode(xml), pw);
+describe("parsePcrd — protocol2 exposure", () => {
+  // Reuses the same synthetic-ZIP builder as pcrd-synthetic.test.ts, inlined here to avoid a
+  // cross-file dependency for a one-off check of how a .pcrd surfaces its embedded protocol2.
+  const xml =
+    `﻿<?xml version="1.0" encoding="utf-8"?><experimentalData2 exType="User">` +
+    `<identifier identityKey="synthetic.pcrd" /><header currentVersion="06.10" />` +
+    `${PROTOCOL2_XML.replace(/^<\?xml[^>]*>\s*/, "")}` +
+    `<runData channelCount="6" wellsCount="96"><plateReadDataVector /></runData>` +
+    `<protocolRunInfo><RunInfo><KeyValuePairs><Key>Identifier</Key><Value>T</Value></KeyValuePairs></RunInfo></protocolRunInfo>` +
+    `</experimentalData2>`;
+  const pw = "synthetic-pcrd-password";
+  const bytes = buildSyntheticPrcl(new TextEncoder().encode(xml), pw);
+
+  it("exposes the runDefinition text via protocolText, with no separate password", () => {
     const pcrd = parsePcrd(bytes, { password: pw });
     expect(pcrd.error).toBeUndefined();
-    const protocols = pcrd.zpcr!.protocols();
-    expect(protocols).toHaveLength(1);
-    expect(protocols[0]!.name).toBe("protocol2.xml");
-    expect(protocols[0]!.prcl.protocol!.steps).toHaveLength(4);
-    expect(protocols[0]!.prcl.needsPassword).toBeUndefined();
+    expect(pcrd.zpcr!.protocolText).toContain("PLATEREAD #h3F");
+  });
+
+  it("does not typed-decode a PrclEntry for the embedded protocol2 (no separate file)", () => {
+    const pcrd = parsePcrd(bytes, { password: pw });
+    expect(pcrd.zpcr!.protocols()).toEqual([]);
   });
 });

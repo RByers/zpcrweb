@@ -241,8 +241,20 @@ export interface Zpcr {
   metadata: RunMetadata;
   /** All plate reads, ordered by cycle. */
   reads: PlateRead[];
-  /** Low-level access to every file in the archive. */
+  /**
+   * Low-level access to every file in the archive. A `.zpcr` is a real multi-file ZIP, so this
+   * lists real files. A `.pcrd` is a single XML document with no inner files — for a
+   * `.pcrd`-derived `Zpcr`, `entries` is empty and the accessors throw; browse the real
+   * document structure via the web app's `.pcrd` raw view instead.
+   */
   archive: ArchiveAccess;
+  /**
+   * The thermal protocol's one-line program, e.g.
+   * `METHOD CALC;HOTLID 105,30;VOLUME 20;TEMP 95.0,60;...;END;`. Sourced from the real
+   * `ProtocolRunDefinition.txt` file (`.zpcr`) or the `protocol2` element's `runDefinition`
+   * attribute (`.pcrd`) — the same real data either way. Empty string if unavailable.
+   */
+  protocolText: string;
   /** Pivot the run-centric reads into well-centric amplification curves. */
   curves(options?: CurveOptions): WellCurve[];
   /** The per-channel dark (LED-off background) reading across cycles. */

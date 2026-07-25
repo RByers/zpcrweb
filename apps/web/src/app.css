@@ -845,6 +845,24 @@
 .xml-punct {
   color: var(--ink-muted);
 }
+/* Collapsible XML tree nodes (lib/xmlTree.tsx) */
+.decoded__xml details {
+  margin: 0;
+}
+.decoded__xml summary {
+  cursor: pointer;
+  list-style-position: outside;
+}
+.decoded__xml summary::marker {
+  color: var(--ink-muted);
+}
+.decoded__xml summary:hover {
+  background: var(--raised);
+}
+.xml-count {
+  color: var(--ink-muted);
+  font-style: italic;
+}
 
 /* ---- Runlog table ------------------------------------------------------- */
 .runlog {

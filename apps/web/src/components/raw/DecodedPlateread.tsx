@@ -17,10 +17,15 @@ export function DecodedPlateread({ zpcr, read }: { zpcr: Zpcr; read: PlateRead }
   const [channel, setChannel] = useState(2);
   const [stat, setStat] = useState<Stat>("mean");
 
-  // Archive entries for a `.pcrd`-origin read are a synthesized XML fragment, not the binary
-  // `.Plateread` layout — decodePlateReadDetail() returns no fields for those (its ICFF
-  // footer scan finds nothing), so the binary-only sections below are skipped in that case.
-  const bytes = useMemo(() => zpcr.archive.bytes(read.fileName), [zpcr, read.fileName]);
+  // A `.pcrd`-origin read has no real archive entry at all (a `.pcrd` has no inner files —
+  // see Zpcr.archive's doc comment), so there's nothing to decode structurally; guard the
+  // lookup rather than assuming `read.fileName` names a real entry. decodePlateReadDetail()
+  // on empty bytes finds no ICFF footer and returns no fields, so the binary-only sections
+  // below are skipped in that case.
+  const bytes = useMemo(
+    () => (zpcr.archive.entries.includes(read.fileName) ? zpcr.archive.bytes(read.fileName) : new Uint8Array(0)),
+    [zpcr, read.fileName],
+  );
   const detail = useMemo(() => decodePlateReadDetail(bytes), [bytes]);
   const isBinary = detail.fields.length > 0;
   const channelCount = read.dark.length;

@@ -8,8 +8,8 @@ import {
 } from "@zpcrweb/core";
 import { usePltdPassword } from "../../state/pltdPassword";
 import { PasswordPrompt } from "../PasswordPrompt";
-import { ProtocolTextLines } from "./ProtocolText";
-import { formatXml } from "../../lib/xmlFormat";
+import { ProtocolDecoded } from "./DecodedView";
+import { XmlTreeFromString } from "../../lib/xmlTree";
 
 /** Decode a `.prcl` with the client-stored password (shared with `.pltd`/`.pcrd`, see
  * `pltd.md` §2), exposing the setter for the prompt. */
@@ -46,10 +46,7 @@ function UndecodedNote({ prcl }: { prcl: Prcl }) {
   );
 }
 
-/**
- * `.prcl` archive entry → decoded protocol, handling the password prompt. See
- * {@link ProtocolDetail} for the actual rendering (shared with the `.pcrd`-embedded protocol).
- */
+/** `.prcl` archive entry → decoded protocol, handling the password prompt. */
 export function DecodedProtocol({ zpcr, name }: { zpcr: Zpcr; name: string }) {
   const { prcl, setPassword } = usePrclEntry(zpcr, name);
 
@@ -87,13 +84,12 @@ function stepSummary(step: ProtocolStep): string {
 }
 
 /**
- * The decoded protocol for any {@link ProtocolDocument}, regardless of source: root settings
- * (lid, volume, real-time) plus the ordered step table. Used for both a `.zpcr`'s embedded
- * `.prcl` entries ({@link DecodedProtocol}, above — needs a password) and a `.pcrd`'s
- * already-decrypted `protocol2` subtree (`EmbeddedProtocol` in `DecodedView.tsx` — no password
- * needed).
+ * The decoded protocol for a {@link ProtocolDocument}: root settings (lid, volume, real-time)
+ * plus the ordered step table when one was parsed from the XML `protocol2` payload, or the
+ * flat `;`-separated `runDefinition` text (via the shared {@link ProtocolDecoded}) for the
+ * plaintext variant (`prcl.md` §1.1), which carries no XML step list.
  */
-export function ProtocolDetail({
+function ProtocolDetail({
   protocol,
   sourceHint,
 }: {
@@ -156,7 +152,7 @@ export function ProtocolDetail({
             No structured step list (plaintext protocol, prcl.md §1.1) — parsed from the text
             grammar below.
           </span>
-          <ProtocolTextLines text={protocol.runDefinition} />
+          <ProtocolDecoded text={protocol.runDefinition} />
         </section>
       )}
     </div>
@@ -164,13 +160,12 @@ export function ProtocolDetail({
 }
 
 /**
- * `.prcl` "Text" mode: the decrypted `<protocol2>` XML pretty-printed for the ZIP variant, or
- * the raw `runDefinition` line for the plaintext variant (`prcl.md` §1.1), which has no XML.
+ * `.prcl` "Text" mode: the decrypted `<protocol2>` XML for the ZIP variant, or the raw
+ * `runDefinition` line for the plaintext variant (`prcl.md` §1.1), which has no XML.
  */
 export function ProtocolXml({ zpcr, name }: { zpcr: Zpcr; name: string }) {
   const { prcl, setPassword } = usePrclEntry(zpcr, name);
   const xml = prcl.xml ?? "";
-  const formatted = useMemo(() => (xml ? formatXml(xml) : null), [xml]);
   if (prcl.needsPassword || prcl.error) {
     return (
       <div className="decoded">
@@ -182,13 +177,12 @@ export function ProtocolXml({ zpcr, name }: { zpcr: Zpcr; name: string }) {
   if (prcl.container.format === "text") {
     return (
       <div className="decoded">
-        <ProtocolTextLines text={prcl.protocol?.runDefinition ?? ""} />
+        <ProtocolDecoded text={prcl.protocol?.runDefinition ?? ""} />
       </div>
     );
   }
   if (!xml) return <div className="decoded__na mono">No XML for {name}.</div>;
-  if (formatted == null) return <pre className="decoded__xml mono">{xml}</pre>;
-  return <div className="decoded__xml mono">{formatted}</div>;
+  return <XmlTreeFromString xml={xml} />;
 }
 
 function Pair({ k, v }: { k: string; v: string }) {

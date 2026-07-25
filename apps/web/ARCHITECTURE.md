@@ -2,39 +2,46 @@
 
 The web app (`@zpcrweb/web`) is a browser UI over [`@zpcrweb/core`](../../packages/core). It
 loads one or more `.zpcr` and/or `.pcrd` files, switches between them, and explores each
-through three views: Overview, Curves, and Raw files.
+through three views: Overview, Curves, and Raw.
 
-## Two formats, one UI
+## Two formats, mostly one UI
 
 `@zpcrweb/core`'s `parseZpcr`/`parsePcrd` both produce the same `Zpcr` shape (see the root
-[`ARCHITECTURE.md`](../../ARCHITECTURE.md#two-input-formats-one-output-shape)), so almost none
-of the app is format-aware:
+[`ARCHITECTURE.md`](../../ARCHITECTURE.md#two-input-formats-one-output-shape)), so most of the
+app is format-agnostic:
 
-- `OverviewView`, `CurvesView`, and `RawFilesView` all take a plain `Zpcr` — they don't know or
-  care whether it came from a `.zpcr` archive or a decoded `.pcrd` document.
-- The Raw files view's per-file-type routing (`decodedKind` in `DecodedView.tsx`) matches
-  `.pcrd`'s virtual archive entries by the *same names* a `.zpcr` uses (`RunInfo.xml`,
-  `ProtocolRunDefinition.txt`, `runlog.xml`, `Read00001.Plateread`, …), so those decoders need
-  no format branching either. The one addition is `plate2` — a `.pcrd`'s `plateSetup2.xml`
-  entry is already decrypted (the whole document was), so it skips the password flow a real
-  `.pltd` entry needs and renders straight through `EmbeddedPlate` → the shared `PlateDetail`
-  component (`components/raw/DecodedPlate.tsx`).
+- `OverviewView` and `CurvesView` take a plain `Zpcr` — they don't know or care whether it came
+  from a `.zpcr` archive or a decoded `.pcrd` document. `OverviewView`'s protocol tile reads
+  `zpcr.protocolText` (a real field on `Zpcr`, not a by-name file lookup), so it works
+  identically either way.
 - `DecodedPlateread` (the `.Plateread` typed view) shows the WELLDATA/DARKDATA tables from the
   already-decoded `PlateRead` object either way; it only conditionally shows the binary-only
-  "descriptor dictionary" section (`decodePlateReadDetail` finds nothing for a `.pcrd`-origin
-  read's synthesized XML fragment, which is the signal used to hide that section).
+  "descriptor dictionary" section (`decodePlateReadDetail` finds nothing when there's no
+  matching binary archive entry — always the case for a `.pcrd`-origin read, since a `.pcrd`
+  has no archive entries at all — which is the signal used to hide that section).
+- `RunInfoTable` and `ProtocolDecoded` (`components/raw/DecodedView.tsx`) take plain
+  `text: string` rather than `(zpcr, name)`, so both `RawFilesView` (`.zpcr`'s real files, by
+  name) and `PcrdRawView` (a `.pcrd`'s real XML nodes, by direct reference) can feed them
+  without either pretending to be the other.
+
+**The Raw view is the one place formats genuinely diverge**, because a `.zpcr` is a real
+multi-file archive and a `.pcrd` is a single XML document with no inner files — see "Raw
+views" below. `App.tsx` picks `RawFilesView` vs `PcrdRawView` based on the active file's
+`kind`.
 
 ## The `.pcrd` password gate
 
 Unlike a `.zpcr`'s embedded `.pltd` (locked per-file, browsable independently), a whole `.pcrd`
-document is encrypted — nothing (metadata, reads, archive) exists until the password succeeds.
+document is encrypted — nothing (metadata, reads) exists until the password succeeds.
 `useZpcrStore` reflects this: `LoadedFile` holds only raw `bytes` + `kind`; the actual `Zpcr` is
 derived reactively per file (`runs: Map<id, RunResult>`, recomputed whenever the shared
 password changes via `usePltdPassword` — see `state/pltdPassword.ts`, which despite the name
 now covers `.pltd`/`.prcl`/`.pcrd` alike). `App.tsx` renders the shared `PasswordPrompt`
 (`components/PasswordPrompt.tsx`) in place of the view area whenever the active file's `RunResult`
 has `needsPassword`/`error` instead of a `zpcr`; `FileBar` shows a lock/warning glyph for
-locked/errored files in the list without blocking selection of other files.
+locked/errored files in the list without blocking selection of other files. `RunResult` also
+carries `documentXml` for a successfully-decoded `.pcrd` — the full raw document
+(`Pcrd.xml`), which `PcrdRawView` renders (see "Raw views" below).
 
 ## Stack
 
@@ -79,31 +86,82 @@ exposed as a clear affordance on each file chip.
 ## Views
 
 - **Overview** — run metadata as stat tiles + the thermal protocol text, read from
-  `zpcr.metadata` and `zpcr.archive.text()`.
+  `zpcr.metadata` and `zpcr.protocolText`.
 - **Curves** — the centerpiece (see below).
-- **Raw files** — groups `zpcr.archive.entries` (Metadata / Plate reads / Calibration /
-  Other). Each file opens in its **best default mode** (`RawFilesView.defaultMode`) with
-  Decoded / Text / Hex always switchable: a typed **Decoded** view where one exists, else
-  **Text** for textual files, else **Hex** (`archive.hexDump`, paginated). See below.
+- **Raw** — `RawFilesView` for `.zpcr`, `PcrdRawView` for `.pcrd` (see "Raw views" below).
 
 ### Decoded views (`components/raw/DecodedView.tsx`)
 
-A small router keyed on the file name (`decodedKind`):
+`RawFilesView`'s small router, keyed on the `.zpcr` archive entry's file name (`decodedKind`):
 
 - **`.Plateread`** → header (cycle, block temp, timestamp) + the DARKDATA table + the
   WELLDATA fluorescence table as a per-channel plate grid with a stat selector
   (mean/std/min/max). Reads straight from the decoded `PlateRead` (found by `fileName`).
-- **`RunInfo.xml`** → a two-column key/value table (it is just a flat `KeyValuePairs` blob;
-  parsed with `parseRunInfoRaw`).
-- **`ProtocolRunDefinition.txt`** → one step per line (split on `;`), numbered.
-- **other `.xml`** (e.g. `runlog.xml`) → pretty-printed, syntax-highlighted XML
-  (`lib/xmlFormat.tsx`). runlog.xml is not single-rooted (a BOM, an empty header element,
-  then many sibling `<Log>` records with no wrapper), so the formatter strips the BOM/XML
-  declaration, wraps the body in a synthetic root for `DOMParser`, and renders that root's
-  children — degrading to raw text on a parse error.
+- **`RunInfo.xml`** → `RunInfoTable`, a two-column key/value table (it is just a flat
+  `KeyValuePairs` blob; parsed with `parseRunInfoRaw`). Takes plain `text`, so `PcrdRawView`
+  reuses it directly for a `.pcrd`'s `protocolRunInfo/RunInfo` subtree (same schema).
+- **`ProtocolRunDefinition.txt`** → `ProtocolDecoded`, one step per line (split on `;`),
+  numbered. Also takes plain `text` and is reused by `PcrdRawView` for `zpcr.protocolText`.
+- **other `.xml`** (e.g. `runlog.xml`) → the shared collapsible `XmlTreeFromString`
+  (`lib/xmlTree.tsx` — see "Raw views" below).
 
-XML formatting is a *presentation* concern (not `.zpcr` decoding), so it lives in the app,
-not the library.
+XML rendering is a *presentation* concern (not `.zpcr`/`.pcrd` decoding), so it lives in the
+app, not the library.
+
+## Raw views
+
+A `.zpcr` is a real multi-file archive; a `.pcrd` is a single XML document with no inner
+files. Rather than make `.pcrd` pretend to have files matching `.zpcr`'s names, the two
+formats get separate raw-browsing components that share one XML rendering primitive.
+
+### The shared XML tree (`lib/xmlTree.tsx`)
+
+Every place the app shows XML — the generic `.zpcr` archive-entry fallback, a decrypted
+`.pltd`'s payload (`PlateXml`), `runlog.xml`'s per-entry hover tooltip, and `.pcrd`'s whole
+document — goes through one component, `XmlTree` (plus `XmlTreeFromString` for callers that
+start from a raw string rather than parsed `Element`s). Built on the native `DOMParser` (same
+BOM/declaration-stripping trick as before), each element is its own React component with its
+own open/closed `<details>` state; children are only turned into React elements when their
+parent is open, so a closed subtree costs ~O(1) regardless of size — a `.pcrd`'s
+`calibrationCollection` (~1.4 MB of deeply nested elements in the real sample) collapses by
+default and costs nothing until opened. The default-open heuristic (child count, then a
+text-length fallback) is generic, not tuned to any one format's tag names.
+
+### `RawFilesView` (`.zpcr`)
+
+Unchanged in spirit from before `.pcrd` support: groups `zpcr.archive.entries` (Metadata /
+Plate setup / Plate reads / Calibration / Other). Each file opens in its **best default mode**
+(`RawFilesView.defaultMode`) with Decoded / Text / Hex always switchable: a typed **Decoded**
+view where one exists (`DecodedView.tsx`, above), else **Text** for textual files, else **Hex**
+(`archive.hexDump`, paginated).
+
+### `PcrdRawView` (`.pcrd`)
+
+Parses the full document once (`parseXmlFragment(documentXml)`) and builds a table of contents
+from `<experimentalData2>`'s *real* children (per `pcrd.md`'s schema) — not files. Left-nav
+groups: **Document** (the whole tree, shown first/by default — large subtrees collapsed, per
+the user's request to see the real document rather than a fabricated file list), **Plate
+setup** (`plateSetup2` → `PlateDetail`, same component `.zpcr`'s embedded `.pltd` uses),
+**Protocol** (`protocol2` → `ProtocolDecoded` fed `zpcr.protocolText`), **Plate reads** (one
+entry per real `<plateRead>`, labeled by its actual cycle number, → `DecodedPlateread` fed
+`zpcr.reads[i]` directly — no filename indirection), **Calibration** (`calibrationCollection`
+— XML only, no decoder yet), **Run info** (`protocolRunInfo/RunInfo` → `RunInfoTable`), **Log**
+(every real `<log>` element, fed straight to `RunLogTable` — see below), **Other** (every
+remaining top-level element, one nav entry each — always current since it's discovered from
+the parsed document rather than a hardcoded list, so an unfamiliar future subtree still
+surfaces). Each entry toggles Decoded/XML (no Hex — low value for a text-format node); nodes
+with no decoder default to XML and disable the Decoded toggle, mirroring `RawFilesView`'s
+`disabled={!hasDecoded}` pattern.
+
+### `runlog.ts`'s two real shapes
+
+`.zpcr`'s real `runlog.xml` uses child elements (`<Log><TS>…</TS><Msg>…</Msg></Log>`); a
+`.pcrd`'s real `<log>` records are attribute-only (`<log ts="…" msg="…" />` — see `pcrd.md`).
+`lib/runlog.ts` reads both directly (`logEntriesFromElements`, branching on
+`el.attributes.length`, with an explicit attribute→column-name map since some names are
+genuine abbreviation differences, not just casing — `assemblyName` → `ANm`) rather than
+reshaping one into the other, so `RunLogTable` (`parsed: RunLogParsed`) renders either
+format's real elements without either one faking the other's schema.
 
 ## Curves view
 
