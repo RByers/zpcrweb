@@ -60,11 +60,6 @@ export function DecodedPlateread({ zpcr, read }: { zpcr: Zpcr; read: PlateRead }
         </dl>
         {!isBinary && read.headerFields && read.headerFields.length > 0 && (
           <>
-            <p className="decoded__hint mono">
-              This read comes from a .pcrd document (plate-read data as text, not the binary
-              .Plateread layout) — the fields below are the document's own
-              PlateReadDataHeader element.
-            </p>
             <div className="decoded__gridwrap">
               <table className="decoded__tbl mono">
                 <thead>
