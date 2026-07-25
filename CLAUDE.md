@@ -42,7 +42,7 @@ committed in `samples/` and `packages/core/test/fixtures/`.
 When testing the web app in a browser, always load it with the `cfxPassword` URL query
 parameter set, so samples decrypt automatically instead of sitting behind the password prompt:
 pull the value from `secrets.json`'s `cfxPassword` field (see Secrets, above) and append
-`?cfxPassword=<value>` to the dev server URL, e.g. `http://localhost:5173/?cfxPassword=<value>`.
+`?cfxPassword=<value>` to the dev server URL with URL escaping in case of any special characters like # in the password, e.g. `http://localhost:5173/?cfxPassword=<value>`.
 
 ## Format documentation
 
