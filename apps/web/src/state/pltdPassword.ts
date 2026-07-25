@@ -18,30 +18,47 @@ const KEY = "zpcr:pltdPassword";
 const QUERY_PARAM = "cfxPassword";
 const listeners = new Set<() => void>();
 
+// In-memory fallback, kept in sync with localStorage. `localStorage` can throw (private
+// mode, sandboxed iframe, third-party-storage blocking) — when it does, a URL-supplied
+// password must still be readable for the rest of this page load rather than silently
+// dropped just because it couldn't be persisted.
+let memoryPassword = "";
+try {
+  memoryPassword = localStorage.getItem(KEY) ?? "";
+} catch {
+  /* ignore (private mode, etc.) */
+}
+
+// Read the `cfxPassword` URL param and seed the store *immediately* — the first thing this
+// module does, before any export below is even reachable by a caller — so every other
+// component/hook that reads the password sees it from its very first read, regardless of
+// where in the import graph this module happens to sit.
+try {
+  const fromUrl = new URLSearchParams(window.location.search).get(QUERY_PARAM);
+  if (fromUrl) memoryPassword = fromUrl;
+} catch {
+  /* ignore (e.g. no window, malformed URL) */
+}
+try {
+  if (memoryPassword) localStorage.setItem(KEY, memoryPassword);
+} catch {
+  /* ignore storage failures (private mode, etc.) — memoryPassword still holds it */
+}
+
 function read(): string {
-  try {
-    return localStorage.getItem(KEY) ?? "";
-  } catch {
-    return "";
-  }
+  return memoryPassword;
 }
 
 /** Persist the password (empty string clears it) and notify subscribers. */
 export function setStoredPltdPassword(value: string): void {
+  memoryPassword = value;
   try {
     if (value) localStorage.setItem(KEY, value);
     else localStorage.removeItem(KEY);
   } catch {
-    /* ignore storage failures (private mode, etc.) */
+    /* ignore storage failures (private mode, etc.) — memoryPassword still holds it */
   }
   listeners.forEach((l) => l());
-}
-
-try {
-  const fromUrl = new URLSearchParams(window.location.search).get(QUERY_PARAM);
-  if (fromUrl) setStoredPltdPassword(fromUrl);
-} catch {
-  /* ignore (e.g. no window, malformed URL) */
 }
 
 function subscribe(cb: () => void): () => void {
