@@ -3,5 +3,6 @@ dist/
 *.tsbuildinfo
 .DS_Store
 coverage/
-.claude/
+.claude/*
+!.claude/settings.json
 secrets.json

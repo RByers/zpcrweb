@@ -8,6 +8,20 @@
 - Merge feature/worktree branches into `main` locally. After doing so delete the worktree and branch.
 - Don't open PRs, and don't push anything upstream to the `origin` or make any branches from there.
 
+### Worktree base ref
+
+`origin` here is a personal push target, not a shared upstream — this workflow never pushes to
+it (see above), so `origin/main` drifts far behind local `main` over time. `.claude/settings.json`
+sets `worktree.baseRef` to `"head"` so `EnterWorktree` branches from local `HEAD` (i.e. local
+`main`, when that's checked out) instead of the default `"fresh"` behavior, which branches from
+`origin/<default-branch>`. Without this, a new worktree ends up dozens of commits behind local
+`main`; merging it back is still a clean fast-forward, but `ExitWorktree`'s cleanup then refuses
+to delete the worktree branch, since from its point of view it looks like a branch with many
+commits not yet reachable from `main` (Git only sees that `origin/main` isn't an ancestor of
+`main` — it doesn't check whether those commits are old history that's actually already merged
+into `main`). If you ever see a new worktree start dozens of commits behind local `main`, check
+that `.claude/settings.json` hasn't been lost.
+
 Whenever changes are made, review and update all ARCHITECTURE.md files to be a concise yet accurate summary of the application design, with pointers to other relevant files.
 
 ## UI testing
