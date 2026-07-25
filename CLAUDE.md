@@ -19,11 +19,15 @@ The reverse-engineered binary format docs are the reference for anything in
 |-----|--------|
 | [`plateread.md`](./plateread.md) | The `.Plateread` files inside a `.zpcr` — one per plate read (PCR cycle), holding the 6-channel × 108-well raw fluorescence table plus cycle number, block temperature and timestamp. **Mixed endianness:** metadata (version words, scalar header, trailing descriptor dictionary) is big-endian; the WELLDATA/DARKDATA float arrays are little-endian. The trailing descriptor dictionary makes the file self-describing — decode via declared offsets, with hardcoded offsets only as fallback. Implemented by `packages/core/src/plateread.ts`. |
 | [`pltd.md`](./pltd.md) | The `.pltd` plate-definition files — per-well fluorophores, target/gene, sample name and type, replicate, standard quantity. Encrypted + compressed XML container. Implemented by `packages/core/src/pltd.ts`, entry point `parsePltd(bytes)`; `zpcr.plates()` decodes every plate in an archive. |
+| [`pcrd.md`](./pcrd.md) | The `.pcrd` CFX Manager saved-experiment file — the whole run (plate setup, protocol, every plate read, `RunInfo`/`runlog`, plus analysis/UI state) as one large XML document, in the same encrypted-ZIP container as `.pltd`/`.prcl`. Implemented by `packages/core/src/pcrd.ts`, entry point `parsePcrd(bytes)`, which decodes into the same `Zpcr` shape `parseZpcr` produces. |
 | [`ARCHITECTURE.md`](./ARCHITECTURE.md) | Project-level design: isomorphic library goals, monorepo layout, input strategy. |
 | [`apps/web/ARCHITECTURE.md`](./apps/web/ARCHITECTURE.md) | Web app design notes. |
 
-Both format docs are marked **fully decoded** and validated against the committed sample in
-`samples/`. If a decoder changes, update the corresponding doc in the same commit.
+`plateread.md` and `pltd.md` are marked **fully decoded** and validated against the committed
+samples in `samples/`. `pcrd.md`'s container and plate-read data are likewise fully decoded
+and cross-validated bit-for-bit against the matching `.zpcr`; its analysis-state subtrees
+(`dataAnalysisParameters`, `PersistedData`, …) are mapped but not yet interpreted. If a
+decoder changes, update the corresponding doc in the same commit.
 
 ## Commands
 

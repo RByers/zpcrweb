@@ -1,8 +1,40 @@
 # Web app architecture
 
 The web app (`@zpcrweb/web`) is a browser UI over [`@zpcrweb/core`](../../packages/core). It
-loads one or more `.zpcr` files, switches between them, and explores each through three
-views: Overview, Curves, and Raw files.
+loads one or more `.zpcr` and/or `.pcrd` files, switches between them, and explores each
+through three views: Overview, Curves, and Raw files.
+
+## Two formats, one UI
+
+`@zpcrweb/core`'s `parseZpcr`/`parsePcrd` both produce the same `Zpcr` shape (see the root
+[`ARCHITECTURE.md`](../../ARCHITECTURE.md#two-input-formats-one-output-shape)), so almost none
+of the app is format-aware:
+
+- `OverviewView`, `CurvesView`, and `RawFilesView` all take a plain `Zpcr` — they don't know or
+  care whether it came from a `.zpcr` archive or a decoded `.pcrd` document.
+- The Raw files view's per-file-type routing (`decodedKind` in `DecodedView.tsx`) matches
+  `.pcrd`'s virtual archive entries by the *same names* a `.zpcr` uses (`RunInfo.xml`,
+  `ProtocolRunDefinition.txt`, `runlog.xml`, `Read00001.Plateread`, …), so those decoders need
+  no format branching either. The one addition is `plate2` — a `.pcrd`'s `plateSetup2.xml`
+  entry is already decrypted (the whole document was), so it skips the password flow a real
+  `.pltd` entry needs and renders straight through `EmbeddedPlate` → the shared `PlateDetail`
+  component (`components/raw/DecodedPlate.tsx`).
+- `DecodedPlateread` (the `.Plateread` typed view) shows the WELLDATA/DARKDATA tables from the
+  already-decoded `PlateRead` object either way; it only conditionally shows the binary-only
+  "descriptor dictionary" section (`decodePlateReadDetail` finds nothing for a `.pcrd`-origin
+  read's synthesized XML fragment, which is the signal used to hide that section).
+
+## The `.pcrd` password gate
+
+Unlike a `.zpcr`'s embedded `.pltd` (locked per-file, browsable independently), a whole `.pcrd`
+document is encrypted — nothing (metadata, reads, archive) exists until the password succeeds.
+`useZpcrStore` reflects this: `LoadedFile` holds only raw `bytes` + `kind`; the actual `Zpcr` is
+derived reactively per file (`runs: Map<id, RunResult>`, recomputed whenever the shared
+password changes via `usePltdPassword` — see `state/pltdPassword.ts`, which despite the name
+now covers `.pltd`/`.prcl`/`.pcrd` alike). `App.tsx` renders the shared `PasswordPrompt`
+(`components/PasswordPrompt.tsx`) in place of the view area whenever the active file's `RunResult`
+has `needsPassword`/`error` instead of a `zpcr`; `FileBar` shows a lock/warning glyph for
+locked/errored files in the list without blocking selection of other files.
 
 ## Stack
 
@@ -29,13 +61,15 @@ written inline in a component.
 
 ## State & persistence
 
-`state/useZpcrStore.ts` is the single store hook. It holds the list of loaded+parsed files,
-the active file id, and a per-file settings map. `state/db.ts` is a minimal IndexedDB
-wrapper with two object stores:
+`state/useZpcrStore.ts` is the single store hook. It holds the list of loaded (not yet parsed)
+files, the active file id, a per-file settings map, and the derived `runs` map (see "The
+`.pcrd` password gate" above). `state/db.ts` is a minimal IndexedDB wrapper with two object
+stores:
 
-- `files` — `{ id, name, size, addedAt, bytes }`; **raw bytes** are stored so files survive
-  reloads and are re-parsed with `parseZpcr` on load (fast; the archive is small). `id` is a
-  `name:size` key, which also dedupes re-adding the same file.
+- `files` — `{ id, name, size, addedAt, bytes, kind }`; **raw bytes** are stored so files
+  survive reloads and are re-parsed (`parseZpcr` or `parsePcrd`, by `kind`) on load. `id` is a
+  `name:size` key, which also dedupes re-adding the same file. `kind` defaults to `"zpcr"` for
+  records written before `.pcrd` support existed.
 - `settings` — `{ fileId, view, enabledChannels[], enabledWells[], baseline, scale }`, so
   each file remembers its enabled wells/channels and last view. Writes are debounced.
 

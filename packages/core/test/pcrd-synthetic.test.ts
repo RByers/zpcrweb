@@ -1,0 +1,249 @@
+import { deflateRawSync } from "node:zlib";
+import { randomBytes } from "node:crypto";
+import { describe, it, expect } from "vitest";
+import { parsePcrd } from "../src/index.js";
+
+/**
+ * A small, hand-built `<experimentalData2>` document matching the schema `pcrd.md`
+ * documents, wrapped in a real ZipCrypto-encrypted single-entry ZIP (built here, not
+ * fixture data) so the full container → decrypt → inflate → parse pipeline is exercised
+ * without depending on the real CFX password (which this repo does not ship — see
+ * `pcrd.test.ts` for the password-gated tests against the real committed sample).
+ */
+function buildPlateRead(cycle: number, blockTmp: string, wellBase: number): string {
+  const wellValues = Array.from({ length: 648 }, (_, i) => {
+    const rec = i % 4;
+    const v = wellBase + Math.floor(i / 4) + rec * 0.1;
+    return v.toFixed(3);
+  }).join(";");
+  const darkValues = Array.from({ length: 24 }, (_, i) => (10 + i).toFixed(2)).join(";");
+  return `<plateRead><PlateRead V="1"><SerVersion>2</SerVersion><Hdr><PlateReadDataHeader V="1"><SerVersion>9</SerVersion><CRC>0</CRC><HeadSerNum>SG00000</HeadSerNum><ScMode>0</ScMode><ScIdx>1</ScIdx><RtrvlType>3</RtrvlType><StepId>0</StepId><Step>2</Step><Cycle>${cycle}</Cycle><ErrNum>0</ErrNum><ErrDesc /><BlockTmp>${blockTmp}</BlockTmp><ShtTmp>44.4</ShtTmp><AmbTmp>28</AmbTmp><ChNum>0</ChNum><NumCols>12</NumCols><NumRows>9</NumRows><Time>Tue, 21 Jul 2026 05:23:17 GMT</Time><PRVersion>2</PRVersion><ChCount>6</ChCount><ChMask>63</ChMask><SamTmp>60</SamTmp><LidTmp>105</LidTmp><FanState>1</FanState><LidForce>1</LidForce><LidState>1</LidState><LidPos>0</LidPos><DrkCrnt><PAr V="1">${darkValues}</PAr></DrkCrnt><FanOffTmp>35</FanOffTmp><FanOnTmp>40</FanOnTmp><FWVersions /></PlateReadDataHeader></Hdr><Data><PAr V="1">${wellValues}</PAr></Data><Unique>0</Unique><Time>-1</Time><Name /><Interp>False</Interp></PlateRead></plateRead>`;
+}
+
+function buildSyntheticXml(): string {
+  const plateSetup2 =
+    `<plateSetup2 rows="8" columns="12" dyes="1" standardUnits="" plateType="OtherStdTemplate" ` +
+    `scanMode="AllChannelsScan" plateName="Test Plate"><header currentVersion="06.00" /><geneNameList>` +
+    `<geneName shortName="TargetA" /></geneNameList><conditionNameList />` +
+    `<dyeLayersList><dyeLayer><fluor fluorName="FAM" channelPosition="0" fluorId="1" />` +
+    `<wellSample plateIndex="0" wellSampleType="wcSample" wellLoadedFluor="True" geneName="TargetA" />` +
+    `</dyeLayer></dyeLayersList></plateSetup2>`;
+  const protocol2 =
+    `<protocol2 lidTemperature="105" volume="20" ` +
+    `runDefinition="METHOD CALC;HOTLID 105,30;VOLUME 20;TEMP 95.0,60;TEMP 60.0,30;PLATEREAD #h3F;GOTO 2,1;END;" />`;
+  const runInfo = `<protocolRunInfo><RunInfo>
+    <KeyValuePairs><Key>Identifier</Key><Value>TEST-RUN-1234</Value></KeyValuePairs>
+    <KeyValuePairs><Key>DataFile</Key><Value>synthetic.zpcr</Value></KeyValuePairs>
+    <KeyValuePairs><Key>BaseSerialNumber</Key><Value>CT000000</Value></KeyValuePairs>
+    <KeyValuePairs><Key>BlockDescription</Key><Value>"96FX"</Value></KeyValuePairs>
+    <KeyValuePairs><Key>ScanMask</Key><Value>63</Value></KeyValuePairs>
+    <KeyValuePairs><Key>NumberPlateColumns</Key><Value>12</Value></KeyValuePairs>
+    <KeyValuePairs><Key>NumberPlateRows</Key><Value>8</Value></KeyValuePairs>
+    <KeyValuePairs><Key>NumberReferenceRows</Key><Value>1</Value></KeyValuePairs>
+  </RunInfo></protocolRunInfo>`;
+  const log =
+    `<log lgNm="CT000000" level="INFO" ts="2026-07-20T13:18:18.000-08:00" ` +
+    `assemblyName="Satellite Service" sev="Info" data="0" tag="Unassigned" msgNm="" msg="Run started" />`;
+  const reads = [buildPlateRead(1, "59.99", 1000), buildPlateRead(2, "60.01", 1100)].join("");
+  const runData = `<runData channelCount="6" wellsCount="96"><calibrationCollection><CalibrationCollection V="1"><SerVersion>1</SerVersion><Fluors /></CalibrationCollection></calibrationCollection><plateReadDataVector>${reads}</plateReadDataVector></runData>`;
+  const dataAnalysisParameters = `<dataAnalysisParameters V="1"><SerVersion>1</SerVersion><selectedStepNumber>2</selectedStepNumber></dataAnalysisParameters>`;
+
+  return (
+    `﻿<?xml version="1.0" encoding="utf-8"?><experimentalData2 exType="User">` +
+    `<identifier identityKey="synthetic.pcrd" /><header currentVersion="06.10" createdByClientApp="BioRadCFXManager.exe" />` +
+    `${plateSetup2}${protocol2}${runData}${dataAnalysisParameters}${runInfo}${log}` +
+    `<auditHeader user="test" /></experimentalData2>`
+  );
+}
+
+// --- Minimal ZipCrypto encryption + single-entry ZIP builder, mirroring zipcrypto.ts's
+// decrypt algorithm in reverse. Test-only: the library never needs to *write* CFX files.
+
+const CRC_TABLE = (() => {
+  const table = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    table[n] = c >>> 0;
+  }
+  return table;
+})();
+function crc32Byte(crc: number, byte: number): number {
+  return (CRC_TABLE[(crc ^ byte) & 0xff]! ^ (crc >>> 8)) >>> 0;
+}
+function crc32(bytes: Uint8Array): number {
+  let c = 0xffffffff;
+  for (const b of bytes) c = crc32Byte(c, b);
+  return (c ^ 0xffffffff) >>> 0;
+}
+
+class EncryptKeys {
+  k0 = 0x12345678;
+  k1 = 0x23456789;
+  k2 = 0x34567890;
+  constructor(password: string) {
+    for (let i = 0; i < password.length; i++) this.update(password.charCodeAt(i) & 0xff);
+  }
+  update(byte: number): void {
+    this.k0 = crc32Byte(this.k0, byte);
+    this.k1 = (Math.imul((this.k1 + (this.k0 & 0xff)) >>> 0, 134775813) + 1) >>> 0;
+    this.k2 = crc32Byte(this.k2, this.k1 >>> 24);
+  }
+  encryptByte(plain: number): number {
+    const temp = (this.k2 | 2) & 0xffff;
+    const keystream = (Math.imul(temp, temp ^ 1) >>> 8) & 0xff;
+    const cipher = (plain ^ keystream) & 0xff;
+    this.update(plain);
+    return cipher;
+  }
+}
+
+function zipCryptoEncrypt(data: Uint8Array, password: string, entryCrc: number): Uint8Array {
+  const keys = new EncryptKeys(password);
+  const header = randomBytes(12);
+  header[11] = (entryCrc >>> 24) & 0xff;
+  const out = new Uint8Array(12 + data.length);
+  for (let i = 0; i < 12; i++) out[i] = keys.encryptByte(header[i]!);
+  for (let i = 0; i < data.length; i++) out[12 + i] = keys.encryptByte(data[i]!);
+  return out;
+}
+
+function u16(n: number): Uint8Array {
+  return new Uint8Array([n & 0xff, (n >> 8) & 0xff]);
+}
+function u32(n: number): Uint8Array {
+  return new Uint8Array([n & 0xff, (n >> 8) & 0xff, (n >> 16) & 0xff, (n >>> 24) & 0xff]);
+}
+function concat(...parts: Uint8Array[]): Uint8Array {
+  const total = parts.reduce((n, p) => n + p.length, 0);
+  const out = new Uint8Array(total);
+  let o = 0;
+  for (const p of parts) {
+    out.set(p, o);
+    o += p.length;
+  }
+  return out;
+}
+
+/** Build a single-entry encrypted `.pcrd`-shaped ZIP around `plaintext`, for test use only. */
+function buildSyntheticPcrd(plaintext: Uint8Array, password: string): Uint8Array {
+  const entryCrc = crc32(plaintext);
+  const compressed = deflateRawSync(plaintext, { level: 6 });
+  const encrypted = zipCryptoEncrypt(compressed, password, entryCrc);
+  const name = new TextEncoder().encode("synthetic.pcrd");
+
+  const localHeader = concat(
+    new Uint8Array([0x50, 0x4b, 0x03, 0x04]),
+    u16(20),
+    u16(0x0001),
+    u16(8),
+    u16(0),
+    u16(0),
+    u32(entryCrc),
+    u32(encrypted.length),
+    u32(plaintext.length),
+    u16(name.length),
+    u16(0),
+    name,
+  );
+  const cdEntry = concat(
+    new Uint8Array([0x50, 0x4b, 0x01, 0x02]),
+    u16(45),
+    u16(20),
+    u16(0x0001),
+    u16(8),
+    u16(0),
+    u16(0),
+    u32(entryCrc),
+    u32(encrypted.length),
+    u32(plaintext.length),
+    u16(name.length),
+    u16(0),
+    u16(0),
+    u16(0),
+    u16(0),
+    u32(0),
+    u32(0),
+    name,
+  );
+  const cdOffset = localHeader.length + encrypted.length;
+  const eocd = concat(
+    new Uint8Array([0x50, 0x4b, 0x05, 0x06]),
+    u16(0),
+    u16(0),
+    u16(1),
+    u16(1),
+    u32(cdEntry.length),
+    u32(cdOffset),
+    u16(0),
+  );
+  return concat(localHeader, encrypted, cdEntry, eocd);
+}
+
+describe("pcrd — synthetic round trip (no real password needed)", () => {
+  const password = "synthetic-test-password";
+  const plaintext = new TextEncoder().encode(buildSyntheticXml());
+  const zipBytes = buildSyntheticPcrd(plaintext, password);
+
+  it("decodes the container without a password", () => {
+    const pcrd = parsePcrd(zipBytes);
+    expect(pcrd.needsPassword).toBe(true);
+    expect(pcrd.container.innerName).toBe("synthetic.pcrd");
+    expect(pcrd.container.compressionMethod).toBe(8);
+  });
+
+  it("decrypts, inflates, and parses into the same shape as a .zpcr", () => {
+    const pcrd = parsePcrd(zipBytes, { password });
+    expect(pcrd.error).toBeUndefined();
+    const zpcr = pcrd.zpcr!;
+
+    expect(zpcr.metadata.identifier).toBe("TEST-RUN-1234");
+    expect(zpcr.metadata.baseSerialNumber).toBe("CT000000");
+    expect(zpcr.metadata.channelCount).toBe(6);
+    expect(zpcr.reads).toHaveLength(2);
+    expect(zpcr.reads[0]!.cycle).toBe(1);
+    expect(zpcr.reads[0]!.blockTempC).toBeCloseTo(59.99, 2);
+    expect(zpcr.reads[1]!.blockTempC).toBeCloseTo(60.01, 2);
+    expect(zpcr.reads[0]!.wells).toHaveLength(648);
+    expect(zpcr.reads[0]!.dark).toHaveLength(6);
+    expect(zpcr.reads[0]!.get(0, 0, 0).mean).toBeCloseTo(1000, 2);
+  });
+
+  it("pivots into curves/darkCurves/steps like a .zpcr", () => {
+    const zpcr = parsePcrd(zipBytes, { password }).zpcr!;
+    const curves = zpcr.curves();
+    expect(curves.length).toBeGreaterThan(0);
+    expect(curves[0]!.cycles).toEqual([1, 2]);
+    expect(zpcr.darkCurves()).toHaveLength(6);
+    expect(zpcr.steps()).toEqual([{ step: 2, readCount: 2 }]);
+  });
+
+  it("decodes the embedded plate via plates()", () => {
+    const zpcr = parsePcrd(zipBytes, { password }).zpcr!;
+    const plates = zpcr.plates();
+    expect(plates).toHaveLength(1);
+    expect(plates[0]!.pltd.plate!.plateName).toBe("Test Plate");
+    expect(plates[0]!.pltd.plate!.fluors).toEqual([{ fluor: "FAM", channel: 0, fluorId: "1" }]);
+  });
+
+  it("exposes the virtual archive, including not-yet-decoded subtrees", () => {
+    const zpcr = parsePcrd(zipBytes, { password }).zpcr!;
+    expect(zpcr.archive.entries).toContain("Read00001.Plateread");
+    expect(zpcr.archive.entries).toContain("Read00002.Plateread");
+    expect(zpcr.archive.entries).toContain("RunInfo.xml");
+    expect(zpcr.archive.entries).toContain("ProtocolRunDefinition.txt");
+    expect(zpcr.archive.entries).toContain("runlog.xml");
+    expect(zpcr.archive.entries).toContain("plateSetup2.xml");
+    expect(zpcr.archive.entries).toContain("dataAnalysisParameters.xml");
+    expect(zpcr.archive.entries).toContain("calibrationCollection.xml");
+    expect(zpcr.archive.text("ProtocolRunDefinition.txt")).toContain("METHOD CALC");
+    expect(zpcr.archive.text("dataAnalysisParameters.xml")).toContain("selectedStepNumber");
+    expect(zpcr.archive.hexDump("Read00001.Plateread").length).toBeGreaterThan(0);
+  });
+
+  it("reports an error (not needsPassword) on a wrong password", () => {
+    const pcrd = parsePcrd(zipBytes, { password: "wrong" });
+    expect(pcrd.needsPassword).toBeUndefined();
+    expect(pcrd.error).toBeDefined();
+  });
+});

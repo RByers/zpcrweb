@@ -42,7 +42,7 @@ export function DropZone({ onFiles, large }: Props) {
       <input
         ref={inputRef}
         type="file"
-        accept=".zpcr"
+        accept=".zpcr,.pcrd"
         multiple
         hidden
         onChange={(e) => {
@@ -53,14 +53,14 @@ export function DropZone({ onFiles, large }: Props) {
       {large ? (
         <>
           <div className="dropzone__icon mono">⇪</div>
-          <div className="dropzone__title">Drop .zpcr files here</div>
+          <div className="dropzone__title">Drop .zpcr or .pcrd files here</div>
           <div className="dropzone__sub">
             or <span className="dropzone__link">click to browse</span> · multiple files
             supported
           </div>
         </>
       ) : (
-        <span className="dropzone__compact mono">+ load .zpcr</span>
+        <span className="dropzone__compact mono">+ load file</span>
       )}
     </div>
   );

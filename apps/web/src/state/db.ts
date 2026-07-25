@@ -9,13 +9,15 @@ const DB_VERSION = 1;
 const FILES = "files";
 const SETTINGS = "settings";
 
-/** A stored file record. */
+/** A stored file record. `kind` defaults to `"zpcr"` for records written before `.pcrd`
+ * support was added (absent field on load), so existing IndexedDB data keeps working. */
 export interface StoredFile {
   id: string;
   name: string;
   size: number;
   addedAt: number;
   bytes: ArrayBuffer;
+  kind?: "zpcr" | "pcrd";
 }
 
 /** Persisted per-file view settings. */

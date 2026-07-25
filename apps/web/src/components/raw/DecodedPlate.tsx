@@ -1,8 +1,16 @@
 import { useMemo, useState } from "react";
-import { parsePltd, type Pltd, type SampleType, type WellDefinition, type Zpcr } from "@zpcrweb/core";
+import {
+  parsePltd,
+  type PlateDefinition,
+  type Pltd,
+  type SampleType,
+  type WellDefinition,
+  type Zpcr,
+} from "@zpcrweb/core";
 import { channelColor } from "../../lib/channelColors";
 import { formatXml } from "../../lib/xmlFormat";
 import { usePltdPassword } from "../../state/pltdPassword";
+import { PasswordPrompt } from "../PasswordPrompt";
 
 /** Display metadata per normalized sample type: short badge, full label, accent color. */
 const SAMPLE_TYPE_META: Record<SampleType, { abbr: string; label: string; color: string }> = {
@@ -33,47 +41,6 @@ function usePltdEntry(
   return { pltd, password, setPassword };
 }
 
-/** Prompt to enter the CFX plate-file password (stored client-side, reused for all plates). */
-function PasswordPrompt({
-  wrong,
-  onSubmit,
-}: {
-  wrong: boolean;
-  onSubmit: (pw: string) => void;
-}) {
-  const [value, setValue] = useState("");
-  return (
-    <section className="decoded__block">
-      <h3 className="decoded__h">Plate password required</h3>
-      <p className="decoded__hint mono">
-        {wrong ? "The saved password did not decrypt this file. " : ""}
-        Plate files are ZipCrypto-encrypted; this app doesn&apos;t ship the password. Enter the
-        CFX plate-file password (see <code>pltd.md</code> for how to find it in a licensed CFX
-        Manager install). It&apos;s stored in your browser and reused for every plate.
-      </p>
-      <form
-        className="plate__pwform"
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (value) onSubmit(value);
-        }}
-      >
-        <input
-          type="password"
-          className="plate__pwinput mono"
-          placeholder="plate-file password"
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          autoFocus
-        />
-        <button type="submit" className="segmented__item" disabled={!value}>
-          Save &amp; decode
-        </button>
-      </form>
-    </section>
-  );
-}
-
 /** The ZIP container facts — shown alongside the password prompt when the payload is locked. */
 function UndecodedNote({ pltd }: { pltd: Pltd }) {
   const c = pltd.container;
@@ -94,14 +61,12 @@ function UndecodedNote({ pltd }: { pltd: Pltd }) {
 }
 
 /**
- * Decoded plate map for a `.pltd` file: an 8×12 grid coloured by sample type, each well
- * showing its loaded fluorophores (channel dots); click a well for its full detail
- * (fluors → targets, sample, condition, replicate, quantity). The decrypted `<platesetup2>`
- * XML is available separately via the Raw files "Text" mode (see {@link PlateXml}).
+ * `.pltd` archive entry → decoded plate map, handling the password prompt. The decrypted
+ * `<platesetup2>` XML is available separately via the Raw files "Text" mode (see
+ * {@link PlateXml}). See {@link PlateDetail} for the grid rendering itself.
  */
 export function DecodedPlate({ zpcr, name }: { zpcr: Zpcr; name: string }) {
   const { pltd, setPassword } = usePltdEntry(zpcr, name);
-  const [selected, setSelected] = useState<number | null>(null);
 
   if (pltd.needsPassword || pltd.error) {
     return (
@@ -112,8 +77,25 @@ export function DecodedPlate({ zpcr, name }: { zpcr: Zpcr; name: string }) {
     );
   }
   if (!pltd.plate) return <div className="decoded__na mono">No plate for {name}.</div>;
-  const { plate, container } = pltd;
+  const { container } = pltd;
+  return (
+    <PlateDetail
+      plate={pltd.plate}
+      sourceHint={`${container.innerName} · ${container.compressionMethod === 9 ? "DEFLATE64" : "DEFLATE"} · decrypted`}
+    />
+  );
+}
 
+/**
+ * The decoded plate map for any {@link PlateDefinition}, regardless of source: an 8×12 grid
+ * coloured by sample type, each well showing its loaded fluorophores (channel dots); click a
+ * well for its full detail (fluors → targets, sample, condition, replicate, quantity). Used
+ * for both a `.zpcr`'s embedded `.pltd` entries ({@link DecodedPlate}, above — needs a
+ * password) and a `.pcrd`'s already-decrypted `plateSetup2` subtree (`EmbeddedPlate` in
+ * `DecodedView.tsx` — no password needed, the whole document was already decrypted).
+ */
+export function PlateDetail({ plate, sourceHint }: { plate: PlateDefinition; sourceHint?: string }) {
+  const [selected, setSelected] = useState<number | null>(null);
   const typesPresent = [...new Set(plate.wells.map((w) => w.sampleType))];
 
   return (
@@ -137,10 +119,7 @@ export function DecodedPlate({ zpcr, name }: { zpcr: Zpcr; name: string }) {
             </span>
           ))}
         </div>
-        <span className="decoded__hint mono">
-          {container.innerName} · {container.compressionMethod === 9 ? "DEFLATE64" : "DEFLATE"} ·
-          decrypted
-        </span>
+        {sourceHint && <span className="decoded__hint mono">{sourceHint}</span>}
       </section>
 
       <section className="decoded__block">

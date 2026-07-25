@@ -7,7 +7,7 @@
  */
 
 export { parseZpcr, zpcrFromBlob } from "./zpcr.js";
-export { zpcrFromFile } from "./node.js";
+export { zpcrFromFile, pcrdFromFile } from "./node.js";
 
 export { hexDump } from "./hex.js";
 export { deltaBaseline, subtractSeries } from "./analysis.js";
@@ -40,6 +40,7 @@ export {
   ROWS,
 } from "./plateread.js";
 export { parsePltd, isPltdName } from "./pltd.js";
+export { parsePcrd, isPcrdName, pcrdFromBlob } from "./pcrd.js";
 export { zipCryptoDecrypt } from "./zipcrypto.js";
 export { inflateRaw } from "./inflate.js";
 
@@ -73,3 +74,4 @@ export type {
   PlateFluor,
   SampleType,
 } from "./pltd.js";
+export type { Pcrd, PcrdContainer, PcrdOptions } from "./pcrd.js";

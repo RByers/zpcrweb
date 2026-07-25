@@ -7,8 +7,8 @@ type Mode = "decoded" | "text" | "hex";
 
 function group(name: string): string {
   if (/\.Plateread$/i.test(name)) return "Plate reads";
-  if (/\.pltd$/i.test(name)) return "Plate setup";
-  if (/\.Dcal$/i.test(name)) return "Calibration";
+  if (/\.pltd$/i.test(name) || name === "plateSetup2.xml") return "Plate setup";
+  if (/\.Dcal$/i.test(name) || name === "calibrationCollection.xml") return "Calibration";
   if (/\.(xml|txt|alf)$/i.test(name)) return "Metadata";
   return "Other";
 }

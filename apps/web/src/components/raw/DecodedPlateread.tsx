@@ -17,8 +17,12 @@ export function DecodedPlateread({ zpcr, read }: { zpcr: Zpcr; read: PlateRead }
   const [channel, setChannel] = useState(2);
   const [stat, setStat] = useState<Stat>("mean");
 
+  // Archive entries for a `.pcrd`-origin read are a synthesized XML fragment, not the binary
+  // `.Plateread` layout — decodePlateReadDetail() returns no fields for those (its ICFF
+  // footer scan finds nothing), so the binary-only sections below are skipped in that case.
   const bytes = useMemo(() => zpcr.archive.bytes(read.fileName), [zpcr, read.fileName]);
   const detail = useMemo(() => decodePlateReadDetail(bytes), [bytes]);
+  const isBinary = detail.fields.length > 0;
   const channelCount = read.dark.length;
 
   const fmt = (v: number) => (stat === "std" ? v.toFixed(2) : v.toFixed(1));
@@ -28,14 +32,18 @@ export function DecodedPlateread({ zpcr, read }: { zpcr: Zpcr; read: PlateRead }
       <section className="decoded__block">
         <h3 className="decoded__h">File structure</h3>
         <dl className="decoded__dl mono">
-          <div className="decoded__pair">
-            <dt>Size</dt>
-            <dd>{detail.size.toLocaleString()} B</dd>
-          </div>
-          <div className="decoded__pair">
-            <dt>Version</dt>
-            <dd>{detail.versionWords.join(" · ")} (BE)</dd>
-          </div>
+          {isBinary && (
+            <>
+              <div className="decoded__pair">
+                <dt>Size</dt>
+                <dd>{detail.size.toLocaleString()} B</dd>
+              </div>
+              <div className="decoded__pair">
+                <dt>Version</dt>
+                <dd>{detail.versionWords.join(" · ")} (BE)</dd>
+              </div>
+            </>
+          )}
           <div className="decoded__pair">
             <dt>Cycle</dt>
             <dd>{read.cycle}</dd>
@@ -45,55 +53,63 @@ export function DecodedPlateread({ zpcr, read }: { zpcr: Zpcr; read: PlateRead }
             <dd>{read.timestamp ?? "—"}</dd>
           </div>
         </dl>
+        {!isBinary && (
+          <p className="decoded__hint mono">
+            This read comes from a .pcrd document (plate-read data as text, not the binary
+            .Plateread layout) — no descriptor dictionary to show.
+          </p>
+        )}
       </section>
 
-      <section className="decoded__block">
-        <h3 className="decoded__h">
-          Descriptor dictionary — every field, from the file's own schema
-        </h3>
-        <p className="decoded__hint mono">
-          Scalars are big-endian; the WELLDATA/DARKDATA float arrays are little-endian.
-          Fields with an unclear purpose are shown with their raw value.
-        </p>
-        <div className="decoded__gridwrap">
-          <table className="decoded__tbl decoded__fields mono">
-            <thead>
-              <tr>
-                <th>Field</th>
-                <th>Offset</th>
-                <th>Len</th>
-                <th>Flag</th>
-                <th>int (BE)</th>
-                <th>float (BE)</th>
-                <th>text / hex</th>
-              </tr>
-            </thead>
-            <tbody>
-              {detail.fields.map((f) => (
-                <tr key={f.name}>
-                  <td className="decoded__fname">{f.name}</td>
-                  <td>0x{f.offset.toString(16)}</td>
-                  <td>{f.length}</td>
-                  <td>{f.flag}</td>
-                  <td>{f.length === 4 ? f.int : ""}</td>
-                  <td>
-                    {f.length === 4 && f.float !== undefined
-                      ? f.float.toFixed(Math.abs(f.float) < 1000 ? 3 : 0)
-                      : ""}
-                  </td>
-                  <td className="decoded__ftext">
-                    {f.text !== undefined
-                      ? f.text
-                      : f.length > 4
-                        ? `«${f.length} B» 0x${f.hex}`
-                        : ""}
-                  </td>
+      {isBinary && (
+        <section className="decoded__block">
+          <h3 className="decoded__h">
+            Descriptor dictionary — every field, from the file's own schema
+          </h3>
+          <p className="decoded__hint mono">
+            Scalars are big-endian; the WELLDATA/DARKDATA float arrays are little-endian.
+            Fields with an unclear purpose are shown with their raw value.
+          </p>
+          <div className="decoded__gridwrap">
+            <table className="decoded__tbl decoded__fields mono">
+              <thead>
+                <tr>
+                  <th>Field</th>
+                  <th>Offset</th>
+                  <th>Len</th>
+                  <th>Flag</th>
+                  <th>int (BE)</th>
+                  <th>float (BE)</th>
+                  <th>text / hex</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
+              </thead>
+              <tbody>
+                {detail.fields.map((f) => (
+                  <tr key={f.name}>
+                    <td className="decoded__fname">{f.name}</td>
+                    <td>0x{f.offset.toString(16)}</td>
+                    <td>{f.length}</td>
+                    <td>{f.flag}</td>
+                    <td>{f.length === 4 ? f.int : ""}</td>
+                    <td>
+                      {f.length === 4 && f.float !== undefined
+                        ? f.float.toFixed(Math.abs(f.float) < 1000 ? 3 : 0)
+                        : ""}
+                    </td>
+                    <td className="decoded__ftext">
+                      {f.text !== undefined
+                        ? f.text
+                        : f.length > 4
+                          ? `«${f.length} B» 0x${f.hex}`
+                          : ""}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
 
       <section className="decoded__block">
         <h3 className="decoded__h">DARKDATA — LED-off background (per channel)</h3>

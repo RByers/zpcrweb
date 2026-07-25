@@ -14,13 +14,20 @@ i.e. once per PCR cycle. This run had 45 reads (protocol `... PLATEREAD; GOTO 2,
 
 **Endianness is mixed.** The metadata — version words, the scalar header, and the descriptor
 dictionary — is **big-endian**. The **WELLDATA and DARKDATA float arrays are little-endian**
-(they read as native DSP output). Fluorescence and temperature values are IEEE-754 32-bit
-floats; counters/lengths are int32.
+(they read as native DSP output), **and so is the `uint32` count word that introduces each
+array** (`0x1A4` for WELLDATA, `0x2A28` for DARKDATA) — it belongs to the little-endian array,
+not the surrounding big-endian metadata. Fluorescence and temperature values are IEEE-754
+32-bit floats; counters/lengths are int32.
 
 > The original reverse-engineering assumed all-little-endian and read the scalar header at
 > approximate misaligned offsets — which made e.g. block temperature come out as ~98 °C. Reading
 > the descriptor-declared offsets **big-endian** instead gives the correct **60 °C** (the plate
 > read happens at the 60 °C step), and every other scalar then matches `RunInfo.xml`/the protocol.
+>
+> **Erratum (found while cross-validating against the matching `.pcrd` — see `pcrd.md` §3.1):**
+> the WELLDATA/DARKDATA count word itself is little-endian too. Reading it big-endian gives
+> `2592` as `537526272`; reading it correctly gives `2592`, matching the `.pcrd`'s `PAr` element
+> count (2592 = 648 × 4) for the same run.
 
 ---
 
@@ -35,15 +42,15 @@ variable-length in principle but constant across this run):
 | Magic / version | `0x000` | `00 00 00 01  00 00 00 02  00 00 00 00` (big-endian-looking version words) |
 | ASCII strings block | `0x00C` | Base serial, shuttle serial, head serial, and a firmware-version banner, each NUL-terminated |
 | Scalar metadata | `0x11C` | Step id, scan index, **cycle number**, temperatures, LED currents, timestamp (see §3) |
-| **`WELLDATA`** | `0x1A4` | `int32` float-count (`2592`) then 648 records × 4 floats — **the fluorescence table** (§2) |
-| **`DARKDATA`** | `0x2A28` | `int32` float-count (`24`) then 6 records × 4 floats — dark/background reading per channel |
+| **`WELLDATA`** | `0x1A4` | `uint32` float-count (`2592`, **little-endian**) then 648 records × 4 floats — **the fluorescence table** (§2) |
+| **`DARKDATA`** | `0x2A28` | `uint32` float-count (`24`, **little-endian**) then 6 records × 4 floats — dark/background reading per channel |
 | `FILEPATH` | `0x2A8C` | ASCII `\Storage Card\CurrentRun\Read0004N.xlateread` |
 | Descriptor dictionary | `0x2AB0` | ICFF index: field-name table + descriptors mapping names → data (§4, [`icff.md`](./icff.md)) |
 | ICFF footer | end (last 8 bytes) | `[index_offset][entry_stride]`, both u32 LE — points back at the dictionary |
 
-Array fields are framed as **`[uint32 count_of_floats][float32 × count]`**. The descriptor for
-each array (in the dictionary) stores the data offset relative to base `0x1A4`
-(`WELLDATA` → +4 = `0x1A8`; `DARKDATA` → +0x2884 = `0x2A28`).
+Array fields are framed as **`[uint32 count_of_floats][float32 × count]`**, both little-endian.
+The descriptor for each array (in the dictionary) stores the data offset relative to base
+`0x1A4` (`WELLDATA` → +4 = `0x1A8`; `DARKDATA` → +0x2884 = `0x2A28`).
 
 ---
 
@@ -201,7 +208,7 @@ The **offsets are absolute and exact**, verified against the data:
 - `DATETIME`, the serials, and every scalar likewise point at their exact bytes.
 
 So the index can drive decoding directly, with no hardcoded offsets. Array entries point at the
-`int32` count; the float payload starts 4 bytes later.
+little-endian `uint32` count; the little-endian float payload starts 4 bytes later.
 
 ---
 

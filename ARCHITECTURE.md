@@ -1,15 +1,19 @@
 # Architecture
 
 Key design points for the zpcrweb project. For the `.Plateread` binary format itself, see
-[`plateread.md`](./plateread.md).
+[`plateread.md`](./plateread.md); for the `.pcrd` XML format, see [`pcrd.md`](./pcrd.md).
 
 ## Goals
 
 - One parsing library, usable **unchanged** from both a Node app and a browser web app.
 - Well-typed output: the consumer never touches raw bytes unless they want to.
+- **Two input formats, one output shape.** `.zpcr` (instrument raw output) and `.pcrd` (CFX
+  Manager's saved-experiment document) describe overlapping data through very different
+  containers — see "Two input formats" below. `parseZpcr`/`parsePcrd` both produce a `Zpcr`,
+  so nothing downstream (pivots, the web app's views) needs to know which format it's holding.
 - Minimal dependencies. One reputable dependency (`fflate`) for ZIP decompression; nothing
   else at runtime.
-- An extensive test suite validated against a real instrument sample.
+- An extensive test suite validated against real instrument samples.
 
 ## Monorepo
 
@@ -19,20 +23,55 @@ npm workspaces:
   core path.
 - `apps/web` — the web app, which depends on `@zpcrweb/core`. Scaffolded now, built later
   (see [`TODO.md`](./TODO.md)).
-- `samples/` — a committed real `.zpcr` (~400 KB) used by tests as ground truth.
+- `samples/` — committed real `.zpcr` files and a matching `.pcrd` (~350 KB) for the same run,
+  used by tests as ground truth (see `pcrd.test.ts`'s cross-validation against `20260720.zpcr`).
 
 ## Isomorphic input strategy
 
-The core entry point, `parseZpcr(data)`, accepts `Uint8Array | ArrayBuffer` — the common
-denominator available in every JS runtime. Everything downstream is synchronous and
-environment-agnostic.
+The core entry points, `parseZpcr(data)` and `parsePcrd(data, options)`, accept
+`Uint8Array | ArrayBuffer` — the common denominator available in every JS runtime. Everything
+downstream is synchronous and environment-agnostic.
 
 Environment-specific *convenience* wrappers are kept thin and isolated so the core stays
 portable:
 
-- `zpcrFromFile(path)` (Node) dynamically imports `node:fs/promises`, so bundlers targeting
-  the browser never pull in Node built-ins unless the function is actually referenced.
-- `zpcrFromBlob(blob)` uses the `Blob` API, available in both browsers and modern Node.
+- `zpcrFromFile(path)` / `pcrdFromFile(path)` (Node) dynamically import `node:fs/promises`, so
+  bundlers targeting the browser never pull in Node built-ins unless the function is actually
+  referenced.
+- `zpcrFromBlob(blob)` / `pcrdFromBlob(blob)` use the `Blob` API, available in both browsers
+  and modern Node.
+
+## Two input formats, one output shape
+
+`.zpcr` and `.pcrd` describe the same underlying qPCR run through unrelated containers — a
+plain multi-file ZIP written incrementally by the instrument, versus a single encrypted XML
+document written once by CFX Manager when a run is opened and saved (see `pcrd.md`). Rather
+than let that difference leak into every consumer, `parsePcrd` decodes straight into a `Zpcr`
+— the exact same public shape `parseZpcr` produces:
+
+- **Reads, curves, metadata, plates()** all come from the same typed structures either way, so
+  `pivot.ts`, the web app's views, and any future consumer are format-agnostic. A `.pcrd`'s
+  plate reads are decoded from `<PlateRead>` XML elements (`decodePcrdPlateRead` in `pcrd.ts`)
+  into the identical `PlateRead` interface `decodePlateRead` produces from the binary
+  `.Plateread` layout — same `wells`/`dark`/`temps`/`get()`, different source bytes.
+- **`Zpcr.archive`** — for a `.pcrd`, this is a *virtual* archive: there are no real inner
+  files, so `pcrd.ts` synthesizes pseudo-entries from the document's XML subtrees. Where a
+  `.zpcr` equivalent exists, the pseudo-entry is named to match it exactly (`RunInfo.xml`,
+  `ProtocolRunDefinition.txt`, `runlog.xml`, `Read00001.Plateread`, …), so the web app's
+  existing per-file-type routing (`decodedKind` in `apps/web`) needs no format-specific
+  branching. Subtrees with no `.zpcr` equivalent and no dedicated decoder yet
+  (`dataAnalysisParameters`, `calibrationCollection`, `PersistedData`, …) are still exposed
+  verbatim as `<name>.xml` entries — raw exploration for data this library hasn't interpreted.
+- **`Zpcr.plates()`** — a `.pcrd` embeds exactly one plate (`plateSetup2`), already decrypted
+  along with the rest of the document. `pcrd.ts` reuses `pltd.ts`'s `parsePlatesetup2` (the
+  same `<platesetup2>`/`<plateSetup2>` schema, differing only in root-tag case) and wraps it in
+  a synthetic `PltdEntry` with no password step, so `zpcr.plates()` behaves the same for both
+  formats even though only a `.zpcr`'s *embedded* `.pltd` entries actually need a password.
+
+The one place formats stay genuinely distinct is the top-level decrypt step: `parsePcrd`
+returns `{ container, needsPassword?, error?, zpcr? }` (mirroring `parsePltd`'s `Pltd` shape)
+because the whole document — not just an embedded plate — is ZipCrypto-encrypted and needs a
+password before any of the above exists.
 
 ## Why fflate
 
@@ -77,7 +116,17 @@ raw bytes ─▶ fflate.unzipSync ─▶ { name: Uint8Array }
   [`pltd.md`](./pltd.md). `fflate` covers neither ZipCrypto nor DEFLATE64, so those are
   handled in-house by **`zipcrypto.ts`** (traditional PKWARE decrypt) and **`inflate.ts`**
   (a small DEFLATE/DEFLATE64 inflater) — no new runtime dependency.
-- **`zpcr.ts`** — orchestrates the above into the public `Zpcr` object.
+- **`zipsingle.ts`** — the single-entry-ZIP container parse (central-directory driven, both
+  container variants) shared by `.pltd`/`.prcl` and `.pcrd` — see `pltd.md` §1/`pcrd.md` §1.
+- **`xmlLite.ts`** — minimal hand-rolled XML scanning shared by every CFX XML payload: attribute
+  parsing, entity unescaping, and `splitElements()`, a depth-tracking child-element splitter
+  used to walk a large `.pcrd` document one level at a time (root → `runData` →
+  `plateReadDataVector` → each `plateRead`) without a full DOM parse.
+- **`pcrd.ts`** — decodes a `.pcrd` (see `pcrd.md` and "Two input formats" above) into a `Zpcr`.
+  Shares its container/decrypt/inflate path with `pltd.ts` via `zipsingle.ts`/`zipcrypto.ts`/
+  `inflate.ts`; its own code is XML traversal (`xmlLite.ts`) plus building the virtual archive.
+- **`zpcr.ts`** — orchestrates the above into the public `Zpcr` object (the `.zpcr` path;
+  `pcrd.ts` builds the equivalent object directly for `.pcrd`).
 
 ## Two output shapes
 
@@ -94,9 +143,10 @@ Both are provided because they serve different consumers:
 
 Full visualizers for every file type (protocol, `.alf`, `runlog.xml`, `.Dcal`) are future
 work. Until then, `Zpcr.archive` lets the UI show the raw `bytes`, decoded `text`, or a
-canonical `hexDump` of any archive entry. This means the app can present *something* useful
-for every file from day one, and new typed parsers can be layered in without changing the
-low-level contract.
+canonical `hexDump` of any archive entry — real files for a `.zpcr`, synthesized pseudo-files
+for a `.pcrd` (see "Two input formats" above). This means the app can present *something*
+useful for every file from day one, and new typed parsers can be layered in without changing
+the low-level contract.
 
 ## Coordinate convention
 

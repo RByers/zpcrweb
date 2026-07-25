@@ -1,12 +1,14 @@
 import { useSyncExternalStore } from "react";
 
 /**
- * Client-side store for the CFX plate-file (`.pltd`/`.prcl`) decryption password.
+ * Client-side store for the CFX file decryption password — one fixed standard-mode password
+ * shared by `.pltd`/`.prcl` *and* `.pcrd` (see `pltd.md` §2, `pcrd.md` §2).
  *
  * The password is **not** shipped with the app — the user enters it once (see
  * `pltd.md` for how a licensed CFX Manager user obtains it) and it is persisted to
- * `localStorage`, then reused for every plate. Kept in `localStorage` (not IndexedDB) so it's
- * a trivial single-value read that any component can subscribe to synchronously.
+ * `localStorage`, then reused for every plate/protocol/`.pcrd`. Kept in `localStorage` (not
+ * IndexedDB) so it's a trivial single-value read that any component can subscribe to
+ * synchronously.
  */
 const KEY = "zpcr:pltdPassword";
 const listeners = new Set<() => void>();

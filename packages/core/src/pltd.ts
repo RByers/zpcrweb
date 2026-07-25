@@ -17,6 +17,8 @@
 
 import { zipCryptoDecrypt } from "./zipcrypto.js";
 import { inflateRaw } from "./inflate.js";
+import { parseSingleEntryZip } from "./zipsingle.js";
+import { allTagAttrs, firstTagAttrs, stripBomBytes } from "./xmlLite.js";
 
 /** Normalized well sample type. `raw` preserves the original `wc*` code for the unknowns. */
 export type SampleType =
@@ -162,120 +164,19 @@ export interface PltdOptions {
 }
 
 // ---------------------------------------------------------------------------
-// ZIP container
-// ---------------------------------------------------------------------------
-
-const u16 = (b: Uint8Array, o: number): number => b[o]! | (b[o + 1]! << 8);
-const u32 = (b: Uint8Array, o: number): number =>
-  (b[o]! | (b[o + 1]! << 8) | (b[o + 2]! << 16) | (b[o + 3]! << 24)) >>> 0;
-
-interface RawEntry {
-  name: string;
-  method: number;
-  encrypted: boolean;
-  crc32: number;
-  compressedSize: number;
-  uncompressedSize: number;
-  data: Uint8Array;
-}
-
-const EOCD_SIG = 0x06054b50;
-const CEN_SIG = 0x02014b50;
-
-/**
- * Parse the single ZIP entry from a `.pltd`/`.prcl` buffer via its central directory — the
- * authoritative source for sizes and offsets across both container variants (some files
- * carry a data descriptor and a leading spanning marker, so the local header alone is not
- * reliable).
- */
-function parseSingleZipEntry(bytes: Uint8Array): RawEntry {
-  // Locate the End Of Central Directory record by scanning backwards.
-  let eocd = -1;
-  for (let i = bytes.length - 22; i >= 0; i--) {
-    if (u32(bytes, i) === EOCD_SIG) {
-      eocd = i;
-      break;
-    }
-  }
-  if (eocd < 0) throw new Error("Not a .pltd/.prcl: no ZIP end-of-central-directory record");
-
-  const cdOffset = u32(bytes, eocd + 16);
-  if (u32(bytes, cdOffset) !== CEN_SIG) {
-    throw new Error("Not a .pltd/.prcl: central directory not found at expected offset");
-  }
-
-  const flags = u16(bytes, cdOffset + 8);
-  const method = u16(bytes, cdOffset + 10);
-  const crc32 = u32(bytes, cdOffset + 16);
-  const compressedSize = u32(bytes, cdOffset + 20);
-  const uncompressedSize = u32(bytes, cdOffset + 24);
-  const nameLen = u16(bytes, cdOffset + 28);
-  const extraLen = u16(bytes, cdOffset + 30);
-  const commentLen = u16(bytes, cdOffset + 32);
-  const localOffset = u32(bytes, cdOffset + 42);
-  const name = new TextDecoder("utf-8").decode(
-    bytes.subarray(cdOffset + 46, cdOffset + 46 + nameLen),
-  );
-
-  // Local header at localOffset: skip its (possibly different) name/extra to find the data.
-  const lNameLen = u16(bytes, localOffset + 26);
-  const lExtraLen = u16(bytes, localOffset + 28);
-  const dataStart = localOffset + 30 + lNameLen + lExtraLen;
-  const data = bytes.subarray(dataStart, dataStart + compressedSize);
-
-  void commentLen;
-  return {
-    name,
-    method,
-    encrypted: (flags & 0x1) === 1,
-    crc32,
-    compressedSize,
-    uncompressedSize,
-    data,
-  };
-}
-
-// ---------------------------------------------------------------------------
 // platesetup2 XML
 // ---------------------------------------------------------------------------
-
-function unescapeXml(s: string): string {
-  return s
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&apos;/g, "'")
-    .replace(/&#(\d+);/g, (_, d: string) => String.fromCharCode(Number(d)))
-    .replace(/&amp;/g, "&");
-}
-
-/** Parse `key="value"` attributes from a tag's interior, XML-unescaping values. */
-function parseAttrs(tag: string): Record<string, string> {
-  const attrs: Record<string, string> = {};
-  const re = /([\w:.-]+)\s*=\s*"([^"]*)"/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(tag)) !== null) attrs[m[1]!] = unescapeXml(m[2]!);
-  return attrs;
-}
-
-function firstTagAttrs(xml: string, tagName: string): Record<string, string> {
-  const m = new RegExp(`<${tagName}\\b([^>]*)>`).exec(xml);
-  return m ? parseAttrs(m[1]!) : {};
-}
-
-function allTagAttrs(xml: string, tagName: string): Record<string, string>[] {
-  const re = new RegExp(`<${tagName}\\b([^>]*?)/?>`, "g");
-  const out: Record<string, string>[] = [];
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(xml)) !== null) out.push(parseAttrs(m[1]!));
-  return out;
-}
 
 function toSampleType(raw: string): SampleType {
   return SAMPLE_TYPE_MAP[raw] ?? "other";
 }
 
-function parsePlatesetup2(xml: string): PlateDefinition {
+/**
+ * Parse a `<platesetup2>`/`<plateSetup2>` XML fragment into a typed {@link PlateDefinition}.
+ * Exported so `pcrd.ts` can reuse it for the `plateSetup2` subtree embedded in a `.pcrd`
+ * document (same schema, different root-tag case — tag matching here is case-insensitive).
+ */
+export function parsePlatesetup2(xml: string): PlateDefinition {
   const root = firstTagAttrs(xml, "platesetup2");
   const rows = Number(root.rows ?? 8) || 8;
   const columns = Number(root.columns ?? 12) || 12;
@@ -304,7 +205,7 @@ function parsePlatesetup2(xml: string): PlateDefinition {
   }
 
   const fluors: PlateFluor[] = [];
-  const layerRe = /<dyeLayer\b([^>]*)>([\s\S]*?)<\/dyeLayer>/g;
+  const layerRe = /<dyeLayer\b([^>]*)>([\s\S]*?)<\/dyeLayer>/gi;
   let layer: RegExpExecArray | null;
   while ((layer = layerRe.exec(xml)) !== null) {
     const body = layer[2]!;
@@ -373,12 +274,6 @@ function parsePlatesetup2(xml: string): PlateDefinition {
 
 const textDecoder = new TextDecoder("utf-8");
 
-function stripBom(bytes: Uint8Array): Uint8Array {
-  return bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf
-    ? bytes.subarray(3)
-    : bytes;
-}
-
 /**
  * Parse a `.pltd` (or `.prcl`) file: decode the ZIP container, decrypt and inflate the
  * entry, and — for `.pltd` plate files — parse the `<platesetup2>` XML into a typed
@@ -394,7 +289,7 @@ function stripBom(bytes: Uint8Array): Uint8Array {
  *   one. See `pltd.md` for how a licensed CFX Manager user can obtain it.
  */
 export function parsePltd(bytes: Uint8Array, options: PltdOptions = {}): Pltd {
-  const entry = parseSingleZipEntry(bytes);
+  const entry = parseSingleEntryZip(bytes);
   const container: PltdContainer = {
     innerName: entry.name,
     compressionMethod: entry.method,
@@ -422,7 +317,7 @@ export function parsePltd(bytes: Uint8Array, options: PltdOptions = {}): Pltd {
       throw new Error(`Unsupported ZIP compression method ${entry.method}`);
     }
 
-    const xml = textDecoder.decode(stripBom(inflated));
+    const xml = textDecoder.decode(stripBomBytes(inflated));
     const plate = /<platesetup2\b/.test(xml) ? parsePlatesetup2(xml) : undefined;
     return { container, xml, plate };
   } catch (e) {
