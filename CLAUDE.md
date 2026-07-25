@@ -7,6 +7,8 @@
 - Merge feature/worktree branches into `main` locally. After doing so delete the worktree and branch.
 - Don't open PRs, and don't push anything upstream to the `origin`
 
+Whenever changes are made, review and update all ARCHITECTURE.md files to be a concise yet accurate summary of the application design, with pointers to other relevant files.
+
 ## Format documentation
 
 The reverse-engineered binary format docs are the reference for anything in
