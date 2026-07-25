@@ -387,8 +387,10 @@ only pieces the two views share.
   `document.body`, positioned from the hovered element's own bounding rect, mirroring `FileBar`'s
   file-chip card) listing everything on the plate for that chip/cell and its Cq, one line per
   entry (swatch · label · sample/well · Cq, the sample/well eliding with an ellipsis before the
-  Cq ever gets pushed off): hovering a well lists its targets/fluors with Cq (plus its sample, in
-  the card's subtitle); hovering a target/fluor lists its wells (with sample) and Cq; hovering a
+  Cq ever gets pushed off): hovering a well lists its targets/fluors with Cq (plus, in the card's
+  subtitle, its sample type — the same `SAMPLE_TYPE_META` label the cell's color comes from, read
+  as `"empty"` for an unloaded well — and its sample name); hovering a target/fluor lists its
+  wells (with sample) and Cq; hovering a
   channel lists its wells (with sample) and Cq; hovering a sample lists its targets/fluors (with
   well) and Cq. Card rows come from `allPlotCurves` — every curve on the plate for the active
   view mode, computed the same way as `plotCurves` but *without* the enabled-wells/channels/
@@ -403,6 +405,10 @@ only pieces the two views share.
   differ from its Cq on the chart once a filter narrows the plotted set, since the "all curves"
   run resolves each group's threshold across the whole plate rather than just what's selected —
   expected, since the card summarizes the plate rather than doubling as an alternate chart legend.
+  `WellMatrix` renders its native `title` tooltip (`"A1 — NRT (no-RT)"`) only when no `cardData`
+  callback is passed, so the two hover affordances never stack: the Curves rail shows the card
+  alone, while `AnalysisView`'s card-less well grid keeps the plain tooltip. Either way the same
+  text stays on the cell's `aria-label`.
 - **X axis:** integer cycles only — a tick per cycle, gridline + label every 5.
 - **Hover/tap tooltip:** a uPlot cursor plugin finds the nearest series (well curve, dark,
   factory overlay, or temperature) and reports its label, channel/dye, cycle, and

@@ -14,6 +14,7 @@ import {
 import { ANALYSIS_BASELINE_MODE, formatBaselineFormula } from "../../lib/cq";
 import { computeWellTypes } from "../../lib/wellTypes";
 import { NO_TARGET, targetGroups } from "../../lib/plateTargets";
+import { SAMPLE_TYPE_META } from "../../lib/sampleType";
 import {
   wellKey,
   type BandsMode,
@@ -594,7 +595,11 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
           selected: isSelected(c),
         })),
     );
-    return { title: `Well ${label}`, subtitle: well.sample ? `Sample: ${well.sample}` : undefined, rows };
+    // Sample type is shown the same way the grid colors the cell: a well that isn't loaded reads
+    // as "empty" whatever type the plate design assigned it (see `computeWellTypes`).
+    const meta = SAMPLE_TYPE_META[well.loaded ? well.sampleType : "empty"];
+    const parts = [meta.label, well.sample ? `Sample: ${well.sample}` : null].filter(Boolean);
+    return { title: `Well ${label}`, subtitle: parts.join(" · "), rows };
   };
 
   const cardForDyeLabel = (dyeLabel: string): HoverCardData | null => {

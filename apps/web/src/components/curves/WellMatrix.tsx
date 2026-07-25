@@ -97,8 +97,10 @@ export function WellMatrix({ enabled, onChange, wellTypes, onHoverWell, cardData
               hide();
             }}
             aria-pressed={on}
-            aria-label={`Well ${label}${c + 1}`}
-            title={meta ? `${label}${c + 1} — ${meta.label}` : undefined}
+            aria-label={meta ? `Well ${label}${c + 1} — ${meta.label}` : `Well ${label}${c + 1}`}
+            // Native tooltip only as a fallback: when a hover card is wired up it already names
+            // the well and its sample type, and the two floating boxes fight each other.
+            title={!cardData && meta ? `${label}${c + 1} — ${meta.label}` : undefined}
           />
         );
       })}
