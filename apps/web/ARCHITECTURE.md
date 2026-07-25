@@ -98,6 +98,14 @@ exposed as a clear affordance on each file chip.
   component (`PlateViewer`, formerly `PlateDetail`) previously embedded in the Raw view's
   Decoded mode for `.pltd` — moved to its own tab so it's reachable without hunting through the
   file list, and reused by nothing else now that Raw shows a plain table instead (see below).
+  Layout: `PlatesView` uses its own `.plateview` flex layout rather than `.raw`'s CSS grid,
+  because the plate-list sidebar is conditional (only multi-plate runs get one) — a grid's
+  fixed column tracks would strand the lone content pane in the narrow first track when
+  there's no sidebar to occupy the other. `PlateViewer` itself declares its own container
+  context (`.plateview__main { container: platemain / inline-size }`, distinct from the
+  app-wide `appmain` container `.raw`/`.curves` key off) so its internal grid-vs-well-detail
+  layout responds to the space it's actually given rather than the whole app window: side by
+  side once there's room, stacked (well detail below the grid) on narrow containers.
 - **Raw** — `RawFilesView` for `.zpcr`, `PcrdRawView` for `.pcrd` (see "Raw views" below).
 
 ### Decoded views (`components/raw/DecodedView.tsx`)

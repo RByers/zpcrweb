@@ -15,72 +15,78 @@ export function PlateViewer({ plate, sourceHint }: { plate: PlateDefinition; sou
   const typesPresent = [...new Set(plate.wells.map((w) => w.sampleType))];
 
   return (
-    <div className="decoded">
-      <section className="decoded__block">
-        <h3 className="decoded__h">
-          {plate.plateName || "Plate"} — {plate.rows}×{plate.columns}, {plate.dyeCount}{" "}
-          {plate.dyeCount === 1 ? "dye" : "dyes"}
-        </h3>
-        <dl className="decoded__dl mono">
-          <Pair k="Scan mode" v={plate.scanMode || "—"} />
-          <Pair k="Plate type" v={plate.plateType || "—"} />
-          <Pair k="Std units" v={plate.standardUnits || "—"} />
-          <Pair k="Targets" v={plate.targets.length ? plate.targets.join(", ") : "—"} />
-        </dl>
-        <div className="plate__fluors">
-          {plate.fluors.map((f) => (
-            <span key={f.channel + f.fluor} className="plate__chip mono">
-              <span className="decoded__swatch" style={{ background: channelColor(f.channel) }} />
-              {f.fluor} <span className="plate__chipch">C{f.channel + 1}</span>
-            </span>
-          ))}
-        </div>
-        {sourceHint && <span className="decoded__hint mono">{sourceHint}</span>}
-      </section>
+    <div className="plateviewer">
+      <div className="plateviewer__main">
+        <section className="decoded__block">
+          <h3 className="decoded__h">
+            {plate.plateName || "Plate"} — {plate.rows}×{plate.columns}, {plate.dyeCount}{" "}
+            {plate.dyeCount === 1 ? "dye" : "dyes"}
+          </h3>
+          <dl className="decoded__dl mono">
+            <Pair k="Scan mode" v={plate.scanMode || "—"} />
+            <Pair k="Plate type" v={plate.plateType || "—"} />
+            <Pair k="Std units" v={plate.standardUnits || "—"} />
+            <Pair k="Targets" v={plate.targets.length ? plate.targets.join(", ") : "—"} />
+          </dl>
+          <div className="plate__fluors">
+            {plate.fluors.map((f) => (
+              <span key={f.channel + f.fluor} className="plate__chip mono">
+                <span className="decoded__swatch" style={{ background: channelColor(f.channel) }} />
+                {f.fluor} <span className="plate__chipch">C{f.channel + 1}</span>
+              </span>
+            ))}
+          </div>
+          {sourceHint && <span className="decoded__hint mono">{sourceHint}</span>}
+        </section>
 
-      <section className="decoded__block">
-        <div className="decoded__gridwrap">
-          <table className="decoded__grid plate__grid mono">
-            <thead>
-              <tr>
-                <th />
-                {Array.from({ length: plate.columns }, (_, c) => (
-                  <th key={c}>{c + 1}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {ROW_LABELS.slice(0, plate.rows).map((label, row) => (
-                <tr key={label}>
-                  <th>{label}</th>
-                  {Array.from({ length: plate.columns }, (_, col) => {
-                    const w = plate.wells[row * plate.columns + col]!;
-                    return (
-                      <WellCell
-                        key={col}
-                        well={w}
-                        selected={selected === w.index}
-                        onClick={() => setSelected(w.index)}
-                      />
-                    );
-                  })}
+        <section className="decoded__block">
+          <div className="decoded__gridwrap">
+            <table className="decoded__grid plate__grid mono">
+              <thead>
+                <tr>
+                  <th />
+                  {Array.from({ length: plate.columns }, (_, c) => (
+                    <th key={c}>{c + 1}</th>
+                  ))}
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {ROW_LABELS.slice(0, plate.rows).map((label, row) => (
+                  <tr key={label}>
+                    <th>{label}</th>
+                    {Array.from({ length: plate.columns }, (_, col) => {
+                      const w = plate.wells[row * plate.columns + col]!;
+                      return (
+                        <WellCell
+                          key={col}
+                          well={w}
+                          selected={selected === w.index}
+                          onClick={() => setSelected(w.index)}
+                        />
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
 
-        <div className="plate__legend mono">
-          {typesPresent.map((t) => (
-            <span key={t} className="plate__legitem">
-              <span className="plate__legdot" style={{ background: SAMPLE_TYPE_META[t].color }} />
-              {SAMPLE_TYPE_META[t].label}
-            </span>
-          ))}
-        </div>
-      </section>
+          <div className="plate__legend mono">
+            {typesPresent.map((t) => (
+              <span key={t} className="plate__legitem">
+                <span className="plate__legdot" style={{ background: SAMPLE_TYPE_META[t].color }} />
+                {SAMPLE_TYPE_META[t].label}
+              </span>
+            ))}
+          </div>
+        </section>
+      </div>
 
-      {selected !== null && plate.wells[selected] && <WellDetail well={plate.wells[selected]} />}
+      {selected !== null && plate.wells[selected] && (
+        <div className="plateviewer__detail">
+          <WellDetail well={plate.wells[selected]} />
+        </div>
+      )}
     </div>
   );
 }

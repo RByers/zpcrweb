@@ -9,6 +9,10 @@ import { usePltdPassword } from "../../state/pltdPassword";
  * entry (a `.zpcr`) or the single embedded `plateSetup2` (a `.pcrd`); {@link Zpcr.plates}
  * covers both uniformly. A peer of "Curves", separate from "Raw files" (which shows plate
  * data as a table instead, see `raw/PlateTable.tsx`).
+ *
+ * Uses its own `.plateview` layout (flex, not `.raw`'s two-column grid) because the plate
+ * list sidebar is conditional — a grid's fixed column tracks would misplace the lone
+ * `.plateview__main` child when there's only one plate and no sidebar to fill the other track.
  */
 export function PlatesView({ zpcr }: { zpcr: Zpcr }) {
   const [password, setPassword] = usePltdPassword();
@@ -23,9 +27,9 @@ export function PlatesView({ zpcr }: { zpcr: Zpcr }) {
   const { pltd } = entry;
 
   return (
-    <div className="raw">
+    <div className="plateview">
       {entries.length > 1 && (
-        <aside className="raw__list">
+        <aside className="plateview__list raw__list">
           <div className="raw__group">
             <div className="raw__grouphead">Plates</div>
             {entries.map((e, i) => (
@@ -42,7 +46,7 @@ export function PlatesView({ zpcr }: { zpcr: Zpcr }) {
         </aside>
       )}
 
-      <section className="raw__viewer">
+      <section className="plateview__main">
         {pltd.needsPassword || pltd.error ? (
           <div className="decoded">
             <PasswordPrompt wrong={!!pltd.error} onSubmit={setPassword} />
