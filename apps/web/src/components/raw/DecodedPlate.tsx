@@ -8,7 +8,7 @@ import {
   type Zpcr,
 } from "@zpcrweb/core";
 import { channelColor } from "../../lib/channelColors";
-import { formatXml } from "../../lib/xmlFormat";
+import { XmlTreeFromString } from "../../lib/xmlTree";
 import { usePltdPassword } from "../../state/pltdPassword";
 import { PasswordPrompt } from "../PasswordPrompt";
 
@@ -91,8 +91,8 @@ export function DecodedPlate({ zpcr, name }: { zpcr: Zpcr; name: string }) {
  * coloured by sample type, each well showing its loaded fluorophores (channel dots); click a
  * well for its full detail (fluors → targets, sample, condition, replicate, quantity). Used
  * for both a `.zpcr`'s embedded `.pltd` entries ({@link DecodedPlate}, above — needs a
- * password) and a `.pcrd`'s already-decrypted `plateSetup2` subtree (`EmbeddedPlate` in
- * `DecodedView.tsx` — no password needed, the whole document was already decrypted).
+ * password) and a `.pcrd`'s already-decrypted `plateSetup2` subtree (`PcrdRawView` — no
+ * password needed, the whole document was already decrypted).
  */
 export function PlateDetail({ plate, sourceHint }: { plate: PlateDefinition; sourceHint?: string }) {
   const [selected, setSelected] = useState<number | null>(null);
@@ -173,7 +173,6 @@ export function PlateDetail({ plate, sourceHint }: { plate: PlateDefinition; sou
 export function PlateXml({ zpcr, name }: { zpcr: Zpcr; name: string }) {
   const { pltd, setPassword } = usePltdEntry(zpcr, name);
   const xml = pltd.xml ?? "";
-  const formatted = useMemo(() => (xml ? formatXml(xml) : null), [xml]);
   if (pltd.needsPassword || pltd.error) {
     return (
       <div className="decoded">
@@ -183,8 +182,7 @@ export function PlateXml({ zpcr, name }: { zpcr: Zpcr; name: string }) {
     );
   }
   if (!xml) return <div className="decoded__na mono">No XML for {name}.</div>;
-  if (formatted == null) return <pre className="decoded__xml mono">{xml}</pre>;
-  return <div className="decoded__xml mono">{formatted}</div>;
+  return <XmlTreeFromString xml={xml} />;
 }
 
 function WellCell({

@@ -7,6 +7,7 @@ import { PasswordPrompt } from "./components/PasswordPrompt";
 import { OverviewView } from "./components/views/OverviewView";
 import { CurvesView } from "./components/views/CurvesView";
 import { RawFilesView } from "./components/views/RawFilesView";
+import { PcrdRawView } from "./components/views/PcrdRawView";
 
 export function App() {
   const store = useZpcrStore();
@@ -75,7 +76,10 @@ export function App() {
                 onChange={store.updateSettings}
               />
             )}
-            {view === "raw" && <RawFilesView zpcr={zpcr} />}
+            {view === "raw" && active.kind === "pcrd" && (
+              <PcrdRawView zpcr={zpcr} documentXml={activeRun?.documentXml ?? ""} />
+            )}
+            {view === "raw" && active.kind === "zpcr" && <RawFilesView zpcr={zpcr} />}
           </>
         )}
       </main>

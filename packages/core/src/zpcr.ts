@@ -18,6 +18,7 @@ import {
 import { compareRefToCal, parseFactoryRefRowCal } from "./refcal.js";
 
 const RUNINFO_NAME = "RunInfo.xml";
+const PROTOCOL_NAME = "ProtocolRunDefinition.txt";
 const textDecoder = new TextDecoder("utf-8");
 
 /** Normalize the accepted isomorphic input types into a `Uint8Array`. */
@@ -50,6 +51,7 @@ export function parseZpcr(data: Uint8Array | ArrayBuffer): Zpcr {
     metadata,
     reads,
     archive,
+    protocolText: archive.entries.includes(PROTOCOL_NAME) ? archive.text(PROTOCOL_NAME) : "",
     curves: (options?: CurveOptions) => toCurves(reads, options),
     darkCurves: (step?: number) => toDarkCurves(reads, step),
     temperatureCurves: (step?: number) => toTemperatureCurves(reads, step),

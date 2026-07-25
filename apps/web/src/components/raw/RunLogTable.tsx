@@ -1,17 +1,11 @@
-import { useMemo, useState } from "react";
-import type { Zpcr } from "@zpcrweb/core";
-import {
-  friendlyTimestamp,
-  parseRunLog,
-  type RunLogEntry,
-} from "../../lib/runlog";
-import { formatXml } from "../../lib/xmlFormat";
+import { useState } from "react";
+import { friendlyTimestamp, type RunLogEntry, type RunLogParsed } from "../../lib/runlog";
+import { XmlTreeFromString } from "../../lib/xmlTree";
 
 const DEFAULT_COLUMNS = new Set(["TS", "Level", "Msg"]);
 
 interface Props {
-  zpcr: Zpcr;
-  name: string;
+  parsed: RunLogParsed;
 }
 
 interface HoverState {
@@ -20,12 +14,9 @@ interface HoverState {
   y: number;
 }
 
-export function RunLogTable({ zpcr, name }: Props) {
-  const parsed = useMemo(
-    () => parseRunLog(zpcr.archive.text(name)),
-    [zpcr, name],
-  );
-
+/** Renders a parsed run log — real `<Log>` (`.zpcr`) or `<log>` (`.pcrd`) records, already
+ * shaped by `logEntriesFromElements`/`parseRunLog`/`summarizeRunLog` (`lib/runlog.ts`). */
+export function RunLogTable({ parsed }: Props) {
   const [visibleCols, setVisibleCols] = useState<Set<string>>(
     () => new Set([...DEFAULT_COLUMNS].filter((c) => parsed.columns.includes(c))),
   );
@@ -35,12 +26,6 @@ export function RunLogTable({ zpcr, name }: Props) {
   const shownColumns = parsed.columns.filter((c) => visibleCols.has(c));
   const rows = parsed.entries.filter(
     (e) => !hiddenSev.has(e.fields["Sev"] ?? ""),
-  );
-
-  // Pretty-print each entry's XML once for the hover panel.
-  const pretty = useMemo(
-    () => parsed.entries.map((e) => formatXml(e.xml)),
-    [parsed],
   );
 
   const toggle = (set: Set<string>, key: string): Set<string> => {
@@ -130,7 +115,7 @@ export function RunLogTable({ zpcr, name }: Props) {
             top: Math.min(hover.y + 16, window.innerHeight - 320),
           }}
         >
-          {pretty[hoveredEntryIndex]}
+          <XmlTreeFromString xml={parsed.entries[hoveredEntryIndex]!.xml} />
         </div>
       )}
     </div>
