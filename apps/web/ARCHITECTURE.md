@@ -314,7 +314,9 @@ only pieces the two views share.
   baseline — see "Two baseline concepts" under Reference view below. Also Linear ↔ Log (uPlot
   `distr: 3`).
   - *Log + baseline:* Constant/Linear-corrected values can go ≤ 0, undefined on a log axis, so
-    non-positive points are gaps (`null`) with an inline note. Raw is unaffected.
+    each curve is shifted up by a constant (a "min-1" baseline, `logFloor` in `lib/uplot/chart.ts`)
+    so its own minimum reads 1, with an inline note. A no-op when the curve is already positive
+    (Raw is unaffected).
   - *Region-finding is fragile at low sample counts:* `findBaselineByRegression`'s "extend while
     within `k` std errors" loop estimates that std error from the current window, which starts
     at `initialWidth` points (default **5**, giving 3 degrees of freedom). A width of 3 (1

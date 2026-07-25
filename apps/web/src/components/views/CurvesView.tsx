@@ -995,7 +995,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
         </div>
         {logBaselined && (
           <div className="rail__note mono">
-            Log + baseline: non-positive points are hidden (gaps).
+            Log + baseline: each curve shifted so its own minimum reads 1.
           </div>
         )}
       </aside>

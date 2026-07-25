@@ -101,10 +101,28 @@ export interface PlotCurve {
   baselineRegionBegin?: number | null;
 }
 
-/** Values <= 0 are undefined on a log axis; render them as gaps. */
+/** Values <= 0 are undefined on a log axis; render them as gaps. Should be a no-op once
+ * {@link logFloor} has shifted the curve's own minimum to 1 — kept as a fail-safe. */
 function logSafe(values: number[], scale: Scale): (number | null)[] {
   if (scale !== "log") return values;
   return values.map((v) => (v <= 0 ? null : v));
+}
+
+/**
+ * A curve normalized to its own baseline (or a factory delta/%) fluctuates around 0 and can
+ * dip negative — undefined on a log axis. Rather than punching gaps in the line there, shift
+ * the whole curve up by a constant so its own minimum reads 1 (a "min-1" baseline): the log
+ * scale then shows the curve's full shape/growth, just anchored to "this curve's noise floor"
+ * instead of the underlying unit's zero. A no-op when the curve is already positive (e.g. the
+ * raw baseline, where RFU readings never go non-positive) or when `scale` isn't `"log"`.
+ */
+function logFloor(values: number[], adjust: Adjust[], scale: Scale): Adjust[] {
+  if (scale !== "log" || values.length === 0) return adjust;
+  const plotted = applyAdjust(values, adjust);
+  const min = Math.min(...plotted);
+  if (min > 0) return adjust;
+  const shiftUp = 1 - min;
+  return adjust.map((a) => ({ scale: a.scale, shift: a.shift + shiftUp }));
 }
 
 /**
@@ -318,13 +336,17 @@ export function buildChart(cfg: BuildChartConfig): {
 
   for (const curve of wellCurves) {
     const factory = factoryByKey.get(`${curve.channel},${curve.col}`);
-    const adjust = wellAdjust(
-      curve.cycles,
+    const adjust = logFloor(
       curve.mean,
-      factory?.mean,
-      baseline,
-      curveBaselineMode,
-      curveBaselineRange,
+      wellAdjust(
+        curve.cycles,
+        curve.mean,
+        factory?.mean,
+        baseline,
+        curveBaselineMode,
+        curveBaselineRange,
+      ),
+      scale,
     );
     wellAdjusts.push(adjust);
     rows.push(logSafe(applyAdjust(curve.mean, adjust), scale));
@@ -391,7 +413,7 @@ export function buildChart(cfg: BuildChartConfig): {
   for (const channel of presentChannels) {
     const dark = darkByChannel.get(channel);
     if (!dark) continue;
-    const adjust = nonWellAdjust(dark.mean);
+    const adjust = logFloor(dark.mean, nonWellAdjust(dark.mean), scale);
     rows.push(logSafe(applyAdjust(dark.mean, adjust), scale));
     meta.push({
       kind: "dark",
@@ -425,7 +447,11 @@ export function buildChart(cfg: BuildChartConfig): {
     for (const key of presentPairs) {
       const factory = factoryByKey.get(key);
       if (!factory) continue;
-      const adjust = wellAdjust(cycles, factory.mean, factory.mean, baseline, curveBaselineMode, curveBaselineRange);
+      const adjust = logFloor(
+        factory.mean,
+        wellAdjust(cycles, factory.mean, factory.mean, baseline, curveBaselineMode, curveBaselineRange),
+        scale,
+      );
       rows.push(logSafe(applyAdjust(factory.mean, adjust), scale));
       meta.push({
         kind: "factory",
