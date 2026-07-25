@@ -11,6 +11,10 @@ import type {
 import { buildChart, type FactoryCurve, type PlotCurve, type TooltipData } from "../../lib/uplot/chart";
 import { channelLabel } from "../../lib/channelColors";
 
+// Stable reference so the effect-dependency array below doesn't see a new "empty" array
+// (and rebuild the whole chart, cancelling any in-progress hover) on every render.
+const NO_FACTORY_CURVES: FactoryCurve[] = [];
+
 interface Props {
   curves: PlotCurve[];
   darkCurves: DarkCurve[];
@@ -31,7 +35,7 @@ interface Props {
 export function CurveChart({
   curves,
   darkCurves,
-  factoryCurves = [],
+  factoryCurves = NO_FACTORY_CURVES,
   tempCurves,
   baseline,
   curveBaselineMode,
