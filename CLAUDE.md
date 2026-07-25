@@ -4,8 +4,9 @@
 
 **No pull requests in this repo.** Work is committed directly onto branches and then merged into main. 
 
+- Create worktrees on branches forked from the local `main` branch and do development there.
 - Merge feature/worktree branches into `main` locally. After doing so delete the worktree and branch.
-- Don't open PRs, and don't push anything upstream to the `origin`
+- Don't open PRs, and don't push anything upstream to the `origin` or make any branches from there.
 
 Whenever changes are made, review and update all ARCHITECTURE.md files to be a concise yet accurate summary of the application design, with pointers to other relevant files.
 
