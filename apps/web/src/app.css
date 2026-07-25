@@ -485,6 +485,9 @@
   display: flex;
   flex-direction: column;
   gap: 5px;
+  /* Without this, a long label (e.g. "COLOR SEPARATION") stretches the segmented control
+     below it to match the label's width instead of the control's own content. */
+  align-items: flex-start;
 }
 .toggle__label {
   font-size: 11px;

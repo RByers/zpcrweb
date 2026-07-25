@@ -6,7 +6,6 @@ import {
   type CalibrationMatrix,
   type Dcal,
   type DcalEntry,
-  type DarkCurve,
   type DyeResponseCurve,
   type NormalizationMode,
   type WellCurve,
@@ -18,11 +17,7 @@ import {
  * whole plate/step, and running the solve for every well/cycle.
  */
 
-/**
- * The two physical tube/plate types this UI offers — see `dcal.md`. `plateName` (`pltd.md`
- * §2) has a third legacy value, `MJ White`, not modeled here; a plate using it falls back to
- * `BR Clear` like any other unrecognized value.
- */
+/** The two physical tube/plate types Bio-Rad calibrates against — see `dcal.md`. */
 export type TubeType = "BR Clear" | "BR White";
 
 /**
@@ -100,9 +95,8 @@ export interface FluorCurve {
 
 /**
  * Run color separation for every well and cycle: build the raw per-channel vector (restricted
- * to `channels`, in that order), optionally subtract each channel's dark-current reading (§4.2
- * of `calibration.md`), and solve against `matrix`. `dyeChannels` gives each matrix column's
- * primary channel, aligned with `matrix.dyes`, purely for the returned curves' coloring.
+ * to `channels`, in that order) and solve against `matrix`. `dyeChannels` gives each matrix
+ * column's primary channel, aligned with `matrix.dyes`, purely for the returned curves' coloring.
  *
  * Unlike a raw channel reading (mean/std/min/max), a color-separated value has no direct
  * min/max/std of its own — those describe the pre-separation optical distribution within a
@@ -110,11 +104,9 @@ export interface FluorCurve {
  */
 export function computeFluorCurves(
   wellCurves: WellCurve[],
-  darkCurves: DarkCurve[],
   matrix: CalibrationMatrix,
   channels: number[],
   dyeChannels: number[],
-  options: { subtractDark: boolean },
 ): FluorCurve[] {
   const byWell = new Map<string, Map<number, WellCurve>>();
   for (const c of wellCurves) {
@@ -123,7 +115,6 @@ export function computeFluorCurves(
     forWell.set(c.channel, c);
     byWell.set(key, forWell);
   }
-  const darkByChannel = new Map(darkCurves.map((d) => [d.channel, d]));
 
   const out: FluorCurve[] = [];
   for (const byChannel of byWell.values()) {
@@ -134,10 +125,7 @@ export function computeFluorCurves(
 
     for (let i = 0; i < cycles.length; i++) {
       const raw = channels.map((ch) => byChannel.get(ch)?.mean[i] ?? 0);
-      const darkLevel = options.subtractDark
-        ? channels.map((ch) => darkByChannel.get(ch)?.mean[i] ?? 0)
-        : undefined;
-      const corrected = preprocessChannelReadings(raw, darkLevel ? { darkLevel } : {});
+      const corrected = preprocessChannelReadings(raw);
       const { concentrations } = separateChannels(matrix, corrected);
       concentrations.forEach((v, d) => {
         perDye[d]![i] = v;

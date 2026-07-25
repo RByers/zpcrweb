@@ -205,12 +205,10 @@ overlays a tooltip.
   - *Log + ΔRFU:* ΔRFU values go ≤ 0, undefined on a log axis, so non-positive points are
     gaps (`null`) with an inline note. The other three combinations are unaffected.
 - **Dark (LED-off) background:** `zpcr.darkCurves()` gives one background series per channel.
-  Only meaningful against a raw RFU baseline, so the toggle is disabled in ΔRFU mode.
-  - *Off* (default): one **dashed** dark line per present channel, transformed like the
-    curves — so you see where each channel's background sits.
-  - *On*: each curve is `subtractSeries(mean, dark[channel])` before scale (the dark lines
-    are dropped and the y-axis label gains "− dark"). Both `subtractSeries` and
-    `deltaBaseline` are tested library functions.
+  A pure display overlay — it never alters the plotted well curves, min/max bands, or the
+  y-axis label. Off (default) draws nothing; On draws one **dotted** dark line per present
+  channel, transformed like the curves (so it still tracks ΔRFU/log). Channel-space only,
+  like the min/max bands, so the toggle only appears when color separation is off.
 - **Temperatures (right axis):** `zpcr.temperatureCurves(step)` gives one series per
   temperature field in the platereads. Chips in the rail toggle each one (all off by
   default, since they are instrument context rather than the measurement) and preview its

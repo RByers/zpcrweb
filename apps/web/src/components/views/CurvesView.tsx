@@ -89,13 +89,6 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
     [darkCurves, available, settings.enabledChannels],
   );
 
-  // Dark (LED-off) subtraction only makes sense against a raw RFU baseline — ΔRFU already
-  // removes each well's own starting offset, so subtracting a separate dark level on top of
-  // that is meaningless. Disable rather than silently ignore, so the setting the user left on
-  // resumes working the moment they switch back to Raw.
-  const darkApplicable = settings.baseline !== "delta";
-  const effectiveSubtractDark = darkApplicable && settings.subtractDark;
-
   // ---- Dye-space (color-separated) curves ------------------------------------------------
   // See calibration.md. Uses the plate's own fluorophore list matched against this run's
   // `.Dcal` calibration data — both need to be available for this to do anything.
@@ -143,18 +136,8 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
   const allFluorCurves = useMemo(() => {
     if (!matrix || !calibrationOn) return [];
     const dyeChannels = calibratedFluors.map((f) => f.channel);
-    return computeFluorCurves(allCurves, darkCurves, matrix, available, dyeChannels, {
-      subtractDark: effectiveSubtractDark,
-    });
-  }, [
-    matrix,
-    calibrationOn,
-    allCurves,
-    darkCurves,
-    available,
-    calibratedFluors,
-    effectiveSubtractDark,
-  ]);
+    return computeFluorCurves(allCurves, matrix, available, dyeChannels);
+  }, [matrix, calibrationOn, allCurves, available, calibratedFluors]);
 
   const visibleFluor = useMemo(
     () =>
@@ -173,10 +156,9 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
 
   // ---- What actually gets plotted --------------------------------------------------------
   // Channel space and dye space never mix on the same plot: color-separated curves carry no
-  // real min/max/std of their own (§5 of calibration.md solves for a single concentration
-  // per channel vector, not a distribution), and pre-separation dark subtraction already
-  // happened inside computeFluorCurves — so bands, the dark overlay, and chart-level dark
-  // subtraction are all channel-space-only concepts.
+  // real min/max/std of their own (§5 of calibration.md solves for a single concentration per
+  // channel vector, not a distribution) — so bands and the dark overlay are both
+  // channel-space-only concepts, hidden once color separation is on.
 
   const plotCurves: PlotCurve[] = calibrationOn
     ? visibleFluor.map((c) => ({
@@ -377,34 +359,35 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
             value={settings.scale}
             onChange={(v) => onChange({ scale: v as Scale })}
           />
-          <Toggle
-            label={calibrationOn ? "Dark (pre-separation)" : "Dark (LED-off)"}
-            options={[
-              ["off", "Off"],
-              ["on", "On"],
-            ]}
-            value={settings.subtractDark ? "on" : "off"}
-            onChange={(v) => onChange({ subtractDark: v === "on" })}
-            disabled={!darkApplicable}
-          />
           {!calibrationOn && (
-            <Toggle
-              label="Min/max band"
-              options={[
-                ["off", "Off"],
-                ["auto", "Auto"],
-                ["on", "On"],
-              ]}
-              value={settings.bands}
-              onChange={(v) => onChange({ bands: v as BandsMode })}
-            />
+            <>
+              <Toggle
+                label="Dark"
+                options={[
+                  ["off", "Off"],
+                  ["on", "On"],
+                ]}
+                value={settings.showDark ? "on" : "off"}
+                onChange={(v) => onChange({ showDark: v === "on" })}
+              />
+              <Toggle
+                label="Min/max band"
+                options={[
+                  ["off", "Off"],
+                  ["auto", "Auto"],
+                  ["on", "On"],
+                ]}
+                value={settings.bands}
+                onChange={(v) => onChange({ bands: v as BandsMode })}
+              />
+            </>
           )}
         </div>
 
         <div className="rail__stat mono">
           {plotCurves.length} / {calibrationOn ? allFluorCurves.length : allCurves.length}{" "}
           curves
-          {!calibrationOn && !effectiveSubtractDark && " + dark"}
+          {!calibrationOn && settings.showDark && " + dark"}
           {visibleTemps.length > 0 && ` + ${visibleTemps.length} temp`}
         </div>
         {logDelta && (
@@ -417,11 +400,10 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
       <section className="curves__plot">
         <CurveChart
           curves={plotCurves}
-          darkCurves={calibrationOn ? [] : enabledDark}
+          darkCurves={!calibrationOn && settings.showDark ? enabledDark : []}
           tempCurves={visibleTemps}
           baseline={settings.baseline}
           scale={settings.scale}
-          subtractDark={calibrationOn ? false : effectiveSubtractDark}
           bands={calibrationOn ? "off" : settings.bands}
         />
       </section>

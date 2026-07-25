@@ -32,8 +32,9 @@ export interface FileSettings {
   enabledWells: Set<string>; // "row,col"
   baseline: Baseline;
   scale: Scale;
-  /** Subtract each channel's dark (LED-off) background from its curves. */
-  subtractDark: boolean;
+  /** Overlay each channel's dark (LED-off) background as a dotted line. Channel-space only —
+   * see the "What actually gets plotted" note in CurvesView. */
+  showDark: boolean;
   /** Min/max envelope bands mode. */
   bands: BandsMode;
   /** Selected protocol step (`STEP` value), or null to use the first step. */
@@ -120,7 +121,7 @@ function defaultSettings(): FileSettings {
     enabledWells: wells,
     baseline: "raw",
     scale: "linear",
-    subtractDark: false,
+    showDark: false,
     bands: "auto",
     step: null,
     // Temperatures are off by default — they are instrument context, not the measurement.
@@ -140,7 +141,7 @@ function toStored(id: string, s: FileSettings): StoredSettings {
     enabledWells: [...s.enabledWells],
     baseline: s.baseline,
     scale: s.scale,
-    subtractDark: s.subtractDark,
+    showDark: s.showDark,
     bands: s.bands,
     step: s.step ?? null,
     temps: [...s.temps],
@@ -157,7 +158,7 @@ function fromStored(s: StoredSettings): FileSettings {
     enabledWells: new Set(s.enabledWells),
     baseline: s.baseline ?? "raw",
     scale: s.scale ?? "linear",
-    subtractDark: s.subtractDark ?? false,
+    showDark: s.showDark ?? false,
     bands: s.bands ?? "auto",
     step: s.step ?? null,
     calibration: s.calibration ?? null,

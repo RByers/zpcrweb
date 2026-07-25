@@ -1,10 +1,5 @@
 import uPlot from "uplot";
-import {
-  deltaBaseline,
-  subtractSeries,
-  type DarkCurve,
-  type TemperatureCurve,
-} from "@zpcrweb/core";
+import { deltaBaseline, type DarkCurve, type TemperatureCurve } from "@zpcrweb/core";
 import { channelColor, channelLabel } from "../channelColors";
 import { tempColor } from "../tempColors";
 import type { Baseline, BandsMode, Scale } from "../../state/useZpcrStore";
@@ -80,12 +75,13 @@ export interface TooltipData {
 
 export interface BuildChartConfig {
   wellCurves: PlotCurve[];
+  /** Dark (LED-off) background series to overlay as dotted lines; empty draws none. Purely a
+   * display overlay — never subtracted from `wellCurves`. */
   darkCurves: DarkCurve[];
   /** Temperature series to plot on the right-hand °C axis (empty to hide the axis). */
   tempCurves: TemperatureCurve[];
   baseline: Baseline;
   scale: Scale;
-  subtractDark: boolean;
   bands: BandsMode;
   width: number;
   height: number;
@@ -93,7 +89,7 @@ export interface BuildChartConfig {
 }
 
 const REF_DASH = [3, 3];
-const DARK_DASH = [8, 5];
+const DARK_DOT = [1, 3];
 const TEMP_DASH = [5, 4];
 const SETPOINT_DASH = [2, 4];
 /** uPlot scale key for the right-hand temperature axis. */
@@ -103,7 +99,7 @@ export function buildChart(cfg: BuildChartConfig): {
   data: uPlot.AlignedData;
   options: uPlot.Options;
 } {
-  const { wellCurves, darkCurves, tempCurves, baseline, scale, subtractDark } = cfg;
+  const { wellCurves, darkCurves, tempCurves, baseline, scale } = cfg;
   const cycles =
     wellCurves[0]?.cycles ?? darkCurves[0]?.cycles ?? tempCurves[0]?.cycles ?? [];
 
@@ -118,10 +114,7 @@ export function buildChart(cfg: BuildChartConfig): {
   const series: uPlot.Series[] = [{ label: "Cycle" }];
 
   for (const curve of wellCurves) {
-    const darkMean = darkByChannel.get(curve.channel)?.mean;
-    const base =
-      subtractDark && darkMean ? subtractSeries(curve.mean, darkMean) : curve.mean;
-    rows.push(logSafe(transform(base), scale));
+    rows.push(logSafe(transform(curve.mean), scale));
     meta.push({
       kind: "well",
       channel: curve.channel,
@@ -143,32 +136,30 @@ export function buildChart(cfg: BuildChartConfig): {
     });
   }
 
-  if (!subtractDark) {
-    const presentChannels = new Set(wellCurves.map((c) => c.channel));
-    for (const channel of presentChannels) {
-      const dark = darkByChannel.get(channel);
-      if (!dark) continue;
-      rows.push(logSafe(transform(dark.mean), scale));
-      meta.push({
-        kind: "dark",
-        channel,
-        label: "dark",
-        dyeLabel: channelLabel(channel),
-        isReference: false,
-        cycles: dark.cycles,
-        mean: dark.mean,
-        std: dark.std,
-        min: dark.min,
-        max: dark.max,
-      });
-      series.push({
-        label: `dark · ${channelLabel(channel)}`,
-        stroke: channelColor(channel),
-        width: 2,
-        dash: DARK_DASH,
-        points: { show: false },
-      });
-    }
+  const presentChannels = new Set(wellCurves.map((c) => c.channel));
+  for (const channel of presentChannels) {
+    const dark = darkByChannel.get(channel);
+    if (!dark) continue;
+    rows.push(logSafe(transform(dark.mean), scale));
+    meta.push({
+      kind: "dark",
+      channel,
+      label: "dark",
+      dyeLabel: channelLabel(channel),
+      isReference: false,
+      cycles: dark.cycles,
+      mean: dark.mean,
+      std: dark.std,
+      min: dark.min,
+      max: dark.max,
+    });
+    series.push({
+      label: `dark · ${channelLabel(channel)}`,
+      stroke: channelColor(channel),
+      width: 2,
+      dash: DARK_DOT,
+      points: { show: false },
+    });
   }
 
   // Temperatures ride the right-hand °C axis so they can share the x axis with the curves
@@ -200,9 +191,7 @@ export function buildChart(cfg: BuildChartConfig): {
   // Min/max envelope bands. Auto shows them only when a single well (one row/col) is
   // selected, regardless of how many channels — so each channel's curve gets its own band.
   const computeBand = (c: PlotCurve): BandData => {
-    const darkMean = darkByChannel.get(c.channel)?.mean;
-    const base = subtractDark && darkMean ? subtractSeries(c.mean, darkMean) : c.mean;
-    const plottedMean = transform(base);
+    const plottedMean = transform(c.mean);
     const min: (number | null)[] = [];
     const max: (number | null)[] = [];
     for (let i = 0; i < c.mean.length; i++) {
@@ -260,7 +249,7 @@ export function buildChart(cfg: BuildChartConfig): {
         stroke: "#8aa0c0",
         grid: { stroke: "rgba(120,200,255,0.06)", width: 1 },
         ticks: { stroke: "rgba(120,200,255,0.12)", width: 1 },
-        label: yLabel(baseline, subtractDark),
+        label: yLabel(baseline),
         labelSize: 30,
         labelFont: "12px system-ui",
         font: "11px ui-monospace, monospace",
@@ -291,9 +280,8 @@ export function buildChart(cfg: BuildChartConfig): {
   return { data: rows as uPlot.AlignedData, options };
 }
 
-function yLabel(baseline: Baseline, subtractDark: boolean): string {
-  const base = baseline === "delta" ? "ΔRFU (mean)" : "RFU (mean)";
-  return subtractDark ? `${base} − dark` : base;
+function yLabel(baseline: Baseline): string {
+  return baseline === "delta" ? "ΔRFU (mean)" : "RFU (mean)";
 }
 
 /**

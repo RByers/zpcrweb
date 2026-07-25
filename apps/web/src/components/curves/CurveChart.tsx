@@ -11,7 +11,6 @@ interface Props {
   tempCurves: TemperatureCurve[];
   baseline: Baseline;
   scale: Scale;
-  subtractDark: boolean;
   bands: BandsMode;
 }
 
@@ -21,7 +20,6 @@ export function CurveChart({
   tempCurves,
   baseline,
   scale,
-  subtractDark,
   bands,
 }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
@@ -42,7 +40,6 @@ export function CurveChart({
       tempCurves,
       baseline,
       scale,
-      subtractDark,
       bands,
       width,
       height,
@@ -56,7 +53,7 @@ export function CurveChart({
       plotRef.current?.destroy();
       plotRef.current = null;
     };
-  }, [curves, darkCurves, tempCurves, baseline, scale, subtractDark, bands]);
+  }, [curves, darkCurves, tempCurves, baseline, scale, bands]);
 
   // Keep the plot sized to its container.
   useEffect(() => {
