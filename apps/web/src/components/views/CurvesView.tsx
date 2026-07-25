@@ -112,11 +112,14 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
   const calibrations = useMemo(() => zpcr.calibrations(), [zpcr]);
 
   // Per-well sample type (from the plate definition), for coloring the well-selection grid to
-  // match the Plates view, and for defaulting well selection to non-empty wells.
+  // match the Plates view. A well not actually loaded shows as "empty" (grey) regardless of its
+  // configured sampleType — mirroring PlateViewer, which likewise gates its sample-type color on
+  // `loaded` rather than `sampleType !== "empty"` (a well can be assigned a real sampleType like
+  // "unknown" in the plate design without ending up loaded with a fluor for this run).
   const wellTypes = useMemo(() => {
     if (!plate) return undefined;
     const m = new Map<string, (typeof plate.wells)[number]["sampleType"]>();
-    for (const w of plate.wells) m.set(wellKey(w.row, w.col), w.sampleType);
+    for (const w of plate.wells) m.set(wellKey(w.row, w.col), w.loaded ? w.sampleType : "empty");
     return m;
   }, [plate]);
 
@@ -126,12 +129,14 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
     return s;
   }, []);
 
-  // The set of wells a plate definition marks as non-empty — the default selection for a newly
-  // opened file, and what the "reset" button next to Wells restores.
+  // The set of wells the plate definition actually loads (a real, loaded tube) — the default
+  // selection for a newly opened file, and what the "reset" button next to Wells restores.
+  // `loaded`, not `sampleType !== "empty"`: a well can carry a non-"empty" sampleType (e.g. the
+  // default "unknown"/wcSample) while still having no fluor loaded into it.
   const nonEmptyWellSet = useMemo(() => {
     if (!plate) return null;
     const s = new Set<string>();
-    for (const w of plate.wells) if (w.sampleType !== "empty") s.add(wellKey(w.row, w.col));
+    for (const w of plate.wells) if (w.loaded) s.add(wellKey(w.row, w.col));
     return s.size > 0 ? s : null;
   }, [plate]);
 
