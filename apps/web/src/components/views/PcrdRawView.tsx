@@ -131,6 +131,18 @@ function entryKey(entry: NavEntry): string {
   return entry.kind;
 }
 
+/** The nav label for `entry`, looked up from {@link PcrdDocument.groups} — the same labels the
+ * left-hand nav list renders (e.g. "Cycle 2" for a plate read), so the toolbar name and download
+ * filename always agree with what's shown in the nav. */
+function entryLabel(entry: NavEntry, doc: PcrdDocument): string {
+  const key = entryKey(entry);
+  for (const g of doc.groups) {
+    const item = g.items.find((i) => entryKey(i.entry) === key);
+    if (item) return item.label;
+  }
+  return key;
+}
+
 /** The XML subtree(s) the "XML" mode renders for a nav entry — mirrors the `mode === "xml"`
  * branches of {@link PcrdRawContent}, kept separate so the download button can grab the same
  * roots without rendering. */
@@ -272,27 +284,6 @@ export function PcrdRawView({
       </section>
     </div>
   );
-}
-
-function entryLabel(entry: NavEntry, doc: PcrdDocument): string {
-  switch (entry.kind) {
-    case "document":
-      return "Document";
-    case "plateSetup":
-      return "plateSetup2";
-    case "protocol":
-      return "protocol2";
-    case "plateRead":
-      return doc.plateReadEls[entry.index]?.tagName ?? "plateRead";
-    case "calibration":
-      return "calibrationCollection";
-    case "runInfo":
-      return "RunInfo";
-    case "log":
-      return `log × ${doc.logEls.length}`;
-    case "other":
-      return entry.el.tagName;
-  }
 }
 
 function PcrdRawContent({
