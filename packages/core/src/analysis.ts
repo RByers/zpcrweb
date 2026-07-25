@@ -9,6 +9,7 @@ import {
   fitLinearBaseline,
   smoothCurve,
   subtractBaseline,
+  validateBaselineRegion,
   type BaselineMode,
   type BaselineRegion,
   type LinearBaselineFit,
@@ -33,10 +34,16 @@ function fallbackRegion(cycles: number[]): BaselineRegion {
 
 export interface CurveBaselineResult {
   baselineRegion: BaselineRegion;
+  /** §7 baseline-validation gate — see {@link validateBaselineRegion}. `false` means
+   * `baselineRegion` failed the flatness/linearity check against the curve's full span, so
+   * `correctedValues`/`amplified`/`deltaRfu` are an extrapolation artifact rather than a
+   * trustworthy correction: `amplified` is forced `false` in that case regardless of the rise. */
+  baselineValid: boolean;
   correctedValues: number[];
   /** §5.1 noise estimate — the baseline-corrected residual spread over `baselineRegion`. */
   noise: number;
-  /** §7 amplification gate — see {@link isAmplified}. */
+  /** §7 amplification gate — see {@link isAmplified}. Always `false` when `baselineValid` is
+   * `false`. */
   amplified: boolean;
   /** Endpoint rise relative to the baseline: the curve's last corrected value minus the mean
    * corrected value over `baselineRegion` (≈ the last value itself, since baseline subtraction
@@ -71,10 +78,12 @@ export function baselineCorrectCurve(
   mode: BaselineMode,
   amplification?: AmplificationOptions,
 ): CurveBaselineResult {
-  const region = autoBaselineRegion(cycles, smoothCurve(values)) ?? fallbackRegion(cycles);
+  const smoothed = smoothCurve(values);
+  const region = autoBaselineRegion(cycles, smoothed) ?? fallbackRegion(cycles);
+  const baselineValid = validateBaselineRegion(cycles, smoothed, region);
   const correctedValues = subtractBaseline(cycles, values, region, mode);
   const noise = baselineNoise(cycles, correctedValues, region);
-  const amplified = isAmplified(correctedValues, noise, amplification);
+  const amplified = baselineValid && isAmplified(correctedValues, noise, amplification);
 
   const idx: number[] = [];
   for (let i = 0; i < cycles.length; i++) {
@@ -86,5 +95,14 @@ export function baselineCorrectCurve(
   const baselineRfu = idx.length > 0 ? idx.reduce((s, i) => s + values[i]!, 0) / idx.length : 0;
   const baselineFit = fitLinearBaseline(cycles, values, region);
 
-  return { baselineRegion: region, correctedValues, noise, amplified, deltaRfu, baselineRfu, baselineFit };
+  return {
+    baselineRegion: region,
+    baselineValid,
+    correctedValues,
+    noise,
+    amplified,
+    deltaRfu,
+    baselineRfu,
+    baselineFit,
+  };
 }

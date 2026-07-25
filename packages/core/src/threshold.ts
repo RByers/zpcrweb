@@ -176,16 +176,26 @@ export interface CqOptions {
   noise?: number;
   amplification?: AmplificationOptions;
   crossing?: CqCrossingOptions;
+  /** §7's baseline-validation gate — pass `false` (typically `CurveBaselineResult.baselineValid`
+   * from `analysis.ts`, which runs `baseline.ts`'s `validateBaselineRegion`) to report no Cq
+   * outright. A region that fails that check produces a corrected curve that's an artifact of
+   * extrapolating a locally-fit line across cycles it doesn't describe, so any crossing or
+   * inflection found in it is not trustworthy however clean it looks — checked before
+   * `noise`/`isAmplified`, since a spurious rise like that routinely clears the amplification
+   * squelch too. */
+  baselineValid?: boolean;
 }
 
 /**
- * §6 + §7 combined: apply the §7 amplification squelch (when `noise` is given), then compute Cq
- * with whichever algorithm `options.algorithm` selects — {@link findThresholdCrossing} or
- * {@link findInflectionCq}. `cycles`/`values` should already be baseline-corrected
- * ({@link subtractBaseline} in `baseline.ts`).
+ * §6 + §7 combined: apply the §7 baseline-validation and amplification squelches (when
+ * `baselineValid`/`noise` are given), then compute Cq with whichever algorithm
+ * `options.algorithm` selects — {@link findThresholdCrossing} or {@link findInflectionCq}.
+ * `cycles`/`values` should already be baseline-corrected ({@link subtractBaseline} in
+ * `baseline.ts`).
  */
 export function computeCq(cycles: number[], values: number[], options: CqOptions = {}): number | null {
   const algorithm = options.algorithm ?? "Threshold";
+  if (options.baselineValid === false) return null;
   if (options.noise !== undefined && !isAmplified(values, options.noise, options.amplification)) return null;
 
   if (algorithm === "Threshold") {

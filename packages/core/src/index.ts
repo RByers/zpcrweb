@@ -65,6 +65,7 @@ export {
   findBaselineByCurvature,
   findBaselineByRegression,
   autoBaselineRegion,
+  validateBaselineRegion,
   subtractBaseline,
   fitLinearBaseline,
 } from "./baseline.js";
@@ -143,6 +144,7 @@ export type {
   CurvatureBaselineOptions,
   RegressionBaselineOptions,
   AutoBaselineOptions,
+  BaselineValidationOptions,
   BaselineMode,
   LinearBaselineFit,
 } from "./baseline.js";

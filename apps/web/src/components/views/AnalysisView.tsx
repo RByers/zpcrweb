@@ -207,6 +207,7 @@ export function AnalysisView({ zpcr, settings, onChange }: Props) {
       correctedValues: number[];
       noise: number;
       amplified: boolean;
+      baselineValid: boolean;
       deltaRfu: number;
     }
     const prepped: Prepped[] = [];
@@ -233,6 +234,7 @@ export function AnalysisView({ zpcr, settings, onChange }: Props) {
           correctedValues: baseline.correctedValues,
           noise: baseline.noise,
           amplified: baseline.amplified,
+          baselineValid: baseline.baselineValid,
           deltaRfu: baseline.deltaRfu,
         });
       }
@@ -260,6 +262,7 @@ export function AnalysisView({ zpcr, settings, onChange }: Props) {
           algorithm,
           threshold: algorithm === "Threshold" ? threshold : undefined,
           noise: p.noise,
+          baselineValid: p.baselineValid,
         });
         return {
           target: p.target,

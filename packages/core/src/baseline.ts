@@ -178,6 +178,31 @@ function residualStdError(x: number[], y: number[], fit: { slope: number; interc
   return Math.sqrt(sumSquares / (n - 2));
 }
 
+/**
+ * §3.2's flatness/linearity ratios for `region`, judged against the *whole* curve's span
+ * (`values` should cover every cycle, not just the region) rather than the region's own
+ * scatter — a region can fit a straight line almost perfectly and still be the wrong baseline if
+ * that line doesn't hold across the rest of the run (see {@link validateBaselineRegion}). Returns
+ * `null` if the region has too few points to fit a line.
+ */
+function regionFlatnessRatios(
+  cycles: number[],
+  values: number[],
+  region: BaselineRegion,
+): { relFlat: number; relLin: number } | null {
+  const idx = regionIndices(cycles, region);
+  if (idx.length < 2) return null;
+
+  const x = idx.map((i) => cycles[i]!);
+  const y = idx.map((i) => values[i]!);
+  const span = Math.max(...values) - Math.min(...values);
+  const meanY = y.reduce((a, b) => a + b, 0) / y.length;
+  const flatRms = Math.sqrt(y.reduce((s, v) => s + (v - meanY) ** 2, 0) / y.length);
+  const fit = linearFit(x, y);
+  const linRms = Math.sqrt(y.reduce((s, v, i) => s + (v - (fit.slope * x[i]! + fit.intercept)) ** 2, 0) / y.length);
+  return { relFlat: span > 0 ? flatRms / span : 0, relLin: span > 0 ? linRms / span : 0 };
+}
+
 export interface CurvatureBaselineOptions {
   /** Reject a candidate peak below this fraction of the tallest peak. Default **0.3**. */
   minPeakRatio?: number;
@@ -242,23 +267,15 @@ export function findBaselineByCurvature(
   if (merged.length === 0) return null;
 
   const onsetCycle = cycles[merged[0]!.index]!;
-  const span = Math.max(...values) - Math.min(...values);
 
   for (let endCycle = onsetCycle - margin; endCycle - minBegin + 1 >= minWidth; endCycle--) {
-    const idx = regionIndices(cycles, { beginCycle: minBegin, endCycle });
+    const region = { beginCycle: minBegin, endCycle };
+    const idx = regionIndices(cycles, region);
     if (idx.length < minWidth) continue;
 
-    const x = idx.map((i) => cycles[i]!);
-    const y = idx.map((i) => values[i]!);
-    const meanY = y.reduce((a, b) => a + b, 0) / y.length;
-    const flatRms = Math.sqrt(y.reduce((s, v) => s + (v - meanY) ** 2, 0) / y.length);
-    const fit = linearFit(x, y);
-    const linRms = Math.sqrt(y.reduce((s, v, i) => s + (v - (fit.slope * x[i]! + fit.intercept)) ** 2, 0) / y.length);
-    const relFlat = span > 0 ? flatRms / span : 0;
-    const relLin = span > 0 ? linRms / span : 0;
-
-    if (relFlat <= maxRelativeFlatness && relLin <= maxRelativeLinearity) {
-      return { beginCycle: minBegin, endCycle };
+    const stats = regionFlatnessRatios(cycles, values, region);
+    if (stats && stats.relFlat <= maxRelativeFlatness && stats.relLin <= maxRelativeLinearity) {
+      return region;
     }
   }
   return null;
@@ -333,6 +350,40 @@ export function autoBaselineRegion(
     findBaselineByCurvature(cycles, values, { ...options.curvature, constraints: options.constraints }) ??
     findBaselineByRegression(cycles, values, { ...options.regression, constraints: options.constraints });
   return region ? clampBaselineRegion(region, cycles, options.constraints) : null;
+}
+
+export interface BaselineValidationOptions {
+  /** Max residual-from-mean, relative to the curve's span, for the region to count as flat. Default **0.035**. */
+  maxRelativeFlatness?: number;
+  /** Max residual-from-fitted-line, relative to the curve's span, for the region to count as linear. Default **0.03**. */
+  maxRelativeLinearity?: number;
+}
+
+/**
+ * §7's baseline-validation gate: check `region` against the same flatness/linearity bounds
+ * {@link findBaselineByCurvature} requires of its own candidates (§3.2), regardless of which
+ * strategy actually chose `region` — {@link findBaselineByRegression}'s iterative extension
+ * stops at the first cycle that departs its *local* fit, which is only sometimes amplification
+ * onset: a curve whose true baseline decays at a changing rate (steep early, shallow late, with
+ * no amplification anywhere) departs a short initial fit too, leaving a region that is a
+ * near-perfect straight line on its own but a poor description of the curve as a whole. Fitting
+ * that region and extrapolating it across every remaining cycle then manufactures a spurious
+ * rise out of pure slope-estimation error. Judging the region's residuals against the *whole*
+ * curve's span (as this function does, via {@link regionFlatnessRatios}) catches that case, since
+ * the mismatch shows up as the region failing flatness even though it looked fine in isolation.
+ * `values` should cover every cycle — the same curve `region` was chosen from — not just the
+ * region itself.
+ */
+export function validateBaselineRegion(
+  cycles: number[],
+  values: number[],
+  region: BaselineRegion,
+  options: BaselineValidationOptions = {},
+): boolean {
+  const maxRelativeFlatness = options.maxRelativeFlatness ?? 0.035;
+  const maxRelativeLinearity = options.maxRelativeLinearity ?? 0.03;
+  const stats = regionFlatnessRatios(cycles, values, region);
+  return stats !== null && stats.relFlat <= maxRelativeFlatness && stats.relLin <= maxRelativeLinearity;
 }
 
 /**

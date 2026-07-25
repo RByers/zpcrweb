@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseZpcr, subtractSeries, baselineCorrectCurve } from "../src/index.js";
+import { parseZpcr, subtractSeries, baselineCorrectCurve, computeCq } from "../src/index.js";
 import { readSampleBytes } from "./sample.js";
 
 describe("subtractSeries", () => {
@@ -67,6 +67,45 @@ describe("baselineCorrectCurve", () => {
     expect(result.baselineFit.intercept).toBeGreaterThan(-100);
     expect(result.baselineFit.intercept).toBeLessThan(500);
     expect(Math.abs(result.baselineFit.slope)).toBeLessThan(50);
+  });
+
+  it("reports baselineValid true and the real rise as amplified for a clean sigmoid", () => {
+    const result = baselineCorrectCurve(cycles, values, "LinearBaseLineNormalized");
+    expect(result.baselineValid).toBe(true);
+    expect(result.amplified).toBe(true);
+  });
+
+  // Recorded from a real NTC (no-template control) well: a pure two-segment decay (steep for the
+  // first ~5 cycles, much shallower after) with no amplification anywhere. Auto-detection locks
+  // onto cycles 1-5 as "the baseline" (findBaselineByRegression's local fit-and-extend stops
+  // right where the decay's slope changes), and extrapolating that steep 5-cycle line across all
+  // 40 cycles fabricates a ~200 RFU "rise" out of pure slope-estimation error — exactly the false
+  // positive `validateBaselineRegion`'s §7 gate exists to catch.
+  const ntcCycles = Array.from({ length: 40 }, (_, i) => i + 1);
+  const ntcValues = [
+    7423.0, 7408.0, 7399.5, 7387.8, 7384.8, 7384.3, 7374.3, 7372.1, 7368.0, 7360.0, 7360.5, 7355.8,
+    7350.2, 7350.7, 7344.7, 7337.0, 7335.1, 7335.1, 7328.0, 7324.7, 7323.7, 7317.8, 7313.6, 7318.6,
+    7304.5, 7303.3, 7296.4, 7297.1, 7291.2, 7282.1, 7283.2, 7278.4, 7271.5, 7268.2, 7262.3, 7254.3,
+    7247.6, 7247.0, 7239.8, 7240.0,
+  ];
+
+  it("flags an invalid baseline on a two-segment-decay NTC well instead of a spurious rise", () => {
+    const result = baselineCorrectCurve(ntcCycles, ntcValues, "LinearBaseLineNormalized");
+    expect(result.baselineValid).toBe(false);
+    // Without the gate this would otherwise read as amplified (the mis-fit baseline extrapolates
+    // to a ~200 RFU manufactured rise, well past any reasonable noise-based threshold).
+    expect(result.amplified).toBe(false);
+  });
+
+  it("suppresses Cq via computeCq's baselineValid option for that same well", () => {
+    const result = baselineCorrectCurve(ntcCycles, ntcValues, "LinearBaseLineNormalized");
+    const cq = computeCq(ntcCycles, result.correctedValues, {
+      algorithm: "Threshold",
+      threshold: 30,
+      noise: result.noise,
+      baselineValid: result.baselineValid,
+    });
+    expect(cq).toBeNull();
   });
 });
 

@@ -8,6 +8,7 @@ import {
   findBaselineByCurvature,
   findBaselineByRegression,
   autoBaselineRegion,
+  validateBaselineRegion,
   subtractBaseline,
   fitLinearBaseline,
 } from "../src/index.js";
@@ -247,6 +248,40 @@ describe("autoBaselineRegion", () => {
     expect(region).not.toBeNull();
     expect(region!.beginCycle).toBe(1);
     expect(region!.endCycle).toBeLessThan(40);
+  });
+});
+
+describe("validateBaselineRegion", () => {
+  it("passes a region that's genuinely flat over the curve's whole span", () => {
+    const cycles = Array.from({ length: 40 }, (_, i) => i + 1);
+    const values = cycles.map((c) => 100 + 5000 / (1 + Math.exp(-(c - 25) * 0.5)));
+    const region = autoBaselineRegion(cycles, values)!;
+    expect(validateBaselineRegion(cycles, values, region)).toBe(true);
+  });
+
+  it("rejects a region that's a good local fit but a poor description of the whole curve", () => {
+    // Recorded from a real NTC (no-template control) well: a pure decay, steeper for the first
+    // ~5 cycles (~-9.7 RFU/cycle) then much shallower for the rest (~-4.7 RFU/cycle) — no
+    // amplification anywhere. findBaselineByRegression's local fit-and-extend still locks onto
+    // cycles 1-5, since the slope genuinely changes there; validateBaselineRegion is what catches
+    // that a line fit to just those cycles doesn't hold across the other 35.
+    const cycles = Array.from({ length: 40 }, (_, i) => i + 1);
+    const values = [
+      7423.0, 7408.0, 7399.5, 7387.8, 7384.8, 7384.3, 7374.3, 7372.1, 7368.0, 7360.0, 7360.5,
+      7355.8, 7350.2, 7350.7, 7344.7, 7337.0, 7335.1, 7335.1, 7328.0, 7324.7, 7323.7, 7317.8,
+      7313.6, 7318.6, 7304.5, 7303.3, 7296.4, 7297.1, 7291.2, 7282.1, 7283.2, 7278.4, 7271.5,
+      7268.2, 7262.3, 7254.3, 7247.6, 7247.0, 7239.8, 7240.0,
+    ];
+    const smoothed = smoothCurve(values);
+    const region = autoBaselineRegion(cycles, smoothed)!;
+    expect(region).toEqual({ beginCycle: 1, endCycle: 5 });
+    expect(validateBaselineRegion(cycles, smoothed, region)).toBe(false);
+  });
+
+  it("returns false for a region with fewer than 2 points in range", () => {
+    const cycles = [1, 2, 3, 4, 5];
+    const values = [10, 20, 30, 40, 50];
+    expect(validateBaselineRegion(cycles, values, { beginCycle: 10, endCycle: 12 })).toBe(false);
   });
 });
 

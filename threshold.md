@@ -280,9 +280,21 @@ Two guards worth implementing, both of which change reported results:
   (default multiplier **10**, not pinned by the doc); `computeCq()` applies it automatically when
   given a `noise` estimate.
 - **Validate the baseline.** If the chosen region fails the flatness/linearity checks of §3.2, the
-  Cq derived from it is unreliable however clean the crossing looks. Surface it rather than
-  silently reporting a number. **Not implemented** — callers of `threshold.ts` currently need to
-  check this themselves against `findBaselineByCurvature`'s pass/fail behaviour.
+  Cq derived from it is unreliable however clean the crossing looks — this matters even for a
+  region `findBaselineByRegression` chose, not just `findBaselineByCurvature`'s own candidates:
+  its local fit-and-extend stops at the first point that departs the fit, which is only sometimes
+  real amplification onset. A curve whose true baseline decays at a *changing*
+  rate (steep for the first few cycles, much shallower after, with no amplification anywhere)
+  departs a short initial fit too, and extrapolating that region's line across the rest of the run
+  then manufactures a spurious rise out of pure slope-estimation error — observed on a real NTC
+  well (`20230829_135443_CT019138_SINGLE_STEP_.zpcr`, well B5). Implemented by
+  `validateBaselineRegion()` in `packages/core/src/baseline.ts`, which re-checks the final region
+  (however it was chosen) against §3.2's flatness/linearity bounds, judged against the curve's
+  *whole* span rather than the region's own scatter. `baselineCorrectCurve()` in `analysis.ts`
+  runs it automatically and surfaces the result as `CurveBaselineResult.baselineValid`, forcing
+  `amplified` to `false` when invalid; `computeCq()`'s `baselineValid` option (typically fed from
+  that same field) reports no Cq outright when `false`, checked before the amplification squelch
+  above.
 
 ## 8. Recommended defaults
 
@@ -303,10 +315,10 @@ For an implementation aiming to match a reference instrument:
 ## 9. Open items
 
 - **Partially implemented.** `baseline.ts` covers §2–§4 (smoothing, baseline region, baseline
-  subtraction) and `threshold.ts` covers §5–§7 (threshold determination, both Cq algorithms, the
-  amplification squelch). Not implemented: the `pDriftCorrection` reference-normalization
-  baseline modes, `LinearBaseLineNormalizedCurveFit`'s refinement, and the §7 baseline-validation
-  gate (surfacing a Cq derived from a region that failed the §3.2 flatness/linearity checks).
+  subtraction, and now the §7 baseline-validation gate via `validateBaselineRegion()`) and
+  `threshold.ts` covers §5–§7 (threshold determination, both Cq algorithms, the amplification
+  squelch). Not implemented: the `pDriftCorrection` reference-normalization baseline modes and
+  `LinearBaseLineNormalizedCurveFit`'s refinement.
 - **Not validated.** These algorithms are specified to be *reasonable and precise*, but no Cq —
   and, for the baseline stages now implemented, no baseline region or corrected curve either —
   has been compared against a reference instrument's own reported values for the same well. Until

@@ -79,6 +79,7 @@ function computeCurveMetrics(
       algorithm,
       threshold: algorithm === "Threshold" ? threshold : undefined,
       noise: b.noise,
+      baselineValid: b.baselineValid,
     });
     return { cq, baselineFormula: formatBaselineFormula(b.baselineFit) };
   });

@@ -482,11 +482,13 @@ already-validated Curves view.
   (`packages/core/src/analysis.ts`) is the shared library entry point, called with
   `lib/cq.ts`'s fixed `ANALYSIS_BASELINE_MODE` constant (`"LinearBaseLineNormalized"`, no region
   argument — baselining isn't user-configurable at all here, see "Baseline is always automatic"
-  under Curves view): auto-detected baseline region, corrected values, `baselineNoise`,
-  `isAmplified`, ΔRFU (endpoint corrected value minus the baseline region's mean), and
-  `baselineFit` (the fitted `{ slope, intercept }`, rendered via `formatBaselineFormula()`) in
-  one call. Since the same call and the same fixed mode run in both `CurvesView` and
-  `AnalysisView`, a row's ΔRFU/Cq always matches the chart's own marker for that curve.
+  under Curves view): auto-detected baseline region, `baselineValid` (§7's baseline-validation
+  gate — `validateBaselineRegion()` re-checked against the region actually used), corrected
+  values, `baselineNoise`, `isAmplified` (forced `false` when `baselineValid` is `false`), ΔRFU
+  (endpoint corrected value minus the baseline region's mean), and `baselineFit` (the fitted
+  `{ slope, intercept }`, rendered via `formatBaselineFormula()`) in one call. Since the same call
+  and the same fixed mode run in both `CurvesView` and `AnalysisView`, a row's ΔRFU/Cq always
+  matches the chart's own marker for that curve.
 - **Cq algorithm (`analysisCqAlgorithm` setting):** `"Threshold"` (§6.1) is the default — the
   observed instrument default, and §6's own. It needs a threshold per group: §5.1's
   `resolveThreshold` over the median `baselineNoise` across that group's own wells, overridable
@@ -494,11 +496,14 @@ already-validated Curves view.
   in Threshold mode, collapsible exactly like the Curves view's Temperature section (`<details
   className="rail__details">`, chevron rotates open, no separate show/hide button) — a blank
   input falls back to the auto value, shown as the input's placeholder. `"NoThreshold"` (§6.2,
-  2nd-derivative inflection) needs no threshold at all.
+  2nd-derivative inflection) needs no threshold at all. Both pass the row's `baselineValid` into
+  `computeCq()`, which reports no Cq outright when it's `false` — checked before the amplification
+  squelch, since an invalid baseline's extrapolated rise routinely clears that squelch too.
 - **Amplification / greying:** a row renders at reduced opacity
-  (`.analysis__row.is-unamplified`) whenever it has no Cq (`cq == null`) — either because
-  `isAmplified` (§7 — total rise under 10× baseline noise) failed, or, in Threshold mode, the
-  curve never crossed (or didn't end above) the resolved threshold. Keying greying on the Cq
+  (`.analysis__row.is-unamplified`) whenever it has no Cq (`cq == null`) — either because the
+  baseline-validation gate failed, `isAmplified` (§7 — total rise under 10× baseline noise)
+  failed, or, in Threshold mode, the curve never crossed (or didn't end above) the resolved
+  threshold. Keying greying on the Cq
   result itself, not a separately-cached amplification flag, is what makes greying react live to
   switching Cq mode or editing a threshold override — both change `cq` (and therefore the row's
   styling) through the same `rows` `useMemo`, no separate invalidation needed. A row is never
