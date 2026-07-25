@@ -1,0 +1,286 @@
+import { describe, it, expect } from "vitest";
+import {
+  parseZpcr,
+  smoothCurve,
+  skipCycles,
+  clampBaselineRegion,
+  dataWindowRange,
+  findBaselineByCurvature,
+  findBaselineByRegression,
+  autoBaselineRegion,
+  subtractBaseline,
+} from "../src/index.js";
+import { readSampleBytes } from "./sample.js";
+
+describe("smoothCurve", () => {
+  it("disable returns a copy of the input, unchanged", () => {
+    const input = [1, 5, 2, 8, 3];
+    const out = smoothCurve(input, { mode: "Disable" });
+    expect(out).toEqual(input);
+    expect(out).not.toBe(input);
+  });
+
+  it("RollingBoxcar averages a flat window over the centre", () => {
+    const out = smoothCurve([0, 0, 10, 0, 0], { mode: "RollingBoxcar", width: 5 });
+    expect(out[2]).toBeCloseTo(2, 5); // (0+0+10+0+0)/5
+  });
+
+  it("shrinks the window at the edges instead of leaving them unsmoothed", () => {
+    const out = smoothCurve([10, 0, 0, 0, 0], { mode: "RollingBoxcar", width: 5 });
+    // index 0's window has no left neighbours: [10, 0, 0] (indices 0-2) -> mean 10/3
+    expect(out[0]).toBeCloseTo(10 / 3, 5);
+  });
+
+  it("WeightedMean weights the centre more than a boxcar would", () => {
+    const values = [0, 0, 10, 0, 0];
+    const boxcar = smoothCurve(values, { mode: "RollingBoxcar", width: 5 })[2]!;
+    const weighted = smoothCurve(values, { mode: "WeightedMean", width: 5 })[2]!;
+    expect(weighted).toBeGreaterThan(boxcar);
+  });
+
+  it("Centroid pulls the result toward the window's larger values", () => {
+    const values = [1, 1, 1, 1, 100];
+    const out = smoothCurve(values, { mode: "Centroid", width: 5 });
+    // centred at index 2, the 100 at index 4 dominates the intensity weighting
+    expect(out[2]).toBeGreaterThan(10);
+  });
+
+  it("Centroid falls back to a plain average when every value in the window is <= 0", () => {
+    const out = smoothCurve([-1, -2, -3], { mode: "Centroid", width: 3 });
+    expect(out[1]).toBeCloseTo(-2, 5);
+  });
+
+  it("does not mutate the input", () => {
+    const input = [1, 2, 3, 4, 5];
+    smoothCurve(input, { mode: "WeightedMean" });
+    expect(input).toEqual([1, 2, 3, 4, 5]);
+  });
+
+  it("smooths the real B3/channel-0 curve without wildly distorting the plateau", () => {
+    const zpcr = parseZpcr(readSampleBytes());
+    const curve = zpcr.curves({ channel: 0 }).find((c) => c.wellLabel === "B3")!;
+    const smoothed = smoothCurve(curve.mean, { mode: "WeightedMean", width: 5 });
+    expect(smoothed).toHaveLength(curve.mean.length);
+    // the last cycle is still on the rising part of the curve, so a centred-but-edge-shrunk
+    // window pulls it down somewhat -- but nowhere near the flat baseline level (~3350).
+    expect(smoothed.at(-1)!).toBeGreaterThan(8000);
+  });
+});
+
+describe("skipCycles", () => {
+  it("drops leading and trailing cycles, keeping cycles/values aligned", () => {
+    const cycles = [1, 2, 3, 4, 5];
+    const values = [10, 20, 30, 40, 50];
+    const out = skipCycles(cycles, values, 1, 2);
+    expect(out.cycles).toEqual([2, 3]);
+    expect(out.values).toEqual([20, 30]);
+  });
+
+  it("defaults to skipping nothing", () => {
+    const out = skipCycles([1, 2, 3], [10, 20, 30]);
+    expect(out.cycles).toEqual([1, 2, 3]);
+    expect(out.values).toEqual([10, 20, 30]);
+  });
+});
+
+describe("clampBaselineRegion", () => {
+  const cycles = Array.from({ length: 45 }, (_, i) => i + 1);
+
+  it("never begins before minBeginCycle (default 1)", () => {
+    const region = clampBaselineRegion({ beginCycle: 0, endCycle: 9 }, cycles);
+    expect(region.beginCycle).toBe(1);
+  });
+
+  it("never runs past the last cycle present", () => {
+    const region = clampBaselineRegion({ beginCycle: 40, endCycle: 100 }, cycles);
+    expect(region.endCycle).toBe(45);
+  });
+
+  it("widens a too-narrow region up to the minimum width", () => {
+    const region = clampBaselineRegion({ beginCycle: 5, endCycle: 5 }, cycles, { minWidth: 3 });
+    expect(region.endCycle - region.beginCycle + 1).toBe(3);
+  });
+
+  it("caps the widened region at the last cycle rather than overshooting", () => {
+    const region = clampBaselineRegion({ beginCycle: 44, endCycle: 44 }, cycles, { minWidth: 5 });
+    expect(region.endCycle).toBe(45);
+  });
+
+  it("respects a custom minBeginCycle", () => {
+    const region = clampBaselineRegion({ beginCycle: 1, endCycle: 9 }, cycles, { minBeginCycle: 2 });
+    expect(region.beginCycle).toBe(2);
+  });
+});
+
+describe("dataWindowRange", () => {
+  it("with the observed defaults (position 1, width 0.99) spans nearly the whole run", () => {
+    const range = dataWindowRange(45);
+    expect(range.start).toBe(1);
+    expect(range.end).toBe(45);
+  });
+
+  it("a narrower window sits before the given position", () => {
+    const range = dataWindowRange(100, { positionFraction: 0.5, widthFraction: 0.2 });
+    expect(range.end).toBe(50);
+    expect(range.start).toBe(31);
+  });
+
+  it("never returns a start below 1", () => {
+    const range = dataWindowRange(10, { positionFraction: 0.1, widthFraction: 0.9 });
+    expect(range.start).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe("findBaselineByCurvature", () => {
+  function sigmoid(cycles: number[], onset: number): number[] {
+    return cycles.map((c) => 100 + 5000 / (1 + Math.exp(-(c - onset) * 0.5)));
+  }
+
+  it("finds a region ending comfortably before a clean sigmoid's onset", () => {
+    const cycles = Array.from({ length: 40 }, (_, i) => i + 1);
+    const values = sigmoid(cycles, 25);
+    const region = findBaselineByCurvature(cycles, values);
+    expect(region).not.toBeNull();
+    expect(region!.beginCycle).toBe(1);
+    expect(region!.endCycle).toBeLessThan(25);
+    expect(region!.endCycle - region!.beginCycle + 1).toBeGreaterThanOrEqual(3);
+  });
+
+  it("finds a plausible baseline on the real B3/channel-0 amplification curve", () => {
+    const zpcr = parseZpcr(readSampleBytes());
+    const curve = zpcr.curves({ channel: 0 }).find((c) => c.wellLabel === "B3")!;
+    const smoothed = smoothCurve(curve.mean, { mode: "WeightedMean", width: 5 });
+    const region = findBaselineByCurvature(curve.cycles, smoothed);
+    expect(region).not.toBeNull();
+    expect(region!.beginCycle).toBe(1);
+    // the curve is flat through ~cycle 25 and plateaus by ~cycle 40 (see fixture data); the
+    // flatness/linearity thresholds are relative to the *whole* curve's span, so the region is
+    // allowed to creep partway into the early rise rather than stopping exactly at onset.
+    expect(region!.endCycle).toBeGreaterThanOrEqual(3);
+    expect(region!.endCycle).toBeLessThan(40);
+  });
+
+  it("returns null for a flat curve with no amplification onset", () => {
+    const cycles = Array.from({ length: 20 }, (_, i) => i + 1);
+    const values = cycles.map(() => 1000);
+    expect(findBaselineByCurvature(cycles, values)).toBeNull();
+  });
+
+  it("returns null when there are too few cycles to analyse", () => {
+    expect(findBaselineByCurvature([1, 2], [10, 20])).toBeNull();
+  });
+});
+
+describe("findBaselineByRegression", () => {
+  it("extends through a flat region and stops where a sigmoid departs from the fitted line", () => {
+    const cycles = Array.from({ length: 40 }, (_, i) => i + 1);
+    const values = cycles.map((c) => 100 + 5000 / (1 + Math.exp(-(c - 25) * 0.5)));
+    const region = findBaselineByRegression(cycles, values);
+    expect(region).not.toBeNull();
+    expect(region!.beginCycle).toBe(1);
+    expect(region!.endCycle).toBeLessThan(25);
+    expect(region!.endCycle).toBeGreaterThanOrEqual(3);
+  });
+
+  it("extends through the entire run for a perfectly flat curve", () => {
+    const cycles = Array.from({ length: 10 }, (_, i) => i + 1);
+    const values = cycles.map(() => 500);
+    const region = findBaselineByRegression(cycles, values);
+    expect(region).toEqual({ beginCycle: 1, endCycle: 10 });
+  });
+
+  it("degrades gracefully on a noisy, slowly-rising curve", () => {
+    const cycles = Array.from({ length: 30 }, (_, i) => i + 1);
+    // gentle linear drift with small noise -- no sharp inflection for curvature detection
+    const noise = [0, 1, -1, 0.5, -0.5, 1, -1, 0, 0.5, -0.5];
+    const values = cycles.map((c, i) => 1000 + c * 2 + noise[i % noise.length]!);
+    const region = findBaselineByRegression(cycles, values);
+    expect(region).not.toBeNull();
+    expect(region!.beginCycle).toBe(1);
+  });
+
+  it("returns null when there aren't enough cycles for the initial fit", () => {
+    expect(findBaselineByRegression([1, 2], [10, 20], { initialWidth: 3 })).toBeNull();
+  });
+});
+
+describe("autoBaselineRegion", () => {
+  it("prefers curvature detection when it finds a confident region", () => {
+    const cycles = Array.from({ length: 40 }, (_, i) => i + 1);
+    const values = cycles.map((c) => 100 + 5000 / (1 + Math.exp(-(c - 25) * 0.5)));
+    const region = autoBaselineRegion(cycles, values);
+    expect(region).not.toBeNull();
+    expect(region!.endCycle).toBeLessThan(25);
+  });
+
+  it("falls back to regression when curvature finds nothing", () => {
+    const cycles = Array.from({ length: 20 }, (_, i) => i + 1);
+    const values = cycles.map(() => 1000); // flat: no second-derivative peak at all
+    const region = autoBaselineRegion(cycles, values);
+    expect(region).not.toBeNull();
+    expect(region!.beginCycle).toBe(1);
+  });
+
+  it("produces a plausible region on the real B3/channel-0 curve, well short of the plateau", () => {
+    const zpcr = parseZpcr(readSampleBytes());
+    const curve = zpcr.curves({ channel: 0 }).find((c) => c.wellLabel === "B3")!;
+    const smoothed = smoothCurve(curve.mean, { mode: "WeightedMean", width: 5 });
+    const region = autoBaselineRegion(curve.cycles, smoothed);
+    expect(region).not.toBeNull();
+    expect(region!.beginCycle).toBe(1);
+    expect(region!.endCycle).toBeLessThan(40);
+  });
+});
+
+describe("subtractBaseline", () => {
+  const cycles = [1, 2, 3, 4, 5];
+
+  it("Raw leaves the curve unchanged", () => {
+    const values = [10, 12, 15, 20, 30];
+    expect(subtractBaseline(cycles, values, { beginCycle: 1, endCycle: 3 }, "Raw")).toEqual(values);
+  });
+
+  it("RawBaseLineSubtracted subtracts the mean of the region from every cycle", () => {
+    const values = [10, 12, 20, 30, 40];
+    const out = subtractBaseline(cycles, values, { beginCycle: 1, endCycle: 2 }, "RawBaseLineSubtracted");
+    // mean of [10, 12] = 11
+    expect(out).toEqual([-1, 1, 9, 19, 29]);
+  });
+
+  it("LinearBaseLineNormalized removes a sloping baseline, leaving the region ~0", () => {
+    // a pure line: y = 2c + 3, no amplification
+    const values = cycles.map((c) => 2 * c + 3);
+    const out = subtractBaseline(cycles, values, { beginCycle: 1, endCycle: 5 }, "LinearBaseLineNormalized");
+    for (const v of out) expect(v).toBeCloseTo(0, 6);
+  });
+
+  it("LinearBaseLineNormalized reduces to the constant form when the region has no slope", () => {
+    const values = [50, 50, 50, 80, 120];
+    const linear = subtractBaseline(cycles, values, { beginCycle: 1, endCycle: 3 }, "LinearBaseLineNormalized");
+    const constant = subtractBaseline(cycles, values, { beginCycle: 1, endCycle: 3 }, "RawBaseLineSubtracted");
+    expect(linear[0]).toBeCloseTo(constant[0]!, 6);
+    expect(linear[3]).toBeCloseTo(constant[3]!, 6);
+  });
+
+  it("returns the curve unchanged if the region has no overlapping cycles", () => {
+    const values = [10, 20, 30];
+    const out = subtractBaseline([1, 2, 3], values, { beginCycle: 100, endCycle: 200 }, "RawBaseLineSubtracted");
+    expect(out).toEqual(values);
+  });
+
+  it("does not mutate inputs", () => {
+    const values = [10, 20, 30, 40, 50];
+    subtractBaseline(cycles, values, { beginCycle: 1, endCycle: 3 }, "LinearBaseLineNormalized");
+    expect(values).toEqual([10, 20, 30, 40, 50]);
+  });
+
+  it("brings the real B3/channel-0 baseline region close to zero after linear subtraction", () => {
+    const zpcr = parseZpcr(readSampleBytes());
+    const curve = zpcr.curves({ channel: 0 }).find((c) => c.wellLabel === "B3")!;
+    const region = { beginCycle: 1, endCycle: 20 }; // well within the flat region (amplification starts ~27)
+    const corrected = subtractBaseline(curve.cycles, curve.mean, region, "LinearBaseLineNormalized");
+    for (let i = 0; i < 20; i++) expect(Math.abs(corrected[i]!)).toBeLessThan(15);
+    // the plateau at the end should still show strong signal well above the baseline
+    expect(corrected.at(-1)!).toBeGreaterThan(1000);
+  });
+});

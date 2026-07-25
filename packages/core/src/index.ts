@@ -53,6 +53,16 @@ export {
 } from "./calibration.js";
 export { zipCryptoDecrypt } from "./zipcrypto.js";
 export { inflateRaw } from "./inflate.js";
+export {
+  smoothCurve,
+  skipCycles,
+  clampBaselineRegion,
+  dataWindowRange,
+  findBaselineByCurvature,
+  findBaselineByRegression,
+  autoBaselineRegion,
+  subtractBaseline,
+} from "./baseline.js";
 
 export type {
   Zpcr,
@@ -107,3 +117,14 @@ export type {
   ChannelPreprocessOptions,
   ColorSeparationResult,
 } from "./calibration.js";
+export type {
+  SmoothingMode,
+  SmoothingOptions,
+  BaselineRegion,
+  BaselineRegionConstraints,
+  DataWindowOptions,
+  CurvatureBaselineOptions,
+  RegressionBaselineOptions,
+  AutoBaselineOptions,
+  BaselineMode,
+} from "./baseline.js";

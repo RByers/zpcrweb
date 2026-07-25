@@ -125,6 +125,9 @@ raw bytes ─▶ fflate.unzipSync ─▶ { name: Uint8Array }
 - **`calibration.ts`** — channel→dye color separation built on top of `.Dcal` data: per-dye
   response curves, a channel×dye calibration matrix, and a solve via `linalg.ts`'s
   pseudo-inverse. See [`calibration.md`](./calibration.md).
+- **`baseline.ts`** — the baseline stages (§2–§4) of a dye curve's Cq analysis: smoothing,
+  automatic/manual baseline-region selection, and baseline subtraction. Stops short of
+  thresholding and Cq themselves, which remain unimplemented. See [`threshold.md`](./threshold.md).
 - **`runinfo.ts`** — a small regex scan over the flat `<KeyValuePairs>` list. No XML
   dependency: the structure is regular and self-closing `<Value />` maps to `""`.
 - **`temps.ts`** — pulls temperatures out of the `.Plateread` ICFF index. It matches on the

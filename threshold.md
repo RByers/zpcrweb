@@ -14,14 +14,15 @@ Cq (also written Ct) — takes four more stages:
 Cq is the (fractional) cycle number at which a well's signal becomes reliably distinguishable from
 its own noise. Everything below exists to make that judgement reproducible.
 
-> **Status: specification, not implemented.** Nothing in `packages/core/src` computes baselines,
-> thresholds or Cq today; the library stops at colour separation plus a display-only
-> delta-baseline helper. This document specifies reasonable algorithms and the option space a
-> faithful implementation needs, so that the numbers can be compared against a reference
-> instrument's own output rather than invented. The option names and default values quoted are
-> those a real CFX run persists — they are observable in the committed sample
-> `samples/20260720_Luna_noRT.pcrd`, whose analysis parameters are described in
-> [`pcrd.md`](./pcrd.md) §2.5.
+> **Status: baselining implemented (§2–§4); thresholding and Cq are still specification only
+> (§5–§6).** `packages/core/src/baseline.ts` implements smoothing, baseline-region selection
+> (both automatic strategies) and baseline subtraction (the `Raw`/`RawBaseLineSubtracted`/
+> `LinearBaseLineNormalized` modes); nothing computes a threshold or a Cq yet. This document
+> specifies reasonable algorithms and the option space a faithful implementation needs, so that
+> the numbers can be compared against a reference instrument's own output rather than invented.
+> The option names and default values quoted are those a real CFX run persists — they are
+> observable in the committed sample `samples/20260720_Luna_noRT.pcrd`, whose analysis parameters
+> are described in [`pcrd.md`](./pcrd.md) §2.5.
 
 ---
 
@@ -60,6 +61,8 @@ Note `pDriftCorrection` sits in this group — it is a baseline setting, not an 
 
 ## 2. Smoothing (the digital filter)
 
+> Implemented by `smoothCurve()` in `packages/core/src/baseline.ts`.
+
 Applied to the curve before baselining. Options:
 
 | Mode | Behaviour |
@@ -85,6 +88,10 @@ consideration entirely — useful when the first cycles are disturbed. Apply the
 else.
 
 ## 3. Choosing the baseline region
+
+> Implemented by `clampBaselineRegion()` (§3.1), `findBaselineByCurvature()` /
+> `findBaselineByRegression()` / `autoBaselineRegion()` (§3.2) and `dataWindowRange()` (§3.3) in
+> `packages/core/src/baseline.ts`.
 
 The baseline is the flat, pre-amplification part of the curve. Everything downstream depends on
 choosing it correctly: too late and it eats into the exponential rise, dragging Cq later; too
@@ -143,6 +150,9 @@ With the observed values the window is effectively the whole run, so the two coi
 distinction matters for runs where a sub-range is deliberately analysed.
 
 ## 4. Baseline subtraction modes
+
+> Implemented by `subtractBaseline()` in `packages/core/src/baseline.ts`, for the `Raw`,
+> `RawBaseLineSubtracted` and `LinearBaseLineNormalized` modes only — see §9.
 
 `pCRBaseLine` selects what "baseline-corrected" means. The modes form a ladder:
 
@@ -281,10 +291,13 @@ For an implementation aiming to match a reference instrument:
 
 ## 9. Open items
 
-- **Not implemented.** No code in this repo computes any of the above yet.
-- **Not validated.** These algorithms are specified to be *reasonable and precise*, but no Cq
-  produced by them has been compared against a reference instrument's own reported Cq for the same
-  well. Until that comparison exists, treat agreement as unproven — the same caveat
+- **Partially implemented.** `baseline.ts` covers §2–§4 (smoothing, baseline region, baseline
+  subtraction). Thresholding (§5) and Cq (§6) are still unimplemented, as are the `pDriftCorrection`
+  reference-normalization baseline modes and `LinearBaseLineNormalizedCurveFit`'s refinement.
+- **Not validated.** These algorithms are specified to be *reasonable and precise*, but no Cq —
+  and, for the baseline stages now implemented, no baseline region or corrected curve either —
+  has been compared against a reference instrument's own reported values for the same well. Until
+  that comparison exists, treat agreement as unproven — the same caveat
   [`calibration.md`](./calibration.md) carries.
 - The exact form of the curve-fit refinement in `LinearBaseLineNormalizedCurveFit` (as against
   plain linear baselining) is not pinned down.
