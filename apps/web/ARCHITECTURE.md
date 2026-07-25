@@ -447,11 +447,20 @@ only pieces the two views share.
   one of two dye-space groupings: **Fluorophore** labels/legends each curve by its dye name
   (`FluorBar`'s chips, keyed by fluor); **Target** instead labels each curve by the target/gene
   assigned to that fluor *in that well* (`WellFluor.target`, per `pltd.md`), so the same dye
-  used for different genes in different wells appears as separate legend entries — falling back
-  to the fluor name for a well/fluor with no target configured. Both modes keep the same
-  channel-derived color (`FluorChip.channel`) — target mode does not introduce a new color
-  scheme, just a different grouping/label built by `CurvesView`'s `labelForFluorCurve`/
-  `targetInfos`.
+  used for different genes in different wells appears as separate legend entries. Loaded
+  well/fluor pairs carrying no target of their own get one shared `"(none)"` group instead
+  (`lib/plateTargets.ts`'s `NO_TARGET`/`targetGroups()`, shared with the Analysis view) — on by
+  default like every other target, so a partially-annotated plate's remaining curves stay
+  labelled and toggleable rather than showing up under their dye name with no chip. That
+  catch-all is only added *alongside* real targets: on a plate with no `geneName` anywhere,
+  target mode is already de facto fluorophore mode, and one lumped group would merge the dyes'
+  per-group Cq thresholds — so those curves keep falling back to their fluor name (the same
+  reason the Analysis view falls back to fluorophore grouping there; see `usingTargets` below).
+  Both modes keep the same channel-derived color (`FluorChip.channel`) — target mode does not
+  introduce a new color scheme, just a different grouping/label built by `CurvesView`'s
+  `labelForFluorCurve`/`targetInfos`. A group spanning several fluorophores (`"(none)"`, or a
+  target loaded as more than one dye) has no single channel, so its chip takes
+  `channelColors.ts`'s `NEUTRAL_COLOR` rather than borrowing one member's hue.
 
 ## Analysis view
 
@@ -472,7 +481,10 @@ already-validated Curves view.
 
 - **One row per (target, well) — or (fluorophore, well) with no targets assigned:** built from
   `PlateDefinition.wells[].fluors[]`, in a `loaded` well that's in `settings.enabledWells`.
-  Grouping normally keys on `WellFluor.target`; if no well on the plate has a target assigned at
+  Grouping normally keys on `WellFluor.target`, with untargeted pairs collected into the shared
+  `"(none)"` group `lib/plateTargets.ts`'s `targetGroups()` appends (see the Curves view's target
+  mode above), so those wells get Cq rows instead of being dropped from the table; if no well on
+  the plate has a target assigned at
   all (`targetInfos` empty — a plate that was never annotated with target/gene names), the rail
   and table fall back to grouping by fluorophore instead (`usingTargets` flag, `groupInfos`),
   mirroring `CurvesView`'s Fluorophore view mode — the rail's "Targets" section relabels itself

@@ -35,8 +35,15 @@ export const CHANNEL_INFO: readonly ChannelInfo[] = [
   { index: 5, color: "#3b82f6" }, // blue — sixth CFX channel
 ];
 
-export function channelColor(index: number): string {
-  return CHANNEL_INFO[index]?.color ?? "#8aa0c0";
+/** Neutral blue-grey (`--ink-2`) for anything that isn't one single channel — e.g. a target chip
+ * whose wells load several fluorophores, where borrowing one of their channel hues would
+ * misrepresent the group. */
+export const NEUTRAL_COLOR = "#8aa0c0";
+
+/** Color for a channel index, or {@link NEUTRAL_COLOR} for `null`/out-of-range (no single
+ * channel). */
+export function channelColor(index: number | null): string {
+  return (index != null && CHANNEL_INFO[index]?.color) || NEUTRAL_COLOR;
 }
 
 /**

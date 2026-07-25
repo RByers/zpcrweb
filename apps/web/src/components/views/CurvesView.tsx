@@ -13,6 +13,7 @@ import {
 } from "@zpcrweb/core";
 import { ANALYSIS_BASELINE_MODE, formatBaselineFormula } from "../../lib/cq";
 import { computeWellTypes } from "../../lib/wellTypes";
+import { NO_TARGET, targetGroups } from "../../lib/plateTargets";
 import {
   wellKey,
   type BandsMode,
@@ -207,33 +208,28 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
     return m;
   }, [plate]);
 
-  // Distinct targets across the plate, each carrying the channel/calibration of the fluor it's
-  // assigned to — for the "Target" view mode's legend and coloring.
-  const targetInfos = useMemo(() => {
-    if (!plate) return [];
-    const byFluor = new Map(fluorCals.map((f) => [f.fluor, f]));
-    const seen = new Map<string, { target: string; fluor: string; channel: number; curve: unknown }>();
-    for (const w of plate.wells) {
-      for (const wf of w.fluors) {
-        if (!wf.target || seen.has(wf.target)) continue;
-        const cal = byFluor.get(wf.fluor);
-        seen.set(wf.target, {
-          target: wf.target,
-          fluor: wf.fluor,
-          channel: cal?.channel ?? wf.channel,
-          curve: cal?.curve,
-        });
-      }
-    }
-    return [...seen.values()];
-  }, [plate, fluorCals]);
+  // Distinct targets across the plate, plus the {@link NO_TARGET} catch-all for loaded
+  // well/fluor pairs with no target of their own — the "Target" view mode's legend, coloring
+  // and toggle keys. See `targetGroups`.
+  const targetInfos = useMemo(
+    () => (plate ? targetGroups(plate, fluorCals) : []),
+    [plate, fluorCals],
+  );
 
-  // Label a dye-space curve for display/toggling: its fluor name normally, or the target
-  // assigned to it in its own well when in target view mode (falling back to the fluor name
-  // for a well/fluor with no target configured).
+  /** Whether targetInfos carries a {@link NO_TARGET} group — i.e. whether untargeted curves have
+   * a chip to be labelled and toggled by, rather than falling back to their fluor name. */
+  const hasNoTargetGroup = useMemo(
+    () => targetInfos.some((t) => t.target === NO_TARGET),
+    [targetInfos],
+  );
+
+  // Label a dye-space curve for display/toggling: its fluor name normally, or in target view
+  // mode the target assigned to it in its own well — {@link NO_TARGET} when it has none (which
+  // also covers the curves `showUnloadedFluors` draws for pairs the plate never loads), or the
+  // fluor name when this plate has no targets at all.
   const labelForFluorCurve = (row: number, col: number, dye: string): string =>
     fluorViewMode === "target"
-      ? (wellFluorTargets.get(wellKey(row, col))?.get(dye) ?? dye)
+      ? (wellFluorTargets.get(wellKey(row, col))?.get(dye) ?? (hasNoTargetGroup ? NO_TARGET : dye))
       : dye;
 
   // Hovering a target/fluor chip or a well-grid cell in the rail highlights the matching
@@ -246,7 +242,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
         ? targetInfos.map((t) => ({
             key: t.target,
             label: t.target,
-            sublabel: t.fluor,
+            sublabel: t.fluors.join(", "),
             channel: t.channel,
             calibrated: !!t.curve,
           }))
@@ -427,6 +423,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
       wellSample,
       fluorViewMode,
       wellFluorTargets,
+      hasNoTargetGroup,
     ],
   );
 
@@ -473,7 +470,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
             sample: wellSample.get(wellKey(c.row, c.col)),
           })),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [calibrationOn, visibleFluor, visibleChannel, fluorViewMode, wellFluorTargets, wellSample],
+    [calibrationOn, visibleFluor, visibleChannel, fluorViewMode, wellFluorTargets, hasNoTargetGroup, wellSample],
   );
 
   // Every curve on the plate for the active view mode, ignoring the enabled-wells/channels/
@@ -530,6 +527,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
       wellFluors,
       fluorViewMode,
       wellFluorTargets,
+      hasNoTargetGroup,
       wellSample,
     ],
   );

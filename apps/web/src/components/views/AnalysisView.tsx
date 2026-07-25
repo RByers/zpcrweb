@@ -13,6 +13,7 @@ import {
 import { wellKey, type FileSettings } from "../../state/useZpcrStore";
 import { ANALYSIS_BASELINE_MODE, formatBaselineFormula } from "../../lib/cq";
 import { computeWellTypes } from "../../lib/wellTypes";
+import { NO_TARGET, targetGroups, type TargetGroup } from "../../lib/plateTargets";
 import { usePltdPassword } from "../../state/pltdPassword";
 import { channelLabel } from "../../lib/channelColors";
 import {
@@ -87,33 +88,27 @@ export function AnalysisView({ zpcr, settings, onChange }: Props) {
   const calibrationAvailable = calibratedFluors.length > 0;
   const wellTypes = useMemo(() => computeWellTypes(plate), [plate]);
 
-  const targetInfos = useMemo(() => {
-    if (!plate) return [];
-    const byFluor = new Map(fluorCals.map((f) => [f.fluor, f]));
-    const seen = new Map<string, { target: string; fluor: string; channel: number; curve: unknown }>();
-    for (const w of plate.wells) {
-      for (const wf of w.fluors) {
-        if (!wf.target || seen.has(wf.target)) continue;
-        const cal = byFluor.get(wf.fluor);
-        seen.set(wf.target, {
-          target: wf.target,
-          fluor: wf.fluor,
-          channel: cal?.channel ?? wf.channel,
-          curve: cal?.curve,
-        });
-      }
-    }
-    return [...seen.values()];
-  }, [plate, fluorCals]);
+  // Targets on the plate plus the {@link NO_TARGET} catch-all for loaded well/fluor pairs with
+  // no target of their own — see `targetGroups`.
+  const targetInfos = useMemo<TargetGroup[]>(
+    () => (plate ? targetGroups(plate, fluorCals) : []),
+    [plate, fluorCals],
+  );
 
   // No per-well target assigned anywhere on the plate: group by fluorophore instead, mirroring
   // CurvesView's Fluorophore view mode, so the Analysis table still has something to group on.
+  // (`targetGroups` adds no NO_TARGET group in that case, so this is simply "no targets".)
   const usingTargets = targetInfos.length > 0;
-  const groupInfos = useMemo(
+  const groupInfos = useMemo<TargetGroup[]>(
     () =>
       usingTargets
         ? targetInfos
-        : fluorCals.map((f) => ({ target: f.fluor, fluor: f.fluor, channel: f.channel, curve: f.curve })),
+        : fluorCals.map((f) => ({
+            target: f.fluor,
+            fluors: [f.fluor],
+            channel: f.channel,
+            curve: f.curve,
+          })),
     [usingTargets, targetInfos, fluorCals],
   );
 
@@ -122,7 +117,7 @@ export function AnalysisView({ zpcr, settings, onChange }: Props) {
       groupInfos.map((g) => ({
         key: g.target,
         label: g.target,
-        sublabel: usingTargets ? g.fluor : channelLabel(g.channel),
+        sublabel: usingTargets ? g.fluors.join(", ") : channelLabel(g.channel ?? 0),
         channel: g.channel,
         calibrated: !!g.curve,
       })),
@@ -215,7 +210,7 @@ export function AnalysisView({ zpcr, settings, onChange }: Props) {
       if (!w.loaded) continue;
       if (!settings.enabledWells.has(wellKey(w.row, w.col))) continue;
       for (const wf of w.fluors) {
-        const group = usingTargets ? wf.target : wf.fluor;
+        const group = usingTargets ? (wf.target || NO_TARGET) : wf.fluor;
         if (!group || settings.analysisDisabledTargets.has(group)) continue;
         const curve = curveByWellDye.get(`${w.row},${w.col},${wf.fluor}`);
         if (!curve) continue;
