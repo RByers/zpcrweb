@@ -26,6 +26,7 @@ Additional typed parsers for the archive files currently reachable only via the 
 Still planned:
 
 - [ ] Generate a nice simple but clear favicon
+- [ ] Move "Reference row vs factory calibration" from overview into a "Diagnostics" tab and include a chart view for the reference row only. Remove the reference row option from the main curves tab. In the diagnostics chart for any reference column which is enabled, also draw a dotted line for the factory value (use a solid line for the reference). Share as much code as is practical with the main curves view.
 - [ ] When a file is opened with an attached plate (pcrd or zpcr with embedded pltd), use the plate definition to determine the UI defaults (channels and wells to display etc.).
 - [ ] Try to replace react with preact and evaluate the cost in terms of added complexity and app quality.
 - [ ] Add a plate editor which allows setting the flourophores used per well, as well as the tube types for the plate (clear / white).  Used for calibration adjustments and fluorophore display. Allow saving/naming plate files and applying them to runs. Remember the plate setting applied to each loaded run. Have an easy mechanism to copy/paste settings from one well to another or to all wells on a column/row/plate, or to duplicate a column/row across multiple columns/rows (eg. using click drag to select a region simple to copy/paste operations in spreadsheets)
