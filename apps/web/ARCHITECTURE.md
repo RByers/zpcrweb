@@ -301,6 +301,37 @@ genuine abbreviation differences, not just casing — `assemblyName` → `ANm`) 
 reshaping one into the other, so `RunLogTable` (`parsed: RunLogParsed`) renders either
 format's real elements without either one faking the other's schema.
 
+## One Cq per well/target: `lib/runAnalysis.ts`
+
+`useRunAnalysis(zpcr, settings, pltdPassword, activeStep, dyeSpace)` is the single run-level
+derivation the Curves and Analysis views share: plate + password state, fluorophore/target groups
+(`lib/plateTargets.ts`), the calibration matrix and `calibration.md` §4 corrections, the
+color-separated `allFluorCurves` — and, on top of those, the run's **Cq table**.
+
+- **`cqTable`** — `packages/core/src/analysis.ts`'s `computeCqTable()` over *every* well/dye pair on
+  the plate, keyed by `curveKey(row, col, fluor)`. One entry per key: Cq, the §5.1 group threshold,
+  noise, amplification verdict, ΔRFU and the fitted baseline. Views look values up in it and never
+  recompute — that is the whole point. A group's threshold is the median baseline noise across the
+  curves it's computed with, so the old arrangement (three independent computations over the plotted
+  curves, over every curve, and over the Analysis view's enabled wells) had the same well showing a
+  Cq in one view and "—" in another. Display filters — enabled wells, disabled targets, sample and
+  fluor toggles, the view-mode switch — now change only which entries are *shown*.
+- **Grouping** is `groupOf(row, col, fluor)`: the pair's target/gene, the shared `"(none)"` catch-all
+  when it has none (NTC/NRT wells still get a real threshold and a real Cq rather than being dropped
+  for lack of a name), or the fluorophore itself on a plate with no targets at all. Note this is
+  independent of the Curves view's Fluorophore/Target *display* mode, which used to re-group the
+  thresholds under the chart and so produce different Cq values than the Analysis table for the
+  same wells.
+- **Noise cohort:** only well/fluor pairs the plate actually loads (`loadedFluors`) contribute to a
+  group's threshold, via `CqTableCurve.contributesToThreshold`. Pairs the plate never loaded still
+  get their own entry — the Curves view can plot them with "Unloaded" on, and they need a Cq — but a
+  dye that was never pipetted into a well doesn't set the bar for the wells that were. That's a
+  data-validity gate, not a user filter.
+- **`channelCqTable`** — the same computation over raw *channel* curves, keyed by
+  `channelCurveKey(row, col, channel)`, for the Cq markers the Curves view draws while color
+  separation is off. A separate quantity rather than a second copy of the same one: a channel curve
+  mixes every dye emitting into that filter and belongs to no target.
+
 ## Curves view
 
 Data flows `zpcr.curves({ includeReference:false })` + `zpcr.darkCurves()` → filter by
@@ -394,17 +425,17 @@ only pieces the two views share.
   channel lists its wells (with sample) and Cq; hovering a sample lists its targets/fluors (with
   well) and Cq. Card rows come from `allPlotCurves` — every curve on the plate for the active
   view mode, computed the same way as `plotCurves` but *without* the enabled-wells/channels/
-  fluors/samples filters (`CurvesView`'s `allBaseCurves`/`allCurveMetrics`) — rather than
+  fluors/samples filters (`CurvesView`'s `allPlotCurves`) — rather than
   `plotCurves` itself, so an element excluded by a rail filter still gets a row instead of being
   dropped from the card entirely; each row carries a `selected` flag (in `selectedCurveKeys`,
   the set of curves actually in `plotCurves`) that `HoverCard` uses to greyed-out (`.is-dim`) and
   sort unselected rows after the selected ones. Rows are capped at 10 with a "N more" footer past
   that, selected rows always counted first so a long unselected tail can't crowd them out. Both
-  Cq computations (`computeCurveMetrics`, factored out so `curveMetrics`/`allCurveMetrics` share
-  it) use the same per-group-threshold algorithm, but a curve's Cq in a hover card can still
-  differ from its Cq on the chart once a filter narrows the plotted set, since the "all curves"
-  run resolves each group's threshold across the whole plate rather than just what's selected —
-  expected, since the card summarizes the plate rather than doubling as an alternate chart legend.
+  Both sets of rows take their Cq from the run's single Cq table (`lib/runAnalysis.ts`) by
+  well/fluor key, so a curve's Cq in a hover card is by construction the same number as its marker
+  on the chart and its row in the Analysis table. (It used to be computed three separate times over
+  three different subsets — the plotted curves, every curve, and the Analysis view's enabled wells —
+  which made the same well legitimately show a Cq in one place and "—" in another.)
   `WellMatrix` renders its native `title` tooltip (`"A1 — NRT (no-RT)"`) only when no `cardData`
   callback is passed, so the two hover affordances never stack: the Curves rail shows the card
   alone, while `AnalysisView`'s card-less well grid keeps the plain tooltip. Either way the same
@@ -480,10 +511,8 @@ from Curves' Fluorophore view mode). It only operates in dye space: computing a 
 curve needs channel→dye color separation (`calibration.md`), so the rail shows an explanatory
 note instead of a table when no `.Dcal` calibration matches the plate's fluorophores, the same
 condition `CurvesView`'s "Target" view mode gates on. The matrix-building/corrections/
-`computeFluorCurves` pipeline is duplicated from `CurvesView` rather than shared — both are
-UI-orchestration glue over the real transforms in `lib/fluorCurves.ts`, not analytical logic of
-their own, so the duplication trades a little repetition for not risking a regression in the
-already-validated Curves view.
+`computeFluorCurves` pipeline and the Cq table both come from the shared `lib/runAnalysis.ts`
+hook (see below), so this view and `CurvesView` cannot drift apart.
 
 - **One row per (target, well) — or (fluorophore, well) with no targets assigned:** built from
   `PlateDefinition.wells[].fluors[]`, in a `loaded` well that's in `settings.enabledWells`.
@@ -497,16 +526,16 @@ already-validated Curves view.
   "Fluorophores" and the table drops the now-redundant Fluor column. Either way the opt-out set
   (`analysisDisabledTargets`) and threshold overrides are keyed by whichever grouping is active.
 - **Baseline:** always the auto-detected linear fit — `baselineCorrectCurve()`
-  (`packages/core/src/analysis.ts`) is the shared library entry point, called with
-  `lib/cq.ts`'s fixed `ANALYSIS_BASELINE_MODE` constant (`"LinearBaseLineNormalized"`, no region
+  (`packages/core/src/analysis.ts`), which `computeCqTable()` applies internally with
+  the fixed `ANALYSIS_BASELINE_MODE` constant (`"LinearBaseLineNormalized"`, no region
   argument — baselining isn't user-configurable at all here, see "Baseline is always automatic"
   under Curves view): auto-detected baseline region, `baselineValid` (§7's baseline-validation
   gate — `validateBaselineRegion()` re-checked against the region actually used), corrected
   values, `baselineNoise`, `isAmplified` (forced `false` when `baselineValid` is `false`), ΔRFU
   (endpoint corrected value minus the baseline region's mean), and `baselineFit` (the fitted
-  `{ slope, intercept }`, rendered via `formatBaselineFormula()`) in one call. Since the same call
-  and the same fixed mode run in both `CurvesView` and `AnalysisView`, a row's ΔRFU/Cq always
-  matches the chart's own marker for that curve.
+  `{ slope, intercept }`, rendered via `formatBaselineFormula()`) in one call. All of it reaches
+  this view through the run's Cq table, so a row's ΔRFU/Cq is the same value the chart's marker
+  and the hover cards show — the same object, not a matching recomputation.
 - **Cq algorithm (`analysisCqAlgorithm` setting):** `"Threshold"` (§6.1) is the default — the
   observed instrument default, and §6's own. It needs a threshold per group: §5.1's
   `resolveThreshold` over the median `baselineNoise` across that group's own wells, overridable

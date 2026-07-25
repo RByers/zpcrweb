@@ -178,6 +178,14 @@ raw bytes ─▶ fflate.unzipSync ─▶ { name: Uint8Array }
   second-derivative maximum, and the §7 amplification squelch — now gated first by
   `baseline.ts`'s baseline-validation result (`computeCq()`'s `baselineValid` option). `computeCq()`
   ties both algorithms together. See [`threshold.md`](./threshold.md).
+- **`analysis.ts`** — the transforms that sit on top of those two: `baselineCorrectCurve()` (one
+  curve's baseline, noise, amplification verdict and ΔRFU) and `computeCqTable()`, **the** Cq
+  entry point. `computeCqTable()` takes every curve of a run at once, resolves one §5.1 threshold
+  per group from that group's own noise cohort, and returns one entry per well/fluorophore key.
+  It's deliberately batch-shaped: a Cq isn't a property of a single curve — its threshold is the
+  median noise of the curves it was computed *with* — so recomputing over a filtered subset yields
+  a different, equally defensible answer for the same well. Consumers build the table once over the
+  whole plate and filter it for display; see `apps/web/src/lib/runAnalysis.ts`.
 - **`runinfo.ts`** — a small regex scan over the flat `<KeyValuePairs>` list. No XML
   dependency: the structure is regular and self-closing `<Value />` maps to `""`.
 - **`temps.ts`** — pulls temperatures out of the `.Plateread` ICFF index. It matches on the

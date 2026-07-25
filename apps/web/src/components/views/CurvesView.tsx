@@ -1,19 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import {
-  baselineCorrectCurve,
-  buildCalibrationMatrix,
-  computeCq,
-  resolveThreshold,
-  REFERENCE_ROW,
-  type CqAlgorithm,
-  type Zpcr,
-  type WellCurve,
-  type DarkCurve,
-  type TemperatureCurve,
-} from "@zpcrweb/core";
-import { ANALYSIS_BASELINE_MODE, formatBaselineFormula } from "../../lib/cq";
+import type { Zpcr, TemperatureCurve } from "@zpcrweb/core";
+import { formatBaselineFormula } from "../../lib/cq";
 import { computeWellTypes } from "../../lib/wellTypes";
-import { NO_TARGET, targetGroups } from "../../lib/plateTargets";
+import { NO_TARGET } from "../../lib/plateTargets";
 import { SAMPLE_TYPE_META } from "../../lib/sampleType";
 import {
   wellKey,
@@ -25,14 +14,8 @@ import {
 } from "../../state/useZpcrStore";
 import { usePltdPassword } from "../../state/pltdPassword";
 import { channelColor, channelLabel } from "../../lib/channelColors";
-import {
-  computeFluorCurves,
-  matchFluorCalibrations,
-  plateBackgroundLevels,
-  resolveTubeType,
-  type CalibrationBackground,
-  type FluorCorrections,
-} from "../../lib/fluorCurves";
+import { channelCurveKey, curveKey, useRunAnalysis } from "../../lib/runAnalysis";
+import type { CalibrationBackground } from "../../lib/fluorCurves";
 import { ChannelBar } from "../curves/ChannelBar";
 import { FluorBar, type FluorChip } from "../curves/FluorBar";
 import { SampleBar } from "../curves/SampleBar";
@@ -46,47 +29,6 @@ import { Switch } from "../Switch";
 import { ResetIcon } from "../ResetIcon";
 import type { HighlightMatch, PlotCurve } from "../../lib/uplot/chart";
 
-/** Baseline + Cq for a set of curves, grouped by `dyeLabel` (`threshold.md` §5.1: one threshold
- * per group, from the median baseline noise across that group's own curves) — factored out so
- * it can run twice: once over the plotted set (drives the chart's own Cq markers) and once over
- * every curve on the plate regardless of rail filters (drives the hover cards, so a greyed-out
- * row still shows a real Cq instead of always reading "—"). The two runs are intentionally
- * independent — a group's threshold in the "all curves" run is computed across the whole plate,
- * not just what's currently selected, so it won't match the chart's own Cq for the same curve
- * when a filter has narrowed the plotted set; that's expected, not a bug, since the hover card's
- * job is to summarize the whole plate, not to double as an alternate chart legend. Baselining
- * itself is never a parameter here — always the auto-detected linear baseline, regardless of
- * what the chart currently *displays* (see `CurveView`). */
-function computeCurveMetrics(
-  curves: { cycles: number[]; mean: number[]; dyeLabel: string }[],
-  algorithm: CqAlgorithm,
-  thresholdOverrides: Map<string, number>,
-): { cq: number | null; baselineFormula: string }[] {
-  if (curves.length === 0) return [];
-  const baselines = curves.map((c) => baselineCorrectCurve(c.cycles, c.mean, ANALYSIS_BASELINE_MODE));
-  const noisesByLabel = new Map<string, number[]>();
-  curves.forEach((c, i) => {
-    const list = noisesByLabel.get(c.dyeLabel) ?? [];
-    list.push(baselines[i]!.noise);
-    noisesByLabel.set(c.dyeLabel, list);
-  });
-  const thresholdByLabel = new Map<string, number>();
-  for (const [label, noises] of noisesByLabel) {
-    thresholdByLabel.set(label, resolveThreshold(noises, { overrideValue: thresholdOverrides.get(label) }));
-  }
-  return curves.map((c, i) => {
-    const b = baselines[i]!;
-    const threshold = thresholdByLabel.get(c.dyeLabel) ?? 0;
-    const cq = computeCq(c.cycles, b.correctedValues, {
-      algorithm,
-      threshold: algorithm === "Threshold" ? threshold : undefined,
-      noise: b.noise,
-      baselineValid: b.baselineValid,
-    });
-    return { cq, baselineFormula: formatBaselineFormula(b.baselineFit) };
-  });
-}
-
 interface Props {
   zpcr: Zpcr;
   settings: FileSettings;
@@ -96,24 +38,37 @@ interface Props {
 export function CurvesView({ zpcr, settings, onChange }: Props) {
   const [pltdPassword, setPltdPassword] = usePltdPassword();
   const steps = useMemo(() => zpcr.steps(), [zpcr]);
-  // Only channels actually scanned (CHANNELMASK) are offered/plotted.
-  const available = useMemo(() => zpcr.channels(), [zpcr]);
   // Selected step: the stored one if still valid, else the first step.
   const activeStep =
     settings.step != null && steps.some((s) => s.step === settings.step)
       ? settings.step
       : (steps[0]?.step ?? undefined);
 
-  // Full curve set for the active step. The reference row is shown separately, in the
-  // Reference view — see RefColBar/ReferenceView.
-  const allCurves = useMemo<WellCurve[]>(
-    () => zpcr.curves({ includeReference: false, step: activeStep }),
-    [zpcr, activeStep],
-  );
-  const darkCurves = useMemo<DarkCurve[]>(
-    () => zpcr.darkCurves(activeStep),
-    [zpcr, activeStep],
-  );
+  // The run-level derivation this view shares with the Analysis view — plate, targets,
+  // color separation and, above all, the run's single Cq table. See `runAnalysis.ts`: this view
+  // reads Cq values out of that table and never recomputes them for the subset it happens to be
+  // plotting, which is what used to make its markers and hover cards disagree with each other and
+  // with the Analysis table.
+  const run = useRunAnalysis(zpcr, settings, pltdPassword, activeStep, settings.calibration !== false);
+  const {
+    plateEntry,
+    plate,
+    allCurves,
+    darkCurves,
+    available,
+    tube,
+    fluorCals,
+    calibrationAvailable,
+    plateBackgroundAvailable,
+    wellFluorTargets,
+    wellFluors,
+    wellSample,
+    targetInfos,
+    allFluorCurves,
+    cqTable,
+    channelCqTable,
+  } = run;
+
   // Every temperature the platereads carry, for this step. Which of them are plotted is a
   // per-file setting; the right-hand axis appears only when at least one is selected.
   const allTemps = useMemo<TemperatureCurve[]>(
@@ -134,16 +89,9 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
     [darkCurves, available, settings.enabledChannels],
   );
 
-  // ---- Dye-space (color-separated) curves ------------------------------------------------
-  // See calibration.md. Uses the plate's own fluorophore list matched against this run's
-  // `.Dcal` calibration data — both need to be available for this to do anything.
-
-  const plateEntry = useMemo(
-    () => zpcr.plates(pltdPassword || undefined)[0],
-    [zpcr, pltdPassword],
-  );
-  const plate = plateEntry?.pltd.plate;
-  const calibrations = useMemo(() => zpcr.calibrations(), [zpcr]);
+  // ---- Plate-derived selection state -----------------------------------------------------
+  // The dye-space curves themselves come from `useRunAnalysis` above (see calibration.md); what's
+  // left here is the per-view selection/labelling state built on top of the plate.
 
   // Per-well sample type, for coloring the well-selection grid to match the Plates view — see
   // `computeWellTypes`; shared with AnalysisView's well matrix.
@@ -184,38 +132,8 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
 
   const resetWells = () => onChange({ enabledWells: nonEmptyWellSet ?? fullWellSet });
 
-  const tube = resolveTubeType(plate?.plateName);
-
-  const fluorCals = useMemo(
-    () => (plate ? matchFluorCalibrations(plate.fluors, calibrations, tube) : []),
-    [plate, calibrations, tube],
-  );
-  const calibratedFluors = useMemo(() => fluorCals.filter((f) => f.curve), [fluorCals]);
-  const calibrationAvailable = calibratedFluors.length > 0;
   const calibrationOn = settings.calibration ?? calibrationAvailable;
   const fluorViewMode: FluorViewMode = settings.fluorViewMode;
-
-  // Target/gene name assigned to each (well, fluor) pair — pltd.md's per-well target, distinct
-  // from the fluor itself: the same dye can carry a different target in different wells.
-  const wellFluorTargets = useMemo(() => {
-    const m = new Map<string, Map<string, string>>();
-    if (plate) {
-      for (const w of plate.wells) {
-        const inner = new Map<string, string>();
-        for (const wf of w.fluors) if (wf.target) inner.set(wf.fluor, wf.target);
-        m.set(wellKey(w.row, w.col), inner);
-      }
-    }
-    return m;
-  }, [plate]);
-
-  // Distinct targets across the plate, plus the {@link NO_TARGET} catch-all for loaded
-  // well/fluor pairs with no target of their own — the "Target" view mode's legend, coloring
-  // and toggle keys. See `targetGroups`.
-  const targetInfos = useMemo(
-    () => (plate ? targetGroups(plate, fluorCals) : []),
-    [plate, fluorCals],
-  );
 
   /** Whether targetInfos carries a {@link NO_TARGET} group — i.e. whether untargeted curves have
    * a chip to be labelled and toggled by, rather than falling back to their fluor name. */
@@ -256,111 +174,6 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
           })),
     [fluorViewMode, targetInfos, fluorCals],
   );
-
-  // Block temperature is essentially constant across a single PLATEREAD step's cycles (see
-  // plateread.md §3), so one representative matrix per step is accurate without recomputing
-  // it every cycle.
-  const stepTemperatureC = useMemo(() => {
-    const temps = zpcr.reads
-      .filter((r) => r.step === activeStep)
-      .map((r) => r.blockTempC)
-      .filter((t): t is number => t != null);
-    return temps.length ? temps.reduce((a, b) => a + b, 0) / temps.length : 60;
-  }, [zpcr, activeStep]);
-
-  const matrix = useMemo(() => {
-    if (calibratedFluors.length === 0) return null;
-    // `channels` is passed in rather than slicing rows afterwards so the matrix's column norms
-    // — the RFU scale factor of calibration.md §5 — are computed over the rows the solve uses.
-    return buildCalibrationMatrix(
-      calibratedFluors.map((f) => f.curve!),
-      stepTemperatureC,
-      { normalization: settings.calibrationNormalization, channels: available },
-    );
-  }, [calibratedFluors, stepTemperatureC, settings.calibrationNormalization, available]);
-
-  // The §4 corrections applied to every raw reading before the solve. The levels are read per
-  // scan, so these are `[channelIndex][cycle]` tables aligned with `available`.
-  const corrections = useMemo<FluorCorrections>(() => {
-    const reads = zpcr.reads.filter((r) => r.step === activeStep);
-    // §4.1: one position of the reference row — the first — per channel, LED on.
-    const referenceLevel = available.map((ch) =>
-      reads.map((r) => r.get(ch, REFERENCE_ROW, 0).mean),
-    );
-    // §4.2: whichever additive background the user picked, as a per-cycle table. `dark` varies
-    // per scan (DARKDATA is re-read every cycle); `plate` is one temperature-interpolated
-    // constant, broadcast across the cycles so both take the same code path downstream.
-    const darkByChannel = new Map(darkCurves.map((d) => [d.channel, d]));
-    const plateLevels =
-      settings.calibrationBackground === "plate"
-        ? plateBackgroundLevels(zpcr.calibrations(), tube, stepTemperatureC, available)
-        : undefined;
-    const backgroundLevel =
-      settings.calibrationBackground === "dark"
-        ? available.map((ch) => darkByChannel.get(ch)?.mean ?? [])
-        : plateLevels
-          ? plateLevels.map((level) => reads.map(() => level))
-          : undefined;
-    // §4.1: per-well gain factors, only ever present in a `.pcrd` (a `.zpcr` stores none), and
-    // only when that run actually saved a set — otherwise the gain correction stays inactive
-    // and the reference level correctly has no effect of its own.
-    const factors = zpcr.wellFactors;
-    return {
-      referenceLevel,
-      backgroundLevel,
-      wellFactor: factors
-        ? (row, col) => {
-            const perChannel = factors.get(row, col);
-            return perChannel && available.map((ch) => perChannel[ch] ?? 1);
-          }
-        : undefined,
-    };
-  }, [
-    zpcr,
-    activeStep,
-    available,
-    darkCurves,
-    settings.calibrationBackground,
-    tube,
-    stepTemperatureC,
-  ]);
-
-  // Whether the "Plate" background is actually backed by data — a file can carry .Dcal entries
-  // for other vessel types than this plate's, in which case that mode silently subtracts nothing.
-  const plateBackgroundAvailable = useMemo(
-    () => plateBackgroundLevels(zpcr.calibrations(), tube, stepTemperatureC, available) != null,
-    [zpcr, tube, stepTemperatureC, available],
-  );
-
-  // The separation solve is real work (one pseudo-inverse per well per cycle) — skip it
-  // entirely while the feature is off rather than computing curves nobody will see.
-  const allFluorCurves = useMemo(() => {
-    if (!matrix || !calibrationOn) return [];
-    const dyeChannels = calibratedFluors.map((f) => f.channel);
-    return computeFluorCurves(allCurves, matrix, available, dyeChannels, corrections);
-  }, [matrix, calibrationOn, allCurves, available, calibratedFluors, corrections]);
-
-  // Per-well set of fluor names actually loaded into that well (pltd.md dye layers) — a well
-  // can be enabled and a fluor can be globally on while that particular well/fluor pair was
-  // never loaded (a dye layer doesn't necessarily cover every well), so no line should be
-  // drawn for it.
-  const wellFluors = useMemo(() => {
-    const m = new Map<string, Set<string>>();
-    if (plate) {
-      for (const w of plate.wells) m.set(wellKey(w.row, w.col), new Set(w.fluors.map((f) => f.fluor)));
-    }
-    return m;
-  }, [plate]);
-
-  // Per-well sample name (pltd.md's `conditionName`, exposed as `WellDefinition.sample`) — for
-  // the Samples rail section's chips and for filtering plotted curves by sample.
-  const wellSample = useMemo(() => {
-    const m = new Map<string, string>();
-    if (plate) {
-      for (const w of plate.wells) if (w.sample) m.set(wellKey(w.row, w.col), w.sample);
-    }
-    return m;
-  }, [plate]);
 
   // Distinct sample names actually assigned to a well on this plate, in plate order — declared
   // names with no well (`plate.samples`) are left out since there'd be nothing to toggle.
@@ -439,7 +252,22 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
   // channel vector, not a distribution) — so bands and the dark overlay are both
   // channel-space-only concepts, hidden once color separation is on.
 
-  const baseCurves: Omit<PlotCurve, "cq">[] = useMemo(
+  // Cq and the fitted baseline for one plotted curve — *looked up*, never recomputed. The run's
+  // table (`runAnalysis.ts`) already holds exactly one value per well/fluor pair, computed over the
+  // whole plate; deriving it again from whatever subset happens to be plotted is precisely what
+  // used to make the chart's markers, the hover cards and the Analysis table disagree.
+  const dyeCq = (row: number, col: number, dye: string) => {
+    const e = cqTable.get(curveKey(row, col, dye));
+    return { cq: e?.cq ?? null, baselineFormula: e ? formatBaselineFormula(e.baselineFit) : null };
+  };
+  // Channel space has no target to be consistent *with*: a raw channel curve mixes every dye
+  // emitting into that filter, so it carries its own Cq from its own table. See `channelCqTable`.
+  const channelCq = (row: number, col: number, channel: number) => {
+    const e = channelCqTable.get(channelCurveKey(row, col, channel));
+    return { cq: e?.cq ?? null, baselineFormula: e ? formatBaselineFormula(e.baselineFit) : null };
+  };
+
+  const plotCurves: PlotCurve[] = useMemo(
     () =>
       calibrationOn
         ? visibleFluor.map((c) => ({
@@ -455,6 +283,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
             min: c.mean,
             max: c.mean,
             sample: wellSample.get(wellKey(c.row, c.col)),
+            ...dyeCq(c.row, c.col, c.dye),
           }))
         : visibleChannel.map((c) => ({
             channel: c.channel,
@@ -469,17 +298,29 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
             min: c.min,
             max: c.max,
             sample: wellSample.get(wellKey(c.row, c.col)),
+            ...channelCq(c.row, c.col, c.channel),
           })),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [calibrationOn, visibleFluor, visibleChannel, fluorViewMode, wellFluorTargets, hasNoTargetGroup, wellSample],
+    [
+      calibrationOn,
+      visibleFluor,
+      visibleChannel,
+      fluorViewMode,
+      wellFluorTargets,
+      hasNoTargetGroup,
+      wellSample,
+      cqTable,
+      channelCqTable,
+    ],
   );
 
   // Every curve on the plate for the active view mode, ignoring the enabled-wells/channels/
   // fluors/samples filters (but still skipping fluor/well pairs the plate itself never loads,
   // unless "Unloaded" is on — that's a data-validity gate, not a selection filter). Exists only
   // to power the rail hover cards below, so a filtered-out element still lists its neighbors
-  // (greyed out) instead of the card going empty.
-  const allBaseCurves: Omit<PlotCurve, "cq">[] = useMemo(
+  // (greyed out) instead of the card going empty. Cq values come from the same table as the
+  // plotted curves', so a hover card and the chart always agree on a given curve.
+  const allPlotCurves: PlotCurve[] = useMemo(
     () =>
       calibrationOn
         ? allFluorCurves
@@ -501,6 +342,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
               min: c.mean,
               max: c.mean,
               sample: wellSample.get(wellKey(c.row, c.col)),
+              ...dyeCq(c.row, c.col, c.dye),
             }))
         : allCurves
             .filter((c) => available.includes(c.channel))
@@ -517,6 +359,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
               min: c.min,
               max: c.max,
               sample: wellSample.get(wellKey(c.row, c.col)),
+              ...channelCq(c.row, c.col, c.channel),
             })),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [
@@ -530,39 +373,10 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
       wellFluorTargets,
       hasNoTargetGroup,
       wellSample,
+      cqTable,
+      channelCqTable,
     ],
   );
-
-  // Cq markers (`threshold.md` §6), one per plotted curve, computed per the Analysis view's
-  // settings — same algorithm, same per-group (dye/target/channel label) threshold, same
-  // (always auto-linear) baseline this chart itself plots with — so a curve's marker always
-  // matches what the Analysis table would report for it.
-  const curveMetrics = useMemo(
-    () => computeCurveMetrics(baseCurves, settings.analysisCqAlgorithm, settings.analysisThresholdOverrides),
-    [baseCurves, settings.analysisCqAlgorithm, settings.analysisThresholdOverrides],
-  );
-
-  const plotCurves: PlotCurve[] = baseCurves.map((c, i) => ({
-    ...c,
-    cq: curveMetrics[i]?.cq ?? null,
-    baselineFormula: curveMetrics[i]?.baselineFormula ?? null,
-  }));
-
-  // Same Cq computation, but over every curve on the plate (see `allBaseCurves`) — powers the
-  // hover cards' greyed-out rows. Independent of `curveMetrics`: a group's threshold here is
-  // resolved across the whole plate rather than just the currently-plotted subset, so a curve's
-  // Cq in a hover card can legitimately differ from its Cq on the chart once a filter narrows
-  // what's plotted — the card is summarizing the plate, not re-deriving the chart's own marker.
-  const allCurveMetrics = useMemo(
-    () => computeCurveMetrics(allBaseCurves, settings.analysisCqAlgorithm, settings.analysisThresholdOverrides),
-    [allBaseCurves, settings.analysisCqAlgorithm, settings.analysisThresholdOverrides],
-  );
-
-  const allPlotCurves: PlotCurve[] = allBaseCurves.map((c, i) => ({
-    ...c,
-    cq: allCurveMetrics[i]?.cq ?? null,
-    baselineFormula: allCurveMetrics[i]?.baselineFormula ?? null,
-  }));
 
   // ---- Rail hover cards -------------------------------------------------------------------
   // Each card lists every curve on the plate for the hovered chip/cell (`allPlotCurves`), not

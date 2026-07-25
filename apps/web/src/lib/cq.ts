@@ -2,8 +2,9 @@ import type { LinearBaselineFit } from "@zpcrweb/core";
 
 /** Cq/Analysis always baseline-correct with the library's linear mode (`threshold.md` §4's
  * `LinearBaseLineNormalized`, auto-detected region) — baselining is no longer a user choice; see
- * `useZpcrStore.ts`'s `CurveView`, which only controls what the Curves-view chart *displays*. */
-export const ANALYSIS_BASELINE_MODE = "LinearBaseLineNormalized" as const;
+ * `useZpcrStore.ts`'s `CurveView`, which only controls what the Curves-view chart *displays*.
+ * Re-exported from the library, which applies it inside `computeCqTable`. */
+export { ANALYSIS_BASELINE_MODE } from "@zpcrweb/core";
 
 function formatCoefficient(n: number): string {
   const rounded = Math.round(n * 100) / 100;

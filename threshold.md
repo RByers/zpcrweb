@@ -209,6 +209,14 @@ Two refinements that matter in practice:
   the threshold approaches zero, so every well "crosses" at cycle 1. Impose a minimum absolute
   RFU.
 
+> A direct consequence, worth stating plainly: **a Cq is a property of a well *and the group it
+> was computed with*, not of the well's curve alone.** Change the set of wells in the group and the
+> median noise moves, the threshold moves, and a marginal well can gain or lose its Cq. So a Cq must
+> be computed once per run over the whole group and then read, never recomputed over whatever subset
+> a caller happens to be looking at. `packages/core/src/analysis.ts`'s `computeCqTable()` is the
+> batch entry point that enforces this: one call over every curve of a run, one entry per
+> well/fluorophore.
+
 ### 5.2 Manual override
 
 `thresholdOverrideValue` (with `autoCalculateThreshold="False"`) pins the threshold to a fixed RFU

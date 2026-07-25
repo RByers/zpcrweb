@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { parseZpcr, subtractSeries, baselineCorrectCurve, computeCq } from "../src/index.js";
+import {
+  parseZpcr,
+  subtractSeries,
+  baselineCorrectCurve,
+  computeCq,
+  computeCqTable,
+} from "../src/index.js";
 import { readSampleBytes } from "./sample.js";
 
 describe("subtractSeries", () => {
@@ -147,5 +153,108 @@ describe("darkCurves", () => {
       expect(d.min[0]!).toBeLessThanOrEqual(d.mean[0]!);
       expect(d.max[0]!).toBeGreaterThanOrEqual(d.mean[0]!);
     }
+  });
+});
+
+describe("computeCqTable", () => {
+  const cycles = Array.from({ length: 40 }, (_, i) => i + 1);
+  /** A sigmoid amplifying at `onset`, on a flat ~100 RFU baseline. */
+  const amp = (onset: number) => cycles.map((c) => 100 + 5000 / (1 + Math.exp(-(c - onset) * 0.5)));
+  /** A flat, faintly wobbling well — an NTC that never takes off. */
+  const flat = (level = 100) => cycles.map((c) => level + Math.sin(c) * 2);
+
+  const curve = (key: string, group: string, values: number[], rest = {}) => ({
+    key,
+    group,
+    cycles,
+    values,
+    ...rest,
+  });
+
+  it("returns exactly one entry per key, and drops duplicate keys", () => {
+    const table = computeCqTable([
+      curve("0,0,FAM", "GeneA", amp(25)),
+      curve("0,1,FAM", "GeneA", amp(28)),
+      curve("0,0,FAM", "GeneA", amp(10)), // duplicate key: ignored
+    ]);
+    expect(table.size).toBe(2);
+    // The first entry won: its Cq reflects the onset-25 curve, not the onset-10 one.
+    expect(table.get("0,0,FAM")!.cq).toBeGreaterThan(15);
+  });
+
+  it("shares one threshold across a group and gives each curve its own Cq", () => {
+    const table = computeCqTable([
+      curve("0,0,FAM", "GeneA", amp(20)),
+      curve("0,1,FAM", "GeneA", amp(30)),
+    ]);
+    const a = table.get("0,0,FAM")!;
+    const b = table.get("0,1,FAM")!;
+    expect(a.threshold).toBe(b.threshold);
+    expect(a.cq).toBeLessThan(b.cq!);
+  });
+
+  it("is unaffected by which curves a view happens to display — the whole point", () => {
+    // Same well, once alongside a quiet plate-mate and once alongside a noisy one. Because the
+    // table is always built over the whole plate, callers can't produce these two answers for the
+    // same well by filtering; this test pins that the *inputs* are what differ, so a view that
+    // re-derived from a subset would drift.
+    const quiet = computeCqTable([curve("0,0,FAM", "G", amp(25)), curve("0,1,FAM", "G", flat())]);
+    const noisy = computeCqTable([
+      curve("0,0,FAM", "G", amp(25)),
+      curve("0,1,FAM", "G", cycles.map((c) => 100 + Math.sin(c * 3) * 400)),
+    ]);
+    expect(quiet.get("0,0,FAM")!.threshold).not.toBeCloseTo(noisy.get("0,0,FAM")!.threshold, 1);
+  });
+
+  it("gives untargeted wells (NTC/NRT) real entries in the catch-all group", () => {
+    const table = computeCqTable([
+      curve("0,0,FAM", "GeneA", amp(22)),
+      curve("0,1,FAM", "GeneA", amp(24)),
+      // Two dyes in one untargeted well: distinct curves, distinct keys, one shared group.
+      curve("7,11,FAM", "(none)", amp(31)),
+      curve("7,11,HEX", "(none)", flat()),
+    ]);
+    expect(table.size).toBe(4);
+    expect(table.get("7,11,FAM")!.group).toBe("(none)");
+    expect(table.get("7,11,FAM")!.cq).not.toBeNull();
+    // The flat one is legitimately Cq-less — unamplified, not merely ungrouped.
+    expect(table.get("7,11,HEX")!.cq).toBeNull();
+    expect(table.get("7,11,HEX")!.amplified).toBe(false);
+  });
+
+  it("honours a per-group threshold override", () => {
+    const overrides = new Map([["GeneA", 4000]]);
+    const table = computeCqTable([curve("0,0,FAM", "GeneA", amp(25))], {
+      thresholdOverrides: overrides,
+    });
+    const auto = computeCqTable([curve("0,0,FAM", "GeneA", amp(25))]);
+    expect(table.get("0,0,FAM")!.threshold).toBe(4000);
+    expect(table.get("0,0,FAM")!.cq).toBeGreaterThan(auto.get("0,0,FAM")!.cq!);
+  });
+
+  it("keeps opted-out curves out of the noise cohort but still gives them a Cq", () => {
+    const noisyUnloaded = cycles.map((c) => 100 + Math.sin(c * 3) * 400);
+    const withOptOut = computeCqTable([
+      curve("0,0,FAM", "G", amp(25)),
+      curve("0,1,FAM", "G", flat()),
+      curve("7,0,FAM", "G", noisyUnloaded, { contributesToThreshold: false }),
+    ]);
+    const withoutIt = computeCqTable([
+      curve("0,0,FAM", "G", amp(25)),
+      curve("0,1,FAM", "G", flat()),
+    ]);
+    expect(withOptOut.get("0,0,FAM")!.threshold).toBeCloseTo(
+      withoutIt.get("0,0,FAM")!.threshold,
+      6,
+    );
+    expect(withOptOut.has("7,0,FAM")).toBe(true);
+  });
+
+  it("falls back to every curve when a whole group opts out of the cohort", () => {
+    const table = computeCqTable([
+      curve("0,0,FAM", "G", amp(25), { contributesToThreshold: false }),
+      curve("0,1,FAM", "G", amp(27), { contributesToThreshold: false }),
+    ]);
+    expect(table.get("0,0,FAM")!.threshold).toBeGreaterThan(0);
   });
 });

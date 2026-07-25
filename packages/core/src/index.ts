@@ -10,7 +10,12 @@ export { parseZpcr, zpcrFromBlob } from "./zpcr.js";
 export { zpcrFromFile, pcrdFromFile } from "./node.js";
 
 export { hexDump } from "./hex.js";
-export { subtractSeries, baselineCorrectCurve } from "./analysis.js";
+export {
+  subtractSeries,
+  baselineCorrectCurve,
+  computeCqTable,
+  ANALYSIS_BASELINE_MODE,
+} from "./analysis.js";
 export {
   toCurves,
   toDarkCurves,
@@ -100,7 +105,12 @@ export type {
   PrclEntry,
   DcalEntry,
 } from "./types.js";
-export type { CurveBaselineResult } from "./analysis.js";
+export type {
+  CurveBaselineResult,
+  CqTableCurve,
+  CqTableEntry,
+  CqTableOptions,
+} from "./analysis.js";
 export type { IcffEntry } from "./icff.js";
 export type { PlatereadDetail } from "./plateread.js";
 export type {

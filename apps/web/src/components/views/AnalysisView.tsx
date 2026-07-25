@@ -1,28 +1,11 @@
 import { useMemo } from "react";
-import {
-  baselineCorrectCurve,
-  buildCalibrationMatrix,
-  computeCq,
-  resolveThreshold,
-  REFERENCE_ROW,
-  type CqAlgorithm,
-  type DarkCurve,
-  type WellCurve,
-  type Zpcr,
-} from "@zpcrweb/core";
+import type { CqAlgorithm, Zpcr } from "@zpcrweb/core";
 import { wellKey, type FileSettings } from "../../state/useZpcrStore";
-import { ANALYSIS_BASELINE_MODE, formatBaselineFormula } from "../../lib/cq";
+import { formatBaselineFormula } from "../../lib/cq";
 import { computeWellTypes } from "../../lib/wellTypes";
-import { NO_TARGET, targetGroups, type TargetGroup } from "../../lib/plateTargets";
 import { usePltdPassword } from "../../state/pltdPassword";
 import { channelLabel } from "../../lib/channelColors";
-import {
-  computeFluorCurves,
-  matchFluorCalibrations,
-  plateBackgroundLevels,
-  resolveTubeType,
-  type FluorCorrections,
-} from "../../lib/fluorCurves";
+import { curveKey, useRunAnalysis } from "../../lib/runAnalysis";
 import { FluorBar, type FluorChip } from "../curves/FluorBar";
 import { WellMatrix } from "../curves/WellMatrix";
 import { PasswordPrompt } from "../PasswordPrompt";
@@ -63,54 +46,18 @@ function sanitizeFilePart(s: string): string {
 export function AnalysisView({ zpcr, settings, onChange }: Props) {
   const [pltdPassword, setPltdPassword] = usePltdPassword();
   const steps = useMemo(() => zpcr.steps(), [zpcr]);
-  const available = useMemo(() => zpcr.channels(), [zpcr]);
   const activeStep =
     settings.step != null && steps.some((s) => s.step === settings.step)
       ? settings.step
       : (steps[0]?.step ?? undefined);
 
-  const allCurves = useMemo<WellCurve[]>(
-    () => zpcr.curves({ includeReference: false, step: activeStep }),
-    [zpcr, activeStep],
-  );
-  const darkCurves = useMemo<DarkCurve[]>(() => zpcr.darkCurves(activeStep), [zpcr, activeStep]);
-
-  const plateEntry = useMemo(() => zpcr.plates(pltdPassword || undefined)[0], [zpcr, pltdPassword]);
-  const plate = plateEntry?.pltd.plate;
-  const calibrations = useMemo(() => zpcr.calibrations(), [zpcr]);
-  const tube = resolveTubeType(plate?.plateName);
-
-  const fluorCals = useMemo(
-    () => (plate ? matchFluorCalibrations(plate.fluors, calibrations, tube) : []),
-    [plate, calibrations, tube],
-  );
-  const calibratedFluors = useMemo(() => fluorCals.filter((f) => f.curve), [fluorCals]);
-  const calibrationAvailable = calibratedFluors.length > 0;
+  // Every Cq this view shows comes out of the run-level table — see `runAnalysis.ts`. This view
+  // filters that table for display (enabled wells, enabled targets); it never recomputes from the
+  // filtered subset, which is what used to make it disagree with the Curves view.
+  const run = useRunAnalysis(zpcr, settings, pltdPassword, activeStep);
+  const { plateEntry, plate, tube, groupInfos, usingTargets, cqTable, groupOf } = run;
+  const calibrationAvailable = run.calibrationAvailable;
   const wellTypes = useMemo(() => computeWellTypes(plate), [plate]);
-
-  // Targets on the plate plus the {@link NO_TARGET} catch-all for loaded well/fluor pairs with
-  // no target of their own — see `targetGroups`.
-  const targetInfos = useMemo<TargetGroup[]>(
-    () => (plate ? targetGroups(plate, fluorCals) : []),
-    [plate, fluorCals],
-  );
-
-  // No per-well target assigned anywhere on the plate: group by fluorophore instead, mirroring
-  // CurvesView's Fluorophore view mode, so the Analysis table still has something to group on.
-  // (`targetGroups` adds no NO_TARGET group in that case, so this is simply "no targets".)
-  const usingTargets = targetInfos.length > 0;
-  const groupInfos = useMemo<TargetGroup[]>(
-    () =>
-      usingTargets
-        ? targetInfos
-        : fluorCals.map((f) => ({
-            target: f.fluor,
-            fluors: [f.fluor],
-            channel: f.channel,
-            curve: f.curve,
-          })),
-    [usingTargets, targetInfos, fluorCals],
-  );
 
   const chipItems: FluorChip[] = useMemo(
     () =>
@@ -124,56 +71,6 @@ export function AnalysisView({ zpcr, settings, onChange }: Props) {
     [groupInfos, usingTargets],
   );
 
-  const stepTemperatureC = useMemo(() => {
-    const temps = zpcr.reads
-      .filter((r) => r.step === activeStep)
-      .map((r) => r.blockTempC)
-      .filter((t): t is number => t != null);
-    return temps.length ? temps.reduce((a, b) => a + b, 0) / temps.length : 60;
-  }, [zpcr, activeStep]);
-
-  const matrix = useMemo(() => {
-    if (calibratedFluors.length === 0) return null;
-    return buildCalibrationMatrix(
-      calibratedFluors.map((f) => f.curve!),
-      stepTemperatureC,
-      { normalization: settings.calibrationNormalization, channels: available },
-    );
-  }, [calibratedFluors, stepTemperatureC, settings.calibrationNormalization, available]);
-
-  const corrections = useMemo<FluorCorrections>(() => {
-    const reads = zpcr.reads.filter((r) => r.step === activeStep);
-    const referenceLevel = available.map((ch) => reads.map((r) => r.get(ch, REFERENCE_ROW, 0).mean));
-    const darkByChannel = new Map(darkCurves.map((d) => [d.channel, d]));
-    const plateLevels =
-      settings.calibrationBackground === "plate"
-        ? plateBackgroundLevels(zpcr.calibrations(), tube, stepTemperatureC, available)
-        : undefined;
-    const backgroundLevel =
-      settings.calibrationBackground === "dark"
-        ? available.map((ch) => darkByChannel.get(ch)?.mean ?? [])
-        : plateLevels
-          ? plateLevels.map((level) => reads.map(() => level))
-          : undefined;
-    const factors = zpcr.wellFactors;
-    return {
-      referenceLevel,
-      backgroundLevel,
-      wellFactor: factors
-        ? (row, col) => {
-            const perChannel = factors.get(row, col);
-            return perChannel && available.map((ch) => perChannel[ch] ?? 1);
-          }
-        : undefined,
-    };
-  }, [zpcr, activeStep, available, darkCurves, settings.calibrationBackground, tube, stepTemperatureC]);
-
-  const allFluorCurves = useMemo(() => {
-    if (!matrix) return [];
-    const dyeChannels = calibratedFluors.map((f) => f.channel);
-    return computeFluorCurves(allCurves, matrix, available, dyeChannels, corrections);
-  }, [matrix, allCurves, available, calibratedFluors, corrections]);
-
   const toggleTarget = (target: string) => {
     const next = new Set(settings.analysisDisabledTargets);
     next.has(target) ? next.delete(target) : next.add(target);
@@ -185,38 +82,20 @@ export function AnalysisView({ zpcr, settings, onChange }: Props) {
   // ---- Build one row per active (target, well) pair --------------------------------------
 
   const rows: AnalysisRow[] = useMemo(() => {
-    if (!plate || allFluorCurves.length === 0) return [];
-    const curveByWellDye = new Map<string, { cycles: number[]; mean: number[] }>();
-    for (const c of allFluorCurves) curveByWellDye.set(`${c.row},${c.col},${c.dye}`, c);
-
-    interface Prepped {
-      target: string;
-      fluor: string;
-      channel: number;
-      row: number;
-      col: number;
-      wellLabel: string;
-      sample: string;
-      baselineFormula: string;
-      cycles: number[];
-      correctedValues: number[];
-      noise: number;
-      amplified: boolean;
-      baselineValid: boolean;
-      deltaRfu: number;
-    }
-    const prepped: Prepped[] = [];
+    if (!plate || cqTable.size === 0) return [];
+    const out: AnalysisRow[] = [];
     for (const w of plate.wells) {
       if (!w.loaded) continue;
       if (!settings.enabledWells.has(wellKey(w.row, w.col))) continue;
       for (const wf of w.fluors) {
-        const group = usingTargets ? (wf.target || NO_TARGET) : wf.fluor;
+        // A well/fluor pair with no target of its own still gets a row: it lands in the shared
+        // NO_TARGET group (NTC/NRT wells and the like), rather than being dropped for lack of a name.
+        const group = groupOf(w.row, w.col, wf.fluor);
         if (!group || settings.analysisDisabledTargets.has(group)) continue;
-        const curve = curveByWellDye.get(`${w.row},${w.col},${wf.fluor}`);
-        if (!curve) continue;
+        const entry = cqTable.get(curveKey(w.row, w.col, wf.fluor));
+        if (!entry) continue;
         const info = groupInfos.find((g) => g.target === group);
-        const baseline = baselineCorrectCurve(curve.cycles, curve.mean, ANALYSIS_BASELINE_MODE);
-        prepped.push({
+        out.push({
           target: group,
           fluor: wf.fluor,
           channel: info?.channel ?? wf.channel,
@@ -224,67 +103,23 @@ export function AnalysisView({ zpcr, settings, onChange }: Props) {
           col: w.col,
           wellLabel: w.label,
           sample: w.sample ?? "",
-          baselineFormula: formatBaselineFormula(baseline.baselineFit),
-          cycles: curve.cycles,
-          correctedValues: baseline.correctedValues,
-          noise: baseline.noise,
-          amplified: baseline.amplified,
-          baselineValid: baseline.baselineValid,
-          deltaRfu: baseline.deltaRfu,
+          baselineFormula: formatBaselineFormula(entry.baselineFit),
+          threshold: entry.threshold,
+          noise: entry.noise,
+          amplified: entry.amplified,
+          deltaRfu: entry.deltaRfu,
+          cq: entry.cq,
         });
       }
     }
-
-    // §5.1: one threshold per target, from the median baseline noise across that target's wells.
-    const noisesByTarget = new Map<string, number[]>();
-    for (const p of prepped) {
-      const list = noisesByTarget.get(p.target) ?? [];
-      list.push(p.noise);
-      noisesByTarget.set(p.target, list);
-    }
-    const thresholdByTarget = new Map<string, number>();
-    for (const [target, noises] of noisesByTarget) {
-      thresholdByTarget.set(
-        target,
-        resolveThreshold(noises, { overrideValue: settings.analysisThresholdOverrides.get(target) }),
-      );
-    }
-
-    return prepped
-      .map((p): AnalysisRow => {
-        const threshold = thresholdByTarget.get(p.target) ?? 0;
-        const cq = computeCq(p.cycles, p.correctedValues, {
-          algorithm,
-          threshold: algorithm === "Threshold" ? threshold : undefined,
-          noise: p.noise,
-          baselineValid: p.baselineValid,
-        });
-        return {
-          target: p.target,
-          fluor: p.fluor,
-          channel: p.channel,
-          row: p.row,
-          col: p.col,
-          wellLabel: p.wellLabel,
-          sample: p.sample,
-          baselineFormula: p.baselineFormula,
-          threshold,
-          noise: p.noise,
-          amplified: p.amplified,
-          deltaRfu: p.deltaRfu,
-          cq,
-        };
-      })
-      .sort((a, b) => a.target.localeCompare(b.target) || a.row - b.row || a.col - b.col);
+    return out.sort((a, b) => a.target.localeCompare(b.target) || a.row - b.row || a.col - b.col);
   }, [
     plate,
-    allFluorCurves,
+    cqTable,
+    groupOf,
     settings.enabledWells,
     settings.analysisDisabledTargets,
-    settings.analysisThresholdOverrides,
-    usingTargets,
     groupInfos,
-    algorithm,
   ]);
 
   const download = () => {

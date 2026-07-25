@@ -14,7 +14,14 @@ import {
   type BaselineRegion,
   type LinearBaselineFit,
 } from "./baseline.js";
-import { baselineNoise, isAmplified, type AmplificationOptions } from "./threshold.js";
+import {
+  baselineNoise,
+  computeCq,
+  isAmplified,
+  resolveThreshold,
+  type AmplificationOptions,
+  type CqAlgorithm,
+} from "./threshold.js";
 
 /**
  * Element-wise subtraction of one series from another, `a[i] - b[i]`. Used to subtract a
@@ -105,4 +112,125 @@ export function baselineCorrectCurve(
     baselineRfu,
     baselineFit,
   };
+}
+
+/** Default baseline mode for every Cq in the app: `threshold.md` §4's `LinearBaseLineNormalized`
+ * over the auto-detected region. Baselining is not a user choice — what the Curves view *plots*
+ * is (see its `CurveView` setting), but that never feeds a Cq. */
+export const ANALYSIS_BASELINE_MODE: BaselineMode = "LinearBaseLineNormalized";
+
+/** One curve entering {@link computeCqTable}. */
+export interface CqTableCurve {
+  /** Identity of the curve — one well/fluorophore pair — and the key its result is filed under.
+   * Duplicates are dropped (first wins) so a repeated pair can neither be double-counted in its
+   * group's noise cohort nor end up with two different Cq values.
+   *
+   * Well/*fluor*, not well/target: a well can load two dyes that share one group (both untargeted,
+   * say), and they are two distinct curves with two distinct Cq values. Since each well/fluor pair
+   * carries at most one target, one entry per key is still exactly one Cq per well/target. */
+  key: string;
+  /** Threshold group (`threshold.md` §5.1): one threshold per group, resolved from the median
+   * baseline noise across that group's curves. Normally the target/gene name — with untargeted
+   * wells (NTC/NRT and the like) sharing one catch-all group rather than being left out: a well
+   * with no target still gets a real Cq. */
+  group: string;
+  cycles: number[];
+  values: number[];
+  /** Whether this curve joins its group's noise cohort — default `true`. Set `false` for a curve
+   * that should still *get* a Cq but shouldn't influence the group's threshold, i.e. a well/fluor
+   * pair the plate never loaded (real signal isn't expected there, so its noise shouldn't set the
+   * bar for wells that were loaded). Never use it to reflect a display filter: that's exactly the
+   * subset-dependence this table exists to eliminate. A group whose curves *all* opt out falls
+   * back to using them all, rather than resolving a meaningless zero threshold. */
+  contributesToThreshold?: boolean;
+}
+
+/** One well/target pair's analysis result — every Cq-related number the UI shows for it. */
+export interface CqTableEntry extends CurveBaselineResult {
+  group: string;
+  /** The §5.1 threshold resolved for {@link group}, shared by every curve in it. */
+  threshold: number;
+  cq: number | null;
+}
+
+export interface CqTableOptions {
+  /** §6, see {@link CqAlgorithm}. Default `"Threshold"`. */
+  algorithm?: CqAlgorithm;
+  /** Manual per-group threshold overrides, keyed by {@link CqTableCurve.group}. A group with no
+   * entry uses the auto threshold. */
+  thresholdOverrides?: ReadonlyMap<string, number>;
+  /** Baseline subtraction mode; defaults to {@link ANALYSIS_BASELINE_MODE} and should normally be
+   * left alone, so every view reports the same Cq. */
+  baselineMode?: BaselineMode;
+  amplification?: AmplificationOptions;
+}
+
+/**
+ * **The** Cq computation: baseline-correct every curve, resolve one threshold per group from that
+ * group's own noise cohort (§5.1), and derive each curve's Cq (§6) — returning one entry per
+ * `key`.
+ *
+ * This is deliberately the single implementation, and callers are expected to build it over a
+ * run's *whole* plate, once, and then read individual entries out of it. A Cq is not a property of
+ * a curve alone: its group's threshold is the median baseline noise over the curves handed in, so
+ * computing it a second time over a filtered subset (only the plotted wells, only the enabled
+ * targets, …) yields a *different, equally defensible* Cq for the very same well — which is how
+ * one view came to show a Cq where another showed none. Filter the returned table for display;
+ * never re-derive it from a subset.
+ */
+export function computeCqTable(
+  curves: CqTableCurve[],
+  options: CqTableOptions = {},
+): Map<string, CqTableEntry> {
+  const algorithm = options.algorithm ?? "Threshold";
+  const mode = options.baselineMode ?? ANALYSIS_BASELINE_MODE;
+
+  const unique: CqTableCurve[] = [];
+  const seen = new Set<string>();
+  for (const c of curves) {
+    if (seen.has(c.key)) continue;
+    seen.add(c.key);
+    unique.push(c);
+  }
+
+  const baselines = unique.map((c) =>
+    baselineCorrectCurve(c.cycles, c.values, mode, options.amplification),
+  );
+
+  // §5.1: one threshold per group, over that group's whole noise cohort.
+  const cohortByGroup = new Map<string, number[]>();
+  const allByGroup = new Map<string, number[]>();
+  unique.forEach((c, i) => {
+    const noise = baselines[i]!.noise;
+    const all = allByGroup.get(c.group) ?? [];
+    all.push(noise);
+    allByGroup.set(c.group, all);
+    if (c.contributesToThreshold === false) return;
+    const cohort = cohortByGroup.get(c.group) ?? [];
+    cohort.push(noise);
+    cohortByGroup.set(c.group, cohort);
+  });
+  const thresholdByGroup = new Map<string, number>();
+  for (const [group, all] of allByGroup) {
+    const noises = cohortByGroup.get(group) ?? all;
+    thresholdByGroup.set(
+      group,
+      resolveThreshold(noises, { overrideValue: options.thresholdOverrides?.get(group) }),
+    );
+  }
+
+  const table = new Map<string, CqTableEntry>();
+  unique.forEach((c, i) => {
+    const b = baselines[i]!;
+    const threshold = thresholdByGroup.get(c.group) ?? 0;
+    const cq = computeCq(c.cycles, b.correctedValues, {
+      algorithm,
+      threshold: algorithm === "Threshold" ? threshold : undefined,
+      noise: b.noise,
+      amplification: options.amplification,
+      baselineValid: b.baselineValid,
+    });
+    table.set(c.key, { ...b, group: c.group, threshold, cq });
+  });
+  return table;
 }
