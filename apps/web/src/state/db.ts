@@ -42,9 +42,11 @@ export interface StoredSettings {
   temps?: string[];
   /** Color separation: on/off, or unset to auto-enable when plate + calibration data exist. */
   calibration?: boolean | null;
+  /** When color separation is on, group/label curves by fluorophore or by target/gene. */
+  fluorViewMode?: "fluorophore" | "target";
   /** Calibration normalization mode; see `calibration.md` §3. */
   calibrationNormalization?: "none" | "column" | "global";
-  /** Fluorophore names hidden from the calibration ("Fluorophores") view. */
+  /** Fluorophore (or, in target view mode, target) names hidden from the dye-space view. */
   disabledFluors?: string[];
 }
 

@@ -36,6 +36,8 @@ export type CurveBaselineRange = [number, number] | null;
 export type Scale = "linear" | "log";
 /** Min/max envelope bands: always off, always on, or auto (only when one well selected). */
 export type BandsMode = "off" | "auto" | "on";
+/** How dye-space curves are grouped/labeled once color separation is on. */
+export type FluorViewMode = "fluorophore" | "target";
 
 /** Per-file view settings, in-memory form (Sets for cheap toggling). */
 export interface FileSettings {
@@ -68,10 +70,14 @@ export interface FileSettings {
    * explicit user override.
    */
   calibration: boolean | null;
+  /** When color separation is on, group/label curves by fluorophore or by target/gene (each
+   * target listed separately, still colored by its channel/fluorophore — see `pltd.md`). */
+  fluorViewMode: FluorViewMode;
   /** Calibration matrix column normalization; see `calibration.md` §3. */
   calibrationNormalization: NormalizationMode;
-  /** Fluorophore names hidden from the calibration curves (an opt-out set, like `enabledChannels`
-   * inverted — new fluors default to shown without needing to know their names up front). */
+  /** Fluorophore (or, in target view mode, target) names hidden from the dye-space curves (an
+   * opt-out set, like `enabledChannels` inverted — new entries default to shown without needing
+   * to know their names up front). */
   disabledFluors: Set<string>;
 }
 
@@ -152,6 +158,7 @@ function defaultSettings(): FileSettings {
     temps: new Set<string>(),
     // Auto: on once plate + calibration data are available (see CurvesView).
     calibration: null,
+    fluorViewMode: "fluorophore",
     calibrationNormalization: "global",
     disabledFluors: new Set<string>(),
   };
@@ -173,6 +180,7 @@ function toStored(id: string, s: FileSettings): StoredSettings {
     step: s.step ?? null,
     temps: [...s.temps],
     calibration: s.calibration,
+    fluorViewMode: s.fluorViewMode,
     calibrationNormalization: s.calibrationNormalization,
     disabledFluors: [...s.disabledFluors],
   };
@@ -192,6 +200,7 @@ function fromStored(s: StoredSettings): FileSettings {
     bands: s.bands ?? "auto",
     step: s.step ?? null,
     calibration: s.calibration ?? null,
+    fluorViewMode: s.fluorViewMode ?? "fluorophore",
     calibrationNormalization: s.calibrationNormalization ?? "global",
     disabledFluors: new Set(s.disabledFluors ?? []),
     temps: new Set(s.temps ?? []),

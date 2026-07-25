@@ -13,6 +13,7 @@ import {
   type BandsMode,
   type CurveBaselineMode,
   type FileSettings,
+  type FluorViewMode,
   type Scale,
 } from "../../state/useZpcrStore";
 import { usePltdPassword } from "../../state/pltdPassword";
@@ -24,7 +25,7 @@ import {
   type FluorCorrections,
 } from "../../lib/fluorCurves";
 import { ChannelBar } from "../curves/ChannelBar";
-import { FluorBar } from "../curves/FluorBar";
+import { FluorBar, type FluorChip } from "../curves/FluorBar";
 import { WellMatrix } from "../curves/WellMatrix";
 import { CurveChart } from "../curves/CurveChart";
 import { TempBar } from "../curves/TempBar";
@@ -167,6 +168,70 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
   const calibratedFluors = useMemo(() => fluorCals.filter((f) => f.curve), [fluorCals]);
   const calibrationAvailable = calibratedFluors.length > 0;
   const calibrationOn = settings.calibration ?? calibrationAvailable;
+  const fluorViewMode: FluorViewMode = settings.fluorViewMode;
+
+  // Target/gene name assigned to each (well, fluor) pair — pltd.md's per-well target, distinct
+  // from the fluor itself: the same dye can carry a different target in different wells.
+  const wellFluorTargets = useMemo(() => {
+    const m = new Map<string, Map<string, string>>();
+    if (plate) {
+      for (const w of plate.wells) {
+        const inner = new Map<string, string>();
+        for (const wf of w.fluors) if (wf.target) inner.set(wf.fluor, wf.target);
+        m.set(wellKey(w.row, w.col), inner);
+      }
+    }
+    return m;
+  }, [plate]);
+
+  // Distinct targets across the plate, each carrying the channel/calibration of the fluor it's
+  // assigned to — for the "Target" view mode's legend and coloring.
+  const targetInfos = useMemo(() => {
+    if (!plate) return [];
+    const byFluor = new Map(fluorCals.map((f) => [f.fluor, f]));
+    const seen = new Map<string, { target: string; fluor: string; channel: number; curve: unknown }>();
+    for (const w of plate.wells) {
+      for (const wf of w.fluors) {
+        if (!wf.target || seen.has(wf.target)) continue;
+        const cal = byFluor.get(wf.fluor);
+        seen.set(wf.target, {
+          target: wf.target,
+          fluor: wf.fluor,
+          channel: cal?.channel ?? wf.channel,
+          curve: cal?.curve,
+        });
+      }
+    }
+    return [...seen.values()];
+  }, [plate, fluorCals]);
+
+  // Label a dye-space curve for display/toggling: its fluor name normally, or the target
+  // assigned to it in its own well when in target view mode (falling back to the fluor name
+  // for a well/fluor with no target configured).
+  const labelForFluorCurve = (row: number, col: number, dye: string): string =>
+    fluorViewMode === "target"
+      ? (wellFluorTargets.get(wellKey(row, col))?.get(dye) ?? dye)
+      : dye;
+
+  const chipItems: FluorChip[] = useMemo(
+    () =>
+      fluorViewMode === "target"
+        ? targetInfos.map((t) => ({
+            key: t.target,
+            label: t.target,
+            sublabel: t.fluor,
+            channel: t.channel,
+            calibrated: !!t.curve,
+          }))
+        : fluorCals.map((f) => ({
+            key: f.fluor,
+            label: f.fluor,
+            sublabel: channelLabel(f.channel),
+            channel: f.channel,
+            calibrated: !!f.curve,
+          })),
+    [fluorViewMode, targetInfos, fluorCals],
+  );
 
   // Block temperature is essentially constant across a single PLATEREAD step's cycles (see
   // plateread.md §3), so one representative matrix per step is accurate without recomputing
@@ -242,10 +307,10 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
       allFluorCurves.filter(
         (c) =>
           settings.enabledWells.has(wellKey(c.row, c.col)) &&
-          !settings.disabledFluors.has(c.dye) &&
+          !settings.disabledFluors.has(labelForFluorCurve(c.row, c.col, c.dye)) &&
           (wellFluors.get(wellKey(c.row, c.col))?.has(c.dye) ?? false),
       ),
-    [allFluorCurves, settings.enabledWells, settings.disabledFluors, wellFluors],
+    [allFluorCurves, settings.enabledWells, settings.disabledFluors, wellFluors, fluorViewMode, wellFluorTargets],
   );
 
   // Whether to show the run in dye space: the user's toggle, independent of whether any
@@ -262,7 +327,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
   const plotCurves: PlotCurve[] = calibrationOn
     ? visibleFluor.map((c) => ({
         channel: c.channel,
-        dyeLabel: c.dye,
+        dyeLabel: labelForFluorCurve(c.row, c.col, c.dye),
         row: c.row,
         col: c.col,
         wellLabel: c.wellLabel,
@@ -333,7 +398,6 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
 
         {plateEntry && (
           <div className="rail__section">
-            <div className="rail__title">Calibration</div>
             {plateEntry.pltd.needsPassword || plateEntry.pltd.error ? (
               <PasswordPrompt
                 wrong={!!plateEntry.pltd.error}
@@ -343,13 +407,18 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
               <>
                 <div className="rail__row">
                   <Toggle
-                    label="Color separation"
+                    label="View"
                     options={[
-                      ["off", "Off"],
-                      ["on", "On"],
+                      ["channel", "Channel"],
+                      ["fluorophore", "Fluorophore"],
+                      ["target", "Target"],
                     ]}
-                    value={calibrationOn ? "on" : "off"}
-                    onChange={(v) => onChange({ calibration: v === "on" })}
+                    value={calibrationOn ? fluorViewMode : "channel"}
+                    onChange={(v) =>
+                      v === "channel"
+                        ? onChange({ calibration: false })
+                        : onChange({ calibration: true, fluorViewMode: v as FluorViewMode })
+                    }
                   />
                 </div>
                 {calibrationOn && (
@@ -392,10 +461,12 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
         )}
 
         <div className="rail__section">
-          <div className="rail__title">{calibrationOn ? "Fluorophores" : "Channels"}</div>
+          <div className="rail__title">
+            {calibrationOn ? (fluorViewMode === "target" ? "Targets" : "Fluorophores") : "Channels"}
+          </div>
           {calibrationOn ? (
             <FluorBar
-              fluors={fluorCals}
+              items={chipItems}
               disabled={settings.disabledFluors}
               onToggle={toggleFluor}
             />
@@ -461,6 +532,22 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
             value={settings.curveBaseline}
             onChange={(v) => onChange({ curveBaseline: v as CurveBaselineMode })}
           />
+        </div>
+
+        {settings.curveBaseline !== "raw" && (
+          <div className="rail__section">
+            <BaselineRangeSlider
+              min={1}
+              max={maxCycle}
+              value={settings.curveBaselineRange ?? defaultRangePreview(maxCycle)}
+              isManual={settings.curveBaselineRange != null}
+              onChange={(range) => onChange({ curveBaselineRange: range })}
+              onReset={() => onChange({ curveBaselineRange: null })}
+            />
+          </div>
+        )}
+
+        <div className="rail__section rail__row">
           <Toggle
             label="Scale"
             options={[
@@ -473,7 +560,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
           {!calibrationOn && (
             <>
               <Toggle
-                label="Dark"
+                label="Show dark"
                 options={[
                   ["off", "Off"],
                   ["on", "On"],
@@ -494,19 +581,6 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
             </>
           )}
         </div>
-
-        {settings.curveBaseline !== "raw" && (
-          <div className="rail__section">
-            <BaselineRangeSlider
-              min={1}
-              max={maxCycle}
-              value={settings.curveBaselineRange ?? defaultRangePreview(maxCycle)}
-              isManual={settings.curveBaselineRange != null}
-              onChange={(range) => onChange({ curveBaselineRange: range })}
-              onReset={() => onChange({ curveBaselineRange: null })}
-            />
-          </div>
-        )}
 
         <div className="rail__stat mono">
           {plotCurves.length} / {calibrationOn ? allFluorCurves.length : allCurves.length}{" "}

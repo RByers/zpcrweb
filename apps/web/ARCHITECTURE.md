@@ -272,9 +272,10 @@ only pieces the two views share.
     not a per-well one.
 - **Dark (LED-off) background:** `zpcr.darkCurves()` gives one background series per channel.
   A pure display overlay — it never alters the plotted well curves, min/max bands, or the
-  y-axis label. Off (default) draws nothing; On draws one **dotted** dark line per present
-  channel, transformed like the curves (so it still tracks the baseline mode/log). Channel-space
-  only, like the min/max bands, so the toggle only appears when color separation is off.
+  y-axis label. The "Show dark" toggle: off (default) draws nothing; on draws one **dotted**
+  dark line per present channel, transformed like the curves (so it still tracks the baseline
+  mode/log). Channel-space only, like the min/max bands, so the toggle only appears when color
+  separation is off.
 - **Temperatures (right axis):** `zpcr.temperatureCurves(step)` gives one series per
   temperature field in the platereads. Chips in the rail toggle each one (all off by
   default, since they are instrument context rather than the measurement) and preview its
@@ -288,19 +289,29 @@ only pieces the two views share.
   factory overlay, or temperature) and reports its label, channel/dye, cycle, and
   mean/min/max/std — or, for a temperature, just its °C. The search projects each series
   through **its own** scale, so proximity is measured in pixels across both axes.
-- **Color separation (dye space):** `lib/fluorCurves.ts` matches the plate's fluorophores to
-  this run's `.Dcal` data, builds one calibration matrix per step (restricted to the scanned
-  channels, so its RFU scale factors are measured over the right rows), and solves every
-  well/cycle — see [`calibration.md`](../../calibration.md). `CurvesView` assembles the §4
-  corrections that go in first: the per-scan reference level from the reference row, the
-  per-scan dark level from `DARKDATA`, and the per-well gain factors when the run has them
-  (a `.pcrd` thing — a `.zpcr` carries none, so only the dark subtraction bites there). The
+- **Color separation (dye space) and the "View" mode selector:** `lib/fluorCurves.ts` matches
+  the plate's fluorophores to this run's `.Dcal` data, builds one calibration matrix per step
+  (restricted to the scanned channels, so its RFU scale factors are measured over the right
+  rows), and solves every well/cycle — see [`calibration.md`](../../calibration.md). `CurvesView`
+  assembles the §4 corrections that go in first: the per-scan reference level from the reference
+  row, the per-scan dark level from `DARKDATA`, and the per-well gain factors when the run has
+  them (a `.pcrd` thing — a `.zpcr` carries none, so only the dark subtraction bites there). The
   normalization selector is a numerical-conditioning knob and does not change the RFU scale.
   `computeFluorCurves` solves every well against every calibrated plate fluor, but `CurvesView`
-  only plots a line when all three hold: the well is enabled, the fluor isn't globally disabled,
-  and — per `pltd.md`'s per-well dye layers (`WellDefinition.fluors`) — that specific well
-  actually has that fluor loaded, so a dye layer that skips some wells doesn't draw phantom
-  lines for them.
+  only plots a line when all three hold: the well is enabled, the fluor (or, in target mode,
+  its target — see below) isn't disabled, and — per `pltd.md`'s per-well dye layers
+  (`WellDefinition.fluors`) — that specific well actually has that fluor loaded, so a dye layer
+  that skips some wells doesn't draw phantom lines for them.
+
+  A three-way "View" toggle (`calibration`/`fluorViewMode` settings) picks channel space or
+  one of two dye-space groupings: **Fluorophore** labels/legends each curve by its dye name
+  (`FluorBar`'s chips, keyed by fluor); **Target** instead labels each curve by the target/gene
+  assigned to that fluor *in that well* (`WellFluor.target`, per `pltd.md`), so the same dye
+  used for different genes in different wells appears as separate legend entries — falling back
+  to the fluor name for a well/fluor with no target configured. Both modes keep the same
+  channel-derived color (`FluorChip.channel`) — target mode does not introduce a new color
+  scheme, just a different grouping/label built by `CurvesView`'s `labelForFluorCurve`/
+  `targetInfos`.
 
 ## Reference view
 

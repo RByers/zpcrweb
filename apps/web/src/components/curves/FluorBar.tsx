@@ -1,40 +1,53 @@
-import { channelColor, channelLabel } from "../../lib/channelColors";
-import type { FluorCalibration } from "../../lib/fluorCurves";
+import { channelColor } from "../../lib/channelColors";
+
+/** One chip's worth of data — a fluorophore or, in target view mode, a target/gene. */
+export interface FluorChip {
+  /** Toggle key, and the `disabled` set's membership key. */
+  key: string;
+  /** Primary label, e.g. the fluorophore or target name. */
+  label: string;
+  /** Secondary label shown below — the channel (fluorophore mode) or the fluorophore itself
+   * (target mode). */
+  sublabel: string;
+  /** Optical channel — used only for coloring, so a channel's hue stays consistent between
+   * channel-space and dye-space views. */
+  channel: number;
+  /** False when no matching `.Dcal` calibration was found — shown dimmed and non-interactive,
+   * so its absence from the plot is visible rather than silent. */
+  calibrated: boolean;
+}
 
 interface Props {
-  fluors: FluorCalibration[];
-  /** Fluor names *not* shown; anything else calibrated is on. */
+  items: FluorChip[];
+  /** Keys *not* shown; anything else calibrated is on. */
   disabled: Set<string>;
-  onToggle: (fluor: string) => void;
+  onToggle: (key: string) => void;
 }
 
 /**
- * One chip per fluorophore present on the plate (not per channel) — colored by that fluor's
- * primary channel, so a channel's hue stays consistent between channel-space and dye-space
- * views. Multiple fluors sharing a channel simply share a color, distinguished by their label.
- * A fluor with no matching `.Dcal` calibration is still listed, dimmed and non-interactive, so
- * its absence from the plot is visible rather than silent.
+ * One chip per fluorophore or target (see {@link FluorChip}) present on the plate — colored by
+ * its primary channel. Multiple items sharing a channel simply share a color, distinguished by
+ * their label.
  */
-export function FluorBar({ fluors, disabled, onToggle }: Props) {
+export function FluorBar({ items, disabled, onToggle }: Props) {
   return (
     <div className="chanbar">
-      {fluors.map((f) => {
-        const uncalibrated = !f.curve;
-        const on = !uncalibrated && !disabled.has(f.fluor);
+      {items.map((f) => {
+        const on = f.calibrated && !disabled.has(f.key);
         return (
           <button
-            key={f.fluor}
-            className={"chanchip" + (on ? " is-on" : "") + (uncalibrated ? " is-disabled" : "")}
-            onClick={() => !uncalibrated && onToggle(f.fluor)}
-            disabled={uncalibrated}
+            key={f.key}
+            className={"chanchip" + (on ? " is-on" : "") + (!f.calibrated ? " is-disabled" : "")}
+            onClick={() => f.calibrated && onToggle(f.key)}
+            disabled={!f.calibrated}
             aria-pressed={on}
-            title={uncalibrated ? `${f.fluor}: no calibration data for this tube type` : f.fluor}
+            title={!f.calibrated ? `${f.label}: no calibration data for this tube type` : f.label}
             style={{ ["--chan" as string]: channelColor(f.channel) }}
           >
             <span className="chanchip__swatch" />
             <span className="chanchip__label">
-              <span className="chanchip__ch mono">{f.fluor}</span>
-              <span className="chanchip__dye">{channelLabel(f.channel)}</span>
+              <span className="chanchip__ch mono">{f.label}</span>
+              <span className="chanchip__dye">{f.sublabel}</span>
             </span>
           </button>
         );
