@@ -387,6 +387,10 @@
   background: transparent;
   opacity: 1;
 }
+.rail__icon-btn {
+  display: inline-flex;
+  align-items: center;
+}
 .rail__row {
   display: flex;
   gap: 16px;

@@ -1,4 +1,6 @@
+import type { SampleType } from "@zpcrweb/core";
 import { wellKey } from "../../state/useZpcrStore";
+import { SAMPLE_TYPE_META } from "../../lib/sampleType";
 
 const ROWS = 8;
 const COLS = 12;
@@ -7,6 +9,10 @@ const ROW_LETTERS = "ABCDEFGH";
 interface Props {
   enabled: Set<string>;
   onChange: (next: Set<string>) => void;
+  /** Sample type per well key, from the plate definition — colors each cell to match the
+   * Plates view (grey/empty, green/positive control, red/negative control, blue/unknown, …).
+   * Omitted when no plate is loaded yet, in which case cells fall back to the plain on/off look. */
+  wellTypes?: Map<string, SampleType>;
 }
 
 /**
@@ -14,7 +20,7 @@ interface Props {
  * number (1–12) headers toggle a whole row/column; the corner toggles all wells. The
  * reference row is shown separately, in the Reference view.
  */
-export function WellMatrix({ enabled, onChange }: Props) {
+export function WellMatrix({ enabled, onChange, wellTypes }: Props) {
   const sampleKeys = () => {
     const keys: string[] = [];
     for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) keys.push(wellKey(r, c));
@@ -56,14 +62,27 @@ export function WellMatrix({ enabled, onChange }: Props) {
         {label}
       </button>
       {Array.from({ length: COLS }, (_, c) => {
-        const on = enabled.has(wellKey(r, c));
+        const key = wellKey(r, c);
+        const on = enabled.has(key);
+        const type = wellTypes?.get(key);
+        const meta = type ? SAMPLE_TYPE_META[type] : undefined;
         return (
           <button
             key={`w${r}-${c}`}
             className={"wm-cell" + (on ? " is-on" : "")}
+            style={
+              meta
+                ? {
+                    borderColor: meta.color + (on ? "" : "66"),
+                    background: meta.color + (on ? "40" : "16"),
+                    boxShadow: on ? `0 0 6px ${meta.color}66` : undefined,
+                  }
+                : undefined
+            }
             onClick={() => toggleWell(r, c)}
             aria-pressed={on}
             aria-label={`Well ${label}${c + 1}`}
+            title={meta ? `${label}${c + 1} — ${meta.label}` : undefined}
           />
         );
       })}

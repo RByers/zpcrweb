@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import {
   buildCalibrationMatrix,
   REFERENCE_ROW,
@@ -31,6 +31,7 @@ import { TempBar } from "../curves/TempBar";
 import { BaselineRangeSlider } from "../curves/BaselineRangeSlider";
 import { PasswordPrompt } from "../PasswordPrompt";
 import { Toggle } from "../Toggle";
+import { ResetIcon } from "../ResetIcon";
 import type { PlotCurve } from "../../lib/uplot/chart";
 
 /** Fallback baseline-region preview shown while auto-detecting, mirroring `chart.ts`'s
@@ -109,6 +110,48 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
   );
   const plate = plateEntry?.pltd.plate;
   const calibrations = useMemo(() => zpcr.calibrations(), [zpcr]);
+
+  // Per-well sample type (from the plate definition), for coloring the well-selection grid to
+  // match the Plates view, and for defaulting well selection to non-empty wells.
+  const wellTypes = useMemo(() => {
+    if (!plate) return undefined;
+    const m = new Map<string, (typeof plate.wells)[number]["sampleType"]>();
+    for (const w of plate.wells) m.set(wellKey(w.row, w.col), w.sampleType);
+    return m;
+  }, [plate]);
+
+  const fullWellSet = useMemo(() => {
+    const s = new Set<string>();
+    for (let r = 0; r < 8; r++) for (let c = 0; c < 12; c++) s.add(wellKey(r, c));
+    return s;
+  }, []);
+
+  // The set of wells a plate definition marks as non-empty — the default selection for a newly
+  // opened file, and what the "reset" button next to Wells restores.
+  const nonEmptyWellSet = useMemo(() => {
+    if (!plate) return null;
+    const s = new Set<string>();
+    for (const w of plate.wells) if (w.sampleType !== "empty") s.add(wellKey(w.row, w.col));
+    return s.size > 0 ? s : null;
+  }, [plate]);
+
+  const setsEqual = (a: Set<string>, b: Set<string>) =>
+    a.size === b.size && [...a].every((k) => b.has(k));
+
+  // Apply the plate-derived default exactly once per plate, and only while the selection still
+  // looks like the untouched "all wells" default — so a file whose selection was already
+  // customized (including a restore from storage) is left alone.
+  const appliedDefaultForPlate = useRef<typeof plate>(undefined);
+  useEffect(() => {
+    if (!plate || !nonEmptyWellSet) return;
+    if (appliedDefaultForPlate.current === plate) return;
+    appliedDefaultForPlate.current = plate;
+    if (setsEqual(settings.enabledWells, fullWellSet)) {
+      onChange({ enabledWells: nonEmptyWellSet });
+    }
+  }, [plate, nonEmptyWellSet, fullWellSet, settings.enabledWells, onChange]);
+
+  const resetWells = () => onChange({ enabledWells: nonEmptyWellSet ?? fullWellSet });
 
   const tube = resolveTubeType(plate?.plateName);
 
@@ -348,10 +391,20 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
         </div>
 
         <div className="rail__section">
-          <div className="rail__title">Wells</div>
+          <div className="rail__title">
+            Wells
+            <button
+              className="rail__link rail__icon-btn"
+              onClick={resetWells}
+              title="Reset to the wells present in the plate definition"
+            >
+              <ResetIcon />
+            </button>
+          </div>
           <WellMatrix
             enabled={settings.enabledWells}
             onChange={(next) => onChange({ enabledWells: next })}
+            wellTypes={wellTypes}
           />
         </div>
 

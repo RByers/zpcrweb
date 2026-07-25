@@ -107,8 +107,12 @@ exposed as a clear affordance on each file chip.
 - **Reference** — reference row vs factory calibration (see below).
 - **Plates** — `PlatesView` (`components/views/PlatesView.tsx`): the visual, color-coded plate
   map (`components/plate/PlateViewer.tsx`) for every plate attached to the run, via
-  `zpcr.plates()`. A sidebar lists plates when there's more than one (multiple `.pltd` entries
-  in a `.zpcr`); a `.pcrd`'s single embedded plate setup shows directly. This is the same grid
+  `zpcr.plates()`. Per-sample-type color/label/abbreviation lives in one place,
+  `lib/sampleType.ts`'s `SAMPLE_TYPE_META` — grey for empty, green for positive control, red for
+  negative control, blue for unknown — shared with the Curves view's well-selection matrix (see
+  below) so the two grids read the same way. A sidebar lists plates when there's more than one
+  (multiple `.pltd` entries in a `.zpcr`); a `.pcrd`'s single embedded plate setup shows
+  directly. This is the same grid
   component (`PlateViewer`, formerly `PlateDetail`) previously embedded in the Raw view's
   Decoded mode for `.pltd` — moved to its own tab so it's reachable without hunting through the
   file list, and reused by nothing else now that Raw shows a plain table instead (see below).
@@ -226,6 +230,12 @@ only pieces the two views share.
 
 - **Selection:** a channel bar (6 dye-labelled toggles) and an 8×12 well matrix (`WellMatrix`)
   whose row (A–H) and column (1–12) headers toggle whole rows/columns, plus an all/none corner.
+  Once the plate definition is available (password permitting), each cell is tinted by
+  `SAMPLE_TYPE_META` (see **Plates** below) so selection state reads alongside sample type; a
+  reset button next to the "Wells" label restores the selection to exactly the plate's
+  non-empty wells. `CurvesView` applies that same non-empty-wells set as the one-time default
+  the first time a file's plate loads (only while the selection still looks like the untouched
+  "all wells" default, so a previously customized selection is left alone).
 - **Baseline (`curveBaseline` setting):** Raw / Constant / Linear — the `threshold.md` §4
   subtraction modes implemented by `packages/core/src/baseline.ts`, selected per curve by
   `chart.ts`'s `algorithmAdjust()`: find the flat pre-amplification region — either the rail's
