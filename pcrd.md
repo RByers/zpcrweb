@@ -8,8 +8,9 @@ analysis state, collapsed into a single XML file.
 
 > **Status:** container fully decoded; payload structurally mapped and cross-validated against
 > the `.zpcr` for the same run. All 45 plate reads decode, and every fluorescence and dark-current
-> value is bit-for-bit identical to the corresponding binary `.Plateread` (§2.1). The analysis-state
-> subtrees (§2.5) are mapped but not interpreted.
+> value is bit-for-bit identical to the corresponding binary `.Plateread` (§2.1). `calibrationCollection`
+> (§2.6) is likewise fully decoded and value-for-value cross-validated against the real `.Dcal`
+> files. The remaining analysis-state subtrees (§2.5) are mapped but not interpreted.
 
 ---
 
@@ -201,19 +202,89 @@ These subtrees use a distinct serializer convention: a `V="1"` attribute on the 
 
 **The single largest subtree: ~1.4 MB serialized, 56% of the whole document.** It absorbs what
 the `.zpcr` keeps as 28 separate `*.Dcal` files (`FAM_BR Clear.Dcal`, `Cy5_BR White.Dcal`, …).
+Fully decoded and cross-validated: every field and every payload value for all 28 (dye, plate
+type) pairs matches the corresponding binary `.Dcal` exactly (see `dcal.md`) — implemented by
+`decodeCalibrationCollection`/`parseCalibrationDataElement` in `packages/core/src/pcrd.ts`,
+wired into `zpcr.calibrations()`.
 
 ```
 <CalibrationCollection V="1">
   <SerVersion>1</SerVersion>
-  <Fluors>      <!-- <Ar><I><Fluorophor V="1"> — Id, Name ("Cal Gold 540"), Usage,
-                     IsDel, EmFilter/ExFilter <Filter V="1"> with Id/Type/Name -->
-  <FactoryCals> <!-- factory pure-dye calibrations -->
-  <UserCals>    <!-- user-run calibrations -->
+  <Fluors><Ar V="1">
+    <I><Fluorophor V="1">
+      <SerVersion>4</SerVersion>
+      <Id>0</Id>
+      <Name>Cal Gold 540</Name>              <!-- matches a CalibrationData's <Dye> below -->
+      <Usage>Unassigned</Usage>
+      <IsDel>False</IsDel>
+      <EmFilter>…</EmFilter> <ExFilter>…</ExFilter>  <!-- <Filter V="1"> Id/Type/Name, often empty -->
+      <Clr>-16744384</Clr>
+      <Units />
+      <Channel>1</Channel>                    <!-- 0-based primary channel — already matches
+                                                    this library's convention, no ±1 needed -->
+      <IsFactory>True</IsFactory>
+    </Fluorophor></I>
+    …                                          <!-- one per dye the instrument knows, not per
+                                                    (dye, plate) pair -->
+  </Ar></Fluors>
+  <FactoryCals><Ar V="1" /></FactoryCals>      <!-- empty in this sample -->
+  <UserCals><Ar V="1">
+    <I><CalibrationData V="1">
+      <SerVersion>5</SerVersion>
+      <FileType>4</FileType>
+      <Version />
+      <CreationTime>Mon, 01 Jan 0001 05:00:00 GMT</CreationTime>  <!-- .NET DateTime.MinValue:
+                                                                        unset, not a real date -->
+      <Notes>0165|CC050815A4|7|</Notes>        <!-- matches the binary NOTES field verbatim -->
+      <Dye>Cal Gold 540</Dye>
+      <Plate>BR Clear</Plate>                  <!-- "BR Clear" | "BR White" -->
+      <Security>2|07/23/2026 21:26:16|System.CurrentSystemTimeZone|Bio-Rad Service|Bio-Rad Service||BioRadCFXManager|3.1.1517.0823|4ad03850-…</Security>
+      <Channels>6</Channels>
+      <Wells>108</Wells>
+      <Factory>False</Factory>
+      <PRs><PRs V="1">
+        <dye0_x003A_20_x003A_PR><PlateRead V="1">…</PlateRead></dye0_x003A_20_x003A_PR>
+        <empty0_x003A_20_x003A_PR>…</empty0_x003A_20_x003A_PR>
+        <dye0_x003A_40_x003A_PR>…  <empty0_x003A_40_x003A_PR>…
+        <dye0_x003A_60_x003A_PR>…  <empty0_x003A_60_x003A_PR>…
+        <dye0_x003A_80_x003A_PR>…  <empty0_x003A_80_x003A_PR>…
+      </PRs></PRs>
+    </CalibrationData></I>
+    …                                          <!-- 28 total: 14 dyes × {BR Clear, BR White} -->
+  </Ar></UserCals>
 ```
 
-The `Name` values line up with the `.Dcal` filename stems, and the `_BR Clear` / `_BR White`
-split corresponds to plate type. Not decoded further — the sample's amplification data needs
-none of it.
+**`Fluors`** is the shared dye library (one entry per dye the instrument knows, not per
+calibration file) — `Name` matches a `CalibrationData`'s `<Dye>`, and `Channel` is the same
+0-based primary-channel mapping `dcal.md` §6 documents from the binary format's (1-based)
+`PRIMARYCHANNEL`.
+
+**`FactoryCals`**/**`UserCals`** each hold an `<Ar>` of `<I><CalibrationData V="1">` — one per
+(dye, plate type) pair, 28 total in the sample (all under `UserCals`; `FactoryCals` was empty).
+`Dye` + `Plate` identify it exactly like a binary `.Dcal`'s `DYE`/`PLATE` fields; `Channels`/
+`Wells`/`Factory`/`Notes` likewise match their binary-field namesakes directly.
+
+**`Security`** flattens the binary format's separate `SECURITY{YEAR..APPVER}` fields into one
+`|`-separated string: `<unknown>|MM/DD/YYYY HH:MM:SS|<.NET timezone type name>|username|
+fullName|signature|app|appVersion|<guid>`. The timezone field is a serialized .NET type name
+(`System.CurrentSystemTimeZone`), not a numeric offset, so there's no minutes-offset to recover
+the way the binary `SECURITYTIMEZONE` int32 gives one. Interestingly, this date is often
+*populated* here even when the matching `.zpcr`'s own binary `.Dcal` copy has an all-zero
+`SECURITYYEAR` (unset) — the `.pcrd` snapshot can be the more complete of the two for this
+field.
+
+**`PRs`** doubly-wraps (`<PRs><PRs V="1">`) the eight payload blocks, keyed by the binary
+format's own key names with colons XML-escaped by .NET's `XmlConvert.EncodeName`
+(`dye0:20:PR` → `dye0_x003A_20_x003A_PR`) — lowercase `dye`/`empty` here, vs. the binary
+format's `Dye`/`Empty`. Each block's value is a full `<PlateRead V="1">` element reusing
+§2.1/§2.2's own schema (`Hdr/PlateReadDataHeader`, `Data/PAr`) — except here `Data/PAr` holds
+**648 raw values** (`channels × wells`, one float per position, channel-major), not the 2592
+`mean;std;min;max` tuples a real plate read's `PAr` carries — matching the binary `.Dcal`
+payload block layout (`dcal.md` §3), not the `.Plateread` one. Every `AmbTmp`/`ShtTmp`/
+`HeadSerNum`/`AlphaSerNum`/`BaseSerNum` inside each block's own header is a placeholder
+(`0`/empty) in this sample — the instrument-side ambient/shuttle temperature and serials the
+binary `.Dcal` carries at the top level aren't preserved in this XML form, so a `.pcrd`-derived
+calibration reports those as absent rather than a fabricated `0`.
 
 ### 2.7 Provenance
 
@@ -245,7 +316,8 @@ Interestingly the first log entry names the data file as
   parse to a `Float32Array` shaped exactly like the binary `WELLDATA`, so a `.pcrd` and a
   `.zpcr` can feed the *same* `PlateRead[]` → `toCurves()` → `WellCurve[]` pipeline. The
   separator is a pure delimiter — no leading or trailing empty fields in any of the 45 reads.
-- `calibrationCollection` is **56% of the document** (~1.4 MB serialized). If parsing lazily,
-  skip it by default; a streaming or subtree-skipping parse matters more here than anywhere else.
+- `calibrationCollection` is **56% of the document** (~1.4 MB serialized) — parsed only when
+  `zpcr.calibrations()` is actually called (same lazy-getter shape as `plates()`/`protocols()`),
+  so a caller that never touches calibration data never pays for walking it.
 - A `.pcrd` is a superset of its `.zpcr` for everything except the `.Dcal`/`.alf` raw files, so
   it is the better input where both exist — and the only input carrying analysis state.

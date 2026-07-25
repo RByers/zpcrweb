@@ -36,10 +36,10 @@ one algorithm doc, `calibration.md`, for the color-separation math built on top 
 `icff.md`, `plateread.md`, `dcal.md`, `pltd.md`, and `prcl.md` are marked **fully decoded** and
 validated against the committed samples in `samples/` — though one `prcl.md` field (the
 `PLATEREAD` operand) remains uninterpreted.
-`pcrd.md`'s container and plate-read data are
-likewise fully decoded and cross-validated bit-for-bit against the matching `.zpcr`; its
-analysis-state subtrees (`dataAnalysisParameters`, `PersistedData`, …) are mapped but not yet
-interpreted. If a decoder changes, update the corresponding doc in the same commit.
+`pcrd.md`'s container, plate-read data, and `calibrationCollection` are likewise fully decoded
+and cross-validated bit-for-bit against the matching `.zpcr`; its remaining analysis-state
+subtrees (`dataAnalysisParameters`, `PersistedData`, …) are mapped but not yet interpreted. If a
+decoder changes, update the corresponding doc in the same commit.
 
 ## Commands
 

@@ -101,7 +101,55 @@ describe.skipIf(!PW)("pcrd — decode (requires CFX_PLTD_PASSWORD)", () => {
   it("exposes not-yet-decoded subtrees verbatim in the full raw document (Pcrd.xml)", () => {
     const pcrd = parsePcrd(readBytes(PCRD_PATH), { password: PW });
     expect(pcrd.xml).toContain("<experimentalData2");
-    expect(pcrd.xml).toContain("calibrationCollection");
     expect(pcrd.xml).toContain("dataAnalysisParameters");
+  });
+
+  it("decodes calibrations() from calibrationCollection, matching the .zpcr's real .Dcal files", () => {
+    const zpcr = parsePcrd(readBytes(PCRD_PATH), { password: PW }).zpcr!;
+    const reference = parseZpcr(readBytes(ZPCR_PATH));
+
+    const entries = zpcr.calibrations();
+    const refEntries = reference.calibrations();
+    // 14 dyes x {BR Clear, BR White}, same library the .zpcr carries as 28 real .Dcal files.
+    expect(entries).toHaveLength(28);
+    expect(refEntries).toHaveLength(28);
+
+    const byKey = (list: typeof entries) =>
+      new Map(list.map((e) => [`${e.dcal.dye}|${e.dcal.plate}`, e.dcal]));
+    const fromPcrd = byKey(entries);
+    const fromZpcr = byKey(refEntries);
+    expect([...fromPcrd.keys()].sort()).toEqual([...fromZpcr.keys()].sort());
+
+    for (const [key, a] of fromPcrd) {
+      const b = fromZpcr.get(key)!;
+      expect(a.primaryChannel).toBe(b.primaryChannel);
+      expect(a.channelCount).toBe(b.channelCount);
+      expect(a.wellCount).toBe(b.wellCount);
+      expect(a.factory).toBe(b.factory);
+      expect(a.notes).toBe(b.notes);
+
+      expect(a.blocks).toHaveLength(b.blocks.length);
+      for (const blockA of a.blocks) {
+        const blockB = b.blocks.find(
+          (x) => x.kind === blockA.kind && x.temperatureC === blockA.temperatureC,
+        )!;
+        expect(blockB).toBeDefined();
+        expect(blockA.channelCount).toBe(blockB.channelCount);
+        expect(blockA.wellCount).toBe(blockB.wellCount);
+        for (let i = 0; i < blockA.values.length; i++) {
+          expect(blockA.values[i]!).toBeCloseTo(blockB.values[i]!, 2);
+        }
+      }
+    }
+  });
+
+  it("recovers the calibration timestamp/operator the .pcrd's copy carries (unlike this run's .zpcr .Dcal snapshot)", () => {
+    const zpcr = parsePcrd(readBytes(PCRD_PATH), { password: PW }).zpcr!;
+    const fam = zpcr
+      .calibrations()
+      .find((e) => e.dcal.dye === "FAM" && e.dcal.plate === "BR Clear")!.dcal;
+    expect(fam.security.date?.getUTCFullYear()).toBe(2026);
+    expect(fam.security.username).toBe("Bio-Rad Service");
+    expect(fam.security.app).toBe("BioRadCFXManager");
   });
 });

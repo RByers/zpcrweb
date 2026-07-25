@@ -12,10 +12,10 @@
  * {@link parsePcrd} decodes it into a {@link Zpcr} — the same public shape `parseZpcr`
  * produces — so callers and UI code work with either format interchangeably. A `.pcrd` has no
  * inner files, so the returned `Zpcr.archive` is empty; subtrees this module does not
- * specifically decode (`dataAnalysisParameters`, `calibrationCollection`, `PersistedData`, …)
- * are still visible, verbatim, in the full raw document returned as {@link Pcrd.xml} — the web
- * app's `.pcrd` raw view renders that as a real, navigable XML tree rather than pretending
- * these subtrees are files.
+ * specifically decode (`dataAnalysisParameters`, `PersistedData`, …) are still visible,
+ * verbatim, in the full raw document returned as {@link Pcrd.xml} — the web app's `.pcrd` raw
+ * view renders that as a real, navigable XML tree rather than pretending these subtrees are
+ * files.
  */
 
 import type {
@@ -32,6 +32,7 @@ import type {
 } from "./types.js";
 import type { PlateDefinition } from "./pltd.js";
 import { parsePlatesetup2 } from "./pltd.js";
+import type { Dcal, DcalBlock } from "./dcal.js";
 import { zipCryptoDecrypt } from "./zipcrypto.js";
 import { inflateRaw } from "./inflate.js";
 import { parseSingleEntryZip } from "./zipsingle.js";
@@ -194,6 +195,155 @@ function decodePcrdPlateRead(el: XmlElement, index: number): PlateRead {
       return wells[wellIndex(channel, row, col)] as WellReading;
     },
   };
+}
+
+// ---------------------------------------------------------------------------
+// Calibration: <runData><calibrationCollection><CalibrationCollection>…
+// ---------------------------------------------------------------------------
+
+/**
+ * Matches one XML-encoded `.Dcal` payload-block key inside `<PRs>`, e.g.
+ * `dye0_x003A_60_x003A_PR` (`_x003A_` is .NET's `XmlConvert.EncodeName` escape for `:`, since a
+ * bare colon isn't legal in an unqualified element name — so the binary `.Dcal` key `dye0:60:PR`
+ * round-trips through this XML form with its colons replaced). Lowercase here, unlike the
+ * binary format's `Dye`/`Empty`; see `dcal.ts`'s `BLOCK_RE` for the binary-file equivalent.
+ */
+const XML_BLOCK_RE = /^(dye|empty)(0|180)_x003A_(\d+)_x003A_PR$/i;
+
+/**
+ * Parse one `<CalibrationData V="1">` element (one dye × one plate type) into a {@link Dcal},
+ * matching `parseDcal`'s output shape for the binary `.Dcal` format as closely as the XML form
+ * allows. `channelByFluor` (from the collection's shared `<Fluors>` list) supplies the
+ * 0-based primary channel, since `CalibrationData` itself doesn't repeat it.
+ *
+ * Cross-validated against the binary `.Dcal` files for the same run: `Dye`/`Plate`/`Channels`/
+ * `Wells`/`Notes` and every payload block value match `parseDcal`'s output exactly (see
+ * `pcrd.md` §2.6).
+ */
+function parseCalibrationDataElement(
+  el: XmlElement,
+  channelByFluor: Map<string, number>,
+): Dcal | null {
+  const body = el.inner;
+  const text = (name: string): string => firstTagText(body, name) ?? "";
+
+  const dye = unescapeXml(text("Dye"));
+  const plate = unescapeXml(text("Plate"));
+  if (!dye || !plate) return null;
+
+  const channelCount = Number(text("Channels")) || 6;
+  const wellCount = Number(text("Wells")) || 108;
+  const notes = text("Notes") || undefined;
+
+  // "2|MM/DD/YYYY HH:MM:SS|<.NET timezone type name>|username|fullName|signature|app|appVersion|guid"
+  // — a flattened form of the binary format's separate SECURITYYEAR..SECURITYAPPVER fields. The
+  // timezone field is a serialized .NET type name here, not a numeric offset, so there's no
+  // `timezoneOffsetMin` to recover.
+  const securityParts = text("Security").split("|");
+  const dateMatch = /^(\d{2})\/(\d{2})\/(\d{4}) (\d{2}):(\d{2}):(\d{2})$/.exec(
+    securityParts[1] ?? "",
+  );
+  const date = dateMatch
+    ? new Date(
+        Date.UTC(
+          Number(dateMatch[3]),
+          Number(dateMatch[1]) - 1,
+          Number(dateMatch[2]),
+          Number(dateMatch[4]),
+          Number(dateMatch[5]),
+          Number(dateMatch[6]),
+        ),
+      )
+    : undefined;
+
+  const outerPRs = findElement(body, "PRs");
+  const innerPRs = outerPRs ? splitElements(outerPRs.inner)[0] : undefined;
+  const blockEls = innerPRs ? splitElements(innerPRs.inner) : [];
+
+  const blocks: DcalBlock[] = [];
+  for (const blockEl of blockEls) {
+    const m = XML_BLOCK_RE.exec(blockEl.name);
+    if (!m) continue;
+    const plateReadEl = findElement(blockEl.inner, "PlateRead");
+    const dataEl = plateReadEl ? findElement(plateReadEl.inner, "Data") : undefined;
+    const parText = dataEl ? (findElement(dataEl.inner, "PAr")?.inner ?? "") : "";
+    const values = parText ? parText.split(";").map(Number) : [];
+    blocks.push({
+      kind: (m[1] as string).toLowerCase() === "dye" ? "dye" : "empty",
+      rotationDeg: m[2] === "180" ? 180 : 0,
+      temperatureC: Number(m[3]),
+      channelCount,
+      wellCount,
+      values,
+    });
+  }
+
+  return {
+    dye,
+    plate,
+    primaryChannel: channelByFluor.get(dye) ?? 0,
+    channelCount,
+    wellCount,
+    factory: text("Factory").toLowerCase() === "true",
+    // Every `AmbTmp`/`ShtTmp` in this document's per-block headers is a placeholder zero (the
+    // instrument-side values the binary `.Dcal` carries at the top level aren't preserved when
+    // CFX Manager re-serializes into a `.pcrd`) — reporting `0` here would be reporting a
+    // fabricated reading, so both are left unset rather than guessed.
+    ambientTempC: undefined,
+    shuttleTempC: undefined,
+    notes,
+    // Per-scan serials (`HeadSerNum`/`AlphaSerNum`/`BaseSerNum`) are likewise blank in every
+    // block header of this document — not populated here, for the same reason.
+    serials: {},
+    security: {
+      date,
+      username: securityParts[3] || undefined,
+      fullName: securityParts[4] || undefined,
+      app: securityParts[6] || undefined,
+      appVersion: securityParts[7] || undefined,
+    },
+    blocks,
+    fields: [], // no ICFF index for an XML-derived entry — see dcal.ts's `fields` doc comment
+  };
+}
+
+/**
+ * Decode `<runData><calibrationCollection>` into the same {@link DcalEntry} shape
+ * `zpcr.calibrations()` returns for a `.zpcr`'s real `.Dcal` files — the two agree dye-for-dye,
+ * plate-type-for-plate-type, and value-for-value on the calibration data shared between a
+ * `.pcrd` and the `.zpcr` for the same run (see `pcrd.md` §2.6). `runDataEl` is `<runData>`'s
+ * inner XML.
+ */
+function decodeCalibrationCollection(runDataEl: string): DcalEntry[] {
+  const wrapper = findElement(runDataEl, "calibrationCollection");
+  const coll = wrapper ? findElement(wrapper.inner, "CalibrationCollection") : undefined;
+  if (!coll) return [];
+
+  const fluorsEl = findElement(coll.inner, "Fluors");
+  const fluorsAr = fluorsEl ? findElement(fluorsEl.inner, "Ar") : undefined;
+  const channelByFluor = new Map<string, number>();
+  for (const item of fluorsAr ? splitElements(fluorsAr.inner) : []) {
+    const fluorophorEl = findElement(item.inner, "Fluorophor");
+    if (!fluorophorEl) continue;
+    const name = unescapeXml(firstTagText(fluorophorEl.inner, "Name") ?? "");
+    if (!name) continue;
+    channelByFluor.set(name, Number(firstTagText(fluorophorEl.inner, "Channel") ?? "0"));
+  }
+
+  const entries: DcalEntry[] = [];
+  for (const listName of ["FactoryCals", "UserCals"]) {
+    const listEl = findElement(coll.inner, listName);
+    const ar = listEl ? findElement(listEl.inner, "Ar") : undefined;
+    for (const item of ar ? splitElements(ar.inner) : []) {
+      const calEl = findElement(item.inner, "CalibrationData");
+      const dcal = calEl ? parseCalibrationDataElement(calEl, channelByFluor) : null;
+      if (!dcal) continue;
+      // Not a real archive entry — named to match the corresponding `.zpcr`'s `.Dcal` filename
+      // for consistency (see dcal.md's naming convention), not because this file exists.
+      entries.push({ name: `${dcal.dye}_${dcal.plate}.Dcal`, dcal });
+    }
+  }
+  return entries;
 }
 
 // ---------------------------------------------------------------------------
@@ -360,10 +510,8 @@ function buildZpcr(root: XmlElement[]): Zpcr {
     // .zpcr's real .prcl archive entries are, since there's no separate password-gated file
     // here to model.
     protocols: (): PrclEntry[] => [],
-    // A .pcrd's calibrationCollection subtree covers the same ground as .Dcal files (see
-    // pcrd.md §3.6) but in an unrelated XML schema, not yet decoded into DcalEntry -- browsable
-    // as raw XML in the app's .pcrd document view, not yet a typed decoder.
-    calibrations: (): DcalEntry[] => [],
+    calibrations: (): DcalEntry[] =>
+      runData ? decodeCalibrationCollection(runData.inner) : [],
     factoryRefCal: () =>
       parseFactoryRefRowCal(
         metadata.raw["FactoryRefRowCal"] ?? "",

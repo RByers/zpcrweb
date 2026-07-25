@@ -87,7 +87,7 @@ returns `{ container, needsPassword?, error?, xml?, zpcr? }` (mirroring `parsePl
 shape) because the whole document — not just an embedded plate — is ZipCrypto-encrypted and
 needs a password before any of the above exists. `xml` is the full raw decrypted document,
 independent of `zpcr` — the app's only way to browse subtrees this module doesn't decode
-(`dataAnalysisParameters`, `calibrationCollection`, `PersistedData`, …).
+(`dataAnalysisParameters`, `PersistedData`, …).
 
 ## Why fflate
 
