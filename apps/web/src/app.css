@@ -1133,6 +1133,41 @@
   height: 6px;
   border-radius: 50%;
 }
+
+/* Detailed cell mode: condition + per-fluor target text (colored by channel) written
+   directly into the cell, instead of the compact mode's abbreviation + dots. */
+.plate__grid--detailed {
+  table-layout: auto;
+}
+.plate__grid--detailed td.plate__well {
+  width: auto;
+  min-width: 84px;
+  height: auto;
+  min-height: 40px;
+  padding: 3px 5px;
+}
+.plate__wellcond {
+  display: block;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.plate__welltargets {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-top: 2px;
+}
+.plate__target {
+  font-size: 9px;
+  line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .plate__legend {
   display: flex;
   flex-wrap: wrap;
