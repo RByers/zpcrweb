@@ -13,7 +13,7 @@ import { usePltdPassword } from "./pltdPassword";
 
 export type FileKind = "zpcr" | "pcrd";
 
-export type ViewId = "overview" | "curves" | "raw";
+export type ViewId = "overview" | "curves" | "plates" | "raw";
 export type Baseline = "raw" | "delta";
 export type Scale = "linear" | "log";
 /** Min/max envelope bands: always off, always on, or auto (only when one well selected). */

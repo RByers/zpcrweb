@@ -9,6 +9,11 @@
 
 Whenever changes are made, review and update all ARCHITECTURE.md files to be a concise yet accurate summary of the application design, with pointers to other relevant files.
 
+## Secrets
+
+Local-only secrets (e.g. the CFX file decryption password) live in `SECRETS.md`, which is
+gitignored and never committed.
+
 ## Format documentation
 
 The reverse-engineered binary format docs are the reference for anything in

@@ -2,7 +2,7 @@
 
 The web app (`@zpcrweb/web`) is a browser UI over [`@zpcrweb/core`](../../packages/core). It
 loads one or more `.zpcr` and/or `.pcrd` files, switches between them, and explores each
-through three views: Overview, Curves, and Raw.
+through four views: Overview, Curves, Plates, and Raw.
 
 ## Two formats, mostly one UI
 
@@ -23,6 +23,9 @@ app is format-agnostic:
   `text: string` rather than `(zpcr, name)`, so both `RawFilesView` (`.zpcr`'s real files, by
   name) and `PcrdRawView` (a `.pcrd`'s real XML nodes, by direct reference) can feed them
   without either pretending to be the other.
+- `PlatesView` takes a plain `Zpcr` too, via `zpcr.plates(password)` — a `.zpcr`'s embedded
+  `.pltd` entries and a `.pcrd`'s single embedded plate setup both come back as the same
+  `PltdEntry[]` shape, so the view never branches on `kind`.
 
 **The Raw view is the one place formats genuinely diverge**, because a `.zpcr` is a real
 multi-file archive and a `.pcrd` is a single XML document with no inner files — see "Raw
@@ -88,6 +91,13 @@ exposed as a clear affordance on each file chip.
 - **Overview** — run metadata as stat tiles + the thermal protocol text, read from
   `zpcr.metadata` and `zpcr.protocolText`.
 - **Curves** — the centerpiece (see below).
+- **Plates** — `PlatesView` (`components/views/PlatesView.tsx`): the visual, color-coded plate
+  map (`components/plate/PlateViewer.tsx`) for every plate attached to the run, via
+  `zpcr.plates()`. A sidebar lists plates when there's more than one (multiple `.pltd` entries
+  in a `.zpcr`); a `.pcrd`'s single embedded plate setup shows directly. This is the same grid
+  component (`PlateViewer`, formerly `PlateDetail`) previously embedded in the Raw view's
+  Decoded mode for `.pltd` — moved to its own tab so it's reachable without hunting through the
+  file list, and reused by nothing else now that Raw shows a plain table instead (see below).
 - **Raw** — `RawFilesView` for `.zpcr`, `PcrdRawView` for `.pcrd` (see "Raw views" below).
 
 ### Decoded views (`components/raw/DecodedView.tsx`)
@@ -97,6 +107,10 @@ exposed as a clear affordance on each file chip.
 - **`.Plateread`** → header (cycle, block temp, timestamp) + the DARKDATA table + the
   WELLDATA fluorescence table as a per-channel plate grid with a stat selector
   (mean/std/min/max). Reads straight from the decoded `PlateRead` (found by `fileName`).
+- **`.pltd`** → `DecodedPlate` (`components/raw/DecodedPlate.tsx`), which decrypts the entry
+  and renders `PlateTable` (`components/raw/PlateTable.tsx`) — one row per well, in plate
+  order, with sample type/name/condition/replicate/quantity and fluor→target columns. Plain
+  tabular data, deliberately not the color-coded grid — see the **Plates** tab for that.
 - **`RunInfo.xml`** → `RunInfoTable`, a two-column key/value table (it is just a flat
   `KeyValuePairs` blob; parsed with `parseRunInfoRaw`). Takes plain `text`, so `PcrdRawView`
   reuses it directly for a `.pcrd`'s `protocolRunInfo/RunInfo` subtree (same schema).
@@ -141,7 +155,8 @@ Parses the full document once (`parseXmlFragment(documentXml)`) and builds a tab
 from `<experimentalData2>`'s *real* children (per `pcrd.md`'s schema) — not files. Left-nav
 groups: **Document** (the whole tree, shown first/by default — large subtrees collapsed, per
 the user's request to see the real document rather than a fabricated file list), **Plate
-setup** (`plateSetup2` → `PlateDetail`, same component `.zpcr`'s embedded `.pltd` uses),
+setup** (`plateSetup2` → `PlateTable`, same component `.zpcr`'s embedded `.pltd` uses — the
+color-coded grid lives in the **Plates** tab instead, fed by the same `zpcr.plates()`),
 **Protocol** (`protocol2` → `ProtocolDecoded` fed `zpcr.protocolText`), **Plate reads** (one
 entry per real `<plateRead>`, labeled by its actual cycle number, → `DecodedPlateread` fed
 `zpcr.reads[i]` directly — no filename indirection), **Calibration** (`calibrationCollection`
