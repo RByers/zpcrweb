@@ -7,10 +7,11 @@ puts 17% into channel 4). **Color separation** is the process of "unmixing" that
 given the 6 raw channel readings for a well and the pure-dye calibration data for the dyes on
 the plate, estimate how much each dye actually contributed.
 
-> **Status:** implements the documented algorithm below. Implemented by
+> **Status:** the matrix construction and solve (§§2–3, §5) are implemented by
 > [`packages/core/src/calibration.ts`](./packages/core/src/calibration.ts) (linear algebra in
-> [`linalg.ts`](./packages/core/src/linalg.ts)), tested against the calibration data in the
-> committed sample archives — see the module's tests for round-trip checks. Not yet
+> [`linalg.ts`](./packages/core/src/linalg.ts)) and tested against the calibration data in the
+> committed sample archives. **The preprocessing stage (§4) is documented here ahead of the
+> implementation** — the current helper differs in two specific ways, spelled out in §8. Not yet
 > cross-validated end-to-end against a reference instrument's own color-separated output, so
 > treat this as "correct per the algorithm below," not "byte-for-byte verified."
 
@@ -80,18 +81,87 @@ applied uniformly and undone by the solve in §5.
 
 ## 4. Preprocessing the raw channel readings
 
-Before a raw reading is fed into the solve, the same corrections a live instrument would apply
-should be applied here too, **in this order**:
+Before a raw reading is fed into the solve, two corrections are applied to each channel value.
+Both are **independently optional** — a run may have either, both, or neither active — and the
+order matters:
 
 1. Start from the raw per-channel mean fluorescence for the well/cycle.
-2. Apply a per-channel multiplicative correction factor, if the instrument/run provides one
-   (compensates for known per-channel gain differences).
-3. Subtract a per-channel black/background level.
-4. Subtract a per-channel dark-current reading — an LED-off background measurement taken at scan
-   time (the same shape of data a `.Plateread`'s `DARKDATA` holds; see
-   [`plateread.md`](./plateread.md)).
+2. **Per-well gain correction, pivoted on the reference level** (§4.1). If per-well correction
+   factors are in play:
+
+   ```
+   corrected = (raw − referenceLevel) / wellFactor + referenceLevel
+   ```
+
+3. **Dark-current subtraction** (§4.2), if enabled:
+
+   ```
+   corrected = corrected − darkLevel
+   ```
 
 The result is the corrected channel vector that goes into §5.
+
+Note what step 2 is *not*: the reference level is **not subtracted** from the reading. It is
+removed, used as the zero point for the gain scaling, and then added straight back. Only the
+portion of the signal *above* the reference level is scaled; the reference level itself passes
+through untouched. If no per-well factors are active, the reference level has **no effect
+whatsoever** on the reading — it is not a background term in its own right.
+
+Note also that the gain factor **divides** rather than multiplies. Whether a given factor
+convention is a divisor or a multiplier is pure convention, but getting it backwards inverts the
+correction, so it is worth stating explicitly.
+
+### 4.1 The reference level and the reference row
+
+A CFX block carries **one more row than its nominal plate**: 9 rows of 12 on a 96-well block
+(108 positions), 17 rows of 24 on a 384-well block (408). The extra final row is not sample
+wells — it is a row of **fixed optical reference positions built into the instrument**, read on
+every scan alongside the real wells. Both [`plateread.md`](./plateread.md) and
+[`dcal.md`](./dcal.md) describe the resulting geometry; this section is about what analysis does
+with it.
+
+Of that whole reference row, the calibration path uses exactly **one position per channel — the
+first** — as that scan's reference level. It is:
+
+- **per-channel** — each optical channel gets its own reference value;
+- **per-scan** — re-read every cycle, so it tracks slow changes in the optics over a run rather
+  than being a fixed constant;
+- **an in-band optical measurement** — taken through the same illumination and detection path as
+  the sample wells, with the LED **on**.
+
+That last point is what distinguishes it from dark data below, and it explains why it works as a
+pivot rather than as a subtrahend: it is a *level*, a common-mode value the gain correction should
+not amplify, not a *background* to be removed.
+
+The remaining reference positions are recorded in the plate read but are not consumed by this
+path. Runs also carry a **factory calibration of the full reference row** in their metadata; that
+is recorded for comparison purposes, not used in the per-cycle correction. Comparing it against
+the live reference readings is a useful **diagnostic of optical drift** — LED aging, detector or
+filter changes since the instrument was calibrated — which is exactly what this library's
+reference-calibration comparison surfaces. Be careful not to confuse that diagnostic sense of
+"drift" with the analysis option of the same name (§6).
+
+### 4.2 Dark data (LED off)
+
+Dark data is a separate, genuinely additive background: a reading taken with the **excitation
+source off**, capturing detector dark current and electronic offset — signal present regardless
+of illumination. It is stored per plate read as **one record per channel, not per well** (see
+[`plateread.md`](./plateread.md)'s `DARKDATA`), because the offset is a property of the detection
+channel rather than of any plate position.
+
+Because it is a true additive offset, it is handled the obvious way: **subtracted outright** from
+every channel reading, after the gain correction. It is gated by its own enable flag, and skipped
+entirely when a plate read carries no dark record.
+
+The two mechanisms are complementary and should not be conflated:
+
+| | Reference level (§4.1) | Dark data (§4.2) |
+|---|---|---|
+| Illumination | LED **on** | LED **off** |
+| Granularity | Per channel, per scan, from a physical plate position | Per channel, per scan, no plate position |
+| Captures | Optical/common-mode level through the real light path | Detector dark current + electronic offset |
+| Applied as | **Pivot** for gain scaling — removed then restored | **Subtracted** outright |
+| Net effect if gain correction is off | None | Still subtracted |
 
 ## 5. Solving for dye concentrations
 
@@ -119,7 +189,41 @@ called `rcond`), rather than inverting everything unconditionally. A direct-inve
 implementation with no such floor is a real risk, not a hypothetical one — treat any
 color-separation implementation without a documented threshold as suspect.
 
-## 6. API summary
+## 6. "Drift correction" is a different stage entirely
+
+Analysis software for these instruments exposes a user-facing **drift correction** option, and it
+is natural to assume it is the mechanism that compensates for optical drift using the reference
+row. **It is not.** Keeping the two apart matters, because they act at different stages on
+different data:
+
+- **Optical drift** is a property of the *instrument* — LEDs dim, filters and detectors age. The
+  reference row is what makes it observable (§4.1), and the per-scan reference level is what keeps
+  the gain correction anchored as it happens. There is no user-facing switch for this; it is part
+  of producing a calibrated reading at all.
+- **Drift correction (the option)** operates much later, on the *already colour-separated
+  amplification curve*, and is a **baseline** setting. It sits alongside the other per-fluorophore
+  baseline and threshold parameters — baseline start/end cycles, baseline method, automatic vs
+  manual thresholds — and it governs how the curve's baseline is fitted and removed before a
+  quantification cycle (Cq) is determined. Its concern is a **sloping baseline in the
+  amplification trace**, not the optical path. The application's own menu wording names it
+  *baseline* drift correction.
+
+Consequences worth knowing:
+
+- Drift correction consumes **neither the reference row nor the dark data**. It runs on data that
+  has already been through §4 and §5.
+- It is a **per-fluorophore** setting, persisted with the run's analysis parameters, not a global
+  instrument property.
+- Enabling it forces baselines to be **recomputed automatically** rather than reused from stored
+  values, so toggling it can change Cq values for wells whose baselines had been manually set.
+- Because it is downstream of colour separation, it has no bearing on the correctness of the
+  calibration described in this document. **Nothing in §§2–5 changes when it is toggled.**
+
+This library implements §§2–5 only. Baseline fitting and Cq determination — and therefore drift
+correction — are not part of the colour-separation path; the closest thing here is the simple
+delta-baseline helper, which is a display transform rather than a baseline-fitting algorithm.
+
+## 7. API summary
 
 ```ts
 import {
@@ -148,8 +252,18 @@ common case of a one-off separation; use the individual functions instead when r
 calibration matrix across many wells or cycles at the same temperature, since rebuilding it per
 call is wasted work.
 
-## 7. Limitations / open items
+## 8. Limitations / open items
 
+- **The preprocessing helper does not yet implement §4 as documented.** It currently *multiplies*
+  by a correction factor, then subtracts a black level and a dark level as two independent
+  background terms. §4 says the factor **divides**, and that the reference level is a **pivot**
+  that is restored rather than subtracted. The two agree only when no correction factors are
+  supplied (leaving dark subtraction, which does match). Callers passing correction factors or a
+  black level will get different numbers from the documented algorithm — treat §4 as the
+  specification and the helper as needing to be brought in line with it.
+- Dark data is per channel, but the helper takes it as a per-channel array with no notion of the
+  "no dark record present" case; a plate read lacking dark data should skip the subtraction
+  rather than subtract zeros (equivalent in effect, but worth making explicit).
 - This library always derives the calibration matrix from `.Dcal` files. Some systems also
   support a user-edited override matrix that takes precedence over the calibration-derived one;
   that override mechanism isn't modeled here.
