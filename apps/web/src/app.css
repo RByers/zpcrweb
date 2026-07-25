@@ -298,6 +298,9 @@
   gap: 6px;
   padding: 1px 0;
 }
+.curvecard__row.is-dim {
+  opacity: 0.4;
+}
 .curvecard__swatch {
   flex: 0 0 auto;
   width: 8px;
@@ -328,6 +331,11 @@
 .curvecard__empty {
   font-size: 11px;
   color: var(--ink-muted);
+}
+.curvecard__more {
+  font-size: 10px;
+  color: var(--ink-muted);
+  margin-top: 4px;
 }
 .filechip__del {
   display: inline-flex;

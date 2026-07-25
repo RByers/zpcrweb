@@ -418,13 +418,24 @@ only pieces the two views share.
   `ChannelBar`/`FluorBar`/`WellMatrix`/`SampleBar` also renders a small floating hover card (see
   `components/curves/HoverCard.tsx`'s `useHoverCard` hook — a fixed-position portal to
   `document.body`, positioned from the hovered element's own bounding rect, mirroring `FileBar`'s
-  file-chip card) listing exactly what's plotted for that chip/cell and its Cq: hovering a well
-  lists its targets/fluors with Cq (plus its sample, in the card's subtitle); hovering a
-  target/fluor lists its wells (with sample) and Cq; hovering a channel lists its wells (with
-  sample) and Cq; hovering a sample lists its targets/fluors (with well) and Cq. The card data is
-  built from `plotCurves` itself (`CurvesView`'s `cardForWell`/`cardForDyeLabel`/
-  `cardForChannel`/`cardForSample`), so it always agrees with what the chart is actually drawing
-  and marking, never a separately-recomputed Cq.
+  file-chip card) listing everything on the plate for that chip/cell and its Cq, one line per
+  entry (swatch · label · sample/well · Cq, the sample/well eliding with an ellipsis before the
+  Cq ever gets pushed off): hovering a well lists its targets/fluors with Cq (plus its sample, in
+  the card's subtitle); hovering a target/fluor lists its wells (with sample) and Cq; hovering a
+  channel lists its wells (with sample) and Cq; hovering a sample lists its targets/fluors (with
+  well) and Cq. Card rows come from `allPlotCurves` — every curve on the plate for the active
+  view mode, computed the same way as `plotCurves` but *without* the enabled-wells/channels/
+  fluors/samples filters (`CurvesView`'s `allBaseCurves`/`allCurveMetrics`) — rather than
+  `plotCurves` itself, so an element excluded by a rail filter still gets a row instead of being
+  dropped from the card entirely; each row carries a `selected` flag (in `selectedCurveKeys`,
+  the set of curves actually in `plotCurves`) that `HoverCard` uses to greyed-out (`.is-dim`) and
+  sort unselected rows after the selected ones. Rows are capped at 10 with a "N more" footer past
+  that, selected rows always counted first so a long unselected tail can't crowd them out. Both
+  Cq computations (`computeCurveMetrics`, factored out so `curveMetrics`/`allCurveMetrics` share
+  it) use the same per-group-threshold algorithm, but a curve's Cq in a hover card can still
+  differ from its Cq on the chart once a filter narrows the plotted set, since the "all curves"
+  run resolves each group's threshold across the whole plate rather than just what's selected —
+  expected, since the card summarizes the plate rather than doubling as an alternate chart legend.
 - **X axis:** integer cycles only — a tick per cycle, gridline + label every 5.
 - **Hover/tap tooltip:** a uPlot cursor plugin finds the nearest series (well curve, dark,
   factory overlay, or temperature) and reports its label, channel/dye, cycle, and

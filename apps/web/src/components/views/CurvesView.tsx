@@ -5,6 +5,8 @@ import {
   computeCq,
   resolveThreshold,
   REFERENCE_ROW,
+  type BaselineMode,
+  type CqAlgorithm,
   type Zpcr,
   type WellCurve,
   type DarkCurve,
@@ -49,6 +51,46 @@ import type { HighlightMatch, PlotCurve } from "../../lib/uplot/chart";
  * (threshold.md §3.1/§8's default cycles 2–9), clamped to the run. */
 function defaultRangePreview(maxCycle: number): [number, number] {
   return [Math.min(2, maxCycle), Math.min(9, maxCycle)];
+}
+
+/** Baseline + Cq for a set of curves, grouped by `dyeLabel` (`threshold.md` §5.1: one threshold
+ * per group, from the median baseline noise across that group's own curves) — factored out so
+ * it can run twice: once over the plotted set (drives the chart's own Cq markers) and once over
+ * every curve on the plate regardless of rail filters (drives the hover cards, so a greyed-out
+ * row still shows a real Cq instead of always reading "—"). The two runs are intentionally
+ * independent — a group's threshold in the "all curves" run is computed across the whole plate,
+ * not just what's currently selected, so it won't match the chart's own Cq for the same curve
+ * when a filter has narrowed the plotted set; that's expected, not a bug, since the hover card's
+ * job is to summarize the whole plate, not to double as an alternate chart legend. */
+function computeCurveMetrics(
+  curves: { cycles: number[]; mean: number[]; dyeLabel: string }[],
+  cqBaselineMode: BaselineMode,
+  cqManualRegion: { beginCycle: number; endCycle: number } | null,
+  algorithm: CqAlgorithm,
+  thresholdOverrides: Map<string, number>,
+): { cq: number | null; baselineRfu: number | null; baselineRegion: { beginCycle: number; endCycle: number } }[] {
+  if (curves.length === 0) return [];
+  const baselines = curves.map((c) => baselineCorrectCurve(c.cycles, c.mean, cqBaselineMode, cqManualRegion));
+  const noisesByLabel = new Map<string, number[]>();
+  curves.forEach((c, i) => {
+    const list = noisesByLabel.get(c.dyeLabel) ?? [];
+    list.push(baselines[i]!.noise);
+    noisesByLabel.set(c.dyeLabel, list);
+  });
+  const thresholdByLabel = new Map<string, number>();
+  for (const [label, noises] of noisesByLabel) {
+    thresholdByLabel.set(label, resolveThreshold(noises, { overrideValue: thresholdOverrides.get(label) }));
+  }
+  return curves.map((c, i) => {
+    const b = baselines[i]!;
+    const threshold = thresholdByLabel.get(c.dyeLabel) ?? 0;
+    const cq = computeCq(c.cycles, b.correctedValues, {
+      algorithm,
+      threshold: algorithm === "Threshold" ? threshold : undefined,
+      noise: b.noise,
+    });
+    return { cq, baselineRfu: b.baselineRfu, baselineRegion: b.baselineRegion };
+  });
 }
 
 interface Props {
@@ -442,6 +484,64 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
     [calibrationOn, visibleFluor, visibleChannel, fluorViewMode, wellFluorTargets, wellSample],
   );
 
+  // Every curve on the plate for the active view mode, ignoring the enabled-wells/channels/
+  // fluors/samples filters (but still skipping fluor/well pairs the plate itself never loads,
+  // unless "Unloaded" is on — that's a data-validity gate, not a selection filter). Exists only
+  // to power the rail hover cards below, so a filtered-out element still lists its neighbors
+  // (greyed out) instead of the card going empty.
+  const allBaseCurves: Omit<PlotCurve, "cq">[] = useMemo(
+    () =>
+      calibrationOn
+        ? allFluorCurves
+            .filter(
+              (c) =>
+                settings.showUnloadedFluors ||
+                (wellFluors.get(wellKey(c.row, c.col))?.has(c.dye) ?? false),
+            )
+            .map((c) => ({
+              channel: c.channel,
+              dyeLabel: labelForFluorCurve(c.row, c.col, c.dye),
+              row: c.row,
+              col: c.col,
+              wellLabel: c.wellLabel,
+              isReference: c.isReference,
+              cycles: c.cycles,
+              mean: c.mean,
+              std: c.cycles.map(() => 0),
+              min: c.mean,
+              max: c.mean,
+              sample: wellSample.get(wellKey(c.row, c.col)),
+            }))
+        : allCurves
+            .filter((c) => available.includes(c.channel))
+            .map((c) => ({
+              channel: c.channel,
+              dyeLabel: channelLabel(c.channel),
+              row: c.row,
+              col: c.col,
+              wellLabel: c.wellLabel,
+              isReference: c.isReference,
+              cycles: c.cycles,
+              mean: c.mean,
+              std: c.std,
+              min: c.min,
+              max: c.max,
+              sample: wellSample.get(wellKey(c.row, c.col)),
+            })),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [
+      calibrationOn,
+      allFluorCurves,
+      allCurves,
+      available,
+      settings.showUnloadedFluors,
+      wellFluors,
+      fluorViewMode,
+      wellFluorTargets,
+      wellSample,
+    ],
+  );
+
   // Cq markers (`threshold.md` §6), one per plotted curve, computed per the Analysis view's
   // settings — same algorithm, same per-group (dye/target/channel label) threshold, same
   // baseline settings this chart itself plots with — so a curve's marker always matches what
@@ -454,41 +554,17 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
         : null,
     [settings.curveBaselineRange],
   );
-  const curveMetrics = useMemo(() => {
-    if (baseCurves.length === 0) return [];
-    const baselines = baseCurves.map((c) =>
-      baselineCorrectCurve(c.cycles, c.mean, cqBaselineMode, cqManualRegion),
-    );
-    const noisesByLabel = new Map<string, number[]>();
-    baseCurves.forEach((c, i) => {
-      const list = noisesByLabel.get(c.dyeLabel) ?? [];
-      list.push(baselines[i]!.noise);
-      noisesByLabel.set(c.dyeLabel, list);
-    });
-    const thresholdByLabel = new Map<string, number>();
-    for (const [label, noises] of noisesByLabel) {
-      thresholdByLabel.set(
-        label,
-        resolveThreshold(noises, { overrideValue: settings.analysisThresholdOverrides.get(label) }),
-      );
-    }
-    return baseCurves.map((c, i) => {
-      const b = baselines[i]!;
-      const threshold = thresholdByLabel.get(c.dyeLabel) ?? 0;
-      const cq = computeCq(c.cycles, b.correctedValues, {
-        algorithm: settings.analysisCqAlgorithm,
-        threshold: settings.analysisCqAlgorithm === "Threshold" ? threshold : undefined,
-        noise: b.noise,
-      });
-      return { cq, baselineRfu: b.baselineRfu, baselineRegion: b.baselineRegion };
-    });
-  }, [
-    baseCurves,
-    cqBaselineMode,
-    cqManualRegion,
-    settings.analysisCqAlgorithm,
-    settings.analysisThresholdOverrides,
-  ]);
+  const curveMetrics = useMemo(
+    () =>
+      computeCurveMetrics(
+        baseCurves,
+        cqBaselineMode,
+        cqManualRegion,
+        settings.analysisCqAlgorithm,
+        settings.analysisThresholdOverrides,
+      ),
+    [baseCurves, cqBaselineMode, cqManualRegion, settings.analysisCqAlgorithm, settings.analysisThresholdOverrides],
+  );
 
   const plotCurves: PlotCurve[] = baseCurves.map((c, i) => ({
     ...c,
@@ -500,61 +576,108 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
       settings.curveBaseline === "raw" ? null : (curveMetrics[i]?.baselineRegion.beginCycle ?? null),
   }));
 
+  // Same Cq computation, but over every curve on the plate (see `allBaseCurves`) — powers the
+  // hover cards' greyed-out rows. Independent of `curveMetrics`: a group's threshold here is
+  // resolved across the whole plate rather than just the currently-plotted subset, so a curve's
+  // Cq in a hover card can legitimately differ from its Cq on the chart once a filter narrows
+  // what's plotted — the card is summarizing the plate, not re-deriving the chart's own marker.
+  const allCurveMetrics = useMemo(
+    () =>
+      computeCurveMetrics(
+        allBaseCurves,
+        cqBaselineMode,
+        cqManualRegion,
+        settings.analysisCqAlgorithm,
+        settings.analysisThresholdOverrides,
+      ),
+    [allBaseCurves, cqBaselineMode, cqManualRegion, settings.analysisCqAlgorithm, settings.analysisThresholdOverrides],
+  );
+
+  const allPlotCurves: PlotCurve[] = allBaseCurves.map((c, i) => ({
+    ...c,
+    cq: allCurveMetrics[i]?.cq ?? null,
+    baselineRfu: allCurveMetrics[i]?.baselineRfu ?? null,
+  }));
+
   // ---- Rail hover cards -------------------------------------------------------------------
-  // Each card lists exactly what's plotted (`plotCurves`, already filtered by every rail
-  // control) for the hovered chip/cell, so its Cq values always agree with the chart's own
-  // markers. A row's color is its curve's channel, matching the chip/legend coloring elsewhere.
+  // Each card lists every curve on the plate for the hovered chip/cell (`allPlotCurves`), not
+  // just the currently-plotted ones, so a filtered-out well/target/channel/sample still shows up
+  // — just marked unselected so `HoverCard` can grey it out and sort it after the selected rows.
+  // A row's color is its curve's channel, matching the chip/legend coloring elsewhere.
+
+  const selectedCurveKeys = useMemo(
+    () => new Set(plotCurves.map((c) => `${c.row},${c.col},${c.dyeLabel}`)),
+    [plotCurves],
+  );
+  const isSelected = (c: PlotCurve) => selectedCurveKeys.has(`${c.row},${c.col},${c.dyeLabel}`);
+
+  /** Selected rows first (each group's own original order preserved within that half). */
+  function selectedFirst<T extends { selected: boolean }>(rows: T[]): T[] {
+    return [...rows.filter((r) => r.selected), ...rows.filter((r) => !r.selected)];
+  }
 
   const cardForWell = (label: string): HoverCardData | null => {
     const well = plate?.wells.find((w) => w.label === label);
     if (!well) return null;
-    const rows: HoverCardRow[] = plotCurves
-      .filter((c) => c.wellLabel === label)
-      .map((c) => ({
-        key: `${c.dyeLabel}-${c.channel}`,
-        label: c.dyeLabel,
-        cq: c.cq ?? null,
-        color: channelColor(c.channel),
-      }));
+    const rows: HoverCardRow[] = selectedFirst(
+      allPlotCurves
+        .filter((c) => c.wellLabel === label)
+        .map((c) => ({
+          key: `${c.dyeLabel}-${c.channel}`,
+          label: c.dyeLabel,
+          cq: c.cq ?? null,
+          color: channelColor(c.channel),
+          selected: isSelected(c),
+        })),
+    );
     return { title: `Well ${label}`, subtitle: well.sample ? `Sample: ${well.sample}` : undefined, rows };
   };
 
   const cardForDyeLabel = (dyeLabel: string): HoverCardData | null => {
-    const matches = plotCurves.filter((c) => c.dyeLabel === dyeLabel);
+    const matches = allPlotCurves.filter((c) => c.dyeLabel === dyeLabel);
     if (matches.length === 0) return null;
-    const rows: HoverCardRow[] = matches.map((c) => ({
-      key: `${c.row},${c.col}`,
-      label: c.wellLabel,
-      sublabel: c.sample,
-      cq: c.cq ?? null,
-      color: channelColor(c.channel),
-    }));
+    const rows: HoverCardRow[] = selectedFirst(
+      matches.map((c) => ({
+        key: `${c.row},${c.col}`,
+        label: c.wellLabel,
+        sublabel: c.sample,
+        cq: c.cq ?? null,
+        color: channelColor(c.channel),
+        selected: isSelected(c),
+      })),
+    );
     return { title: dyeLabel, rows };
   };
 
   const cardForChannel = (channel: number): HoverCardData | null => {
-    const matches = plotCurves.filter((c) => c.channel === channel);
+    const matches = allPlotCurves.filter((c) => c.channel === channel);
     if (matches.length === 0) return null;
-    const rows: HoverCardRow[] = matches.map((c) => ({
-      key: `${c.row},${c.col}`,
-      label: c.wellLabel,
-      sublabel: c.sample,
-      cq: c.cq ?? null,
-      color: channelColor(channel),
-    }));
+    const rows: HoverCardRow[] = selectedFirst(
+      matches.map((c) => ({
+        key: `${c.row},${c.col}`,
+        label: c.wellLabel,
+        sublabel: c.sample,
+        cq: c.cq ?? null,
+        color: channelColor(channel),
+        selected: isSelected(c),
+      })),
+    );
     return { title: channelLabel(channel), rows };
   };
 
   const cardForSample = (sample: string): HoverCardData | null => {
-    const matches = plotCurves.filter((c) => c.sample === sample);
+    const matches = allPlotCurves.filter((c) => c.sample === sample);
     if (matches.length === 0) return null;
-    const rows: HoverCardRow[] = matches.map((c) => ({
-      key: `${c.row},${c.col}-${c.dyeLabel}`,
-      label: c.dyeLabel,
-      sublabel: c.wellLabel,
-      cq: c.cq ?? null,
-      color: channelColor(c.channel),
-    }));
+    const rows: HoverCardRow[] = selectedFirst(
+      matches.map((c) => ({
+        key: `${c.row},${c.col}-${c.dyeLabel}`,
+        label: c.dyeLabel,
+        sublabel: c.wellLabel,
+        cq: c.cq ?? null,
+        color: channelColor(c.channel),
+        selected: isSelected(c),
+      })),
+    );
     return { title: sample, rows };
   };
 

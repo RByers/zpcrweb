@@ -1,14 +1,21 @@
 import { useState } from "react";
 import { createPortal } from "react-dom";
 
-/** One row of a {@link HoverCard}: something plotted (a well, a target/fluor, …) plus its Cq. */
+/** One row of a {@link HoverCard}: something on the plate (a well, a target/fluor, …) plus its
+ * Cq. `selected` mirrors the chart's own dimming: false for a row excluded by a rail filter
+ * (disabled well/channel/fluor/sample) — still listed, just greyed out, never actually plotted. */
 export interface HoverCardRow {
   key: string;
   label: string;
   sublabel?: string;
   cq: number | null;
   color?: string;
+  selected: boolean;
 }
+
+/** Rows are shown selected-first, capped at this many, with a "N more" footer past the cap —
+ * a fully-populated plate (96 wells) would otherwise make some cards unusably long. */
+const MAX_ROWS = 10;
 
 export interface HoverCardData {
   title: string;
@@ -34,16 +41,21 @@ export function HoverCard({
       <div className="curvecard__title">{data.title}</div>
       {data.subtitle && <div className="curvecard__subtitle">{data.subtitle}</div>}
       {data.rows.length > 0 ? (
-        <div className="curvecard__rows">
-          {data.rows.map((r) => (
-            <div className="curvecard__row" key={r.key}>
-              {r.color && <span className="curvecard__swatch" style={{ background: r.color }} />}
-              <span className="curvecard__label">{r.label}</span>
-              {r.sublabel && <span className="curvecard__sub">{r.sublabel}</span>}
-              <span className="curvecard__cq">{r.cq != null ? r.cq.toFixed(2) : "—"}</span>
-            </div>
-          ))}
-        </div>
+        <>
+          <div className="curvecard__rows">
+            {data.rows.slice(0, MAX_ROWS).map((r) => (
+              <div className={"curvecard__row" + (r.selected ? "" : " is-dim")} key={r.key}>
+                {r.color && <span className="curvecard__swatch" style={{ background: r.color }} />}
+                <span className="curvecard__label">{r.label}</span>
+                {r.sublabel && <span className="curvecard__sub">{r.sublabel}</span>}
+                <span className="curvecard__cq">{r.cq != null ? r.cq.toFixed(2) : "—"}</span>
+              </div>
+            ))}
+          </div>
+          {data.rows.length > MAX_ROWS && (
+            <div className="curvecard__more">{data.rows.length - MAX_ROWS} more</div>
+          )}
+        </>
       ) : (
         <div className="curvecard__empty">No curves plotted</div>
       )}
