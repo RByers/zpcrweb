@@ -4,6 +4,7 @@ const ALL_VIEWS: { id: ViewId; label: string }[] = [
   { id: "overview", label: "Overview" },
   { id: "curves", label: "Curves" },
   { id: "plates", label: "Plates" },
+  { id: "analysis", label: "Analysis" },
   { id: "reference", label: "Reference" },
   { id: "raw", label: "Raw files" },
 ];

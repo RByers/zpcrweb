@@ -181,6 +181,12 @@ export function CurveChart({
                     <td>std</td>
                     <td>{tip.std.toFixed(2)}</td>
                   </tr>
+                  {tip.kind === "well" && tip.cq != null && (
+                    <tr>
+                      <td>Cq</td>
+                      <td>{tip.cq.toFixed(2)}</td>
+                    </tr>
+                  )}
                 </>
               )}
             </tbody>

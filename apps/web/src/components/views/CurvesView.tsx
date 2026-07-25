@@ -1,12 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  baselineCorrectCurve,
   buildCalibrationMatrix,
+  computeCq,
+  resolveThreshold,
   REFERENCE_ROW,
   type Zpcr,
   type WellCurve,
   type DarkCurve,
   type TemperatureCurve,
 } from "@zpcrweb/core";
+import { libBaselineMode } from "../../lib/cq";
 import {
   wellKey,
   type BandsMode,
@@ -365,33 +369,87 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
   // channel vector, not a distribution) — so bands and the dark overlay are both
   // channel-space-only concepts, hidden once color separation is on.
 
-  const plotCurves: PlotCurve[] = calibrationOn
-    ? visibleFluor.map((c) => ({
-        channel: c.channel,
-        dyeLabel: labelForFluorCurve(c.row, c.col, c.dye),
-        row: c.row,
-        col: c.col,
-        wellLabel: c.wellLabel,
-        isReference: c.isReference,
-        cycles: c.cycles,
-        mean: c.mean,
-        std: c.cycles.map(() => 0),
-        min: c.mean,
-        max: c.mean,
-      }))
-    : visibleChannel.map((c) => ({
-        channel: c.channel,
-        dyeLabel: channelLabel(c.channel),
-        row: c.row,
-        col: c.col,
-        wellLabel: c.wellLabel,
-        isReference: c.isReference,
-        cycles: c.cycles,
-        mean: c.mean,
-        std: c.std,
-        min: c.min,
-        max: c.max,
-      }));
+  const baseCurves: Omit<PlotCurve, "cq">[] = useMemo(
+    () =>
+      calibrationOn
+        ? visibleFluor.map((c) => ({
+            channel: c.channel,
+            dyeLabel: labelForFluorCurve(c.row, c.col, c.dye),
+            row: c.row,
+            col: c.col,
+            wellLabel: c.wellLabel,
+            isReference: c.isReference,
+            cycles: c.cycles,
+            mean: c.mean,
+            std: c.cycles.map(() => 0),
+            min: c.mean,
+            max: c.mean,
+          }))
+        : visibleChannel.map((c) => ({
+            channel: c.channel,
+            dyeLabel: channelLabel(c.channel),
+            row: c.row,
+            col: c.col,
+            wellLabel: c.wellLabel,
+            isReference: c.isReference,
+            cycles: c.cycles,
+            mean: c.mean,
+            std: c.std,
+            min: c.min,
+            max: c.max,
+          })),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [calibrationOn, visibleFluor, visibleChannel, fluorViewMode, wellFluorTargets],
+  );
+
+  // Cq markers (`threshold.md` §6), one per plotted curve, computed per the Analysis view's
+  // settings — same algorithm, same per-group (dye/target/channel label) threshold, same
+  // baseline settings this chart itself plots with — so a curve's marker always matches what
+  // the Analysis table would report for it.
+  const cqBaselineMode = libBaselineMode(settings.curveBaseline);
+  const cqManualRegion = useMemo<{ beginCycle: number; endCycle: number } | null>(
+    () =>
+      settings.curveBaselineRange
+        ? { beginCycle: settings.curveBaselineRange[0], endCycle: settings.curveBaselineRange[1] }
+        : null,
+    [settings.curveBaselineRange],
+  );
+  const cqByCurve = useMemo(() => {
+    if (baseCurves.length === 0) return [];
+    const baselines = baseCurves.map((c) =>
+      baselineCorrectCurve(c.cycles, c.mean, cqBaselineMode, cqManualRegion),
+    );
+    const noisesByLabel = new Map<string, number[]>();
+    baseCurves.forEach((c, i) => {
+      const list = noisesByLabel.get(c.dyeLabel) ?? [];
+      list.push(baselines[i]!.noise);
+      noisesByLabel.set(c.dyeLabel, list);
+    });
+    const thresholdByLabel = new Map<string, number>();
+    for (const [label, noises] of noisesByLabel) {
+      thresholdByLabel.set(
+        label,
+        resolveThreshold(noises, { overrideValue: settings.analysisThresholdOverrides.get(label) }),
+      );
+    }
+    return baseCurves.map((c, i) => {
+      const b = baselines[i]!;
+      const threshold = thresholdByLabel.get(c.dyeLabel) ?? 0;
+      return computeCq(c.cycles, b.correctedValues, {
+        algorithm: settings.analysisCqAlgorithm,
+        threshold: settings.analysisCqAlgorithm === "Threshold" ? threshold : undefined,
+        noise: b.noise,
+      });
+    });
+  }, [
+    baseCurves,
+    cqBaselineMode,
+    cqManualRegion,
+    settings.analysisCqAlgorithm,
+    settings.analysisThresholdOverrides,
+  ]);
+
+  const plotCurves: PlotCurve[] = baseCurves.map((c, i) => ({ ...c, cq: cqByCurve[i] ?? null }));
 
   const toggleTemp = (key: string) => {
     const next = new Set(settings.temps);

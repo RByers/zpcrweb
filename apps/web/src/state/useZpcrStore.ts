@@ -5,6 +5,7 @@ import {
   parsePlateCsv,
   parsePltd,
   parseZpcr,
+  type CqAlgorithm,
   type NormalizationMode,
   type PcrdContainer,
   type PlateDefinition,
@@ -26,7 +27,7 @@ export type FileKind = "zpcr" | "pcrd" | "pltd" | "csv";
 /** The two kinds a plate — standalone or attached to a run — can be uploaded as. */
 export type PlateFileKind = "pltd" | "csv";
 
-export type ViewId = "overview" | "curves" | "reference" | "plates" | "raw";
+export type ViewId = "overview" | "curves" | "plates" | "analysis" | "reference" | "raw";
 /** Reference view only — drift relative to the factory calibration value; see `ReferenceView`. */
 export type Baseline = "raw" | "delta" | "percent";
 /**
@@ -97,6 +98,17 @@ export interface FileSettings {
    * the plate definition actually loads that fluor into that well. Off by default — the normal
    * behavior only draws curves pltd.md's per-well dye layers actually cover. */
   showUnloadedFluors: boolean;
+  /** Analysis view: target/gene names hidden from the Cq/ΔRFU table (an opt-out set, like
+   * {@link disabledFluors}). Also gates which curves the Curves view marks with a Cq marker. */
+  analysisDisabledTargets: Set<string>;
+  /** Analysis view's Cq determination algorithm (`threshold.md` §6); see {@link CqAlgorithm}.
+   * Defaults to `"NoThreshold"` (second-derivative/inflection) — no threshold to tune before a
+   * table full of Cqs shows up. */
+  analysisCqAlgorithm: CqAlgorithm;
+  /** Manual per-target threshold override (RFU), keyed by target name — only consulted when
+   * {@link analysisCqAlgorithm} is `"Threshold"`. A target with no entry uses the auto threshold
+   * (`threshold.md` §5.1: 3.2 × median baseline noise across that target's wells). */
+  analysisThresholdOverrides: Map<string, number>;
 }
 
 /** A file loaded into memory — bytes only. Parsing is derived (see {@link ZpcrStore.runs}),
@@ -202,6 +214,9 @@ function defaultSettings(): FileSettings {
     calibrationBackground: "none",
     disabledFluors: new Set<string>(),
     showUnloadedFluors: false,
+    analysisDisabledTargets: new Set<string>(),
+    analysisCqAlgorithm: "NoThreshold",
+    analysisThresholdOverrides: new Map<string, number>(),
   };
 }
 
@@ -225,6 +240,9 @@ function toStored(id: string, s: FileSettings): StoredSettings {
     calibrationBackground: s.calibrationBackground,
     disabledFluors: [...s.disabledFluors],
     showUnloadedFluors: s.showUnloadedFluors,
+    analysisDisabledTargets: [...s.analysisDisabledTargets],
+    analysisCqAlgorithm: s.analysisCqAlgorithm,
+    analysisThresholdOverrides: [...s.analysisThresholdOverrides],
   };
 }
 
@@ -247,6 +265,9 @@ function fromStored(s: StoredSettings): FileSettings {
     disabledFluors: new Set(s.disabledFluors ?? []),
     showUnloadedFluors: s.showUnloadedFluors ?? false,
     temps: new Set(s.temps ?? []),
+    analysisDisabledTargets: new Set(s.analysisDisabledTargets ?? []),
+    analysisCqAlgorithm: s.analysisCqAlgorithm ?? "NoThreshold",
+    analysisThresholdOverrides: new Map(s.analysisThresholdOverrides ?? []),
   };
 }
 

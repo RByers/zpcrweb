@@ -54,6 +54,13 @@ export interface StoredSettings {
   /** When true, dye-space curves are drawn for every enabled well/fluor pair, even ones the
    * plate definition doesn't actually load into that well. Off by default. */
   showUnloadedFluors?: boolean;
+  /** Analysis view: target/gene names hidden from the Cq/ΔRFU table. */
+  analysisDisabledTargets?: string[];
+  /** Analysis view's Cq determination algorithm. Absent on records written before this setting
+   * existed, which then default to `"NoThreshold"`. */
+  analysisCqAlgorithm?: "Threshold" | "NoThreshold";
+  /** Manual per-target threshold overrides (RFU), as `[target, value]` pairs. */
+  analysisThresholdOverrides?: [string, number][];
 }
 
 function openDb(): Promise<IDBDatabase> {

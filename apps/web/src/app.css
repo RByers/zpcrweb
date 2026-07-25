@@ -1520,3 +1520,56 @@
   outline: none;
   border-color: var(--neon-cyan);
 }
+
+/* ---- Analysis view ------------------------------------------------------- */
+/* Reuses .curves/.curves__rail's two-column grid layout (rail + content). */
+.analysis__table-wrap {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: 10px;
+}
+.analysis__tbl {
+  width: 100%;
+}
+.analysis__row.is-unamplified {
+  opacity: 0.45;
+}
+.analysis__row.is-unamplified:hover {
+  opacity: 0.7;
+}
+.analysis__download {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: auto;
+  padding: 5px 10px;
+  font-size: 11px;
+}
+.analysis__thresholds {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.analysis__threshold-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--ink-2);
+}
+.analysis__threshold-row input {
+  width: 84px;
+  padding: 3px 6px;
+  background: var(--plane);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--ink);
+  font-size: 11px;
+  text-align: right;
+}
+.analysis__threshold-row input:focus {
+  outline: none;
+  border-color: var(--neon-cyan);
+}

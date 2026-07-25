@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseZpcr, subtractSeries } from "../src/index.js";
+import { parseZpcr, subtractSeries, baselineCorrectCurve } from "../src/index.js";
 import { readSampleBytes } from "./sample.js";
 
 describe("subtractSeries", () => {
@@ -17,6 +17,52 @@ describe("subtractSeries", () => {
     subtractSeries(a, b);
     expect(a).toEqual([5, 6]);
     expect(b).toEqual([1, 1]);
+  });
+});
+
+describe("baselineCorrectCurve", () => {
+  // Flat baseline (cycles 1-9) then an exponential rise plateauing by cycle 25.
+  const cycles = Array.from({ length: 30 }, (_, i) => i + 1);
+  const values = cycles.map((c) => (c <= 9 ? 100 : Math.min(5000, 100 + 5 * 2 ** (c - 9))));
+
+  it("reports near-zero noise for a manually-pinned flat region", () => {
+    const result = baselineCorrectCurve(cycles, values, "RawBaseLineSubtracted", {
+      beginCycle: 1,
+      endCycle: 9,
+    });
+    expect(result.noise).toBeCloseTo(0, 6);
+  });
+
+  it("flags a real rise as amplified with a large positive ΔRFU", () => {
+    const result = baselineCorrectCurve(cycles, values, "RawBaseLineSubtracted", {
+      beginCycle: 1,
+      endCycle: 9,
+    });
+    expect(result.amplified).toBe(true);
+    expect(result.deltaRfu).toBeGreaterThan(1000);
+    // Baseline-subtracted: the flat region should sit near zero.
+    expect(result.correctedValues[0]).toBeCloseTo(0, 3);
+  });
+
+  it("does not flag a flat, noisy curve as amplified", () => {
+    const flat = cycles.map((_, i) => (i % 2 === 0 ? 99 : 101));
+    const result = baselineCorrectCurve(cycles, flat, "RawBaseLineSubtracted");
+    expect(result.amplified).toBe(false);
+  });
+
+  it("honors a manual baseline region override", () => {
+    const result = baselineCorrectCurve(cycles, values, "RawBaseLineSubtracted", {
+      beginCycle: 1,
+      endCycle: 5,
+    });
+    expect(result.baselineRegion).toEqual({ beginCycle: 1, endCycle: 5 });
+  });
+
+  it("computes ΔRFU from raw values (no subtraction) in Raw mode", () => {
+    const result = baselineCorrectCurve(cycles, values, "Raw", { beginCycle: 1, endCycle: 9 });
+    expect(result.correctedValues).toEqual(values);
+    // Endpoint (5000) minus the mean of the flat baseline region (100).
+    expect(result.deltaRfu).toBeCloseTo(4900, 6);
   });
 });
 

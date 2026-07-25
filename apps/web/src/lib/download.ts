@@ -41,7 +41,9 @@ function csvField(v: string): string {
   return /[",\r\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
 }
 
-function csvRow(cells: string[]): string {
+/** RFC4180-ish quoting of one CSV row. Exported so other CSV builders (e.g. the Analysis
+ * view's table export) share the same quoting rules instead of re-implementing them. */
+export function csvRow(cells: string[]): string {
   return cells.map(csvField).join(",") + "\r\n";
 }
 

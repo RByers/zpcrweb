@@ -3,7 +3,7 @@
 The web app (`@zpcrweb/web`) is a browser UI over [`@zpcrweb/core`](../../packages/core). It
 loads one or more files — `.zpcr`, `.pcrd`, or a standalone plate file (`.pltd` or zpcrweb's own
 `.plt.csv`, see "Standalone plate entries and attach" below) — switches between them, and
-explores each through up to five views: Overview, Curves, Reference, Plates, and Raw (a
+explores each through up to six views: Overview, Curves, Plates, Analysis, Reference, and Raw (a
 standalone plate file only gets Plates + Raw — see below).
 
 ## Two formats, mostly one UI
@@ -12,7 +12,7 @@ standalone plate file only gets Plates + Raw — see below).
 [`ARCHITECTURE.md`](../../ARCHITECTURE.md#two-input-formats-one-output-shape)), so most of the
 app is format-agnostic:
 
-- `OverviewView`, `CurvesView`, and `ReferenceView` take a plain `Zpcr` — they don't know or
+- `OverviewView`, `CurvesView`, `AnalysisView`, and `ReferenceView` take a plain `Zpcr` — they don't know or
   care whether it came from a `.zpcr` archive or a decoded `.pcrd` document. `OverviewView`'s
   protocol tile and thermal-protocol block read `zpcr.protocol()` (a real accessor on `Zpcr`,
   not a by-name file lookup), so both the name and — when the format provides one — the step
@@ -135,10 +135,14 @@ a minimal IndexedDB wrapper with two object stores:
   separate override record to keep in sync, see above). `kind` defaults to `"zpcr"` for records
   written before `.pcrd` support existed.
 - `settings` — `{ fileId, enabledChannels[], enabledWells[], enabledRefCols[], baseline,
-  curveBaseline, scale }`, so each file remembers its enabled wells/channels/reference columns.
-  `baseline` (Reference view's factory-relative ΔRFU/Drift %) and `curveBaseline` (Curves
-  view's library baseline-subtraction mode) are independent settings — see "Two baseline
-  concepts" under Reference view. Writes are debounced.
+  curveBaseline, scale, … }`, so each file remembers its enabled wells/channels/reference
+  columns. `baseline` (Reference view's factory-relative ΔRFU/Drift %) and `curveBaseline`
+  (Curves view's library baseline-subtraction mode) are independent settings — see "Two baseline
+  concepts" under Reference view. The Analysis view adds three of its own:
+  `analysisDisabledTargets[]` (an opt-out target filter, like `disabledFluors`),
+  `analysisCqAlgorithm` (`"Threshold"`/`"NoThreshold"`, default `"NoThreshold"`), and
+  `analysisThresholdOverrides` (`[target, value][]`, manual per-target threshold RFU) — see
+  "Analysis view" below. Writes are debounced.
 
 Deleting a file removes both its `files` and `settings` records and drops it from memory —
 exposed as a clear affordance on each file chip.
@@ -148,6 +152,7 @@ exposed as a clear affordance on each file chip.
 - **Overview** — run metadata as stat tiles + the thermal protocol text, read from
   `zpcr.metadata` and `zpcr.protocolText`.
 - **Curves** — the centerpiece (see below).
+- **Analysis** — per-target/well Cq and ΔRFU table (see below).
 - **Reference** — reference row vs factory calibration (see below).
 - **Plates** — `PlatesView` (`components/views/PlatesView.tsx`): the visual, color-coded plate
   map (`components/plate/PlateViewer.tsx`) for every plate attached to the run, via
@@ -340,7 +345,11 @@ only pieces the two views share.
 - **Hover/tap tooltip:** a uPlot cursor plugin finds the nearest series (well curve, dark,
   factory overlay, or temperature) and reports its label, channel/dye, cycle, and
   mean/min/max/std — or, for a temperature, just its °C. The search projects each series
-  through **its own** scale, so proximity is measured in pixels across both axes.
+  through **its own** scale, so proximity is measured in pixels across both axes. A well
+  series also carries a `cq` (see "Analysis view" below); when defined, the tooltip adds a Cq
+  row and the chart draws a small ring on the curve at its (interpolated) Cq position — the
+  same marker logic (`cqMarkers` in `buildChart()`) that makes an unamplified or off-curve
+  well show no marker at all.
 - **Color separation (dye space) and the "View" mode selector:** `lib/fluorCurves.ts` matches
   the plate's fluorophores to this run's `.Dcal` data, builds one calibration matrix per step
   (restricted to the scanned channels, so its RFU scale factors are measured over the right
@@ -377,6 +386,56 @@ only pieces the two views share.
   channel-derived color (`FluorChip.channel`) — target mode does not introduce a new color
   scheme, just a different grouping/label built by `CurvesView`'s `labelForFluorCurve`/
   `targetInfos`.
+
+## Analysis view
+
+`AnalysisView` (`components/views/AnalysisView.tsx`) is a table of one row per active
+(target, well) pair — Cq and endpoint ΔRFU, per `threshold.md` §5–§7 — reusing `CurvesView`'s
+rail layout (`FluorBar` for the target filter, `WellMatrix` — sharing the same
+`settings.enabledWells` — for the well filter) but with its own target opt-out set
+(`analysisDisabledTargets`, since a target filtered out of the table shouldn't also hide it
+from Curves' Fluorophore view mode). It only operates in dye space: computing a per-target
+curve needs channel→dye color separation (`calibration.md`), so the rail shows an explanatory
+note instead of a table when no `.Dcal` calibration matches the plate's fluorophores, the same
+condition `CurvesView`'s "Target" view mode gates on. The matrix-building/corrections/
+`computeFluorCurves` pipeline is duplicated from `CurvesView` rather than shared — both are
+UI-orchestration glue over the real transforms in `lib/fluorCurves.ts`, not analytical logic of
+their own, so the duplication trades a little repetition for not risking a regression in the
+already-validated Curves view.
+
+- **One row per (target, well):** built from `PlateDefinition.wells[].fluors[]` — each
+  `WellFluor` with a `target` set, in a `loaded` well that's in `settings.enabledWells` and
+  whose target isn't in `analysisDisabledTargets`, paired with that well/dye's `FluorCurve`
+  from `computeFluorCurves`.
+- **Baseline:** reused verbatim from the Curves view's own settings (`curveBaseline`/
+  `curveBaselineRange`) via `lib/cq.ts`'s `libBaselineMode()`, mapped to `baseline.ts`'s
+  `BaselineMode` the same way `chart.ts`'s `algorithmAdjust()` does — so a row's ΔRFU and Cq
+  are computed from the same region/subtraction the Curves chart plots, not a second
+  independent baseline choice. `baselineCorrectCurve` (`packages/core/src/analysis.ts`) is the
+  shared library entry point: baseline region (auto or `curveBaselineRange`'s manual override),
+  corrected values, `baselineNoise`, `isAmplified`, and ΔRFU (endpoint corrected value minus the
+  baseline region's mean) in one call.
+- **Cq algorithm (`analysisCqAlgorithm` setting):** `"NoThreshold"` (2nd-derivative inflection,
+  `threshold.md` §6.2) is the default — no threshold to tune before the table populates.
+  `"Threshold"` (§6.1) needs a threshold per target: §5.1's `resolveThreshold` over the median
+  `baselineNoise` across that target's own wells, overridable per target via
+  `analysisThresholdOverrides` (a "Threshold overrides" rail section, shown only in Threshold
+  mode) — a blank input falls back to the auto value, shown as the input's placeholder.
+- **Amplification / greying:** a row whose curve fails `isAmplified` (§7 — total rise under
+  10× baseline noise) renders at reduced opacity (`.analysis__row.is-unamplified`) rather than
+  being hidden, so a flat well's absence from qualification is visible instead of silently
+  dropped from the table.
+- **CSV download:** built directly from the table's rows (target, fluor, channel, well,
+  threshold, Cq, ΔRFU, amplified), via the shared `csvRow()` quoting helper
+  (`lib/download.ts`, exported for reuse) and `downloadText()` — filename
+  `<run name>_analysis.csv`, the same `dataFile`-derived naming `plateReadCsvFilename` uses for
+  the Raw view's per-cycle export.
+- **Curves view integration:** the same Cq computation (algorithm + per-group threshold) runs
+  in `CurvesView` for every currently-plotted curve, grouped by whatever label is currently
+  shown (channel, fluorophore, or target — see the Curves view's tooltip bullet above), so a
+  curve gets a Cq marker/tooltip row in *any* view mode, not just Target mode; the grouping key
+  only lines up with `analysisThresholdOverrides`' target-keyed entries when Curves is actually
+  in Target mode.
 
 ## Reference view
 

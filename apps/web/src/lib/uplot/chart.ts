@@ -40,6 +40,9 @@ export interface PlotCurve {
   std: number[];
   min: number[];
   max: number[];
+  /** Cq (`threshold.md` §6), computed per the Analysis view's settings — `null`/undefined when
+   * unamplified or not computable. Drives the chart's Cq marker and its tooltip row. */
+  cq?: number | null;
 }
 
 /** Values <= 0 are undefined on a log axis; render them as gaps. */
@@ -155,6 +158,8 @@ export interface SeriesMeta {
   /** Per-cycle raw→plotted mapping this series was drawn with; lets the tooltip/band code
    * reposition min/max/std into plotted space without recomputing which baseline applied. */
   adjust: Adjust[];
+  /** See {@link PlotCurve.cq}. */
+  cq?: number | null;
 }
 
 /** Min/max envelope for a single isolated well (drawn as a shaded band). */
@@ -181,6 +186,8 @@ export interface TooltipData {
   std: number;
   left: number;
   top: number;
+  /** See {@link PlotCurve.cq}. */
+  cq?: number | null;
 }
 
 export interface BuildChartConfig {
@@ -268,6 +275,7 @@ export function buildChart(cfg: BuildChartConfig): {
       min: curve.min,
       max: curve.max,
       adjust,
+      cq: curve.cq,
     });
     series.push({
       label: `${curve.wellLabel} · ${curve.dyeLabel}`,
@@ -277,6 +285,30 @@ export function buildChart(cfg: BuildChartConfig): {
       points: { show: false },
     });
   }
+
+  // Cq markers: one per well curve with a defined Cq, positioned by linearly interpolating the
+  // curve's already-plotted (baseline-adjusted, log-safe) values at the fractional Cq cycle —
+  // the same values the line itself is drawn from.
+  const cqMarkers: { x: number; y: number; color: string }[] = [];
+  wellCurves.forEach((curve, i) => {
+    if (curve.cq == null) return;
+    const plottedRow = rows[i + 1] as (number | null)[];
+    const cycles = curve.cycles;
+    let lo = -1;
+    for (let j = 0; j < cycles.length - 1; j++) {
+      if (curve.cq! >= cycles[j]! && curve.cq! <= cycles[j + 1]!) {
+        lo = j;
+        break;
+      }
+    }
+    if (lo < 0) return;
+    const y0 = plottedRow[lo];
+    const y1 = plottedRow[lo + 1];
+    if (y0 == null || y1 == null) return;
+    const span = cycles[lo + 1]! - cycles[lo]!;
+    const frac = span !== 0 ? (curve.cq! - cycles[lo]!) / span : 0;
+    cqMarkers.push({ x: curve.cq!, y: y0 + frac * (y1 - y0), color: channelColor(curve.channel) });
+  });
 
   const presentChannels = new Set(wellCurves.map((c) => c.channel));
   for (const channel of presentChannels) {
@@ -457,7 +489,7 @@ export function buildChart(cfg: BuildChartConfig): {
     cursor: { focus: { prox: 24 }, points: { size: 6 } },
     focus: { alpha: 0.12 },
     legend: { show: false },
-    plugins: [overlayPlugin(meta, bands, cfg.onHover)],
+    plugins: [overlayPlugin(meta, bands, cqMarkers, cfg.onHover)],
   };
 
   return { data: rows as uPlot.AlignedData, options, meta };
@@ -502,10 +534,12 @@ function yLabel(baseline: Baseline, curveBaselineMode: CurveBaselineMode): strin
 function overlayPlugin(
   meta: SeriesMeta[],
   bands: BandData[],
+  cqMarkers: { x: number; y: number; color: string }[],
   onHover: (t: TooltipData | null) => void,
 ): uPlot.Plugin {
   let svg: SVGSVGElement;
   let bandGroup: SVGGElement;
+  let cqGroup: SVGGElement;
   let group: SVGGElement;
   let vline: SVGLineElement;
   let capMax: SVGLineElement;
@@ -534,6 +568,9 @@ function overlayPlugin(
         });
         bandGroup = document.createElementNS(SVG_NS, "g");
         svg.appendChild(bandGroup);
+
+        cqGroup = document.createElementNS(SVG_NS, "g");
+        svg.appendChild(cqGroup);
 
         group = document.createElementNS(SVG_NS, "g");
         group.style.display = "none";
@@ -576,6 +613,25 @@ function overlayPlugin(
             "d",
             top.length ? `M${top.join("L")}L${bot.reverse().join("L")}Z` : "",
           );
+        });
+
+        // Cq markers: one small ring per curve with a defined Cq, at its (interpolated)
+        // position on the plotted line.
+        while (cqGroup.childElementCount > cqMarkers.length) {
+          cqGroup.lastElementChild!.remove();
+        }
+        while (cqGroup.childElementCount < cqMarkers.length) {
+          const c = document.createElementNS(SVG_NS, "circle");
+          c.setAttribute("r", "4.5");
+          c.setAttribute("fill", "none");
+          c.setAttribute("stroke-width", "1.75");
+          cqGroup.appendChild(c);
+        }
+        cqMarkers.forEach((m, i) => {
+          const c = cqGroup.children[i] as SVGCircleElement;
+          c.setAttribute("cx", String(u.valToPos(m.x, "x")));
+          c.setAttribute("cy", String(u.valToPos(m.y, "y")));
+          c.setAttribute("stroke", m.color);
         });
       },
 
@@ -684,6 +740,7 @@ function overlayPlugin(
                 std: m.std[idx] ?? 0,
                 left,
                 top,
+                cq: m.cq,
               }
             : null,
         );
