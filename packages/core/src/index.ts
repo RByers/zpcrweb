@@ -70,6 +70,7 @@ export type {
   PlateRead,
   WellReading,
   WellCurve,
+  WellFactors,
   DarkCurve,
   PlateReadTemp,
   TemperatureCurve,

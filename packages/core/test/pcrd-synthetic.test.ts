@@ -20,6 +20,31 @@ function buildPlateRead(cycle: number, blockTmp: string, wellBase: number): stri
   return `<plateRead><PlateRead V="1"><SerVersion>2</SerVersion><Hdr><PlateReadDataHeader V="1"><SerVersion>9</SerVersion><CRC>0</CRC><HeadSerNum>SG00000</HeadSerNum><ScMode>0</ScMode><ScIdx>1</ScIdx><RtrvlType>3</RtrvlType><StepId>0</StepId><Step>2</Step><Cycle>${cycle}</Cycle><ErrNum>0</ErrNum><ErrDesc /><BlockTmp>${blockTmp}</BlockTmp><ShtTmp>44.4</ShtTmp><AmbTmp>28</AmbTmp><ChNum>0</ChNum><NumCols>12</NumCols><NumRows>9</NumRows><Time>Tue, 21 Jul 2026 05:23:17 GMT</Time><PRVersion>2</PRVersion><ChCount>6</ChCount><ChMask>63</ChMask><SamTmp>60</SamTmp><LidTmp>105</LidTmp><FanState>1</FanState><LidForce>1</LidForce><LidState>1</LidState><LidPos>0</LidPos><DrkCrnt><PAr V="1">${darkValues}</PAr></DrkCrnt><FanOffTmp>35</FanOffTmp><FanOnTmp>40</FanOnTmp><FWVersions /></PlateReadDataHeader></Hdr><Data><PAr V="1">${wellValues}</PAr></Data><Unique>0</Unique><Time>-1</Time><Name /><Interp>False</Interp></PlateRead></plateRead>`;
 }
 
+/**
+ * A `<wellFactorsCollection>` with the SNR set marked saved and the flyover set not, so the
+ * decoder has to pick SNR as the active one. Factor for (channel, well) is `1 + ch/10 + well/1000`,
+ * distinct per cell so an indexing mistake can't pass.
+ */
+function buildWellFactors(): string {
+  const set = (offset: number): string =>
+    Array.from({ length: 6 }, (_, ch) => {
+      const values = Array.from(
+        { length: 108 },
+        (_, well) => (offset + 1 + ch / 10 + well / 1000).toFixed(4),
+      ).join(";");
+      return `<Ch${ch}><PAr V="1">${values}</PAr></Ch${ch}>`;
+    }).join("");
+  const factors = (offset: number): string =>
+    `<WellFactors V="1"><SerVersion>1</SerVersion><Channels>6</Channels>${set(offset)}</WellFactors>`;
+  return (
+    `<wellFactorsCollection><WellFactorsCollection V="1"><SerVersion>1</SerVersion><WFHeader>` +
+    `<WellFactorsHeader V="1"><SerVersion>1</SerVersion><Channels>6</Channels><Wells>108</Wells>` +
+    `<snrSaved>True</snrSaved><flyovrSaved>False</flyovrSaved><user>synthetic</user>` +
+    `</WellFactorsHeader></WFHeader><SnrWF>${factors(0)}</SnrWF><FlyoverWF>${factors(10)}</FlyoverWF>` +
+    `</WellFactorsCollection></wellFactorsCollection>`
+  );
+}
+
 function buildSyntheticXml(): string {
   const plateSetup2 =
     `<plateSetup2 rows="8" columns="12" dyes="1" standardUnits="" plateType="OtherStdTemplate" ` +
@@ -52,6 +77,7 @@ function buildSyntheticXml(): string {
     `﻿<?xml version="1.0" encoding="utf-8"?><experimentalData2 exType="User">` +
     `<identifier identityKey="synthetic.pcrd" /><header currentVersion="06.10" createdByClientApp="BioRadCFXManager.exe" />` +
     `${plateSetup2}${protocol2}${runData}${dataAnalysisParameters}${runInfo}${log}` +
+    `${buildWellFactors()}` +
     `<auditHeader user="test" /></experimentalData2>`
   );
 }
@@ -252,5 +278,27 @@ describe("pcrd — synthetic round trip (no real password needed)", () => {
     const pcrd = parsePcrd(zipBytes, { password: "wrong" });
     expect(pcrd.needsPassword).toBeUndefined();
     expect(pcrd.error).toBeDefined();
+  });
+
+  it("decodes wellFactorsCollection, taking the saved set as the active one", () => {
+    const factors = parsePcrd(zipBytes, { password }).zpcr!.wellFactors!;
+    expect(factors.channelCount).toBe(6);
+    expect(factors.wellCount).toBe(108);
+    expect(factors.source).toBe("synthetic");
+    // Only SNR is flagged saved here, so the flyover set is decoded as absent and SNR is active.
+    expect(factors.snr).toBeDefined();
+    expect(factors.flyover).toBeUndefined();
+    expect(factors.active).toBe(factors.snr);
+    expect(factors.snr![0]).toHaveLength(108);
+  });
+
+  it("indexes well factors row-major, matching the plate read's own well layout", () => {
+    const factors = parsePcrd(zipBytes, { password }).zpcr!.wellFactors!;
+    // Well index is row*12 + col, so B3 (row 1, col 2) is well 14.
+    expect(factors.get(1, 2)).toEqual([
+      1.014, 1.114, 1.214, 1.314, 1.414, 1.514,
+    ]);
+    // The reference row (row 8) carries factors of its own, at the end of the 108.
+    expect(factors.get(8, 11)![0]).toBeCloseTo(1.107, 6);
   });
 });

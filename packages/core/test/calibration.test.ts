@@ -9,6 +9,7 @@ import {
   separateDyes,
   type CalibrationMatrix,
   type Dcal,
+  type NormalizationMode,
   type ResponseKnot,
 } from "../src/index.js";
 import { findDcalBlock } from "../src/dcal.js";
@@ -17,6 +18,29 @@ import { readSampleBytes } from "./sample.js";
 function calibrations(): Map<string, Dcal> {
   const zpcr = parseZpcr(readSampleBytes());
   return new Map(zpcr.calibrations().map((c) => [c.name, c.dcal]));
+}
+
+/**
+ * A hand-written, unnormalized calibration matrix: `values` are taken as the raw per-dye
+ * responses, so `columnScale` is 1 and `columnNorm` is each column's own L2 norm — the same
+ * bookkeeping `buildCalibrationMatrix` does with `normalization: "none"`.
+ */
+function rawMatrix(dyes: string[], values: number[][]): CalibrationMatrix {
+  return {
+    dyes,
+    channels: values.map((_, i) => i),
+    channelCount: values.length,
+    values,
+    columnScale: dyes.map(() => 1),
+    columnNorm: dyes.map((_, d) =>
+      Math.sqrt(values.reduce((sum, row) => sum + row[d]! ** 2, 0)),
+    ),
+  };
+}
+
+/** The RFU `separateChannels` reports for a dye present at `concentration` in `matrix`. */
+function expectedRfu(matrix: CalibrationMatrix, dye: number, concentration: number): number {
+  return concentration * matrix.columnNorm[dye]!;
 }
 
 describe("buildDyeResponseCurve", () => {
@@ -119,8 +143,8 @@ describe("buildCalibrationMatrix", () => {
     }
   });
 
-  it("'global' (default) normalization gives the whole matrix unit L2 norm", () => {
-    const matrix = buildCalibrationMatrix(curves, 60);
+  it("'global' normalization gives the whole matrix unit L2 norm", () => {
+    const matrix = buildCalibrationMatrix(curves, 60, { normalization: "global" });
     let sumSquares = 0;
     for (const row of matrix.values) for (const v of row) sumSquares += v ** 2;
     expect(Math.sqrt(sumSquares)).toBeCloseTo(1, 6);
@@ -130,6 +154,76 @@ describe("buildCalibrationMatrix", () => {
     const raw = buildCalibrationMatrix(curves, 60, { normalization: "none" });
     const alsoRaw = buildCalibrationMatrix(curves, 60, { normalization: "none" });
     expect(raw.values).toEqual(alsoRaw.values);
+  });
+
+  it("records columnNorm from the raw responses, unaffected by the normalization mode", () => {
+    const raw = buildCalibrationMatrix(curves, 60, { normalization: "none" });
+    for (const mode of ["none", "column", "global"] as const) {
+      const matrix = buildCalibrationMatrix(curves, 60, { normalization: mode });
+      matrix.columnNorm.forEach((norm, d) => expect(norm).toBeCloseTo(raw.columnNorm[d]!, 6));
+    }
+  });
+
+  it("restricts rows to the requested channels, normalizing over just those rows", () => {
+    const matrix = buildCalibrationMatrix(curves, 60, {
+      normalization: "column",
+      channels: [0, 2],
+    });
+    expect(matrix.channels).toEqual([0, 2]);
+    expect(matrix.channelCount).toBe(2);
+    expect(matrix.values).toHaveLength(2);
+    // Normalizing over only the kept rows is the point of passing `channels` rather than
+    // slicing rows off a full-channel matrix afterwards.
+    for (let d = 0; d < curves.length; d++) {
+      let sumSquares = 0;
+      for (const row of matrix.values) sumSquares += row[d]! ** 2;
+      expect(Math.sqrt(sumSquares)).toBeCloseTo(1, 6);
+    }
+  });
+});
+
+describe("normalization mode does not change the reported RFU scale", () => {
+  const cal = calibrations();
+  const dyeNames = ["FAM_BR Clear.Dcal", "HEX_BR Clear.Dcal", "Cy5_BR Clear.Dcal"];
+  const curves = dyeNames.map((n) => buildDyeResponseCurve(cal.get(n)!));
+  const reading = [2269.1, 2022.2, 1934.8, 1975.6, 2332.1, 2137.1];
+
+  it("gives identical concentrations for 'none', 'column' and 'global' on a full-rank matrix", () => {
+    const solve = (normalization: NormalizationMode): number[] =>
+      separateChannels(buildCalibrationMatrix(curves, 60, { normalization }), reading)
+        .concentrations;
+    const none = solve("none");
+    for (const mode of ["column", "global"] as const) {
+      const other = solve(mode);
+      for (let d = 0; d < curves.length; d++) expect(other[d]!).toBeCloseTo(none[d]!, 6);
+    }
+  });
+
+  it("reports RFU on the same order of magnitude as the raw channel readings", () => {
+    const result = separateChannels(buildCalibrationMatrix(curves, 60), reading);
+    for (const c of result.concentrations) {
+      expect(c).toBeGreaterThan(100);
+      expect(c).toBeLessThan(10_000);
+    }
+  });
+
+  it("stays finite with far more dyes than channels, where the solve is underdetermined", () => {
+    const many = [...cal.values()]
+      .filter((d) => d.plate.trim().toLowerCase() === "br clear")
+      .map((d) => buildDyeResponseCurve(d));
+    expect(many.length).toBeGreaterThan(6);
+    for (const normalization of ["none", "column", "global"] as const) {
+      const result = separateChannels(
+        buildCalibrationMatrix(many, 60, { normalization }),
+        reading,
+      );
+      for (const c of result.concentrations) {
+        expect(Number.isFinite(c)).toBe(true);
+        // Before the eigensolver's convergence test was made scale-relative, `global` here
+        // produced concentrations around 1e9 — see calibration.md §3.
+        expect(Math.abs(c)).toBeLessThan(1e5);
+      }
+    }
   });
 });
 
@@ -170,14 +264,13 @@ describe("preprocessChannelReadings", () => {
 
 describe("separateChannels", () => {
   it("exactly recovers known concentrations from a square, well-conditioned matrix", () => {
-    const matrix: CalibrationMatrix = {
-      dyes: ["A", "B"],
-      channelCount: 2,
-      values: [
+    const matrix = rawMatrix(
+      ["A", "B"],
+      [
         [1, 0.2],
         [0.1, 1],
       ],
-    };
+    );
     const trueConcentrations = [50, 30];
     const channelReadings = matrix.values.map((row) =>
       row.reduce((sum, v, i) => sum + v * trueConcentrations[i]!, 0),
@@ -185,54 +278,72 @@ describe("separateChannels", () => {
     const result = separateChannels(matrix, channelReadings);
     expect(result.failed).toBe(false);
     expect(result.dyes).toEqual(["A", "B"]);
-    expect(result.concentrations[0]!).toBeCloseTo(trueConcentrations[0]!, 4);
-    expect(result.concentrations[1]!).toBeCloseTo(trueConcentrations[1]!, 4);
+    // Reported in RFU — the recovered concentration times that dye's own response magnitude.
+    expect(result.concentrations[0]!).toBeCloseTo(expectedRfu(matrix, 0, 50), 4);
+    expect(result.concentrations[1]!).toBeCloseTo(expectedRfu(matrix, 1, 30), 4);
   });
 
   it("exactly recovers known concentrations from an overdetermined (more channels than dyes) matrix", () => {
-    const matrix: CalibrationMatrix = {
-      dyes: ["A", "B"],
-      channelCount: 3,
-      values: [
+    const matrix = rawMatrix(
+      ["A", "B"],
+      [
         [1, 0],
         [0, 1],
         [0.3, 0.3],
       ],
-    };
+    );
     const trueConcentrations = [12, 7];
     const channelReadings = matrix.values.map((row) =>
       row.reduce((sum, v, i) => sum + v * trueConcentrations[i]!, 0),
     );
     const result = separateChannels(matrix, channelReadings);
-    expect(result.concentrations[0]!).toBeCloseTo(trueConcentrations[0]!, 4);
-    expect(result.concentrations[1]!).toBeCloseTo(trueConcentrations[1]!, 4);
+    expect(result.concentrations[0]!).toBeCloseTo(expectedRfu(matrix, 0, 12), 4);
+    expect(result.concentrations[1]!).toBeCloseTo(expectedRfu(matrix, 1, 7), 4);
   });
 
   it("reports failed with all-zero concentrations for a matrix with no signal at all", () => {
-    const matrix: CalibrationMatrix = {
-      dyes: ["A", "B"],
-      channelCount: 2,
-      values: [
+    const matrix = rawMatrix(
+      ["A", "B"],
+      [
         [0, 0],
         [0, 0],
       ],
-    };
+    );
     const result = separateChannels(matrix, [10, 10]);
     expect(result.failed).toBe(true);
     expect(result.concentrations).toEqual([0, 0]);
   });
 
   it("does not blow up on a near-singular matrix (two near-duplicate dyes)", () => {
-    const matrix: CalibrationMatrix = {
-      dyes: ["A", "A-dup"],
-      channelCount: 2,
-      values: [
+    const matrix = rawMatrix(
+      ["A", "A-dup"],
+      [
         [1, 1.0000001],
         [0.5, 0.5000001],
       ],
-    };
+    );
     const result = separateChannels(matrix, [10, 5]);
     for (const c of result.concentrations) expect(Number.isFinite(c)).toBe(true);
+  });
+
+  it("is unchanged by scaling the whole matrix, since the solve undoes the scaling", () => {
+    const values = [
+      [1, 0.2],
+      [0.1, 1],
+    ];
+    const base = rawMatrix(["A", "B"], values);
+    // The same matrix, scaled down by 1e-4 and told so via columnScale — the shape
+    // `buildCalibrationMatrix` produces for `global` normalization.
+    const scaled: CalibrationMatrix = {
+      ...base,
+      values: values.map((row) => row.map((v) => v * 1e-4)),
+      columnScale: [1e-4, 1e-4],
+    };
+    const reading = [10, 5];
+    const a = separateChannels(base, reading).concentrations;
+    const b = separateChannels(scaled, reading).concentrations;
+    expect(b[0]!).toBeCloseTo(a[0]!, 6);
+    expect(b[1]!).toBeCloseTo(a[1]!, 6);
   });
 });
 
@@ -260,7 +371,11 @@ describe("separateDyes — end-to-end with real calibration files", () => {
     });
     expect(result.dyes).toEqual(["FAM", "HEX", "Texas Red", "Cy5", "Quasar 705"]);
     for (let i = 0; i < trueConcentrations.length; i++) {
-      expect(result.concentrations[i]!).toBeCloseTo(trueConcentrations[i]!, 2);
+      // Reported in RFU: concentration × that dye's response magnitude across the channels.
+      expect(result.concentrations[i]! / matrix.columnNorm[i]!).toBeCloseTo(
+        trueConcentrations[i]!,
+        2,
+      );
     }
   });
 });

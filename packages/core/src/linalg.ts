@@ -52,22 +52,35 @@ function identity(n: number): Matrix {
  * Eigen-decompose a real symmetric matrix via the classic cyclic Jacobi rotation method.
  * Converges quickly for the small (≤6×6) matrices this module handles. Returns eigenvalues and
  * their matching eigenvectors (as columns of `vectors`), unordered.
+ *
+ * `tolerance` is **relative**: sweeping stops once the off-diagonal magnitude falls below
+ * `tolerance × ‖input‖_F`. It has to be relative — an absolute cutoff makes the whole routine
+ * scale-dependent, since multiplying the input by `s` multiplies the off-diagonal sum of squares
+ * by `s²`. A small-magnitude matrix would then satisfy an absolute test before a single rotation
+ * ran and come back with its untouched diagonal as the "eigenvalues", which is exactly the
+ * failure `buildCalibrationMatrix`'s normalization used to trigger (see `calibration.md` §3).
  */
 export function symmetricEigenDecomposition(
   input: Matrix,
   maxSweeps = 100,
-  tolerance = 1e-12,
+  tolerance = 1e-14,
 ): { eigenvalues: number[]; vectors: Matrix } {
   const n = input.length;
   const a = input.map((row) => row.slice());
   const v = identity(n);
+
+  let frobeniusSquared = 0;
+  for (const row of input) for (const x of row) frobeniusSquared += x * x;
+  // Compare squared quantities against a squared threshold, so the test reads as
+  // `sqrt(offDiagonal) <= tolerance * sqrt(frobeniusSquared)` without the square roots.
+  const threshold = tolerance * tolerance * frobeniusSquared;
 
   for (let sweep = 0; sweep < maxSweeps; sweep++) {
     let offDiagonal = 0;
     for (let p = 0; p < n; p++) {
       for (let q = p + 1; q < n; q++) offDiagonal += a[p]![q]! * a[p]![q]!;
     }
-    if (offDiagonal < tolerance) break;
+    if (offDiagonal <= threshold) break;
 
     for (let p = 0; p < n - 1; p++) {
       for (let q = p + 1; q < n; q++) {

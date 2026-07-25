@@ -226,6 +226,14 @@ only pieces the two views share.
   factory overlay, or temperature) and reports its label, channel/dye, cycle, and
   mean/min/max/std — or, for a temperature, just its °C. The search projects each series
   through **its own** scale, so proximity is measured in pixels across both axes.
+- **Color separation (dye space):** `lib/fluorCurves.ts` matches the plate's fluorophores to
+  this run's `.Dcal` data, builds one calibration matrix per step (restricted to the scanned
+  channels, so its RFU scale factors are measured over the right rows), and solves every
+  well/cycle — see [`calibration.md`](../../calibration.md). `CurvesView` assembles the §4
+  corrections that go in first: the per-scan reference level from the reference row, the
+  per-scan dark level from `DARKDATA`, and the per-well gain factors when the run has them
+  (a `.pcrd` thing — a `.zpcr` carries none, so only the dark subtraction bites there). The
+  normalization selector is a numerical-conditioning knob and does not change the RFU scale.
 
 ## Reference view
 

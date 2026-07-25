@@ -82,7 +82,13 @@ export function interpolateResponse(knots: ResponseKnot[], temperatureC: number)
   return knots[last]!.response; // unreachable given the checks above
 }
 
-/** How a calibration matrix's dye columns are scaled before use in {@link separateChannels}. */
+/**
+ * How a calibration matrix's dye columns are scaled before the pseudo-inverse is taken. This is
+ * a **numerical conditioning** choice only: {@link separateChannels} undoes whichever scaling was
+ * applied, so all three modes report concentrations on the same fixed scale (see §3). The mode
+ * still matters when the matrix is ill-conditioned or rank-deficient, because it changes which
+ * directions fall under the pseudo-inverse's `rcond` floor.
+ */
 export type NormalizationMode =
   | "none" // use the raw interpolated response values as-is
   | "column" // L2-normalize each dye's channel-response vector independently
@@ -92,54 +98,82 @@ export type NormalizationMode =
 export interface CalibrationMatrix {
   /** Dye names, column order. */
   dyes: string[];
-  /** Row count. */
+  /** Optical channel index for each row of {@link values}, in row order. */
+  channels: number[];
+  /** Row count — `channels.length`. */
   channelCount: number;
-  /** `values[channel][dye]` — column `d` is dye `d`'s (normalized) response across channels. */
+  /** `values[row][dye]` — column `d` is dye `d`'s (scaled) response across {@link channels}. */
   values: number[][];
+  /**
+   * The factor each raw column was multiplied by to produce {@link values} (per
+   * {@link NormalizationMode}). {@link separateChannels} divides it back out, so the reported
+   * concentrations don't depend on the mode.
+   */
+  columnScale: number[];
+  /**
+   * L2 norm of each dye's **raw** (pre-scaling) response column, i.e. the RFU that dye produces
+   * across {@link channels} at unit concentration. The unit conversion that puts
+   * {@link separateChannels}'s output on an RFU scale — see §5.
+   */
+  columnNorm: number[];
 }
 
-function normalize(values: number[][], mode: NormalizationMode): number[][] {
-  if (mode === "none") return values;
-  const channelCount = values.length;
+/** The per-column factors `mode` scales the raw matrix by. Always finite and non-zero. */
+function columnScales(values: number[][], mode: NormalizationMode): number[] {
   const dyeCount = values[0]?.length ?? 0;
+  if (mode === "none") return new Array(dyeCount).fill(1);
 
   if (mode === "column") {
-    const out = values.map((row) => row.slice());
-    for (let d = 0; d < dyeCount; d++) {
+    return Array.from({ length: dyeCount }, (_, d) => {
       let sumSquares = 0;
-      for (let c = 0; c < channelCount; c++) sumSquares += out[c]![d]! ** 2;
-      const scale = sumSquares > 0 ? 1 / Math.sqrt(sumSquares) : 1;
-      for (let c = 0; c < channelCount; c++) out[c]![d]! *= scale;
-    }
-    return out;
+      for (const row of values) sumSquares += row[d]! ** 2;
+      return sumSquares > 0 ? 1 / Math.sqrt(sumSquares) : 1;
+    });
   }
 
-  // "global": one norm across every entry in the matrix.
+  // "global": one norm across every entry in the matrix, shared by all columns.
   let sumSquares = 0;
   for (const row of values) for (const v of row) sumSquares += v ** 2;
   const scale = sumSquares > 0 ? 1 / Math.sqrt(sumSquares) : 1;
-  return values.map((row) => row.map((v) => v * scale));
+  return new Array(dyeCount).fill(scale);
 }
 
 /**
  * Assemble a channel×dye calibration matrix by sampling each dye's response curve at
- * `temperatureC`, then normalizing the columns. Default normalization is `"global"` (one norm
- * across the whole matrix), matching the observed default behavior; `"column"` instead
- * normalizes each dye independently, and `"none"` skips normalization.
+ * `temperatureC`. `channels` restricts the rows to the optical channels actually scanned (the
+ * run's `CHANNELMASK`), defaulting to every channel the curves cover — pass it rather than
+ * slicing rows afterwards, since the column norms this matrix carries have to be computed over
+ * the same rows the solve will use.
+ *
+ * `normalization` is a conditioning choice with no effect on the reported concentration scale;
+ * see {@link NormalizationMode}. The default is `"column"`, which equilibrates the columns of a
+ * matrix whose dyes differ several-fold in brightness.
  */
 export function buildCalibrationMatrix(
   curves: DyeResponseCurve[],
   temperatureC: number,
-  options: { normalization?: NormalizationMode } = {},
+  options: { normalization?: NormalizationMode; channels?: number[] } = {},
 ): CalibrationMatrix {
-  const channelCount = curves.reduce((max, c) => Math.max(max, c.channels.length), 0);
-  const raw: number[][] = Array.from({ length: channelCount }, (_, channel) =>
+  const curveChannelCount = curves.reduce((max, c) => Math.max(max, c.channels.length), 0);
+  const channels =
+    options.channels ?? Array.from({ length: curveChannelCount }, (_, i) => i);
+
+  const raw: number[][] = channels.map((channel) =>
     curves.map((curve) => interpolateResponse(curve.channels[channel] ?? [], temperatureC)),
   );
+
+  const scale = columnScales(raw, options.normalization ?? "column");
+  const columnNorm = curves.map((_, d) =>
+    Math.sqrt(raw.reduce((sum, row) => sum + row[d]! ** 2, 0)),
+  );
+
   return {
     dyes: curves.map((c) => c.dye),
-    channelCount,
-    values: normalize(raw, options.normalization ?? "global"),
+    channels,
+    channelCount: channels.length,
+    values: raw.map((row) => row.map((v, d) => v * scale[d]!)),
+    columnScale: scale,
+    columnNorm,
   };
 }
 
@@ -195,7 +229,11 @@ export function preprocessChannelReadings(
 export interface ColorSeparationResult {
   /** Dye names, aligned with {@link concentrations}. */
   dyes: string[];
-  /** Estimated per-dye concentration/intensity, aligned with {@link dyes}. */
+  /**
+   * Estimated per-dye intensity in **RFU**, aligned with {@link dyes}: the magnitude of that
+   * dye's own contribution to the channel vector, on the same scale as the raw channel readings
+   * that went in. Independent of the matrix's {@link NormalizationMode} — see §5.
+   */
   concentrations: number[];
   /**
    * True if the calibration matrix had no usable signal at all (e.g. every entry zero) — the
@@ -205,12 +243,18 @@ export interface ColorSeparationResult {
 }
 
 /**
- * Solve `matrix · concentrations = channelReadings` for the per-dye concentrations, via the
+ * Solve `matrix · concentrations = channelReadings` for the per-dye intensities, via the
  * matrix's Moore-Penrose pseudo-inverse (see `linalg.ts`). This reduces to an ordinary matrix
  * solve when the matrix is square and well-conditioned (channel count == dye count), and to a
  * least-squares fit otherwise (e.g. more channels than dyes). `rcond` is the singular-value
  * cutoff passed through to the pseudo-inverse — raise it if a near-singular calibration matrix
  * (e.g. two near-identical dyes) is producing implausibly large concentrations.
+ *
+ * The raw solve is against the matrix as {@link buildCalibrationMatrix} scaled it, so its output
+ * is in whatever units that scaling implies. Two factors put the result back on a fixed scale
+ * (see §5): `columnScale` undoes the normalization, leaving a concentration relative to the pure
+ * calibration dye, and `columnNorm` converts that into the RFU the dye contributes. The reported
+ * value therefore does not depend on the {@link NormalizationMode} the matrix was built with.
  */
 export function separateChannels(
   matrix: CalibrationMatrix,
@@ -223,9 +267,10 @@ export function separateChannels(
   }
 
   const inverse = pseudoInverse(matrix.values, options.rcond);
-  const concentrations = inverse.map((row) =>
-    row.reduce((sum, x, i) => sum + x * (channelReadings[i] ?? 0), 0),
-  );
+  const concentrations = inverse.map((row, d) => {
+    const solved = row.reduce((sum, x, i) => sum + x * (channelReadings[i] ?? 0), 0);
+    return solved * (matrix.columnScale[d] ?? 1) * (matrix.columnNorm[d] ?? 1);
+  });
   return { dyes: matrix.dyes, concentrations, failed: false };
 }
 
@@ -244,6 +289,7 @@ export function separateDyes(
   options: {
     well?: number;
     normalization?: NormalizationMode;
+    channels?: number[];
     preprocess?: ChannelPreprocessOptions;
     rcond?: number;
   } = {},
@@ -251,6 +297,7 @@ export function separateDyes(
   const curves = dcals.map((dcal) => buildDyeResponseCurve(dcal, options.well ?? 0));
   const matrix = buildCalibrationMatrix(curves, temperatureC, {
     normalization: options.normalization,
+    channels: options.channels,
   });
   const channelReadings = preprocessChannelReadings(rawChannelReadings, options.preprocess);
   return separateChannels(matrix, channelReadings, { rcond: options.rcond });

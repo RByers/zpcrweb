@@ -124,7 +124,13 @@ raw bytes ─▶ fflate.unzipSync ─▶ { name: Uint8Array }
   empty-plate baseline, also on top of the ICFF index. See [`dcal.md`](./dcal.md).
 - **`calibration.ts`** — channel→dye color separation built on top of `.Dcal` data: per-dye
   response curves, a channel×dye calibration matrix, and a solve via `linalg.ts`'s
-  pseudo-inverse. See [`calibration.md`](./calibration.md).
+  pseudo-inverse. The matrix's normalization mode is a conditioning choice only — the solve
+  undoes it and reports per-dye RFU, so the mode never changes the scale. See
+  [`calibration.md`](./calibration.md).
+- **`linalg.ts`** — the small dense-matrix routines `calibration.ts` needs, chiefly a
+  pseudo-inverse via Jacobi eigen-decomposition of the Gram matrix. Both its convergence test
+  and its singular-value floor are **relative**, which is what makes the color-separation
+  pipeline scale-invariant.
 - **`baseline.ts`** — the baseline stages (§2–§4) of a dye curve's Cq analysis: smoothing,
   automatic/manual baseline-region selection, and baseline subtraction. Stops short of
   thresholding and Cq themselves, which remain unimplemented. See [`threshold.md`](./threshold.md).

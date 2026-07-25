@@ -27,6 +27,7 @@ import type {
   PltdEntry,
   PrclEntry,
   RunMetadata,
+  WellFactors,
   WellReading,
   Zpcr,
 } from "./types.js";
@@ -46,7 +47,7 @@ import {
 } from "./xmlLite.js";
 import { parseRunInfo } from "./runinfo.js";
 import { extractTemps } from "./temps.js";
-import { CHANNELS, WELLS_PER_CHANNEL, wellIndex } from "./plateread.js";
+import { CHANNELS, COLUMNS, WELLS_PER_CHANNEL, wellIndex } from "./plateread.js";
 import {
   toChannels,
   toCurves,
@@ -347,6 +348,71 @@ function decodeCalibrationCollection(runDataEl: string): DcalEntry[] {
 }
 
 // ---------------------------------------------------------------------------
+// Well factors: <wellFactorsCollection><WellFactorsCollection>…
+// ---------------------------------------------------------------------------
+
+/**
+ * Decode one `<WellFactors>` element — `<Ch0>…<ChN>`, each holding a `<PAr>` of `;`-separated
+ * per-well floats — into `[channel][well]`. Returns undefined when no channel row is present.
+ */
+function parseWellFactorsElement(inner: string, channelCount: number): number[][] | undefined {
+  const rows: number[][] = [];
+  for (let channel = 0; channel < channelCount; channel++) {
+    const chEl = findElement(inner, `Ch${channel}`);
+    const par = chEl ? findElement(chEl.inner, "PAr") : undefined;
+    if (!par) return undefined;
+    rows.push(par.inner.split(";").map(Number));
+  }
+  return rows.length > 0 ? rows : undefined;
+}
+
+/**
+ * Decode `<wellFactorsCollection>` into {@link WellFactors} — the per-well gain divisors
+ * `calibration.md` §4.1 applies. The header's `snrSaved`/`flyovrSaved` flags say which of the two
+ * sets was actually recorded; a run with neither (the committed sample's case, where the header
+ * notes the set was synthesized during persistence loading and every factor is exactly `1`) gets
+ * no active set, so no gain correction is applied at all.
+ */
+function decodeWellFactors(el: XmlElement): WellFactors | undefined {
+  const coll = findElement(el.inner, "WellFactorsCollection");
+  if (!coll) return undefined;
+
+  const hdrWrapper = findElement(coll.inner, "WFHeader");
+  const hdr = hdrWrapper ? findElement(hdrWrapper.inner, "WellFactorsHeader") : undefined;
+  const headerText = hdr?.inner ?? "";
+  const channelCount = Number(firstTagText(headerText, "Channels") ?? CHANNELS) || CHANNELS;
+  const wellCount =
+    Number(firstTagText(headerText, "Wells") ?? WELLS_PER_CHANNEL) || WELLS_PER_CHANNEL;
+  // .NET serializes booleans as "True"/"False" here, not "true"/"1".
+  const flag = (name: string): boolean =>
+    (firstTagText(headerText, name) ?? "").trim().toLowerCase() === "true";
+
+  const readSet = (wrapperName: string): number[][] | undefined => {
+    const wrapper = findElement(coll.inner, wrapperName);
+    const wf = wrapper ? findElement(wrapper.inner, "WellFactors") : undefined;
+    return wf ? parseWellFactorsElement(wf.inner, channelCount) : undefined;
+  };
+
+  const snr = flag("snrSaved") ? readSet("SnrWF") : undefined;
+  const flyover = flag("flyovrSaved") ? readSet("FlyoverWF") : undefined;
+  const active = flyover ?? snr;
+
+  return {
+    channelCount,
+    wellCount,
+    source: unescapeXml(firstTagText(headerText, "user") ?? "") || undefined,
+    snr,
+    flyover,
+    active,
+    get(row: number, col: number): number[] | undefined {
+      if (!active) return undefined;
+      const well = row * COLUMNS + col;
+      return active.map((channel) => channel[well] ?? 1);
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Empty archive — a `.pcrd` has no inner files. Kept as a real `ArchiveAccess` (rather than
 // making `Zpcr.archive` optional, which would widen the shared interface) so a `.pcrd`-derived
 // `Zpcr` still satisfies the same public shape a `.zpcr` does; every accessor just reports
@@ -494,6 +560,9 @@ function buildZpcr(root: XmlElement[]): Zpcr {
   const runDefinition = protocol2?.attrs.runDefinition;
   const protocolText = runDefinition ? unescapeXml(runDefinition) : "";
 
+  const wellFactorsEl = byLower.get("wellfactorscollection");
+  const wellFactors = wellFactorsEl ? decodeWellFactors(wellFactorsEl) : undefined;
+
   return {
     metadata,
     reads,
@@ -512,6 +581,7 @@ function buildZpcr(root: XmlElement[]): Zpcr {
     protocols: (): PrclEntry[] => [],
     calibrations: (): DcalEntry[] =>
       runData ? decodeCalibrationCollection(runData.inner) : [],
+    wellFactors,
     factoryRefCal: () =>
       parseFactoryRefRowCal(
         metadata.raw["FactoryRefRowCal"] ?? "",

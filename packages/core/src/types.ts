@@ -126,6 +126,32 @@ export interface RunMetadata {
   raw: Record<string, string>;
 }
 
+/**
+ * Per-well optical gain correction factors — the `wellFactor` divisor in `calibration.md` §4.1.
+ * A run carries two independently-saved sets; `active` is whichever one the run actually has,
+ * per the `snrSaved`/`flyovrSaved` flags. Only a `.pcrd` stores these (`wellFactorsCollection`);
+ * a `.zpcr` archive has no equivalent, so `Zpcr.wellFactors` is undefined there.
+ */
+export interface WellFactors {
+  /** Channel count the factors were recorded for. */
+  channelCount: number;
+  /** Well count per channel (108 for a 96-well block, including the reference row). */
+  wellCount: number;
+  /** Free-text provenance from the header's `user` field, e.g. how the set was created. */
+  source?: string;
+  /** Signal-to-noise well factors, `snr[channel][well]`, present only when `snrSaved`. */
+  snr?: number[][];
+  /** Dynamic ("flyover") well factors, `flyover[channel][well]`, present only when `flyovrSaved`. */
+  flyover?: number[][];
+  /**
+   * The set to actually apply: `flyover` when saved, else `snr` when saved, else undefined —
+   * a run with neither gets no gain correction at all (see `calibration.md` §4.1).
+   */
+  active?: number[][];
+  /** Look up one well's factors across all channels, aligned with channel index. Undefined when no set is active. */
+  get(row: number, col: number): number[] | undefined;
+}
+
 /** A well-centric amplification curve: mean fluorescence across cycles for one channel. */
 export interface WellCurve {
   /** Optical channel 0–5. */
@@ -278,6 +304,12 @@ export interface Zpcr {
   calibrations(): DcalEntry[];
   /** Optical channel indices that hold data, from `CHANNELMASK` (e.g. `[0]` or `[0..5]`). */
   channels(): number[];
+  /**
+   * Per-well gain correction factors, when the source carries them: a `.pcrd`'s
+   * `wellFactorsCollection`. Undefined for a `.zpcr`, which stores no equivalent — the gain
+   * correction in `calibration.md` §4.1 is then simply inactive.
+   */
+  wellFactors?: WellFactors;
   /** Factory calibration of the reference row, from `RunInfo.xml`'s `FactoryRefRowCal`. */
   factoryRefCal(): RefWellCal[];
   /** Live reference row vs factory calibration, per channel/column (optical drift). */

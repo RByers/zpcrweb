@@ -70,14 +70,28 @@ export function matchFluorCalibrations(
   return [...seen.values()];
 }
 
-/** Restrict a calibration matrix to a subset of channel rows (e.g. the run's scanned channels). */
-export function restrictToChannels(matrix: CalibrationMatrix, channels: number[]): CalibrationMatrix {
-  const zeroRow = matrix.dyes.map(() => 0);
-  return {
-    dyes: matrix.dyes,
-    channelCount: channels.length,
-    values: channels.map((ch) => matrix.values[ch] ?? zeroRow),
-  };
+/**
+ * The per-cycle, per-well corrections `calibration.md` §4 applies to a raw reading before the
+ * solve. All three parts are optional and independent: a run may carry any combination.
+ */
+export interface FluorCorrections {
+  /**
+   * Per-channel reference level per cycle — `referenceLevel[i][cycle]`, where `i` indexes the
+   * `channels` array passed to {@link computeFluorCurves}. The pivot for the gain correction
+   * (§4.1); with no `wellFactor` it has no effect, by design.
+   */
+  referenceLevel?: number[][];
+  /** Per-channel dark (LED-off) level per cycle, same indexing — subtracted outright (§4.2). */
+  darkLevel?: number[][];
+  /** One well's gain factors across `channels`, or undefined when the run has none (§4.1). */
+  wellFactor?: (row: number, col: number) => number[] | undefined;
+}
+
+/** Pull cycle `i`'s column out of a `[channel][cycle]` table, skipping non-finite entries. */
+function columnAt(table: number[][] | undefined, i: number): number[] | undefined {
+  if (!table) return undefined;
+  const out = table.map((series) => series[i]);
+  return out.every((v) => v !== undefined && Number.isFinite(v)) ? (out as number[]) : undefined;
 }
 
 /** One fluorophore's separated concentration curve for a single well — mirrors `WellCurve`. */
@@ -95,8 +109,14 @@ export interface FluorCurve {
 
 /**
  * Run color separation for every well and cycle: build the raw per-channel vector (restricted
- * to `channels`, in that order) and solve against `matrix`. `dyeChannels` gives each matrix
- * column's primary channel, aligned with `matrix.dyes`, purely for the returned curves' coloring.
+ * to `channels`, in that order), apply `calibration.md` §4's corrections, and solve against
+ * `matrix`. `dyeChannels` gives each matrix column's primary channel, aligned with
+ * `matrix.dyes`, purely for the returned curves' coloring.
+ *
+ * `corrections` carries the per-cycle reference/dark levels and per-well gain factors. Omitting
+ * it skips §4 entirely, which is only right for a run that genuinely has none of that data —
+ * the reference and dark levels are per-channel, so dropping them doesn't merely offset every
+ * dye's baseline, it changes the channel proportions the solve unmixes.
  *
  * Unlike a raw channel reading (mean/std/min/max), a color-separated value has no direct
  * min/max/std of its own — those describe the pre-separation optical distribution within a
@@ -107,6 +127,7 @@ export function computeFluorCurves(
   matrix: CalibrationMatrix,
   channels: number[],
   dyeChannels: number[],
+  corrections: FluorCorrections = {},
 ): FluorCurve[] {
   const byWell = new Map<string, Map<number, WellCurve>>();
   for (const c of wellCurves) {
@@ -122,10 +143,16 @@ export function computeFluorCurves(
     if (!first) continue;
     const cycles = first.cycles;
     const perDye: number[][] = matrix.dyes.map(() => new Array<number>(cycles.length).fill(0));
+    // Per well, not per cycle: the gain factors are a fixed property of the plate position.
+    const wellFactor = corrections.wellFactor?.(first.row, first.col);
 
     for (let i = 0; i < cycles.length; i++) {
       const raw = channels.map((ch) => byChannel.get(ch)?.mean[i] ?? 0);
-      const corrected = preprocessChannelReadings(raw);
+      const corrected = preprocessChannelReadings(raw, {
+        referenceLevel: columnAt(corrections.referenceLevel, i),
+        wellFactor,
+        darkLevel: columnAt(corrections.darkLevel, i),
+      });
       const { concentrations } = separateChannels(matrix, corrected);
       concentrations.forEach((v, d) => {
         perDye[d]![i] = v;

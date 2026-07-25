@@ -10,7 +10,8 @@ analysis state, collapsed into a single XML file.
 > the `.zpcr` for the same run. All 45 plate reads decode, and every fluorescence and dark-current
 > value is bit-for-bit identical to the corresponding binary `.Plateread` (§2.1). `calibrationCollection`
 > (§2.6) is likewise fully decoded and value-for-value cross-validated against the real `.Dcal`
-> files. The remaining analysis-state subtrees (§2.5) are mapped but not interpreted.
+> files, as is `wellFactorsCollection` (§2.5). The remaining analysis-state subtrees (§2.5) are
+> mapped but not interpreted.
 
 ---
 
@@ -76,7 +77,7 @@ line terminators. Its root gathers what the `.zpcr` spreads across many files:
 | `runData/calibrationCollection` | the 28 `*.Dcal` files (§2.6) |
 | `protocolRunInfo/RunInfo` | `RunInfo.xml` |
 | `log` (repeated) | `runlog.xml` |
-| `wellFactorsCollection`, `dataAnalysisParameters`, `PersistedData`, `qcAnalysisParameters`, `precisionMeltCalibration` | **no equivalent** — application analysis/UI state |
+| `wellFactorsCollection` (decoded, §2.5), `dataAnalysisParameters`, `PersistedData`, `qcAnalysisParameters`, `precisionMeltCalibration` | **no equivalent** — application analysis/UI state |
 | `hardwareSoftwareInfo`, `auditHeader`, `header` | provenance; partly overlaps `RunInfo.xml` |
 
 Note the case difference: the root child is `plateSetup2` (capital `S`) while the standalone
@@ -178,7 +179,7 @@ The sample: 95 °C/60 s, 95 °C/10 s, 60 °C/30 s, then goto step 1 × 44 — i.
 the 45 plate reads. Step numbers are 0-based here while `runDefinition`'s `GOTO 2,44` is
 1-based. Melt/other step types are expected but not present in this sample.
 
-### 2.5 Analysis and application state (not interpreted)
+### 2.5 Analysis and application state (mostly not interpreted)
 
 No `.zpcr` equivalent — this is what CFX Manager adds on top of the raw run:
 
@@ -194,8 +195,15 @@ No `.zpcr` equivalent — this is what CFX Manager adds on top of the raw run:
   specifies the baseline/threshold/Cq algorithms they configure. The remaining sub-elements
   (`adDataAnalysisParams`, `fsdDataAnalysisParams`, `OligoContentParams`, `geneExpressionData`)
   are still uninterpreted.
-- **`wellFactorsCollection`** (~3.7 KB) — `WFHeader`, `SnrWF`, `FlyoverWF`; per-well correction
-  factors applied to the raw fluorescence.
+- **`wellFactorsCollection`** (~3.7 KB) — **decoded** (unlike the rest of this section), since it
+  is the only source of the per-well gain factors [`calibration.md`](./calibration.md) §4.1
+  applies to a raw reading. `WFHeader` is a `WellFactorsHeader` giving `Channels`, `Wells`, the
+  instrument serials, and the `snrSaved`/`flyovrSaved` flags; `SnrWF` and `FlyoverWF` each hold a
+  `WellFactors` element with one `<ChN><PAr>` per channel, a `;`-separated float per well in
+  row-major order (108 for a 96-well block, reference row included). The two flags say which set
+  was really recorded — in this sample **neither** is, the header notes the table was "created in
+  Persistence loading", and every factor is exactly `1`. Decoded by `decodeWellFactors` in
+  `pcrd.ts` into `Zpcr.wellFactors`; a `.zpcr` has no equivalent and leaves it undefined.
 - **`PersistedData`** (~39 KB) — `PD_ContentData` + `PD_ViewSettings`, tagged
   `BioRad.Common.Xml.PersistableData`; UI state (chart selections, colours), not run data.
 - **`qcAnalysisParameters`**, **`precisionMeltCalibration`** — empty in this sample.

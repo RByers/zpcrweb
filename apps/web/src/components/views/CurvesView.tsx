@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import {
   buildCalibrationMatrix,
+  REFERENCE_ROW,
   type Zpcr,
   type WellCurve,
   type DarkCurve,
@@ -20,7 +21,7 @@ import {
   computeFluorCurves,
   matchFluorCalibrations,
   resolveTubeType,
-  restrictToChannels,
+  type FluorCorrections,
 } from "../../lib/fluorCurves";
 import { ChannelBar } from "../curves/ChannelBar";
 import { FluorBar } from "../curves/FluorBar";
@@ -125,21 +126,49 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
 
   const matrix = useMemo(() => {
     if (calibratedFluors.length === 0) return null;
-    const raw = buildCalibrationMatrix(
+    // `channels` is passed in rather than slicing rows afterwards so the matrix's column norms
+    // — the RFU scale factor of calibration.md §5 — are computed over the rows the solve uses.
+    return buildCalibrationMatrix(
       calibratedFluors.map((f) => f.curve!),
       stepTemperatureC,
-      { normalization: settings.calibrationNormalization },
+      { normalization: settings.calibrationNormalization, channels: available },
     );
-    return restrictToChannels(raw, available);
   }, [calibratedFluors, stepTemperatureC, settings.calibrationNormalization, available]);
+
+  // The §4 corrections applied to every raw reading before the solve. Both levels are read
+  // per scan, so these are `[channelIndex][cycle]` tables aligned with `available`.
+  const corrections = useMemo<FluorCorrections>(() => {
+    const reads = zpcr.reads.filter((r) => r.step === activeStep);
+    // §4.1: one position of the reference row — the first — per channel, LED on.
+    const referenceLevel = available.map((ch) =>
+      reads.map((r) => r.get(ch, REFERENCE_ROW, 0).mean),
+    );
+    // §4.2: the per-channel LED-off background, from the same reads' DARKDATA.
+    const darkByChannel = new Map(darkCurves.map((d) => [d.channel, d]));
+    const darkLevel = available.map((ch) => darkByChannel.get(ch)?.mean ?? []);
+    // §4.1: per-well gain factors, only ever present in a `.pcrd` (a `.zpcr` stores none), and
+    // only when that run actually saved a set — otherwise the gain correction stays inactive
+    // and the reference level correctly has no effect of its own.
+    const factors = zpcr.wellFactors;
+    return {
+      referenceLevel,
+      darkLevel,
+      wellFactor: factors
+        ? (row, col) => {
+            const perChannel = factors.get(row, col);
+            return perChannel && available.map((ch) => perChannel[ch] ?? 1);
+          }
+        : undefined,
+    };
+  }, [zpcr, activeStep, available, darkCurves]);
 
   // The separation solve is real work (one pseudo-inverse per well per cycle) — skip it
   // entirely while the feature is off rather than computing curves nobody will see.
   const allFluorCurves = useMemo(() => {
     if (!matrix || !calibrationOn) return [];
     const dyeChannels = calibratedFluors.map((f) => f.channel);
-    return computeFluorCurves(allCurves, matrix, available, dyeChannels);
-  }, [matrix, calibrationOn, allCurves, available, calibratedFluors]);
+    return computeFluorCurves(allCurves, matrix, available, dyeChannels, corrections);
+  }, [matrix, calibrationOn, allCurves, available, calibratedFluors, corrections]);
 
   const visibleFluor = useMemo(
     () =>

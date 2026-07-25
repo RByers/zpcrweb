@@ -116,3 +116,35 @@ describe("pseudoInverse", () => {
     approxEqual(pseudoInverse(m), m);
   });
 });
+
+describe("pseudoInverse scale invariance", () => {
+  // A moderately ill-conditioned 6×6, the shape a 6-channel × 6-dye calibration matrix takes.
+  const base = [
+    [1, 0.9, 0.2, 0.1, 0.0, 0.3],
+    [0.9, 1, 0.5, 0.2, 0.1, 0.2],
+    [0.2, 0.5, 1, 0.8, 0.1, 0.1],
+    [0.1, 0.2, 0.8, 1, 0.6, 0.05],
+    [0.0, 0.1, 0.1, 0.6, 1, 0.4],
+    [0.3, 0.2, 0.1, 0.05, 0.4, 1],
+  ];
+
+  // pinv(sA) = pinv(A)/s exactly, so scaling the input must not change the answer's shape.
+  // A convergence test on absolute off-diagonal magnitude broke this: a small-magnitude matrix
+  // met it before any rotation ran, and came back with its untouched diagonal.
+  it("scales exactly as pinv(sA) = pinv(A)/s across ten orders of magnitude", () => {
+    const reference = pseudoInverse(base);
+    for (const s of [1e-6, 1e-4, 1e-2, 1, 1e2, 1e4]) {
+      const scaled = pseudoInverse(base.map((row) => row.map((v) => v * s)));
+      approxEqual(
+        scaled.map((row) => row.map((v) => v * s)),
+        reference,
+      );
+    }
+  });
+
+  it("still satisfies the Moore-Penrose round trip for a tiny-magnitude matrix", () => {
+    const tiny = base.map((row) => row.map((v) => v * 1e-5));
+    const inv = pseudoInverse(tiny);
+    approxEqual(multiply(multiply(tiny, inv), tiny), tiny);
+  });
+});

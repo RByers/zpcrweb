@@ -284,6 +284,23 @@ describe("pcrd — decoded structure (real document, re-wrapped, no secret neede
     expect(fam.security.username).toBe("Bio-Rad Service");
     expect(fam.security.app).toBe("BioRadCFXManager");
   });
+
+  it("decodes wellFactorsCollection, with no active set for this run's unsaved factors", () => {
+    const factors = pcrd.zpcr!.wellFactors!;
+    expect(factors.channelCount).toBe(6);
+    expect(factors.wellCount).toBe(108);
+    // This run saved neither set (`snrSaved`/`flyovrSaved` are both False — the header notes
+    // the factors were synthesized during persistence loading), so no gain correction applies.
+    expect(factors.source).toMatch(/Persistence loading/);
+    expect(factors.snr).toBeUndefined();
+    expect(factors.flyover).toBeUndefined();
+    expect(factors.active).toBeUndefined();
+    expect(factors.get(0, 0)).toBeUndefined();
+  });
+
+  it("has no wellFactors on a .zpcr, which stores no equivalent", () => {
+    expect(parseZpcr(readBytes(ZPCR_PATH)).wellFactors).toBeUndefined();
+  });
 });
 
 describe.skipIf(!PW)("pcrd — decryption pipeline (requires secrets.json)", () => {
