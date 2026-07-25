@@ -47,15 +47,14 @@ export function RefCalPanel({ zpcr }: { zpcr: Zpcr }) {
   };
 
   return (
-    <section className="overview__block">
-      <h2 className="overview__h">Reference row vs factory calibration</h2>
-      <p className="refcal__note">
-        Live reference reading (averaged over the run) vs the factory calibration
-        (<code>FactoryRefRowCal</code>), for every reference column and channel. Deviation
-        indicates optical drift since calibration (e.g. LED aging), not sample signal. Dark
-        background positions sit near 0%; the bright reference features show the real drift.
-      </p>
-      <div className="refcal__controls">
+    <section className="overview__block refcal">
+      <div className="refcal__side">
+        <h2 className="overview__h">Reference row vs factory calibration</h2>
+        <p className="refcal__note">
+          Live reference reading (averaged over the run) vs the factory calibration
+          (<code>FactoryRefRowCal</code>), for every reference column and channel. Deviation
+          indicates optical drift since calibration (e.g. LED aging), not sample signal.
+        </p>
         <div className="segmented segmented--sm">
           {STATS.map((s) => (
             <button
@@ -67,8 +66,13 @@ export function RefCalPanel({ zpcr }: { zpcr: Zpcr }) {
             </button>
           ))}
         </div>
+        <p className="refcal__legend mono">
+          {stat === "drift"
+            ? "% deviation of live from factory; ±≥5% highlighted."
+            : `${stat === "factory" ? "Factory-calibrated" : "Live (run-averaged)"} mean fluorescence.`}
+        </p>
       </div>
-      <div className="decoded__gridwrap">
+      <div className="decoded__gridwrap refcal__gridwrap">
         <table className="decoded__grid refcal__grid mono">
           <thead>
             <tr>
@@ -101,11 +105,6 @@ export function RefCalPanel({ zpcr }: { zpcr: Zpcr }) {
           </tbody>
         </table>
       </div>
-      <p className="refcal__legend mono">
-        {stat === "drift"
-          ? "Values are % deviation of live from factory; ±≥5% highlighted."
-          : `${stat === "factory" ? "Factory-calibrated" : "Live (run-averaged)"} mean fluorescence.`}
-      </p>
     </section>
   );
 }

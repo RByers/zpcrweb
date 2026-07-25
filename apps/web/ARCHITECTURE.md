@@ -231,7 +231,9 @@ only pieces the two views share.
 plus the reference-vs-factory-calibration table (`RefCalPanel`) below it. It reuses the same
 rail+chart layout and `CurveChart` component as the Curves view, but with its own selection
 state (`enabledRefCols`, a `RefColBar` chip bar mirroring `ChannelBar`) rather than a well
-matrix, since every plotted curve here is a reference well.
+matrix, since every plotted curve here is a reference well. Each `RefColBar` chip also has a
+small **only** button (`onOnly`) that sets `enabledRefCols` to just that one column, for
+quickly isolating a single reference well's drift.
 
 - **Live curves:** `zpcr.curves({ includeReference:true })`, filtered to `isReference` wells,
   by enabled channel and reference column. Plotted **solid** — `isReference` is forced to
@@ -240,14 +242,26 @@ matrix, since every plotted curve here is a reference well.
 - **Factory overlay:** `zpcr.factoryRefCal()` gives one `(channel, col) → mean` value per
   reference well (`RunInfo.xml`'s `FactoryRefRowCal`; see `packages/core/src/refcal.ts`). Each
   is expanded to a flat line (`mean` repeated once per cycle) and passed to `CurveChart` as
-  `factoryCurves`, an overlay concept added to
-  `lib/uplot/chart.ts`'s `buildChart()` — matched to a well curve's series by `channel,col` key
-  and drawn **dotted**, exactly the same "pure display overlay, never subtracted" pattern the
-  Dark toggle uses on the main Curves view (`darkCurves`), just keyed by column as well as
-  channel since the factory value differs per reference well rather than per channel alone.
-- **`RefCalPanel`** (`components/views/RefCalPanel.tsx`, unchanged, just relocated from
-  Overview): the col×channel drift/factory/live grid, from `zpcr.refCalComparison()` — a
-  run-averaged summary alongside the chart's per-cycle detail.
+  `factoryCurves`, an overlay concept added to `lib/uplot/chart.ts`'s `buildChart()` — matched
+  to a well curve's series by `channel,col` key and drawn **dotted** in the Raw baseline,
+  exactly the same "pure display overlay, never subtracted" pattern the Dark toggle uses on
+  the main Curves view (`darkCurves`), just keyed by column as well as channel since the
+  factory value differs per reference well rather than per channel alone. The tooltip shows
+  the matched column (`R{n}`) alongside the channel/dye for a factory series, since a factory
+  line's identity isn't otherwise visible the way a well curve's label is.
+- **ΔRFU is drift from factory, not from cycle 1:** on the main Curves view, ΔRFU subtracts
+  each curve's own first cycle (`deltaBaseline`). Here that would bury the factory
+  comparison the view exists to show, so `buildChart()` special-cases any well curve with a
+  matching `factoryCurves` entry: in the `"delta"` baseline it plots `live − factory` (constant
+  per cycle) instead, and skips drawing the factory line itself (it would otherwise be a flat,
+  redundant 0). Well curves with no factory match — none exist in this view today, but the
+  branch is generic — still fall back to the normal `deltaBaseline`.
+- **`RefCalPanel`** (`components/views/RefCalPanel.tsx`, relocated from Overview): the
+  col×channel drift/factory/live grid, from `zpcr.refCalComparison()` — a run-averaged summary
+  alongside the chart's per-cycle detail. Laid out as `.refcal`, a two-column flex row (text +
+  stat toggle on the left, the grid on the right, wrapping to stacked on narrow containers)
+  rather than stacked blocks, so the panel's height is set by the taller side instead of their
+  sum — it was previously the tallest section on the page.
 
 ## Color encoding (see `lib/channelColors.ts`)
 

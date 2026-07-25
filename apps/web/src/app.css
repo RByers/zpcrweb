@@ -275,12 +275,33 @@
   color: var(--ink-2);
   word-break: break-all;
 }
+/* Text/controls beside the grid rather than stacked above it, so the whole panel's height is
+   set by the taller of the two (usually the grid) instead of their sum. */
+.refcal {
+  display: flex;
+  align-items: flex-start;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+.refcal__side {
+  flex: 1 1 240px;
+  min-width: 200px;
+  max-width: 320px;
+}
+.refcal__side .overview__h {
+  margin-bottom: 6px;
+}
+.refcal__side .segmented {
+  margin: 6px 0;
+}
+.refcal__gridwrap {
+  flex: 2 1 420px;
+}
 .refcal__note {
-  margin: 0 0 10px;
-  max-width: 80ch;
+  margin: 0;
   color: var(--ink-muted);
   font-size: 12px;
-  line-height: 1.5;
+  line-height: 1.4;
 }
 .refcal__note code {
   font-family: var(--font-mono);
@@ -292,17 +313,18 @@
   color: var(--neon-magenta);
   font-weight: 600;
 }
-.refcal__controls {
-  margin-bottom: 10px;
-}
 .refcal__grid th {
   white-space: nowrap;
+  padding: 2px 8px;
+}
+.refcal__grid td {
+  padding: 1px 8px;
 }
 .refcal__grid tbody th {
   color: var(--ink-2);
 }
 .refcal__legend {
-  margin: 8px 0 0;
+  margin: 0;
   font-size: 11px;
   color: var(--ink-muted);
 }
@@ -454,6 +476,44 @@
 .chanchip__dye {
   font-size: 10px;
   color: var(--ink-muted);
+}
+
+/* A `.refchip` is a `<div>` (not a `<button>`), so it needs its own border/radius — the base
+   `button` rule that `.chanchip` normally rides on doesn't apply. */
+.refchip {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 4px 4px 4px 8px;
+  transition: border-color 120ms, background 120ms, box-shadow 120ms, opacity 120ms;
+}
+.refchip__toggle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  background: transparent;
+  padding: 0;
+}
+.refchip__toggle:hover {
+  background: transparent;
+}
+.refchip__only {
+  flex: 0 0 auto;
+  border: 0;
+  background: transparent;
+  padding: 2px 4px;
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+  opacity: 0.7;
+}
+.refchip__only:hover {
+  background: transparent;
+  color: var(--neon-cyan);
+  opacity: 1;
 }
 
 /* ---- Well matrix -------------------------------------------------------- */

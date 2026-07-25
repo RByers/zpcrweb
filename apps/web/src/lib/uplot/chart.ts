@@ -48,6 +48,8 @@ interface SeriesMeta {
   kind: "well" | "dark" | "factory" | "temp";
   /** Optical channel for well/dark series; -1 for temperature series. */
   channel: number;
+  /** Reference/plate column, for a factory-overlay series; -1 for every other kind. */
+  col: number;
   label: string;
   dyeLabel: string;
   isReference: boolean;
@@ -71,6 +73,8 @@ export interface TooltipData {
   label: string;
   /** Optical channel for well/dark series; -1 for temperature series. */
   channel: number;
+  /** Reference/plate column, for a factory-overlay series; -1 for every other kind. */
+  col: number;
   dye: string;
   color: string;
   cycle: number;
@@ -119,18 +123,34 @@ export function buildChart(cfg: BuildChartConfig): {
   const darkByChannel = new Map<number, DarkCurve>();
   for (const d of darkCurves) darkByChannel.set(d.channel, d);
 
+  const factoryByKey = new Map<string, FactoryCurve>();
+  for (const f of factoryCurves) factoryByKey.set(`${f.channel},${f.col}`, f);
+
   const transform = (values: number[]): number[] =>
     baseline === "delta" ? deltaBaseline(values) : values;
+
+  // A well curve with a matching factory value plots ΔRFU as (live − factory) rather than
+  // deltaBaseline's (live − first cycle) — drift from the factory calibration, not from the
+  // run's own start. The factory line itself is redundant in that mode (it would just be a
+  // flat 0), so it's skipped below.
+  const transformWell = (curve: PlotCurve): number[] => {
+    const factory = factoryByKey.get(`${curve.channel},${curve.col}`);
+    if (baseline === "delta" && factory) {
+      return curve.mean.map((v, i) => v - (factory.mean[i] ?? 0));
+    }
+    return transform(curve.mean);
+  };
 
   const rows: (number | null)[][] = [cycles.map((c) => c)];
   const meta: SeriesMeta[] = [];
   const series: uPlot.Series[] = [{ label: "Cycle" }];
 
   for (const curve of wellCurves) {
-    rows.push(logSafe(transform(curve.mean), scale));
+    rows.push(logSafe(transformWell(curve), scale));
     meta.push({
       kind: "well",
       channel: curve.channel,
+      col: curve.col,
       label: curve.wellLabel,
       dyeLabel: curve.dyeLabel,
       isReference: curve.isReference,
@@ -157,6 +177,7 @@ export function buildChart(cfg: BuildChartConfig): {
     meta.push({
       kind: "dark",
       channel,
+      col: -1,
       label: "dark",
       dyeLabel: channelLabel(channel),
       isReference: false,
@@ -175,33 +196,35 @@ export function buildChart(cfg: BuildChartConfig): {
     });
   }
 
-  const factoryByKey = new Map<string, FactoryCurve>();
-  for (const f of factoryCurves) factoryByKey.set(`${f.channel},${f.col}`, f);
-
-  const presentPairs = new Set(wellCurves.map((c) => `${c.channel},${c.col}`));
-  for (const key of presentPairs) {
-    const factory = factoryByKey.get(key);
-    if (!factory) continue;
-    rows.push(logSafe(transform(factory.mean), scale));
-    meta.push({
-      kind: "factory",
-      channel: factory.channel,
-      label: "factory",
-      dyeLabel: channelLabel(factory.channel),
-      isReference: false,
-      cycles,
-      mean: factory.mean,
-      std: factory.mean.map(() => 0),
-      min: factory.mean,
-      max: factory.mean,
-    });
-    series.push({
-      label: `factory · ${channelLabel(factory.channel)} col ${factory.col + 1}`,
-      stroke: channelColor(factory.channel),
-      width: 2,
-      dash: FACTORY_DOT,
-      points: { show: false },
-    });
+  // The factory line is redundant (and misleading — it'd plot as a flat 0) once ΔRFU is
+  // computed relative to it above, so it's only drawn against the raw/Δ-from-start baseline.
+  if (baseline !== "delta") {
+    const presentPairs = new Set(wellCurves.map((c) => `${c.channel},${c.col}`));
+    for (const key of presentPairs) {
+      const factory = factoryByKey.get(key);
+      if (!factory) continue;
+      rows.push(logSafe(transform(factory.mean), scale));
+      meta.push({
+        kind: "factory",
+        channel: factory.channel,
+        col: factory.col,
+        label: "factory",
+        dyeLabel: channelLabel(factory.channel),
+        isReference: false,
+        cycles,
+        mean: factory.mean,
+        std: factory.mean.map(() => 0),
+        min: factory.mean,
+        max: factory.mean,
+      });
+      series.push({
+        label: `factory · ${channelLabel(factory.channel)} col ${factory.col + 1}`,
+        stroke: channelColor(factory.channel),
+        width: 2,
+        dash: FACTORY_DOT,
+        points: { show: false },
+      });
+    }
   }
 
   // Temperatures ride the right-hand °C axis so they can share the x axis with the curves
@@ -211,6 +234,7 @@ export function buildChart(cfg: BuildChartConfig): {
     meta.push({
       kind: "temp",
       channel: -1,
+      col: -1,
       label: t.label,
       dyeLabel: "",
       isReference: false,
@@ -233,7 +257,7 @@ export function buildChart(cfg: BuildChartConfig): {
   // Min/max envelope bands. Auto shows them only when a single well (one row/col) is
   // selected, regardless of how many channels — so each channel's curve gets its own band.
   const computeBand = (c: PlotCurve): BandData => {
-    const plottedMean = transform(c.mean);
+    const plottedMean = transformWell(c);
     const min: (number | null)[] = [];
     const max: (number | null)[] = [];
     for (let i = 0; i < c.mean.length; i++) {
@@ -450,6 +474,7 @@ function overlayPlugin(
             kind: "temp",
             label: m.label,
             channel: -1,
+            col: -1,
             dye: "",
             color: (u.series[best]!.stroke as string) ?? "#8aa0c0",
             cycle: m.cycles[idx] ?? 0,
@@ -494,6 +519,7 @@ function overlayPlugin(
           kind: m.kind,
           label: m.label,
           channel: m.channel,
+          col: m.col,
           dye: m.dyeLabel,
           color,
           cycle: m.cycles[idx] ?? 0,

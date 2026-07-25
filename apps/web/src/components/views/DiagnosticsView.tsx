@@ -17,9 +17,11 @@ interface Props {
 
 /**
  * Reference row only, plotted against the factory calibration: a solid line per (channel,
- * reference column) for the live reads, and a dotted flat line for the matching
- * `FactoryRefRowCal` value — the same dotted-overlay pattern as the Dark toggle on the main
- * Curves view (see `chart.ts`'s `factoryCurves`).
+ * reference column) for the live reads, and — in the Raw baseline — a dotted flat line for
+ * the matching `FactoryRefRowCal` value, the same dotted-overlay pattern as the Dark toggle
+ * on the main Curves view (see `chart.ts`'s `factoryCurves`). Switching to ΔRFU replots the
+ * live line as drift from the factory value (`live − factory`) rather than drift from the
+ * run's own first cycle, so the (now redundant, always-zero) factory line is hidden instead.
  */
 export function DiagnosticsView({ zpcr, settings, onChange }: Props) {
   const steps = useMemo(() => zpcr.steps(), [zpcr]);
@@ -91,6 +93,10 @@ export function DiagnosticsView({ zpcr, settings, onChange }: Props) {
     onChange({ enabledRefCols: next });
   };
 
+  const onlyRefCol = (col: number) => {
+    onChange({ enabledRefCols: new Set([col]) });
+  };
+
   return (
     <div className="diagnostics">
       <div className="diagnostics__chart">
@@ -120,7 +126,12 @@ export function DiagnosticsView({ zpcr, settings, onChange }: Props) {
 
           <div className="rail__section">
             <div className="rail__title">Reference columns</div>
-            <RefColBar enabled={settings.enabledRefCols} columns={columns} onToggle={toggleRefCol} />
+            <RefColBar
+              enabled={settings.enabledRefCols}
+              columns={columns}
+              onToggle={toggleRefCol}
+              onOnly={onlyRefCol}
+            />
           </div>
 
           <div className="rail__section rail__row">
@@ -145,7 +156,10 @@ export function DiagnosticsView({ zpcr, settings, onChange }: Props) {
           </div>
 
           <div className="rail__stat mono">
-            {plotCurves.length} reference curves · {factoryCurves.length} factory
+            {plotCurves.length} reference curves
+            {settings.baseline === "delta"
+              ? " · ΔRFU from factory"
+              : ` · ${factoryCurves.length} factory`}
           </div>
         </aside>
 

@@ -94,6 +94,7 @@ export function CurveChart({
             {tip.kind !== "temp" && (
               <span className="chart__tip-dye">
                 C{tip.channel + 1} · {tip.dye}
+                {tip.kind === "factory" && ` · R${tip.col + 1}`}
               </span>
             )}
           </div>
