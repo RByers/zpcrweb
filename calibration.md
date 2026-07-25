@@ -12,8 +12,11 @@ the plate, estimate how much each dye actually contributed.
 > [`linalg.ts`](./packages/core/src/linalg.ts)), tested against the calibration data in the
 > committed sample archives. Not yet cross-validated end-to-end against a reference instrument's
 > own color-separated output, so treat this as "correct per the algorithm below," not
-> "byte-for-byte verified." What is still open is the *absolute* RFU scale and the well-factor-set
-> selection rule not yet being wired up in code — see §8.
+> "byte-for-byte verified" — with one exception: §4's preprocessing rules (the reference-level
+> pivot, the well-factor-set selection rule, and the dark-current subtraction) have been confirmed
+> directly against the real analysis software's own logic, not just inferred from file formats.
+> What is still open is the *absolute* RFU scale (§8) and the well-factor-set selection rule not
+> yet being wired up in *this library's* code (§8) — §4 itself is settled.
 
 ---
 
@@ -111,12 +114,16 @@ Both are **independently optional** — a run may have either, both, or neither 
 order matters:
 
 1. Start from the raw per-channel mean fluorescence for the well/cycle.
-2. **Per-well gain correction, pivoted on the reference level** (§4.1). If per-well correction
-   factors are in play:
+2. **Per-well gain correction, pivoted on the reference level** (§4.1). This whole step is gated
+   by one user-facing setting — apply well factors, on or off — as well as by whether a well-factor
+   table is actually present; when it's active:
 
    ```
    corrected = (raw − referenceLevel) / wellFactor + referenceLevel
    ```
+
+   When it's off, the reference level is not merely inert — it is never read from the plate read at
+   all, for any purpose. It exists solely to feed this one calculation.
 
 3. **Dark-current subtraction** (§4.2), if enabled:
 
@@ -129,8 +136,8 @@ The result is the corrected channel vector that goes into §5.
 Note what step 2 is *not*: the reference level is **not subtracted** from the reading. It is
 removed, used as the zero point for the gain scaling, and then added straight back. Only the
 portion of the signal *above* the reference level is scaled; the reference level itself passes
-through untouched. If no per-well factors are active, the reference level has **no effect
-whatsoever** on the reading — it is not a background term in its own right.
+through untouched. It is not a background term in its own right — it has no role anywhere outside
+this one calculation.
 
 Note also that the gain factor **divides** rather than multiplies. Whether a given factor
 convention is a divisor or a multiplier is pure convention, but getting it backwards inverts the
@@ -189,17 +196,19 @@ apply, and its reference level correspondingly has no effect.
 
 **It would be reasonable to expect more: that the instrument compares all 12 live reference
 columns against a factory-measured baseline, every cycle, to derive a per-channel correction
-factor that tracks optical drift in real time.** That is not what happens, in this library or (as
-far as the decoded formats show) in the source instrument software. What the run's metadata
-carries instead is a **factory calibration of the full reference row** — one static value per
-(channel, column), recorded once, not per cycle — and the only thing built from it is a
-**diagnostic**: this library's reference-calibration comparison averages each column's *live*
-readings across the *entire run* (not per cycle) and reports the delta against that column's
-factory value, as a drift indicator for a human to look at. Nothing consumes that comparison's
-output as an input to §4 — the gain correction in this section is the only place drift-tracking
-actually happens, and it runs through the single per-cycle black-level pivot above, not through
-this diagnostic. Be careful not to confuse that diagnostic sense of "drift" with the analysis
-option of the same name (§6).
+factor that tracks optical drift in real time. It does not.** This has been confirmed directly
+against the analysis software's own logic, not inferred from what a file format happens to carry:
+the reference-level read described above is the *only* per-cycle use of reference-row data
+anywhere in the run-processing path, full stop — there is no second routine anywhere that reads
+columns other than the one, and no routine that folds a factory/live comparison back into a
+correction. What the run's metadata does carry is a **factory calibration of the full reference
+row** — one static value per (channel, column), recorded once when the instrument was serviced,
+not per cycle. The only thing built from it is a **diagnostic**: this library's
+reference-calibration comparison averages each column's *live* readings across the *entire run*
+(not per cycle) and reports the delta against that column's factory value, as a drift indicator for
+a human to look at, surfaced in a calibration/service view rather than fed into any calculation.
+Be careful not to confuse that diagnostic sense of "drift" with the analysis option of the same
+name (§6).
 
 ### 4.2 Dark data (LED off)
 
