@@ -1,5 +1,5 @@
 import uPlot from "uplot";
-import { deltaBaseline, type DarkCurve, type TemperatureCurve } from "@zpcrweb/core";
+import type { DarkCurve, TemperatureCurve } from "@zpcrweb/core";
 import { channelColor, channelLabel } from "../channelColors";
 import { tempColor } from "../tempColors";
 import type { Baseline, BandsMode, Scale } from "../../state/useZpcrStore";
@@ -34,6 +34,47 @@ function logSafe(values: number[], scale: Scale): (number | null)[] {
   return values.map((v) => (v <= 0 ? null : v));
 }
 
+/**
+ * How a raw value (mean, min, max, or a std offset) maps into plotted space at one cycle:
+ * `plotted = raw * scale + shift`. Delta baselines are additive (`scale: 1`, `shift` is the
+ * subtracted reference); the percent baseline is multiplicative (`shift: 0`, `scale` rescales
+ * to % of factory) — a single {scale, shift} pair covers both without the tooltip/band code
+ * needing to know which baseline produced it.
+ */
+interface Adjust {
+  scale: number;
+  shift: number;
+}
+const IDENTITY_ADJUST: Adjust = { scale: 1, shift: 0 };
+
+function applyAdjust(values: number[], adjust: Adjust[]): number[] {
+  return values.map((v, i) => v * adjust[i]!.scale + adjust[i]!.shift);
+}
+
+/**
+ * Per-cycle adjust for a well curve. ΔRFU plots drift from the matching factory value when one
+ * exists (`shift = -factory`), else drift from the run's own first cycle (deltaBaseline's
+ * behavior). "%" plots the value as a percentage of the matching factory value; with no factory
+ * value to divide by, it has no defined meaning, so it falls back to raw (identity) like ΔRFU
+ * falls back to deltaBaseline.
+ */
+function wellAdjust(values: number[], factory: number[] | undefined, baseline: Baseline): Adjust[] {
+  if (baseline === "delta" && factory) {
+    return values.map((_, i) => ({ scale: 1, shift: -(factory[i] ?? 0) }));
+  }
+  if (baseline === "delta") {
+    const shift = -(values[0] ?? 0);
+    return values.map(() => ({ scale: 1, shift }));
+  }
+  if (baseline === "percent" && factory) {
+    return values.map((_, i) => {
+      const f = factory[i] ?? 0;
+      return { scale: f !== 0 ? 100 / f : 1, shift: 0 };
+    });
+  }
+  return values.map(() => IDENTITY_ADJUST);
+}
+
 /** A factory-calibration reference value, overlaid as a dotted flat line per (channel, col) —
  * see the Reference view. Purely a display overlay, like {@link DarkCurve}. */
 export interface FactoryCurve {
@@ -58,6 +99,9 @@ interface SeriesMeta {
   std: number[];
   min: number[];
   max: number[];
+  /** Per-cycle raw→plotted mapping this series was drawn with; lets the tooltip/band code
+   * reposition min/max/std into plotted space without recomputing which baseline applied. */
+  adjust: Adjust[];
 }
 
 /** Min/max envelope for a single isolated well (drawn as a shaded band). */
@@ -126,27 +170,25 @@ export function buildChart(cfg: BuildChartConfig): {
   const factoryByKey = new Map<string, FactoryCurve>();
   for (const f of factoryCurves) factoryByKey.set(`${f.channel},${f.col}`, f);
 
-  const transform = (values: number[]): number[] =>
-    baseline === "delta" ? deltaBaseline(values) : values;
-
-  // A well curve with a matching factory value plots ΔRFU as (live − factory) rather than
-  // deltaBaseline's (live − first cycle) — drift from the factory calibration, not from the
-  // run's own start. The factory line itself is redundant in that mode (it would just be a
-  // flat 0), so it's skipped below.
-  const transformWell = (curve: PlotCurve): number[] => {
-    const factory = factoryByKey.get(`${curve.channel},${curve.col}`);
-    if (baseline === "delta" && factory) {
-      return curve.mean.map((v, i) => v - (factory.mean[i] ?? 0));
-    }
-    return transform(curve.mean);
-  };
+  // Dark/temp series have no factory match, so "%" has no meaning for them — deltaBaseline
+  // still applies under ΔRFU, but percent falls back to identity (raw values).
+  const nonWellAdjust = (values: number[]): Adjust[] =>
+    baseline === "delta"
+      ? values.map(() => ({ scale: 1, shift: -(values[0] ?? 0) }))
+      : values.map(() => IDENTITY_ADJUST);
 
   const rows: (number | null)[][] = [cycles.map((c) => c)];
   const meta: SeriesMeta[] = [];
   const series: uPlot.Series[] = [{ label: "Cycle" }];
+  // Kept alongside `meta` so computeBand (below) can reuse the exact same per-cycle mapping
+  // each well curve's line was plotted with, rather than re-deriving it.
+  const wellAdjusts: Adjust[][] = [];
 
   for (const curve of wellCurves) {
-    rows.push(logSafe(transformWell(curve), scale));
+    const factory = factoryByKey.get(`${curve.channel},${curve.col}`);
+    const adjust = wellAdjust(curve.mean, factory?.mean, baseline);
+    wellAdjusts.push(adjust);
+    rows.push(logSafe(applyAdjust(curve.mean, adjust), scale));
     meta.push({
       kind: "well",
       channel: curve.channel,
@@ -159,6 +201,7 @@ export function buildChart(cfg: BuildChartConfig): {
       std: curve.std,
       min: curve.min,
       max: curve.max,
+      adjust,
     });
     series.push({
       label: `${curve.wellLabel} · ${curve.dyeLabel}`,
@@ -173,7 +216,8 @@ export function buildChart(cfg: BuildChartConfig): {
   for (const channel of presentChannels) {
     const dark = darkByChannel.get(channel);
     if (!dark) continue;
-    rows.push(logSafe(transform(dark.mean), scale));
+    const adjust = nonWellAdjust(dark.mean);
+    rows.push(logSafe(applyAdjust(dark.mean, adjust), scale));
     meta.push({
       kind: "dark",
       channel,
@@ -186,6 +230,7 @@ export function buildChart(cfg: BuildChartConfig): {
       std: dark.std,
       min: dark.min,
       max: dark.max,
+      adjust,
     });
     series.push({
       label: `dark · ${channelLabel(channel)}`,
@@ -197,13 +242,15 @@ export function buildChart(cfg: BuildChartConfig): {
   }
 
   // The factory line is redundant (and misleading — it'd plot as a flat 0) once ΔRFU is
-  // computed relative to it above, so it's only drawn against the raw/Δ-from-start baseline.
+  // computed relative to it above, so it's only drawn against the raw/percent baselines —
+  // under "%" it plots as a flat 100, a visible reference for "on-spec".
   if (baseline !== "delta") {
     const presentPairs = new Set(wellCurves.map((c) => `${c.channel},${c.col}`));
     for (const key of presentPairs) {
       const factory = factoryByKey.get(key);
       if (!factory) continue;
-      rows.push(logSafe(transform(factory.mean), scale));
+      const adjust = wellAdjust(factory.mean, factory.mean, baseline);
+      rows.push(logSafe(applyAdjust(factory.mean, adjust), scale));
       meta.push({
         kind: "factory",
         channel: factory.channel,
@@ -216,6 +263,7 @@ export function buildChart(cfg: BuildChartConfig): {
         std: factory.mean.map(() => 0),
         min: factory.mean,
         max: factory.mean,
+        adjust,
       });
       series.push({
         label: `factory · ${channelLabel(factory.channel)} col ${factory.col + 1}`,
@@ -243,6 +291,7 @@ export function buildChart(cfg: BuildChartConfig): {
       std: [],
       min: [],
       max: [],
+      adjust: [],
     });
     series.push({
       label: `${t.label} (°C)`,
@@ -256,14 +305,13 @@ export function buildChart(cfg: BuildChartConfig): {
 
   // Min/max envelope bands. Auto shows them only when a single well (one row/col) is
   // selected, regardless of how many channels — so each channel's curve gets its own band.
-  const computeBand = (c: PlotCurve): BandData => {
-    const plottedMean = transformWell(c);
+  const computeBand = (c: PlotCurve, adjust: Adjust[]): BandData => {
     const min: (number | null)[] = [];
     const max: (number | null)[] = [];
     for (let i = 0; i < c.mean.length; i++) {
-      const off = (plottedMean[i] ?? 0) - (c.mean[i] ?? 0);
-      const mn = (c.min[i] ?? 0) + off;
-      const mx = (c.max[i] ?? 0) + off;
+      const a = adjust[i] ?? IDENTITY_ADJUST;
+      const mn = (c.min[i] ?? 0) * a.scale + a.shift;
+      const mx = (c.max[i] ?? 0) * a.scale + a.shift;
       min.push(scale === "log" && mn <= 0 ? null : mn);
       max.push(scale === "log" && mx <= 0 ? null : mx);
     }
@@ -273,7 +321,9 @@ export function buildChart(cfg: BuildChartConfig): {
   const distinctWells = new Set(wellCurves.map((c) => `${c.row},${c.col}`));
   const showBands =
     cfg.bands === "on" || (cfg.bands === "auto" && distinctWells.size === 1);
-  const bands: BandData[] = showBands ? wellCurves.map(computeBand) : [];
+  const bands: BandData[] = showBands
+    ? wellCurves.map((c, i) => computeBand(c, wellAdjusts[i]!))
+    : [];
 
   const options: uPlot.Options = {
     width: cfg.width,
@@ -347,7 +397,9 @@ export function buildChart(cfg: BuildChartConfig): {
 }
 
 function yLabel(baseline: Baseline): string {
-  return baseline === "delta" ? "ΔRFU (mean)" : "RFU (mean)";
+  if (baseline === "delta") return "ΔRFU (mean)";
+  if (baseline === "percent") return "RFU (% of factory)";
+  return "RFU (mean)";
 }
 
 /**
@@ -488,12 +540,13 @@ function overlayPlugin(
           return;
         }
 
-        const offset = plotted - (m.mean[idx] ?? 0);
+        const a = m.adjust[idx] ?? IDENTITY_ADJUST;
         const x = u.valToPos(m.cycles[idx] ?? 0, "x");
-        const yMax = u.valToPos((m.max[idx] ?? 0) + offset, "y");
-        const yMin = u.valToPos((m.min[idx] ?? 0) + offset, "y");
-        const yHi = u.valToPos(plotted + (m.std[idx] ?? 0), "y");
-        const yLo = u.valToPos(plotted - (m.std[idx] ?? 0), "y");
+        const yMax = u.valToPos((m.max[idx] ?? 0) * a.scale + a.shift, "y");
+        const yMin = u.valToPos((m.min[idx] ?? 0) * a.scale + a.shift, "y");
+        const stdOff = (m.std[idx] ?? 0) * a.scale;
+        const yHi = u.valToPos(plotted + stdOff, "y");
+        const yLo = u.valToPos(plotted - stdOff, "y");
         const color = channelColor(m.channel);
 
         if ([x, yMax, yMin, yHi, yLo].every(Number.isFinite)) {

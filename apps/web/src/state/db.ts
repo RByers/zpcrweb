@@ -28,7 +28,7 @@ export interface StoredSettings {
   enabledWells: string[]; // "row,col" keys
   /** Reference columns (0-based) shown in the Reference view. */
   enabledRefCols?: number[];
-  baseline: "raw" | "delta";
+  baseline: "raw" | "delta" | "percent";
   scale: "linear" | "log";
   showDark: boolean;
   bands: "off" | "auto" | "on";

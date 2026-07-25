@@ -20,7 +20,7 @@ import { usePltdPassword } from "./pltdPassword";
 export type FileKind = "zpcr" | "pcrd";
 
 export type ViewId = "overview" | "curves" | "reference" | "plates" | "raw";
-export type Baseline = "raw" | "delta";
+export type Baseline = "raw" | "delta" | "percent";
 export type Scale = "linear" | "log";
 /** Min/max envelope bands: always off, always on, or auto (only when one well selected). */
 export type BandsMode = "off" | "auto" | "on";
