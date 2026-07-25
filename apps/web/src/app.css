@@ -387,9 +387,46 @@
   background: transparent;
   opacity: 1;
 }
-.rail__link.is-on {
-  color: var(--neon-magenta);
-  opacity: 1;
+.switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  font-size: 11px;
+  color: var(--ink-2);
+}
+.switch__track {
+  position: relative;
+  width: 26px;
+  height: 15px;
+  border-radius: 8px;
+  background: var(--raised-2);
+  border: 1px solid var(--border);
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.switch__track::after {
+  content: "";
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: var(--ink-muted);
+  transition: transform 0.15s ease, background 0.15s ease;
+}
+.switch.is-on {
+  color: var(--ink);
+}
+.switch.is-on .switch__track {
+  background: var(--neon-magenta-dim);
+  border-color: var(--neon-magenta);
+}
+.switch.is-on .switch__track::after {
+  background: var(--neon-magenta);
+  transform: translateX(11px);
 }
 .rail__icon-btn {
   display: inline-flex;

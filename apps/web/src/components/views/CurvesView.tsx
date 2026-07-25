@@ -32,6 +32,7 @@ import { TempBar } from "../curves/TempBar";
 import { BaselineRangeSlider } from "../curves/BaselineRangeSlider";
 import { PasswordPrompt } from "../PasswordPrompt";
 import { Toggle } from "../Toggle";
+import { Switch } from "../Switch";
 import { ResetIcon } from "../ResetIcon";
 import type { PlotCurve } from "../../lib/uplot/chart";
 
@@ -472,23 +473,23 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
         <div className="rail__section">
           <div className="rail__title">
             {calibrationOn ? (fluorViewMode === "target" ? "Targets" : "Fluorophores") : "Channels"}
-            {calibrationOn && (
-              <button
-                className={"rail__link" + (settings.showUnloadedFluors ? " is-on" : "")}
-                onClick={() => onChange({ showUnloadedFluors: !settings.showUnloadedFluors })}
-                aria-pressed={settings.showUnloadedFluors}
-                title="Draw curves for every enabled well, even ones the plate configuration doesn't load this fluor/target into"
-              >
-                Unloaded
-              </button>
-            )}
           </div>
           {calibrationOn ? (
-            <FluorBar
-              items={chipItems}
-              disabled={settings.disabledFluors}
-              onToggle={toggleFluor}
-            />
+            <>
+              <FluorBar
+                items={chipItems}
+                disabled={settings.disabledFluors}
+                onToggle={toggleFluor}
+              />
+              <div className="rail__row" style={{ marginTop: 8 }}>
+                <Switch
+                  label="Unloaded"
+                  checked={settings.showUnloadedFluors}
+                  onChange={(v) => onChange({ showUnloadedFluors: v })}
+                  title="Draw curves for every enabled well, even ones the plate configuration doesn't load this fluor/target into"
+                />
+              </div>
+            </>
           ) : (
             <ChannelBar
               enabled={settings.enabledChannels}
