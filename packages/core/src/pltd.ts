@@ -99,7 +99,11 @@ export interface PlateFluor {
 
 /** A fully decoded plate definition. */
 export interface PlateDefinition {
-  /** Plate name (`plateName`), e.g. `BR Clear`. */
+  /**
+   * Vessel type (`plateName`) — the plastic the reaction sits in, not a user-chosen label:
+   * `BR Clear`, `BR White` or `MJ White`. Matches a `.Dcal`'s plate field (compare
+   * case-insensitively) and so selects which calibration data applies. See `pltd.md` §2.
+   */
   plateName: string;
   /** Row count (typically 8). */
   rows: number;

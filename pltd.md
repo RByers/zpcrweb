@@ -56,6 +56,53 @@ Decrypted and inflated, the entry is a UTF-8 (BOM-prefixed) XML document rooted 
 </platesetup2>
 ```
 
+### Vessel type (white vs. clear) — `plateName`
+
+**The tube/plate type lives in the root element's `plateName` attribute.** Despite its name it is
+not a user-chosen label for the file — that is `header/@name` — but the **type of plastic the
+reaction sits in**, chosen from a fixed list. Both committed samples carry one:
+`BR White` in the 2019 `.zpcr`'s plate, `BR Clear` in the `.pcrd` sample.
+
+Observed values, and the complete set the software recognizes:
+
+| Value | Meaning |
+|---|---|
+| `BR Clear` | Bio-Rad clear-plastic plate/tubes |
+| `BR White` | Bio-Rad white-plastic plate/tubes |
+| `MJ White` | Legacy MJ Research white vessel — the default for plates originating in the older MJ-lineage path (see the iQ5 lineage note in §1) |
+
+Across the plate files available for inspection the distribution is roughly two-thirds
+`BR White`, one-third `BR Clear`, with a single `MJ White`.
+
+**Why it matters:** white and clear plastic differ in reflectivity and background fluorescence, so
+each has its **own pure-dye calibration**. This attribute is the join key into that calibration
+data — `.Dcal` files carry a matching plate field using **the same strings** (see
+[`dcal.md`](./dcal.md) §2, `PLATE`), and every `.zpcr` ships its calibration set covering both
+plate types. Effectively, `plateName` selects which half of the archive's calibration data
+applies, and therefore which dyes have usable calibration at all. Colour separation
+([`calibration.md`](./calibration.md)) is only meaningful against the calibration for the plate
+type the run actually used.
+
+Three traps worth knowing:
+
+- **`plateName` is reused on `<dyeLayer>` with an entirely different meaning** — there it holds the
+  *fluorophore* name (`<dyeLayer plateName="SYBR" …>`), not a vessel type. Only the attribute on
+  the **root element** is the plate type. This is why the parser reads the dye layer's name from
+  `fluorName` where possible and treats the layer's `plateName` only as a fallback.
+- **Compare case-insensitively.** The software carries both display-cased (`BR White`) and
+  upper-cased (`BR WHITE`) forms of these names, and the shipped calibration files are
+  inconsistent in the same way. Matching a plate to its calibration on an exact-case comparison
+  will silently fail on some inputs.
+- **`plateName` is not `plateType`.** The neighbouring `plateType` attribute is the *template
+  category* (`OtherStdTemplate` in every file inspected) and says nothing about the vessel. The
+  software separately models a vessel *form* — unassigned / plates / strips / tubes — but that is
+  internal collection metadata and is **not** what this attribute holds; the white/clear
+  distinction is carried by the string above and nothing else.
+
+One cross-format note: the `.pcrd` document embeds this same schema but spells the root element
+`<plateSetup2>` (capital S) where a `.pltd` uses `<platesetup2>`. The attribute is `plateName` in
+both. Match the element name case-insensitively if one code path handles both.
+
 ### Dye layers → fluorophores
 
 There is **one `<dyeLayer>` per fluorophore**, in channel order. Its `<fluor>` gives the
@@ -103,6 +150,7 @@ an empty tube.
 `parsePltd()` returns the container metadata plus a `PlateDefinition` with `fluors` (dye
 layers), `targets`, `conditions`, and `wells[]` — each `WellDefinition` carrying its loaded
 `fluors` (with per-fluor `target`), `sampleType`, `sampleName`, `condition(s)`, `replicate`
-and `quantity`. On a wrong/missing password the container is still returned with an `error`
+and `quantity`. The vessel type is exposed as `PlateDefinition.plateName` (§2) — the value to
+match against a `.Dcal`'s plate field when selecting calibration. On a wrong/missing password the container is still returned with an `error`
 so callers can fall back to a raw hex view. The web app's **Raw files → Plate setup** panel
 renders both a colour-coded plate map and the pretty-printed decrypted XML.
