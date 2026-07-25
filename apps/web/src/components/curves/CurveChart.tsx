@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import uPlot from "uplot";
-import type { DarkCurve, TemperatureCurve, WellCurve } from "@zpcrweb/core";
+import type { DarkCurve, TemperatureCurve } from "@zpcrweb/core";
 import type { Baseline, BandsMode, Scale } from "../../state/useZpcrStore";
-import { buildChart, type TooltipData } from "../../lib/uplot/chart";
+import { buildChart, type PlotCurve, type TooltipData } from "../../lib/uplot/chart";
 
 interface Props {
-  curves: WellCurve[];
+  curves: PlotCurve[];
   darkCurves: DarkCurve[];
   /** Temperature series for the right-hand °C axis; empty hides that axis. */
   tempCurves: TemperatureCurve[];

@@ -1,6 +1,6 @@
 import { Fragment, useMemo } from "react";
 import { findDcalBlock, parseDcal, type Dcal, type DcalBlock, type Zpcr } from "@zpcrweb/core";
-import { channelColor, channelDye } from "../../lib/channelColors";
+import { channelColor } from "../../lib/channelColors";
 
 const TEMPS = [20, 40, 60, 80];
 
@@ -30,7 +30,7 @@ export function DecodedDcal({ zpcr, name }: { zpcr: Zpcr; name: string }) {
         <dl className="decoded__dl mono">
           <Pair
             k="Primary channel"
-            v={`C${dcal.primaryChannel + 1} (${channelDye(dcal.primaryChannel)})`}
+            v={`C${dcal.primaryChannel + 1} (${dcal.dye || "?"})`}
           />
           <Pair k="Channels × wells" v={`${dcal.channelCount} × ${dcal.wellCount}`} />
           <Pair

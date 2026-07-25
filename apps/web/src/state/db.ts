@@ -33,6 +33,14 @@ export interface StoredSettings {
   step: number | null;
   /** Temperature field keys plotted on the right axis, e.g. `["BLOCKTEMP"]`. */
   temps?: string[];
+  /** Color separation: on/off, or unset to auto-enable when plate + calibration data exist. */
+  calibration?: boolean | null;
+  /** Calibration normalization mode; see `calibration.md` §3. */
+  calibrationNormalization?: "none" | "column" | "global";
+  /** Tube/plate type override for calibration matching, or unset to auto-detect from the plate. */
+  calibrationTube?: "BR Clear" | "BR White" | null;
+  /** Fluorophore names hidden from the calibration ("Fluorophores") view. */
+  disabledFluors?: string[];
 }
 
 function openDb(): Promise<IDBDatabase> {

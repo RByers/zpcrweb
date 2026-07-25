@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { parsePcrd, parseZpcr, type PcrdContainer, type Zpcr } from "@zpcrweb/core";
+import {
+  parsePcrd,
+  parseZpcr,
+  type NormalizationMode,
+  type PcrdContainer,
+  type Zpcr,
+} from "@zpcrweb/core";
 import {
   deleteFile,
   fileId,
@@ -10,6 +16,7 @@ import {
   type StoredSettings,
 } from "./db";
 import { usePltdPassword } from "./pltdPassword";
+import type { TubeType } from "../lib/fluorCurves";
 
 export type FileKind = "zpcr" | "pcrd";
 
@@ -37,6 +44,19 @@ export interface FileSettings {
    * hides the temperature axis entirely.
    */
   temps: Set<string>;
+  /**
+   * Channel→dye color separation (see `calibration.md`). `null` auto-enables it once plate
+   * data and matching `.Dcal` calibration data are both available; `true`/`false` is an
+   * explicit user override.
+   */
+  calibration: boolean | null;
+  /** Calibration matrix column normalization; see `calibration.md` §3. */
+  calibrationNormalization: NormalizationMode;
+  /** Tube/plate type used to select `.Dcal` files, or `null` to auto-detect from the plate. */
+  calibrationTube: TubeType | null;
+  /** Fluorophore names hidden from the calibration curves (an opt-out set, like `enabledChannels`
+   * inverted — new fluors default to shown without needing to know their names up front). */
+  disabledFluors: Set<string>;
 }
 
 /** A file loaded into memory — bytes only. Parsing is derived (see {@link ZpcrStore.runs}),
@@ -108,6 +128,11 @@ function defaultSettings(): FileSettings {
     step: null,
     // Temperatures are off by default — they are instrument context, not the measurement.
     temps: new Set<string>(),
+    // Auto: on once plate + calibration data are available (see CurvesView).
+    calibration: null,
+    calibrationNormalization: "global",
+    calibrationTube: null,
+    disabledFluors: new Set<string>(),
   };
 }
 
@@ -123,6 +148,10 @@ function toStored(id: string, s: FileSettings): StoredSettings {
     bands: s.bands,
     step: s.step ?? null,
     temps: [...s.temps],
+    calibration: s.calibration,
+    calibrationNormalization: s.calibrationNormalization,
+    calibrationTube: s.calibrationTube,
+    disabledFluors: [...s.disabledFluors],
   };
 }
 
@@ -136,6 +165,10 @@ function fromStored(s: StoredSettings): FileSettings {
     subtractDark: s.subtractDark ?? false,
     bands: s.bands ?? "auto",
     step: s.step ?? null,
+    calibration: s.calibration ?? null,
+    calibrationNormalization: s.calibrationNormalization ?? "global",
+    calibrationTube: s.calibrationTube ?? null,
+    disabledFluors: new Set(s.disabledFluors ?? []),
     temps: new Set(s.temps ?? []),
   };
 }

@@ -403,6 +403,10 @@
   border-color: color-mix(in srgb, var(--chan) 60%, transparent);
   box-shadow: 0 0 12px color-mix(in srgb, var(--chan) 22%, transparent);
 }
+.chanchip.is-disabled {
+  opacity: 0.22;
+  cursor: not-allowed;
+}
 .chanchip__swatch {
   width: 10px;
   height: 10px;

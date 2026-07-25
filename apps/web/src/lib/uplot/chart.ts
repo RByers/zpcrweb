@@ -4,13 +4,34 @@ import {
   subtractSeries,
   type DarkCurve,
   type TemperatureCurve,
-  type WellCurve,
 } from "@zpcrweb/core";
-import { channelColor, channelDye } from "../channelColors";
+import { channelColor, channelLabel } from "../channelColors";
 import { tempColor } from "../tempColors";
 import type { Baseline, BandsMode, Scale } from "../../state/useZpcrStore";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
+
+/**
+ * One plotted curve, already resolved to a display label by the caller — either a plain channel
+ * ("C1", channel-space) or a fluorophore name (dye-space, after color separation). Chart code
+ * never guesses a dye from a channel index; see `channelColors.ts`.
+ */
+export interface PlotCurve {
+  /** Optical channel — used only for color. */
+  channel: number;
+  dyeLabel: string;
+  row: number;
+  col: number;
+  wellLabel: string;
+  isReference: boolean;
+  cycles: number[];
+  mean: number[];
+  /** Std/min/max envelope; a color-separated curve has none of its own — pass `mean` for both
+   * min and max, and zeros for std, so the envelope collapses to nothing rather than lying. */
+  std: number[];
+  min: number[];
+  max: number[];
+}
 
 /** Values <= 0 are undefined on a log axis; render them as gaps. */
 function logSafe(values: number[], scale: Scale): (number | null)[] {
@@ -24,6 +45,7 @@ interface SeriesMeta {
   /** Optical channel for well/dark series; -1 for temperature series. */
   channel: number;
   label: string;
+  dyeLabel: string;
   isReference: boolean;
   cycles: number[];
   mean: number[];
@@ -57,7 +79,7 @@ export interface TooltipData {
 }
 
 export interface BuildChartConfig {
-  wellCurves: WellCurve[];
+  wellCurves: PlotCurve[];
   darkCurves: DarkCurve[];
   /** Temperature series to plot on the right-hand °C axis (empty to hide the axis). */
   tempCurves: TemperatureCurve[];
@@ -104,6 +126,7 @@ export function buildChart(cfg: BuildChartConfig): {
       kind: "well",
       channel: curve.channel,
       label: curve.wellLabel,
+      dyeLabel: curve.dyeLabel,
       isReference: curve.isReference,
       cycles: curve.cycles,
       mean: curve.mean,
@@ -112,7 +135,7 @@ export function buildChart(cfg: BuildChartConfig): {
       max: curve.max,
     });
     series.push({
-      label: `${curve.wellLabel} · ${channelDye(curve.channel)}`,
+      label: `${curve.wellLabel} · ${curve.dyeLabel}`,
       stroke: channelColor(curve.channel),
       width: 1,
       dash: curve.isReference ? REF_DASH : undefined,
@@ -130,6 +153,7 @@ export function buildChart(cfg: BuildChartConfig): {
         kind: "dark",
         channel,
         label: "dark",
+        dyeLabel: channelLabel(channel),
         isReference: false,
         cycles: dark.cycles,
         mean: dark.mean,
@@ -138,7 +162,7 @@ export function buildChart(cfg: BuildChartConfig): {
         max: dark.max,
       });
       series.push({
-        label: `dark · ${channelDye(channel)}`,
+        label: `dark · ${channelLabel(channel)}`,
         stroke: channelColor(channel),
         width: 2,
         dash: DARK_DASH,
@@ -155,6 +179,7 @@ export function buildChart(cfg: BuildChartConfig): {
       kind: "temp",
       channel: -1,
       label: t.label,
+      dyeLabel: "",
       isReference: false,
       cycles: t.cycles,
       mean: t.celsius.map((v) => v ?? NaN),
@@ -174,7 +199,7 @@ export function buildChart(cfg: BuildChartConfig): {
 
   // Min/max envelope bands. Auto shows them only when a single well (one row/col) is
   // selected, regardless of how many channels — so each channel's curve gets its own band.
-  const computeBand = (c: WellCurve): BandData => {
+  const computeBand = (c: PlotCurve): BandData => {
     const darkMean = darkByChannel.get(c.channel)?.mean;
     const base = subtractDark && darkMean ? subtractSeries(c.mean, darkMean) : c.mean;
     const plottedMean = transform(base);
@@ -439,7 +464,7 @@ function overlayPlugin(
           kind: m.kind,
           label: m.label,
           channel: m.channel,
-          dye: channelDye(m.channel),
+          dye: m.dyeLabel,
           color,
           cycle: m.cycles[idx] ?? 0,
           mean: m.mean[idx] ?? 0,

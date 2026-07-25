@@ -74,7 +74,7 @@ export function RefCalPanel({ zpcr }: { zpcr: Zpcr }) {
             <tr>
               <th />
               {channels.map((ch) => (
-                <th key={ch.index} title={ch.dye}>
+                <th key={ch.index}>
                   <span
                     className="decoded__swatch"
                     style={{ background: channelColor(ch.index) }}

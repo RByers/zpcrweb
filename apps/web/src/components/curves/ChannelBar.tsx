@@ -23,7 +23,6 @@ export function ChannelBar({ enabled, available, onToggle }: Props) {
             <span className="chanchip__swatch" />
             <span className="chanchip__label">
               <span className="chanchip__ch mono">C{c.index + 1}</span>
-              <span className="chanchip__dye">{c.dye}</span>
             </span>
           </button>
         );
