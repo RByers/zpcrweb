@@ -205,6 +205,66 @@
   font-size: 11px;
   color: var(--ink-muted);
 }
+.filecard {
+  pointer-events: none;
+  min-width: 220px;
+  max-width: 320px;
+  padding: 10px 12px;
+  background: rgba(10, 14, 22, 0.96);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(4px);
+}
+.filecard__title {
+  font-size: 11px;
+  color: var(--ink);
+  margin-bottom: 6px;
+  word-break: break-all;
+}
+.filecard__dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 8px;
+  margin: 0 0 8px;
+  font-size: 11px;
+}
+.filecard__dl dt {
+  color: var(--ink-muted);
+}
+.filecard__dl dd {
+  margin: 0;
+  color: var(--ink-2);
+  text-align: right;
+}
+.filecard__section + .filecard__section {
+  margin-top: 8px;
+}
+.filecard__label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ink-muted);
+  margin-bottom: 4px;
+}
+.filecard__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+.filecard__chip {
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--ink-2);
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, currentColor 16%, transparent);
+  border: 1px solid color-mix(in srgb, currentColor 40%, transparent);
+}
+.filecard__empty {
+  font-size: 11px;
+  color: var(--ink-muted);
+}
 .filechip__del {
   display: inline-flex;
   align-items: center;
@@ -284,6 +344,22 @@
   margin: 0;
   color: var(--ink-2);
   word-break: break-all;
+}
+.overview__platelists {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+}
+.overview__platelist {
+  flex: 1 1 240px;
+  min-width: 200px;
+}
+.overview__platelist-h {
+  font-size: 11px;
+  color: var(--ink-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 6px;
 }
 /* Text/controls beside the grid rather than stacked above it, so the whole panel's height is
    set by the taller of the two (usually the grid) instead of their sum. */

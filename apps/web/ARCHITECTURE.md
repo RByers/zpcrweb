@@ -57,6 +57,15 @@ locked/errored files in the list without blocking selection of other files. `Run
 carries `documentXml` for a successfully-decoded `.pcrd` — the full raw document
 (`Pcrd.xml`), which `PcrdRawView` renders (see "Raw views" below).
 
+Each chip's hover card (protocol name, cycle count, and the plate's target/sample lists — the
+same lists `OverviewView` shows in its "Plate" section, via the shared `lib/plateTargets.ts`
+helper) renders through a `createPortal` into `document.body` at a `position: fixed` spot
+computed from the chip's `getBoundingClientRect()` on hover/focus, rather than as a normal
+absolutely-positioned child of the chip. `.filebar` scrolls horizontally
+(`overflow-x: auto`), which per the CSS spec forces the other axis to compute to `auto` too —
+a plain `position: absolute` dropdown would get clipped vertically by that implicit scroll
+box.
+
 ## Stack
 
 - **React 18 API on the Preact runtime + Vite + TypeScript** — SPA, no router (the selected
