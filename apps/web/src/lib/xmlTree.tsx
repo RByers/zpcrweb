@@ -68,23 +68,16 @@ function closeTag(el: Element): ReactNode {
   );
 }
 
-// A node collapses by default once it has "enough" children, is text-heavy, or is deep enough
-// that showing it expanded would just be noise. Child count is checked first (cheap, O(1));
-// `textContent.length` is only touched as a fallback for small-child-count-but-large-text
-// nodes, since reading it forces the DOM to concatenate the whole subtree's text once.
-const DEFAULT_OPEN_MAX_CHILDREN = 8;
-const DEFAULT_OPEN_MAX_DEPTH = 2;
-const DEFAULT_OPEN_MAX_TEXT = 400;
+// A node opens by default when it has few enough children that expanding it stays readable.
+const DEFAULT_OPEN_MAX_CHILDREN = 4;
 
-function defaultOpen(el: Element, depth: number): boolean {
-  if (el.children.length > DEFAULT_OPEN_MAX_CHILDREN) return false;
-  if (depth > DEFAULT_OPEN_MAX_DEPTH) return false;
-  return (el.textContent?.length ?? 0) <= DEFAULT_OPEN_MAX_TEXT;
+function defaultOpen(el: Element): boolean {
+  return el.children.length <= DEFAULT_OPEN_MAX_CHILDREN;
 }
 
 function TreeNode({ el, depth }: { el: Element; depth: number }) {
   const elementChildren = Array.from(el.children);
-  const initialOpen = useMemo(() => defaultOpen(el, depth), [el, depth]);
+  const initialOpen = useMemo(() => defaultOpen(el), [el]);
   const [open, setOpen] = useState(initialOpen);
 
   if (elementChildren.length === 0) {
