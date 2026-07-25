@@ -525,7 +525,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
       cq: c.cq ?? null,
       color: channelColor(c.channel),
     }));
-    return { title: dyeLabel, subtitle: `${rows.length} well${rows.length === 1 ? "" : "s"}`, rows };
+    return { title: dyeLabel, rows };
   };
 
   const cardForChannel = (channel: number): HoverCardData | null => {
@@ -538,7 +538,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
       cq: c.cq ?? null,
       color: channelColor(channel),
     }));
-    return { title: channelLabel(channel), subtitle: `${rows.length} well${rows.length === 1 ? "" : "s"}`, rows };
+    return { title: channelLabel(channel), rows };
   };
 
   const cardForSample = (sample: string): HoverCardData | null => {
@@ -551,7 +551,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
       cq: c.cq ?? null,
       color: channelColor(c.channel),
     }));
-    return { title: sample, subtitle: `${rows.length} curve${rows.length === 1 ? "" : "s"}`, rows };
+    return { title: sample, rows };
   };
 
   // The Baseline range slider's non-manual preview: rather than a static example range, show

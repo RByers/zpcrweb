@@ -289,37 +289,40 @@
   color: var(--ink-muted);
   margin-bottom: 6px;
 }
-.curvecard__tbl {
-  border-collapse: collapse;
+.curvecard__rows {
   font-size: 11px;
-  width: 100%;
 }
-.curvecard__tbl td {
+.curvecard__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   padding: 1px 0;
-  vertical-align: middle;
-}
-.curvecard__swatch-cell {
-  width: 12px;
 }
 .curvecard__swatch {
-  display: inline-block;
+  flex: 0 0 auto;
   width: 8px;
   height: 8px;
   border-radius: 2px;
 }
 .curvecard__label {
+  flex: 0 0 auto;
   color: var(--ink-2);
-  padding-right: 10px;
   white-space: nowrap;
 }
 .curvecard__sub {
-  display: block;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 10px;
   color: var(--ink-muted);
 }
 .curvecard__cq {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding-left: 8px;
   color: var(--ink);
-  text-align: right;
   white-space: nowrap;
 }
 .curvecard__empty {

@@ -34,22 +34,16 @@ export function HoverCard({
       <div className="curvecard__title">{data.title}</div>
       {data.subtitle && <div className="curvecard__subtitle">{data.subtitle}</div>}
       {data.rows.length > 0 ? (
-        <table className="curvecard__tbl">
-          <tbody>
-            {data.rows.map((r) => (
-              <tr key={r.key}>
-                <td className="curvecard__swatch-cell">
-                  {r.color && <span className="curvecard__swatch" style={{ background: r.color }} />}
-                </td>
-                <td className="curvecard__label">
-                  {r.label}
-                  {r.sublabel && <span className="curvecard__sub">{r.sublabel}</span>}
-                </td>
-                <td className="curvecard__cq">{r.cq != null ? r.cq.toFixed(2) : "—"}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div className="curvecard__rows">
+          {data.rows.map((r) => (
+            <div className="curvecard__row" key={r.key}>
+              {r.color && <span className="curvecard__swatch" style={{ background: r.color }} />}
+              <span className="curvecard__label">{r.label}</span>
+              {r.sublabel && <span className="curvecard__sub">{r.sublabel}</span>}
+              <span className="curvecard__cq">{r.cq != null ? r.cq.toFixed(2) : "—"}</span>
+            </div>
+          ))}
+        </div>
       ) : (
         <div className="curvecard__empty">No curves plotted</div>
       )}
