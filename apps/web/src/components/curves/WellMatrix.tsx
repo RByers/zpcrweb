@@ -13,6 +13,9 @@ interface Props {
    * Plates view (grey/empty, green/positive control, red/negative control, blue/unknown, …).
    * Omitted when no plate is loaded yet, in which case cells fall back to the plain on/off look. */
   wellTypes?: Map<string, SampleType>;
+  /** Hovering a well cell (by its `"A1"`-style label, or `null` on leave) — drives the
+   * curve-chart highlight. */
+  onHoverWell?: (label: string | null) => void;
 }
 
 /**
@@ -20,7 +23,7 @@ interface Props {
  * number (1–12) headers toggle a whole row/column; the corner toggles all wells. The
  * reference row is shown separately, in the Reference view.
  */
-export function WellMatrix({ enabled, onChange, wellTypes }: Props) {
+export function WellMatrix({ enabled, onChange, wellTypes, onHoverWell }: Props) {
   const sampleKeys = () => {
     const keys: string[] = [];
     for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) keys.push(wellKey(r, c));
@@ -80,6 +83,8 @@ export function WellMatrix({ enabled, onChange, wellTypes }: Props) {
                 : undefined
             }
             onClick={() => toggleWell(r, c)}
+            onMouseEnter={() => onHoverWell?.(`${label}${c + 1}`)}
+            onMouseLeave={() => onHoverWell?.(null)}
             aria-pressed={on}
             aria-label={`Well ${label}${c + 1}`}
             title={meta ? `${label}${c + 1} — ${meta.label}` : undefined}

@@ -430,7 +430,12 @@ quickly isolating a single reference well's drift.
 
 **Color encodes the channel, never the individual well.** With hundreds of lines, wells in a
 channel share one hue; the hovered/nearest line is emphasized while siblings dim (uPlot
-`focus.alpha`).
+`focus.alpha`). Hovering a target/fluor chip or a well-grid cell in the rail dims every
+non-matching curve the same way, but driven externally rather than by cursor proximity:
+`buildChart()` returns its `SeriesMeta[]` alongside the uPlot options, and `CurveChart` calls
+`applyHighlight(u, meta, match)` (`lib/uplot/chart.ts`) to set each series' `alpha` directly and
+redraw without rebuilding paths — cheap enough to call on every mouse move, and independent of
+the single-nearest-series cursor focus above.
 
 The hues follow each dye's **emission color** — FAM green, HEX yellow, Texas Red orange, Cy5
 red, Cy5.5 purple — the Bio-Rad CFX convention users recognize. This palette is deliberately

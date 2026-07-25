@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   buildCalibrationMatrix,
   REFERENCE_ROW,
@@ -35,7 +35,7 @@ import { PasswordPrompt } from "../PasswordPrompt";
 import { Toggle } from "../Toggle";
 import { Switch } from "../Switch";
 import { ResetIcon } from "../ResetIcon";
-import type { PlotCurve } from "../../lib/uplot/chart";
+import type { HighlightMatch, PlotCurve } from "../../lib/uplot/chart";
 
 /** Fallback baseline-region preview shown while auto-detecting, mirroring `chart.ts`'s
  * `fallbackRegion` (threshold.md §3.1/§8's default cycles 2–9), clamped to the run. */
@@ -214,6 +214,10 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
     fluorViewMode === "target"
       ? (wellFluorTargets.get(wellKey(row, col))?.get(dye) ?? dye)
       : dye;
+
+  // Hovering a target/fluor chip or a well-grid cell in the rail highlights the matching
+  // curve(s) in the chart, the same way hovering the chart itself dims every other curve.
+  const [hoverHighlight, setHoverHighlight] = useState<HighlightMatch | null>(null);
 
   const chipItems: FluorChip[] = useMemo(
     () =>
@@ -516,6 +520,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
                 items={chipItems}
                 disabled={settings.disabledFluors}
                 onToggle={toggleFluor}
+                onHover={(key) => setHoverHighlight(key ? { kind: "target", dyeLabel: key } : null)}
               />
               <div className="rail__row" style={{ marginTop: 8 }}>
                 <Switch
@@ -550,6 +555,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
             enabled={settings.enabledWells}
             onChange={(next) => onChange({ enabledWells: next })}
             wellTypes={wellTypes}
+            onHoverWell={(label) => setHoverHighlight(label ? { kind: "well", label } : null)}
           />
         </div>
 
@@ -661,6 +667,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
           curveBaselineRange={settings.curveBaselineRange}
           scale={settings.scale}
           bands={calibrationOn ? "off" : settings.bands}
+          highlight={hoverHighlight}
         />
       </section>
     </div>

@@ -8,7 +8,15 @@ import type {
   CurveBaselineRange,
   Scale,
 } from "../../state/useZpcrStore";
-import { buildChart, type FactoryCurve, type PlotCurve, type TooltipData } from "../../lib/uplot/chart";
+import {
+  applyHighlight,
+  buildChart,
+  type FactoryCurve,
+  type HighlightMatch,
+  type PlotCurve,
+  type SeriesMeta,
+  type TooltipData,
+} from "../../lib/uplot/chart";
 import { channelLabel } from "../../lib/channelColors";
 
 // Stable reference so the effect-dependency array below doesn't see a new "empty" array
@@ -30,6 +38,9 @@ interface Props {
   curveBaselineRange: CurveBaselineRange;
   scale: Scale;
   bands: BandsMode;
+  /** Rail-driven highlight (hovering a target/fluor chip or a well-grid cell); `null` shows
+   * every curve at full opacity. */
+  highlight?: HighlightMatch | null;
 }
 
 export function CurveChart({
@@ -42,10 +53,17 @@ export function CurveChart({
   curveBaselineRange,
   scale,
   bands,
+  highlight = null,
 }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const plotRef = useRef<uPlot | null>(null);
+  const metaRef = useRef<SeriesMeta[]>([]);
   const [tip, setTip] = useState<TooltipData | null>(null);
+  // Kept current on every render (not just inside an effect) so the build effect below can
+  // apply whatever highlight is active right now without depending on `highlight` itself —
+  // that dependency would tear down and rebuild the whole uPlot instance on every hover.
+  const highlightRef = useRef(highlight);
+  highlightRef.current = highlight;
 
   // (Re)build the plot whenever the data or options change.
   useEffect(() => {
@@ -55,7 +73,7 @@ export function CurveChart({
     const width = Math.max(320, Math.floor(rect.width));
     const height = Math.max(240, Math.floor(rect.height));
 
-    const { data, options } = buildChart({
+    const { data, options, meta } = buildChart({
       wellCurves: curves,
       darkCurves,
       factoryCurves,
@@ -72,6 +90,8 @@ export function CurveChart({
 
     plotRef.current?.destroy();
     plotRef.current = new uPlot(options, data, host);
+    metaRef.current = meta;
+    applyHighlight(plotRef.current, meta, highlightRef.current);
 
     return () => {
       plotRef.current?.destroy();
@@ -88,6 +108,10 @@ export function CurveChart({
     scale,
     bands,
   ]);
+
+  useEffect(() => {
+    if (plotRef.current) applyHighlight(plotRef.current, metaRef.current, highlight);
+  }, [highlight]);
 
   // Keep the plot sized to its container.
   useEffect(() => {

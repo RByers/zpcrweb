@@ -132,8 +132,13 @@ export interface FactoryCurve {
   mean: number[];
 }
 
+/** A target/fluor chip or well-grid cell to highlight — dims every other series to match the
+ * cursor-proximity dimming `focus.alpha` already does for a single hovered curve, but driven by
+ * hovering the rail's legend/well-grid instead of the plot itself. */
+export type HighlightMatch = { kind: "target"; dyeLabel: string } | { kind: "well"; label: string };
+
 /** Per-series metadata, index-aligned with uPlot series (offset by the x row). */
-interface SeriesMeta {
+export interface SeriesMeta {
   kind: "well" | "dark" | "factory" | "temp";
   /** Optical channel for well/dark series; -1 for temperature series. */
   channel: number;
@@ -213,6 +218,7 @@ const TEMP_SCALE = "temp";
 export function buildChart(cfg: BuildChartConfig): {
   data: uPlot.AlignedData;
   options: uPlot.Options;
+  meta: SeriesMeta[];
 } {
   const { wellCurves, darkCurves, factoryCurves, tempCurves, baseline, curveBaselineMode, curveBaselineRange, scale } =
     cfg;
@@ -454,7 +460,26 @@ export function buildChart(cfg: BuildChartConfig): {
     plugins: [overlayPlugin(meta, bands, cfg.onHover)],
   };
 
-  return { data: rows as uPlot.AlignedData, options };
+  return { data: rows as uPlot.AlignedData, options, meta };
+}
+
+/**
+ * Externally-driven curve highlighting, for hovering a target/fluor chip or a well-grid cell in
+ * the rail (as opposed to `focus.alpha` above, which handles hovering the plot itself via
+ * uPlot's own single-nearest-series cursor focus). Sets each well series' `alpha` directly and
+ * redraws without rebuilding paths, so it's cheap enough to call on every mouse move. `match:
+ * null` restores full opacity.
+ */
+export function applyHighlight(u: uPlot, meta: SeriesMeta[], match: HighlightMatch | null): void {
+  meta.forEach((m, i) => {
+    const isMatch =
+      !match ||
+      (m.kind === "well" &&
+        ((match.kind === "well" && m.label === match.label) ||
+          (match.kind === "target" && m.dyeLabel === match.dyeLabel)));
+    u.series[i + 1]!.alpha = isMatch ? 1 : 0.12;
+  });
+  u.redraw(false, false);
 }
 
 function yLabel(baseline: Baseline, curveBaselineMode: CurveBaselineMode): string {

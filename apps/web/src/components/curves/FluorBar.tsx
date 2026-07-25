@@ -22,6 +22,8 @@ interface Props {
   /** Keys *not* shown; anything else calibrated is on. */
   disabled: Set<string>;
   onToggle: (key: string) => void;
+  /** Hovering a chip (by its `key`, or `null` on leave) — drives the curve-chart highlight. */
+  onHover?: (key: string | null) => void;
 }
 
 /**
@@ -29,7 +31,7 @@ interface Props {
  * its primary channel. Multiple items sharing a channel simply share a color, distinguished by
  * their label.
  */
-export function FluorBar({ items, disabled, onToggle }: Props) {
+export function FluorBar({ items, disabled, onToggle, onHover }: Props) {
   return (
     <div className="chanbar">
       {items.map((f) => {
@@ -39,6 +41,8 @@ export function FluorBar({ items, disabled, onToggle }: Props) {
             key={f.key}
             className={"chanchip" + (on ? " is-on" : "") + (!f.calibrated ? " is-disabled" : "")}
             onClick={() => f.calibrated && onToggle(f.key)}
+            onMouseEnter={() => onHover?.(f.key)}
+            onMouseLeave={() => onHover?.(null)}
             disabled={!f.calibrated}
             aria-pressed={on}
             title={!f.calibrated ? `${f.label}: no calibration data for this tube type` : f.label}
