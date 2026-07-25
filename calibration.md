@@ -7,13 +7,12 @@ puts 17% into channel 4). **Color separation** is the process of "unmixing" that
 given the 6 raw channel readings for a well and the pure-dye calibration data for the dyes on
 the plate, estimate how much each dye actually contributed.
 
-> **Status:** the matrix construction and solve (§§2–3, §5) are implemented by
+> **Status:** implements the algorithm below (§§2–5), including the preprocessing stage (§4) —
 > [`packages/core/src/calibration.ts`](./packages/core/src/calibration.ts) (linear algebra in
-> [`linalg.ts`](./packages/core/src/linalg.ts)) and tested against the calibration data in the
-> committed sample archives. **The preprocessing stage (§4) is documented here ahead of the
-> implementation** — the current helper differs in two specific ways, spelled out in §8. Not yet
-> cross-validated end-to-end against a reference instrument's own color-separated output, so
-> treat this as "correct per the algorithm below," not "byte-for-byte verified."
+> [`linalg.ts`](./packages/core/src/linalg.ts)), tested against the calibration data in the
+> committed sample archives. Not yet cross-validated end-to-end against a reference instrument's
+> own color-separated output, so treat this as "correct per the algorithm below," not
+> "byte-for-byte verified."
 
 ---
 
@@ -241,7 +240,11 @@ const curves = dcals.map((dcal) => buildDyeResponseCurve(dcal));
 const matrix = buildCalibrationMatrix(curves, blockTemperatureC);
 
 // Apply the same corrections a live reading needs (§4).
-const corrected = preprocessChannelReadings(rawChannelMeans, { darkCurrent });
+const corrected = preprocessChannelReadings(rawChannelMeans, {
+  referenceLevel,
+  wellFactor,
+  darkLevel,
+});
 
 // Solve (§5).
 const { dyes, concentrations, failed } = separateChannels(matrix, corrected);
@@ -254,16 +257,6 @@ call is wasted work.
 
 ## 8. Limitations / open items
 
-- **The preprocessing helper does not yet implement §4 as documented.** It currently *multiplies*
-  by a correction factor, then subtracts a black level and a dark level as two independent
-  background terms. §4 says the factor **divides**, and that the reference level is a **pivot**
-  that is restored rather than subtracted. The two agree only when no correction factors are
-  supplied (leaving dark subtraction, which does match). Callers passing correction factors or a
-  black level will get different numbers from the documented algorithm — treat §4 as the
-  specification and the helper as needing to be brought in line with it.
-- Dark data is per channel, but the helper takes it as a per-channel array with no notion of the
-  "no dark record present" case; a plate read lacking dark data should skip the subtraction
-  rather than subtract zeros (equivalent in effect, but worth making explicit).
 - This library always derives the calibration matrix from `.Dcal` files. Some systems also
   support a user-edited override matrix that takes precedence over the calibration-derived one;
   that override mechanism isn't modeled here.

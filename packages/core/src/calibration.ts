@@ -143,20 +143,36 @@ export function buildCalibrationMatrix(
   };
 }
 
-/** Per-channel corrections applied to a raw reading before color separation. */
+/** Per-channel corrections applied to a raw reading before color separation (see §4). */
 export interface ChannelPreprocessOptions {
-  /** Per-channel multiplicative correction factor, if the instrument reports one. */
-  correctionFactors?: number[];
-  /** Per-channel background/black level to subtract. */
-  blackLevel?: number[];
-  /** Per-channel LED-off dark-current reading to subtract (e.g. a `.Plateread`'s `DARKDATA`). */
-  darkCurrent?: number[];
+  /**
+   * Per-channel reference level — one position from the plate's reference row, read with the
+   * LED on (§4.1). The pivot for {@link wellFactor}'s gain correction, not a value subtracted
+   * on its own: with no `wellFactor` supplied it has no effect. Missing/omitted channels
+   * default to `0`.
+   */
+  referenceLevel?: number[];
+  /**
+   * Per-channel gain correction factor (§4.1). When present for a channel, that channel's
+   * reading is corrected as `(raw − referenceLevel) / wellFactor + referenceLevel` — the factor
+   * **divides**, and only the portion of the signal above the reference level is scaled. A
+   * channel with no factor here is left as-is.
+   */
+  wellFactor?: number[];
+  /**
+   * Per-channel dark-current level to subtract (§4.2) — an LED-off background reading (e.g. a
+   * `.Plateread`'s `DARKDATA`), genuinely additive and unrelated to the reference level. Applied
+   * after the gain correction. A channel with no level here is left as-is; omit entirely for a
+   * plate read with no dark record rather than passing zeros.
+   */
+  darkLevel?: number[];
 }
 
 /**
- * Apply the same corrections a live reading needs before color separation, in order: raw mean
- * fluorescence → optional per-channel correction factor (multiplicative) → subtract black level
- * → subtract dark current.
+ * Apply the same corrections a live reading needs before color separation (§4), in order:
+ * raw mean fluorescence → gain correction pivoted on the reference level (if a well factor is
+ * given for that channel) → subtract dark current (if given for that channel). Both corrections
+ * are independently optional, per channel.
  */
 export function preprocessChannelReadings(
   raw: number[],
@@ -164,9 +180,13 @@ export function preprocessChannelReadings(
 ): number[] {
   return raw.map((value, channel) => {
     let v = value;
-    if (options.correctionFactors) v *= options.correctionFactors[channel] ?? 1;
-    if (options.blackLevel) v -= options.blackLevel[channel] ?? 0;
-    if (options.darkCurrent) v -= options.darkCurrent[channel] ?? 0;
+    const factor = options.wellFactor?.[channel];
+    if (factor !== undefined) {
+      const reference = options.referenceLevel?.[channel] ?? 0;
+      v = (v - reference) / factor + reference;
+    }
+    const dark = options.darkLevel?.[channel];
+    if (dark !== undefined) v -= dark;
     return v;
   });
 }

@@ -134,23 +134,37 @@ describe("buildCalibrationMatrix", () => {
 });
 
 describe("preprocessChannelReadings", () => {
-  it("applies correction factor, then subtracts black level, then dark current, per channel", () => {
-    const raw = [100, 200, 300];
+  it("pivots the gain correction on the reference level (dividing by wellFactor), then subtracts dark level", () => {
+    const raw = [110, 220, 330];
     const result = preprocessChannelReadings(raw, {
-      correctionFactors: [2, 1, 0.5],
-      blackLevel: [10, 20, 30],
-      darkCurrent: [1, 2, 3],
+      referenceLevel: [10, 20, 30],
+      wellFactor: [2, 1, 0.5],
+      darkLevel: [1, 2, 3],
     });
-    // ch0: 100*2 - 10 - 1 = 189; ch1: 200*1 - 20 - 2 = 178; ch2: 300*0.5 - 30 - 3 = 117
-    expect(result).toEqual([189, 178, 117]);
+    // ch0: (110-10)/2+10 - 1 = 59; ch1: (220-20)/1+20 - 2 = 218; ch2: (330-30)/0.5+30 - 3 = 627
+    expect(result).toEqual([59, 218, 627]);
+  });
+
+  it("has no effect from the reference level alone when no wellFactor is supplied", () => {
+    const raw = [100, 200];
+    expect(preprocessChannelReadings(raw, { referenceLevel: [10, 20] })).toEqual(raw);
+  });
+
+  it("divides by wellFactor rather than multiplying", () => {
+    // With referenceLevel 0 (default), (raw - 0) / factor + 0 == raw / factor.
+    expect(preprocessChannelReadings([10], { wellFactor: [2] })).toEqual([5]);
   });
 
   it("is a no-op with no options", () => {
     expect(preprocessChannelReadings([1, 2, 3])).toEqual([1, 2, 3]);
   });
 
-  it("applies a partial correction, defaulting missing channels to identity", () => {
-    expect(preprocessChannelReadings([10, 10], { blackLevel: [1] })).toEqual([9, 10]);
+  it("applies dark subtraction independently of gain correction, per channel", () => {
+    expect(preprocessChannelReadings([10, 10], { darkLevel: [3] })).toEqual([7, 10]);
+  });
+
+  it("applies gain correction independently per channel, leaving channels with no factor untouched", () => {
+    expect(preprocessChannelReadings([20, 20], { wellFactor: [2] })).toEqual([10, 20]);
   });
 });
 
