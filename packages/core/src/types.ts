@@ -154,6 +154,7 @@ export interface WellCurve {
 import type { RefWellCal, RefCalComparison } from "./refcal.js";
 export type { RefWellCal, RefCalComparison } from "./refcal.js";
 import type { Pltd } from "./pltd.js";
+import type { Dcal } from "./dcal.js";
 
 /** A `.pltd` archive entry paired with its decoded plate definition. */
 export interface PltdEntry {
@@ -161,6 +162,14 @@ export interface PltdEntry {
   name: string;
   /** The parsed container + plate (see {@link Pltd}). */
   pltd: Pltd;
+}
+
+/** A `.Dcal` archive entry paired with its decoded pure-dye calibration. */
+export interface DcalEntry {
+  /** Archive entry name, e.g. `FAM_BR Clear.Dcal`. */
+  name: string;
+  /** The parsed calibration (see {@link Dcal}). */
+  dcal: Dcal;
 }
 
 /** A per-channel dark (LED-off background) reading across cycles, from DARKDATA. */
@@ -238,6 +247,8 @@ export interface Zpcr {
    * `password` (this library ships none); without it each entry reports `needsPassword`.
    */
   plates(password?: string): PltdEntry[];
+  /** Decode every `.Dcal` pure-dye calibration entry in the archive (unencrypted). */
+  calibrations(): DcalEntry[];
   /** Optical channel indices that hold data, from `CHANNELMASK` (e.g. `[0]` or `[0..5]`). */
   channels(): number[];
   /** Factory calibration of the reference row, from `RunInfo.xml`'s `FactoryRefRowCal`. */

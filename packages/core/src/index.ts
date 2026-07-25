@@ -40,6 +40,7 @@ export {
   ROWS,
 } from "./plateread.js";
 export { parsePltd, isPltdName } from "./pltd.js";
+export { parseDcal, findDcalBlock, isDcalName } from "./dcal.js";
 export { zipCryptoDecrypt } from "./zipcrypto.js";
 export { inflateRaw } from "./inflate.js";
 
@@ -60,6 +61,7 @@ export type {
   RefWellCal,
   RefCalComparison,
   PltdEntry,
+  DcalEntry,
 } from "./types.js";
 export type { IcffEntry } from "./icff.js";
 export type { PlatereadDetail } from "./plateread.js";
@@ -73,3 +75,4 @@ export type {
   PlateFluor,
   SampleType,
 } from "./pltd.js";
+export type { Dcal, DcalBlock, DcalSecurity, DcalSerials } from "./dcal.js";
