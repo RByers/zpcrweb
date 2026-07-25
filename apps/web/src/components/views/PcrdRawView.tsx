@@ -130,7 +130,13 @@ function entryKey(entry: NavEntry): string {
 
 export function PcrdRawView({ zpcr, documentXml }: { zpcr: Zpcr; documentXml: string }) {
   const doc = useMemo(() => {
-    const root = parseXmlFragment(documentXml);
+    // parseXmlFragment always wraps the parsed content in a synthetic root (needed for
+    // multi-rooted fragments like runlog.xml); a .pcrd document is single-rooted
+    // (<experimentalData2>), so that synthetic wrapper's one child *is* the real document
+    // root — unwrap it so `buildDocument` walks experimentalData2's real children instead of
+    // treating experimentalData2 itself as the only "child" to categorize.
+    const wrapper = parseXmlFragment(documentXml);
+    const root = wrapper && wrapper.children.length === 1 ? wrapper.children[0]! : wrapper;
     return root ? buildDocument(root, zpcr) : null;
   }, [documentXml, zpcr]);
 
