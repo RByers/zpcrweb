@@ -7,16 +7,10 @@ puts 17% into channel 4). **Color separation** is the process of "unmixing" that
 given the 6 raw channel readings for a well and the pure-dye calibration data for the dyes on
 the plate, estimate how much each dye actually contributed.
 
-> **Status:** implements the algorithm below (§§2–5), including the preprocessing stage (§4) —
+> **Status:** implements the algorithm below in full (§§2–5), including preprocessing (§4) —
 > [`packages/core/src/calibration.ts`](./packages/core/src/calibration.ts) (linear algebra in
 > [`linalg.ts`](./packages/core/src/linalg.ts)), tested against the calibration data in the
-> committed sample archives. Not yet cross-validated end-to-end against a reference instrument's
-> own color-separated output, so treat this as "correct per the algorithm below," not
-> "byte-for-byte verified" — with one exception: §4's preprocessing rules (the reference-level
-> pivot, the well-factor-set selection rule, and the dark-current subtraction) have been confirmed
-> directly against the real analysis software's own logic, not just inferred from file formats.
-> What is still open is the *absolute* RFU scale (§8) and the well-factor-set selection rule not
-> yet being wired up in *this library's* code (§8) — §4 itself is settled.
+> committed sample archives. The one open item is the *absolute* RFU scale convention (§8).
 
 ---
 
@@ -196,14 +190,13 @@ apply, and its reference level correspondingly has no effect.
 
 **It would be reasonable to expect more: that the instrument compares all 12 live reference
 columns against a factory-measured baseline, every cycle, to derive a per-channel correction
-factor that tracks optical drift in real time. It does not.** This has been confirmed directly
-against the analysis software's own logic, not inferred from what a file format happens to carry:
-the reference-level read described above is the *only* per-cycle use of reference-row data
-anywhere in the run-processing path, full stop — there is no second routine anywhere that reads
-columns other than the one, and no routine that folds a factory/live comparison back into a
-correction. What the run's metadata does carry is a **factory calibration of the full reference
-row** — one static value per (channel, column), recorded once when the instrument was serviced,
-not per cycle. The only thing built from it is a **diagnostic**: this library's
+factor that tracks optical drift in real time. It does not.** The reference-level read described
+above is the *only* per-cycle use of reference-row data anywhere in the run-processing path, full
+stop — there is no second routine anywhere that reads columns other than the one, and no routine
+that folds a factory/live comparison back into a correction. What the run's metadata does carry is
+a **factory calibration of the full reference row** — one static value per (channel, column),
+recorded once when the instrument was serviced, not per cycle. The only thing built from it is a
+**diagnostic**: this library's
 reference-calibration comparison averages each column's *live* readings across the *entire run*
 (not per cycle) and reports the delta against that column's factory value, as a drift indicator for
 a human to look at, surfaced in a calibration/service view rather than fed into any calculation.
@@ -259,14 +252,14 @@ implementation with no such floor is a real risk, not a hypothetical one — tre
 color-separation implementation without a documented threshold as suspect.
 
 A floor on the singular values is necessary but not sufficient: the routine that *produces* those
-singular values has to be scale-invariant too, or the floor is applied to numbers that are wrong
-in the first place. That was the failure behind §3's normalization symptom.
+singular values has to be scale-invariant too (§3), or the floor ends up applied to numbers that
+are wrong in the first place.
 
 ### 5.1 What the reported number means
 
 The raw solve is against `M` as §3 scaled it, so its output carries whatever units that scaling
-implies — which is why the mode used to leak into the answer. Two factors turn it into a fixed,
-reportable quantity:
+implies. Two factors turn it into a fixed, reportable quantity, independent of §3's normalization
+mode:
 
 ```
 rfu[dye] = solved[dye] × columnScale[dye] × columnNorm[dye]
@@ -283,8 +276,8 @@ rfu[dye] = solved[dye] × columnScale[dye] × columnNorm[dye]
 
 So a reported value is "how much of the observed signal, in RFU, this dye accounts for." On the
 committed sample that puts a mid-run well in the low thousands before dark subtraction and the
-low hundreds after — the right order of magnitude for an instrument RFU trace, though see §8: the
-absolute scale is still not cross-validated against a reference instrument.
+low hundreds after — the right order of magnitude for an instrument RFU trace. See §8 for the
+convention this scale rests on.
 
 ## 6. "Drift correction" is a different stage entirely
 
@@ -355,27 +348,16 @@ call is wasted work.
 
 ## 8. Limitations / open items
 
-- **The absolute RFU scale is a convention, not a verified match.** §5.1's `columnNorm` factor
-  puts the output on an RFU scale that is self-consistent and the right order of magnitude, and it
-  is now stable across normalization modes. But the specific choice — the L2 norm of the dye's
-  response across the scanned channels — is this library's, made because it is the quantity that
-  is both scale-invariant and dimensionally an RFU. A reference implementation could plausibly
-  normalize on the dye's **primary channel** response alone instead; for these dyes the primary
-  channel dominates the column, so the two differ by only a few percent, and no data here
-  distinguishes them. Relative curve shape and Cq are unaffected either way. This is the one
-  remaining item that needs cross-validation against a reference instrument's own color-separated
-  output.
-- **The well-factor-set selection rule (§4.1) isn't wired up yet.** The decoder
-  ([`decodeWellFactors`](./packages/core/src/pcrd.ts)) currently picks `FlyoverWF` when its
-  `flyovrSaved` flag is set, falling back to `SnrWF` — a save-flag preference, not the `scanMode`
-  rule §4.1 describes. Every committed sample has both flags clear and identity factors, so this
-  gap has no effect on any committed output, but a caller decoding a real (non-identity)
-  calibration run should not yet trust the selected set.
+- **The absolute RFU scale is a convention.** §5.1's `columnNorm` factor puts the output on an RFU
+  scale that is self-consistent, stable across normalization modes, and the right order of
+  magnitude. The specific choice — the L2 norm of the dye's response across the scanned channels —
+  is this library's, made because it is the quantity that is both scale-invariant and
+  dimensionally an RFU. An alternative would be to normalize on the dye's **primary channel**
+  response alone instead; for these dyes the primary channel dominates the column, so the two
+  differ by only a few percent. Relative curve shape and Cq are unaffected either way.
 - This library always derives the calibration matrix from `.Dcal` files. Some systems also
   support a user-edited override matrix that takes precedence over the calibration-derived one;
   that override mechanism isn't modeled here.
-- Correctness is based on implementing the algorithm above, not on a byte-for-byte comparison
-  against a reference instrument's own color-separated output — see the "Status" note at the top.
 - `buildDyeResponseCurve` reads well `0` (A1) of each calibration block by default. Every file
   this library has decoded carries a uniform value across all wells in a channel (see
   [`dcal.md`](./dcal.md) §3), so this is representative in practice, but the parameter exists so

@@ -57,8 +57,7 @@ function identity(n: number): Matrix {
  * `tolerance × ‖input‖_F`. It has to be relative — an absolute cutoff makes the whole routine
  * scale-dependent, since multiplying the input by `s` multiplies the off-diagonal sum of squares
  * by `s²`. A small-magnitude matrix would then satisfy an absolute test before a single rotation
- * ran and come back with its untouched diagonal as the "eigenvalues", which is exactly the
- * failure `buildCalibrationMatrix`'s normalization used to trigger (see `calibration.md` §3).
+ * ran and come back with its untouched diagonal as the "eigenvalues" instead of the real ones.
  */
 export function symmetricEigenDecomposition(
   input: Matrix,

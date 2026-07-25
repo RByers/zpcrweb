@@ -377,12 +377,15 @@ function parseWellFactorsElement(inner: string, channelCount: number): number[][
 
 /**
  * Decode `<wellFactorsCollection>` into {@link WellFactors} — the per-well gain divisors
- * `calibration.md` §4.1 applies. The header's `snrSaved`/`flyovrSaved` flags say which of the two
- * sets was actually recorded; a run with neither (the committed sample's case, where the header
- * notes the set was synthesized during persistence loading and every factor is exactly `1`) gets
- * no active set, so no gain correction is applied at all.
+ * `calibration.md` §4.1 applies. Which of the two saved sets is active is determined by the
+ * plate's scan pattern (`scanMode`), not a save-flag preference: `AllChannelsScan` (the
+ * step-and-repeat mode) selects `SnrWF`, any other scan mode selects `FlyoverWF`. The header's
+ * `snrSaved`/`flyovrSaved` flags then gate whether the selected set was actually recorded; a run
+ * where it wasn't (the committed sample's case, where the header notes the set was synthesized
+ * during persistence loading and every factor is exactly `1`) gets no active set, so no gain
+ * correction is applied at all.
  */
-function decodeWellFactors(el: XmlElement): WellFactors | undefined {
+function decodeWellFactors(el: XmlElement, scanMode: string | undefined): WellFactors | undefined {
   const coll = findElement(el.inner, "WellFactorsCollection");
   if (!coll) return undefined;
 
@@ -404,7 +407,7 @@ function decodeWellFactors(el: XmlElement): WellFactors | undefined {
 
   const snr = flag("snrSaved") ? readSet("SnrWF") : undefined;
   const flyover = flag("flyovrSaved") ? readSet("FlyoverWF") : undefined;
-  const active = flyover ?? snr;
+  const active = scanMode === "AllChannelsScan" ? snr : flyover;
 
   return {
     channelCount,
@@ -570,7 +573,7 @@ function buildZpcr(root: XmlElement[]): Zpcr {
   const protocolText = runDefinition ? unescapeXml(runDefinition) : "";
 
   const wellFactorsEl = byLower.get("wellfactorscollection");
-  const wellFactors = wellFactorsEl ? decodeWellFactors(wellFactorsEl) : undefined;
+  const wellFactors = wellFactorsEl ? decodeWellFactors(wellFactorsEl, plate?.scanMode) : undefined;
 
   return {
     metadata,
