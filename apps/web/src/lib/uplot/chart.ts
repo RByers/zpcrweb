@@ -201,6 +201,11 @@ export interface SeriesMeta {
   baselineFormula?: string | null;
   /** See {@link PlotCurve.sample}. */
   sample?: string;
+  /** For `kind: "baseline"` only: index into `meta`/`u.series` (well series, not row/col index —
+   * see `applyHighlight`) of the well curve this baseline overlays. Lets highlight state be
+   * copied from the parent rather than re-derived, so a baseline can never show/hide out of step
+   * with its own curve. */
+  parentIndex?: number;
 }
 
 /** Min/max envelope for a single isolated well (drawn as a shaded band). */
@@ -352,6 +357,7 @@ export function buildChart(cfg: BuildChartConfig): {
         min: [],
         max: [],
         adjust,
+        parentIndex: i,
       });
       series.push({
         label: `${curve.wellLabel} · ${curve.dyeLabel} baseline`,
@@ -588,7 +594,11 @@ export function buildChart(cfg: BuildChartConfig): {
  * null` restores full opacity.
  */
 export function applyHighlight(u: uPlot, meta: SeriesMeta[], match: HighlightMatch | null): void {
+  // Baselines don't get their own match test — deferred to a second pass below — so a baseline
+  // can never show/hide out of step with the curve it overlays, no matter how `isMatch`'s match
+  // kinds evolve.
   meta.forEach((m, i) => {
+    if (m.kind === "baseline") return;
     const isMatch =
       !match ||
       (m.kind === "well" &&
@@ -597,6 +607,10 @@ export function applyHighlight(u: uPlot, meta: SeriesMeta[], match: HighlightMat
           (match.kind === "channel" && m.channel === match.channel) ||
           (match.kind === "sample" && m.sample === match.sample)));
     u.series[i + 1]!.alpha = isMatch ? 1 : 0.12;
+  });
+  meta.forEach((m, i) => {
+    if (m.kind !== "baseline" || m.parentIndex == null) return;
+    u.series[i + 1]!.alpha = u.series[m.parentIndex + 1]!.alpha;
   });
   u.redraw(false, false);
 }
