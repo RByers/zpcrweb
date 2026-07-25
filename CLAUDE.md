@@ -7,6 +7,11 @@
 - Merge feature/worktree branches into `main` locally. After doing so delete the worktree and branch.
 - Don't open PRs, and don't push anything upstream to the `origin`
 
+## Secrets
+
+Local-only secrets (e.g. the CFX file decryption password) live in `SECRETS.md`, which is
+gitignored and never committed.
+
 ## Format documentation
 
 The reverse-engineered binary format docs are the reference for anything in

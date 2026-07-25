@@ -3,7 +3,7 @@ import type { Zpcr } from "@zpcrweb/core";
 import { parseXmlFragment, XmlTree } from "../../lib/xmlTree";
 import { logEntriesFromElements, summarizeRunLog } from "../../lib/runlog";
 import { DecodedPlateread } from "../raw/DecodedPlateread";
-import { PlateDetail } from "../raw/DecodedPlate";
+import { PlateTable } from "../raw/PlateTable";
 import { RunInfoTable, ProtocolDecoded } from "../raw/DecodedView";
 import { RunLogTable } from "../raw/RunLogTable";
 
@@ -246,7 +246,7 @@ function PcrdRawContent({
     if (mode === "xml") return <XmlTree roots={doc.plateSetup2El ? [doc.plateSetup2El] : []} />;
     const plate = zpcr.plates()[0]?.pltd.plate;
     if (!plate) return <div className="decoded__na mono">No plate decoded.</div>;
-    return <PlateDetail plate={plate} sourceHint="embedded in .pcrd document" />;
+    return <PlateTable plate={plate} sourceHint="embedded in .pcrd document" />;
   }
 
   if (entry.kind === "protocol") {

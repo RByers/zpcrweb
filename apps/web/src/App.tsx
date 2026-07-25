@@ -6,6 +6,7 @@ import { ViewSelector } from "./components/ViewSelector";
 import { PasswordPrompt } from "./components/PasswordPrompt";
 import { OverviewView } from "./components/views/OverviewView";
 import { CurvesView } from "./components/views/CurvesView";
+import { PlatesView } from "./components/views/PlatesView";
 import { RawFilesView } from "./components/views/RawFilesView";
 import { PcrdRawView } from "./components/views/PcrdRawView";
 
@@ -76,6 +77,7 @@ export function App() {
                 onChange={store.updateSettings}
               />
             )}
+            {view === "plates" && <PlatesView zpcr={zpcr} />}
             {view === "raw" && active.kind === "pcrd" && (
               <PcrdRawView zpcr={zpcr} documentXml={activeRun?.documentXml ?? ""} />
             )}
