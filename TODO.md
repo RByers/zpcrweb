@@ -8,7 +8,6 @@ visualizer for everything** inside a `.zpcr` archive.
 Additional typed parsers for the archive files currently reachable only via the low-level
 `archive` API (raw bytes / text / hex):
 
-- [ ] Parse the calibration files and try to infer how to use them. Do they include cross-talk information for subtracting a fraction of one channel from another? Search the web for any academic literature on how crosstalk elimination is done in practice. 
 - [ ] baseline subtraction / Cq (Ct) calculation helpers derived from the curves.
 - [ ] **Protocol** — `ProtocolName.txt`, `ProtocolRunDefinition.txt`
       (e.g. `METHOD CALC;HOTLID 105,30;VOLUME 20;TEMP …;PLATEREAD;GOTO 2,44;END`). Parse
@@ -16,29 +15,20 @@ Additional typed parsers for the archive files currently reachable only via the 
 - [ ] **`.alf` run log** — the `*_…_Luna_noRT.alf` tab/`*`-delimited step-by-step run log
       (per-step temperatures, timestamps, elapsed time, error state).
 - [ ] **`runlog.xml`** — full structured run event log.
-- [ ] **`.Dcal` dye calibration files** — one per dye/plate-type (FAM, HEX, VIC/Cal Gold
-      540, ROX/Tex 615/Cal Orange 560, Cy5, Quasar 670/705, …). Needed for the
-      **channel → dye mapping**, which the `.Plateread` payload alone cannot provide.
 - [ ] **Plateread header** — LED currents ×6 and fan/lid state are decoded via the
       descriptor dictionary but only reachable through `decodePlateReadDetail`; promote them
       to the typed `PlateRead` surface like the temperatures now are.
 - [ ] **`FactoryRefRowCal`** — parse the factory reference-row calibration array in
       `RunInfo.xml` into typed per-well records.
-- [x] Parse the .pltd file and try to decode how they define plates (flourophores, targets
-      and samples per well). Done — see [`pltd.md`](./pltd.md) and `parsePltd` / `zpcr.plates()`.
-- [x] Parse the .prcl file and try to decode how it defines a protocol. Done — see
-      [`prcl.md`](./prcl.md) and `parsePrcl` / `zpcr.protocols()`.
-      On the original question: it does *not* map exactly to `ProtocolRunDefinition.txt`. The
-      `.prcl` embeds the same text grammar in its `runDefinition` attribute, but the archive's
-      `.txt` differs in the `PLATEREAD` operand (`#h81` vs `#h3F`) and the terminator — the
-      `.txt` is what the instrument recorded, the `.prcl` is the protocol as authored.
 
 ## Web app (`apps/web`)
 
 Still planned:
 
 - [ ] Generate a nice simple but clear favicon
-- [ ] Visualize calibration files
+- [ ] Move the visual plate viewer from the 'raw files' tab into it's own tab as a peer of 'curves' to visualizes any plate files attached to the run data.  The 'decoded' view in raw files should instead display the raw data in a tabular form.
+- [ ] When a file is opened with an attached plate (pcrd or zpcr with embedded pltd), use the plate definition to determine the UI defaults (channels and wells to display etc.).
+- [ ] Try to replace react with preact and evaluate the cost in terms of added complexity and app quality.
 - [ ] Add a plate editor which allows setting the flourophores used per well, as well as the tube types for the plate (clear / white).  Used for calibration adjustments and fluorophore display. Allow saving/naming plate files and applying them to runs. Remember the plate setting applied to each loaded run. Have an easy mechanism to copy/paste settings from one well to another or to all wells on a column/row/plate, or to duplicate a column/row across multiple columns/rows (eg. using click drag to select a region simple to copy/paste operations in spreadsheets)
 - [ ] Optionally allow writing the target and sample names per well in the plate editor, again with easy copy paste of some form. Then use these in the curves visualization (eg. on hover).
 - [ ] Add an option to apply flourophore-specific calibration to the run based on the calibration file data.
