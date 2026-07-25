@@ -361,7 +361,7 @@ export function buildChart(cfg: BuildChartConfig): {
   // Cq markers: one per well curve with a defined Cq, positioned by linearly interpolating the
   // curve's already-plotted (baseline-adjusted, log-safe) values at the fractional Cq cycle —
   // the same values the line itself is drawn from.
-  const cqMarkers: { x: number; y: number; color: string }[] = [];
+  const cqMarkers: { x: number; y: number; color: string; seriesIdx: number }[] = [];
   wellCurves.forEach((curve, i) => {
     if (curve.cq == null) return;
     const plottedRow = rows[i + 1] as (number | null)[];
@@ -379,7 +379,12 @@ export function buildChart(cfg: BuildChartConfig): {
     if (y0 == null || y1 == null) return;
     const span = cycles[lo + 1]! - cycles[lo]!;
     const frac = span !== 0 ? (curve.cq! - cycles[lo]!) / span : 0;
-    cqMarkers.push({ x: curve.cq!, y: y0 + frac * (y1 - y0), color: channelColor(curve.channel) });
+    cqMarkers.push({
+      x: curve.cq!,
+      y: y0 + frac * (y1 - y0),
+      color: channelColor(curve.channel),
+      seriesIdx: i + 1,
+    });
   });
 
   const presentChannels = new Set(wellCurves.map((c) => c.channel));
@@ -608,7 +613,7 @@ function yLabel(baseline: Baseline, curveBaselineMode: CurveBaselineMode): strin
 function overlayPlugin(
   meta: SeriesMeta[],
   bands: BandData[],
-  cqMarkers: { x: number; y: number; color: string }[],
+  cqMarkers: { x: number; y: number; color: string; seriesIdx: number }[],
   onHover: (t: TooltipData | null) => void,
 ): uPlot.Plugin {
   let svg: SVGSVGElement;
@@ -706,6 +711,7 @@ function overlayPlugin(
           c.setAttribute("cx", String(u.valToPos(m.x, "x")));
           c.setAttribute("cy", String(u.valToPos(m.y, "y")));
           c.setAttribute("stroke", m.color);
+          c.setAttribute("stroke-opacity", String(u.series[m.seriesIdx]!.alpha ?? 1));
         });
       },
 
