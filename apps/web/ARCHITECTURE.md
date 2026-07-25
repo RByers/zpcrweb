@@ -296,6 +296,11 @@ only pieces the two views share.
   per-scan dark level from `DARKDATA`, and the per-well gain factors when the run has them
   (a `.pcrd` thing — a `.zpcr` carries none, so only the dark subtraction bites there). The
   normalization selector is a numerical-conditioning knob and does not change the RFU scale.
+  `computeFluorCurves` solves every well against every calibrated plate fluor, but `CurvesView`
+  only plots a line when all three hold: the well is enabled, the fluor isn't globally disabled,
+  and — per `pltd.md`'s per-well dye layers (`WellDefinition.fluors`) — that specific well
+  actually has that fluor loaded, so a dye layer that skips some wells doesn't draw phantom
+  lines for them.
 
 ## Reference view
 

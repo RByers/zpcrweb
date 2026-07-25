@@ -225,14 +225,27 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
     return computeFluorCurves(allCurves, matrix, available, dyeChannels, corrections);
   }, [matrix, calibrationOn, allCurves, available, calibratedFluors, corrections]);
 
+  // Per-well set of fluor names actually loaded into that well (pltd.md dye layers) — a well
+  // can be enabled and a fluor can be globally on while that particular well/fluor pair was
+  // never loaded (a dye layer doesn't necessarily cover every well), so no line should be
+  // drawn for it.
+  const wellFluors = useMemo(() => {
+    const m = new Map<string, Set<string>>();
+    if (plate) {
+      for (const w of plate.wells) m.set(wellKey(w.row, w.col), new Set(w.fluors.map((f) => f.fluor)));
+    }
+    return m;
+  }, [plate]);
+
   const visibleFluor = useMemo(
     () =>
       allFluorCurves.filter(
         (c) =>
           settings.enabledWells.has(wellKey(c.row, c.col)) &&
-          !settings.disabledFluors.has(c.dye),
+          !settings.disabledFluors.has(c.dye) &&
+          (wellFluors.get(wellKey(c.row, c.col))?.has(c.dye) ?? false),
       ),
-    [allFluorCurves, settings.enabledWells, settings.disabledFluors],
+    [allFluorCurves, settings.enabledWells, settings.disabledFluors, wellFluors],
   );
 
   // Whether to show the run in dye space: the user's toggle, independent of whether any
