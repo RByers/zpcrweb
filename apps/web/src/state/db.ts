@@ -48,6 +48,9 @@ export interface StoredSettings {
   calibrationNormalization?: "none" | "column" | "global";
   /** Fluorophore (or, in target view mode, target) names hidden from the dye-space view. */
   disabledFluors?: string[];
+  /** When true, dye-space curves are drawn for every enabled well/fluor pair, even ones the
+   * plate definition doesn't actually load into that well. Off by default. */
+  showUnloadedFluors?: boolean;
 }
 
 function openDb(): Promise<IDBDatabase> {

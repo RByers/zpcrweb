@@ -308,9 +308,18 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
         (c) =>
           settings.enabledWells.has(wellKey(c.row, c.col)) &&
           !settings.disabledFluors.has(labelForFluorCurve(c.row, c.col, c.dye)) &&
-          (wellFluors.get(wellKey(c.row, c.col))?.has(c.dye) ?? false),
+          (settings.showUnloadedFluors ||
+            (wellFluors.get(wellKey(c.row, c.col))?.has(c.dye) ?? false)),
       ),
-    [allFluorCurves, settings.enabledWells, settings.disabledFluors, wellFluors, fluorViewMode, wellFluorTargets],
+    [
+      allFluorCurves,
+      settings.enabledWells,
+      settings.disabledFluors,
+      settings.showUnloadedFluors,
+      wellFluors,
+      fluorViewMode,
+      wellFluorTargets,
+    ],
   );
 
   // Whether to show the run in dye space: the user's toggle, independent of whether any
@@ -463,6 +472,16 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
         <div className="rail__section">
           <div className="rail__title">
             {calibrationOn ? (fluorViewMode === "target" ? "Targets" : "Fluorophores") : "Channels"}
+            {calibrationOn && (
+              <button
+                className={"rail__link" + (settings.showUnloadedFluors ? " is-on" : "")}
+                onClick={() => onChange({ showUnloadedFluors: !settings.showUnloadedFluors })}
+                aria-pressed={settings.showUnloadedFluors}
+                title="Draw curves for every enabled well, even ones the plate configuration doesn't load this fluor/target into"
+              >
+                Unloaded
+              </button>
+            )}
           </div>
           {calibrationOn ? (
             <FluorBar

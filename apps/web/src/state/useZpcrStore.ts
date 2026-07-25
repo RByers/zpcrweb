@@ -79,6 +79,10 @@ export interface FileSettings {
    * opt-out set, like `enabledChannels` inverted — new entries default to shown without needing
    * to know their names up front). */
   disabledFluors: Set<string>;
+  /** When true, draw a dye-space curve for every enabled well/fluor pair regardless of whether
+   * the plate definition actually loads that fluor into that well. Off by default — the normal
+   * behavior only draws curves pltd.md's per-well dye layers actually cover. */
+  showUnloadedFluors: boolean;
 }
 
 /** A file loaded into memory — bytes only. Parsing is derived (see {@link ZpcrStore.runs}),
@@ -161,6 +165,7 @@ function defaultSettings(): FileSettings {
     fluorViewMode: "fluorophore",
     calibrationNormalization: "global",
     disabledFluors: new Set<string>(),
+    showUnloadedFluors: false,
   };
 }
 
@@ -183,6 +188,7 @@ function toStored(id: string, s: FileSettings): StoredSettings {
     fluorViewMode: s.fluorViewMode,
     calibrationNormalization: s.calibrationNormalization,
     disabledFluors: [...s.disabledFluors],
+    showUnloadedFluors: s.showUnloadedFluors,
   };
 }
 
@@ -203,6 +209,7 @@ function fromStored(s: StoredSettings): FileSettings {
     fluorViewMode: s.fluorViewMode ?? "fluorophore",
     calibrationNormalization: s.calibrationNormalization ?? "global",
     disabledFluors: new Set(s.disabledFluors ?? []),
+    showUnloadedFluors: s.showUnloadedFluors ?? false,
     temps: new Set(s.temps ?? []),
   };
 }

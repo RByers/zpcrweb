@@ -387,6 +387,10 @@
   background: transparent;
   opacity: 1;
 }
+.rail__link.is-on {
+  color: var(--neon-magenta);
+  opacity: 1;
+}
 .rail__icon-btn {
   display: inline-flex;
   align-items: center;

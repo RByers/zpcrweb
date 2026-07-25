@@ -301,7 +301,11 @@ only pieces the two views share.
   only plots a line when all three hold: the well is enabled, the fluor (or, in target mode,
   its target — see below) isn't disabled, and — per `pltd.md`'s per-well dye layers
   (`WellDefinition.fluors`) — that specific well actually has that fluor loaded, so a dye layer
-  that skips some wells doesn't draw phantom lines for them.
+  that skips some wells doesn't draw phantom lines for them. That third check can be bypassed via
+  the `showUnloadedFluors` setting (the "Unloaded" toggle beside the Fluorophores/Targets rail
+  title, off by default), drawing a curve for every enabled well/fluor pair regardless of what
+  the plate definition actually loads there — useful for spotting cross-talk or a mis-configured
+  plate, at the cost of otherwise-meaningless curves once it's on.
 
   A three-way "View" toggle (`calibration`/`fluorViewMode` settings) picks channel space or
   one of two dye-space groupings: **Fluorophore** labels/legends each curve by its dye name
