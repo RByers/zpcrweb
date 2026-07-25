@@ -6,9 +6,11 @@ Bio-Rad CFX96 (`"96FX"` block, serial `CT019138`) real-time qPCR run
 i.e. once per PCR cycle. This run had 45 reads (protocol `... PLATEREAD; GOTO 2,44`).
 
 > **Status:** fully decoded. The file is **self-describing**: a trailing **descriptor
-> dictionary** (§4) lists every field's absolute offset, byte length, and type. Using it, all
+> dictionary** (§4) lists every field's absolute offset, byte length, and type. The dictionary's
+> container format — "ICFF" — is not specific to `.Plateread`; it's documented on its own in
+> [`icff.md`](./icff.md) and implemented by `packages/core/src/icff.ts`. Using it, all
 > scalar-header fields, strings, and the WELLDATA/DARKDATA arrays decode exactly — no offsets
-> need to be hardcoded (they were originally, and still serve as a fallback).
+> need to be hardcoded.
 
 **Endianness is mixed.** The metadata — version words, the scalar header, and the descriptor
 dictionary — is **big-endian**. The **WELLDATA and DARKDATA float arrays are little-endian**
@@ -36,8 +38,8 @@ variable-length in principle but constant across this run):
 | **`WELLDATA`** | `0x1A4` | `int32` float-count (`2592`) then 648 records × 4 floats — **the fluorescence table** (§2) |
 | **`DARKDATA`** | `0x2A28` | `int32` float-count (`24`) then 6 records × 4 floats — dark/background reading per channel |
 | `FILEPATH` | `0x2A8C` | ASCII `\Storage Card\CurrentRun\Read0004N.xlateread` |
-| Descriptor dictionary | `0x2AB0` | Field-name table + descriptors mapping names → data (§4) |
-| Trailer | end | Pointers into the dictionary/string pool |
+| Descriptor dictionary | `0x2AB0` | ICFF index: field-name table + descriptors mapping names → data (§4, [`icff.md`](./icff.md)) |
+| ICFF footer | end (last 8 bytes) | `[index_offset][entry_stride]`, both u32 LE — points back at the dictionary |
 
 Array fields are framed as **`[uint32 count_of_floats][float32 × count]`**. The descriptor for
 each array (in the dictionary) stores the data offset relative to base `0x1A4`
@@ -170,20 +172,25 @@ either. Both sample archives — a 2019 qualification run and a 2026 amplificati
 
 ## 4. Descriptor dictionary (`0x2AB9`–end) — the authoritative schema
 
-The tail of the file, immediately after the FILEPATH string, is a **self-describing schema**:
-a list of **field-name slots**. Each slot is a NUL-padded field name followed **255 bytes
-later** by a 9-byte descriptor:
+The tail of the file, immediately after the FILEPATH string, is an **ICFF** index — a small,
+hand-rolled container format Bio-Rad reuses for other file types too. The full container layout
+(footer, index-entry structure, endianness rules) is documented separately in
+[`icff.md`](./icff.md) and implemented by `packages/core/src/icff.ts`; this section covers only
+what's specific to `.Plateread`'s use of it.
 
-```
-[uint32 offset][uint32 length][uint8 type]      offset/length are ABSOLUTE file bytes
-```
-
-Field names appear in this order (`ICFFPRFILEVERSION, PLATEREADVERSION, CRC, RUNGUID,
+Field names appear in this order (`PRFILEVERSION, PLATEREADVERSION, CRC, RUNGUID,
 ALPHASERIALNUMBER, BASESERIALNUMBER, HEADSERIALNUMBER, FIRMWAREVERSIONS, SHUTTLEPARAM,
 SCANMODE, RETRIEVALTYPE, SCANINDEX, STEPIDENTIFICATION, STEP, CYCLE, ERRORNUMBER,
 ERRORDESCRIPTION, BLOCKTEMP, AMBIENTTEMP, SHUTTLETEMP, SAMPLETEMP, LIDTEMP, LEDCURRENT01..06,
 FANSTATE, FANOFFTEMP, FANONTEMP, LIDSTATE, LIDFORCE, LIDPOSITION, CHANNELMASK, NUMBERCOLUMNS,
-NUMBERROWS, DATETIME, DELTATIME, WELLDATA, DARKDATA, FILEPATH`).
+NUMBERROWS, DATETIME, DELTATIME, WELLDATA, DARKDATA, FILEPATH`) — 42 entries in both sample
+archives.
+
+> The first field's real name is `PRFILEVERSION`. An earlier version of this decoder located the
+> index by scanning for the literal string `ICFFPRFILEVERSION` starting at `0x0100`, which
+> happened to work only because the `ICFF` magic sits immediately before that field's name in
+> the file — the magic bytes are not part of the name. See [`icff.md`](./icff.md) for why the
+> footer-based approach is the correct, general one.
 
 The **offsets are absolute and exact**, verified against the data:
 
@@ -193,8 +200,8 @@ The **offsets are absolute and exact**, verified against the data:
 - `FILEPATH` → offset `0x2A8C`, length `45`.
 - `DATETIME`, the serials, and every scalar likewise point at their exact bytes.
 
-So the dictionary can drive decoding directly, with no hardcoded offsets. The array descriptors
-point at the `int32` count; the float payload starts 4 bytes later.
+So the index can drive decoding directly, with no hardcoded offsets. Array entries point at the
+`int32` count; the float payload starts 4 bytes later.
 
 ---
 

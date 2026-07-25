@@ -1,5 +1,5 @@
 import type { PlateReadTemp, TempKind } from "./types.js";
-import type { PlatereadField } from "./descriptors.js";
+import type { IcffEntry } from "./icff.js";
 
 /**
  * Temperature extraction from a `.Plateread` descriptor dictionary.
@@ -81,7 +81,7 @@ export function tempRow(name: string): string | undefined {
  * two interpretations ever lands in {@link MIN_C}–{@link MAX_C}.
  */
 function decodeTemp(
-  field: PlatereadField,
+  field: IcffEntry,
 ): { celsius: number; kind: TempKind } | undefined {
   if (field.length !== 4) return undefined;
   const setpoint = SETPOINT_NAMES.has(field.name);
@@ -106,7 +106,7 @@ function decodeTemp(
  *
  * @param fields the parsed descriptor dictionary
  */
-export function extractTemps(fields: PlatereadField[]): PlateReadTemp[] {
+export function extractTemps(fields: IcffEntry[]): PlateReadTemp[] {
   const temps: PlateReadTemp[] = [];
   for (const field of fields) {
     if (!field.name.includes("TEMP")) continue;

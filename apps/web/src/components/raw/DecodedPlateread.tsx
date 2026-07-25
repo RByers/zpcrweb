@@ -62,7 +62,7 @@ export function DecodedPlateread({ zpcr, read }: { zpcr: Zpcr; read: PlateRead }
                 <th>Field</th>
                 <th>Offset</th>
                 <th>Len</th>
-                <th>Type</th>
+                <th>Flag</th>
                 <th>int (BE)</th>
                 <th>float (BE)</th>
                 <th>text / hex</th>
@@ -74,7 +74,7 @@ export function DecodedPlateread({ zpcr, read }: { zpcr: Zpcr; read: PlateRead }
                   <td className="decoded__fname">{f.name}</td>
                   <td>0x{f.offset.toString(16)}</td>
                   <td>{f.length}</td>
-                  <td>{f.type}</td>
+                  <td>{f.flag}</td>
                   <td>{f.length === 4 ? f.int : ""}</td>
                   <td>
                     {f.length === 4 && f.float !== undefined

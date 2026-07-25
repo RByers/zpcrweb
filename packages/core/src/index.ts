@@ -22,11 +22,7 @@ export {
 } from "./pivot.js";
 export { parseFactoryRefRowCal, compareRefToCal } from "./refcal.js";
 export { extractTemps, tempLabel, tempRow } from "./temps.js";
-export {
-  decodePlateReadDetail,
-  parseDescriptors,
-  fieldMap,
-} from "./descriptors.js";
+export { parseIcff, icffFieldMap } from "./icff.js";
 export {
   parseRunInfo,
   parseRunInfoRaw,
@@ -34,6 +30,7 @@ export {
 } from "./runinfo.js";
 export {
   decodePlateRead,
+  decodePlateReadDetail,
   wellIndex,
   isPlateReadName,
   plateReadNumber,
@@ -64,7 +61,8 @@ export type {
   RefCalComparison,
   PltdEntry,
 } from "./types.js";
-export type { PlatereadField, PlatereadDetail } from "./descriptors.js";
+export type { IcffEntry } from "./icff.js";
+export type { PlatereadDetail } from "./plateread.js";
 export type {
   Pltd,
   PltdContainer,

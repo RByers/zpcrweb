@@ -8,7 +8,7 @@ function firstPlateread(): Uint8Array {
   return zpcr.archive.bytes(name);
 }
 
-describe("descriptor dictionary decode", () => {
+describe("ICFF index decode", () => {
   const detail = decodePlateReadDetail(firstPlateread());
   const by = new Map(detail.fields.map((f) => [f.name, f]));
 
@@ -16,11 +16,15 @@ describe("descriptor dictionary decode", () => {
     expect(detail.versionWords).toEqual([1, 2, 0]);
   });
 
-  it("decodes the full field set", () => {
-    expect(detail.fields.length).toBeGreaterThanOrEqual(40);
+  it("decodes the full field set, located via the footer (not a name scan)", () => {
+    expect(detail.fields).toHaveLength(42);
     for (const n of ["CYCLE", "BLOCKTEMP", "WELLDATA", "DARKDATA", "FILEPATH", "DATETIME"]) {
       expect(by.has(n)).toBe(true);
     }
+    // The first field's real name is PRFILEVERSION; the ICFF magic immediately precedes it
+    // in the file, which a name-anchored scan (the old approach) mistook for part of the name.
+    expect(detail.fields[0]!.name).toBe("PRFILEVERSION");
+    expect(by.has("ICFFPRFILEVERSION")).toBe(false);
   });
 
   it("locates the arrays at the documented offsets", () => {

@@ -1,11 +1,11 @@
 import { describe, it, expect } from "vitest";
 import { extractTemps, parseZpcr, tempLabel, tempRow } from "../src/index.js";
-import type { PlatereadField } from "../src/index.js";
+import type { IcffEntry } from "../src/index.js";
 import { readMultistepBytes, readSampleBytes } from "./sample.js";
 
-/** Build a minimal descriptor field for the label/decoding unit tests. */
-function field(name: string, extra: Partial<PlatereadField> = {}): PlatereadField {
-  return { name, offset: 1, length: 4, type: 1, hex: "", ...extra };
+/** Build a minimal ICFF entry for the label/decoding unit tests. */
+function field(name: string, extra: Partial<IcffEntry> = {}): IcffEntry {
+  return { name, offset: 1, length: 4, flag: 1, hex: "", ...extra };
 }
 
 describe("plateread temperatures", () => {

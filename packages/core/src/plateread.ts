@@ -1,5 +1,5 @@
 import type { PlateRead, WellReading } from "./types.js";
-import { fieldMap, parseDescriptors } from "./descriptors.js";
+import { icffFieldMap, parseIcff, type IcffEntry } from "./icff.js";
 import { extractTemps } from "./temps.js";
 
 /**
@@ -51,12 +51,11 @@ export function decodePlateRead(
 ): PlateRead {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
 
-  // The file's own descriptor dictionary (self-describing schema) locates every field.
-  // Scalars in the dictionary are big-endian; the WELLDATA/DARKDATA float arrays are
-  // little-endian. Array descriptors point at the int32 count; the float data starts 4
-  // bytes later.
-  const descriptors = parseDescriptors(bytes);
-  const fields = fieldMap(descriptors);
+  // The file's own ICFF index (see icff.md) locates every field by name. Scalars are
+  // big-endian; the WELLDATA/DARKDATA float arrays are little-endian. Array entries point
+  // at the int32 count; the float data starts 4 bytes later.
+  const descriptors = parseIcff(bytes);
+  const fields = icffFieldMap(descriptors);
   const wellField = fields.get("WELLDATA");
   const darkField = fields.get("DARKDATA");
   if (!wellField || !darkField) {
@@ -126,4 +125,25 @@ export function isPlateReadName(name: string): boolean {
 export function plateReadNumber(name: string): number | null {
   const match = PLATEREAD_RE.exec(name);
   return match ? Number(match[1]) : null;
+}
+
+/** The fully-decoded structural view of a `.Plateread` file. */
+export interface PlatereadDetail {
+  /** File size in bytes. */
+  size: number;
+  /** The three big-endian version/magic words at 0x000. */
+  versionWords: number[];
+  /** Every ICFF index entry, with decoded values. */
+  fields: IcffEntry[];
+}
+
+/** Fully decode a `.Plateread` file's structure (version words + ICFF index entries). */
+export function decodePlateReadDetail(bytes: Uint8Array): PlatereadDetail {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const versionWords = [
+    view.getInt32(0, false),
+    view.getInt32(4, false),
+    view.getInt32(8, false),
+  ];
+  return { size: bytes.length, versionWords, fields: parseIcff(bytes) };
 }
