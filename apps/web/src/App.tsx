@@ -87,7 +87,11 @@ export function App() {
             )}
             {view === "plates" && <PlatesView zpcr={zpcr} />}
             {view === "raw" && active.kind === "pcrd" && (
-              <PcrdRawView zpcr={zpcr} documentXml={activeRun?.documentXml ?? ""} />
+              <PcrdRawView
+                zpcr={zpcr}
+                documentXml={activeRun?.documentXml ?? ""}
+                fileName={active.name}
+              />
             )}
             {view === "raw" && active.kind === "zpcr" && <RawFilesView zpcr={zpcr} />}
           </>

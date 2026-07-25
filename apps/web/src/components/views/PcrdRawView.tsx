@@ -157,7 +157,16 @@ function xmlRootsFor(doc: PcrdDocument, entry: NavEntry): Element[] {
   }
 }
 
-export function PcrdRawView({ zpcr, documentXml }: { zpcr: Zpcr; documentXml: string }) {
+export function PcrdRawView({
+  zpcr,
+  documentXml,
+  fileName,
+}: {
+  zpcr: Zpcr;
+  documentXml: string;
+  fileName: string;
+}) {
+  const pcrdBase = fileName.replace(/\.pcrd$/i, "");
   const doc = useMemo(() => {
     // parseXmlFragment always wraps the parsed content in a synthetic root (needed for
     // multi-rooted fragments like runlog.xml); a .pcrd document is single-rooted
@@ -190,16 +199,18 @@ export function PcrdRawView({ zpcr, documentXml }: { zpcr: Zpcr; documentXml: st
   const canDownload = mode === "xml" ? xmlRootsFor(doc, selected).length > 0 : hasDecoded(selected);
 
   const handleDownload = () => {
-    const fname = entryLabel(selected, doc).replace(/[^\w.-]+/g, "_");
+    const label = entryLabel(selected, doc).replace(/[^\w.-]+/g, "_");
     if (mode === "xml") {
       const roots = xmlRootsFor(doc, selected);
       if (roots.length === 0) return;
-      downloadText(`${fname}.xml`, serializeXmlPretty(roots), "application/xml");
+      const xmlName =
+        selected.kind === "document" ? `${pcrdBase}.pcrd.xml` : `${pcrdBase}.pcrd.${label}.xml`;
+      downloadText(xmlName, serializeXmlPretty(roots), "application/xml");
     } else if (selected.kind === "plateRead") {
       const read = zpcr.reads[selected.index];
       if (read) downloadText(plateReadCsvFilename(zpcr, read), plateReadToCsv(read), "text/csv");
     } else if (decodedRef.current) {
-      downloadText(`${fname}.csv`, decodedToCsv(decodedRef.current), "text/csv");
+      downloadText(`${label}.csv`, decodedToCsv(decodedRef.current), "text/csv");
     }
   };
 
