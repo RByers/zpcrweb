@@ -466,27 +466,6 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
                     calibration.md §5.1 divides the column scaling back out, so every mode
                     reports identical RFU unless the matrix is rank-deficient. The setting still
                     exists (see FileSettings) — it just isn't a user-facing choice. */}
-                {calibrationOn && (
-                  <div className="rail__row">
-                    <Toggle
-                      label="Background"
-                      options={[
-                        ["none", "None"],
-                        ["dark", "Dark"],
-                        ["plate", "Plate"],
-                      ]}
-                      value={settings.calibrationBackground}
-                      onChange={(v) =>
-                        onChange({ calibrationBackground: v as CalibrationBackground })
-                      }
-                    />
-                  </div>
-                )}
-                {calibrationOn && settings.calibrationBackground === "plate" && !plateBackgroundAvailable && (
-                  <div className="rail__note mono">
-                    No {tube} empty-plate calibration in this file — no background subtracted.
-                  </div>
-                )}
                 {calibrationOn && !calibrationAvailable && (
                   <div className="rail__note mono">
                     No .Dcal calibration matches this plate's fluorophores for {tube}. Check
@@ -560,12 +539,13 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
         </div>
 
         {allTemps.length > 0 && (
-          <div className="rail__section">
-            <div className="rail__title">
+          <details className="rail__section rail__details">
+            <summary className="rail__title">
               Temperature (right axis)
               <button
                 className="rail__link"
-                onClick={() =>
+                onClick={(e) => {
+                  e.stopPropagation();
                   onChange({
                     temps:
                       visibleTemps.length > 0
@@ -573,14 +553,14 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
                         : new Set(
                             allTemps.filter((t) => t.kind === "measured").map((t) => t.key),
                           ),
-                  })
-                }
+                  });
+                }}
               >
                 {visibleTemps.length > 0 ? "none" : "all"}
               </button>
-            </div>
+            </summary>
             <TempBar temps={allTemps} enabled={settings.temps} onToggle={toggleTemp} />
-          </div>
+          </details>
         )}
 
         <div className="rail__section rail__row">
@@ -643,6 +623,30 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
             </>
           )}
         </div>
+
+        {calibrationOn && (
+          <div className="rail__section">
+            <div className="rail__row">
+              <Toggle
+                label="Background"
+                options={[
+                  ["none", "None"],
+                  ["dark", "Dark"],
+                  ["plate", "Plate"],
+                ]}
+                value={settings.calibrationBackground}
+                onChange={(v) =>
+                  onChange({ calibrationBackground: v as CalibrationBackground })
+                }
+              />
+            </div>
+            {settings.calibrationBackground === "plate" && !plateBackgroundAvailable && (
+              <div className="rail__note mono">
+                No {tube} empty-plate calibration in this file — no background subtracted.
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="rail__stat mono">
           {plotCurves.length} / {calibrationOn ? allFluorCurves.length : allCurves.length}{" "}

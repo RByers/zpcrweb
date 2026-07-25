@@ -395,6 +395,16 @@
   justify-content: space-between;
   gap: 8px;
 }
+.rail__details > summary {
+  cursor: pointer;
+  list-style-position: outside;
+}
+.rail__details > summary::marker {
+  color: var(--ink-muted);
+}
+.rail__details > summary > .rail__link {
+  cursor: default;
+}
 .rail__link {
   border: 0;
   padding: 0;
