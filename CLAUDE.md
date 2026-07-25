@@ -21,6 +21,13 @@ gitignored and never committed — `{ "cfxPassword": "…" }`. Tests load it via
 need it (`describe.skipIf(!PW)` blocks) — everything else runs against the plaintext samples
 committed in `samples/` and `packages/core/test/fixtures/`.
 
+## UI testing
+
+When testing the web app in a browser, always load it with the `cfxPassword` URL query
+parameter set, so samples decrypt automatically instead of sitting behind the password prompt:
+pull the value from `secrets.json`'s `cfxPassword` field (see Secrets, above) and append
+`?cfxPassword=<value>` to the dev server URL, e.g. `http://localhost:5173/?cfxPassword=<value>`.
+
 ## Format documentation
 
 The reverse-engineered binary format docs are the reference for anything in

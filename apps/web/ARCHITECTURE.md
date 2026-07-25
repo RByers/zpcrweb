@@ -39,7 +39,9 @@ document is encrypted — nothing (metadata, reads) exists until the password su
 `useZpcrStore` reflects this: `LoadedFile` holds only raw `bytes` + `kind`; the actual `Zpcr` is
 derived reactively per file (`runs: Map<id, RunResult>`, recomputed whenever the shared
 password changes via `usePltdPassword` — see `state/pltdPassword.ts`, which despite the name
-now covers `.pltd`/`.prcl`/`.pcrd` alike). `App.tsx` renders the shared `PasswordPrompt`
+now covers `.pltd`/`.prcl`/`.pcrd` alike). The password can also be seeded from the
+`cfxPassword` URL query parameter on load (same module), so scripted/UI testing never has to
+click through the prompt. `App.tsx` renders the shared `PasswordPrompt`
 (`components/PasswordPrompt.tsx`) in place of the view area whenever the active file's `RunResult`
 has `needsPassword`/`error` instead of a `zpcr`; `FileBar` shows a lock/warning glyph for
 locked/errored files in the list without blocking selection of other files. `RunResult` also

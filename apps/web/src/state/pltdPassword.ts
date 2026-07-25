@@ -9,8 +9,13 @@ import { useSyncExternalStore } from "react";
  * `localStorage`, then reused for every plate/protocol/`.pcrd`. Kept in `localStorage` (not
  * IndexedDB) so it's a trivial single-value read that any component can subscribe to
  * synchronously.
+ *
+ * It can also be supplied via the `cfxPassword` URL query parameter (e.g. for scripted/UI
+ * testing, where there's no human to click through `PasswordPrompt`) — present on load, it
+ * seeds `localStorage` just like a manual submit would.
  */
 const KEY = "zpcr:pltdPassword";
+const QUERY_PARAM = "cfxPassword";
 const listeners = new Set<() => void>();
 
 function read(): string {
@@ -30,6 +35,13 @@ export function setStoredPltdPassword(value: string): void {
     /* ignore storage failures (private mode, etc.) */
   }
   listeners.forEach((l) => l());
+}
+
+try {
+  const fromUrl = new URLSearchParams(window.location.search).get(QUERY_PARAM);
+  if (fromUrl) setStoredPltdPassword(fromUrl);
+} catch {
+  /* ignore (e.g. no window, malformed URL) */
 }
 
 function subscribe(cb: () => void): () => void {
