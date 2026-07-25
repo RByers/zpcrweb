@@ -21,13 +21,14 @@ The reverse-engineered binary format docs are the reference for anything in
 | [`plateread.md`](./plateread.md) | The `.Plateread` files inside a `.zpcr` — one per plate read (PCR cycle), holding the 6-channel × 108-well raw fluorescence table plus cycle number, block temperature and timestamp. **Mixed endianness:** metadata (version words, ICFF index) is big-endian; the WELLDATA/DARKDATA float arrays are little-endian. Implemented by `packages/core/src/plateread.ts`. |
 | [`dcal.md`](./dcal.md) | The `.Dcal` pure-dye calibration files — per-dye, per-plate-type fluorescence response across all 6 channels at 4 block temperatures, plus a matching empty-plate baseline; the only in-archive source of the channel→dye mapping (`PRIMARYCHANNEL`). Unencrypted ICFF container. Implemented by `packages/core/src/dcal.ts`, entry point `parseDcal(bytes)`; `zpcr.calibrations()` decodes every `.Dcal` entry in an archive. |
 | [`pltd.md`](./pltd.md) | The `.pltd` plate-definition files — per-well fluorophores, target/gene, sample name and type, replicate, standard quantity. Encrypted + compressed XML container. Implemented by `packages/core/src/pltd.ts`, entry point `parsePltd(bytes)`; `zpcr.plates()` decodes every plate in an archive. |
-| [`pcrd.md`](./pcrd.md) | The `.pcrd` saved-experiment files — CFX Manager's single-file XML document collapsing a whole run (plate setup, protocol, all plate reads, analysis/UI state) into one archive. Same container as `.pltd`. |
+| [`pcrd.md`](./pcrd.md) | The `.pcrd` saved-experiment files — CFX Manager's single-file XML document collapsing a whole run (plate setup, protocol, all plate reads, analysis/UI state) into one archive. Same container as `.pltd`. Container decoded; payload structurally mapped, analysis-state subtrees not yet interpreted. Not yet implemented in `packages/core/src`. |
 | [`zipcrypto.md`](./zipcrypto.md) | The single-entry ZipCrypto-encrypted ZIP container shared by `.pltd`/`.prcl` and `.pcrd`: container variants, the fixed shared password, and the decrypt → inflate pipeline. Implemented by `packages/core/src/zipcrypto.ts` + `inflate.ts`. |
 | [`ARCHITECTURE.md`](./ARCHITECTURE.md) | Project-level design: isomorphic library goals, monorepo layout, input strategy. |
 | [`apps/web/ARCHITECTURE.md`](./apps/web/ARCHITECTURE.md) | Web app design notes. |
 
-All format docs are marked **fully decoded** and validated against the committed samples in
-`samples/`. If a decoder changes, update the corresponding doc in the same commit.
+Most of these docs are marked **fully decoded** and validated against the committed samples in
+`samples/`; `pcrd.md` is the current exception (payload mapped but not fully interpreted). If a
+decoder changes, update the corresponding doc in the same commit.
 
 ## Commands
 
