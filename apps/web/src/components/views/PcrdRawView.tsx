@@ -3,6 +3,7 @@ import type { Zpcr } from "@zpcrweb/core";
 import { parseXmlFragment, serializeXmlPretty, XmlTree } from "../../lib/xmlTree";
 import { logEntriesFromElements, summarizeRunLog } from "../../lib/runlog";
 import { decodedToCsv, downloadText } from "../../lib/download";
+import { DownloadIcon } from "../DownloadIcon";
 import { DecodedPlateread } from "../raw/DecodedPlateread";
 import { PlateTable } from "../raw/PlateTable";
 import { RunInfoTable } from "../raw/DecodedView";
@@ -244,9 +245,10 @@ export function PcrdRawView({ zpcr, documentXml }: { zpcr: Zpcr; documentXml: st
             className="raw__download"
             onClick={handleDownload}
             disabled={!canDownload}
+            aria-label="Download"
             title={mode === "decoded" ? "Download table as CSV" : "Download as a file"}
           >
-            Download
+            <DownloadIcon />
           </button>
         </div>
 

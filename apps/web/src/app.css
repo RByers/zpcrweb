@@ -712,14 +712,15 @@
   align-self: flex-start;
 }
 .raw__download {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border: 1px solid var(--border);
   background: var(--panel);
   color: var(--ink-2);
   border-radius: 4px;
-  padding: 4px 10px;
-  font-size: 11px;
+  padding: 5px;
   cursor: pointer;
-  white-space: nowrap;
 }
 .raw__download:hover:not(:disabled) {
   background: var(--raised);

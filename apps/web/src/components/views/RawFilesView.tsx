@@ -5,6 +5,7 @@ import { PlateXml } from "../raw/DecodedPlate";
 import { ProtocolXml } from "../raw/DecodedProtocol";
 import { usePltdPassword } from "../../state/pltdPassword";
 import { decodedToCsv, downloadText } from "../../lib/download";
+import { DownloadIcon } from "../DownloadIcon";
 
 /** Drop the archive entry's extension, e.g. "RunInfo.xml" -> "RunInfo". */
 function baseName(name: string): string {
@@ -159,9 +160,10 @@ export function RawFilesView({ zpcr }: { zpcr: Zpcr }) {
             className="raw__download"
             onClick={handleDownload}
             disabled={!canDownload}
+            aria-label="Download"
             title={mode === "decoded" ? "Download table as CSV" : "Download as a file"}
           >
-            Download
+            <DownloadIcon />
           </button>
         </div>
 
