@@ -25,9 +25,14 @@ import {
  */
 export type TubeType = "BR Clear" | "BR White";
 
-/** A plate's tube type is usually exactly `plateName`; default to Clear when it isn't. */
+/**
+ * A plate's tube type comes from `plateName` (see pltd.md "Vessel type"), compared
+ * case-insensitively per that doc's warning. `MJ White` — the legacy MJ-lineage vessel — has no
+ * calibration of its own and joins against the same `BR White` half of the archive's `.Dcal`
+ * data as `BR White`. Anything else (including no plate data) defaults to Clear.
+ */
 export function resolveTubeType(plateName: string | undefined): TubeType {
-  return plateName?.trim().toLowerCase() === "br white" ? "BR White" : "BR Clear";
+  return plateName?.trim().toLowerCase().includes("white") ? "BR White" : "BR Clear";
 }
 
 /** One fluorophore present on the plate, with its calibration curve if a matching `.Dcal` was found. */

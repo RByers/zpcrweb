@@ -16,7 +16,6 @@ import {
   type StoredSettings,
 } from "./db";
 import { usePltdPassword } from "./pltdPassword";
-import type { TubeType } from "../lib/fluorCurves";
 
 export type FileKind = "zpcr" | "pcrd";
 
@@ -52,8 +51,6 @@ export interface FileSettings {
   calibration: boolean | null;
   /** Calibration matrix column normalization; see `calibration.md` §3. */
   calibrationNormalization: NormalizationMode;
-  /** Tube/plate type used to select `.Dcal` files, or `null` to auto-detect from the plate. */
-  calibrationTube: TubeType | null;
   /** Fluorophore names hidden from the calibration curves (an opt-out set, like `enabledChannels`
    * inverted — new fluors default to shown without needing to know their names up front). */
   disabledFluors: Set<string>;
@@ -131,7 +128,6 @@ function defaultSettings(): FileSettings {
     // Auto: on once plate + calibration data are available (see CurvesView).
     calibration: null,
     calibrationNormalization: "global",
-    calibrationTube: null,
     disabledFluors: new Set<string>(),
   };
 }
@@ -150,7 +146,6 @@ function toStored(id: string, s: FileSettings): StoredSettings {
     temps: [...s.temps],
     calibration: s.calibration,
     calibrationNormalization: s.calibrationNormalization,
-    calibrationTube: s.calibrationTube,
     disabledFluors: [...s.disabledFluors],
   };
 }
@@ -167,7 +162,6 @@ function fromStored(s: StoredSettings): FileSettings {
     step: s.step ?? null,
     calibration: s.calibration ?? null,
     calibrationNormalization: s.calibrationNormalization ?? "global",
-    calibrationTube: s.calibrationTube ?? null,
     disabledFluors: new Set(s.disabledFluors ?? []),
     temps: new Set(s.temps ?? []),
   };

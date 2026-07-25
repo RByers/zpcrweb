@@ -205,10 +205,11 @@ overlays a tooltip.
   - *Log + ΔRFU:* ΔRFU values go ≤ 0, undefined on a log axis, so non-positive points are
     gaps (`null`) with an inline note. The other three combinations are unaffected.
 - **Dark (LED-off) background:** `zpcr.darkCurves()` gives one background series per channel.
-  - *Show* (default): one **dashed** dark line per present channel, transformed like the
+  Only meaningful against a raw RFU baseline, so the toggle is disabled in ΔRFU mode.
+  - *Off* (default): one **dashed** dark line per present channel, transformed like the
     curves — so you see where each channel's background sits.
-  - *Subtract*: each curve is `subtractSeries(mean, dark[channel])` before ΔRFU/scale (the
-    dark lines are dropped and the y-axis label gains "− dark"). Both `subtractSeries` and
+  - *On*: each curve is `subtractSeries(mean, dark[channel])` before scale (the dark lines
+    are dropped and the y-axis label gains "− dark"). Both `subtractSeries` and
     `deltaBaseline` are tested library functions.
 - **Temperatures (right axis):** `zpcr.temperatureCurves(step)` gives one series per
   temperature field in the platereads. Chips in the rail toggle each one (all off by

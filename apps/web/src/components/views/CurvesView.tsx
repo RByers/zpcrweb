@@ -21,7 +21,6 @@ import {
   matchFluorCalibrations,
   resolveTubeType,
   restrictToChannels,
-  type TubeType,
 } from "../../lib/fluorCurves";
 import { ChannelBar } from "../curves/ChannelBar";
 import { FluorBar } from "../curves/FluorBar";
@@ -90,6 +89,13 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
     [darkCurves, available, settings.enabledChannels],
   );
 
+  // Dark (LED-off) subtraction only makes sense against a raw RFU baseline — ΔRFU already
+  // removes each well's own starting offset, so subtracting a separate dark level on top of
+  // that is meaningless. Disable rather than silently ignore, so the setting the user left on
+  // resumes working the moment they switch back to Raw.
+  const darkApplicable = settings.baseline !== "delta";
+  const effectiveSubtractDark = darkApplicable && settings.subtractDark;
+
   // ---- Dye-space (color-separated) curves ------------------------------------------------
   // See calibration.md. Uses the plate's own fluorophore list matched against this run's
   // `.Dcal` calibration data — both need to be available for this to do anything.
@@ -101,8 +107,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
   const plate = plateEntry?.pltd.plate;
   const calibrations = useMemo(() => zpcr.calibrations(), [zpcr]);
 
-  const detectedTube = resolveTubeType(plate?.plateName);
-  const tube: TubeType = settings.calibrationTube ?? detectedTube;
+  const tube = resolveTubeType(plate?.plateName);
 
   const fluorCals = useMemo(
     () => (plate ? matchFluorCalibrations(plate.fluors, calibrations, tube) : []),
@@ -139,7 +144,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
     if (!matrix || !calibrationOn) return [];
     const dyeChannels = calibratedFluors.map((f) => f.channel);
     return computeFluorCurves(allCurves, darkCurves, matrix, available, dyeChannels, {
-      subtractDark: settings.subtractDark,
+      subtractDark: effectiveSubtractDark,
     });
   }, [
     matrix,
@@ -148,7 +153,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
     darkCurves,
     available,
     calibratedFluors,
-    settings.subtractDark,
+    effectiveSubtractDark,
   ]);
 
   const visibleFluor = useMemo(
@@ -268,15 +273,6 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
                 {calibrationOn && (
                   <div className="rail__row">
                     <Toggle
-                      label="Tube"
-                      options={[
-                        ["BR Clear", "Clear"],
-                        ["BR White", "White"],
-                      ]}
-                      value={tube}
-                      onChange={(v) => onChange({ calibrationTube: v as TubeType })}
-                    />
-                    <Toggle
                       label="Normalization"
                       options={[
                         ["global", "Global"],
@@ -292,8 +288,8 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
                 )}
                 {calibrationOn && !calibrationAvailable && (
                   <div className="rail__note mono">
-                    No .Dcal calibration matches this plate's fluorophores for {tube}. Try
-                    the other tube type, or check the Calibration files under Raw files.
+                    No .Dcal calibration matches this plate's fluorophores for {tube}. Check
+                    the Calibration files under Raw files.
                   </div>
                 )}
                 {calibrationOn &&
@@ -384,11 +380,12 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
           <Toggle
             label={calibrationOn ? "Dark (pre-separation)" : "Dark (LED-off)"}
             options={[
-              ["off", "Show"],
-              ["on", "Subtract"],
+              ["off", "Off"],
+              ["on", "On"],
             ]}
             value={settings.subtractDark ? "on" : "off"}
             onChange={(v) => onChange({ subtractDark: v === "on" })}
+            disabled={!darkApplicable}
           />
           {!calibrationOn && (
             <Toggle
@@ -407,7 +404,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
         <div className="rail__stat mono">
           {plotCurves.length} / {calibrationOn ? allFluorCurves.length : allCurves.length}{" "}
           curves
-          {!calibrationOn && !settings.subtractDark && " + dark"}
+          {!calibrationOn && !effectiveSubtractDark && " + dark"}
           {visibleTemps.length > 0 && ` + ${visibleTemps.length} temp`}
         </div>
         {logDelta && (
@@ -424,7 +421,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
           tempCurves={visibleTemps}
           baseline={settings.baseline}
           scale={settings.scale}
-          subtractDark={calibrationOn ? false : settings.subtractDark}
+          subtractDark={calibrationOn ? false : effectiveSubtractDark}
           bands={calibrationOn ? "off" : settings.bands}
         />
       </section>
@@ -437,11 +434,13 @@ function Toggle({
   options,
   value,
   onChange,
+  disabled,
 }: {
   label: string;
   options: [string, string][];
   value: string;
   onChange: (v: string) => void;
+  disabled?: boolean;
 }) {
   return (
     <div className="toggle">
@@ -451,6 +450,7 @@ function Toggle({
           <button
             key={val}
             className={"segmented__item" + (value === val ? " is-active" : "")}
+            disabled={disabled}
             onClick={() => onChange(val)}
           >
             {text}
