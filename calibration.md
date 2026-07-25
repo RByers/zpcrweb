@@ -12,11 +12,8 @@ the plate, estimate how much each dye actually contributed.
 > [`linalg.ts`](./packages/core/src/linalg.ts)), tested against the calibration data in the
 > committed sample archives. Not yet cross-validated end-to-end against a reference instrument's
 > own color-separated output, so treat this as "correct per the algorithm below," not
-> "byte-for-byte verified." The two problems this document previously tracked are both **fixed**:
-> the normalization modes no longer change the reported RFU scale (§3 explains what the cause
-> turned out to be — a scale-dependent eigensolver, not the normalization itself), and the web
-> app now wires the §4 corrections through (§4). What is still open is the *absolute* RFU scale
-> and the choice of well-factor set — see §8.
+> "byte-for-byte verified." What is still open is the *absolute* RFU scale and the well-factor-set
+> selection rule not yet being wired up in code — see §8.
 
 ---
 
@@ -93,28 +90,11 @@ changes is which directions fall below the pseudo-inverse's singular-value floor
 to matter for an ill-conditioned or rank-deficient matrix — that is the whole reason to keep the
 setting.
 
-> **Resolved:** this document previously recorded that the modes produced RFU magnitudes "far
-> more different than real instrument software's equivalent setting does," and guessed the cause
-> was the wrong mode being treated as the reference default. It was neither. Two distinct
-> defects:
->
-> 1. **A scale-dependent eigensolver.** The Jacobi routine backing the pseudo-inverse
->    ([`linalg.ts`](./packages/core/src/linalg.ts)) tested convergence against an **absolute**
->    threshold on the off-diagonal sum of squares. Scaling a matrix by `s` scales that quantity by
->    `s²`, so a small-magnitude matrix satisfied the test before a single rotation ran and came
->    back with its untouched diagonal reported as the eigenvalues. `global` normalization shrinks
->    the matrix by `‖M‖_F` (≈ 6000 for the committed sample), which was enough to push the solve
->    into that regime: with 14 dyes it produced concentrations around `1e9`. The threshold is now
->    relative to `‖input‖_F`, making the whole pipeline scale-invariant.
-> 2. **The normalization was never undone.** Even with a correct solver, each mode divided the
->    output by its own factor — measured at exactly `‖M‖_F` = 6006× between `none` and `global` on
->    a 3-dye matrix. §5 now folds `columnScale` back in, so the mode is invisible in the result.
->
-> One genuine exception survives, and it is mathematics rather than a bug: when there are **more
-> dyes than channels**, the system is underdetermined and the pseudo-inverse returns the
-> minimum-norm solution. Column scaling changes *which* solution has minimum norm, so `column` can
-> legitimately disagree with `none`/`global` there. A plate with more fluorophores than scanned
-> channels is not a well-posed unmixing problem to begin with.
+One genuine exception survives: when there are **more dyes than channels**, the system is
+underdetermined and the pseudo-inverse returns the minimum-norm solution. Column scaling changes
+*which* solution has minimum norm, so `column` can legitimately disagree with `none`/`global`
+there. A plate with more fluorophores than scanned channels is not a well-posed unmixing problem
+to begin with.
 
 ## 4. Preprocessing the raw channel readings
 
@@ -148,24 +128,6 @@ Note also that the gain factor **divides** rather than multiplies. Whether a giv
 convention is a divisor or a multiplier is pure convention, but getting it backwards inverts the
 correction, so it is worth stating explicitly.
 
-> **Resolved:** this stage was correctly implemented in `preprocessChannelReadings`, but
-> [`apps/web/src/lib/fluorCurves.ts`](./apps/web/src/lib/fluorCurves.ts)'s `computeFluorCurves`
-> — the only caller of the color-separation pipeline in the web app — invoked it as
-> `preprocessChannelReadings(raw)` with no options object at all, so neither correction was ever
-> applied. `computeFluorCurves` now takes a `FluorCorrections` argument and the curves view fills
-> it in: the per-scan reference level from the reference row (§4.1), the per-scan dark level from
-> the same reads' `DARKDATA` (§4.2), and the per-well gain factors when the run carries them.
->
-> One correction to this document's earlier account of the bug: it claimed both
-> `referenceLevel` *and* `wellFactor` come "via the reference row." They do not. The reference row
-> supplies only the reference level; the well factors are a separate per-well table that a `.zpcr`
-> does not carry at all (§4.1). In practice, then, wiring this stage up changes a `.zpcr`-sourced
-> run's output **only by the dark subtraction** — with no well factors, the reference level is a
-> pivot with nothing to pivot, exactly as specified. It is a real change nonetheless: the dark
-> level is per-channel, so subtracting it shifts the channel proportions the solve unmixes rather
-> than merely offsetting every dye equally. On the committed sample it takes a well's separated
-> FAM value at the last cycle from ≈2131 RFU to ≈142 RFU.
-
 ### 4.1 The reference level and the reference row
 
 A CFX block carries **one more row than its nominal plate**: 9 rows of 12 on a 96-well block
@@ -189,15 +151,29 @@ pivot rather than as a subtrahend: it is a *level*, a common-mode value the gain
 not amplify, not a *background* to be removed.
 
 **Where the well factors themselves come from** is a separate question, and the answer is not the
-reference row. They are a per-well × per-channel table stored in the run's analysis state:
-a `.pcrd`'s `wellFactorsCollection` (see [`pcrd.md`](./pcrd.md)), which holds *two* independently
-saved sets — `SnrWF` (signal-to-noise) and `FlyoverWF` (dynamic, measured over the actual plate)
-— each gated by its own `snrSaved`/`flyovrSaved` header flag. A run with neither flag set carries
-a synthesized identity table and gets no gain correction at all; that is the case for every sample
-committed here, where the header records the factors as "created in Persistence loading" and every
-value is exactly `1`. **A `.zpcr` archive has no equivalent file**, so a run read from one never
-has a gain correction to apply, and its reference level correspondingly has no effect. Which of
-the two sets should win when both are saved is an open question — see §8.
+reference row. They are a factory/service calibration of the instrument's optics, computed once
+and stored on the instrument — analysis software just carries the values through unchanged into
+the run's analysis state. A `.pcrd` stores them as a per-well × per-channel table,
+`wellFactorsCollection` (see [`pcrd.md`](./pcrd.md)), which holds *two* independently-saved sets,
+one per optical scan pattern the instrument supports:
+
+- **`SnrWF`** — factors for the **step-and-repeat** scan: the slower mode that stops at each well
+  in turn and cycles through every filter before moving on. (`Snr` here abbreviates
+  "step-a**N**d-**r**epeat," not "signal-to-noise" — a plausible misreading the field name
+  invites.)
+- **`FlyoverWF`** — factors for the **flyover** scan: a single faster pass across the plate.
+
+Each is gated by its own `snrSaved`/`flyovrSaved` header flag, and which set actually applies to a
+given reading is **not a preference between the two** — it's determined by which scan pattern the
+plate was physically read with, the same `scanMode` a plate's setup records (see
+[`pltd.md`](./pltd.md)): `AllChannelsScan` is the step-and-repeat mode and selects `SnrWF`; any
+other scan mode selects `FlyoverWF`. If the flag for the selected set is clear, that run carries a
+synthesized identity table and gets no gain correction at all, regardless of what the other set
+holds — that is the case for every sample committed here, where the header records the factors as
+"created in Persistence loading" and every value is exactly `1`, and the sample's own `scanMode`
+is `AllChannelsScan` (so `SnrWF`, had it been saved, is the set that would have applied). **A
+`.zpcr` archive has no equivalent file**, so a run read from one never has a gain correction to
+apply, and its reference level correspondingly has no effect.
 
 The remaining reference positions are recorded in the plate read but are not consumed by this
 path. Runs also carry a **factory calibration of the full reference row** in their metadata; that
@@ -362,12 +338,12 @@ call is wasted work.
   distinguishes them. Relative curve shape and Cq are unaffected either way. This is the one
   remaining item that needs cross-validation against a reference instrument's own color-separated
   output.
-- **Which well-factor set applies is unresolved.** §4.1's `wellFactorsCollection` carries both an
-  `SnrWF` and a `FlyoverWF` table. This library prefers `FlyoverWF` when its `flyovrSaved` flag is
-  set, falling back to `SnrWF`, on the reasoning that a dynamic measurement over the actual plate
-  should supersede a static one — but that ordering is inferred, not observed. Every committed
-  sample has both flags clear and identity factors, so no sample exercises either path, and the
-  preference is untested against real data.
+- **The well-factor-set selection rule (§4.1) isn't wired up yet.** The decoder
+  ([`decodeWellFactors`](./packages/core/src/pcrd.ts)) currently picks `FlyoverWF` when its
+  `flyovrSaved` flag is set, falling back to `SnrWF` — a save-flag preference, not the `scanMode`
+  rule §4.1 describes. Every committed sample has both flags clear and identity factors, so this
+  gap has no effect on any committed output, but a caller decoding a real (non-identity)
+  calibration run should not yet trust the selected set.
 - This library always derives the calibration matrix from `.Dcal` files. Some systems also
   support a user-edited override matrix that takes precedence over the calibration-derived one;
   that override mechanism isn't modeled here.
