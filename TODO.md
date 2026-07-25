@@ -9,6 +9,10 @@ Additional typed parsers for the archive files currently reachable only via the 
 `archive` API (raw bytes / text / hex):
 
 - [ ] baseline subtraction / Cq (Ct) calculation helpers derived from the curves.
+      **Algorithms and the full option space are now specified in
+      [`threshold.md`](./threshold.md)** — smoothing, baseline region selection (auto and
+      manual), baseline subtraction modes, auto/override threshold, and the two Cq algorithms.
+      Implementation is the remaining work; §8 there lists the defaults to start from.
 - [ ] **Protocol** — `ProtocolName.txt`, `ProtocolRunDefinition.txt`
       (e.g. `METHOD CALC;HOTLID 105,30;VOLUME 20;TEMP …;PLATEREAD;GOTO 2,44;END`). Parse
       into structured steps + cycling program.

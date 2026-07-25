@@ -188,7 +188,12 @@ No `.zpcr` equivalent — this is what CFX Manager adds on top of the raw run:
   `EndCyclesSkip`, `pcrActiveFluors`, melt-temp offsets) plus `fluorsDataAnalysisParams`
   (per-fluor, 8 in the sample), `adDataAnalysisParams`, `fsdDataAnalysisParams`,
   `OligoContentParams` and `geneExpressionData`. **This is where Cq values and thresholds come
-  from** — the most valuable subtree to decode next.
+  from.** The per-fluorophore `pCRDataAnalysisParams` inside `fluorsDataAnalysisParams` — baseline
+  mode and method, digital filter, auto/manual baseline and threshold flags, baseline begin/end
+  cycles, threshold override — are interpreted in [`threshold.md`](./threshold.md), which
+  specifies the baseline/threshold/Cq algorithms they configure. The remaining sub-elements
+  (`adDataAnalysisParams`, `fsdDataAnalysisParams`, `OligoContentParams`, `geneExpressionData`)
+  are still uninterpreted.
 - **`wellFactorsCollection`** (~3.7 KB) — `WFHeader`, `SnrWF`, `FlyoverWF`; per-well correction
   factors applied to the raw fluorescence.
 - **`PersistedData`** (~39 KB) — `PD_ContentData` + `PD_ViewSettings`, tagged
