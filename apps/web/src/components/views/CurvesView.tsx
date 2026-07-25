@@ -15,6 +15,12 @@ import {
 import { usePltdPassword } from "../../state/pltdPassword";
 import { channelColor, channelLabel } from "../../lib/channelColors";
 import { channelCurveKey, curveKey, useRunAnalysis } from "../../lib/runAnalysis";
+import {
+  analysisCsv,
+  analysisCsvFilename,
+  buildAnalysisRows,
+} from "../../lib/analysisRows";
+import { downloadText } from "../../lib/download";
 import type { CalibrationBackground } from "../../lib/fluorCurves";
 import { ChannelBar } from "../curves/ChannelBar";
 import { FluorBar, type FluorChip } from "../curves/FluorBar";
@@ -22,11 +28,13 @@ import { SampleBar } from "../curves/SampleBar";
 import type { HoverCardData, HoverCardRow } from "../curves/HoverCard";
 import { WellMatrix } from "../curves/WellMatrix";
 import { CurveChart } from "../curves/CurveChart";
+import { CurveTable } from "../curves/CurveTable";
 import { TempBar } from "../curves/TempBar";
 import { PasswordPrompt } from "../PasswordPrompt";
 import { Toggle } from "../Toggle";
 import { Switch } from "../Switch";
 import { ResetIcon } from "../ResetIcon";
+import { DownloadIcon } from "../DownloadIcon";
 import type { HighlightMatch, PlotCurve } from "../../lib/uplot/chart";
 
 interface Props {
@@ -44,11 +52,10 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
       ? settings.step
       : (steps[0]?.step ?? undefined);
 
-  // The run-level derivation this view shares with the Analysis view — plate, targets,
-  // color separation and, above all, the run's single Cq table. See `runAnalysis.ts`: this view
-  // reads Cq values out of that table and never recomputes them for the subset it happens to be
-  // plotting, which is what used to make its markers and hover cards disagree with each other and
-  // with the Analysis table.
+  // The run-level derivation this view is built on — plate, targets, color separation and, above
+  // all, the run's single Cq table. See `runAnalysis.ts`: the chart, the hover cards and table mode
+  // all read Cq values out of that one table and never recompute them for the subset they happen to
+  // be showing, which is what used to make them disagree with each other.
   const run = useRunAnalysis(zpcr, settings, pltdPassword, activeStep, settings.calibration !== false);
   const {
     plateEntry,
@@ -64,6 +71,8 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
     wellFluors,
     wellSample,
     targetInfos,
+    usingTargets,
+    groupInfos,
     allFluorCurves,
     cqTable,
     channelCqTable,
@@ -134,6 +143,14 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
 
   const calibrationOn = settings.calibration ?? calibrationAvailable;
   const fluorViewMode: FluorViewMode = settings.fluorViewMode;
+  /** Table mode replaces the chart with the run's Cq/ΔRFU table (the former Analysis view). It is
+   * dye-space-only for the same reason the "Target" mode is: a per-target Cq needs color
+   * separation. */
+  const tableMode = calibrationOn && fluorViewMode === "table";
+  /** How dye-space curves are grouped and labelled. Table mode groups by target, like "target"
+   * mode — so the rail's chips, the threshold overrides and the table's rows all key on the same
+   * label, whichever of the two is showing. */
+  const groupByTarget = fluorViewMode !== "fluorophore";
 
   /** Whether targetInfos carries a {@link NO_TARGET} group — i.e. whether untargeted curves have
    * a chip to be labelled and toggled by, rather than falling back to their fluor name. */
@@ -147,7 +164,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
   // also covers the curves `showUnloadedFluors` draws for pairs the plate never loads), or the
   // fluor name when this plate has no targets at all.
   const labelForFluorCurve = (row: number, col: number, dye: string): string =>
-    fluorViewMode === "target"
+    groupByTarget
       ? (wellFluorTargets.get(wellKey(row, col))?.get(dye) ?? (hasNoTargetGroup ? NO_TARGET : dye))
       : dye;
 
@@ -155,15 +172,18 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
   // curve(s) in the chart, the same way hovering the chart itself dims every other curve.
   const [hoverHighlight, setHoverHighlight] = useState<HighlightMatch | null>(null);
 
+  // Target/table mode chips come from `groupInfos` — the threshold groups themselves — so a plate
+  // with no targets at all still gets chips (its groups are its fluorophores; see `usingTargets`)
+  // rather than an empty bar.
   const chipItems: FluorChip[] = useMemo(
     () =>
-      fluorViewMode === "target"
-        ? targetInfos.map((t) => ({
-            key: t.target,
-            label: t.target,
-            sublabel: t.fluors.join(", "),
-            channel: t.channel,
-            calibrated: !!t.curve,
+      groupByTarget
+        ? groupInfos.map((g) => ({
+            key: g.target,
+            label: g.target,
+            sublabel: usingTargets ? g.fluors.join(", ") : channelLabel(g.channel ?? 0),
+            channel: g.channel,
+            calibrated: !!g.curve,
           }))
         : fluorCals.map((f) => ({
             key: f.fluor,
@@ -172,7 +192,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
             channel: f.channel,
             calibrated: !!f.curve,
           })),
-    [fluorViewMode, targetInfos, fluorCals],
+    [groupByTarget, groupInfos, usingTargets, fluorCals],
   );
 
   // Distinct sample names actually assigned to a well on this plate, in plate order — declared
@@ -217,15 +237,22 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
     [allCurves, available, settings.enabledChannels, settings.enabledWells, settings.disabledSamples, wellSample],
   );
 
+  /** The rail's filters, as one predicate over a well/fluor pair — shared by the plotted dye-space
+   * curves and by table mode's rows, so the two always show the same set. The "is this pair
+   * actually loaded" check is deliberately *not* here: it's a data-validity gate the chart can
+   * bypass ("Unloaded") and the table never applies (it only lists loaded wells). */
+  const fluorCurveVisible = (row: number, col: number, dye: string): boolean =>
+    settings.enabledWells.has(wellKey(row, col)) &&
+    !settings.disabledFluors.has(labelForFluorCurve(row, col, dye)) &&
+    sampleVisible(row, col);
+
   const visibleFluor = useMemo(
     () =>
       allFluorCurves.filter(
         (c) =>
-          settings.enabledWells.has(wellKey(c.row, c.col)) &&
-          !settings.disabledFluors.has(labelForFluorCurve(c.row, c.col, c.dye)) &&
+          fluorCurveVisible(c.row, c.col, c.dye) &&
           (settings.showUnloadedFluors ||
-            (wellFluors.get(wellKey(c.row, c.col))?.has(c.dye) ?? false)) &&
-          sampleVisible(c.row, c.col),
+            (wellFluors.get(wellKey(c.row, c.col))?.has(c.dye) ?? false)),
       ),
     [
       allFluorCurves,
@@ -482,6 +509,40 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
     onChange({ disabledFluors: next });
   };
 
+  // ---- Table mode / CSV export -------------------------------------------------------------
+  // One row per visible (target, well) pair, filtered by exactly the same rail state as the chart
+  // and reading the same Cq table (see `lib/analysisRows.ts`). Built whenever dye space is on, not
+  // only in table mode, so the CSV button works without first switching to the table.
+  const tableRows = useMemo(
+    () => (calibrationOn ? buildAnalysisRows(run, fluorCurveVisible) : []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [
+      calibrationOn,
+      run,
+      settings.enabledWells,
+      settings.disabledFluors,
+      settings.disabledSamples,
+      fluorViewMode,
+      wellFluorTargets,
+      hasNoTargetGroup,
+      wellSample,
+    ],
+  );
+
+  const downloadCsv = () =>
+    downloadText(
+      analysisCsvFilename(zpcr.metadata.dataFile),
+      analysisCsv(tableRows),
+      "text/csv",
+    );
+
+  const setThresholdOverride = (group: string, raw: string) => {
+    const next = new Map(settings.thresholdOverrides);
+    if (raw === "") next.delete(group);
+    else next.set(group, Number(raw));
+    onChange({ thresholdOverrides: next });
+  };
+
   const logBaselined = settings.scale === "log" && settings.curveView === "relative";
 
   return (
@@ -517,12 +578,17 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
             ) : (
               <>
                 <div className="rail__row">
+                  {/* "Table" is a fourth option here rather than a tab of its own: it shows the
+                      same run, grouped by target like "Target" mode, as a Cq/ΔRFU table instead of
+                      a chart — with the whole rail (wells, targets, samples, background,
+                      thresholds) still driving it. */}
                   <Toggle
                     label="View"
                     options={[
                       ["channel", "Channel"],
                       ["fluorophore", "Fluorophore"],
                       ["target", "Target"],
+                      ["table", "Table"],
                     ]}
                     value={calibrationOn ? fluorViewMode : "channel"}
                     onChange={(v) =>
@@ -561,7 +627,11 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
 
         <div className="rail__section">
           <div className="rail__title">
-            {calibrationOn ? (fluorViewMode === "target" ? "Targets" : "Fluorophores") : "Channels"}
+            {!calibrationOn
+              ? "Channels"
+              : groupByTarget && usingTargets
+                ? "Targets"
+                : "Fluorophores"}
           </div>
           {calibrationOn ? (
             <>
@@ -674,58 +744,65 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
           </details>
         )}
 
-        <div className="rail__section rail__row">
-          <Toggle
-            label="View"
-            options={[
-              ["relative", "Relative"],
-              ["absolute", "Absolute"],
-            ]}
-            value={settings.curveView}
-            onChange={(v) => onChange({ curveView: v as CurveView })}
-          />
-          <Switch
-            label="Draw baseline"
-            checked={settings.drawBaseline}
-            onChange={(v) => onChange({ drawBaseline: v })}
-            title="Overlay each curve's auto-detected linear baseline at 50% opacity"
-          />
-        </div>
+        {/* Chart-only controls — nothing they change is visible in table mode. The Background
+            toggle below is not one of them: it feeds the color separation, so it moves the RFU
+            the table reports. */}
+        {!tableMode && (
+          <>
+            <div className="rail__section rail__row">
+              <Toggle
+                label="View"
+                options={[
+                  ["relative", "Relative"],
+                  ["absolute", "Absolute"],
+                ]}
+                value={settings.curveView}
+                onChange={(v) => onChange({ curveView: v as CurveView })}
+              />
+              <Switch
+                label="Draw baseline"
+                checked={settings.drawBaseline}
+                onChange={(v) => onChange({ drawBaseline: v })}
+                title="Overlay each curve's auto-detected linear baseline at 50% opacity"
+              />
+            </div>
 
-        <div className="rail__section rail__row">
-          <Toggle
-            label="Scale"
-            options={[
-              ["linear", "Linear"],
-              ["log", "Log"],
-            ]}
-            value={settings.scale}
-            onChange={(v) => onChange({ scale: v as Scale })}
-          />
-          {!calibrationOn && (
-            <>
+            <div className="rail__section rail__row">
               <Toggle
-                label="Show dark"
+                label="Scale"
                 options={[
-                  ["off", "Off"],
-                  ["on", "On"],
+                  ["linear", "Linear"],
+                  ["log", "Log"],
                 ]}
-                value={settings.showDark ? "on" : "off"}
-                onChange={(v) => onChange({ showDark: v === "on" })}
+                value={settings.scale}
+                onChange={(v) => onChange({ scale: v as Scale })}
               />
-              <Toggle
-                label="Min/max band"
-                options={[
-                  ["off", "Off"],
-                  ["auto", "Auto"],
-                  ["on", "On"],
-                ]}
-                value={settings.bands}
-                onChange={(v) => onChange({ bands: v as BandsMode })}
-              />
-            </>
-          )}
-        </div>
+              {!calibrationOn && (
+                <>
+                  <Toggle
+                    label="Show dark"
+                    options={[
+                      ["off", "Off"],
+                      ["on", "On"],
+                    ]}
+                    value={settings.showDark ? "on" : "off"}
+                    onChange={(v) => onChange({ showDark: v === "on" })}
+                  />
+                  <Toggle
+                    label="Min/max band"
+                    options={[
+                      ["off", "Off"],
+                      ["auto", "Auto"],
+                      ["on", "On"],
+                    ]}
+                    value={settings.bands}
+                    onChange={(v) => onChange({ bands: v as BandsMode })}
+                  />
+                </>
+              )}
+            </div>
+          </>
+        )}
 
         {calibrationOn && (
           <div className="rail__section">
@@ -751,32 +828,94 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
           </div>
         )}
 
+        {/* Cq is always threshold.md §6.1's threshold crossing (there is no algorithm selector any
+            more), so a per-group threshold is always meaningful. An override applies to the whole
+            run's Cq table — chart markers, hover cards and table alike. Blank means auto, shown as
+            the input's placeholder. */}
+        {calibrationOn && calibrationAvailable && (
+          <details className="rail__section rail__details">
+            <summary className="rail__title">
+              <span>
+                <span className="rail__chevron" aria-hidden="true">
+                  ▸
+                </span>
+                Threshold overrides
+              </span>
+            </summary>
+            <div className="analysis__thresholds">
+              {groupInfos
+                .filter((g) => !settings.disabledFluors.has(g.target) && g.curve)
+                .map((g) => {
+                  const auto = tableRows.find((r) => r.target === g.target)?.threshold;
+                  const override = settings.thresholdOverrides.get(g.target);
+                  return (
+                    <label key={g.target} className="analysis__threshold-row mono">
+                      <span>{g.target}</span>
+                      <input
+                        type="number"
+                        placeholder={auto != null ? auto.toFixed(1) : "auto"}
+                        value={override ?? ""}
+                        onChange={(e) => setThresholdOverride(g.target, e.currentTarget.value)}
+                      />
+                    </label>
+                  );
+                })}
+            </div>
+          </details>
+        )}
+
+        {calibrationOn && calibrationAvailable && (
+          <div className="rail__section">
+            <button
+              className="raw__download analysis__download"
+              onClick={downloadCsv}
+              disabled={tableRows.length === 0}
+              aria-label="Download the Cq/ΔRFU table as CSV"
+              title="Download the Cq/ΔRFU table as CSV"
+            >
+              <DownloadIcon /> CSV
+            </button>
+          </div>
+        )}
+
         <div className="rail__stat mono">
-          {plotCurves.length} / {calibrationOn ? allFluorCurves.length : allCurves.length}{" "}
-          curves
-          {!calibrationOn && settings.showDark && " + dark"}
-          {visibleTemps.length > 0 && ` + ${visibleTemps.length} temp`}
+          {tableMode ? (
+            <>{tableRows.length} rows</>
+          ) : (
+            <>
+              {plotCurves.length} / {calibrationOn ? allFluorCurves.length : allCurves.length}{" "}
+              curves
+              {!calibrationOn && settings.showDark && " + dark"}
+              {visibleTemps.length > 0 && ` + ${visibleTemps.length} temp`}
+            </>
+          )}
         </div>
-        {logBaselined && (
+        {!tableMode && logBaselined && (
           <div className="rail__note mono">
             Log + baseline: each curve shifted so its own minimum reads 1.
           </div>
         )}
       </aside>
 
-      <section className="curves__plot">
-        <CurveChart
-          curves={plotCurves}
-          darkCurves={!calibrationOn && settings.showDark ? enabledDark : []}
-          tempCurves={visibleTemps}
-          baseline="raw"
-          curveView={settings.curveView}
-          drawBaseline={settings.drawBaseline}
-          scale={settings.scale}
-          bands={calibrationOn ? "off" : settings.bands}
-          highlight={hoverHighlight}
-        />
-      </section>
+      {tableMode ? (
+        <section className="analysis__table-wrap">
+          <CurveTable rows={tableRows} usingTargets={usingTargets} />
+        </section>
+      ) : (
+        <section className="curves__plot">
+          <CurveChart
+            curves={plotCurves}
+            darkCurves={!calibrationOn && settings.showDark ? enabledDark : []}
+            tempCurves={visibleTemps}
+            baseline="raw"
+            curveView={settings.curveView}
+            drawBaseline={settings.drawBaseline}
+            scale={settings.scale}
+            bands={calibrationOn ? "off" : settings.bands}
+            highlight={hoverHighlight}
+          />
+        </section>
+      )}
     </div>
   );
 }

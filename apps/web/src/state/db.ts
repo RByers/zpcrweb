@@ -46,8 +46,9 @@ export interface StoredSettings {
   temps?: string[];
   /** Color separation: on/off, or unset to auto-enable when plate + calibration data exist. */
   calibration?: boolean | null;
-  /** When color separation is on, group/label curves by fluorophore or by target/gene. */
-  fluorViewMode?: "fluorophore" | "target";
+  /** When color separation is on, group/label curves by fluorophore or by target/gene — or show
+   * the Cq/ΔRFU table instead of the chart (`"table"`). */
+  fluorViewMode?: "fluorophore" | "target" | "table";
   /** Calibration normalization mode; see `calibration.md` §3. Not user-facing — see the
    * FileSettings field of the same name for why. */
   calibrationNormalization?: "none" | "column" | "global";
@@ -61,12 +62,15 @@ export interface StoredSettings {
   /** When true, dye-space curves are drawn for every enabled well/fluor pair, even ones the
    * plate definition doesn't actually load into that well. Off by default. */
   showUnloadedFluors?: boolean;
-  /** Analysis view: target/gene names hidden from the Cq/ΔRFU table. */
-  analysisDisabledTargets?: string[];
-  /** Analysis view's Cq determination algorithm. Absent on records written before this setting
-   * existed, which then default to `"Threshold"`. */
-  analysisCqAlgorithm?: "Threshold" | "NoThreshold";
   /** Manual per-target threshold overrides (RFU), as `[target, value]` pairs. */
+  thresholdOverrides?: [string, number][];
+  /** Retired: the standalone Analysis view's own target opt-out set. That view is now the Curves
+   * view's table mode and shares the rail's {@link disabledFluors}, so these are ignored. */
+  analysisDisabledTargets?: string[];
+  /** Retired: the Analysis view's Cq-algorithm selector. Cq is always `threshold.md` §6.1's
+   * threshold crossing now, so this is ignored. */
+  analysisCqAlgorithm?: "Threshold" | "NoThreshold";
+  /** Retired name for {@link thresholdOverrides}, still read when migrating older records. */
   analysisThresholdOverrides?: [string, number][];
 }
 

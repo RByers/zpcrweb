@@ -1705,8 +1705,10 @@
   border-color: var(--neon-cyan);
 }
 
-/* ---- Analysis view ------------------------------------------------------- */
-/* Reuses .curves/.curves__rail's two-column grid layout (rail + content). */
+/* ---- Curves view: table mode --------------------------------------------- */
+/* The Cq/ΔRFU table that replaces the chart in the "Table" view mode, plus the rail's threshold
+   overrides and CSV button. Sits inside .curves, so it reuses that two-column grid (rail +
+   content) unchanged — only .curves__plot is swapped for .analysis__table-wrap. */
 .analysis__table-wrap {
   min-width: 0;
   min-height: 0;

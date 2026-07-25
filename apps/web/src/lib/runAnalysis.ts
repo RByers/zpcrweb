@@ -26,18 +26,24 @@ import {
 } from "./fluorCurves";
 
 /**
- * The one run-level derivation the Curves and Analysis views share: the plate, its
- * fluorophore/target groups, the color-separation inputs, the dye-space curves — and, on top of
- * those, **the** Cq table.
+ * The one run-level derivation the Curves view's chart, hover cards and table mode share: the
+ * plate, its fluorophore/target groups, the color-separation inputs, the dye-space curves — and,
+ * on top of those, **the** Cq table.
  *
- * Both views used to derive all of this independently, and to compute Cq three separate times over
- * three different subsets of the plate (the Analysis table's enabled wells, the Curves chart's
- * plotted curves, and every curve for the Curves hover cards). A Cq is not a property of one curve:
- * its group's threshold is the median baseline noise across the curves it's computed *with*
+ * These used to derive all of this independently, and to compute Cq three separate times over three
+ * different subsets of the plate (the Analysis table's enabled wells, the Curves chart's plotted
+ * curves, and every curve for the Curves hover cards). A Cq is not a property of one curve: its
+ * group's threshold is the median baseline noise across the curves it's computed *with*
  * (`threshold.md` §5.1), so those three runs legitimately disagreed — the same well showing a Cq in
  * one view and "—" in another. There is now exactly one Cq per well/fluor pair per run, computed
- * over the whole plate; views filter the table for display and never recompute from a subset.
+ * over the whole plate; callers filter the table for display and never recompute from a subset.
  */
+
+/** Cq is always `threshold.md` §6.1's threshold crossing — the instrument's own default, and the
+ * only algorithm whose per-group threshold the "Threshold overrides" rail section can talk about.
+ * §6.2's 2nd-derivative variant used to be selectable in the Analysis view; the selector is gone,
+ * though `computeCqTable` still accepts either. */
+const CQ_ALGORITHM = "Threshold" as const;
 
 /** Identity of a single curve — one well, one fluorophore. See {@link CqTableCurve.key}. */
 export function curveKey(row: number, col: number, fluor: string): string {
@@ -297,15 +303,14 @@ export function useRunAnalysis(
       contributesToThreshold: loadedFluors.get(wellKey(c.row, c.col))?.has(c.dye) ?? false,
     }));
     return computeCqTable(inputs, {
-      algorithm: settings.analysisCqAlgorithm,
-      thresholdOverrides: settings.analysisThresholdOverrides,
+      algorithm: CQ_ALGORITHM,
+      thresholdOverrides: settings.thresholdOverrides,
     });
   }, [
     allFluorCurves,
     groupOf,
     loadedFluors,
-    settings.analysisCqAlgorithm,
-    settings.analysisThresholdOverrides,
+    settings.thresholdOverrides,
   ]);
 
   const channelCqTable = useMemo(() => {
@@ -319,15 +324,14 @@ export function useRunAnalysis(
         contributesToThreshold: (loadedFluors.get(wellKey(c.row, c.col))?.size ?? 0) > 0,
       }));
     return computeCqTable(inputs, {
-      algorithm: settings.analysisCqAlgorithm,
-      thresholdOverrides: settings.analysisThresholdOverrides,
+      algorithm: CQ_ALGORITHM,
+      thresholdOverrides: settings.thresholdOverrides,
     });
   }, [
     allCurves,
     available,
     loadedFluors,
-    settings.analysisCqAlgorithm,
-    settings.analysisThresholdOverrides,
+    settings.thresholdOverrides,
   ]);
 
   return {

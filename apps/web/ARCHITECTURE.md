@@ -3,7 +3,7 @@
 The web app (`@zpcrweb/web`) is a browser UI over [`@zpcrweb/core`](../../packages/core). It
 loads one or more files — `.zpcr`, `.pcrd`, or a standalone plate file (`.pltd` or zpcrweb's own
 `.plt.csv`, see "Standalone plate entries and attach" below) — switches between them, and
-explores each through up to six views: Overview, Curves, Plates, Analysis, Reference, and Raw (a
+explores each through up to five views: Overview, Curves, Plates, Reference, and Raw (a
 standalone plate file only gets Plates + Raw — see below).
 
 ## Two formats, mostly one UI
@@ -12,7 +12,7 @@ standalone plate file only gets Plates + Raw — see below).
 [`ARCHITECTURE.md`](../../ARCHITECTURE.md#two-input-formats-one-output-shape)), so most of the
 app is format-agnostic:
 
-- `OverviewView`, `CurvesView`, `AnalysisView`, and `ReferenceView` take a plain `Zpcr` — they don't know or
+- `OverviewView`, `CurvesView`, and `ReferenceView` take a plain `Zpcr` — they don't know or
   care whether it came from a `.zpcr` archive or a decoded `.pcrd` document. `OverviewView`'s
   protocol tile and thermal-protocol block read `zpcr.protocol()` (a real accessor on `Zpcr`,
   not a by-name file lookup), so both the name and — when the format provides one — the step
@@ -155,10 +155,12 @@ a minimal IndexedDB wrapper with two object stores:
   reference columns. `baseline` (Reference view's factory-relative ΔRFU/Drift %) and `curveView`
   (the Curves view's display mode — baselining itself is never stored, since it's always the
   auto-detected linear fit) are independent settings — see "Two baseline concepts" under
-  Reference view. The Analysis view adds three of its own: `analysisDisabledTargets[]` (an
-  opt-out target filter, like `disabledFluors`), `analysisCqAlgorithm`
-  (`"Threshold"`/`"NoThreshold"`, default `"Threshold"`), and `analysisThresholdOverrides`
-  (`[target, value][]`, manual per-target threshold RFU) — see "Analysis view" below. Writes
+  Reference view. `thresholdOverrides` (`[group, value][]`, manual per-group threshold RFU) is
+  the Curves rail's threshold-override section — see "Table mode" below. Older records may carry
+  it under its former name, `analysisThresholdOverrides`, alongside two settings of the retired
+  standalone Analysis view that are now simply ignored: `analysisDisabledTargets[]` (its own
+  target opt-out set, since folded into the shared `disabledFluors`) and `analysisCqAlgorithm`
+  (its Cq-algorithm selector — Cq is always §6.1's threshold crossing now). Writes
   are debounced. Older records may still carry the retired `curveBaseline`/`curveBaselineRange`
   fields (`state/db.ts`); `useZpcrStore.ts`'s `fromStored()` migrates `curveBaseline: "raw"` to
   `curveView: "absolute"` (anything else to `"relative"`) and drops the region override entirely.
@@ -176,7 +178,6 @@ exposed as a clear affordance on each file chip.
   same way for `.pltd`/`.csv` chips via `lib/encryptionStatus.ts`'s
   `plateFileEncryptionStatus`.
 - **Curves** — the centerpiece (see below).
-- **Analysis** — per-target/well Cq and ΔRFU table (see below).
 - **Reference** — reference row vs factory calibration (see below).
 - **Plates** — `PlatesView` (`components/views/PlatesView.tsx`): the visual, color-coded plate
   map (`components/plate/PlateViewer.tsx`) for every plate attached to the run, via
@@ -304,7 +305,8 @@ format's real elements without either one faking the other's schema.
 ## One Cq per well/target: `lib/runAnalysis.ts`
 
 `useRunAnalysis(zpcr, settings, pltdPassword, activeStep, dyeSpace)` is the single run-level
-derivation the Curves and Analysis views share: plate + password state, fluorophore/target groups
+derivation the Curves view's chart, hover cards and table mode share: plate + password state,
+fluorophore/target groups
 (`lib/plateTargets.ts`), the calibration matrix and `calibration.md` §4 corrections, the
 color-separated `allFluorCurves` — and, on top of those, the run's **Cq table**.
 
@@ -313,15 +315,14 @@ color-separated `allFluorCurves` — and, on top of those, the run's **Cq table*
   noise, amplification verdict, ΔRFU and the fitted baseline. Views look values up in it and never
   recompute — that is the whole point. A group's threshold is the median baseline noise across the
   curves it's computed with, so the old arrangement (three independent computations over the plotted
-  curves, over every curve, and over the Analysis view's enabled wells) had the same well showing a
-  Cq in one view and "—" in another. Display filters — enabled wells, disabled targets, sample and
+  curves, over every curve, and over the standalone Analysis view's enabled wells) had the same well
+  showing a Cq in one place and "—" in another. Display filters — enabled wells, disabled targets, sample and
   fluor toggles, the view-mode switch — now change only which entries are *shown*.
 - **Grouping** is `groupOf(row, col, fluor)`: the pair's target/gene, the shared `"(none)"` catch-all
   when it has none (NTC/NRT wells still get a real threshold and a real Cq rather than being dropped
   for lack of a name), or the fluorophore itself on a plate with no targets at all. Note this is
   independent of the Curves view's Fluorophore/Target *display* mode, which used to re-group the
-  thresholds under the chart and so produce different Cq values than the Analysis table for the
-  same wells.
+  thresholds under the chart and so produce different Cq values than the table for the same wells.
 - **Noise cohort:** only well/fluor pairs the plate actually loads (`loadedFluors`) contribute to a
   group's threshold, via `CqTableCurve.contributesToThreshold`. Pairs the plate never loaded still
   get their own entry — the Curves view can plot them with "Unloaded" on, and they need a Cq — but a
@@ -433,19 +434,20 @@ only pieces the two views share.
   that, selected rows always counted first so a long unselected tail can't crowd them out. Both
   Both sets of rows take their Cq from the run's single Cq table (`lib/runAnalysis.ts`) by
   well/fluor key, so a curve's Cq in a hover card is by construction the same number as its marker
-  on the chart and its row in the Analysis table. (It used to be computed three separate times over
-  three different subsets — the plotted curves, every curve, and the Analysis view's enabled wells —
+  on the chart and its row in table mode. (It used to be computed three separate times over
+  three different subsets — the plotted curves, every curve, and the standalone Analysis view's
+  enabled wells —
   which made the same well legitimately show a Cq in one place and "—" in another.)
   `WellMatrix` renders its native `title` tooltip (`"A1 — NRT (no-RT)"`) only when no `cardData`
   callback is passed, so the two hover affordances never stack: the Curves rail shows the card
-  alone, while `AnalysisView`'s card-less well grid keeps the plain tooltip. Either way the same
-  text stays on the cell's `aria-label`.
+  alone, while a card-less `WellMatrix` (as the Reference-style grids use it) keeps the plain
+  tooltip. Either way the same text stays on the cell's `aria-label`.
 - **X axis:** integer cycles only — a tick per cycle, gridline + label every 5.
 - **Hover/tap tooltip:** a uPlot cursor plugin finds the nearest series (well curve, dark,
   factory overlay, or temperature) and reports its label, channel/dye, cycle, and
   mean/min/max/std — or, for a temperature, just its °C. The search projects each series
   through **its own** scale, so proximity is measured in pixels across both axes. A well
-  series also carries `baselineFormula` and `cq` (see "Analysis view" below); when defined, the
+  series also carries `baselineFormula` and `cq` (see "Table mode" below); when defined, the
   tooltip adds a "baseline" row (the fitted linear baseline, rendered as a formula — see
   `CurveBaselineResult.baselineFit`/`formatBaselineFormula()` above) right before a Cq row, and
   the chart draws a small ring on the curve at its (interpolated) Cq position — the same marker
@@ -480,97 +482,95 @@ only pieces the two views share.
   the plate definition actually loads there — useful for spotting cross-talk or a mis-configured
   plate, at the cost of otherwise-meaningless curves once it's on.
 
-  A three-way "View" toggle (`calibration`/`fluorViewMode` settings) picks channel space or
-  one of two dye-space groupings: **Fluorophore** labels/legends each curve by its dye name
+  A four-way "View" toggle (`calibration`/`fluorViewMode` settings) picks channel space, one of
+  two dye-space groupings, or the table (see "Table mode" below — it groups by target, like
+  **Target**): **Fluorophore** labels/legends each curve by its dye name
   (`FluorBar`'s chips, keyed by fluor); **Target** instead labels each curve by the target/gene
   assigned to that fluor *in that well* (`WellFluor.target`, per `pltd.md`), so the same dye
   used for different genes in different wells appears as separate legend entries. Loaded
   well/fluor pairs carrying no target of their own get one shared `"(none)"` group instead
-  (`lib/plateTargets.ts`'s `NO_TARGET`/`targetGroups()`, shared with the Analysis view) — on by
+  (`lib/plateTargets.ts`'s `NO_TARGET`/`targetGroups()`, shared with table mode) — on by
   default like every other target, so a partially-annotated plate's remaining curves stay
   labelled and toggleable rather than showing up under their dye name with no chip. That
   catch-all is only added *alongside* real targets: on a plate with no `geneName` anywhere,
   target mode is already de facto fluorophore mode, and one lumped group would merge the dyes'
   per-group Cq thresholds — so those curves keep falling back to their fluor name (the same
-  reason the Analysis view falls back to fluorophore grouping there; see `usingTargets` below).
+  reason table mode falls back to fluorophore grouping there; see `usingTargets` below).
   Both modes keep the same channel-derived color (`FluorChip.channel`) — target mode does not
   introduce a new color scheme, just a different grouping/label built by `CurvesView`'s
   `labelForFluorCurve`/`targetInfos`. A group spanning several fluorophores (`"(none)"`, or a
   target loaded as more than one dye) has no single channel, so its chip takes
   `channelColors.ts`'s `NEUTRAL_COLOR` rather than borrowing one member's hue.
 
-## Analysis view
+### Table mode
 
-`AnalysisView` (`components/views/AnalysisView.tsx`) is a table of one row per active
-(target, well) pair — Cq and endpoint ΔRFU, per `threshold.md` §5–§7 — reusing `CurvesView`'s
-rail layout (`FluorBar` for the target filter, `WellMatrix` — sharing the same
-`settings.enabledWells` **and** the same per-well sample-type coloring via `lib/wellTypes.ts`'s
-`computeWellTypes()` — for the well filter) but with its own target opt-out set
-(`analysisDisabledTargets`, since a target filtered out of the table shouldn't also hide it
-from Curves' Fluorophore view mode). It only operates in dye space: computing a per-target
-curve needs channel→dye color separation (`calibration.md`), so the rail shows an explanatory
-note instead of a table when no `.Dcal` calibration matches the plate's fluorophores, the same
-condition `CurvesView`'s "Target" view mode gates on. The matrix-building/corrections/
-`computeFluorCurves` pipeline and the Cq table both come from the shared `lib/runAnalysis.ts`
-hook (see below), so this view and `CurvesView` cannot drift apart.
+The former standalone **Analysis** view, folded into the Curves view as the fourth option of the
+rail's "View" toggle (`fluorViewMode: "table"`). It replaces the chart with a table of one row per
+visible (target, well) pair — Cq and endpoint ΔRFU, per `threshold.md` §5–§7 — while the whole rail
+(targets, wells, samples, background, thresholds) keeps driving it. It was a separate tab with a
+near-identical rail of its own; the two disagreed about Cq (see "One Cq per well/target" above) and
+about which targets were filtered, so the tab is gone and its two unique controls — the threshold
+overrides and the CSV download — moved into the Curves rail, where they apply to the chart too.
+
+Rows come from `lib/analysisRows.ts` (`buildAnalysisRows`/`analysisCsv`), rendered by
+`components/curves/CurveTable.tsx`. Table mode is dye-space-only, for the same reason "Target" mode
+is: a per-target curve needs channel→dye color separation (`calibration.md`).
 
 - **One row per (target, well) — or (fluorophore, well) with no targets assigned:** built from
-  `PlateDefinition.wells[].fluors[]`, in a `loaded` well that's in `settings.enabledWells`.
-  Grouping normally keys on `WellFluor.target`, with untargeted pairs collected into the shared
-  `"(none)"` group `lib/plateTargets.ts`'s `targetGroups()` appends (see the Curves view's target
-  mode above), so those wells get Cq rows instead of being dropped from the table; if no well on
-  the plate has a target assigned at
-  all (`targetInfos` empty — a plate that was never annotated with target/gene names), the rail
-  and table fall back to grouping by fluorophore instead (`usingTargets` flag, `groupInfos`),
-  mirroring `CurvesView`'s Fluorophore view mode — the rail's "Targets" section relabels itself
-  "Fluorophores" and the table drops the now-redundant Fluor column. Either way the opt-out set
-  (`analysisDisabledTargets`) and threshold overrides are keyed by whichever grouping is active.
+  `PlateDefinition.wells[].fluors[]`, for `loaded` wells only — an unloaded pair can still be
+  *plotted* ("Unloaded") but has no real measurement to tabulate. Grouping keys on
+  `RunAnalysis.groupOf`: `WellFluor.target`, the shared `"(none)"` catch-all `lib/plateTargets.ts`'s
+  `targetGroups()` appends (see the Curves view's target mode above) so untargeted NTC/NRT wells get
+  Cq rows instead of being dropped, or — when no well on the plate has a target at all
+  (`usingTargets` false) — the fluorophore itself, mirroring Fluorophore mode. In that last case the
+  rail's "Targets" section relabels itself "Fluorophores" and the table drops the now-redundant
+  Fluor column.
+- **The same filters as the chart:** wells, sample names and the chip opt-out set are applied through
+  one shared predicate (`CurvesView`'s `fluorCurveVisible`), so the table lists exactly the curves the
+  chart would plot. The chips are the rail's normal `disabledFluors` set — table mode has no
+  opt-out set of its own, unlike the old separate view.
 - **Baseline:** always the auto-detected linear fit — `baselineCorrectCurve()`
   (`packages/core/src/analysis.ts`), which `computeCqTable()` applies internally with
   the fixed `ANALYSIS_BASELINE_MODE` constant (`"LinearBaseLineNormalized"`, no region
-  argument — baselining isn't user-configurable at all here, see "Baseline is always automatic"
+  argument — baselining isn't user-configurable at all, see "Baseline is always automatic"
   under Curves view): auto-detected baseline region, `baselineValid` (§7's baseline-validation
   gate — `validateBaselineRegion()` re-checked against the region actually used), corrected
   values, `baselineNoise`, `isAmplified` (forced `false` when `baselineValid` is `false`), ΔRFU
   (endpoint corrected value minus the baseline region's mean), and `baselineFit` (the fitted
-  `{ slope, intercept }`, rendered via `formatBaselineFormula()`) in one call. All of it reaches
-  this view through the run's Cq table, so a row's ΔRFU/Cq is the same value the chart's marker
-  and the hover cards show — the same object, not a matching recomputation.
-- **Cq algorithm (`analysisCqAlgorithm` setting):** `"Threshold"` (§6.1) is the default — the
-  observed instrument default, and §6's own. It needs a threshold per group: §5.1's
-  `resolveThreshold` over the median `baselineNoise` across that group's own wells, overridable
-  per group via `analysisThresholdOverrides` — a "Threshold overrides" rail section shown only
-  in Threshold mode, collapsible exactly like the Curves view's Temperature section (`<details
-  className="rail__details">`, chevron rotates open, no separate show/hide button) — a blank
-  input falls back to the auto value, shown as the input's placeholder. `"NoThreshold"` (§6.2,
-  2nd-derivative inflection) needs no threshold at all. Both pass the row's `baselineValid` into
-  `computeCq()`, which reports no Cq outright when it's `false` — checked before the amplification
-  squelch, since an invalid baseline's extrapolated rise routinely clears that squelch too.
+  `{ slope, intercept }`, rendered via `formatBaselineFormula()`) in one call. All of it reaches the
+  table through the run's Cq table, so a row's ΔRFU/Cq is the same value the chart's marker and the
+  hover cards show — the same object, not a matching recomputation.
+- **Cq is always §6.1's threshold crossing.** `lib/runAnalysis.ts`'s `CQ_ALGORITHM` constant is fixed
+  at `"Threshold"` — the observed instrument default, and §6's own. The Analysis view's
+  `"Threshold"`/`"NoThreshold"` selector is gone (§6.2's 2nd-derivative variant is still implemented
+  and still reachable through `computeCqTable`, just not selectable), which is what makes a per-group
+  threshold always meaningful and the override section always applicable.
+- **Threshold overrides (`thresholdOverrides` setting):** §5.1's `resolveThreshold` over the median
+  `baselineNoise` across a group's own wells, overridable per group in the rail's collapsible
+  "Threshold overrides" section (`<details className="rail__details">`, chevron rotates open, like
+  the Temperature section) — a blank input falls back to the auto value, shown as the input's
+  placeholder. It sits in the Curves rail whenever dye space is on, in *any* of the three dye-space
+  modes, because an override feeds the run's one Cq table: it moves the chart's Cq markers and the
+  hover cards' numbers exactly as it moves the table's. (In Channel mode the section is hidden —
+  `channelCqTable`'s groups are channels, not targets.)
 - **Amplification / greying:** a row renders at reduced opacity
-  (`.analysis__row.is-unamplified`) whenever it has no Cq (`cq == null`) — either because the
-  baseline-validation gate failed, `isAmplified` (§7 — total rise under 10× baseline noise)
-  failed, or, in Threshold mode, the curve never crossed (or didn't end above) the resolved
-  threshold. Keying greying on the Cq
-  result itself, not a separately-cached amplification flag, is what makes greying react live to
-  switching Cq mode or editing a threshold override — both change `cq` (and therefore the row's
-  styling) through the same `rows` `useMemo`, no separate invalidation needed. A row is never
-  hidden, so a well's disqualification is visible instead of silently dropped from the table.
+  (`.analysis__row.is-unamplified`) whenever it has no Cq (`cq == null`) — because the
+  baseline-validation gate failed, because `isAmplified` (§7 — total rise under 10× baseline noise)
+  failed, or because the curve never crossed (or didn't end above) the resolved threshold. Keying
+  greying on the Cq result itself, not a separately-cached amplification flag, is what makes greying
+  react live to editing a threshold override. A row is never hidden, so a well's disqualification is
+  visible instead of silently dropped from the table.
 - **Table/CSV columns, same order in both:** well, sample (`WellDefinition.sampleName`, the
   same field `PlateTable`'s "Sample" column shows), fluor, target (only when `usingTargets`;
   the CSV always includes it, since it's harmless there even when identical to fluor),
   [channel — CSV only, not shown in the table], baseline (`CurveBaselineResult.baselineFit`,
   rendered as a formula via `formatBaselineFormula()` — the same value the Curves view's
   tooltip shows — placed just before threshold since threshold/noise are derived from the same
-  baseline region), threshold, Cq, ΔRFU, amplified. The CSV is built directly from the table's
-  rows via the shared `csvRow()` quoting helper (`lib/download.ts`, exported for reuse) and
-  `downloadText()` — filename `<run name>_analysis.csv`, the same `dataFile`-derived naming
-  `plateReadCsvFilename` uses for the Raw view's per-cycle export.
-- **Curves view integration:** the same Cq computation (algorithm + per-group threshold) runs
-  in `CurvesView` for every currently-plotted curve, grouped by whatever label is currently
-  shown (channel, fluorophore, or target — see the Curves view's tooltip bullet above), so a
-  curve gets a Cq marker/tooltip row in *any* view mode, not just Target mode; the grouping key
-  only lines up with `analysisThresholdOverrides`' target-keyed entries when Curves is actually
-  in Target mode.
+  baseline region), threshold, Cq, ΔRFU, amplified. The CSV is built from the same rows via the
+  shared `csvRow()` quoting helper (`lib/download.ts`) and `downloadText()` — filename
+  `<run name>_analysis.csv`, the same `dataFile`-derived naming `plateReadCsvFilename` uses for the
+  Raw view's per-cycle export. Its rail button is available in any dye-space mode, not just table
+  mode, so the export doesn't require switching away from the chart first.
 
 ## Reference view
 

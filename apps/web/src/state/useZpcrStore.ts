@@ -5,7 +5,6 @@ import {
   parsePlateCsv,
   parsePltd,
   parseZpcr,
-  type CqAlgorithm,
   type NormalizationMode,
   type PcrdContainer,
   type PlateDefinition,
@@ -28,7 +27,7 @@ export type FileKind = "zpcr" | "pcrd" | "pltd" | "csv";
 /** The two kinds a plate — standalone or attached to a run — can be uploaded as. */
 export type PlateFileKind = "pltd" | "csv";
 
-export type ViewId = "overview" | "curves" | "plates" | "analysis" | "reference" | "raw";
+export type ViewId = "overview" | "curves" | "plates" | "reference" | "raw";
 /** Reference view only — drift relative to the factory calibration value; see `ReferenceView`. */
 export type Baseline = "raw" | "delta" | "percent";
 /**
@@ -42,8 +41,12 @@ export type CurveView = "relative" | "absolute";
 export type Scale = "linear" | "log";
 /** Min/max envelope bands: always off, always on, or auto (only when one well selected). */
 export type BandsMode = "off" | "auto" | "on";
-/** How dye-space curves are grouped/labeled once color separation is on. */
-export type FluorViewMode = "fluorophore" | "target";
+/**
+ * What the Curves view's main pane shows once color separation is on: dye-space curves grouped
+ * by fluorophore or by target/gene, or — `"table"` — the run's Cq/ΔRFU table in place of the
+ * chart (the former standalone Analysis view). Table mode groups by target, like `"target"`.
+ */
+export type FluorViewMode = "fluorophore" | "target" | "table";
 
 /** Per-file view settings, in-memory form (Sets for cheap toggling). */
 export interface FileSettings {
@@ -100,16 +103,12 @@ export interface FileSettings {
    * the plate definition actually loads that fluor into that well. Off by default — the normal
    * behavior only draws curves pltd.md's per-well dye layers actually cover. */
   showUnloadedFluors: boolean;
-  /** Analysis view: target/gene names hidden from the Cq/ΔRFU table (an opt-out set, like
-   * {@link disabledFluors}). Also gates which curves the Curves view marks with a Cq marker. */
-  analysisDisabledTargets: Set<string>;
-  /** Analysis view's Cq determination algorithm (`threshold.md` §6); see {@link CqAlgorithm}.
-   * Defaults to `"Threshold"` — the observed instrument default (§6's own default too). */
-  analysisCqAlgorithm: CqAlgorithm;
-  /** Manual per-target threshold override (RFU), keyed by target name — only consulted when
-   * {@link analysisCqAlgorithm} is `"Threshold"`. A target with no entry uses the auto threshold
-   * (`threshold.md` §5.1: 3.2 × median baseline noise across that target's wells). */
-  analysisThresholdOverrides: Map<string, number>;
+  /** Manual per-target threshold override (RFU), keyed by threshold group (target, or
+   * fluorophore on a plate with no targets). A group with no entry uses the auto threshold
+   * (`threshold.md` §5.1: 3.2 × median baseline noise across that group's wells). Edited in the
+   * Curves rail's "Threshold overrides" section; applies to the chart's Cq markers, the hover
+   * cards and the table alike, since all three read the run's one Cq table. */
+  thresholdOverrides: Map<string, number>;
 }
 
 /** A file loaded into memory — bytes only. Parsing is derived (see {@link ZpcrStore.runs}),
@@ -222,9 +221,7 @@ function defaultSettings(): FileSettings {
     disabledFluors: new Set<string>(),
     disabledSamples: new Set<string>(),
     showUnloadedFluors: false,
-    analysisDisabledTargets: new Set<string>(),
-    analysisCqAlgorithm: "Threshold",
-    analysisThresholdOverrides: new Map<string, number>(),
+    thresholdOverrides: new Map<string, number>(),
   };
 }
 
@@ -249,9 +246,7 @@ function toStored(id: string, s: FileSettings): StoredSettings {
     disabledFluors: [...s.disabledFluors],
     disabledSamples: [...s.disabledSamples],
     showUnloadedFluors: s.showUnloadedFluors,
-    analysisDisabledTargets: [...s.analysisDisabledTargets],
-    analysisCqAlgorithm: s.analysisCqAlgorithm,
-    analysisThresholdOverrides: [...s.analysisThresholdOverrides],
+    thresholdOverrides: [...s.thresholdOverrides],
   };
 }
 
@@ -278,9 +273,8 @@ function fromStored(s: StoredSettings): FileSettings {
     disabledSamples: new Set(s.disabledSamples ?? []),
     showUnloadedFluors: s.showUnloadedFluors ?? false,
     temps: new Set(s.temps ?? []),
-    analysisDisabledTargets: new Set(s.analysisDisabledTargets ?? []),
-    analysisCqAlgorithm: s.analysisCqAlgorithm ?? "Threshold",
-    analysisThresholdOverrides: new Map(s.analysisThresholdOverrides ?? []),
+    // Older records carry these under the Analysis view's own name (see StoredSettings).
+    thresholdOverrides: new Map(s.thresholdOverrides ?? s.analysisThresholdOverrides ?? []),
   };
 }
 

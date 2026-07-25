@@ -8,7 +8,6 @@ import { OverviewView } from "./components/views/OverviewView";
 import { CurvesView } from "./components/views/CurvesView";
 import { ReferenceView } from "./components/views/ReferenceView";
 import { PlatesView } from "./components/views/PlatesView";
-import { AnalysisView } from "./components/views/AnalysisView";
 import { RawFilesView } from "./components/views/RawFilesView";
 import { PcrdRawView } from "./components/views/PcrdRawView";
 import { StandalonePlateView } from "./components/views/StandalonePlateView";
@@ -92,13 +91,6 @@ export function App() {
             {view === "overview" && <OverviewView zpcr={zpcr} file={active} run={activeRun!} />}
             {view === "curves" && (
               <CurvesView
-                zpcr={zpcr}
-                settings={settings}
-                onChange={store.updateSettings}
-              />
-            )}
-            {view === "analysis" && (
-              <AnalysisView
                 zpcr={zpcr}
                 settings={settings}
                 onChange={store.updateSettings}
