@@ -9,6 +9,10 @@
 
 Whenever changes are made, review and update all ARCHITECTURE.md files to be a concise yet accurate summary of the application design, with pointers to other relevant files.
 
+## UI testing
+
+When making non-trivial UI changes, use the chrome-devtools MCP to test in Chrome. Always start an independent chrome instance and dev server running on a unique random port to avoid conflicting with the dev sever the user may be running for the main branch. Try to balance token use and UI quality by not over-using chrome-devtools. 
+
 ## Secrets
 
 Local-only secrets (the CFX file decryption password) live in `secrets.json`, which is
