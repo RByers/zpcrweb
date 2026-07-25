@@ -10,8 +10,11 @@ import { ROW_LABELS, SAMPLE_TYPE_META } from "../../lib/sampleType";
  * (for a `.zpcr`'s embedded `.pltd` entries) and a `.pcrd`'s already-decrypted `plateSetup2`
  * subtree — same component either way, only the source of the {@link PlateDefinition} differs.
  */
+type CellMode = "compact" | "detailed";
+
 export function PlateViewer({ plate, sourceHint }: { plate: PlateDefinition; sourceHint?: string }) {
   const [selected, setSelected] = useState<number | null>(null);
+  const [cellMode, setCellMode] = useState<CellMode>("detailed");
   const typesPresent = [...new Set(plate.wells.map((w) => w.sampleType))];
 
   return (
@@ -40,8 +43,30 @@ export function PlateViewer({ plate, sourceHint }: { plate: PlateDefinition; sou
         </section>
 
         <section className="decoded__block">
+          <div className="decoded__controls">
+            <div className="segmented segmented--sm">
+              <button
+                className={"segmented__item" + (cellMode === "compact" ? " is-active" : "")}
+                onClick={() => setCellMode("compact")}
+              >
+                Compact
+              </button>
+              <button
+                className={"segmented__item" + (cellMode === "detailed" ? " is-active" : "")}
+                onClick={() => setCellMode("detailed")}
+              >
+                Detailed
+              </button>
+            </div>
+          </div>
+
           <div className="decoded__gridwrap">
-            <table className="decoded__grid plate__grid mono">
+            <table
+              className={
+                "decoded__grid plate__grid mono" +
+                (cellMode === "detailed" ? " plate__grid--detailed" : "")
+              }
+            >
               <thead>
                 <tr>
                   <th />
@@ -60,6 +85,7 @@ export function PlateViewer({ plate, sourceHint }: { plate: PlateDefinition; sou
                         <WellCell
                           key={col}
                           well={w}
+                          mode={cellMode}
                           selected={selected === w.index}
                           onClick={() => setSelected(w.index)}
                         />
@@ -93,10 +119,12 @@ export function PlateViewer({ plate, sourceHint }: { plate: PlateDefinition; sou
 
 function WellCell({
   well,
+  mode,
   selected,
   onClick,
 }: {
   well: WellDefinition;
+  mode: CellMode;
   selected: boolean;
   onClick: () => void;
 }) {
@@ -119,19 +147,41 @@ function WellCell({
 
   return (
     <td
-      className={"plate__well" + (well.loaded ? "" : " is-empty") + (selected ? " is-sel" : "")}
+      className={
+        "plate__well" +
+        (mode === "detailed" ? " plate__well--detailed" : "") +
+        (well.loaded ? "" : " is-empty") +
+        (selected ? " is-sel" : "")
+      }
       style={well.loaded ? { background: meta.color + "22", borderColor: meta.color + "55" } : undefined}
       title={title}
       onClick={onClick}
     >
-      <span className="plate__welltype" style={{ color: meta.color }}>
-        {well.loaded ? meta.abbr : ""}
-      </span>
-      <span className="plate__dots">
-        {well.fluors.map((f) => (
-          <span key={f.channel} className="plate__dot" style={{ background: channelColor(f.channel) }} />
-        ))}
-      </span>
+      {mode === "compact" ? (
+        <>
+          <span className="plate__welltype" style={{ color: meta.color }}>
+            {well.loaded ? meta.abbr : ""}
+          </span>
+          <span className="plate__dots">
+            {well.fluors.map((f) => (
+              <span key={f.channel} className="plate__dot" style={{ background: channelColor(f.channel) }} />
+            ))}
+          </span>
+        </>
+      ) : (
+        well.loaded && (
+          <>
+            {well.condition && <span className="plate__wellcond">{well.condition}</span>}
+            <span className="plate__welltargets">
+              {well.fluors.map((f) => (
+                <span key={f.channel} className="plate__target" style={{ color: channelColor(f.channel) }}>
+                  {f.target || f.fluor}
+                </span>
+              ))}
+            </span>
+          </>
+        )
+      )}
     </td>
   );
 }

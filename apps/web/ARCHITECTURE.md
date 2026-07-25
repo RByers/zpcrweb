@@ -106,6 +106,11 @@ exposed as a clear affordance on each file chip.
   app-wide `appmain` container `.raw`/`.curves` key off) so its internal grid-vs-well-detail
   layout responds to the space it's actually given rather than the whole app window: side by
   side once there's room, stacked (well detail below the grid) on narrow containers.
+  Cell mode: a Compact/Detailed toggle controls what each well cell shows. Compact is the
+  original abbreviation + per-fluor channel-color dots. Detailed (the default) writes the
+  well's `condition` and each loaded fluor's `target` directly into the cell, the target text
+  colored by that fluor's channel (`channelColor`) — trading grid density for being able to
+  read sample identity and target without opening the click-through well detail panel.
 - **Raw** — `RawFilesView` for `.zpcr`, `PcrdRawView` for `.pcrd` (see "Raw views" below).
 
 ### Decoded views (`components/raw/DecodedView.tsx`)
