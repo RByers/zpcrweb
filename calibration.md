@@ -12,7 +12,10 @@ the plate, estimate how much each dye actually contributed.
 > [`linalg.ts`](./packages/core/src/linalg.ts)), tested against the calibration data in the
 > committed sample archives. Not yet cross-validated end-to-end against a reference instrument's
 > own color-separated output, so treat this as "correct per the algorithm below," not
-> "byte-for-byte verified."
+> "byte-for-byte verified." Two known problems, tracked in §8: the normalization modes in §3
+> produce implausibly different RFU scales from each other (real instrument software does not),
+> and the web app's caller of this pipeline never wires the §4 gain/dark corrections through at
+> all — a confirmed bug, not a design choice.
 
 ---
 
@@ -76,7 +79,21 @@ dominates the numerics purely because of scale. Two useful modes:
 A third mode, no normalization, is also useful for inspecting the raw calibration values
 directly. Any of the three is a valid choice mathematically — normalization affects the *scale*
 of the recovered concentrations, not which dye combination best explains the reading, since it's
-applied uniformly and undone by the solve in §5.
+applied uniformly and undone by the solve in §5: for a diagonal column scaling `D`,
+`pinv(M·D) = D⁻¹·pinv(M)` whenever `M` has full column rank, so each mode just divides every
+recovered concentration by a different scalar (one shared scalar for `global`, a per-dye scalar
+for `column`, none at all for `none`). This is implemented correctly and matches the tests in
+`calibration.test.ts`.
+
+That said, **the resulting RFU scales swing far more between modes than they do in real
+instrument software**, where switching a normalization-equivalent setting does not visibly
+reshuffle the magnitude of the reported RFU. That mismatch is a red flag that something in this
+pipeline doesn't line up with what a reference instrument actually does — either the "typical"
+choice of normalization described above isn't the one real software applies, or there's a scale
+factor elsewhere in the pipeline (see §8) that a reference implementation folds in and this one
+doesn't. Treat the specific scale of a color-separated RFU value as unverified even though the
+relative *shape* of a curve (and the recovered dye combination) is not affected by normalization
+choice.
 
 ## 4. Preprocessing the raw channel readings
 
@@ -109,6 +126,17 @@ whatsoever** on the reading — it is not a background term in its own right.
 Note also that the gain factor **divides** rather than multiplies. Whether a given factor
 convention is a divisor or a multiplier is pure convention, but getting it backwards inverts the
 correction, so it is worth stating explicitly.
+
+> **Bug:** this stage is correctly implemented in `preprocessChannelReadings`, but
+> [`apps/web/src/lib/fluorCurves.ts`](./apps/web/src/lib/fluorCurves.ts)'s `computeFluorCurves` —
+> the only caller of the color-separation pipeline in the web app — invokes it as
+> `preprocessChannelReadings(raw)` with **no options object at all**. That's a no-op: neither the
+> per-well gain correction nor dark-current subtraction is ever applied before a well/cycle's raw
+> channel means are fed into §5's solve, even though both `referenceLevel`/`wellFactor` data (via
+> the reference row, §4.1) and dark data (§4.2, already decoded and used for the channel-space
+> "Dark" overlay) are available to the app at that point. Every color-separated RFU value the web
+> app displays is therefore missing both corrections this document specifies — not a design
+> tradeoff, a wiring gap that should be fixed in `computeFluorCurves`.
 
 ### 4.1 The reference level and the reference row
 
@@ -257,6 +285,20 @@ call is wasted work.
 
 ## 8. Limitations / open items
 
+- **Normalization-mode RFU scale looks wrong.** §3's `global`/`column`/`none` modes are
+  implemented per the documented math and pass tests that verify the scaling identities directly,
+  but they produce RFU magnitudes that differ from each other far more than real instrument
+  software's equivalent setting does. Since normalization is mathematically confined to rescaling
+  (never changes the recovered dye combination — see §3), this is not explained by a bug in the
+  solve itself. Suspect either: the wrong mode is being treated as the reference-matching default,
+  or the missing §4 corrections below are large enough, and different enough per dye, to look like
+  a "normalization" effect. Needs cross-validation against a reference instrument's own
+  color-separated output (see the "Status" note) before trusting any mode's absolute RFU scale.
+- **Gain/dark corrections aren't wired through in the web app** — see the bug note in §4. This is
+  a likely contributor to the scale problem above: the reference level and dark level are
+  per-channel, so skipping them doesn't just shift every dye's baseline by a constant, it changes
+  the *relative* channel proportions the solve sees, which the unmixing matrix will read as a
+  different dye mixture.
 - This library always derives the calibration matrix from `.Dcal` files. Some systems also
   support a user-edited override matrix that takes precedence over the calibration-derived one;
   that override mechanism isn't modeled here.
