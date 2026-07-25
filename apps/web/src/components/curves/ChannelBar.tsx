@@ -5,9 +5,10 @@ interface Props {
   /** Channel indices to offer (from CHANNELMASK); others are hidden. */
   available: number[];
   onToggle: (channel: number) => void;
+  onHover?: (channel: number | null) => void;
 }
 
-export function ChannelBar({ enabled, available, onToggle }: Props) {
+export function ChannelBar({ enabled, available, onToggle, onHover }: Props) {
   return (
     <div className="chanbar">
       {CHANNEL_INFO.filter((c) => available.includes(c.index)).map((c) => {
@@ -17,6 +18,8 @@ export function ChannelBar({ enabled, available, onToggle }: Props) {
             key={c.index}
             className={"chanchip" + (on ? " is-on" : "")}
             onClick={() => onToggle(c.index)}
+            onMouseEnter={() => onHover?.(c.index)}
+            onMouseLeave={() => onHover?.(null)}
             aria-pressed={on}
             style={{ ["--chan" as string]: c.color }}
           >

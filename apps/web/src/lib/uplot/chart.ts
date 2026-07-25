@@ -138,7 +138,10 @@ export interface FactoryCurve {
 /** A target/fluor chip or well-grid cell to highlight — dims every other series to match the
  * cursor-proximity dimming `focus.alpha` already does for a single hovered curve, but driven by
  * hovering the rail's legend/well-grid instead of the plot itself. */
-export type HighlightMatch = { kind: "target"; dyeLabel: string } | { kind: "well"; label: string };
+export type HighlightMatch =
+  | { kind: "target"; dyeLabel: string }
+  | { kind: "well"; label: string }
+  | { kind: "channel"; channel: number };
 
 /** Per-series metadata, index-aligned with uPlot series (offset by the x row). */
 export interface SeriesMeta {
@@ -508,7 +511,8 @@ export function applyHighlight(u: uPlot, meta: SeriesMeta[], match: HighlightMat
       !match ||
       (m.kind === "well" &&
         ((match.kind === "well" && m.label === match.label) ||
-          (match.kind === "target" && m.dyeLabel === match.dyeLabel)));
+          (match.kind === "target" && m.dyeLabel === match.dyeLabel) ||
+          (match.kind === "channel" && m.channel === match.channel)));
     u.series[i + 1]!.alpha = isMatch ? 1 : 0.12;
   });
   u.redraw(false, false);

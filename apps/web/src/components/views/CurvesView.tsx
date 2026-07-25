@@ -573,6 +573,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
               enabled={settings.enabledChannels}
               available={available}
               onToggle={toggleChannel}
+              onHover={(ch) => setHoverHighlight(ch != null ? { kind: "channel", channel: ch } : null)}
             />
           )}
         </div>
