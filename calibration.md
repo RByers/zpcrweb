@@ -384,43 +384,44 @@ call is wasted work.
 
 ## 8. Limitations / open items
 
-- **The absolute RFU scale does not yet reproduce the instrument software's, and the residual
-  looks like a per-well gain rather than anything in §§2–5.** Worked example, from the committed
-  `20260720_Luna_noRT.pcrd`, well B3 (FAM/Texas Red/Cy5), block 59.99 °C:
+- **The absolute RFU scale does not yet reproduce the instrument software's: a per-dye
+  multiplicative constant is missing.** Measurements from the committed
+  `20260720_Luna_noRT.pcrd` (block 59.99 °C), against CFX Manager's own figures for the same
+  run — `none` background, i.e. what this library reports by default:
 
-  | Quantity | Cycle 1 | Cycle 45 |
-  |---|---|---|
-  | Raw channel 1 mean | 3336.7 | 9069.7 |
-  | Separated FAM, no background subtracted | 3273.5 | 8965.4 |
-  | Separated FAM, dark subtracted (dark = 2123.9) | 1152.5 | 6845.9 |
-  | Separated FAM, empty plate subtracted (empty = 2516) | ≈765 | ≈6459 |
-  | **CFX Manager's own curve** | **just over 3000** | **8169** (its End RFU) |
+  | Well | Dye | Cycle | This library | CFX Manager |
+  |---|---|---|---|---|
+  | B3 | FAM | 1 | 3273.5 | "just over 3000" (chart) |
+  | B3 | FAM | 45 | 8965.4 | **8169** (End RFU) |
+  | C3 | FAM | 45 | 2295 | **2115** (End RFU) |
 
-  The cycle-1 reading settles two questions at once:
+  The two exact points fit `CFX = 0.9077 × ours + 32` — a **pure scale of ≈0.908 with no
+  additive term**, which then predicts 3003 for B3 cycle 1, matching the third observation.
+  Two things follow directly:
 
-  1. **CFX's End RFU is an absolute end point, not a baseline-subtracted one** — its curve
-     starts near 3000, not near zero. So the amplitude argument that would have been needed
-     otherwise (≈1.44× ours, unreachable anywhere in §§2–5) does not arise.
-  2. **`none` is the right background default.** Only the no-subtraction curve starts in the
-     right place; dark subtraction starts at 1152 and empty-plate subtraction at ≈765, both far
-     below what the instrument plots. This is what §4.2's default rests on — note that it is an
-     empirical match, and that it is *not* the choice §4.2's own coordinate argument prefers.
+  1. **`none` is the right background (§4.2).** A wrong background choice would show up as a
+     non-zero intercept in that fit, and the intercept is ≈0. Subtracting dark or the empty
+     plate would move cycle 1 to 1152 or ≈765, against an observed ≈3000.
+  2. **It is not a per-well gain.** B3 and C3 give the same factor to within half a percent, so
+     §4.1's well factors — the earlier leading hypothesis — cannot be the explanation.
 
-  What is left is a near-constant **≈0.91 ratio** (8169/8965.4 at cycle 45; a pure scale would
-  put cycle 1 at 2983). Everything §§2–5 could contribute has been ruled out: §3's normalization
-  cancels exactly (§5.1), the temperature the curves are sampled at cancels, the `.Dcal`
-  response is bit-identical across all 108 wells so the well-0 read below is not it, and the
-  channel-6 row the `.Dcal` leaves empty is a zero row, which contributes nothing to a
-  least-squares solve whether it is present or dropped.
+  What the ≈0.908 *is* remains open. It is not anything in §§2–5: §3's normalization cancels
+  exactly (§5.1), the temperature the curves are sampled at cancels, the `.Dcal` response is
+  bit-identical across all 108 wells, the empty channel-6 row is a zero row and so a no-op in a
+  least-squares solve, and it is not the other vessel type's calibration (`BR White` runs ≈4×
+  larger, not 0.9×). For FAM it would mean a scale of 3587 where §5.1 uses a `columnNorm` of
+  3950.8.
 
-  That leaves a **per-well, per-channel gain** — §4.1's well factors — as the leading
-  explanation: `1/1.0975 ≈ 0.91`, or ≈1.13 read as a pivoted correction against this scan's
-  reference level of 2259. This file cannot confirm it, because its `wellFactorsCollection` is
-  the synthesized identity table (§4.1) — which would mean CFX Manager derives the factors from
-  the run rather than reading them back, something this project has no evidence for either way.
-  **The test that would settle it:** compare CFX's End RFU against this library's for the *same
-  fluor in several different wells*. A ratio that varies well to well confirms a per-well gain;
-  a ratio that stays at 0.91 means the remaining error is a global scale convention after all.
+  **Whether the constant is per-dye or global is not yet settled**, and it matters, because a
+  global constant is a one-line change to §5.1 while a per-dye one implies the scale is derived
+  from each dye's calibration in some way not yet identified. The one Cy5 observation available
+  (well C3, reported as rising from near zero to ≈3100) does not fit a 0.908 scale of this
+  library's 2337→3707, and cannot be reconciled with the raw data either: channel 4's raw
+  amplitude in that well is 1366, so an amplitude of ≈3100 would need a 2.27× gain that no
+  quantity in the calibration supplies. That figure was read off a chart rather than the
+  endpoint table, so it may be a baseline-subtracted curve — resolving it needs the same
+  *endpoint-table* End RFU that the FAM numbers above came from, for Cy5 in C3 and for
+  Texas Red in D3 (this library: 4018→6238).
 
 - **The absolute RFU scale is a convention.** §5.1's `columnNorm` factor puts the output on an RFU
   scale that is self-consistent, stable across normalization modes, and the right order of
