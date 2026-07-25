@@ -8,7 +8,8 @@ import type {
   Zpcr,
 } from "./types.js";
 import { createArchiveAccess, unzipArchive } from "./archive.js";
-import { isPltdName, parsePltd } from "./pltd.js";
+import { isPltdName, parsePltd, type Pltd, type PltdContainer } from "./pltd.js";
+import { isPlateCsvName, parsePlateCsv } from "./plateCsv.js";
 import { isPrclName, parsePrcl, protocolDocumentFromRunDefinition } from "./prcl.js";
 import { isDcalName, parseDcal } from "./dcal.js";
 import {
@@ -34,6 +35,28 @@ const textDecoder = new TextDecoder("utf-8");
 /** Normalize the accepted isomorphic input types into a `Uint8Array`. */
 function toBytes(data: Uint8Array | ArrayBuffer): Uint8Array {
   return data instanceof Uint8Array ? data : new Uint8Array(data);
+}
+
+/**
+ * Wrap a `.plt.csv` archive entry (zpcrweb's own plain-text plate format, see `plateCsv.ts`) in
+ * a {@link Pltd}-shaped result, so {@link Zpcr.plates} can return it alongside real `.pltd`
+ * entries with no type or call-site changes — a `.plt.csv` never needs a password, so
+ * `needsPassword` is simply never set.
+ */
+function pltdFromPlateCsv(name: string, bytes: Uint8Array): Pltd {
+  const container: PltdContainer = {
+    innerName: name,
+    compressionMethod: 0,
+    encrypted: false,
+    crc32: 0,
+    compressedSize: bytes.length,
+    uncompressedSize: bytes.length,
+  };
+  try {
+    return { container, plate: parsePlateCsv(textDecoder.decode(bytes)) };
+  } catch (e) {
+    return { container, error: e instanceof Error ? e.message : String(e) };
+  }
 }
 
 /**
@@ -79,10 +102,12 @@ export function parseZpcr(data: Uint8Array | ArrayBuffer): Zpcr {
     channels: () => toChannels(reads),
     plates: (password?: string): PltdEntry[] =>
       archive.entries
-        .filter(isPltdName)
+        .filter((name) => isPltdName(name) || isPlateCsvName(name))
         .map((name) => ({
           name,
-          pltd: parsePltd(files[name] as Uint8Array, password ? { password } : undefined),
+          pltd: isPlateCsvName(name)
+            ? pltdFromPlateCsv(name, files[name] as Uint8Array)
+            : parsePltd(files[name] as Uint8Array, password ? { password } : undefined),
         })),
     protocols: (password?: string): PrclEntry[] =>
       archive.entries

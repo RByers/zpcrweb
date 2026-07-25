@@ -1,8 +1,10 @@
 # Web app architecture
 
 The web app (`@zpcrweb/web`) is a browser UI over [`@zpcrweb/core`](../../packages/core). It
-loads one or more `.zpcr` and/or `.pcrd` files, switches between them, and explores each
-through five views: Overview, Curves, Reference, Plates, and Raw.
+loads one or more files — `.zpcr`, `.pcrd`, or a standalone plate file (`.pltd` or zpcrweb's own
+`.plt.csv`, see "Standalone plate entries and attach" below) — switches between them, and
+explores each through up to five views: Overview, Curves, Reference, Plates, and Raw (a
+standalone plate file only gets Plates + Raw — see below).
 
 ## Two formats, mostly one UI
 
@@ -30,8 +32,9 @@ app is format-agnostic:
   name) and `PcrdRawView` (a `.pcrd`'s real XML nodes, by direct reference) can feed them
   without either pretending to be the other.
 - `PlatesView` takes a plain `Zpcr` too, via `zpcr.plates(password)` — a `.zpcr`'s embedded
-  `.pltd` entries and a `.pcrd`'s single embedded plate setup both come back as the same
-  `PltdEntry[]` shape, so the view never branches on `kind`.
+  `.pltd`/`.plt.csv` entries and a `.pcrd`'s single embedded plate setup both come back as the
+  same `PltdEntry[]` shape, so the view never branches on `kind` to *read* plate data (it does
+  branch to decide whether to offer the attach control — see below, `.zpcr`-only).
 
 **The Raw view is the one place formats genuinely diverge**, because a `.zpcr` is a real
 multi-file archive and a `.pcrd` is a single XML document with no inner files — see "Raw
@@ -86,18 +89,51 @@ library's suite. If UI bugs prove frequent we can add Playwright e2e later (trac
 root `TODO.md`). Any new analytical transform must be added to the library with tests, not
 written inline in a component.
 
+## Standalone plate entries and attach
+
+Two more `LoadedFile` kinds, `"pltd"` and `"csv"` (a bare `.csv` upload is treated leniently as
+zpcrweb's own `.plt.csv` format — see root `ARCHITECTURE.md`'s "Plate CSV + attaching a plate"),
+alongside `"zpcr"`/`"pcrd"`:
+
+- **Standalone entries** — a `.pltd` or `.plt.csv` dropped with no run selected becomes its own
+  top-level file, resolved via `plateFiles`/`activePlateFile` (a `PlateFileResult`, parallel to
+  `runs`/`activeRun` but with no `Zpcr` involved). `App.tsx` detects `active.kind === "pltd" |
+  "csv"` and renders a restricted `ViewSelector` (`views={["plates","raw"]}`) routing to
+  `StandalonePlateView`/`StandaloneRawView` instead of the normal five-view `Zpcr`-gated branch
+  — both are thin, `Zpcr`-free versions of `PlatesView`/`RawFilesView` operating directly on the
+  file's own bytes.
+- **Attach (replace a run's plate)** — `PlatesView`'s upload control (`.zpcr` runs only; a
+  `.pcrd` shows an explanatory note instead, since it has no real archive to add an entry to)
+  calls `store.attachPlate(fileId, file)`, which rewrites the run's own bytes via
+  `attachPlateToZpcr` (see root `ARCHITECTURE.md`) and re-persists them under the same file id.
+  There is **no separate override state** — once attached, the plate is just part of the run's
+  `.zpcr` bytes, so `zpcr.plates()` picks it up the same way it would an originally-embedded
+  `.pltd`, and `CurvesView`'s `zpcr.plates(pltdPassword)[0]` labeling updates with no code path
+  of its own to keep in sync. This is also how "download the run with its attached plate" works
+  — `FileBar`'s per-chip download button just downloads `LoadedFile.bytes` as-is, which already
+  includes anything attached.
+- **`PlateDownloadButton`** (`components/plate/PlateDownloadButton.tsx`) is the two-option
+  download menu (`.pltd` / `.plt.csv`) shared by `PlatesView` and `StandalonePlateView`: "Download
+  .pltd" is only enabled when real `.pltd` bytes exist (a real archive entry, or a standalone
+  `.pltd` upload) — never for a `.plt.csv`-sourced plate or a `.pcrd`'s embedded plate, neither of
+  which has raw `.pltd` bytes to hand back. "Download .plt.csv" is always available, serialized
+  from the current `PlateDefinition` via `plateToCsv`.
+
 ## State & persistence
 
 `state/useZpcrStore.ts` is the single store hook. It holds the list of loaded (not yet parsed)
-files, the active file id, a per-file settings map, the derived `runs` map (see "The `.pcrd`
-password gate" above), and the globally-selected view (`view`/`setView`, plain `useState` —
-not persisted, and not part of the per-file settings map, so switching files never changes
-which view is showing). `state/db.ts` is a minimal IndexedDB wrapper with two object stores:
+files, the active file id, a per-file settings map, the derived `runs`/`plateFiles` maps (see
+"The `.pcrd` password gate" above and "Standalone plate entries and attach"), and the
+globally-selected view (`view`/`setView`, plain `useState` — not persisted, and not part of the
+per-file settings map, so switching files never changes which view is showing). `state/db.ts` is
+a minimal IndexedDB wrapper with two object stores:
 
 - `files` — `{ id, name, size, addedAt, bytes, kind }`; **raw bytes** are stored so files
-  survive reloads and are re-parsed (`parseZpcr` or `parsePcrd`, by `kind`) on load. `id` is a
-  `name:size` key, which also dedupes re-adding the same file. `kind` defaults to `"zpcr"` for
-  records written before `.pcrd` support existed.
+  survive reloads and are re-parsed (`parseZpcr`/`parsePcrd`/`parsePltd`/`parsePlateCsv`, by
+  `kind`) on load. `id` is a `name:size` key, which also dedupes re-adding the same file (an
+  attach changes `size`, so re-persisting after one just writes the same `id` again — no
+  separate override record to keep in sync, see above). `kind` defaults to `"zpcr"` for records
+  written before `.pcrd` support existed.
 - `settings` — `{ fileId, enabledChannels[], enabledWells[], enabledRefCols[], baseline,
   curveBaseline, scale }`, so each file remembers its enabled wells/channels/reference columns.
   `baseline` (Reference view's factory-relative ΔRFU/Drift %) and `curveBaseline` (Curves
@@ -115,7 +151,8 @@ exposed as a clear affordance on each file chip.
 - **Reference** — reference row vs factory calibration (see below).
 - **Plates** — `PlatesView` (`components/views/PlatesView.tsx`): the visual, color-coded plate
   map (`components/plate/PlateViewer.tsx`) for every plate attached to the run, via
-  `zpcr.plates()`. Per-sample-type color/label/abbreviation lives in one place,
+  `zpcr.plates()`, plus an upload control to attach/replace the run's plate (`.zpcr` only —
+  see "Standalone plate entries and attach" below) and a `PlateDownloadButton`. Per-sample-type color/label/abbreviation lives in one place,
   `lib/sampleType.ts`'s `SAMPLE_TYPE_META` — grey for empty, green for positive control, red for
   negative control, blue for unknown — shared with the Curves view's well-selection matrix (see
   below) so the two grids read the same way. A sidebar lists plates when there's more than one

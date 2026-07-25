@@ -40,6 +40,8 @@ export {
   ROWS,
 } from "./plateread.js";
 export { parsePltd, parsePlatesetup2, isPltdName } from "./pltd.js";
+export { plateToCsv, parsePlateCsv, isPlateCsvName } from "./plateCsv.js";
+export { attachPlateToZpcr } from "./attachPlate.js";
 export { parsePrcl, parseProtocol2, isPrclName } from "./prcl.js";
 export { parseDcal, findDcalBlock, isDcalName } from "./dcal.js";
 export { parsePcrd, isPcrdName, pcrdFromBlob } from "./pcrd.js";

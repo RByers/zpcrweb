@@ -105,7 +105,29 @@ ZIP decompression is the one thing not worth hand-rolling. `fflate` is tiny (~8 
 zero dependencies, is actively maintained, and runs identically in Node and the browser.
 `.zpcr` archives are small (hundreds of KB), so we decompress the **whole** archive into
 memory up front (`unzipSync`). That keeps the rest of the library synchronous and lets the
-low-level archive API serve any file instantly.
+low-level archive API serve any file instantly. `fflate` also writes zips (`zipSync`), used by
+`attachPlate.ts` (see below) — the one write path in an otherwise read-only library.
+
+## Plate CSV + attaching a plate (`plateCsv.ts`, `attachPlate.ts`)
+
+There's no real (encrypted) `.pltd` *writer* — not worth building for a format the app only
+ever needs to read. Instead, `plateCsv.ts` defines a small zpcrweb-only plain-text plate
+format — CSV, canonical extension **`.plt.csv`** (`plateToCsv`/`parsePlateCsv`,
+`isPlateCsvName`) — as the thing the app can actually produce: one `# key: value` header block
+of plate-level metadata, then one CSV row per well. It's deliberately not a CFX format (no
+`meta`/`fluorId` fidelity), so it isn't a decoder doc in the table above.
+
+`zpcr.ts`'s `plates()` treats a `.plt.csv` archive entry exactly like a `.pltd` one — wrapped in
+a synthetic `Pltd`-shaped result (`pltdFromPlateCsv`) with a dummy `PltdContainer` and
+`needsPassword` always `false` — so every existing plate consumer (the web app's Plates/Curves
+views) needs zero changes to read one.
+
+`attachPlate.ts`'s `attachPlateToZpcr(zpcrBytes, plateFile)` is the write side: unzip, drop any
+existing `.pltd`/`.plt.csv` entry (at most one plate entry is kept — attaching replaces, not
+adds), add the new entry, `zipSync` back to bytes. The web app calls this to "attach a plate to
+a run": it rewrites the run's own in-memory bytes and re-persists them under the same file id,
+so the plate travels with the file with no separate override state to keep in sync — see
+`apps/web/ARCHITECTURE.md`.
 
 ## Decoding pipeline
 

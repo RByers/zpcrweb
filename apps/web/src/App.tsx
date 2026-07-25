@@ -10,6 +10,10 @@ import { ReferenceView } from "./components/views/ReferenceView";
 import { PlatesView } from "./components/views/PlatesView";
 import { RawFilesView } from "./components/views/RawFilesView";
 import { PcrdRawView } from "./components/views/PcrdRawView";
+import { StandalonePlateView } from "./components/views/StandalonePlateView";
+import { StandaloneRawView } from "./components/views/StandaloneRawView";
+
+const STANDALONE_VIEWS = ["plates", "raw"] as const;
 
 export function App() {
   const store = useZpcrStore();
@@ -33,15 +37,24 @@ export function App() {
     );
   }
 
-  const { view } = store;
-  const zpcr = activeRun?.zpcr ?? null;
+  const isStandalonePlate = active.kind === "pltd" || active.kind === "csv";
+  const zpcr = isStandalonePlate ? null : activeRun?.zpcr ?? null;
+  // `store.view` is global (not per-file), so switching to a standalone entry can land on a
+  // view its restricted tab set doesn't have (e.g. "curves") — fall back to "plates" then.
+  const view = isStandalonePlate && !STANDALONE_VIEWS.includes(store.view as (typeof STANDALONE_VIEWS)[number])
+    ? "plates"
+    : store.view;
 
   return (
     <div className="app">
       <header className="app__header">
         <span className="app__logo mono">zpcr//web</span>
-        {zpcr && (
-          <ViewSelector value={view} onChange={store.setView} />
+        {(zpcr || isStandalonePlate) && (
+          <ViewSelector
+            value={view}
+            onChange={store.setView}
+            views={isStandalonePlate ? [...STANDALONE_VIEWS] : undefined}
+          />
         )}
         <div className="app__header-spacer" />
         <DropZone onFiles={store.addFiles} />
@@ -50,13 +63,21 @@ export function App() {
       <FileBar
         files={store.files}
         runs={store.runs}
+        plateFiles={store.plateFiles}
         activeId={store.activeId}
         onSelect={store.setActive}
         onRemove={store.remove}
       />
 
       <main className="app__main">
-        {!zpcr ? (
+        {isStandalonePlate ? (
+          <>
+            {view === "plates" && store.activePlateFile && (
+              <StandalonePlateView file={active} result={store.activePlateFile} />
+            )}
+            {view === "raw" && <StandaloneRawView file={active} />}
+          </>
+        ) : !zpcr ? (
           <div className="app__gate">
             {activeRun?.needsPassword && (
               <PasswordPrompt wrong={false} onSubmit={setPassword} />
@@ -82,7 +103,14 @@ export function App() {
                 onChange={store.updateSettings}
               />
             )}
-            {view === "plates" && <PlatesView zpcr={zpcr} />}
+            {view === "plates" && (
+              <PlatesView
+                zpcr={zpcr}
+                fileId={active.id}
+                fileKind={active.kind}
+                attachPlate={store.attachPlate}
+              />
+            )}
             {view === "raw" && active.kind === "pcrd" && (
               <PcrdRawView
                 zpcr={zpcr}

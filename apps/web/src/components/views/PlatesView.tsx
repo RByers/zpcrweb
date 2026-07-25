@@ -1,30 +1,64 @@
 import { useMemo, useState } from "react";
-import type { Zpcr } from "@zpcrweb/core";
+import { isPltdName, type Zpcr } from "@zpcrweb/core";
 import { PlateViewer } from "../plate/PlateViewer";
+import { PlateDownloadButton } from "../plate/PlateDownloadButton";
 import { PasswordPrompt } from "../PasswordPrompt";
+import { DropZone } from "../DropZone";
 import { usePltdPassword } from "../../state/pltdPassword";
+import type { FileKind } from "../../state/useZpcrStore";
 
 /**
- * Visual plate viewer for every plate file attached to the run — one per `.pltd` archive
- * entry (a `.zpcr`) or the single embedded `plateSetup2` (a `.pcrd`); {@link Zpcr.plates}
- * covers both uniformly. A peer of "Curves", separate from "Raw files" (which shows plate
+ * Visual plate viewer for every plate file attached to the run — one per `.pltd`/`.plt.csv`
+ * archive entry (a `.zpcr`) or the single embedded `plateSetup2` (a `.pcrd`); {@link Zpcr.plates}
+ * covers all three uniformly. A peer of "Curves", separate from "Raw files" (which shows plate
  * data as a table instead, see `raw/PlateTable.tsx`).
  *
  * Uses its own `.plateview` layout (flex, not `.raw`'s two-column grid) because the plate
  * list sidebar is conditional — a grid's fixed column tracks would misplace the lone
  * `.plateview__main` child when there's only one plate and no sidebar to fill the other track.
  */
-export function PlatesView({ zpcr }: { zpcr: Zpcr }) {
+export function PlatesView({
+  zpcr,
+  fileId,
+  fileKind,
+  attachPlate,
+}: {
+  zpcr: Zpcr;
+  fileId: string;
+  fileKind: FileKind;
+  attachPlate: (fileId: string, file: File) => Promise<void>;
+}) {
   const [password, setPassword] = usePltdPassword();
   const entries = useMemo(() => zpcr.plates(password || undefined), [zpcr, password]);
   const [selected, setSelected] = useState(0);
 
+  const attachControl =
+    fileKind === "zpcr" ? (
+      <DropZone
+        onFiles={(files) => {
+          const file = Array.from(files)[0];
+          if (file) void attachPlate(fileId, file);
+        }}
+        accept=".pltd,.csv,.plt.csv"
+        compactLabel={entries.length === 0 ? "+ attach plate" : "+ replace plate"}
+      />
+    ) : (
+      <span className="decoded__hint mono">Attaching a plate is only supported for .zpcr files.</span>
+    );
+
   if (entries.length === 0) {
-    return <div className="decoded__na mono">No plate files in this run.</div>;
+    return (
+      <div className="plateview plateview--empty">
+        <div className="decoded__na mono">No plate files in this run.</div>
+        {attachControl}
+      </div>
+    );
   }
 
   const entry = entries[Math.min(selected, entries.length - 1)]!;
   const { pltd } = entry;
+  const pltdBytes =
+    fileKind === "zpcr" && isPltdName(entry.name) ? { name: entry.name, bytes: zpcr.archive.bytes(entry.name) } : undefined;
 
   return (
     <div className="plateview">
@@ -47,6 +81,10 @@ export function PlatesView({ zpcr }: { zpcr: Zpcr }) {
       )}
 
       <section className="plateview__main">
+        <div className="plateview__toolbar">
+          {attachControl}
+          <PlateDownloadButton plate={pltd.plate} pltd={pltdBytes} />
+        </div>
         {pltd.needsPassword || pltd.error ? (
           <div className="decoded">
             <PasswordPrompt wrong={!!pltd.error} onSubmit={setPassword} />

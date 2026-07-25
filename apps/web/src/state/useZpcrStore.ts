@@ -1,9 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  attachPlateToZpcr,
   parsePcrd,
+  parsePlateCsv,
+  parsePltd,
   parseZpcr,
   type NormalizationMode,
   type PcrdContainer,
+  type PlateDefinition,
   type Zpcr,
 } from "@zpcrweb/core";
 import type { CalibrationBackground } from "../lib/fluorCurves";
@@ -18,7 +22,9 @@ import {
 } from "./db";
 import { usePltdPassword } from "./pltdPassword";
 
-export type FileKind = "zpcr" | "pcrd";
+export type FileKind = "zpcr" | "pcrd" | "pltd" | "csv";
+/** The two kinds a plate — standalone or attached to a run — can be uploaded as. */
+export type PlateFileKind = "pltd" | "csv";
 
 export type ViewId = "overview" | "curves" | "reference" | "plates" | "raw";
 /** Reference view only — drift relative to the factory calibration value; see `ReferenceView`. */
@@ -121,7 +127,7 @@ export interface RunResult {
   documentXml?: string;
 }
 
-function parseRun(bytes: Uint8Array, kind: FileKind, password: string): RunResult {
+function parseRun(bytes: Uint8Array, kind: "zpcr" | "pcrd", password: string): RunResult {
   if (kind === "zpcr") {
     try {
       return { zpcr: parseZpcr(bytes), needsPassword: false, error: null };
@@ -137,6 +143,26 @@ function parseRun(bytes: Uint8Array, kind: FileKind, password: string): RunResul
     container: pcrd.container,
     documentXml: pcrd.xml,
   };
+}
+
+/** The outcome of parsing a standalone `.pltd`/`.csv` plate file (a top-level entry, or a
+ * run's plate-override attachment) against the current password. */
+export interface PlateFileResult {
+  plate: PlateDefinition | null;
+  needsPassword: boolean;
+  error: string | null;
+}
+
+function parsePlateBytes(kind: PlateFileKind, bytes: Uint8Array, password: string): PlateFileResult {
+  if (kind === "pltd") {
+    const pltd = parsePltd(bytes, password ? { password } : undefined);
+    return { plate: pltd.plate ?? null, needsPassword: !!pltd.needsPassword, error: pltd.error ?? null };
+  }
+  try {
+    return { plate: parsePlateCsv(new TextDecoder().decode(bytes)), needsPassword: false, error: null };
+  } catch (e) {
+    return { plate: null, needsPassword: false, error: e instanceof Error ? e.message : String(e) };
+  }
 }
 
 export function wellKey(row: number, col: number): string {
@@ -228,6 +254,16 @@ function fromStored(s: StoredSettings): FileSettings {
 function fileKind(name: string): FileKind | null {
   if (/\.zpcr$/i.test(name)) return "zpcr";
   if (/\.pcrd$/i.test(name)) return "pcrd";
+  if (/\.pltd$/i.test(name)) return "pltd";
+  if (/\.csv$/i.test(name)) return "csv";
+  return null;
+}
+
+/** `.pltd` or `.csv`/`.plt.csv` (case-insensitive), or `null` — the two formats accepted for
+ * attaching a plate to a run (see the Plates view's upload control). */
+function plateFileKind(name: string): PlateFileKind | null {
+  if (/\.pltd$/i.test(name)) return "pltd";
+  if (/\.csv$/i.test(name)) return "csv";
   return null;
 }
 
@@ -235,10 +271,21 @@ export interface ZpcrStore {
   files: LoadedFile[];
   activeId: string | null;
   active: LoadedFile | null;
-  /** Parse result for every loaded file, keyed by id — recomputed when the shared
-   * decryption password changes, so a `.pcrd` unlocks reactively without reloading. */
+  /** Parse result for every loaded `.zpcr`/`.pcrd` file, keyed by id — recomputed when the
+   * shared decryption password changes, so a `.pcrd` unlocks reactively without reloading. */
   runs: Map<string, RunResult>;
   activeRun: RunResult | null;
+  /** Parse result for every loaded standalone `.pltd`/`.csv` file, keyed by id. */
+  plateFiles: Map<string, PlateFileResult>;
+  activePlateFile: PlateFileResult | null;
+  /**
+   * Attach (or replace) a `.zpcr` run's plate: rewrites the run's own archive bytes in place
+   * (adding/replacing a `.pltd`/`.plt.csv` entry — see `attachPlateToZpcr`) and persists the
+   * result, so the plate travels with the file from then on and `zpcr.plates()` picks it up
+   * with no separate override state. Only valid for a `kind === "zpcr"` run; sets `error`
+   * otherwise (a `.pcrd` has no real archive to attach an entry to).
+   */
+  attachPlate: (fileId: string, file: File) => Promise<void>;
   settings: FileSettings | null;
   /** Selected top-level view (Overview/Curves/…) — global across all loaded files, not
    * per-file, so switching files doesn't reset it. */
@@ -267,10 +314,7 @@ export function useZpcrStore(): ZpcrStore {
     let cancelled = false;
     (async () => {
       try {
-        const [stored, storedSettings] = await Promise.all([
-          getAllFiles(),
-          getAllSettings(),
-        ]);
+        const [stored, storedSettings] = await Promise.all([getAllFiles(), getAllSettings()]);
         if (cancelled) return;
         const loaded: LoadedFile[] = stored.map((f) => ({
           id: f.id,
@@ -307,9 +351,12 @@ export function useZpcrStore(): ZpcrStore {
         const buf = await file.arrayBuffer();
         const bytes = new Uint8Array(buf);
         // Validate the container eagerly so obviously-bad files are rejected up front; a
-        // .pcrd's payload may still need a password, resolved reactively via `runs`.
+        // .pcrd/.pltd's payload may still need a password, resolved reactively via `runs`/
+        // `plateFiles`.
         if (kind === "zpcr") parseZpcr(bytes);
-        else parsePcrd(bytes);
+        else if (kind === "pcrd") parsePcrd(bytes);
+        else if (kind === "pltd") parsePltd(bytes);
+        else parsePlateCsv(new TextDecoder().decode(bytes));
         const id = fileId(file.name, file.size);
         const addedAt = Date.now();
         await putFile({ id, name: file.name, size: file.size, addedAt, bytes: buf, kind });
@@ -343,6 +390,51 @@ export function useZpcrStore(): ZpcrStore {
 
   const setActive = useCallback((id: string) => setActiveId(id), []);
 
+  const attachPlate = useCallback(
+    async (targetFileId: string, file: File) => {
+      const kind = plateFileKind(file.name);
+      if (!kind) {
+        setError(`${file.name}: not a .pltd or .csv file`);
+        return;
+      }
+      const target = files.find((f) => f.id === targetFileId);
+      if (!target) return;
+      if (target.kind !== "zpcr") {
+        setError(`${target.name}: attaching a plate is only supported for .zpcr files`);
+        return;
+      }
+      try {
+        const buf = await file.arrayBuffer();
+        const plateBytes = new Uint8Array(buf);
+        // .csv has no password step, so validate eagerly; a .pltd's container is validated by
+        // attachPlateToZpcr re-zipping it, and its plate resolved reactively via `runs`.
+        if (kind === "csv") parsePlateCsv(new TextDecoder().decode(plateBytes));
+        const augmented = attachPlateToZpcr(target.bytes, { name: file.name, bytes: plateBytes });
+        await putFile({
+          id: target.id,
+          name: target.name,
+          size: augmented.byteLength,
+          addedAt: target.addedAt,
+          bytes: augmented.slice().buffer,
+          kind: target.kind,
+        });
+        setFiles((prev) =>
+          prev.map((f) =>
+            f.id === target.id ? { ...f, size: augmented.byteLength, bytes: augmented } : f,
+          ),
+        );
+      } catch (e) {
+        setError(`${file.name}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    },
+    [files],
+  );
+
+  const active = useMemo(
+    () => files.find((f) => f.id === activeId) ?? null,
+    [files, activeId],
+  );
+
   const settings = activeId
     ? settingsMap[activeId] ?? defaultSettings()
     : null;
@@ -364,18 +456,25 @@ export function useZpcrStore(): ZpcrStore {
     [activeId],
   );
 
-  const active = useMemo(
-    () => files.find((f) => f.id === activeId) ?? null,
-    [files, activeId],
-  );
-
   const runs = useMemo(() => {
     const map = new Map<string, RunResult>();
-    for (const f of files) map.set(f.id, parseRun(f.bytes, f.kind, password));
+    for (const f of files) {
+      if (f.kind === "zpcr" || f.kind === "pcrd") map.set(f.id, parseRun(f.bytes, f.kind, password));
+    }
     return map;
   }, [files, password]);
 
   const activeRun = activeId ? runs.get(activeId) ?? null : null;
+
+  const plateFiles = useMemo(() => {
+    const map = new Map<string, PlateFileResult>();
+    for (const f of files) {
+      if (f.kind === "pltd" || f.kind === "csv") map.set(f.id, parsePlateBytes(f.kind, f.bytes, password));
+    }
+    return map;
+  }, [files, password]);
+
+  const activePlateFile = activeId ? plateFiles.get(activeId) ?? null : null;
 
   return {
     files,
@@ -383,6 +482,9 @@ export function useZpcrStore(): ZpcrStore {
     active,
     runs,
     activeRun,
+    plateFiles,
+    activePlateFile,
+    attachPlate,
     settings,
     view,
     setView,

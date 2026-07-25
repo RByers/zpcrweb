@@ -16,7 +16,7 @@ type Mode = "decoded" | "text" | "hex";
 
 function group(name: string): string {
   if (/\.Plateread$/i.test(name)) return "Plate reads";
-  if (/\.pltd$/i.test(name)) return "Plate setup";
+  if (/\.pltd$/i.test(name) || /\.plt\.csv$/i.test(name)) return "Plate setup";
   if (/\.prcl$/i.test(name)) return "Protocol";
   if (/\.Dcal$/i.test(name)) return "Calibration";
   if (/\.(xml|txt|alf)$/i.test(name)) return "Metadata";
@@ -24,7 +24,9 @@ function group(name: string): string {
 }
 
 const GROUP_ORDER = ["Metadata", "Plate setup", "Protocol", "Plate reads", "Calibration", "Other"];
-const TEXTUAL = /\.(xml|txt|alf)$/i;
+// `.plt.csv` is zpcrweb's own plate CSV format (see `plateCsv.ts`) — plain UTF-8 text, no
+// decryption needed, unlike `.pltd`/`.prcl`.
+const TEXTUAL = /\.(xml|txt|alf|plt\.csv)$/i;
 
 /** Best default mode for a file: decoded if a decoder exists, else text for text, else hex. */
 function defaultMode(name: string): Mode {

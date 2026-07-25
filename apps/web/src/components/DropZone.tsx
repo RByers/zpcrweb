@@ -4,9 +4,17 @@ interface Props {
   onFiles: (files: FileList | File[]) => void | Promise<void>;
   /** Render the large welcome variant. */
   large?: boolean;
+  /** File input `accept` attribute. Defaults to every format the app can load. */
+  accept?: string;
+  /** Large-variant title text override, e.g. "Drop a .pltd or .plt.csv file here". */
+  title?: string;
+  /** Compact-variant label override, e.g. "+ attach plate". */
+  compactLabel?: string;
 }
 
-export function DropZone({ onFiles, large }: Props) {
+const DEFAULT_ACCEPT = ".zpcr,.pcrd,.pltd,.csv";
+
+export function DropZone({ onFiles, large, accept = DEFAULT_ACCEPT, title, compactLabel }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
 
@@ -42,7 +50,7 @@ export function DropZone({ onFiles, large }: Props) {
       <input
         ref={inputRef}
         type="file"
-        accept=".zpcr,.pcrd"
+        accept={accept}
         multiple
         hidden
         onChange={(e) => {
@@ -53,14 +61,14 @@ export function DropZone({ onFiles, large }: Props) {
       {large ? (
         <>
           <div className="dropzone__icon mono">⇪</div>
-          <div className="dropzone__title">Drop .zpcr or .pcrd files here</div>
+          <div className="dropzone__title">{title ?? "Drop .zpcr, .pcrd, .pltd or .plt.csv files here"}</div>
           <div className="dropzone__sub">
             or <span className="dropzone__link">click to browse</span> · multiple files
             supported
           </div>
         </>
       ) : (
-        <span className="dropzone__compact mono">+ load file</span>
+        <span className="dropzone__compact mono">{compactLabel ?? "+ load file"}</span>
       )}
     </div>
   );
