@@ -10,21 +10,35 @@ interface Props {
   title?: string;
   /** Compact-variant label override, e.g. "+ attach plate". */
   compactLabel?: string;
+  /** Grey out and ignore clicks/drops — for a control that's contextually unavailable (e.g.
+   * plate-attach on a `.pcrd`). `disabledTitle` explains why, shown as a native hover tooltip
+   * rather than always-visible text. */
+  disabled?: boolean;
+  disabledTitle?: string;
 }
 
 const DEFAULT_ACCEPT = ".zpcr,.pcrd,.pltd,.csv";
 
-export function DropZone({ onFiles, large, accept = DEFAULT_ACCEPT, title, compactLabel }: Props) {
+export function DropZone({
+  onFiles,
+  large,
+  accept = DEFAULT_ACCEPT,
+  title,
+  compactLabel,
+  disabled,
+  disabledTitle,
+}: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
 
   const onDrop = useCallback(
     (e: React.DragEvent) => {
       e.preventDefault();
+      if (disabled) return;
       setDragging(false);
       if (e.dataTransfer.files.length) void onFiles(e.dataTransfer.files);
     },
-    [onFiles],
+    [onFiles, disabled],
   );
 
   return (
@@ -32,19 +46,23 @@ export function DropZone({ onFiles, large, accept = DEFAULT_ACCEPT, title, compa
       className={
         "dropzone" +
         (large ? " dropzone--large" : "") +
-        (dragging ? " dropzone--active" : "")
+        (dragging ? " dropzone--active" : "") +
+        (disabled ? " dropzone--disabled" : "")
       }
+      title={disabled ? disabledTitle : undefined}
       onDragOver={(e) => {
+        if (disabled) return;
         e.preventDefault();
         setDragging(true);
       }}
       onDragLeave={() => setDragging(false)}
       onDrop={onDrop}
-      onClick={() => inputRef.current?.click()}
+      onClick={() => !disabled && inputRef.current?.click()}
       role="button"
-      tabIndex={0}
+      aria-disabled={disabled}
+      tabIndex={disabled ? -1 : 0}
       onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") inputRef.current?.click();
+        if (!disabled && (e.key === "Enter" || e.key === " ")) inputRef.current?.click();
       }}
     >
       <input
@@ -53,6 +71,7 @@ export function DropZone({ onFiles, large, accept = DEFAULT_ACCEPT, title, compa
         accept={accept}
         multiple
         hidden
+        disabled={disabled}
         onChange={(e) => {
           if (e.target.files?.length) void onFiles(e.target.files);
           e.target.value = "";

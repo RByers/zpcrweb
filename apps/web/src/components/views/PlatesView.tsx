@@ -32,19 +32,18 @@ export function PlatesView({
   const entries = useMemo(() => zpcr.plates(password || undefined), [zpcr, password]);
   const [selected, setSelected] = useState(0);
 
-  const attachControl =
-    fileKind === "zpcr" ? (
-      <DropZone
-        onFiles={(files) => {
-          const file = Array.from(files)[0];
-          if (file) void attachPlate(fileId, file);
-        }}
-        accept=".pltd,.csv,.plt.csv"
-        compactLabel={entries.length === 0 ? "+ attach plate" : "+ replace plate"}
-      />
-    ) : (
-      <span className="decoded__hint mono">Attaching a plate is only supported for .zpcr files.</span>
-    );
+  const attachControl = (
+    <DropZone
+      onFiles={(files) => {
+        const file = Array.from(files)[0];
+        if (file) void attachPlate(fileId, file);
+      }}
+      accept=".pltd,.csv,.plt.csv"
+      compactLabel={entries.length === 0 ? "+ attach plate" : "+ replace plate"}
+      disabled={fileKind !== "zpcr"}
+      disabledTitle="Attaching a plate is only supported for .zpcr files"
+    />
+  );
 
   if (entries.length === 0) {
     return (

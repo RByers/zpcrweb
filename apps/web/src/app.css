@@ -84,10 +84,17 @@
   padding: 6px 12px;
 }
 .dropzone--active,
-.dropzone:hover {
+.dropzone:not(.dropzone--disabled):hover {
   border-color: var(--neon-cyan);
   background: var(--neon-cyan-dim);
   box-shadow: 0 0 24px var(--neon-cyan-dim) inset;
+}
+.dropzone--disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+.dropzone--disabled .dropzone__compact {
+  color: var(--ink-muted);
 }
 .dropzone__icon {
   font-size: clamp(32px, 8cqi, 56px);
@@ -222,11 +229,19 @@
   flex-direction: column;
   gap: 22px;
 }
-.overview__toolbar {
+/* Tiles + download button side by side, so the button reserves its own column instead of
+   pushing the tiles (or anything below) down a row. */
+.overview__head {
   display: flex;
-  justify-content: flex-end;
+  align-items: flex-start;
+  gap: 12px;
+}
+.overview__toolbar {
+  flex: 0 0 auto;
 }
 .overview__tiles {
+  flex: 1;
+  min-width: 0;
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
   gap: 12px;

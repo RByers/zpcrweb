@@ -38,25 +38,27 @@ export function OverviewView({
 
   return (
     <div className="overview">
-      <div className="overview__toolbar">
-        <button
-          className="raw__download"
-          onClick={() => downloadBytes(file.name, file.bytes)}
-          aria-label={`Download ${file.name}`}
-          title="Download original file"
-        >
-          <DownloadIcon />
-        </button>
-      </div>
+      <div className="overview__head">
+        <section className="overview__tiles">
+          {tiles.map((t) => (
+            <div className="tile" key={t.label}>
+              <div className="tile__label">{t.label}</div>
+              <div className="tile__value mono">{t.value}</div>
+            </div>
+          ))}
+        </section>
 
-      <section className="overview__tiles">
-        {tiles.map((t) => (
-          <div className="tile" key={t.label}>
-            <div className="tile__label">{t.label}</div>
-            <div className="tile__value mono">{t.value}</div>
-          </div>
-        ))}
-      </section>
+        <div className="overview__toolbar">
+          <button
+            className="raw__download"
+            onClick={() => downloadBytes(file.name, file.bytes)}
+            aria-label={`Download ${file.name}`}
+            title="Download original file"
+          >
+            <DownloadIcon />
+          </button>
+        </div>
+      </div>
 
       {protocol?.steps ? (
         <section className="overview__block">
