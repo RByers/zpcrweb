@@ -23,6 +23,24 @@ commits not yet reachable from `main` (Git only sees that `origin/main` isn't an
 into `main`). If you ever see a new worktree start dozens of commits behind local `main`, check
 that `.claude/settings.json` hasn't been lost.
 
+### Local git config
+
+The linear-history workflow above is enforced by repo-local git config (`.git/config`, so it is
+not committed and must be re-applied on a fresh clone):
+
+```sh
+git config --local pull.rebase false   # override a global pull.rebase=true
+git config --local pull.ff only        # a pull may only fast-forward, never rewrite history
+git config --local merge.ff only       # `git merge <worktree-branch>` fails unless it ff's
+git config --local rerere.enabled true # remember conflict resolutions
+git config --local rerere.autoupdate true
+```
+
+`merge.ff = only` is what actually keeps history linear: if a worktree branch has fallen behind,
+the merge errors out instead of silently creating a merge commit, so you rebase it first.
+`pull.ff = only` matters because a plain `git pull` with `pull.rebase=true` will flatten any
+merge commits in local `main` and re-fight their resolutions — never `pull` here, just `push`.
+
 Whenever changes are made, review and update all ARCHITECTURE.md files to be a concise yet accurate summary of the application design, with pointers to other relevant files.
 
 ## UI testing
