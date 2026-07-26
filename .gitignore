@@ -7,3 +7,4 @@ coverage/
 !.claude/settings.json
 secrets.json
 tools/.uishot/
+.vscode/
