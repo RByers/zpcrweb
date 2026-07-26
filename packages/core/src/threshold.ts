@@ -8,21 +8,47 @@
  * instrument's own reported Cq — the same caveat `baseline.ts` carries.
  */
 
+export interface BaselineNoiseOptions {
+  /**
+   * How many cycles at the *start* of the baseline region to leave out of the noise estimate.
+   * Default **1**.
+   *
+   * The run's first read is routinely offset from the rest of the baseline — block and optics are
+   * still settling — which §3.1 already acknowledges for cycle 0. It is one anomalous point in a
+   * short window, so it inflates the standard deviation out of proportion to its meaning, and
+   * because §5.1 multiplies that spread by a large constant ({@link AutoThresholdOptions.multiplier})
+   * the error is amplified straight into the threshold and hence into every Cq in the group.
+   *
+   * Only the *noise statistic* skips it. The baseline line itself is still fitted over the whole
+   * region ({@link fitLinearBaseline}) and the curve is still corrected across every cycle: the
+   * point is a poor estimator of scatter, not bad data.
+   *
+   * Ignored when it would leave fewer than 3 points, since the remaining spread would be worse than
+   * the one being cleaned up.
+   */
+  skipLeadingCycles?: number;
+}
+
 /**
  * §5.1: noise estimate for one well — the standard deviation of the baseline-corrected curve
  * over its baseline region. Pass an already-{@link subtractBaseline}d curve; in that region the
  * corrected values are residuals about zero, so their spread *is* the noise estimate the doc
  * calls for.
+ *
+ * The region's leading cycle is excluded by default — see {@link BaselineNoiseOptions.skipLeadingCycles}.
  */
 export function baselineNoise(
   cycles: number[],
   correctedValues: number[],
   region: { beginCycle: number; endCycle: number },
+  options: BaselineNoiseOptions = {},
 ): number {
-  const idx: number[] = [];
+  const skipLeadingCycles = options.skipLeadingCycles ?? 1;
+  const all: number[] = [];
   for (let i = 0; i < cycles.length; i++) {
-    if (cycles[i]! >= region.beginCycle && cycles[i]! <= region.endCycle) idx.push(i);
+    if (cycles[i]! >= region.beginCycle && cycles[i]! <= region.endCycle) all.push(i);
   }
+  const idx = all.length - skipLeadingCycles >= 3 ? all.slice(skipLeadingCycles) : all;
   if (idx.length === 0) return 0;
   const values = idx.map((i) => correctedValues[i]!);
   const mean = values.reduce((a, b) => a + b, 0) / values.length;

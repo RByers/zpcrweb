@@ -28,7 +28,28 @@ describe("baselineNoise", () => {
   it("reflects the spread of noisy residuals about their mean", () => {
     const cycles = [1, 2, 3, 4];
     const values = [-1, 1, -1, 1];
-    expect(baselineNoise(cycles, values, { beginCycle: 1, endCycle: 4 })).toBeCloseTo(1, 6);
+    expect(
+      baselineNoise(cycles, values, { beginCycle: 1, endCycle: 4 }, { skipLeadingCycles: 0 }),
+    ).toBeCloseTo(1, 6);
+  });
+
+  it("leaves the region's first cycle out of the estimate by default", () => {
+    const cycles = [1, 2, 3, 4, 5, 6];
+    // A flat baseline with one offset first read — the case skipLeadingCycles exists for.
+    const values = [40, 0, 0, 0, 0, 0];
+    const region = { beginCycle: 1, endCycle: 6 };
+    expect(baselineNoise(cycles, values, region)).toBe(0);
+    expect(baselineNoise(cycles, values, region, { skipLeadingCycles: 0 })).toBeGreaterThan(10);
+  });
+
+  it("keeps every cycle when skipping would leave fewer than three points", () => {
+    const cycles = [1, 2, 3];
+    const values = [40, 0, 0];
+    // Skipping here would leave 2 points, whose spread is less trustworthy than the point dropped.
+    expect(baselineNoise(cycles, values, { beginCycle: 1, endCycle: 3 })).toBeCloseTo(
+      baselineNoise(cycles, values, { beginCycle: 1, endCycle: 3 }, { skipLeadingCycles: 0 }),
+      10,
+    );
   });
 
   it("returns 0 when no cycle falls within the region", () => {

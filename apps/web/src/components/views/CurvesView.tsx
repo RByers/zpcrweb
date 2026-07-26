@@ -5,6 +5,7 @@ import { computeWellTypes } from "../../lib/wellTypes";
 import { NO_TARGET } from "../../lib/plateTargets";
 import { SAMPLE_TYPE_META } from "../../lib/sampleType";
 import {
+  DEFAULT_THRESHOLD_MULTIPLIER,
   wellKey,
   type BandsMode,
   type CurveView,
@@ -839,9 +840,48 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
                 <span className="rail__chevron" aria-hidden="true">
                   ▸
                 </span>
-                Threshold overrides
+                Threshold
               </span>
             </summary>
+            {/* §5.1's `k` in `threshold = k × median baseline noise`. Adjustable because the
+                calibrated default rests on two anchors from a single run (see
+                `AutoThresholdOptions.multiplier`), and because it is the one number that moves
+                every Cq on the plate — the per-group thresholds below update live as it moves, so
+                its effect is visible rather than inferred. Overridden groups ignore it. */}
+            <div className="threshold-k">
+              <div className="threshold-k__head">
+                <span>Auto threshold</span>
+                <span className="threshold-k__value mono">
+                  {settings.thresholdMultiplier}× noise
+                </span>
+              </div>
+              <input
+                type="range"
+                min={1}
+                max={100}
+                step={1}
+                value={settings.thresholdMultiplier}
+                aria-label="Auto-threshold multiplier, in multiples of median baseline noise"
+                onChange={(e) =>
+                  onChange({ thresholdMultiplier: Number(e.currentTarget.value) })
+                }
+              />
+              <div className="threshold-k__foot">
+                <span className="threshold-k__hint mono">
+                  Calibrated default {DEFAULT_THRESHOLD_MULTIPLIER}×
+                </span>
+                <button
+                  type="button"
+                  className="rail__link"
+                  disabled={settings.thresholdMultiplier === DEFAULT_THRESHOLD_MULTIPLIER}
+                  onClick={() =>
+                    onChange({ thresholdMultiplier: DEFAULT_THRESHOLD_MULTIPLIER })
+                  }
+                >
+                  Reset
+                </button>
+              </div>
+            </div>
             <div className="analysis__thresholds">
               {groupInfos
                 .filter((g) => !settings.disabledFluors.has(g.target) && g.curve)

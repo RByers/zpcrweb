@@ -64,6 +64,9 @@ export interface StoredSettings {
   showUnloadedFluors?: boolean;
   /** Manual per-target threshold overrides (RFU), as `[target, value]` pairs. */
   thresholdOverrides?: [string, number][];
+  /** §5.1's auto-threshold multiplier. Absent on records written before it was adjustable, which
+   * fall back to the library default. */
+  thresholdMultiplier?: number;
   /** Retired: the standalone Analysis view's own target opt-out set. That view is now the Curves
    * view's table mode and shares the rail's {@link disabledFluors}, so these are ignored. */
   analysisDisabledTargets?: string[];

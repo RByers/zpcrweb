@@ -155,8 +155,9 @@ a minimal IndexedDB wrapper with two object stores:
   reference columns. `baseline` (Reference view's factory-relative ΔRFU/Drift %) and `curveView`
   (the Curves view's display mode — baselining itself is never stored, since it's always the
   auto-detected linear fit) are independent settings — see "Two baseline concepts" under
-  Reference view. `thresholdOverrides` (`[group, value][]`, manual per-group threshold RFU) is
-  the Curves rail's threshold-override section — see "Table mode" below. Older records may carry
+  Reference view. `thresholdOverrides` (`[group, value][]`, manual per-group threshold RFU) and
+  `thresholdMultiplier` (§5.1's auto-threshold `k`, absent on records written before it was
+  adjustable) are the Curves rail's Threshold section — see "Table mode" below. Older records may carry
   it under its former name, `analysisThresholdOverrides`, alongside two settings of the retired
   standalone Analysis view that are now simply ignored: `analysisDisabledTargets[]` (its own
   target opt-out set, since folded into the shared `disabledFluors`) and `analysisCqAlgorithm`
@@ -545,11 +546,16 @@ is: a per-target curve needs channel→dye color separation (`calibration.md`).
   `"Threshold"`/`"NoThreshold"` selector is gone (§6.2's 2nd-derivative variant is still implemented
   and still reachable through `computeCqTable`, just not selectable), which is what makes a per-group
   threshold always meaningful and the override section always applicable.
-- **Threshold overrides (`thresholdOverrides` setting):** §5.1's `resolveThreshold` over the median
-  `baselineNoise` across a group's own wells, overridable per group in the rail's collapsible
-  "Threshold overrides" section (`<details className="rail__details">`, chevron rotates open, like
-  the Temperature section) — a blank input falls back to the auto value, shown as the input's
-  placeholder. It sits in the Curves rail whenever dye space is on, in *any* of the three dye-space
+- **Threshold (`thresholdMultiplier` + `thresholdOverrides` settings):** §5.1's `resolveThreshold`
+  over the median `baselineNoise` across a group's own wells, in the rail's collapsible "Threshold"
+  section (`<details className="rail__details">`, chevron rotates open, like the Temperature
+  section). The section holds two controls. A **slider** sets §5.1's multiplier `k` in
+  `threshold = k × median noise` (1–100, calibrated default 40, with a Reset link back to it): it is
+  exposed rather than buried because the calibrated value rests on two anchors from a single run and
+  it is the one number that shifts every Cq on the plate — the per-group thresholds below it update
+  live as it moves, so its effect is visible rather than inferred. Below that, a **per-group
+  override** — a blank input falls back to the auto value, shown as the input's placeholder, and an
+  overridden group ignores the slider entirely. It sits in the Curves rail whenever dye space is on, in *any* of the three dye-space
   modes, because an override feeds the run's one Cq table: it moves the chart's Cq markers and the
   hover cards' numbers exactly as it moves the table's. (In Channel mode the section is hidden —
   `channelCqTable`'s groups are channels, not targets.)

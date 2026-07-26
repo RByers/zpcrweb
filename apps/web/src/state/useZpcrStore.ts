@@ -23,6 +23,10 @@ import {
 } from "./db";
 import { usePltdPassword } from "./pltdPassword";
 
+/** The library's calibrated default for §5.1's auto-threshold multiplier, and the slider's
+ * starting point — see `AutoThresholdOptions.multiplier` in `@zpcrweb/core`. */
+export const DEFAULT_THRESHOLD_MULTIPLIER = 40;
+
 export type FileKind = "zpcr" | "pcrd" | "pltd" | "csv";
 /** The two kinds a plate — standalone or attached to a run — can be uploaded as. */
 export type PlateFileKind = "pltd" | "csv";
@@ -109,6 +113,13 @@ export interface FileSettings {
    * Curves rail's "Threshold overrides" section; applies to the chart's Cq markers, the hover
    * cards and the table alike, since all three read the run's one Cq table. */
   thresholdOverrides: Map<string, number>;
+  /** §5.1's auto-threshold multiplier: `threshold = k × median baseline noise` across the group's
+   * wells, for every group with no entry in {@link thresholdOverrides}. The library default (40)
+   * is calibrated against the thresholds CFX itself persisted in a `.pcrd` — see
+   * `AutoThresholdOptions.multiplier` — but it rests on two anchors from one run, and it is the
+   * single knob that most affects where every Cq lands, so the Curves rail exposes it as a slider
+   * rather than burying it. */
+  thresholdMultiplier: number;
 }
 
 /** A file loaded into memory — bytes only. Parsing is derived (see {@link ZpcrStore.runs}),
@@ -222,6 +233,7 @@ function defaultSettings(): FileSettings {
     disabledSamples: new Set<string>(),
     showUnloadedFluors: false,
     thresholdOverrides: new Map<string, number>(),
+    thresholdMultiplier: DEFAULT_THRESHOLD_MULTIPLIER,
   };
 }
 
@@ -247,6 +259,7 @@ function toStored(id: string, s: FileSettings): StoredSettings {
     disabledSamples: [...s.disabledSamples],
     showUnloadedFluors: s.showUnloadedFluors,
     thresholdOverrides: [...s.thresholdOverrides],
+    thresholdMultiplier: s.thresholdMultiplier,
   };
 }
 
@@ -275,6 +288,7 @@ function fromStored(s: StoredSettings): FileSettings {
     temps: new Set(s.temps ?? []),
     // Older records carry these under the Analysis view's own name (see StoredSettings).
     thresholdOverrides: new Map(s.thresholdOverrides ?? s.analysisThresholdOverrides ?? []),
+    thresholdMultiplier: s.thresholdMultiplier ?? DEFAULT_THRESHOLD_MULTIPLIER,
   };
 }
 

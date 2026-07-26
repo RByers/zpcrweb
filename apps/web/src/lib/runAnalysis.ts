@@ -305,12 +305,14 @@ export function useRunAnalysis(
     return computeCqTable(inputs, {
       algorithm: CQ_ALGORITHM,
       thresholdOverrides: settings.thresholdOverrides,
+      autoThreshold: { multiplier: settings.thresholdMultiplier },
     });
   }, [
     allFluorCurves,
     groupOf,
     loadedFluors,
     settings.thresholdOverrides,
+    settings.thresholdMultiplier,
   ]);
 
   const channelCqTable = useMemo(() => {
@@ -326,12 +328,14 @@ export function useRunAnalysis(
     return computeCqTable(inputs, {
       algorithm: CQ_ALGORITHM,
       thresholdOverrides: settings.thresholdOverrides,
+      autoThreshold: { multiplier: settings.thresholdMultiplier },
     });
   }, [
     allCurves,
     available,
     loadedFluors,
     settings.thresholdOverrides,
+    settings.thresholdMultiplier,
   ]);
 
   return {

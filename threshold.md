@@ -209,6 +209,21 @@ noise      = standard deviation of the baseline-region residuals
 threshold  = k × noise            (k ≈ 40, see below)
 ```
 
+The run's **first read is left out of the `noise` estimate** (`skipLeadingCycles`, default 1).
+Block and optics are still settling then, so that point is routinely offset from the rest of the
+baseline — the same reason §3.1 keeps cycle 0 out of the region, and the reason CFX's own
+`baselineBeginRepeat` defaults to **2** rather than 1. One outlier in a short window inflates the
+standard deviation out of proportion to its meaning, and since the threshold multiplies that
+spread by a large constant the error lands directly in every Cq of the group. Only the noise
+*statistic* skips it: the baseline line is still fitted over the whole region and the curve is
+still corrected across every cycle.
+
+How much this matters depends on the run. On `20230829_135443_CT019138_SINGLE_STEP_.zpcr` the
+first cycle turns out **not** to be unusual — its residual is a median 0.76σ from the baseline,
+with only 5 of 34 loaded wells past 2σ, so dropping it moves the mean noise by 3% and Cq by under
+0.1 cycles. It is cheap insurance on the runs where the first read *is* off, not a correction that
+reshapes a well-behaved plate.
+
 using the residuals *after* baseline subtraction, so the measure is of scatter about the fitted
 baseline rather than of the baseline's slope.
 
@@ -370,6 +385,7 @@ For an implementation aiming to match a reference instrument:
 | Cycles skipped (begin/end) | 0 / 0 |
 | Smoothing | Weighted mean, width 5 |
 | Baseline region | Auto; else cycles 2–9 |
+| Cycles dropped from the noise estimate | 1 (the region's first) |
 | Minimum baseline width | 3 cycles |
 | Baseline mode | Linear (fitted line subtracted) |
 | Baseline region method | Data window over the full run |
@@ -391,6 +407,13 @@ For an implementation aiming to match a reference instrument:
   would either confirm the constant or reveal that it tracks something else (dye, chemistry, plate
   type). Since the multiplier sets how early every Cq lands, this is the single largest source of
   systematic error left in the chain.
+- **Baseline start cycle.** §3.1 allows the region to begin at cycle 1 and `minBeginCycle` defaults
+  to 1, but CFX's own persisted `baselineBeginRepeat` is **2** in every sample examined. Moving the
+  default to 2 measurably lowers the thresholds (on `20230829…SINGLE_STEP_`: 230 → 210 for GAPDH,
+  238 → 188 for the untargeted group) and pulls every Cq 0.1–0.4 cycles earlier, with the same
+  wells reporting a Cq either way. That is a defensible alignment with the instrument, and it
+  subsumes part of what `skipLeadingCycles` does — worth deciding deliberately rather than
+  drifting into.
 - **Persisted analysis parameters are not yet honoured.** A `.pcrd` carries the whole
   `dataAnalysisParameters` tree — including the per-fluorophore `thresholdOverrideValue` /
   `autoCalculateThreshold` pair that §5.2 says should be authoritative, and the
