@@ -37,6 +37,31 @@ npm workspaces:
 - `samples/` — committed real `.zpcr` files and a matching `.pcrd` (~350 KB) for the same run,
   used by tests as ground truth (see `pcrd.test.ts`'s cross-validation against `20260720.zpcr`).
 
+## Why the web app imports core's source
+
+`apps/web` resolves `@zpcrweb/core` to `packages/core/src/index.ts` rather than to the `dist/`
+build its `exports` map advertises — via an alias in `vite.config.ts` plus a matching `paths`
+entry in `apps/web/tsconfig.json`. **Both must move together**; the alias alone leaves tsc and
+the editor reading a stale `dist/index.d.ts` while the browser runs current source, which
+surfaces as type errors for code that demonstrably works.
+
+The reason is developer loop speed: with the `dist/` indirection, `npm run dev` does not react
+to library edits at all, so live work on a decoder needs a second terminal running
+`tsup --watch` and pays its `.d.ts` rebuild latency on every save. The alias removes both.
+
+The cost is that nothing in the app exercises the packaged artifact any more — the `exports`
+map, the dual ESM/CJS output and the generated `.d.ts` are covered only by `npm run build` at
+the repo root. That is an acceptable trade while the web app is the sole consumer; **if the
+library ever gains an external consumer, revisit it**, since packaging breakage would then be
+able to reach someone before a build catches it. Measured when adopted: production bundle
+unchanged (239.37 → 239.42 kB), so Rollup tree-shakes the source as effectively as tsup's
+bundle did.
+
+To undo, delete the alias and the `paths` entry; `dist/` resolution resumes with no source
+changes, and `"node"` can come out of the web `types` array at the same time (it is needed only
+because core's entry re-exports `node.ts`, whose `node:fs/promises` import tsc sees directly
+once it reads source).
+
 ## Isomorphic input strategy
 
 The core entry points, `parseZpcr(data)` and `parsePcrd(data, options)`, accept
@@ -255,10 +280,10 @@ Wells are addressed as `(channel, row, col)`:
 ## Tooling
 
 - **Vitest** for tests — isomorphic, fast, and ready for a future browser-mode test run.
-- **tsup** for builds — emits dual ESM + CJS plus `.d.ts` from a single entry point. Note that
-  the web app does not consume this output: it aliases `@zpcrweb/core` straight to `src` so
-  library edits hot-reload (see [`apps/web/ARCHITECTURE.md`](./apps/web/ARCHITECTURE.md)), which
-  makes `npm run build` at the repo root the only thing that exercises the packaged artifact.
+- **tsup** for builds — emits dual ESM + CJS plus `.d.ts` from a single entry point. The web app
+  deliberately does not consume this output (see [Why the web app imports core's
+  source](#why-the-web-app-imports-cores-source)), so `npm run build` at the repo root is the
+  only thing that exercises the packaged artifact.
 - **TypeScript** in `strict` mode with `noUncheckedIndexedAccess`.
 
 ## Dependency policy

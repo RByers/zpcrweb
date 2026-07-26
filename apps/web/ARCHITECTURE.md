@@ -79,7 +79,9 @@ box.
   This cut the production bundle from 327 KB to 198 KB (111 KB to 72 KB gzipped) with no source
   changes; revisit if a future dependency needs a real React internal the compat shim doesn't
   cover.
-- **`@zpcrweb/core` resolves to its TypeScript source, not its build output.** `vite.config.ts`
+- **`@zpcrweb/core` resolves to its TypeScript source, not its build output.** Rationale and the
+  conditions for revisiting it are in the root [`ARCHITECTURE.md`](../../ARCHITECTURE.md#why-the-web-app-imports-cores-source);
+  the mechanics are here. `vite.config.ts`
   aliases the package specifier to `packages/core/src/index.ts`, and `tsconfig.json` carries a
   matching `paths` entry — both must change together, or the bundler and the typechecker end up
   reading different versions of the library. This means `npm run dev` alone hot-reloads edits to
