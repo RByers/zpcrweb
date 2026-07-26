@@ -254,7 +254,10 @@ Wells are addressed as `(channel, row, col)`:
 ## Tooling
 
 - **Vitest** for tests — isomorphic, fast, and ready for a future browser-mode test run.
-- **tsup** for builds — emits dual ESM + CJS plus `.d.ts` from a single entry point.
+- **tsup** for builds — emits dual ESM + CJS plus `.d.ts` from a single entry point. Note that
+  the web app does not consume this output: it aliases `@zpcrweb/core` straight to `src` so
+  library edits hot-reload (see [`apps/web/ARCHITECTURE.md`](./apps/web/ARCHITECTURE.md)), which
+  makes `npm run build` at the repo root the only thing that exercises the packaged artifact.
 - **TypeScript** in `strict` mode with `noUncheckedIndexedAccess`.
 
 ## Dependency policy

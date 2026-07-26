@@ -79,6 +79,18 @@ box.
   This cut the production bundle from 327 KB to 198 KB (111 KB to 72 KB gzipped) with no source
   changes; revisit if a future dependency needs a real React internal the compat shim doesn't
   cover.
+- **`@zpcrweb/core` resolves to its TypeScript source, not its build output.** `vite.config.ts`
+  aliases the package specifier to `packages/core/src/index.ts`, and `tsconfig.json` carries a
+  matching `paths` entry — both must change together, or the bundler and the typechecker end up
+  reading different versions of the library. This means `npm run dev` alone hot-reloads edits to
+  the library; without it, `packages/core`'s `exports` point at `dist/`, so core changes would
+  need a concurrent `tsup --watch` to become visible. Consequences: the app never exercises
+  `packages/core/dist` in either dev or production, so packaging-level breakage (the `exports`
+  map, dual ESM/CJS output, generated `.d.ts`) is caught only by `npm run build` at the repo
+  root, not by the app; and `tsconfig.json` needs `"node"` in `types` because core's entry
+  re-exports `node.ts`, whose `node:fs/promises` import tsc now sees directly. That import is
+  dynamic precisely so bundlers can drop it, so Vite externalizes it and logs a
+  "has been externalized for browser compatibility" warning on build — expected, not a defect.
 - **uPlot** — canvas charting. Chosen because a run can produce ~648 line series
   (6 channels × 108 wells); uPlot renders that volume smoothly with native log scales and a
   fast cursor, where an SVG library would stutter.

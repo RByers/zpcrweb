@@ -81,5 +81,6 @@ npm test                        # @zpcrweb/core Vitest suite
 npm run build                   # build the library (ESM + CJS + .d.ts)
 npm run typecheck               # typecheck the library
 npm run dev -w @zpcrweb/web     # web dev server → http://localhost:5173
+                                # hot-reloads packages/core edits too (aliased to src, no tsup watch)
 npm run build -w @zpcrweb/web   # web production build (typechecks first)
 ```
