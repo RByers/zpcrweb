@@ -7,11 +7,13 @@ interface Props {
   available: number[];
   onToggle: (channel: number) => void;
   onHover?: (channel: number | null) => void;
+  /** Double-clicking a chip — isolates it: only this channel stays enabled. */
+  onSolo?: (channel: number) => void;
   /** Hover-card content for a channel, or `null`/undefined to show none. */
   cardData?: (channel: number) => HoverCardData | null | undefined;
 }
 
-export function ChannelBar({ enabled, available, onToggle, onHover, cardData }: Props) {
+export function ChannelBar({ enabled, available, onToggle, onHover, onSolo, cardData }: Props) {
   const { show, hide, node } = useHoverCard(cardData ?? (() => null));
   return (
     <div className="chanbar">
@@ -22,6 +24,7 @@ export function ChannelBar({ enabled, available, onToggle, onHover, cardData }: 
             key={c.index}
             className={"chanchip" + (on ? " is-on" : "")}
             onClick={() => onToggle(c.index)}
+            onDoubleClick={() => onSolo?.(c.index)}
             onMouseEnter={(e) => {
               onHover?.(c.index);
               show(c.index, e.currentTarget);

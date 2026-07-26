@@ -466,6 +466,15 @@ only pieces the two views share.
   callback is passed, so the two hover affordances never stack: the Curves rail shows the card
   alone, while a card-less `WellMatrix` (as the Reference-style grids use it) keeps the plain
   tooltip. Either way the same text stays on the cell's `aria-label`.
+  Hovering a chip/cell that's individually *disabled* still needs a curve in `u.series` for
+  `applyHighlight` to un-dim — so `CurvesView`'s `isHoveredWell`/`isHoveredChannel`/
+  `isHoveredTarget`/`isHoveredSample` helpers let the hovered item bypass its own disabled check
+  in `visibleChannel`/`fluorCurveVisible`/`sampleVisible` (only its own dimension's check — hovering
+  a disabled target doesn't also reveal wells the user turned off), so the "peek" a hover implies
+  actually shows the curve instead of just dimming everyone else.
+  Double-clicking a chip/cell (`onSolo`/`onSoloWell` on each of the four components) isolates it
+  within its own dimension — `CurvesView`'s `soloChannel`/`soloFluor`/`soloWell`/`soloSample`
+  reset that dimension's enabled/disabled set so only the double-clicked item remains on.
 - **X axis:** integer cycles only — a tick per cycle, gridline + label every 5.
 - **Hover/tap tooltip:** a uPlot cursor plugin finds the nearest series (well curve, dark,
   factory overlay, or temperature) and reports its label, channel/dye, cycle, and

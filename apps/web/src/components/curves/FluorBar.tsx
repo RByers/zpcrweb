@@ -26,6 +26,8 @@ interface Props {
   onToggle: (key: string) => void;
   /** Hovering a chip (by its `key`, or `null` on leave) — drives the curve-chart highlight. */
   onHover?: (key: string | null) => void;
+  /** Double-clicking a chip — isolates it: only this fluorophore/target stays enabled. */
+  onSolo?: (key: string) => void;
   /** Hover-card content for a chip's `key`, or `null`/undefined to show none. */
   cardData?: (key: string) => HoverCardData | null | undefined;
 }
@@ -35,7 +37,7 @@ interface Props {
  * its primary channel. Multiple items sharing a channel simply share a color, distinguished by
  * their label.
  */
-export function FluorBar({ items, disabled, onToggle, onHover, cardData }: Props) {
+export function FluorBar({ items, disabled, onToggle, onHover, onSolo, cardData }: Props) {
   const { show, hide, node } = useHoverCard(cardData ?? (() => null));
   return (
     <div className="chanbar">
@@ -46,6 +48,7 @@ export function FluorBar({ items, disabled, onToggle, onHover, cardData }: Props
             key={f.key}
             className={"chanchip" + (on ? " is-on" : "") + (!f.calibrated ? " is-disabled" : "")}
             onClick={() => f.calibrated && onToggle(f.key)}
+            onDoubleClick={() => f.calibrated && onSolo?.(f.key)}
             onMouseEnter={(e) => {
               onHover?.(f.key);
               show(f.key, e.currentTarget);

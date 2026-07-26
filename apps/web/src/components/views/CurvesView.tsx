@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { Zpcr, TemperatureCurve } from "@zpcrweb/core";
+import { wellLabel, type Zpcr, type TemperatureCurve } from "@zpcrweb/core";
 import { formatBaselineFormula } from "../../lib/cq";
 import { computeWellTypes } from "../../lib/wellTypes";
 import { NO_TARGET } from "../../lib/plateTargets";
@@ -171,6 +171,19 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
   // curve(s) in the chart, the same way hovering the chart itself dims every other curve.
   const [hoverHighlight, setHoverHighlight] = useState<HighlightMatch | null>(null);
 
+  // A hovered item should be shown even when it's individually disabled — the "peek" a rail
+  // hover is supposed to give — so the visibility filters below let the hovered well/channel/
+  // target/sample bypass its own disabled check (but only its own; hovering a disabled target
+  // doesn't also reveal wells the user turned off).
+  const isHoveredWell = (row: number, col: number) =>
+    hoverHighlight?.kind === "well" && hoverHighlight.label === wellLabel(row, col);
+  const isHoveredChannel = (channel: number) =>
+    hoverHighlight?.kind === "channel" && hoverHighlight.channel === channel;
+  const isHoveredSample = (sample: string | undefined) =>
+    !!sample && hoverHighlight?.kind === "sample" && hoverHighlight.sample === sample;
+  const isHoveredTarget = (label: string) =>
+    hoverHighlight?.kind === "target" && hoverHighlight.dyeLabel === label;
+
   // Target/table mode chips come from `groupInfos` — the threshold groups themselves — so a plate
   // with no targets at all still gets chips (its groups are its fluorophores; see `usingTargets`)
   // rather than an empty bar.
@@ -212,7 +225,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
 
   const sampleVisible = (row: number, col: number): boolean => {
     const sample = wellSample.get(wellKey(row, col));
-    return !sample || !settings.disabledSamples.has(sample);
+    return !sample || !settings.disabledSamples.has(sample) || isHoveredSample(sample);
   };
 
   const toggleSample = (name: string) => {
@@ -228,22 +241,34 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
       allCurves.filter(
         (c) =>
           available.includes(c.channel) &&
-          settings.enabledChannels.has(c.channel) &&
-          settings.enabledWells.has(wellKey(c.row, c.col)) &&
+          (settings.enabledChannels.has(c.channel) || isHoveredChannel(c.channel)) &&
+          (settings.enabledWells.has(wellKey(c.row, c.col)) || isHoveredWell(c.row, c.col)) &&
           sampleVisible(c.row, c.col),
       ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [allCurves, available, settings.enabledChannels, settings.enabledWells, settings.disabledSamples, wellSample],
+    [
+      allCurves,
+      available,
+      settings.enabledChannels,
+      settings.enabledWells,
+      settings.disabledSamples,
+      wellSample,
+      hoverHighlight,
+    ],
   );
 
   /** The rail's filters, as one predicate over a well/fluor pair — shared by the plotted dye-space
    * curves and by table mode's rows, so the two always show the same set. The "is this pair
    * actually loaded" check is deliberately *not* here: it's a data-validity gate the chart can
    * bypass ("Unloaded") and the table never applies (it only lists loaded wells). */
-  const fluorCurveVisible = (row: number, col: number, dye: string): boolean =>
-    settings.enabledWells.has(wellKey(row, col)) &&
-    !settings.disabledFluors.has(labelForFluorCurve(row, col, dye)) &&
-    sampleVisible(row, col);
+  const fluorCurveVisible = (row: number, col: number, dye: string): boolean => {
+    const label = labelForFluorCurve(row, col, dye);
+    return (
+      (settings.enabledWells.has(wellKey(row, col)) || isHoveredWell(row, col)) &&
+      (!settings.disabledFluors.has(label) || isHoveredTarget(label)) &&
+      sampleVisible(row, col)
+    );
+  };
 
   const visibleFluor = useMemo(
     () =>
@@ -264,6 +289,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
       fluorViewMode,
       wellFluorTargets,
       hasNoTargetGroup,
+      hoverHighlight,
     ],
   );
 
@@ -508,6 +534,24 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
     onChange({ disabledFluors: next });
   };
 
+  // Double-clicking any legend item isolates it within its own dimension — every other
+  // channel/target/well/sample turns off, leaving only the one that was double-clicked.
+  const soloChannel = (ch: number) => onChange({ enabledChannels: new Set([ch]) });
+
+  const soloFluor = (key: string) => {
+    const next = new Set(chipItems.map((c) => c.key));
+    next.delete(key);
+    onChange({ disabledFluors: next });
+  };
+
+  const soloWell = (row: number, col: number) => onChange({ enabledWells: new Set([wellKey(row, col)]) });
+
+  const soloSample = (name: string) => {
+    const next = new Set(sampleList);
+    next.delete(name);
+    onChange({ disabledSamples: next });
+  };
+
   // ---- Table mode / CSV export -------------------------------------------------------------
   // One row per visible (target, well) pair, filtered by exactly the same rail state as the chart
   // and reading the same Cq table (see `lib/analysisRows.ts`). Built whenever dye space is on, not
@@ -645,6 +689,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
                 disabled={settings.disabledFluors}
                 onToggle={toggleFluor}
                 onHover={(key) => setHoverHighlight(key ? { kind: "target", dyeLabel: key } : null)}
+                onSolo={soloFluor}
                 cardData={cardForDyeLabel}
               />
               <div className="rail__row" style={{ marginTop: 8 }}>
@@ -662,6 +707,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
               available={available}
               onToggle={toggleChannel}
               onHover={(ch) => setHoverHighlight(ch != null ? { kind: "channel", channel: ch } : null)}
+              onSolo={soloChannel}
               cardData={cardForChannel}
             />
           )}
@@ -683,6 +729,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
             onChange={(next) => onChange({ enabledWells: next })}
             wellTypes={wellTypes}
             onHoverWell={(label) => setHoverHighlight(label ? { kind: "well", label } : null)}
+            onSoloWell={soloWell}
             cardData={cardForWell}
           />
         </div>
@@ -714,6 +761,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
               disabled={settings.disabledSamples}
               onToggle={toggleSample}
               onHover={(sample) => setHoverHighlight(sample ? { kind: "sample", sample } : null)}
+              onSolo={soloSample}
               cardData={cardForSample}
             />
           </details>

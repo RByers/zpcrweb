@@ -17,6 +17,8 @@ interface Props {
   /** Hovering a well cell (by its `"A1"`-style label, or `null` on leave) — drives the
    * curve-chart highlight. */
   onHoverWell?: (label: string | null) => void;
+  /** Double-clicking a well cell — isolates it: only this well stays enabled. */
+  onSoloWell?: (row: number, col: number) => void;
   /** Hover-card content for a well's `"A1"`-style label, or `null`/undefined to show none. */
   cardData?: (label: string) => HoverCardData | null | undefined;
 }
@@ -26,7 +28,7 @@ interface Props {
  * number (1–12) headers toggle a whole row/column; the corner toggles all wells. The
  * reference row is shown separately, in the Reference view.
  */
-export function WellMatrix({ enabled, onChange, wellTypes, onHoverWell, cardData }: Props) {
+export function WellMatrix({ enabled, onChange, wellTypes, onHoverWell, onSoloWell, cardData }: Props) {
   const { show, hide, node } = useHoverCard(cardData ?? (() => null));
   const sampleKeys = () => {
     const keys: string[] = [];
@@ -87,6 +89,7 @@ export function WellMatrix({ enabled, onChange, wellTypes, onHoverWell, cardData
                 : undefined
             }
             onClick={() => toggleWell(r, c)}
+            onDoubleClick={() => onSoloWell?.(r, c)}
             onMouseEnter={(e) => {
               const wellLabel = `${label}${c + 1}`;
               onHoverWell?.(wellLabel);
