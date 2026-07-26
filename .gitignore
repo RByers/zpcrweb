@@ -6,3 +6,4 @@ coverage/
 .claude/*
 !.claude/settings.json
 secrets.json
+tools/.uishot/

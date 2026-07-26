@@ -21,6 +21,7 @@ import {
   type StoredSettings,
 } from "./db";
 import { usePltdPassword } from "./pltdPassword";
+import { onHashChange, readHash, writeHash } from "./urlHash";
 
 /** The library's default for §5.1's auto-threshold multiplier, and the slider's starting point.
  * Must track `AutoThresholdOptions.multiplier`'s own default in `@zpcrweb/core`, which documents
@@ -350,7 +351,9 @@ export function useZpcrStore(): ZpcrStore {
   const [files, setFiles] = useState<LoadedFile[]>([]);
   const [settingsMap, setSettingsMap] = useState<Record<string, FileSettings>>({});
   const [activeId, setActiveId] = useState<string | null>(null);
-  const [view, setView] = useState<ViewId>("curves");
+  // Seed the view from the URL hash so a shared link opens on the right tab with no flash of
+  // the default one (see `urlHash.ts`); the file half can only be resolved after hydration.
+  const [view, setView] = useState<ViewId>(() => readHash().view ?? "curves");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const saveTimers = useRef<Record<string, number>>({});
@@ -376,7 +379,12 @@ export function useZpcrStore(): ZpcrStore {
         for (const s of storedSettings) map[s.fileId] = fromStored(s);
         setFiles(loaded);
         setSettingsMap(map);
-        setActiveId(loaded.at(-1)?.id ?? null);
+        // A `#file=` from the URL wins over "most recently added", when it names something
+        // actually loaded here — files live in this browser's IndexedDB, so a link naming a
+        // file the recipient doesn't have falls back to the default rather than erroring.
+        const wanted = readHash().file;
+        const fromHash = wanted ? loaded.find((f) => f.name === wanted) : undefined;
+        setActiveId(fromHash?.id ?? loaded.at(-1)?.id ?? null);
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e));
       } finally {
@@ -387,6 +395,33 @@ export function useZpcrStore(): ZpcrStore {
       cancelled = true;
     };
   }, []);
+
+  // ── URL hash sync ────────────────────────────────────────────────────────────────────
+  // Both directions are guarded by "is it already that value?" checks (here and in
+  // `writeHash`), so the echo each direction provokes in the other terminates immediately
+  // instead of looping.
+  const active = useMemo(() => files.find((f) => f.id === activeId) ?? null, [files, activeId]);
+  const syncedOnce = useRef(false);
+
+  // State → URL. Held until hydration finishes: before that `active` is still null, and
+  // writing would strip the `#file=` we were opened with before we could honor it.
+  useEffect(() => {
+    if (loading) return;
+    writeHash({ file: active?.name, view }, { replace: !syncedOnce.current });
+    syncedOnce.current = true;
+  }, [loading, active, view]);
+
+  // URL → state, for back/forward and hand-edited links.
+  useEffect(() => {
+    return onHashChange(() => {
+      const h = readHash();
+      if (h.view) setView(h.view);
+      if (h.file) {
+        const match = files.find((f) => f.name === h.file);
+        if (match) setActiveId(match.id);
+      }
+    });
+  }, [files]);
 
   const addFiles = useCallback(async (input: FileList | File[]) => {
     const list = Array.from(input)
@@ -475,11 +510,6 @@ export function useZpcrStore(): ZpcrStore {
       }
     },
     [files],
-  );
-
-  const active = useMemo(
-    () => files.find((f) => f.id === activeId) ?? null,
-    [files, activeId],
   );
 
   const settings = activeId

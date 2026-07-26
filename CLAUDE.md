@@ -67,10 +67,6 @@ in `.git/rr-cache`; leave it as-is.
 
 Whenever changes are made, review and update all ARCHITECTURE.md files to be a concise yet accurate summary of the application design, with pointers to other relevant files.
 
-## UI testing
-
-When making non-trivial UI changes, use the chrome-devtools MCP to test in Chrome. Always start an independent chrome instance and dev server running on a unique random port to avoid conflicting with the dev sever the user may be running for the main branch. Try to balance token use and UI quality by not over-using chrome-devtools. 
-
 ## Secrets
 
 Local-only secrets (the CFX file decryption password) live in `secrets.json`, which is
@@ -81,10 +77,87 @@ committed in `samples/` and `packages/core/test/fixtures/`.
 
 ## UI testing
 
-When testing the web app in a browser, always load it with the `cfxPassword` URL query
-parameter set, so samples decrypt automatically instead of sitting behind the password prompt:
-pull the value from `secrets.json`'s `cfxPassword` field (see Secrets, above) and append
-`?cfxPassword=<value>` to the dev server URL with URL escaping in case of any special characters like # in the password, e.g. `http://localhost:5173/?cfxPassword=<value>`.
+**Always look at a screenshot of a UI change before committing it.** `tools/uishot.mjs` makes
+that cheap — one command, ~5s, ~1–2k tokens:
+
+```sh
+node tools/uishot.mjs                                   # Overview + Curves, default sample
+node tools/uishot.mjs --views curves                    # one view, biggest and most legible
+node tools/uishot.mjs --views overview,curves,plates,raw # four views in one sheet
+node tools/uishot.mjs --file samples/20260720_Luna_noRT.pcrd --views overview
+```
+
+It boots its own dev server and headless Chrome on random ports (so it never collides with the
+server the user is running on 5173), loads a sample, walks the views, and writes **one labelled
+contact-sheet PNG** — `tools/.uishot/shot.png` by default. Read that single image; don't take
+per-view screenshots. It also reports console errors, uncaught exceptions and failed page
+loads, which catch breakage a screenshot can't show.
+
+Cost control, in order of preference:
+
+- **Fewer, bigger images.** Views are tiled into one sheet, so 4 views cost one image (~2k
+  tokens), not four. Capture every view you touched in a single run.
+- **The text report is nearly free** — `console clean` vs. a `PROBLEMS` list is often all you
+  need, and a run whose report is clean and whose diff is small may not need the image at all.
+- **`--max-width` trades legibility for tokens** (image cost ≈ w×h/750). The 1400px default is
+  legible for layout, spacing and chart rendering. Drop to `--max-width 900` for a quick "is it
+  broken" check; raise it only when judging fine typography.
+- Skip it entirely for pure logic/decoder changes that render nothing.
+
+### When to use the MCP instead
+
+Reach for the **chrome-devtools MCP** when you need to *interact* — hover cards, drag,
+multi-step flows, or debugging why something is broken. Its accessibility snapshot and live
+console are worth the extra tokens for exploration; `uishot` is for the confirm-before-commit
+pass. The MCP isn't available in every environment (background jobs, restricted accounts) —
+`uishot` needs nothing but Node and the system Chrome, so prefer it when both would work.
+
+If you drive Chrome by hand, use a random port (never 5173 — the user may have a dev server
+running there), set `CHROME_PATH` if Chrome isn't at `/Applications/Google Chrome.app`, and
+pass `--disable-component-update --disable-background-networking`. Without those two flags
+Chrome's auto-updater spawns a child that holds stdout open, and the run looks like a hang
+long after the page is done.
+
+### Everything is in the URL hash, nothing in the query string
+
+- `#cfxPassword=<value>` seeds the decryption password so samples decrypt instead of sitting
+  behind the prompt. Pull it from `secrets.json` (see Secrets, above) and URL-escape it — the
+  password can contain characters like `#`.
+- `#file=<name>&view=<overview|curves|plates|reference|raw>` selects the active file and view.
+
+Both are hash keys in one query string (`#cfxPassword=…&view=curves`), parsed by
+`state/pltdPassword.ts` and `state/urlHash.ts`. **The password is in the fragment because it's
+a secret**: fragments are never sent to the server, so they can't reach access logs, proxies,
+or a `Referer` header — `?cfxPassword=` would reach all three. The app strips the password
+from the address bar the moment it reads it, so a URL copied afterwards can be shared safely.
+The legacy `?cfxPassword=` query form still works but is deprecated; don't write new links
+with it.
+
+### Getting a sample file loaded
+
+Use CDP's `DOM.setFileInputFiles` against the app's own `<input type="file">` — this is what
+`uishot` does, and it's both the cheapest and the most faithful option:
+
+- **Zero tokens.** It happens inside the script; nothing about the file enters the transcript.
+- **It exercises the real code path** — the same `addFiles` → validate → IndexedDB flow a user
+  triggers by dropping a file, so a regression in loading actually fails the check.
+- **No production code exists just for testing.** Nothing to ship, nothing to keep in sync.
+
+Rejected alternatives, so they don't get re-proposed:
+
+- *Seeding IndexedDB directly via `Runtime.evaluate`* — pushes megabytes of base64 through a
+  CDP message, and skips the validation/parse path entirely, so it can "pass" on a file the
+  app cannot actually open.
+- *A `?sample=` parameter that fetches from the dev server* — ships test-only code to
+  production, and `samples/` sits outside the Vite root so it isn't served anyway.
+- *Synthesizing drag-and-drop `Input` events* — fiddly and flaky for no gain over the file
+  input.
+
+Default to `samples/20260720.zpcr` (~400 KB): it has real amplification curves, targets,
+samples and calibration data, so every view renders something meaningful. The ~70 KB samples
+load marginally faster but leave views sparse, which makes them poor screenshot subjects. Each
+run starts from a clean Chrome profile — otherwise a previous run's sample lingers in
+IndexedDB and shows up as an extra file chip.
 
 ## Format documentation
 

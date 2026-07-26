@@ -52,7 +52,7 @@ document is encrypted — nothing (metadata, reads) exists until the password su
 derived reactively per file (`runs: Map<id, RunResult>`, recomputed whenever the shared
 password changes via `usePltdPassword` — see `state/pltdPassword.ts`, which despite the name
 now covers `.pltd`/`.prcl`/`.pcrd` alike). The password can also be seeded from the
-`cfxPassword` URL query parameter on load (same module), so scripted/UI testing never has to
+`#cfxPassword=` URL hash key on load (same module), so scripted/UI testing never has to
 click through the prompt. `App.tsx` renders the shared `PasswordPrompt`
 (`components/PasswordPrompt.tsx`) in place of the view area whenever the active file's `RunResult`
 has `needsPassword`/`error` instead of a `zpcr`; `FileBar` shows a lock/warning glyph for
@@ -69,10 +69,47 @@ absolutely-positioned child of the chip. `.filebar` scrolls horizontally
 a plain `position: absolute` dropdown would get clipped vertically by that implicit scroll
 box.
 
+## Hash routing
+
+The active file and selected view live in the URL hash as a **query string**, not a path —
+`#file=20260720.zpcr&view=curves` (`state/urlHash.ts`). A query string rather than
+`#/<file>/<view>` because file names contain spaces and `/`-unsafe characters, both keys are
+optional and order-independent (an old link degrades instead of failing to parse), and more
+shareable state can be added later without inventing path segments.
+
+The file is identified by **name**, not by the store's `id` — `fileId()` hashes name+size, so
+ids aren't portable between browsers. Files themselves live only in IndexedDB and can't be
+fetched from a link, so a hash naming a file the user hasn't loaded falls back to the default
+active file while still honoring the `view`.
+
+`useZpcrStore` syncs both directions, each guarded by an "is it already that value?" check so
+the echo one direction provokes in the other terminates rather than looping:
+
+- **State → URL** is deferred until IndexedDB hydration finishes. Before that, `active` is
+  still `null`, and writing would strip the incoming `#file=` before it could be honored. The
+  first post-hydration write uses `replaceState` (the app choosing its own initial state
+  shouldn't create a history entry); later writes `pushState`, which is what makes back/forward
+  step through view switches.
+- **URL → state** listens for `hashchange` *and* `popstate`: `hashchange` alone misses
+  `pushState`, `popstate` alone misses manual address-bar edits.
+
+The view is also seeded synchronously from the hash in `useState`'s initializer, so a shared
+link opens on the right tab with no flash of the default one.
+
+The decryption password shares this one hash query string (`#cfxPassword=…`, see the `.pcrd`
+password gate above) rather than living in `?…`. A fragment is never sent to the server, so a
+secret placed there can't reach access logs, proxies/CDNs or a `Referer` header;
+`pltdPassword.ts` also strips it from the URL as soon as it reads it, which is why the key
+never survives into the `file`/`view` hash that `writeHash` maintains.
+
+`tools/uishot.mjs` navigates by hash for exactly this reason — one assignment per view, with no
+dependence on tab label text. See CLAUDE.md "UI testing".
+
 ## Stack
 
-- **React 18 API on the Preact runtime + Vite + TypeScript** — SPA, no router (the selected
-  view is global, in-memory-only state in the store, shared across all loaded files). Source
+- **React 18 API on the Preact runtime + Vite + TypeScript** — SPA, no router library; the
+  selected view is global state in the store (shared across all loaded files) mirrored into the
+  URL hash, see "Hash routing" above. Source
   (`.tsx`) uses the standard React API; `vite.config.ts` aliases
   `react`/`react-dom`/`react/jsx-runtime` to `preact/compat`/`preact/jsx-runtime`, so no `react`
   or `react-dom` package is installed — only `@types/react`/`@types/react-dom` for typechecking.
