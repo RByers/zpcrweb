@@ -40,7 +40,9 @@ export interface StoredSettings {
   curveBaseline?: "raw" | "constant" | "linear";
   scale: "linear" | "log";
   showDark: boolean;
-  bands: "off" | "auto" | "on";
+  /** Min/max envelope bands. Older records carry the retired three-way mode; `fromStored`
+   * migrates it (only `"on"` becomes `true`). */
+  bands: boolean | "off" | "auto" | "on";
   step: number | null;
   /** Temperature field keys plotted on the right axis, e.g. `["BLOCKTEMP"]`. */
   temps?: string[];

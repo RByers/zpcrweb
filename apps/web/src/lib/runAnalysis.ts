@@ -104,16 +104,17 @@ export interface RunAnalysis {
 }
 
 /**
- * @param dyeSpace whether the dye-space solve is needed at all. The Curves view skips it while
- * color separation is off (one pseudo-inverse per well per cycle is real work); it never changes
- * the *result*, only whether it's computed.
+ * The dye-space solve runs unconditionally, including while the Curves view is showing channel
+ * space. It used to be skipped there (one pseudo-inverse per well per cycle is real work), but the
+ * target thresholds and the CSV export are target-based in *every* view mode, and both read
+ * {@link RunAnalysis.cqTable} — which is empty without it. It never changed the result either way,
+ * only whether it was computed, and the Overview view already pays for it on every run.
  */
 export function useRunAnalysis(
   zpcr: Zpcr,
   settings: FileSettings,
   pltdPassword: string,
   activeStep: number | undefined,
-  dyeSpace = true,
 ): RunAnalysis {
   const available = useMemo(() => zpcr.channels(), [zpcr]);
 
@@ -268,10 +269,10 @@ export function useRunAnalysis(
   ]);
 
   const allFluorCurves = useMemo(() => {
-    if (!matrix || !dyeSpace) return [];
+    if (!matrix) return [];
     const dyeChannels = calibratedFluors.map((f) => f.channel);
     return computeFluorCurves(allCurves, matrix, available, dyeChannels, corrections);
-  }, [matrix, dyeSpace, allCurves, available, calibratedFluors, corrections]);
+  }, [matrix, allCurves, available, calibratedFluors, corrections]);
 
   // ---- The Cq table ------------------------------------------------------------------------
   // Over every well/dye pair on the plate, never a filtered subset. Pairs the plate doesn't load

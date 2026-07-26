@@ -44,8 +44,6 @@ export type Baseline = "raw" | "delta" | "percent";
  */
 export type CurveView = "relative" | "absolute";
 export type Scale = "linear" | "log";
-/** Min/max envelope bands: always off, always on, or auto (only when one well selected). */
-export type BandsMode = "off" | "auto" | "on";
 /**
  * What the Curves view's main pane shows once color separation is on: dye-space curves grouped
  * by fluorophore or by target/gene, or — `"table"` — the run's Cq/ΔRFU table in place of the
@@ -69,8 +67,9 @@ export interface FileSettings {
   /** Overlay each channel's dark (LED-off) background as a dotted line. Channel-space only —
    * see the "What actually gets plotted" note in CurvesView. */
   showDark: boolean;
-  /** Min/max envelope bands mode. */
-  bands: BandsMode;
+  /** Draw each channel's min/max envelope band. Channel-space only, like {@link showDark}, and
+   * off by default — with more than a well or two selected the envelopes overlap into noise. */
+  bands: boolean;
   /** Selected protocol step (`STEP` value), or null to use the first step. */
   step: number | null;
   /**
@@ -222,7 +221,7 @@ function defaultSettings(): FileSettings {
     drawBaseline: false,
     scale: "linear",
     showDark: false,
-    bands: "auto",
+    bands: false,
     step: null,
     // Temperatures are off by default — they are instrument context, not the measurement.
     temps: new Set<string>(),
@@ -280,7 +279,11 @@ function fromStored(s: StoredSettings): FileSettings {
     drawBaseline: s.drawBaseline ?? false,
     scale: s.scale ?? "linear",
     showDark: s.showDark ?? false,
-    bands: s.bands ?? "auto",
+    // Records written while `bands` was a three-way mode ("off"/"auto"/"on") migrate to the
+    // boolean switch: only an explicit "on" survives as on. "auto" (draw the bands only when a
+    // single well is selected) is gone — a switch can't express it, and it made the control's
+    // effect depend on the well selection.
+    bands: typeof s.bands === "boolean" ? s.bands : s.bands === "on",
     step: s.step ?? null,
     calibration: s.calibration ?? null,
     fluorViewMode: s.fluorViewMode ?? "fluorophore",

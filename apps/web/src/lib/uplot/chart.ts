@@ -11,7 +11,7 @@ import {
 } from "@zpcrweb/core";
 import { channelColor, channelLabel } from "../channelColors";
 import { tempColor } from "../tempColors";
-import type { Baseline, BandsMode, CurveView, Scale } from "../../state/useZpcrStore";
+import type { Baseline, CurveView, Scale } from "../../state/useZpcrStore";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
@@ -268,7 +268,8 @@ export interface BuildChartConfig {
    * `ReferenceView` always passes `false`. */
   drawBaseline: boolean;
   scale: Scale;
-  bands: BandsMode;
+  /** Draw each well curve's min/max envelope band. `ReferenceView` always passes `false`. */
+  bands: boolean;
   width: number;
   height: number;
   onHover: (t: TooltipData | null) => void;
@@ -525,8 +526,7 @@ export function buildChart(cfg: BuildChartConfig): {
     });
   });
 
-  // Min/max envelope bands. Auto shows them only when a single well (one row/col) is
-  // selected, regardless of how many channels — so each channel's curve gets its own band.
+  // Min/max envelope bands — one per plotted well curve, so each channel of a well gets its own.
   const computeBand = (c: PlotCurve, adjust: Adjust[]): BandData => {
     const min: (number | null)[] = [];
     const max: (number | null)[] = [];
@@ -540,10 +540,7 @@ export function buildChart(cfg: BuildChartConfig): {
     return { color: channelColor(c.channel), cycles: c.cycles, min, max };
   };
 
-  const distinctWells = new Set(wellCurves.map((c) => `${c.row},${c.col}`));
-  const showBands =
-    cfg.bands === "on" || (cfg.bands === "auto" && distinctWells.size === 1);
-  const bands: BandData[] = showBands
+  const bands: BandData[] = cfg.bands
     ? wellCurves.map((c, i) => computeBand(c, wellAdjusts[i]!))
     : [];
 

@@ -368,7 +368,7 @@ format's real elements without either one faking the other's schema.
 
 ## One Cq per well/target: `lib/runAnalysis.ts`
 
-`useRunAnalysis(zpcr, settings, pltdPassword, activeStep, dyeSpace)` is the single run-level
+`useRunAnalysis(zpcr, settings, pltdPassword, activeStep)` is the single run-level
 derivation the Curves view's chart, hover cards and table mode share: plate + password state,
 fluorophore/target groups
 (`lib/plateTargets.ts`), the calibration matrix and `calibration.md` §4 corrections, the
@@ -395,7 +395,13 @@ color-separated `allFluorCurves` — and, on top of those, the run's **Cq table*
 - **`channelCqTable`** — the same computation over raw *channel* curves, keyed by
   `channelCurveKey(row, col, channel)`, for the Cq markers the Curves view draws while color
   separation is off. A separate quantity rather than a second copy of the same one: a channel curve
-  mixes every dye emitting into that filter and belongs to no target.
+  mixes every dye emitting into that filter and belongs to no target. It shares the rail's
+  `thresholdMultiplier` (its per-group overrides, being target-keyed, never match a channel group).
+- **The dye-space solve is unconditional.** It used to be skipped while the Curves view was showing
+  channel space (`dyeSpace`, a fifth parameter) since one pseudo-inverse per well per cycle is real
+  work. It no longer is: the target thresholds and the CSV export are target-based in *every* view
+  mode and both read `cqTable`, which is empty without it — and `OverviewView` already pays for the
+  same solve on every run.
 
 ## Curves view
 
@@ -431,7 +437,8 @@ only pieces the two views share.
   needs an `initialWidth` of at least **5** points (3 degrees of freedom) and `kStdErrors: 5` for
   the same low-sample-count instability reason — see the regression test in
   `packages/core/test/baseline.test.ts` ("doesn't truncate a flat, realistically-noisy curve …").
-- **`CurveView` setting (`"relative"` default / `"absolute"`):** what the chart *displays* —
+- **`CurveView` setting (`"relative"` default / `"absolute"`, labelled "Values" in the rail —
+  the mode toggle above already owns "View"):** what the chart *displays* —
   `"relative"` plots the baseline-corrected curve, `"absolute"` plots the curve's raw RFU
   unmodified. This is purely a display choice: Cq/ΔRFU/noise/threshold in both the chart's own
   markers and the Analysis table are always computed from the corrected values regardless of
@@ -468,10 +475,15 @@ only pieces the two views share.
   job is to show decoded values faithfully, and the CSV export, where full precision is the point.
 - **Dark (LED-off) background:** `zpcr.darkCurves()` gives one background series per channel.
   A pure display overlay — it never alters the plotted well curves, min/max bands, or the
-  y-axis label. The "Show dark" toggle: off (default) draws nothing; on draws one **dotted**
+  y-axis label. The "Show dark" `Switch`: off (default) draws nothing; on draws one **dotted**
   dark line per present channel, transformed like the curves (so it still tracks the baseline
-  mode/log). Channel-space only, like the min/max bands, so the toggle only appears when color
+  mode/log). Channel-space only, like the min/max bands, so it only appears when color
   separation is off.
+- **Min/max band (`bands`, off by default):** shades each plotted curve's per-cycle min/max
+  envelope. Channel-space only, like the dark overlay. A plain on/off `Switch` alongside it —
+  it used to be a three-way `off`/`auto`/`on` mode whose `auto` drew the bands only when a
+  single well was selected, which made one control's effect depend on another's state;
+  `fromStored` migrates a stored `"on"` to `true` and everything else to `false`.
 - **Temperatures (right axis):** `zpcr.temperatureCurves(step)` gives one series per
   temperature field in the platereads. Chips in the rail toggle each one (all off by
   default, since they are instrument context rather than the measurement) and preview its
@@ -485,7 +497,10 @@ only pieces the two views share.
   `conditionName` — despite the XML attribute name, this is the sample name CFX Manager's UI
   shows). `SampleBar` chips toggle an opt-out set (`disabledSamples`, all shown by default,
   mirroring `disabledFluors`); a well with no `sample` set is never hidden by this filter, since
-  there's no chip for it. Applies to both channel- and dye-space curves alike (`sampleVisible()`,
+  there's no chip for it. Its section header carries the same `<ResetIcon />` re-enable-all button
+  as Channels/Targets and Wells, rather than the "all"/"none" text link it used to — one glyph
+  meaning "back to the default" throughout the rail, and a label that doesn't change under the
+  cursor. Applies to both channel- and dye-space curves alike (`sampleVisible()`,
   consulted by both `visibleChannel` and `visibleFluor`).
 - **Rail hover highlight and hover cards:** hovering a chip/cell in any rail section (channel,
   fluorophore/target, well, or sample) dims every plotted curve that doesn't match, via
@@ -650,10 +665,24 @@ is: a per-target curve needs channel→dye color separation (`calibration.md`).
   A **reset** button per row clears the override and returns that group to the slider — the same
   `<ResetIcon />` the Wells section uses for "reset to the plate definition", so one glyph means
   "back to the derived default" throughout the rail. It is disabled while the row is already
-  automatic. It sits in the Curves rail whenever dye space is on, in *any* of the three dye-space
-  modes, because an override feeds the run's one Cq table: it moves the chart's Cq markers and the
-  hover cards' numbers exactly as it moves the table's. (In Channel mode the section is hidden —
-  `channelCqTable`'s groups are channels, not targets.) Hovering a row sets the same
+  automatic.
+
+  The section sits in the Curves rail in **every** view mode, Channel included, and its rows are
+  always the target groups (`groupInfos`) — a threshold belongs to a target, not to an optical
+  filter, and an override feeds the run's one Cq table, so it moves the chart's Cq markers and the
+  hover cards' numbers exactly as it moves the table's. Channel mode used to hide it, on the
+  grounds that `channelCqTable`'s own groups are channels rather than targets; but that table is
+  resolved from the same `thresholdMultiplier`, so the slider was silently moving the channel
+  chart's Cq markers with no visible cause. Two consequences of that split are worth knowing: a
+  per-group *override* is keyed by target and so never reaches a channel curve's threshold (the
+  multiplier does), and the chip opt-out filters the rows only while the dye chips are actually on
+  screen — in Channel mode the chips are channels, so a target disabled back in dye space would
+  otherwise vanish from the section with nothing to bring it back. Each row's displayed automatic
+  value is read from the run's Cq table directly (`CurvesView`'s `groupThresholds`) rather than
+  from the filtered `tableRows`, so a group whose wells are all deselected still shows its real
+  threshold instead of an empty box.
+
+  Hovering a row sets the same
   `hoverHighlight` a target chip's hover sets (isolating that target's curves via
   `applyHighlight`) and additionally a dotted line at that target's threshold RFU, via
   `CurveChart`'s `thresholdLine` prop → `lib/uplot/chart.ts`'s `ThresholdLineState`/
@@ -672,6 +701,12 @@ is: a per-target curve needs channel→dye color separation (`calibration.md`).
   `overlayPlugin` can draw this without a second pass over the run's curves; nothing else reads
   them. Gated on the same `thresholdLineState.value != null` signal as the dotted line above, so
   it appears and disappears with it rather than needing its own hover state.
+
+  Both hover effects are dye-space-only. In Channel mode a row's threshold is a level on the
+  color-separated curve, not on the raw channel one, and no plotted curve carries the target's
+  label — so `CurvesView` passes no threshold line (which also suppresses the baseline-region
+  overlay riding on it) and highlights the group's own channel instead, or nothing at all for a
+  group spanning several.
 - **Amplification / greying:** a row renders at reduced opacity
   (`.analysis__row.is-unamplified`) whenever it has no Cq (`cq == null`) — because the
   baseline-validation gate failed, because `isAmplified` (§7 — total rise under 10× baseline noise)
@@ -688,8 +723,10 @@ is: a per-target curve needs channel→dye color separation (`calibration.md`).
   baseline region), threshold, Cq, ΔRFU, amplified. The CSV is built from the same rows via the
   shared `csvRow()` quoting helper (`lib/download.ts`) and `downloadText()` — filename
   `<run name>_analysis.csv`, the same `dataFile`-derived naming `plateReadCsvFilename` uses for the
-  Raw view's per-cycle export. Its rail button is available in any dye-space mode, not just table
-  mode, so the export doesn't require switching away from the chart first.
+  Raw view's per-cycle export. Its rail button is always present — in Channel mode too, since the
+  export is the same target-based table whichever space the chart happens to be showing — and is
+  disabled rather than hidden when there are no rows (no usable calibration, or the rail filtered
+  everything out), so exporting never requires switching modes first.
 
 ## Reference view
 

@@ -7,7 +7,6 @@ import { SAMPLE_TYPE_META } from "../../lib/sampleType";
 import {
   DEFAULT_THRESHOLD_MULTIPLIER,
   wellKey,
-  type BandsMode,
   type CurveView,
   type FileSettings,
   type FluorViewMode,
@@ -56,7 +55,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
   // all, the run's single Cq table. See `runAnalysis.ts`: the chart, the hover cards and table mode
   // all read Cq values out of that one table and never recompute them for the subset they happen to
   // be showing, which is what used to make them disagree with each other.
-  const run = useRunAnalysis(zpcr, settings, pltdPassword, activeStep, settings.calibration !== false);
+  const run = useRunAnalysis(zpcr, settings, pltdPassword, activeStep);
   const {
     plateEntry,
     plate,
@@ -598,13 +597,14 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
 
   // ---- Table mode / CSV export -------------------------------------------------------------
   // One row per visible (target, well) pair, filtered by exactly the same rail state as the chart
-  // and reading the same Cq table (see `lib/analysisRows.ts`). Built whenever dye space is on, not
-  // only in table mode, so the CSV button works without first switching to the table.
+  // and reading the same Cq table (see `lib/analysisRows.ts`). Built in every view mode, not only
+  // in table mode or dye space: the rows are what the Threshold section's live auto values and the
+  // CSV button read, and both are available in channel mode too. Rows are target-based regardless
+  // of which space the chart is showing — a threshold belongs to a target, never to a filter.
   const tableRows = useMemo(
-    () => (calibrationOn ? buildAnalysisRows(run, fluorCurveVisible) : []),
+    () => buildAnalysisRows(run, fluorCurveVisible),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [
-      calibrationOn,
       run,
       settings.enabledWells,
       settings.disabledFluors,
@@ -615,6 +615,16 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
       wellSample,
     ],
   );
+
+  /** The live threshold per group (an override, or §5.1's auto value), read straight from the
+   * run's Cq table rather than from `tableRows`: a group's threshold is a property of the run and
+   * its noise cohort, not of which of its wells the rail happens to have selected, so the
+   * Threshold section keeps showing a real value even when a filter hides every row. */
+  const groupThresholds = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const e of cqTable.values()) if (!m.has(e.group)) m.set(e.group, e.threshold);
+    return m;
+  }, [cqTable]);
 
   const downloadCsv = () =>
     downloadText(
@@ -798,17 +808,19 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
                 </span>
                 Samples
               </span>
+              {/* The same reset glyph as Channels/Targets and Wells — one button meaning "back to
+                  the default" throughout the rail, rather than a label that changes under the
+                  cursor. */}
               <button
-                className="rail__link"
+                className="rail__link rail__icon-btn"
+                title="Re-enable all samples"
+                aria-label="Re-enable all samples"
                 onClick={(e) => {
                   e.stopPropagation();
-                  onChange({
-                    disabledSamples:
-                      settings.disabledSamples.size > 0 ? new Set<string>() : new Set(sampleList),
-                  });
+                  onChange({ disabledSamples: new Set<string>() });
                 }}
               >
-                {settings.disabledSamples.size > 0 ? "all" : "none"}
+                <ResetIcon />
               </button>
             </summary>
             <SampleBar
@@ -856,8 +868,10 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
         {!tableMode && (
           <>
             <div className="rail__section rail__row">
+              {/* "Values", not "View": the mode toggle above is already labelled View, and these
+                  two answer different questions — which curves, vs. what the y-axis reads. */}
               <Toggle
-                label="View"
+                label="Values"
                 options={[
                   ["relative", "Relative"],
                   ["absolute", "Absolute"],
@@ -886,30 +900,31 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
                 value={settings.scale}
                 onChange={(v) => onChange({ scale: v as Scale })}
               />
-              {!calibrationOn && (
-                <>
-                  <Toggle
-                    label="Show dark"
-                    options={[
-                      ["off", "Off"],
-                      ["on", "On"],
-                    ]}
-                    value={settings.showDark ? "on" : "off"}
-                    onChange={(v) => onChange({ showDark: v === "on" })}
-                  />
-                  <Toggle
-                    label="Min/max band"
-                    options={[
-                      ["off", "Off"],
-                      ["auto", "Auto"],
-                      ["on", "On"],
-                    ]}
-                    value={settings.bands}
-                    onChange={(v) => onChange({ bands: v as BandsMode })}
-                  />
-                </>
-              )}
             </div>
+
+            {/* Channel-space overlays, each on its own row like "Draw baseline" above rather than
+                trailing the Scale toggle — they are switches, not modes, and a switch beside a
+                segmented control wraps unevenly at rail width. */}
+            {!calibrationOn && (
+              <>
+                <div className="rail__section rail__row">
+                  <Switch
+                    label="Show dark"
+                    checked={settings.showDark}
+                    onChange={(v) => onChange({ showDark: v })}
+                    title="Overlay each channel's LED-off dark background as a dotted line"
+                  />
+                </div>
+                <div className="rail__section rail__row">
+                  <Switch
+                    label="Min/max band"
+                    checked={settings.bands}
+                    onChange={(v) => onChange({ bands: v })}
+                    title="Shade each curve's per-cycle min/max envelope"
+                  />
+                </div>
+              </>
+            )}
           </>
         )}
 
@@ -930,9 +945,15 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
 
         {/* Cq is always threshold.md §6.1's threshold crossing (there is no algorithm selector any
             more), so a per-group threshold is always meaningful. An override applies to the whole
-            run's Cq table — chart markers, hover cards and table alike. Blank means auto, shown as
-            the input's placeholder. */}
-        {calibrationOn && calibrationAvailable && (
+            run's Cq table — chart markers, hover cards and table alike.
+
+            Shown in **every** view mode, channel space included. Thresholds are always
+            target-based (or fluorophore-based on a plate with no targets — see `usingTargets`);
+            channel mode doesn't get thresholds of its own, it gets the same target thresholds,
+            because that's what the run's one Cq table is keyed on. It used to be hidden there,
+            which made the multiplier below silently move the channel chart's Cq markers with no
+            visible cause. */}
+        {calibrationAvailable && (
           <details className="rail__section rail__details">
             <summary className="rail__title">
               <span>
@@ -983,9 +1004,12 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
             </div>
             <div className="analysis__thresholds">
               {groupInfos
-                .filter((g) => !settings.disabledFluors.has(g.target) && g.curve)
+                // The chip opt-out only hides a row while its chips are actually on screen; in
+                // channel mode the chips are channels, so a target disabled in dye space would
+                // otherwise vanish here with nothing to bring it back.
+                .filter((g) => (!calibrationOn || !settings.disabledFluors.has(g.target)) && g.curve)
                 .map((g) => {
-                  const auto = tableRows.find((r) => r.target === g.target)?.threshold;
+                  const auto = groupThresholds.get(g.target);
                   const override = settings.thresholdOverrides.get(g.target);
                   const isAuto = override === undefined;
                   // The field always carries a value — the live auto threshold when there's no
@@ -1001,8 +1025,18 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
                       key={g.target}
                       className="analysis__threshold-row mono"
                       onMouseEnter={() => {
-                        setHoverHighlight({ kind: "target", dyeLabel: g.target });
-                        setHoverThresholdLine(thresholdValue ?? null);
+                        // In channel mode there is no curve labelled with this target to isolate,
+                        // and its threshold is a level on the dye-space curve rather than on the
+                        // raw channel one — so highlight the group's own channel instead (nothing,
+                        // for a group spanning several) and draw no line.
+                        setHoverHighlight(
+                          calibrationOn
+                            ? { kind: "target", dyeLabel: g.target }
+                            : g.channel != null
+                              ? { kind: "channel", channel: g.channel }
+                              : null,
+                        );
+                        setHoverThresholdLine(calibrationOn ? (thresholdValue ?? null) : null);
                       }}
                       onMouseLeave={() => {
                         setHoverHighlight(null);
@@ -1035,19 +1069,20 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
           </details>
         )}
 
-        {calibrationOn && calibrationAvailable && (
-          <div className="rail__section">
-            <button
-              className="raw__download analysis__download"
-              onClick={downloadCsv}
-              disabled={tableRows.length === 0}
-              aria-label="Download the Cq/ΔRFU table as CSV"
-              title="Download the Cq/ΔRFU table as CSV"
-            >
-              <DownloadIcon /> CSV
-            </button>
-          </div>
-        )}
+        {/* Always present — the export is the same target-based Cq/ΔRFU table in every view mode,
+            so there's no mode you have to switch to first. Disabled, not hidden, when the run has
+            no rows to export (no usable calibration, or the rail filtered everything out). */}
+        <div className="rail__section">
+          <button
+            className="raw__download analysis__download"
+            onClick={downloadCsv}
+            disabled={tableRows.length === 0}
+            aria-label="Download the Cq/ΔRFU table as CSV"
+            title="Download the Cq/ΔRFU table as CSV"
+          >
+            <DownloadIcon /> CSV
+          </button>
+        </div>
 
         <div className="rail__stat mono">
           {tableMode ? (
@@ -1082,7 +1117,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
             curveView={settings.curveView}
             drawBaseline={settings.drawBaseline}
             scale={settings.scale}
-            bands={calibrationOn ? "off" : settings.bands}
+            bands={!calibrationOn && settings.bands}
             highlight={hoverHighlight}
             thresholdLine={settings.curveView === "relative" ? hoverThresholdLine : null}
           />

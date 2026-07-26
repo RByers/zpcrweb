@@ -178,7 +178,7 @@ export function ReferenceView({ zpcr, settings, onChange }: Props) {
             curveView="absolute"
             drawBaseline={false}
             scale={settings.scale}
-            bands="off"
+            bands={false}
           />
         </section>
       </div>

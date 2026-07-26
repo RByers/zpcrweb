@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import uPlot from "uplot";
 import type { DarkCurve, TemperatureCurve } from "@zpcrweb/core";
-import type { Baseline, BandsMode, CurveView, Scale } from "../../state/useZpcrStore";
+import type { Baseline, CurveView, Scale } from "../../state/useZpcrStore";
 import {
   applyHighlight,
   buildChart,
@@ -35,7 +35,8 @@ interface Props {
    * Reference view. */
   drawBaseline: boolean;
   scale: Scale;
-  bands: BandsMode;
+  /** Draw each curve's min/max envelope band; pass `false` from the Reference view. */
+  bands: boolean;
   /** Rail-driven highlight (hovering a target/fluor chip or a well-grid cell); `null` shows
    * every curve at full opacity. */
   highlight?: HighlightMatch | null;
