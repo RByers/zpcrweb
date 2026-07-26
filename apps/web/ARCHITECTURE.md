@@ -401,6 +401,15 @@ only pieces the two views share.
   fitted line itself, e.g. `"2000 + 4c"` (`c` = cycle number), via `lib/cq.ts`'s
   `formatBaselineFormula()` over `CurveBaselineResult.baselineFit` (`{ slope, intercept }`,
   `packages/core/src/analysis.ts`), not a single diagnostic RFU number.
+- **Number formatting:** `lib/cq.ts` owns two helpers used by every analysis-facing readout, so the
+  same quantity never appears at two precisions in two places. `formatRfu()` renders an RFU *level*
+  as a whole number (thresholds, ΔRFU, the chart tooltip's mean/min/max, a baseline's intercept):
+  readings run to thousands and carry nothing below the ones place, so decimals there are noise
+  dressed as precision. `formatCq()` renders a Cq to one decimal — the second digit sits well inside
+  the spread between replicates, so showing it invites comparisons the number can't support.
+  Deliberately *not* rounded: quantities that share the unit but not the scale (a baseline's slope
+  in RFU/cycle, a per-cycle standard deviation), the raw-file inspectors under "Raw files", whose
+  job is to show decoded values faithfully, and the CSV export, where full precision is the point.
 - **Dark (LED-off) background:** `zpcr.darkCurves()` gives one background series per channel.
   A pure display overlay — it never alters the plotted well curves, min/max bands, or the
   y-axis label. The "Show dark" toggle: off (default) draws nothing; on draws one **dotted**
@@ -562,12 +571,16 @@ is: a per-target curve needs channel→dye color separation (`calibration.md`).
   over the median `baselineNoise` across a group's own wells, in the rail's collapsible "Threshold"
   section (`<details className="rail__details">`, chevron rotates open, like the Temperature
   section). The section holds two controls. A **slider** sets §5.1's multiplier `k` in
-  `threshold = k × median noise` (1–100, calibrated default 40, with a Reset link back to it): it is
-  exposed rather than buried because the calibrated value rests on two anchors from a single run and
-  it is the one number that shifts every Cq on the plate — the per-group thresholds below it update
-  live as it moves, so its effect is visible rather than inferred. Below that, a **per-group
-  override** — a blank input falls back to the auto value, shown as the input's placeholder, and an
-  overridden group ignores the slider entirely. It sits in the Curves rail whenever dye space is on, in *any* of the three dye-space
+  `threshold = k × median noise` (1–100, default 20, with a Reset link back to it): it is exposed
+  rather than buried because the scale behind it rests on two anchors from a single run and it is
+  the one number that shifts every Cq on the plate — the per-group thresholds below it update live
+  as it moves, so its effect is visible rather than inferred. Below that, one **per-group override**
+  row each. That input always carries a value — the live auto threshold when no override is set,
+  greyed via `.is-auto` — rather than sitting empty behind a placeholder, because an empty number
+  input steps from 0: one press of the down arrow would jump the threshold from ~200 to nothing.
+  Seeded this way the arrows nudge from where the threshold actually is, in whole RFU (`step={1}`).
+  An **auto** button per row clears the override and returns that group to the slider; it is
+  disabled while the row is already automatic. It sits in the Curves rail whenever dye space is on, in *any* of the three dye-space
   modes, because an override feeds the run's one Cq table: it moves the chart's Cq markers and the
   hover cards' numbers exactly as it moves the table's. (In Channel mode the section is hidden —
   `channelCqTable`'s groups are channels, not targets.)

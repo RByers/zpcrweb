@@ -23,9 +23,10 @@ import {
 } from "./db";
 import { usePltdPassword } from "./pltdPassword";
 
-/** The library's calibrated default for §5.1's auto-threshold multiplier, and the slider's
- * starting point — see `AutoThresholdOptions.multiplier` in `@zpcrweb/core`. */
-export const DEFAULT_THRESHOLD_MULTIPLIER = 40;
+/** The library's default for §5.1's auto-threshold multiplier, and the slider's starting point.
+ * Must track `AutoThresholdOptions.multiplier`'s own default in `@zpcrweb/core`, which documents
+ * where the figure comes from (and why it sits below what the CFX anchors imply). */
+export const DEFAULT_THRESHOLD_MULTIPLIER = 20;
 
 export type FileKind = "zpcr" | "pcrd" | "pltd" | "csv";
 /** The two kinds a plate — standalone or attached to a run — can be uploaded as. */
@@ -114,9 +115,9 @@ export interface FileSettings {
    * cards and the table alike, since all three read the run's one Cq table. */
   thresholdOverrides: Map<string, number>;
   /** §5.1's auto-threshold multiplier: `threshold = k × median baseline noise` across the group's
-   * wells, for every group with no entry in {@link thresholdOverrides}. The library default (40)
-   * is calibrated against the thresholds CFX itself persisted in a `.pcrd` — see
-   * `AutoThresholdOptions.multiplier` — but it rests on two anchors from one run, and it is the
+   * wells, for every group with no entry in {@link thresholdOverrides}. The scale comes from the
+   * thresholds CFX itself persisted in a `.pcrd` (see `AutoThresholdOptions.multiplier`), but those
+   * are two anchors from one run and the default sits deliberately below them — and it is the
    * single knob that most affects where every Cq lands, so the Curves rail exposes it as a slider
    * rather than burying it. */
   thresholdMultiplier: number;

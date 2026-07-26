@@ -96,7 +96,15 @@ export interface BaselineRegion {
 }
 
 export interface BaselineRegionConstraints {
-  /** Never begin before this cycle. Default **1** — cycle 0's reading is often anomalous. */
+  /**
+   * Never begin before this cycle. Default **2**.
+   *
+   * Matches `baselineBeginRepeat`, which is **2** in every `.pcrd` examined — CFX does not start a
+   * baseline at the run's first read. Block and optics are still settling then, so that point sits
+   * off the line the rest of the region describes; including it tilts the fit and inflates the
+   * §5.1 noise estimate, which the threshold multiplies straight into every Cq in the group.
+   * (Cycle 0, where present, is skipped for the same reason but more so.)
+   */
   minBeginCycle?: number;
   /** Minimum region width in cycles. Default **3** — fewer leaves no residual to judge noise from. */
   minWidth?: number;
@@ -112,7 +120,7 @@ export function clampBaselineRegion(
   cycles: number[],
   constraints: BaselineRegionConstraints = {},
 ): BaselineRegion {
-  const minBegin = constraints.minBeginCycle ?? 1;
+  const minBegin = constraints.minBeginCycle ?? 2;
   const minWidth = constraints.minWidth ?? 3;
   const maxCycle = cycles.length > 0 ? Math.max(...cycles) : region.endCycle;
 
@@ -260,7 +268,7 @@ export function findBaselineByCurvature(
   const maxRelativeLinearity = options.maxRelativeLinearity ?? 0.03;
   const margin = options.margin ?? 2;
   const onsetFootFraction = options.onsetFootFraction ?? 0.05;
-  const minBegin = options.constraints?.minBeginCycle ?? 1;
+  const minBegin = options.constraints?.minBeginCycle ?? 2;
   const minWidth = options.constraints?.minWidth ?? 3;
 
   if (values.length < 3) return null;
@@ -338,7 +346,7 @@ export function findBaselineByRegression(
 ): BaselineRegion | null {
   const initialWidth = options.initialWidth ?? 5;
   const k = options.kStdErrors ?? 5;
-  const minBegin = options.constraints?.minBeginCycle ?? 1;
+  const minBegin = options.constraints?.minBeginCycle ?? 2;
 
   const beginIdx = cycles.findIndex((c) => c >= minBegin);
   if (beginIdx < 0) return null;

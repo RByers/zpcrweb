@@ -12,6 +12,7 @@ import {
   type TooltipData,
 } from "../../lib/uplot/chart";
 import { channelLabel } from "../../lib/channelColors";
+import { formatCq, formatRfu } from "../../lib/cq";
 
 // Stable reference so the effect-dependency array below doesn't see a new "empty" array
 // (and rebuild the whole chart, cancelling any in-progress hover) on every render.
@@ -162,15 +163,15 @@ export function CurveChart({
                 <>
                   <tr>
                     <td>mean</td>
-                    <td>{tip.mean.toFixed(1)}</td>
+                    <td>{formatRfu(tip.mean)}</td>
                   </tr>
                   <tr>
                     <td>min</td>
-                    <td>{tip.min.toFixed(1)}</td>
+                    <td>{formatRfu(tip.min)}</td>
                   </tr>
                   <tr>
                     <td>max</td>
-                    <td>{tip.max.toFixed(1)}</td>
+                    <td>{formatRfu(tip.max)}</td>
                   </tr>
                   <tr>
                     <td>std</td>
@@ -185,7 +186,7 @@ export function CurveChart({
                   {tip.kind === "well" && tip.cq != null && (
                     <tr>
                       <td>Cq</td>
-                      <td>{tip.cq.toFixed(2)}</td>
+                      <td>{formatCq(tip.cq)}</td>
                     </tr>
                   )}
                 </>

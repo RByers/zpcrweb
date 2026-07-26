@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { createPortal } from "react-dom";
+import { formatCq } from "../../lib/cq";
 
 /** One row of a {@link HoverCard}: something on the plate (a well, a target/fluor, …) plus its
  * Cq. `selected` mirrors the chart's own dimming: false for a row excluded by a rail filter
@@ -48,7 +49,7 @@ export function HoverCard({
                 {r.color && <span className="curvecard__swatch" style={{ background: r.color }} />}
                 <span className="curvecard__label">{r.label}</span>
                 {r.sublabel && <span className="curvecard__sub">{r.sublabel}</span>}
-                <span className="curvecard__cq">{r.cq != null ? r.cq.toFixed(2) : "—"}</span>
+                <span className="curvecard__cq">{formatCq(r.cq)}</span>
               </div>
             ))}
           </div>

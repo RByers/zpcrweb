@@ -58,7 +58,7 @@ export function baselineNoise(
 
 export interface AutoThresholdOptions {
   /**
-   * `T = multiplier × noise`. Default **40**.
+   * `T = multiplier × noise`. Default **20**.
    *
    * Far above the textbook 3–10× because `noise` here is not the quantity those figures describe.
    * They assume the raw well-to-well scatter of the baseline cycles; {@link baselineNoise} measures
@@ -67,19 +67,27 @@ export interface AutoThresholdOptions {
    * the threshold a few RFU above baseline on a curve that rises by thousands, so the crossing
    * lands deep in the exponential's foot and every Cq comes out systematically early.
    *
-   * 40 is calibrated against the only ground truth available: the thresholds CFX itself persisted
-   * in `20260720_Luna_noRT.pcrd` (`autoCalculateThreshold="False"`, so these are the values the
-   * instrument's own analysis used). Against this pipeline's `baselineNoise` for the same wells:
+   * The order of magnitude comes from the only ground truth available: the thresholds CFX itself
+   * persisted in `20260720_Luna_noRT.pcrd` (`autoCalculateThreshold="False"`, so these are the
+   * values the instrument's own analysis used). Against this pipeline's `baselineNoise` for the
+   * same wells:
    *
    * | Fluor | CFX `thresholdOverrideValue` | median noise | ratio |
    * |---|---|---|---|
    * | FAM | 210.72 | 4.98 | 42.3× |
    * | Texas Red | 210.72 | 5.31 | 39.7× |
    *
-   * Two anchors from one run, agreeing within 6% — enough to pin the order of magnitude, not enough
-   * to call the value validated (see `threshold.md` §9). Expressing the same anchors as a fraction
-   * of the wells' amplification instead (7.5% and 10.1% of median ΔRFU) fits them more loosely and
-   * disagrees sharply on other plates, which is why the rule stays noise-relative.
+   * Those two anchors agree with each other within 6% but sit near **40×**, so the default of 20
+   * is deliberately *below* what they imply — chosen against how the resulting Cq values read on
+   * the samples in hand, where 40× lands them later than expected. Two anchors from a single run,
+   * both sharing one override value, are not enough to overrule that (see `threshold.md` §9); they
+   * fix the scale to tens rather than the textbook 3–10×, and the exact figure remains a judgement
+   * call. `computeCqTable`'s `autoThreshold` option makes it adjustable, and the web app puts it on
+   * a slider for exactly this reason.
+   *
+   * Expressing the same anchors as a fraction of the wells' amplification instead (7.5% and 10.1%
+   * of median ΔRFU) fits them more loosely and disagrees sharply on other plates, which is why the
+   * rule stays noise-relative.
    */
   multiplier?: number;
   /** Floor on the resulting threshold, in RFU. Default **0** (no floor) — the doc calls for a
@@ -94,7 +102,7 @@ export interface AutoThresholdOptions {
  * result at `minThreshold` so an all-flat plate doesn't collapse the threshold toward zero.
  */
 export function autoThreshold(noiseEstimates: number[], options: AutoThresholdOptions = {}): number {
-  const multiplier = options.multiplier ?? 40;
+  const multiplier = options.multiplier ?? 20;
   const minThreshold = options.minThreshold ?? 0;
   if (noiseEstimates.length === 0) return minThreshold;
 

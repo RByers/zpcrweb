@@ -177,9 +177,10 @@ raw bytes ─▶ fflate.unzipSync ─▶ { name: Uint8Array }
   the curve. See [`threshold.md`](./threshold.md).
 - **`threshold.ts`** — the threshold and Cq stages (§5–§7) that finish what `baseline.ts` starts:
   per-fluorophore noise/threshold estimation (manual override or auto — the median of a well
-  subset times a multiplier calibrated against the thresholds CFX itself persisted in a `.pcrd`,
-  which is far above the textbook figure because the noise measured here is a post-smoothing,
-  post-baseline-subtraction residual, not raw well scatter), the §6.1 threshold-crossing Cq (log-interpolated, with a linear
+  subset times a multiplier whose scale comes from the thresholds CFX itself persisted in a
+  `.pcrd`, far above the textbook figure because the noise measured here is a post-smoothing,
+  post-baseline-subtraction residual, not raw well scatter; the estimate also skips the baseline
+  region's first cycle), the §6.1 threshold-crossing Cq (log-interpolated, with a linear
   fallback and the §6.1 edge cases — anchored to the *final* above-threshold run, so baseline noise
   flickering over a low group threshold can't be read as a cycle-1 Cq), the §6.2 curve-shape
   (`NoThreshold`) Cq via

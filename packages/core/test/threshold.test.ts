@@ -74,17 +74,20 @@ describe("autoThreshold", () => {
     expect(autoThreshold([1, 2, 3], { multiplier: 3 })).toBeCloseTo(6, 6);
   });
 
-  it("uses the default multiplier of 40", () => {
-    expect(autoThreshold([10])).toBeCloseTo(400, 6);
+  it("uses the default multiplier of 20", () => {
+    expect(autoThreshold([10])).toBeCloseTo(200, 6);
   });
 
-  it("puts CFX's own persisted thresholds within ~6% of the default rule", () => {
+  it("stays within a factor of ~2 of CFX's own persisted thresholds", () => {
     // The two anchors from 20260720_Luna_noRT.pcrd, where CFX ran with
-    // autoCalculateThreshold="False" and thresholdOverrideValue=210.72 — paired with this
-    // pipeline's median baselineNoise for the same wells. See `AutoThresholdOptions.multiplier`.
+    // autoCalculateThreshold="False" and thresholdOverrideValue=210.72, paired with this
+    // pipeline's median baselineNoise for the same wells. They imply ~40x; the default is
+    // deliberately below that (see `AutoThresholdOptions.multiplier`), so this pins the scale
+    // rather than the exact value — tens of multiples of noise, not the textbook 3-10x.
     for (const medianNoise of [4.98, 5.31]) {
       const ours = autoThreshold([medianNoise]);
-      expect(Math.abs(ours - 210.72) / 210.72).toBeLessThan(0.07);
+      expect(ours).toBeGreaterThan(210.72 / 3);
+      expect(ours).toBeLessThan(210.72);
     }
   });
 

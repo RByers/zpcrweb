@@ -104,7 +104,14 @@ early or too short and it is dominated by noise.
 Explicit `baselineBeginRepeat` / `baselineEndRepeat` cycles — the observed sample uses **2** and
 **9**. Sensible constraints for a hand-set or auto-derived region:
 
-- **Begin at cycle ≥ 1** — never cycle 0, whose reading is often anomalous.
+- **Begin at cycle ≥ 2.** `baselineBeginRepeat` is **2** in every `.pcrd` examined — CFX does not
+  start a baseline at the run's first read, and neither does `minBeginCycle`'s default. Block and
+  optics are still settling then, so that point sits off the line the rest of the region describes:
+  including it tilts the fit and inflates the §5.1 noise estimate, which §5.1's multiplier then
+  scales straight into every Cq in the group. (Cycle 0, where a run has one, is skipped for the
+  same reason but more so.) Measured on `20230829…SINGLE_STEP_`, moving from 1 to 2 lowers the
+  auto thresholds ~10–20% and pulls every Cq 0.1–0.4 cycles earlier, with the same wells reporting
+  a Cq either way.
 - **End at cycle 9** as a starting default.
 - **At least 3 cycles wide.** A two-point "baseline" fits any line exactly and has no residual, so
   noise estimation (§5.1) becomes meaningless.
@@ -206,17 +213,16 @@ of the baseline, so that crossing it means "signal", not "noise".
 
 ```
 noise      = standard deviation of the baseline-region residuals
-threshold  = k × noise            (k ≈ 40, see below)
+threshold  = k × noise            (k ≈ 20, see below)
 ```
 
-The run's **first read is left out of the `noise` estimate** (`skipLeadingCycles`, default 1).
-Block and optics are still settling then, so that point is routinely offset from the rest of the
-baseline — the same reason §3.1 keeps cycle 0 out of the region, and the reason CFX's own
-`baselineBeginRepeat` defaults to **2** rather than 1. One outlier in a short window inflates the
-standard deviation out of proportion to its meaning, and since the threshold multiplies that
-spread by a large constant the error lands directly in every Cq of the group. Only the noise
-*statistic* skips it: the baseline line is still fitted over the whole region and the curve is
-still corrected across every cycle.
+On top of the region starting at cycle 2 (§3.1), the region's **own first cycle is left out of the
+`noise` estimate** (`skipLeadingCycles`, default 1) — so with the default region the estimate begins
+at cycle 3. The settling argument in §3.1 doesn't stop cleanly at one cycle, and one outlier in a short window
+inflates a standard deviation out of proportion to its meaning — which the threshold then
+multiplies by a large constant, straight into every Cq of the group. Only the noise *statistic*
+skips it: the baseline line is still fitted over the whole region and the curve is still corrected
+across every cycle.
 
 How much this matters depends on the run. On `20230829_135443_CT019138_SINGLE_STEP_.zpcr` the
 first cycle turns out **not** to be unusual — its residual is a median 0.76σ from the baseline,
@@ -234,17 +240,21 @@ a line fitted tightly to its pre-amplification region subtracted (§3–§4). Mu
 puts the threshold a few RFU above baseline on a curve rising by thousands, so the crossing lands
 deep in the exponential's foot and every Cq comes out systematically early.
 
-**k ≈ 40** is calibrated against the only ground truth available — the thresholds CFX itself
-persisted in `20260720_Luna_noRT.pcrd`, where `autoCalculateThreshold="False"` means these are the
-values the instrument's own analysis actually used:
+The **scale** comes from the only ground truth available — the thresholds CFX itself persisted in
+`20260720_Luna_noRT.pcrd`, where `autoCalculateThreshold="False"` means these are the values the
+instrument's own analysis actually used:
 
 | Fluor | CFX `thresholdOverrideValue` | median `baselineNoise` | ratio |
 |---|---|---|---|
 | FAM | 210.72 | 4.98 | 42.3× |
 | Texas Red | 210.72 | 5.31 | 39.7× |
 
-Two anchors from a single run, agreeing within 6%. That is enough to pin the order of magnitude and
-no more — see §9.
+Two anchors from a single run, agreeing within 6% and both landing near **40×**. That is enough to
+pin the order of magnitude — tens of multiples of this residual, not the textbook 3–10× — and no
+more. The **default is 20**, deliberately below what those anchors imply: judged against how the
+resulting Cq values read on the samples in hand, where 40× places them later than the curves
+suggest. Two anchors sharing one override value, from one run on one instrument, are not enough to
+overrule that; see §9. The web app puts the multiplier on a slider for exactly this reason.
 
 An obvious alternative is to scale the threshold to the *amplification* rather than the noise. The
 same two anchors read as 7.5% and 10.1% of their wells' median ΔRFU: a looser fit, and one that
@@ -384,12 +394,12 @@ For an implementation aiming to match a reference instrument:
 |---|---|
 | Cycles skipped (begin/end) | 0 / 0 |
 | Smoothing | Weighted mean, width 5 |
-| Baseline region | Auto; else cycles 2–9 |
+| Baseline region | Auto, never starting before cycle 2; else cycles 2–9 |
 | Cycles dropped from the noise estimate | 1 (the region's first) |
 | Minimum baseline width | 3 cycles |
 | Baseline mode | Linear (fitted line subtracted) |
 | Baseline region method | Data window over the full run |
-| Threshold | Manual override if present, else ≈40 × baseline noise (§5.1) |
+| Threshold | Manual override if present, else ≈20 × baseline noise (§5.1) |
 | Cq algorithm | Threshold crossing, log-interpolated |
 | No Cq if trace ends under threshold | On |
 
@@ -400,20 +410,14 @@ For an implementation aiming to match a reference instrument:
   `threshold.ts` covers §5–§7 (threshold determination, both Cq algorithms, the amplification
   squelch). Not implemented: the `pDriftCorrection` reference-normalization baseline modes and
   `LinearBaseLineNormalizedCurveFit`'s refinement.
-- **The threshold multiplier rests on two data points.** §5.1's k ≈ 40 is fitted to the two
+- **The threshold multiplier rests on two data points.** §5.1's scale is fixed by the two
   fluorophores of `20260720_Luna_noRT.pcrd` for which CFX persisted an explicit
   `thresholdOverrideValue`. They agree within 6%, but they come from one run on one instrument, and
-  both happen to share the same override value. More runs carrying `autoCalculateThreshold="False"`
+  both happen to share the same override value — and the shipped default (20) sits below the ~40
+  they imply, on the strength of how the resulting Cq values read rather than any measurement. More runs carrying `autoCalculateThreshold="False"`
   would either confirm the constant or reveal that it tracks something else (dye, chemistry, plate
   type). Since the multiplier sets how early every Cq lands, this is the single largest source of
   systematic error left in the chain.
-- **Baseline start cycle.** §3.1 allows the region to begin at cycle 1 and `minBeginCycle` defaults
-  to 1, but CFX's own persisted `baselineBeginRepeat` is **2** in every sample examined. Moving the
-  default to 2 measurably lowers the thresholds (on `20230829…SINGLE_STEP_`: 230 → 210 for GAPDH,
-  238 → 188 for the untargeted group) and pulls every Cq 0.1–0.4 cycles earlier, with the same
-  wells reporting a Cq either way. That is a defensible alignment with the instrument, and it
-  subsumes part of what `skipLeadingCycles` does — worth deciding deliberately rather than
-  drifting into.
 - **Persisted analysis parameters are not yet honoured.** A `.pcrd` carries the whole
   `dataAnalysisParameters` tree — including the per-fluorophore `thresholdOverrideValue` /
   `autoCalculateThreshold` pair that §5.2 says should be authoritative, and the

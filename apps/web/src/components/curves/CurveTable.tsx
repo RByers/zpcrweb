@@ -1,4 +1,5 @@
 import type { AnalysisRow } from "../../lib/analysisRows";
+import { formatCq, formatRfu } from "../../lib/cq";
 
 interface Props {
   rows: AnalysisRow[];
@@ -49,9 +50,9 @@ export function CurveTable({ rows, usingTargets }: Props) {
             <td>{r.fluor}</td>
             {usingTargets && <td>{r.target}</td>}
             <td className="mono">{r.baselineFormula}</td>
-            <td>{r.threshold.toFixed(1)}</td>
-            <td>{r.cq != null ? r.cq.toFixed(2) : "—"}</td>
-            <td>{r.deltaRfu.toFixed(1)}</td>
+            <td>{formatRfu(r.threshold)}</td>
+            <td>{formatCq(r.cq)}</td>
+            <td>{formatRfu(r.deltaRfu)}</td>
           </tr>
         ))}
       </tbody>

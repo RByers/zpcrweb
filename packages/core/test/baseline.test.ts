@@ -88,9 +88,9 @@ describe("skipCycles", () => {
 describe("clampBaselineRegion", () => {
   const cycles = Array.from({ length: 45 }, (_, i) => i + 1);
 
-  it("never begins before minBeginCycle (default 1)", () => {
+  it("never begins before minBeginCycle (default 2)", () => {
     const region = clampBaselineRegion({ beginCycle: 0, endCycle: 9 }, cycles);
-    expect(region.beginCycle).toBe(1);
+    expect(region.beginCycle).toBe(2);
   });
 
   it("never runs past the last cycle present", () => {
@@ -143,7 +143,7 @@ describe("findBaselineByCurvature", () => {
     const values = sigmoid(cycles, 25);
     const region = findBaselineByCurvature(cycles, values);
     expect(region).not.toBeNull();
-    expect(region!.beginCycle).toBe(1);
+    expect(region!.beginCycle).toBe(2);
     expect(region!.endCycle).toBeLessThan(25);
     expect(region!.endCycle - region!.beginCycle + 1).toBeGreaterThanOrEqual(3);
   });
@@ -165,7 +165,7 @@ describe("findBaselineByCurvature", () => {
     const smoothed = smoothCurve(curve.mean, { mode: "WeightedMean", width: 5 });
     const region = findBaselineByCurvature(curve.cycles, smoothed);
     expect(region).not.toBeNull();
-    expect(region!.beginCycle).toBe(1);
+    expect(region!.beginCycle).toBe(2);
     // the curve is flat through ~cycle 25 and plateaus by ~cycle 40 (see fixture data); the
     // flatness/linearity thresholds are relative to the *whole* curve's span, so the region is
     // allowed to creep partway into the early rise rather than stopping exactly at onset.
@@ -190,7 +190,7 @@ describe("findBaselineByRegression", () => {
     const values = cycles.map((c) => 100 + 5000 / (1 + Math.exp(-(c - 25) * 0.5)));
     const region = findBaselineByRegression(cycles, values);
     expect(region).not.toBeNull();
-    expect(region!.beginCycle).toBe(1);
+    expect(region!.beginCycle).toBe(2);
     expect(region!.endCycle).toBeLessThan(25);
     expect(region!.endCycle).toBeGreaterThanOrEqual(3);
   });
@@ -199,7 +199,7 @@ describe("findBaselineByRegression", () => {
     const cycles = Array.from({ length: 10 }, (_, i) => i + 1);
     const values = cycles.map(() => 500);
     const region = findBaselineByRegression(cycles, values);
-    expect(region).toEqual({ beginCycle: 1, endCycle: 10 });
+    expect(region).toEqual({ beginCycle: 2, endCycle: 10 });
   });
 
   it("degrades gracefully on a noisy, slowly-rising curve", () => {
@@ -209,7 +209,7 @@ describe("findBaselineByRegression", () => {
     const values = cycles.map((c, i) => 1000 + c * 2 + noise[i % noise.length]!);
     const region = findBaselineByRegression(cycles, values);
     expect(region).not.toBeNull();
-    expect(region!.beginCycle).toBe(1);
+    expect(region!.beginCycle).toBe(2);
   });
 
   it("returns null when there aren't enough cycles for the initial fit", () => {
@@ -230,7 +230,7 @@ describe("findBaselineByRegression", () => {
       2268.1,
     ];
     const region = findBaselineByRegression(cycles, values);
-    expect(region).toEqual({ beginCycle: 1, endCycle: 45 });
+    expect(region).toEqual({ beginCycle: 2, endCycle: 45 });
   });
 });
 
@@ -248,7 +248,7 @@ describe("autoBaselineRegion", () => {
     const values = cycles.map(() => 1000); // flat: no second-derivative peak at all
     const region = autoBaselineRegion(cycles, values);
     expect(region).not.toBeNull();
-    expect(region!.beginCycle).toBe(1);
+    expect(region!.beginCycle).toBe(2);
   });
 
   it("produces a plausible region on the real B3/channel-0 curve, well short of the plateau", () => {
@@ -257,7 +257,7 @@ describe("autoBaselineRegion", () => {
     const smoothed = smoothCurve(curve.mean, { mode: "WeightedMean", width: 5 });
     const region = autoBaselineRegion(curve.cycles, smoothed);
     expect(region).not.toBeNull();
-    expect(region!.beginCycle).toBe(1);
+    expect(region!.beginCycle).toBe(2);
     expect(region!.endCycle).toBeLessThan(40);
   });
 });
@@ -273,9 +273,11 @@ describe("validateBaselineRegion", () => {
   it("rejects a region that's a good local fit but a poor description of the whole curve", () => {
     // Recorded from a real NTC (no-template control) well: a pure decay, steeper for the first
     // ~5 cycles (~-9.7 RFU/cycle) then much shallower for the rest (~-4.7 RFU/cycle) — no
-    // amplification anywhere. findBaselineByRegression's local fit-and-extend still locks onto
-    // cycles 1-5, since the slope genuinely changes there; validateBaselineRegion is what catches
-    // that a line fit to just those cycles doesn't hold across the other 35.
+    // amplification anywhere. Starting the region at cycle 2 (the `minBeginCycle` default) drops
+    // the steepest point, so the initial fit is shallow enough that regression now extends all the
+    // way to the last cycle instead of stopping at the slope change. Either way the region is a
+    // poor description of the curve — a line through the whole two-segment decay fits it no better
+    // than a line through its first segment — and validateBaselineRegion is what catches that.
     const cycles = Array.from({ length: 40 }, (_, i) => i + 1);
     const values = [
       7423.0, 7408.0, 7399.5, 7387.8, 7384.8, 7384.3, 7374.3, 7372.1, 7368.0, 7360.0, 7360.5,
@@ -285,7 +287,7 @@ describe("validateBaselineRegion", () => {
     ];
     const smoothed = smoothCurve(values);
     const region = autoBaselineRegion(cycles, smoothed)!;
-    expect(region).toEqual({ beginCycle: 1, endCycle: 5 });
+    expect(region).toEqual({ beginCycle: 2, endCycle: 40 });
     expect(validateBaselineRegion(cycles, smoothed, region)).toBe(false);
   });
 
@@ -306,7 +308,7 @@ describe("validateBaselineRegion", () => {
     ];
     const smoothed = smoothCurve(values);
     const region = autoBaselineRegion(cycles, smoothed)!;
-    expect(region).toEqual({ beginCycle: 1, endCycle: 3 });
+    expect(region).toEqual({ beginCycle: 2, endCycle: 4 });
     expect(validateBaselineRegion(cycles, smoothed, region)).toBe(false);
   });
 

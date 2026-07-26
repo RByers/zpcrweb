@@ -1819,7 +1819,8 @@
   color: var(--ink-2);
 }
 .analysis__threshold-row input {
-  width: 84px;
+  width: 72px;
+  margin-left: auto;
   padding: 3px 6px;
   background: var(--plane);
   border: 1px solid var(--border-strong);
@@ -1831,4 +1832,14 @@
 .analysis__threshold-row input:focus {
   outline: none;
   border-color: var(--neon-cyan);
+}
+/* No override set: the field is showing the live auto value, not a value the user chose. */
+.analysis__threshold-row input.is-auto {
+  color: var(--ink-muted);
+}
+.analysis__threshold-row .rail__link {
+  flex: none;
+}
+.analysis__threshold-row .rail__link:disabled {
+  opacity: 0.25;
 }

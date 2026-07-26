@@ -537,10 +537,13 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
       "text/csv",
     );
 
+  /** `raw` empty clears the override, putting the group back on the auto threshold. Values are
+   * rounded to whole RFU to match what the input displays and steps by. */
   const setThresholdOverride = (group: string, raw: string) => {
     const next = new Map(settings.thresholdOverrides);
-    if (raw === "") next.delete(group);
-    else next.set(group, Number(raw));
+    const value = Number(raw);
+    if (raw === "" || !Number.isFinite(value)) next.delete(group);
+    else next.set(group, Math.round(value));
     onChange({ thresholdOverrides: next });
   };
 
@@ -868,7 +871,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
               />
               <div className="threshold-k__foot">
                 <span className="threshold-k__hint mono">
-                  Calibrated default {DEFAULT_THRESHOLD_MULTIPLIER}×
+                  Default {DEFAULT_THRESHOLD_MULTIPLIER}×
                 </span>
                 <button
                   type="button"
@@ -888,16 +891,35 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
                 .map((g) => {
                   const auto = tableRows.find((r) => r.target === g.target)?.threshold;
                   const override = settings.thresholdOverrides.get(g.target);
+                  const isAuto = override === undefined;
+                  // The field always carries a value — the live auto threshold when there's no
+                  // override — rather than sitting empty behind a placeholder. An empty number
+                  // input steps from 0, so one press of the down arrow used to jump the threshold
+                  // from (say) 210 to nothing-or-zero; seeded this way the arrows nudge from where
+                  // the threshold actually is. Whole RFU only: a threshold is a level on a curve
+                  // running to thousands, and sub-unit steps are below anything the reading means.
+                  const shown = isAuto ? (auto != null ? Math.round(auto) : "") : override;
                   return (
-                    <label key={g.target} className="analysis__threshold-row mono">
+                    <div key={g.target} className="analysis__threshold-row mono">
                       <span>{g.target}</span>
                       <input
                         type="number"
-                        placeholder={auto != null ? auto.toFixed(1) : "auto"}
-                        value={override ?? ""}
+                        step={1}
+                        value={shown}
+                        className={isAuto ? "is-auto" : ""}
+                        aria-label={`${g.target} threshold in RFU`}
                         onChange={(e) => setThresholdOverride(g.target, e.currentTarget.value)}
                       />
-                    </label>
+                      <button
+                        type="button"
+                        className="rail__link"
+                        disabled={isAuto}
+                        title={`Return ${g.target} to its automatic threshold`}
+                        onClick={() => setThresholdOverride(g.target, "")}
+                      >
+                        auto
+                      </button>
+                    </div>
                   );
                 })}
             </div>
