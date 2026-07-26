@@ -228,7 +228,7 @@ function defaultSettings(): FileSettings {
     temps: new Set<string>(),
     // Auto: on once plate + calibration data are available (see CurvesView).
     calibration: null,
-    fluorViewMode: "fluorophore",
+    fluorViewMode: "target",
     calibrationNormalization: "global",
     // The dark-current stage is optional and off by default, which is what matches the reported
     // RFU scale of the reference run in `calibration.md` §8. See §4.2.
