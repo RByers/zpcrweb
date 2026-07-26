@@ -905,12 +905,13 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
                       />
                       <button
                         type="button"
-                        className="rail__link"
+                        className="rail__link rail__icon-btn"
                         disabled={isAuto}
-                        title={`Return ${g.target} to its automatic threshold`}
+                        aria-label={`Reset ${g.target} to its automatic threshold`}
+                        title={`Reset ${g.target} to its automatic threshold`}
                         onClick={() => setThresholdOverride(g.target, "")}
                       >
-                        auto
+                        <ResetIcon />
                       </button>
                     </div>
                   );

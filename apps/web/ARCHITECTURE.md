@@ -584,8 +584,10 @@ is: a per-target curve needs channel→dye color separation (`calibration.md`).
   greyed via `.is-auto` — rather than sitting empty behind a placeholder, because an empty number
   input steps from 0: one press of the down arrow would jump the threshold from ~200 to nothing.
   Seeded this way the arrows nudge from where the threshold actually is, in whole RFU (`step={1}`).
-  An **auto** button per row clears the override and returns that group to the slider; it is
-  disabled while the row is already automatic. It sits in the Curves rail whenever dye space is on, in *any* of the three dye-space
+  A **reset** button per row clears the override and returns that group to the slider — the same
+  `<ResetIcon />` the Wells section uses for "reset to the plate definition", so one glyph means
+  "back to the derived default" throughout the rail. It is disabled while the row is already
+  automatic. It sits in the Curves rail whenever dye space is on, in *any* of the three dye-space
   modes, because an override feeds the run's one Cq table: it moves the chart's Cq markers and the
   hover cards' numbers exactly as it moves the table's. (In Channel mode the section is hidden —
   `channelCqTable`'s groups are channels, not targets.)
