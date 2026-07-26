@@ -5,10 +5,12 @@ import type { Baseline, BandsMode, CurveView, Scale } from "../../state/useZpcrS
 import {
   applyHighlight,
   buildChart,
+  setThresholdLine,
   type FactoryCurve,
   type HighlightMatch,
   type PlotCurve,
   type SeriesMeta,
+  type ThresholdLineState,
   type TooltipData,
 } from "../../lib/uplot/chart";
 import { channelLabel } from "../../lib/channelColors";
@@ -37,6 +39,10 @@ interface Props {
   /** Rail-driven highlight (hovering a target/fluor chip or a well-grid cell); `null` shows
    * every curve at full opacity. */
   highlight?: HighlightMatch | null;
+  /** Baseline-subtracted RFU to draw a dotted horizontal line at (hovering a target's threshold
+   * row in the rail); `null`/`undefined` draws none. Meaningless outside `curveView: "relative"`
+   * — see {@link ThresholdLineState}. */
+  thresholdLine?: number | null;
 }
 
 export function CurveChart({
@@ -50,16 +56,20 @@ export function CurveChart({
   scale,
   bands,
   highlight = null,
+  thresholdLine = null,
 }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const plotRef = useRef<uPlot | null>(null);
   const metaRef = useRef<SeriesMeta[]>([]);
+  const thresholdLineStateRef = useRef<ThresholdLineState | null>(null);
   const [tip, setTip] = useState<TooltipData | null>(null);
   // Kept current on every render (not just inside an effect) so the build effect below can
   // apply whatever highlight is active right now without depending on `highlight` itself —
   // that dependency would tear down and rebuild the whole uPlot instance on every hover.
   const highlightRef = useRef(highlight);
   highlightRef.current = highlight;
+  const thresholdLineRef = useRef(thresholdLine);
+  thresholdLineRef.current = thresholdLine;
 
   // (Re)build the plot whenever the data or options change.
   useEffect(() => {
@@ -69,7 +79,7 @@ export function CurveChart({
     const width = Math.max(320, Math.floor(rect.width));
     const height = Math.max(240, Math.floor(rect.height));
 
-    const { data, options, meta } = buildChart({
+    const { data, options, meta, thresholdLineState } = buildChart({
       wellCurves: curves,
       darkCurves,
       factoryCurves,
@@ -87,7 +97,9 @@ export function CurveChart({
     plotRef.current?.destroy();
     plotRef.current = new uPlot(options, data, host);
     metaRef.current = meta;
+    thresholdLineStateRef.current = thresholdLineState;
     applyHighlight(plotRef.current, meta, highlightRef.current);
+    setThresholdLine(plotRef.current, thresholdLineState, thresholdLineRef.current ?? null);
 
     return () => {
       plotRef.current?.destroy();
@@ -108,6 +120,12 @@ export function CurveChart({
   useEffect(() => {
     if (plotRef.current) applyHighlight(plotRef.current, metaRef.current, highlight);
   }, [highlight]);
+
+  useEffect(() => {
+    if (plotRef.current && thresholdLineStateRef.current) {
+      setThresholdLine(plotRef.current, thresholdLineStateRef.current, thresholdLine ?? null);
+    }
+  }, [thresholdLine]);
 
   // Keep the plot sized to its container.
   useEffect(() => {

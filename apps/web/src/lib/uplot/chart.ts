@@ -270,10 +270,28 @@ const SETPOINT_DASH = [2, 4];
 /** uPlot scale key for the right-hand temperature axis. */
 const TEMP_SCALE = "temp";
 
+/** Mutable holder for the rail-driven threshold-hover line (see {@link setThresholdLine}) — a
+ * plain object rather than a plugin option so its value can be updated on every hover without
+ * tearing down and rebuilding the whole uPlot instance. */
+export interface ThresholdLineState {
+  /** Baseline-subtracted RFU value to draw a dotted horizontal line at; `null` draws none.
+   * Only meaningful when the chart is plotting `curveView: "relative"` — the space the
+   * threshold/noise/Cq math (`threshold.md` §5–§6) actually operates in. */
+  value: number | null;
+}
+
+/** Update the threshold-hover line and redraw without rebuilding series/paths — the same
+ * cheap-redraw pattern {@link applyHighlight} uses. */
+export function setThresholdLine(u: uPlot, state: ThresholdLineState, value: number | null): void {
+  state.value = value;
+  u.redraw(false, false);
+}
+
 export function buildChart(cfg: BuildChartConfig): {
   data: uPlot.AlignedData;
   options: uPlot.Options;
   meta: SeriesMeta[];
+  thresholdLineState: ThresholdLineState;
 } {
   const { wellCurves, darkCurves, factoryCurves, tempCurves, baseline, curveView, scale } = cfg;
   const cycles =
@@ -515,6 +533,8 @@ export function buildChart(cfg: BuildChartConfig): {
     ? wellCurves.map((c, i) => computeBand(c, wellAdjusts[i]!))
     : [];
 
+  const thresholdLineState: ThresholdLineState = { value: null };
+
   const options: uPlot.Options = {
     width: cfg.width,
     height: cfg.height,
@@ -580,10 +600,10 @@ export function buildChart(cfg: BuildChartConfig): {
     cursor: { focus: { prox: 24 }, points: { size: 6 } },
     focus: { alpha: 0.12 },
     legend: { show: false },
-    plugins: [overlayPlugin(meta, bands, cqMarkers, cfg.onHover)],
+    plugins: [overlayPlugin(meta, bands, cqMarkers, thresholdLineState, cfg.onHover)],
   };
 
-  return { data: rows as uPlot.AlignedData, options, meta };
+  return { data: rows as uPlot.AlignedData, options, meta, thresholdLineState };
 }
 
 /**
@@ -631,15 +651,19 @@ function yLabel(baseline: Baseline, curveView: CurveView): string {
  * overlay on the plot area, so it shares uPlot's coordinate system and updates on
  * redraw/hover.
  */
+const THRESHOLD_LINE_DASH = "2,3";
+
 function overlayPlugin(
   meta: SeriesMeta[],
   bands: BandData[],
   cqMarkers: { x: number; y: number; color: string; seriesIdx: number }[],
+  thresholdLineState: ThresholdLineState,
   onHover: (t: TooltipData | null) => void,
 ): uPlot.Plugin {
   let svg: SVGSVGElement;
   let bandGroup: SVGGElement;
   let cqGroup: SVGGElement;
+  let thresholdLine: SVGLineElement;
   let group: SVGGElement;
   let vline: SVGLineElement;
   let capMax: SVGLineElement;
@@ -671,6 +695,12 @@ function overlayPlugin(
 
         cqGroup = document.createElementNS(SVG_NS, "g");
         svg.appendChild(cqGroup);
+
+        thresholdLine = line();
+        thresholdLine.setAttribute("stroke", "#e6e6e6");
+        thresholdLine.setAttribute("stroke-dasharray", THRESHOLD_LINE_DASH);
+        thresholdLine.style.display = "none";
+        svg.appendChild(thresholdLine);
 
         group = document.createElementNS(SVG_NS, "g");
         group.style.display = "none";
@@ -734,6 +764,26 @@ function overlayPlugin(
           c.setAttribute("stroke", m.color);
           c.setAttribute("stroke-opacity", String(u.series[m.seriesIdx]!.alpha ?? 1));
         });
+
+        // Rail-driven threshold-hover line: a dotted horizontal line at the hovered target's
+        // threshold RFU, spanning the full plotted cycle range.
+        const tv = thresholdLineState.value;
+        if (tv == null || u.scales.x!.min == null || u.scales.x!.max == null) {
+          thresholdLine.style.display = "none";
+        } else {
+          const x1 = u.valToPos(u.scales.x!.min, "x");
+          const x2 = u.valToPos(u.scales.x!.max, "x");
+          const y = u.valToPos(tv, "y");
+          if ([x1, x2, y].every(Number.isFinite)) {
+            thresholdLine.setAttribute("x1", String(x1));
+            thresholdLine.setAttribute("x2", String(x2));
+            thresholdLine.setAttribute("y1", String(y));
+            thresholdLine.setAttribute("y2", String(y));
+            thresholdLine.style.display = "";
+          } else {
+            thresholdLine.style.display = "none";
+          }
+        }
       },
 
       setCursor: (u: uPlot) => {

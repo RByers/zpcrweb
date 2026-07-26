@@ -200,6 +200,11 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
   // curve(s) in the chart, the same way hovering the chart itself dims every other curve.
   const [hoverHighlight, setHoverHighlight] = useState<HighlightMatch | null>(null);
 
+  // Hovering a target's row in the Threshold rail also draws a dotted line at that target's
+  // threshold RFU (see CurveChart's `thresholdLine` prop) — set alongside `hoverHighlight` so the
+  // two effects (isolate the target's curves, mark its threshold) always appear together.
+  const [hoverThresholdLine, setHoverThresholdLine] = useState<number | null>(null);
+
   // A hovered item should be shown even when it's individually disabled — the "peek" a rail
   // hover is supposed to give — so the visibility filters below let the hovered well/channel/
   // target/sample bypass its own disabled check (but only its own; hovering a disabled target
@@ -980,8 +985,20 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
                   // the threshold actually is. Whole RFU only: a threshold is a level on a curve
                   // running to thousands, and sub-unit steps are below anything the reading means.
                   const shown = isAuto ? (auto != null ? Math.round(auto) : "") : override;
+                  const thresholdValue = isAuto ? auto : override;
                   return (
-                    <div key={g.target} className="analysis__threshold-row mono">
+                    <div
+                      key={g.target}
+                      className="analysis__threshold-row mono"
+                      onMouseEnter={() => {
+                        setHoverHighlight({ kind: "target", dyeLabel: g.target });
+                        setHoverThresholdLine(thresholdValue ?? null);
+                      }}
+                      onMouseLeave={() => {
+                        setHoverHighlight(null);
+                        setHoverThresholdLine(null);
+                      }}
+                    >
                       <span>{g.target}</span>
                       <input
                         type="number"
@@ -1057,6 +1074,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
             scale={settings.scale}
             bands={calibrationOn ? "off" : settings.bands}
             highlight={hoverHighlight}
+            thresholdLine={settings.curveView === "relative" ? hoverThresholdLine : null}
           />
         </section>
       )}
