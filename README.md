@@ -1,7 +1,16 @@
 # zpcrweb
 
 Tools for reading **Bio-Rad CFX** qPCR `.zpcr` files — an isomorphic TypeScript library plus
-a cyberpunk-dark web app built on top of it.
+a cyberpunk-dark web app built on top of it, serving from [https://zpcr.rbyers.ca](https://zpcr.rbyers.ca/).
+
+I built this because:
+ - I just bought a used CFX thermocycler for my [https://lab.rbyers.ca/](home lab) and didn't have $2,000 extra budget for CFX Maestro.
+ - I'd rather not buy a dedicated Windows machine and install drivers (I mostly use a Mac). 
+ - I prefer to really learn how the device works under the hood and want to customize my workflow with automation anyway.
+
+ However this application is nowhere near a complete replacement for CFX Master / Maestro, lots of features are missing and the analysis is likely less reliable and more error-prone. Use at your own risk! On the upsite it is highly hackable, feel free to fork, modify, file issues and submit PRs if you like.
+
+ ## File formats
 
 A `.zpcr` file is a ZIP archive written by a Bio-Rad CFX real-time PCR instrument. Inside it
 holds one `.Plateread` binary file per PCR cycle (the raw fluorescence readings), a
@@ -10,6 +19,10 @@ project decodes those files into well-typed data you can use from Node or the br
 
 The `.Plateread` binary format was reverse-engineered and is documented in
 [`plateread.md`](./plateread.md).
+
+There is also limited support for `.pltd` and `.dpcr` files as produced by CFX software, but they are [encrypted](zipcrypto.md) and for DMCA risk I am not sharing the key. Claude was able to trivially find it in a copy of CFX Master though.
+
+To minimize the hassle of working with encrypted plate definition files, this package define a simple `.plt.csv` file format for plates which can be exported, modified and imported back and linked into a `.zpcr` file. 
 
 ## Repository layout
 
