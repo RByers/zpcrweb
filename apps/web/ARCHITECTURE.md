@@ -412,7 +412,12 @@ only pieces the two views share.
   reset button next to the "Wells" label restores the selection to exactly the plate's
   non-empty wells. `CurvesView` applies that same non-empty-wells set as the one-time default
   the first time a file's plate loads (only while the selection still looks like the untouched
-  "all wells" default, so a previously customized selection is left alone).
+  "all wells" default, so a previously customized selection is left alone). Channel mode mirrors
+  this: the default `enabledChannels` (and its reset button, next to "Channels"/"Targets"/
+  "Fluorophores") is the intersection of the run's available channels and `PlateDefinition.
+  fluors[].channel` — the channels the plate configuration actually assigns a dye to — rather
+  than a hardcoded 1–5. The same button resets dye-space mode by clearing `disabledFluors`
+  instead, since there every fluor/target is enabled by default already.
 - **Baseline is always automatic — no mode or region is user-configurable.** Every curve is
   baseline-corrected with `packages/core/src/baseline.ts`'s `LinearBaseLineNormalized`: find the
   flat pre-amplification region with `autoBaselineRegion` on a smoothed copy of the curve
@@ -567,9 +572,9 @@ only pieces the two views share.
   the plate definition actually loads there — useful for spotting cross-talk or a mis-configured
   plate, at the cost of otherwise-meaningless curves once it's on.
 
-  A four-way "View" toggle (`calibration`/`fluorViewMode` settings) picks channel space, one of
-  two dye-space groupings, or the table (see "Table mode" below — it groups by target, like
-  **Target**): **Fluorophore** labels/legends each curve by its dye name
+  A four-way "View" toggle (`calibration`/`fluorViewMode` settings, defaulting to **Target**)
+  picks channel space, one of two dye-space groupings, or the table (see "Table mode" below — it
+  groups by target, like **Target**): **Fluorophore** labels/legends each curve by its dye name
   (`FluorBar`'s chips, keyed by fluor); **Target** instead labels each curve by the target/gene
   assigned to that fluor *in that well* (`WellFluor.target`, per `pltd.md`), so the same dye
   used for different genes in different wells appears as separate legend entries. Loaded
@@ -648,7 +653,14 @@ is: a per-target curve needs channel→dye color separation (`calibration.md`).
   automatic. It sits in the Curves rail whenever dye space is on, in *any* of the three dye-space
   modes, because an override feeds the run's one Cq table: it moves the chart's Cq markers and the
   hover cards' numbers exactly as it moves the table's. (In Channel mode the section is hidden —
-  `channelCqTable`'s groups are channels, not targets.)
+  `channelCqTable`'s groups are channels, not targets.) Hovering a row sets the same
+  `hoverHighlight` a target chip's hover sets (isolating that target's curves via
+  `applyHighlight`) and additionally a dotted line at that target's threshold RFU, via
+  `CurveChart`'s `thresholdLine` prop → `lib/uplot/chart.ts`'s `ThresholdLineState`/
+  `setThresholdLine` (a mutable holder + cheap `u.redraw`, the same pattern `applyHighlight` uses,
+  so hovering doesn't rebuild the whole uPlot instance). Only meaningful in `curveView:
+  "relative"` — the threshold/noise/Cq math (`threshold.md` §5–§6) is computed against the
+  baseline-subtracted curve, not the raw one — so `CurvesView` passes `null` under "absolute".
 - **Amplification / greying:** a row renders at reduced opacity
   (`.analysis__row.is-unamplified`) whenever it has no Cq (`cq == null`) — because the
   baseline-validation gate failed, because `isAmplified` (§7 — total rise under 10× baseline noise)
