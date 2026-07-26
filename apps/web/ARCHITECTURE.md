@@ -186,12 +186,23 @@ exposed as a clear affordance on each file chip.
 ## Views
 
 - **Overview** — run metadata as stat tiles + the thermal protocol text, read from
-  `zpcr.metadata` and `zpcr.protocolText`, plus an "Encrypted" block (see above) showing
+  `zpcr.metadata` and `zpcr.protocolText`, a "Plate" section listing the plate's targets and
+  samples as chips, plus an "Encrypted" block (see above) showing
   green "No" when nothing in the file is encrypted, orange "Yes" with the password used when
   encrypted content was successfully decrypted, or red "Yes" when it wasn't. The file bar's
   per-chip dot (`components/FileBar.tsx`) mirrors the same three states/colors, computed the
   same way for `.pltd`/`.csv` chips via `lib/encryptionStatus.ts`'s
   `plateFileEncryptionStatus`.
+
+  Each target/sample chip carries that group's positive/negative curve tally — how many of its
+  well/fluor curves got a Cq and how many didn't — as two counts either side of a small track
+  filled to the positive fraction (`CountChip`/`.chipcount`). The numbers come out of
+  `useRunAnalysis`'s single Cq table (`lib/runAnalysis.ts`), the same one the Curves view reads,
+  so a chip can't disagree with the Curves table about the same well; the tally is per *curve*,
+  so a duplexed well contributes to each of its dyes. That's why Overview takes `settings` —
+  thresholds and calibration options change the Cq table. Unloaded wells are skipped, and the
+  chips render bare (name only) whenever the Cq table is empty: an uncalibrated run, or a plate
+  still behind the password prompt.
 - **Curves** — the centerpiece (see below).
 - **Reference** — reference row vs factory calibration (see below).
 - **Plates** — `PlatesView` (`components/views/PlatesView.tsx`): the visual, color-coded plate

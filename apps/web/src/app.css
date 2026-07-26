@@ -277,6 +277,40 @@
   background: color-mix(in srgb, currentColor 16%, transparent);
   border: 1px solid color-mix(in srgb, currentColor 40%, transparent);
 }
+/* A chip carrying its positive/negative curve tally (Overview → Plate). The counts sit either
+   side of a small track whose fill is the positive fraction; the chip's own hue (the target's
+   channel color, via `currentColor`) carries the positives, so a chip reads at a glance without
+   introducing a second palette. */
+.chipcount {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding-right: 5px;
+}
+.chipcount__name {
+  margin-right: 1px;
+}
+.chipcount__pos {
+  font-size: 10px;
+  color: var(--ink);
+}
+.chipcount__neg {
+  font-size: 10px;
+  color: var(--ink-muted);
+}
+.chipcount__bar {
+  width: 22px;
+  height: 3px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ink-muted) 45%, transparent);
+  overflow: hidden;
+}
+.chipcount__fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: currentColor;
+}
 .filecard__empty {
   font-size: 11px;
   color: var(--ink-muted);
