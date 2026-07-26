@@ -34,6 +34,11 @@ export interface PlotCurve {
   /** Optical channel — used only for color. */
   channel: number;
   dyeLabel: string;
+  /** The raw fluorophore name, when this is a dye-space curve. Distinct from {@link dyeLabel},
+   * which is the *display* grouping and carries the target name when the view groups by target.
+   * Thresholds are resolved per fluorophore (see `RunAnalysis.thresholdGroupOf`), so the
+   * Threshold rail's hover highlight has to match on this rather than on the label. */
+  fluor?: string;
   row: number;
   col: number;
   wellLabel: string;
@@ -178,6 +183,7 @@ export interface FactoryCurve {
  * hovering the rail's legend/well-grid instead of the plot itself. */
 export type HighlightMatch =
   | { kind: "target"; dyeLabel: string }
+  | { kind: "fluor"; fluor: string }
   | { kind: "well"; label: string }
   | { kind: "channel"; channel: number }
   | { kind: "sample"; sample: string };
@@ -194,6 +200,8 @@ export interface SeriesMeta {
   col: number;
   label: string;
   dyeLabel: string;
+  /** See {@link PlotCurve.fluor}. */
+  fluor?: string;
   isReference: boolean;
   cycles: number[];
   mean: number[];
@@ -342,6 +350,7 @@ export function buildChart(cfg: BuildChartConfig): {
       col: curve.col,
       label: curve.wellLabel,
       dyeLabel: curve.dyeLabel,
+      fluor: curve.fluor,
       isReference: curve.isReference,
       cycles: curve.cycles,
       mean: curve.mean,
@@ -383,6 +392,7 @@ export function buildChart(cfg: BuildChartConfig): {
         col: -1,
         label: curve.wellLabel,
         dyeLabel: curve.dyeLabel,
+        fluor: curve.fluor,
         isReference: false,
         cycles: curve.cycles,
         mean: baselineRaw,
@@ -635,6 +645,7 @@ export function applyHighlight(u: uPlot, meta: SeriesMeta[], match: HighlightMat
       (m.kind === "well" &&
         ((match.kind === "well" && m.label === match.label) ||
           (match.kind === "target" && m.dyeLabel === match.dyeLabel) ||
+          (match.kind === "fluor" && m.fluor === match.fluor) ||
           (match.kind === "channel" && m.channel === match.channel) ||
           (match.kind === "sample" && m.sample === match.sample)));
     u.series[i + 1]!.alpha = isMatch ? 1 : 0.12;

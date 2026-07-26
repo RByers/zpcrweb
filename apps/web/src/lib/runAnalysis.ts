@@ -98,9 +98,32 @@ export interface RunAnalysis {
    * no well/target Cq to be consistent with. Computed the same way, over the whole plate.
    */
   channelCqTable: Map<string, CqTableEntry>;
-  /** The threshold group a well/fluor pair belongs to — its target, the {@link NO_TARGET} catch-all,
-   * or (on a plate with no targets at all) the fluorophore itself. */
+  /** The *display* group a well/fluor pair belongs to — its target, the {@link NO_TARGET}
+   * catch-all, or (on a plate with no targets at all) the fluorophore itself. Organizes chips,
+   * table rows and colors. **Not** the threshold group — see {@link thresholdGroupOf}. */
   groupOf: (row: number, col: number, fluor: string) => string;
+  /**
+   * The **threshold** group a well/fluor pair belongs to: its **fluorophore**, always.
+   *
+   * Deliberately not the target. A threshold is `multiplier × median baseline noise`
+   * (`threshold.md` §5.1), and baseline noise is an optical property of the dye, the instrument and
+   * the well — the target is a biological label attached to the same physical measurement. Keying
+   * the threshold on the target therefore splits one dye's wells into cohorts that differ only in
+   * what the experimenter called them, which is exactly the "Cq incomparable across a plate"
+   * failure §5.1 exists to prevent: on `20260720.zpcr` the three loaded Texas Red wells carry two
+   * targets (HMPV Ma in A3/B3, PIV3 Bo in D3) and used to come out with thresholds 3.3× apart —
+   * 162 vs 49 RFU — for near-identical curves. It also made cohorts tiny: PIV3 Bo's was a single
+   * well, so its "median noise" was that one well's noise, with no robustness at all.
+   *
+   * This also matches what the instrument does. CFX persists its analysis parameters —
+   * `thresholdOverrideValue` and `autoCalculateThreshold` included — under
+   * `fluorDataAnalysisParam fluorId=…`, one entry per **fluorophore** (`pcrd.md` §2.5,
+   * `threshold.md` §1). There is no per-target threshold anywhere in the format.
+   */
+  thresholdGroupOf: (row: number, col: number, fluor: string) => string;
+  /** The fluorophores thresholds are actually resolved per — the groups {@link thresholdGroupOf}
+   * returns, and the keys {@link FileSettings.thresholdOverrides} uses. */
+  thresholdGroups: FluorCalibration[];
 }
 
 /**
@@ -209,6 +232,9 @@ export function useRunAnalysis(
     [usingTargets, wellFluorTargets],
   );
 
+  // Thresholds group by fluorophore regardless of targets — see `RunAnalysis.thresholdGroupOf`.
+  const thresholdGroupOf = useMemo(() => (_row: number, _col: number, fluor: string) => fluor, []);
+
   // Block temperature is essentially constant across a single PLATEREAD step's cycles (see
   // plateread.md §3), so one representative matrix per step is accurate.
   const stepTemperatureC = useMemo(() => {
@@ -282,7 +308,7 @@ export function useRunAnalysis(
   const cqTable = useMemo(() => {
     const inputs: CqTableCurve[] = allFluorCurves.map((c) => ({
       key: curveKey(c.row, c.col, c.dye),
-      group: groupOf(c.row, c.col, c.dye),
+      group: c.dye, // the fluorophore, never the target — see `thresholdGroupOf`
       cycles: c.cycles,
       values: c.mean,
       contributesToThreshold: loadedFluors.get(wellKey(c.row, c.col))?.has(c.dye) ?? false,
@@ -292,13 +318,7 @@ export function useRunAnalysis(
       thresholdOverrides: settings.thresholdOverrides,
       autoThreshold: { multiplier: settings.thresholdMultiplier },
     });
-  }, [
-    allFluorCurves,
-    groupOf,
-    loadedFluors,
-    settings.thresholdOverrides,
-    settings.thresholdMultiplier,
-  ]);
+  }, [allFluorCurves, loadedFluors, settings.thresholdOverrides, settings.thresholdMultiplier]);
 
   const channelCqTable = useMemo(() => {
     const inputs: CqTableCurve[] = allCurves
@@ -345,5 +365,7 @@ export function useRunAnalysis(
     cqTable,
     channelCqTable,
     groupOf,
+    thresholdGroupOf,
+    thresholdGroups: calibratedFluors,
   };
 }

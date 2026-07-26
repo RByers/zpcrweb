@@ -16,15 +16,22 @@ its own noise. Everything below exists to make that judgement reproducible.
 
 > **Status: implemented (§2–§7), not yet validated against a reference instrument.**
 > `packages/core/src/baseline.ts` implements smoothing, baseline-region selection (both automatic
-> strategies) and baseline subtraction (the `Raw`/`RawBaseLineSubtracted`/
+> strategies plus the §3.4 start-trim) and baseline subtraction (the `Raw`/`RawBaseLineSubtracted`/
 > `LinearBaseLineNormalized` modes). `packages/core/src/threshold.ts` implements threshold
 > determination (manual override or auto, §5), both Cq algorithms (threshold crossing and
-> curve-shape inflection, §6) and the amplification squelch (§7). This document specifies
+> curve-shape inflection, §6) and the amplification squelch (§7).
+> `packages/core/src/stats.ts` holds the statistics both stages share. This document specifies
 > reasonable algorithms and the option space a faithful implementation needs, so that the numbers
 > can be compared against a reference instrument's own output rather than invented. The option
 > names and default values quoted are those a real CFX run persists — they are observable in the
 > committed sample `samples/20260720_Luna_noRT.pcrd`, whose analysis parameters are described in
 > [`pcrd.md`](./pcrd.md) §2.5.
+>
+> **On agreement with CFX.** Bio-Rad documents none of the algorithms below — only the *option
+> names and values* a saved run persists are observable. So each section flags whether a choice is
+> (a) **read from the file**, and therefore certain; (b) **inferred** from those values plus the two
+> thresholds CFX persisted; or (c) **this library's own**, with no evidence either way. Most of the
+> numeric core is (c). Nothing here should be read as "this is what CFX does".
 
 ---
 
@@ -159,7 +166,7 @@ extend it one cycle at a time while each new point stays within a confidence ban
 slowly-rising curves, where a second-derivative peak can be ill-defined.
 
 A practical implementation runs (a) and falls back to (b) when peak detection produces no
-confident answer, then clamps the result to the §3.1 constraints.
+confident answer, then clamps the result to the §3.1 constraints — and then trims the start (§3.4).
 
 ### 3.3 Region *method*: data window vs. full scan
 
@@ -173,6 +180,46 @@ confident answer, then clamps the result to the §3.1 constraints.
 
 With the observed values the window is effectively the whole run, so the two coincide; the
 distinction matters for runs where a sub-range is deliberately analysed.
+
+### 3.4 Trimming the start: the settling transient
+
+*This library's own; **no** evidence CFX does anything equivalent. Implemented by
+`refineBaselineStart()`.*
+
+Everything in §3.2 decides where the baseline must **stop**. Nothing there decides where it should
+**start** — the region simply begins at `minBeginCycle` (2) and takes whatever the instrument was
+doing early in the run. That is a real gap, because the first cycles of a run are the least
+trustworthy part of it: the block and optics are still stabilizing, so the curve rises steeply and
+then flattens — a decaying transient on top of the usual linear drift. A straight line fitted across
+the whole region cannot follow that shape, so the fit tilts, and everything built on it (the noise
+estimate, and through it the group's threshold and every Cq in the group) inherits the error.
+
+The size of the effect is per-well, which is what makes it damaging: on `20260720.zpcr`, wells A3
+and D3 carry the same dye and near-identical curves, but A3's transient is ~55 RFU on the first
+cycle step against D3's ~12, giving residual spreads of 11.1 and 2.5 about their fitted baselines.
+
+The fix is to walk the region's start forward until its residuals stop looking like a smooth arc and
+start looking like noise, judged by the von Neumann ratio of §5.2:
+
+- Stop at the **earliest** start whose ratio reaches ~**1.0**. Earliest, not the maximum — keeping
+  as many baseline cycles as the model honestly supports, rather than discarding good data to chase
+  sampling noise in the statistic.
+- Never trim below ~**8** cycles, and never walk more than ~**15** cycles forward. The second bound
+  matters more than it looks: a settling transient is over within a handful of cycles, and without a
+  bound the walk will "succeed" at the far end of a region, because the tail of a flat curve is
+  white noise and passes trivially. Observed on well A3/FAM of `20260720.zpcr` — a well that never
+  amplifies, so onset detection returns the whole run — where an unbounded walk returned cycles
+  **34–45**, a perfectly white dozen cycles describing nothing about the well's baseline.
+- If **no** start reaches the target, leave the region alone. The premise of the search is that the
+  mis-fit is confined to the front; if nothing makes it white, that premise is false (a baseline
+  that curves continuously, or amplification pulled deep into the region) and trimming would return
+  an arbitrary late slice. §7's validation gate should reject the curve instead.
+
+Judge the ratio on the **unsmoothed** curve. §2's filter makes adjacent points share most of their
+inputs, which is serial correlation by construction — a width-5 weighted mean drives the ratio to
+≈0.4 on pure white noise — so a smoothed curve looks mis-modelled everywhere and the walk trims to
+the minimum on every well. Onset detection genuinely wants the smoothed curve; this test genuinely
+wants the raw one.
 
 ## 4. Baseline subtraction modes
 
@@ -212,8 +259,8 @@ Set `autoCalculateThreshold`. The principle: the threshold should sit just above
 of the baseline, so that crossing it means "signal", not "noise".
 
 ```
-noise      = standard deviation of the baseline-region residuals
-threshold  = k × noise            (k ≈ 20, see below)
+noise      = successive-difference spread of the baseline-region residuals   (§5.2)
+threshold  = k × noise                                                       (k ≈ 20, see below)
 ```
 
 On top of the region starting at cycle 2 (§3.1), the region's **own first cycle is left out of the
@@ -242,19 +289,109 @@ deep in the exponential's foot and every Cq comes out systematically early.
 
 The **scale** comes from the only ground truth available — the thresholds CFX itself persisted in
 `20260720_Luna_noRT.pcrd`, where `autoCalculateThreshold="False"` means these are the values the
-instrument's own analysis actually used:
+instrument's own analysis actually used. The plate loads three fluorophores and exactly **two**
+carry an override: `fluorId` 5 (FAM) and 12 (Texas Red), both 210.72. `fluorId` 4 (Cy5) is left on
+`autoCalculateThreshold="True"` and is **not** an anchor. Dividing those two by the median
+`baselineNoise` over each dye's four loaded wells:
 
-| Fluor | CFX `thresholdOverrideValue` | median `baselineNoise` | ratio |
+| Fluor | CFX `thresholdOverrideValue` | via plain std-dev | via successive difference (§5.2) |
 |---|---|---|---|
-| FAM | 210.72 | 4.98 | 42.3× |
-| Texas Red | 210.72 | 5.31 | 39.7× |
+| FAM | 210.72 | 2.33 → **90.3×** | 2.47 → **85.3×** |
+| Texas Red | 210.72 | 5.08 → **41.5×** | 2.65 → **79.6×** |
 
-Two anchors from a single run, agreeing within 6% and both landing near **40×**. That is enough to
-pin the order of magnitude — tens of multiples of this residual, not the textbook 3–10× — and no
-more. The **default is 20**, deliberately below what those anchors imply: judged against how the
-resulting Cq values read on the samples in hand, where 40× places them later than the curves
-suggest. Two anchors sharing one override value, from one run on one instrument, are not enough to
-overrule that; see §9. The web app puts the multiplier on a slider for exactly this reason.
+Read that table as evidence about the *estimator*, not just the constant. Under a plain standard
+deviation the two anchors disagree by **2.2×**, so "the" multiplier would depend on which dye it had
+been calibrated against — disqualifying for a constant meant to generalize. Under §5.2's estimator
+they agree within **7%**. That is the main argument for §5.2, and it was not true by construction:
+the estimators converge because Texas Red's cohort happened to carry more baseline mis-fit than
+FAM's, and removing that from the statistic removed the disagreement with it.
+
+The **default is 20**, well below the ≈80 those anchors now imply. That gap is a deliberate,
+unresolved judgement call rather than a measurement: re-anchoring to ≈80 puts every Cq on the
+samples in hand later than the curves suggest. Two anchors sharing one override value, from one run
+on one instrument, are not enough to overrule that; see §9. The web app puts the multiplier on a
+slider for exactly this reason.
+
+An obvious alternative is to scale the threshold to the *amplification* rather than the noise. The
+same two anchors read as 7.5% and 10.1% of their wells' median ΔRFU: a looser fit, and one that
+disagrees sharply on other plates (on `20230829_135443_CT019138_SINGLE_STEP_.zpcr`, whose ΔRFU/noise
+ratio is ~4× higher, an 8% rule gives a threshold ~5× the noise-relative one). So the rule stays
+noise-relative.
+
+### 5.2 What "noise" means: successive differences, not spread
+
+*This library's own. CFX's noise statistic is not documented and not observable; all that can be
+said is that this choice makes the two anchors above mutually consistent, which the obvious
+alternative does not. Implemented by `baselineNoise()`, selectable via its `estimator` option.*
+
+The obvious reading of "noise" is the standard deviation of the baseline region's residuals. That is
+wrong in a way that matters, and it is the single largest source of *per-well* error in the chain.
+
+A standard deviation about a fitted line answers **"how far is this curve from my model?"** The
+threshold rule needs **"how much does this curve jitter?"** Those coincide only when the model is
+right. When it isn't — a settling transient (§3.4), a curved drift, the foot of amplification pulled
+into the region — the residuals trace a smooth path rather than scattering, the standard deviation
+reports the size of *that path*, and the threshold inflates in proportion to how badly the line
+mis-described the well. The threshold then rises exactly where the curve is least well understood,
+per well, which makes Cq incomparable across a plate — the very thing §5.1's per-group threshold
+exists to prevent.
+
+Use the root-mean-square **successive difference** instead (the MSSD, or von Neumann, estimator):
+
+```
+noise = sqrt( mean( (r[i] − r[i−1])² ) / 2 )
+```
+
+It measures only cycle-to-cycle change, so it is blind to any smooth trend the fit missed, and it
+agrees with the standard deviation on residuals that really are a straight line plus white noise.
+The `/2` is what makes the two agree there: successive differences of independent values carry twice
+the variance of the values themselves.
+
+Measured over the loaded curves of the committed samples, `std-dev ÷ successive-difference` runs to
+**4.2×** on `20260720.zpcr` and **8.7×** on `20230829_135443_CT019138_SINGLE_STEP_.zpcr` (median
+5.5× there, where 67 of 72 curves carry a visibly non-white baseline). On the latter the old
+estimator put the group threshold at **≈1063 RFU** and only 3 of 72 wells reported a Cq at all;
+this one puts it at **≈178**, and 5 report.
+
+Two cautions:
+
+- **Trend robustness is not outlier robustness.** An isolated bad read enters *two* successive
+  differences rather than one squared deviation, so a lone spike counts for slightly more, not less.
+  This is why the leading-cycle skip below still earns its place. A median-of-absolute-differences
+  variant would be robust to both; it is not implemented, because nothing has been measured to
+  justify the extra constant it needs.
+- **The ratio of the two estimators is itself the useful quantity** — see §5.3.
+
+### 5.3 The von Neumann ratio, and what it is good for
+
+*This library's own; exposed as `residualWhiteness()` and `whiteness()`.*
+
+Dividing the mean squared successive difference by the variance gives **von Neumann's ratio** — a
+scale-free measure of how much of a residual series is noise rather than structure:
+
+| Ratio | Meaning |
+|---|---|
+| **≈ 2** | White noise — successive residuals independent. What a correctly-modelled baseline gives. |
+| **→ 0** | Strongly serially correlated — the residuals trace a smooth path, so a straight line is the wrong model over this region. |
+| **> 2** | Alternating / anti-correlated, e.g. an over-smoothed or aliased trace. |
+
+Its value is that it needs **no tuning constant and no scale**: the null is 2 for every curve, dye,
+run and instrument. Contrast §3.2's flatness/linearity bounds, which are fractions of the curve's
+*whole span* and so grow permissive exactly on the high-rising wells where a mis-fit baseline does
+the most damage. Measured on the committed samples the separation is wide and clean: every visibly
+mis-modelled curve lands at **0.03–0.5**, every clean one at **1.4–2.5**.
+
+**Where it works: choosing between regions.** §3.4's start-trim compares sub-regions of one curve
+against each other, and a wrong answer there costs a few baseline cycles.
+
+**Where it does not: accepting or rejecting one.** Promoting the same ratio into a §7 validation
+gate was tried and abandoned. Being scale-free cuts both ways — it cannot distinguish structure that
+matters from structure far below what the instrument can resolve. A near-noiseless curve is the
+pathological case: with almost no scatter, *any* residual is ~100% structure, so the ratio collapses
+toward 0 and the gate fires hardest precisely where the linear fit is most nearly exact. On
+noise-free synthetic sigmoids it rejects every curve; on real data it flagged ten further wells of
+`20230829…SINGLE_STEP_` invalid without catching anything §7's existing gate was missing. Validation
+stays with the span-relative bounds; the ratio stays a search heuristic and a per-curve diagnostic.
 
 An obvious alternative is to scale the threshold to the *amplification* rather than the noise. The
 same two anchors read as 7.5% and 10.1% of their wells' median ΔRFU: a looser fit, and one that
@@ -264,10 +401,21 @@ noise-relative.
 
 Two refinements that matter in practice:
 
-- **Compute one threshold per fluorophore, not per well.** A threshold that varies well-to-well
-  makes Cq values incomparable across a plate, which defeats the purpose. Estimate the noise
-  across the wells in the group — the `subsetPopRDBaseLinePref` setting (**5**) suggests using a
-  subset of the population rather than every well.
+- **Compute one threshold per fluorophore — not per well, and not per target.** A threshold that
+  varies well-to-well makes Cq values incomparable across a plate, which defeats the purpose.
+  Estimate the noise across the wells in the group — the `subsetPopRDBaseLinePref` setting (**5**)
+  suggests using a subset of the population rather than every well.
+
+  The **fluorophore**, specifically, is the right grouping, and this is one of the few places the
+  file format settles the question: CFX persists `thresholdOverrideValue` and
+  `autoCalculateThreshold` under `fluorDataAnalysisParam fluorId=…` (§1), one entry per dye. There
+  is no per-target threshold anywhere in the format. That matches the physics — baseline noise is a
+  property of the dye, the optics and the well, while the target is a biological label attached to
+  the same physical measurement — and grouping by target instead splits one dye's wells into
+  cohorts differing only in what the experimenter called them. Observed on `20260720.zpcr`, whose
+  three loaded Texas Red wells carry two targets (HMPV Ma in A3/B3, PIV3 Bo in D3): grouping by
+  target gave them thresholds of **162 and 49 RFU** for near-identical curves, and left PIV3 Bo's
+  cohort a single well, so its "median noise" was that one well with no robustness at all.
 - **Floor the threshold.** If a plate contains only flat wells, the noise estimate collapses and
   the threshold approaches zero, so every well "crosses" at cycle 1. Impose a minimum absolute RFU.
   `autoThreshold()` takes a `minThreshold` but defaults it to **0**, i.e. no floor, since no
@@ -284,12 +432,20 @@ Two refinements that matter in practice:
 > batch entry point that enforces this: one call over every curve of a run, one entry per
 > well/fluorophore.
 
-### 5.2 Manual override
+### 5.4 Manual override
 
-`thresholdOverrideValue` (with `autoCalculateThreshold="False"`) pins the threshold to a fixed RFU
-— **38.70** in the sample. This is the common choice when comparing runs, since an auto threshold
-recomputed per run makes Cq values drift between plates. An implementation should treat the
-override as authoritative and skip §5.1 entirely.
+`thresholdOverrideValue` (with `autoCalculateThreshold="False"`) pins the threshold to a fixed RFU.
+This is the common choice when comparing runs, since an auto threshold recomputed per run makes Cq
+values drift between plates. An implementation should treat the override as authoritative and skip
+§5.1 entirely.
+
+**Read the `fluorId`, not just the first entry.** A `.pcrd` carries a `fluorDataAnalysisParam` for
+every fluorophore the software knows about, not only the ones on the plate, so the first override in
+the document usually belongs to a dye the run never used. In `20260720_Luna_noRT.pcrd` the first is
+`fluorId="13002"` at **38.70** — quoted as "the sample's override" in earlier revisions of this doc,
+and wrong: the plate's own dyes are `fluorId` 5 (FAM) and 12 (Texas Red), both **210.72**, plus
+`fluorId` 4 (Cy5) on `autoCalculateThreshold="True"` with no override at all. Only the two 210.72
+values are usable as calibration anchors (§5.1).
 
 ## 6. Cq — two algorithms
 
@@ -362,6 +518,11 @@ Two guards worth implementing, both of which change reported results:
   produces a spurious late Cq. Implemented by `isAmplified()` in `packages/core/src/threshold.ts`
   (default multiplier **10**, not pinned by the doc); `computeCq()` applies it automatically when
   given a `noise` estimate.
+- **Do *not* add a serial-correlation gate here.** Rejecting a region whose residuals aren't white
+  (§5.3) looks like the natural companion to the flatness/linearity check and is not: the von
+  Neumann ratio is scale-free, so it cannot tell structure that matters from structure below the
+  instrument's resolution, and it fires hardest on the cleanest curves. Tried and abandoned — see
+  §5.3 for the measurements. The ratio belongs in region *selection* (§3.4) and in diagnostics.
 - **Validate the baseline.** If the chosen region fails the flatness/linearity checks of §3.2, the
   Cq derived from it is unreliable however clean the crossing looks — this matters even for a
   region `findBaselineByRegression` chose, not just `findBaselineByCurvature`'s own candidates:
@@ -395,32 +556,50 @@ For an implementation aiming to match a reference instrument:
 | Cycles skipped (begin/end) | 0 / 0 |
 | Smoothing | Weighted mean, width 5 |
 | Baseline region | Auto, never starting before cycle 2; else cycles 2–9 |
+| Baseline start-trim (§3.4) | On; target ratio 1.0, min width 8, max trim 15 cycles |
+| Noise statistic (§5.2) | Successive difference (MSSD), not standard deviation |
 | Cycles dropped from the noise estimate | 1 (the region's first) |
 | Minimum baseline width | 3 cycles |
 | Baseline mode | Linear (fitted line subtracted) |
 | Baseline region method | Data window over the full run |
+| Threshold group | The fluorophore (§5.1) — never the target |
 | Threshold | Manual override if present, else ≈20 × baseline noise (§5.1) |
 | Cq algorithm | Threshold crossing, log-interpolated |
 | No Cq if trace ends under threshold | On |
 
 ## 9. Open items
 
-- **Partially implemented.** `baseline.ts` covers §2–§4 (smoothing, baseline region, baseline
-  subtraction, and now the §7 baseline-validation gate via `validateBaselineRegion()`) and
+- **Partially implemented.** `baseline.ts` covers §2–§4 (smoothing, baseline region including
+  §3.4's start-trim, baseline subtraction, and the §7 validation gate via `validateBaselineRegion()`)
+  and
   `threshold.ts` covers §5–§7 (threshold determination, both Cq algorithms, the amplification
   squelch). Not implemented: the `pDriftCorrection` reference-normalization baseline modes and
   `LinearBaseLineNormalizedCurveFit`'s refinement.
 - **The threshold multiplier rests on two data points.** §5.1's scale is fixed by the two
   fluorophores of `20260720_Luna_noRT.pcrd` for which CFX persisted an explicit
-  `thresholdOverrideValue`. They agree within 6%, but they come from one run on one instrument, and
-  both happen to share the same override value — and the shipped default (20) sits below the ~40
-  they imply, on the strength of how the resulting Cq values read rather than any measurement. More runs carrying `autoCalculateThreshold="False"`
-  would either confirm the constant or reveal that it tracks something else (dye, chemistry, plate
-  type). Since the multiplier sets how early every Cq lands, this is the single largest source of
-  systematic error left in the chain.
+  `thresholdOverrideValue` (FAM and Texas Red, both 210.72; Cy5 is on auto and is not an anchor).
+  Under §5.2's estimator they imply 85.3× and 79.6× — agreeing within 7%, but from one run on one
+  instrument, sharing a single override value. The shipped default of **20** sits far below that,
+  on the strength of how the resulting Cq values read rather than any measurement, and closing that
+  4× gap is the largest open question in this document. More runs carrying
+  `autoCalculateThreshold="False"` would either confirm the constant or reveal that it tracks
+  something else (dye, chemistry, plate type). Since the multiplier sets how early every Cq lands,
+  this remains the single largest source of *systematic* error left in the chain — though it is now
+  a uniform one, where the old std-dev estimator made it vary per well.
+- **The noise estimator is inferred, not observed.** §5.2's successive-difference statistic is
+  argued from first principles and from the fact that it makes the two anchors above mutually
+  consistent (2.2× disagreement → 7%). That is real evidence, but it is *indirect*: nothing in the
+  format says what CFX computes, and a different estimator paired with a different multiplier could
+  fit the same two numbers. `baselineNoise()` keeps `residualStdDev` selectable so the comparison
+  can be redone if more anchors turn up.
+- **A robust successive-difference variant is untested.** The MSSD estimator is immune to smooth
+  trend but slightly *more* sensitive to isolated spikes than a standard deviation (a spike enters
+  two differences). A median-of-absolute-differences form would be robust to both; it needs a
+  consistency constant (≈1.048 for Gaussian residuals) that nothing here has been measured against,
+  so it was not shipped.
 - **Persisted analysis parameters are not yet honoured.** A `.pcrd` carries the whole
   `dataAnalysisParameters` tree — including the per-fluorophore `thresholdOverrideValue` /
-  `autoCalculateThreshold` pair that §5.2 says should be authoritative, and the
+  `autoCalculateThreshold` pair that §5.4 says should be authoritative, and the
   `baselineBeginRepeat` / `baselineEndRepeat` region. Reading them would make a `.pcrd` reproduce
   CFX's own numbers exactly rather than approximately. A `.zpcr` stores none of this, so auto
   selection remains the only path there.

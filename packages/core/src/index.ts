@@ -68,12 +68,15 @@ export {
   findBaselineByCurvature,
   findBaselineByRegression,
   autoBaselineRegion,
+  refineBaselineStart,
   validateBaselineRegion,
   subtractBaseline,
   fitLinearBaseline,
 } from "./baseline.js";
+export { stdDev, meanSquaredSuccessiveDifference, whiteness, median } from "./stats.js";
 export {
   baselineNoise,
+  residualWhiteness,
   autoThreshold,
   resolveThreshold,
   isAmplified,
@@ -151,11 +154,14 @@ export type {
   CurvatureBaselineOptions,
   RegressionBaselineOptions,
   AutoBaselineOptions,
+  BaselineStartRefinementOptions,
   BaselineValidationOptions,
   BaselineMode,
   LinearBaselineFit,
 } from "./baseline.js";
 export type {
+  NoiseEstimator,
+  BaselineNoiseOptions,
   AutoThresholdOptions,
   ThresholdOptions,
   AmplificationOptions,

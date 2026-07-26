@@ -87,7 +87,10 @@ export function baselineCorrectCurve(
   amplification?: AmplificationOptions,
 ): CurveBaselineResult {
   const smoothed = smoothCurve(values);
-  const region = autoBaselineRegion(cycles, smoothed) ?? fallbackRegion(cycles);
+  // Onset detection reads the smoothed curve (it hunts a second-derivative peak); the start-trim
+  // reads the raw one, since smoothing is serial correlation by construction and would make every
+  // region look mis-modelled. See `refineBaselineStart`.
+  const region = autoBaselineRegion(cycles, smoothed, { rawValues: values }) ?? fallbackRegion(cycles);
   const baselineValid = validateBaselineRegion(cycles, smoothed, region);
   const correctedValues = subtractBaseline(cycles, values, region, mode);
   const noise = baselineNoise(cycles, correctedValues, region);

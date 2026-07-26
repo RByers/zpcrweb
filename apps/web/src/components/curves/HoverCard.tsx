@@ -10,6 +10,10 @@ export interface HoverCardRow {
   label: string;
   sublabel?: string;
   cq: number | null;
+  /** Overrides the trailing Cq column with arbitrary pre-formatted text. For cards whose subject
+   * isn't a Cq — the Threshold rail's card lists each well's baseline noise instead, since that is
+   * what the threshold is actually derived from. */
+  value?: string;
   color?: string;
   selected: boolean;
 }
@@ -49,7 +53,7 @@ export function HoverCard({
                 {r.color && <span className="curvecard__swatch" style={{ background: r.color }} />}
                 <span className="curvecard__label">{r.label}</span>
                 {r.sublabel && <span className="curvecard__sub">{r.sublabel}</span>}
-                <span className="curvecard__cq">{formatCq(r.cq)}</span>
+                <span className="curvecard__cq">{r.value ?? formatCq(r.cq)}</span>
               </div>
             ))}
           </div>

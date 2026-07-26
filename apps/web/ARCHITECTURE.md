@@ -382,11 +382,18 @@ color-separated `allFluorCurves` — and, on top of those, the run's **Cq table*
   curves, over every curve, and over the standalone Analysis view's enabled wells) had the same well
   showing a Cq in one place and "—" in another. Display filters — enabled wells, disabled targets, sample and
   fluor toggles, the view-mode switch — now change only which entries are *shown*.
-- **Grouping** is `groupOf(row, col, fluor)`: the pair's target/gene, the shared `"(none)"` catch-all
-  when it has none (NTC/NRT wells still get a real threshold and a real Cq rather than being dropped
-  for lack of a name), or the fluorophore itself on a plate with no targets at all. Note this is
-  independent of the Curves view's Fluorophore/Target *display* mode, which used to re-group the
-  thresholds under the chart and so produce different Cq values than the table for the same wells.
+- **Grouping** is two separate things, deliberately. `groupOf(row, col, fluor)` is the *display*
+  group — the pair's target/gene, the shared `"(none)"` catch-all when it has none, or the
+  fluorophore on a plate with no targets — and organizes chips, table rows and colors.
+  `thresholdGroupOf` is the **threshold** group and is always the **fluorophore**. Baseline noise is
+  a property of the dye and the optics; a target is a biological label on the same measurement, so
+  grouping thresholds by target split one dye's wells into cohorts differing only in what they were
+  called: on `20260720.zpcr` the three Texas Red wells carry two targets and got thresholds 162 and
+  49 RFU for near-identical curves, with one cohort a single well. It also matches the format — CFX
+  persists `thresholdOverrideValue` per `fluorId`, never per target. `thresholdOverrides` is
+  therefore keyed by fluorophore name. Both are independent of the Curves view's
+  Fluorophore/Target *display* mode, which used to re-group the thresholds under the chart and so
+  produce different Cq values than the table for the same wells.
 - **Noise cohort:** only well/fluor pairs the plate actually loads (`loadedFluors`) contribute to a
   group's threshold, via `CqTableCurve.contributesToThreshold`. Pairs the plate never loaded still
   get their own entry — the Curves view can plot them with "Unloaded" on, and they need a Cq — but a
@@ -657,8 +664,13 @@ is: a per-target curve needs channel→dye color separation (`calibration.md`).
   `threshold = k × median noise` (1–100, default 20, with a Reset link back to it): it is exposed
   rather than buried because the scale behind it rests on two anchors from a single run and it is
   the one number that shifts every Cq on the plate — the per-group thresholds below it update live
-  as it moves, so its effect is visible rather than inferred. Below that, one **per-group override**
-  row each. That input always carries a value — the live auto threshold when no override is set,
+  as it moves, so its effect is visible rather than inferred. Below that, one **per-fluorophore
+  override** row each. Hovering a row isolates that fluor's curves, draws a dotted line at its
+  threshold, and opens a card breaking the number down — `median σ × k = RFU` over one row per
+  contributing well, each showing that well's baseline region and its own noise. That breakdown
+  earns its place now that neither input is self-evident: the noise is a successive-difference
+  statistic (`threshold.md` §5.2) and each region is independently start-trimmed (§3.4), so a
+  surprising threshold is usually one well's region, and the card says which. That input always carries a value — the live auto threshold when no override is set,
   greyed via `.is-auto` — rather than sitting empty behind a placeholder, because an empty number
   input steps from 0: one press of the down arrow would jump the threshold from ~200 to nothing.
   Seeded this way the arrows nudge from where the threshold actually is, in whole RFU (`step={1}`).

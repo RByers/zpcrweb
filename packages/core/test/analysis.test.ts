@@ -5,6 +5,7 @@ import {
   baselineCorrectCurve,
   computeCq,
   computeCqTable,
+  residualWhiteness,
 } from "../src/index.js";
 import { readSampleBytes } from "./sample.js";
 
@@ -140,7 +141,34 @@ describe("baselineCorrectCurve", () => {
     // The fitted baseline follows the curve's real downward drift instead of being dragged up by
     // the rise — the sign error that pushed the corrected curve's first cycles above threshold.
     expect(result.baselineFit.slope).toBeLessThan(0);
-    expect(result.correctedValues[0]!).toBeLessThan(result.noise);
+
+    // The bug this guards is that the well silently reported *no* Cq: with the baseline sloping
+    // the wrong way the corrected curve started above the threshold, which §6.1 reads as a failed
+    // baseline. Assert that directly — the early cycles stay well under the threshold this well's
+    // own noise implies, and a Cq comes back somewhere in the visible rise (~cycle 32 onward).
+    const threshold = 20 * result.noise;
+    expect(Math.max(...result.correctedValues.slice(0, 5))).toBeLessThan(threshold);
+    const cq = computeCq(lateCycles, result.correctedValues, {
+      algorithm: "Threshold",
+      threshold,
+      noise: result.noise,
+      baselineValid: result.baselineValid,
+    });
+    expect(cq).not.toBeNull();
+    expect(cq!).toBeGreaterThan(28);
+    expect(cq!).toBeLessThan(36);
+  });
+
+  // Same well, but showing *why* the region no longer starts at cycle 2: its pre-amplification
+  // decay is steep early and shallow later, so a line fitted across the whole of it leaves
+  // residuals that trace an arc rather than scattering. `refineBaselineStart` walks the start
+  // forward until that stops being true.
+  it("trims a settling transient off the front of the baseline region", () => {
+    const result = baselineCorrectCurve(lateCycles, lateValues, "LinearBaseLineNormalized");
+    expect(result.baselineRegion.beginCycle).toBeGreaterThan(2);
+    expect(
+      residualWhiteness(lateCycles, result.correctedValues, result.baselineRegion),
+    ).toBeGreaterThan(1);
   });
 
   it("gives that well a Cq even in a group of otherwise flat wells", () => {

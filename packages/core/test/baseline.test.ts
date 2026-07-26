@@ -11,6 +11,8 @@ import {
   validateBaselineRegion,
   subtractBaseline,
   fitLinearBaseline,
+  refineBaselineStart,
+  whiteness,
 } from "../src/index.js";
 import { readSampleBytes } from "./sample.js";
 
@@ -409,5 +411,92 @@ describe("subtractBaseline", () => {
     for (let i = 0; i < 20; i++) expect(Math.abs(corrected[i]!)).toBeLessThan(15);
     // the plateau at the end should still show strong signal well above the baseline
     expect(corrected.at(-1)!).toBeGreaterThan(1000);
+  });
+});
+
+describe("whiteness (von Neumann ratio)", () => {
+  it("sits near 2 for independent scatter and near 0 for a smooth trend", () => {
+    const alternatingIsAntiCorrelated = whiteness([-1, 1, -1, 1, -1, 1, -1, 1]);
+    expect(alternatingIsAntiCorrelated).toBeGreaterThan(3);
+
+    // A smooth arc — the shape a settling transient leaves behind a straight-line fit.
+    const arc = Array.from({ length: 24 }, (_, i) => -((i - 12) ** 2) / 20);
+    expect(whiteness(arc)).toBeLessThan(0.2);
+
+    let seed = 987654321;
+    const scatter = Array.from({ length: 200 }, () => {
+      seed = (seed * 1103515245 + 12345) % 2147483648;
+      return (seed / 2147483648) * 2 - 1;
+    });
+    expect(whiteness(scatter)).toBeGreaterThan(1.6);
+    expect(whiteness(scatter)).toBeLessThan(2.4);
+  });
+
+  it("reports the white-noise null rather than 0 when there is nothing to judge", () => {
+    expect(whiteness([5, 5, 5, 5, 5])).toBe(2);
+    expect(whiteness([1, 2])).toBe(2);
+  });
+});
+
+/** Residuals of a region's own points about a line fitted to them — the series the trim judges. */
+function regionResiduals(cycles: number[], values: number[], region: { beginCycle: number; endCycle: number }) {
+  const idx = cycles
+    .map((c, i) => (c >= region.beginCycle && c <= region.endCycle ? i : -1))
+    .filter((i) => i >= 0);
+  const fit = fitLinearBaseline(cycles, values, region);
+  return idx.map((i) => values[i]! - (fit.slope * cycles[i]! + fit.intercept));
+}
+
+describe("refineBaselineStart", () => {
+  const cycles = Array.from({ length: 30 }, (_, i) => i + 1);
+  // A decaying settling transient over the first ~8 cycles, then a clean linear drift + jitter.
+  let seed = 4242;
+  const jitter = cycles.map(() => {
+    seed = (seed * 1103515245 + 12345) % 2147483648;
+    return (seed / 2147483648) * 2 - 1;
+  });
+  const transient = cycles.map(
+    (c, i) => 1000 + 2 * c + 60 * Math.exp(-(c - 1) / 2.5) + jitter[i]!,
+  );
+  const clean = cycles.map((c, i) => 1000 + 2 * c + jitter[i]!);
+
+  it("walks the start past a settling transient", () => {
+    const out = refineBaselineStart(cycles, transient, { beginCycle: 2, endCycle: 28 });
+    expect(out.beginCycle).toBeGreaterThan(4);
+    expect(out.endCycle).toBe(28);
+    // The trimmed region's residuals are white; the untrimmed region's are not — which is the
+    // whole basis for the walk.
+    expect(whiteness(regionResiduals(cycles, transient, out))).toBeGreaterThan(1);
+    expect(
+      whiteness(regionResiduals(cycles, transient, { beginCycle: 2, endCycle: 28 })),
+    ).toBeLessThan(1);
+  });
+
+  it("leaves a region alone when its residuals are already white", () => {
+    expect(refineBaselineStart(cycles, clean, { beginCycle: 2, endCycle: 28 })).toEqual({
+      beginCycle: 2,
+      endCycle: 28,
+    });
+  });
+
+  it("never trims below its minimum width", () => {
+    const out = refineBaselineStart(cycles, transient, { beginCycle: 2, endCycle: 12 });
+    expect(out.endCycle - out.beginCycle + 1).toBeGreaterThanOrEqual(8);
+  });
+
+  it("leaves the region alone when no start makes it white", () => {
+    // A baseline that curves continuously rather than settling: no prefix trim rescues it, so the
+    // region comes back as found and the §7 flatness gate is left to judge it.
+    const curved = cycles.map((c) => 1000 - 3 * c ** 1.6);
+    const region = { beginCycle: 2, endCycle: 30 };
+    expect(refineBaselineStart(cycles, curved, region)).toEqual(region);
+  });
+
+  it("never walks the start further than maxTrim", () => {
+    const flatTail = cycles.map((c, i) => (c < 20 ? 1000 + 400 / c : 1000 + jitter[i]!));
+    const out = refineBaselineStart(cycles, flatTail, { beginCycle: 2, endCycle: 30 }, {
+      maxTrim: 5,
+    });
+    expect(out.beginCycle).toBeLessThanOrEqual(2 + 5);
   });
 });

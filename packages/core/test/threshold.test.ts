@@ -25,12 +25,54 @@ describe("baselineNoise", () => {
     expect(baselineNoise(cycles, values, { beginCycle: 1, endCycle: 5 })).toBe(0);
   });
 
-  it("reflects the spread of noisy residuals about their mean", () => {
+  it("reflects the spread of noisy residuals about their mean, under residualStdDev", () => {
     const cycles = [1, 2, 3, 4];
     const values = [-1, 1, -1, 1];
     expect(
-      baselineNoise(cycles, values, { beginCycle: 1, endCycle: 4 }, { skipLeadingCycles: 0 }),
+      baselineNoise(
+        cycles,
+        values,
+        { beginCycle: 1, endCycle: 4 },
+        { skipLeadingCycles: 0, estimator: "residualStdDev" },
+      ),
     ).toBeCloseTo(1, 6);
+  });
+
+  it("ignores a smooth trend the baseline fit missed, but not the scatter on top of it", () => {
+    // A settling transient (a decaying ramp) plus a fixed ±1 jitter. The residual spread is
+    // dominated by the ramp; the successive differences are not.
+    const cycles = Array.from({ length: 20 }, (_, i) => i + 1);
+    const ramp = cycles.map((c) => 60 * Math.exp(-(c - 1) / 4));
+    const jitter = cycles.map((_, i) => (i % 2 === 0 ? 1 : -1));
+    const values = ramp.map((r, i) => r + jitter[i]!);
+    const region = { beginCycle: 1, endCycle: 20 };
+
+    const spread = baselineNoise(cycles, values, region, {
+      skipLeadingCycles: 0,
+      estimator: "residualStdDev",
+    });
+    const mssd = baselineNoise(cycles, values, region, { skipLeadingCycles: 0 });
+
+    // The default is the shipped one, and it is the smaller of the two here by a wide margin.
+    expect(baselineNoise(cycles, values, region, { skipLeadingCycles: 0 })).toBe(mssd);
+    expect(spread).toBeGreaterThan(4 * mssd);
+
+    // Remove the trend and the two land within a few tens of percent of each other: they measure
+    // the same thing on residuals the baseline model actually describes, and only diverge on
+    // mis-fit. (Exact agreement isn't expected — they are different estimators of the same σ, and
+    // on a short series both carry sampling spread of their own.)
+    let seed = 12345;
+    const noiseOnly = cycles.map(() => {
+      seed = (seed * 1103515245 + 12345) % 2147483648;
+      return (seed / 2147483648) * 2 - 1;
+    });
+    const flatSpread = baselineNoise(cycles, noiseOnly, region, {
+      skipLeadingCycles: 0,
+      estimator: "residualStdDev",
+    });
+    const flatMssd = baselineNoise(cycles, noiseOnly, region, { skipLeadingCycles: 0 });
+    expect(flatMssd / flatSpread).toBeGreaterThan(0.7);
+    expect(flatMssd / flatSpread).toBeLessThan(1.4);
   });
 
   it("leaves the region's first cycle out of the estimate by default", () => {

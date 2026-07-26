@@ -11,6 +11,8 @@
  * cross-validated against a reference instrument's own Cq — the same caveat applies here.
  */
 
+import { whiteness } from "./stats.js";
+
 /** `pCRDigitalFilter` — the smoothing filter applied to a curve before baselining (§2). */
 export type SmoothingMode = "Disable" | "RollingBoxcar" | "WeightedMean" | "Centroid";
 
@@ -368,26 +370,146 @@ export function findBaselineByRegression(
   return { beginCycle: cycles[beginIdx]!, endCycle: cycles[endIdx]! };
 }
 
+/**
+ * Residuals of `region`'s own points about a straight line fitted to them — the series whose
+ * {@link whiteness} says whether a linear baseline is the right model over this region.
+ */
+function regionResiduals(cycles: number[], values: number[], region: BaselineRegion): number[] {
+  const idx = regionIndices(cycles, region);
+  if (idx.length < 2) return [];
+  const x = idx.map((i) => cycles[i]!);
+  const y = idx.map((i) => values[i]!);
+  const fit = linearFit(x, y);
+  return y.map((v, i) => v - (fit.slope * x[i]! + fit.intercept));
+}
+
+export interface BaselineStartRefinementOptions {
+  /**
+   * The von Neumann ratio ({@link whiteness}) the trimmed region's residuals must reach for the
+   * walk to stop. Default **1.0**.
+   *
+   * White noise sits at 2 and a badly mis-modelled region at well under 0.5, so 1.0 is the
+   * midpoint of a gap that measures wide on real data — every mis-modelled curve in the committed
+   * samples lands at 0.03–0.5 and every clean one at 1.4–2.5. It is deliberately not set nearer 2:
+   * the ratio's own sampling spread on a 10–20 point region is a few tenths, so demanding near-2
+   * would trim good cycles off clean wells to chase noise in the statistic.
+   */
+  targetWhiteness?: number;
+  /**
+   * Never trim the region below this many cycles. Default **8**.
+   *
+   * Both the noise estimate and the ratio driving this search get unreliable on short regions, so
+   * the trim has to stop well before {@link BaselineRegionConstraints.minWidth}'s 3. Eight cycles
+   * leaves seven successive differences, enough for the ratio to mean something.
+   */
+  minWidth?: number;
+  /**
+   * Never walk the start more than this many cycles forward. Default **15**.
+   *
+   * This bounds the search to the phenomenon it exists for. A settling transient is a property of
+   * the *start of a run* — block and optics stabilizing — and is over within a handful of cycles;
+   * nothing physical justifies trimming 30 cycles off the front. Without the bound the walk will
+   * happily run to the far end of a region and "succeed" there, because the tail of a flat,
+   * non-amplifying curve is white noise and passes the test trivially. Observed on well A3/FAM of
+   * `20260720.zpcr`, whose curve never amplifies: onset detection finds nothing and hands back the
+   * whole run (cycles 2–45), and the unbounded walk trimmed that to **34–45** — a perfectly white
+   * dozen cycles at the end of the run that describe nothing about the well's baseline. With the
+   * bound the region comes back as found, and §7's validation gate rejects it, which is the honest
+   * outcome.
+   */
+  maxTrim?: number;
+}
+
+/**
+ * Walk a baseline region's **start** forward until its residuals about a fitted line look like
+ * white noise (§3.2). Returns `region` unchanged if it is already at or below
+ * {@link BaselineStartRefinementOptions.minWidth}, if its residuals are white to begin with, or if
+ * *no* start makes them white — see the note at the end of the function for that last case.
+ *
+ * This is the counterpart to `findBaselineByCurvature`'s `onsetFootFraction`, at the other end of
+ * the region. Onset detection fixes where the baseline must *stop*; nothing until now fixed where
+ * it should *start*, so the region always began at `minBeginCycle` (2) and swallowed whatever the
+ * instrument was doing early in the run. On a well whose block and optics are still settling, the
+ * first several cycles rise steeply and then flatten — a decaying transient on top of the usual
+ * linear drift — and a straight line fitted across the whole region cannot follow that. The fit
+ * tilts, and every downstream quantity built on it (the noise estimate, and through it the group's
+ * threshold and every Cq in that group) inherits the error.
+ *
+ * Trimming from the front is the minimal fix: it discards only the cycles that are actually
+ * mis-described, and stops as soon as the rest of the region is consistent with a line plus noise.
+ * Preferring the *earliest* start that passes, rather than the start that maximizes the ratio,
+ * keeps as many baseline cycles as the model can honestly support — maximizing would throw away
+ * good data to chase sampling noise in the statistic.
+ *
+ * **`values` must be the unsmoothed curve.** §2's smoothing filter makes adjacent points share most
+ * of their inputs, which is serial correlation by construction: a width-5 weighted mean drives the
+ * ratio to ≈0.4 even on pure white noise, so a smoothed curve would look mis-modelled everywhere
+ * and the walk would trim to `minWidth` on every well. Onset detection genuinely wants the smoothed
+ * curve (it is looking for a second-derivative peak); this test genuinely wants the raw one.
+ */
+export function refineBaselineStart(
+  cycles: number[],
+  values: number[],
+  region: BaselineRegion,
+  options: BaselineStartRefinementOptions = {},
+): BaselineRegion {
+  const targetWhiteness = options.targetWhiteness ?? 1.0;
+  const minWidth = options.minWidth ?? 8;
+  const maxTrim = options.maxTrim ?? 15;
+
+  const idx = regionIndices(cycles, region);
+  if (idx.length <= minWidth) return region;
+
+  for (let start = 0; idx.length - start >= minWidth && start <= maxTrim; start++) {
+    const candidate = { beginCycle: cycles[idx[start]!]!, endCycle: region.endCycle };
+    if (whiteness(regionResiduals(cycles, values, candidate)) >= targetWhiteness) return candidate;
+  }
+
+  // Nothing reached the target, so the premise of this whole search — that the mis-fit is confined
+  // to the front — is false: the region is mis-modelled all the way through (a baseline that curves
+  // continuously, or amplification pulled deep into it). Trimming anyway would return whichever
+  // sub-window scored least badly, which on a curve like that is an arbitrary late slice bearing no
+  // relation to the well's real baseline; observed handing back cycles 34–45 of a 45-cycle run.
+  // Leave the region as found and let §7's validation gate reject the curve instead — a wrong
+  // region that is *reported* as wrong beats a wrong region dressed up as a considered choice.
+  return region;
+}
+
 export interface AutoBaselineOptions {
   curvature?: CurvatureBaselineOptions;
   regression?: RegressionBaselineOptions;
   constraints?: BaselineRegionConstraints;
+  /**
+   * The **unsmoothed** curve, enabling the {@link refineBaselineStart} trim. Omit to skip it — the
+   * check is meaningless on a smoothed curve, so it is opt-in rather than applied to whatever
+   * `values` happens to be. See that function for why.
+   */
+  rawValues?: number[];
+  refinement?: BaselineStartRefinementOptions;
 }
 
 /**
  * `autoCalculateBaseline`: run {@link findBaselineByCurvature} and fall back to
- * {@link findBaselineByRegression} when it finds nothing confident, then clamp the result to the
- * §3.1 constraints. Returns `null` if neither strategy finds a region.
+ * {@link findBaselineByRegression} when it finds nothing confident, clamp the result to the §3.1
+ * constraints, and — when `rawValues` is supplied — trim its start with
+ * {@link refineBaselineStart}. Returns `null` if neither strategy finds a region.
+ *
+ * The two stages fix opposite ends of the region: onset detection decides where the baseline must
+ * stop, the trim decides where it should start.
  */
 export function autoBaselineRegion(
   cycles: number[],
   values: number[],
   options: AutoBaselineOptions = {},
 ): BaselineRegion | null {
-  const region =
+  const found =
     findBaselineByCurvature(cycles, values, { ...options.curvature, constraints: options.constraints }) ??
     findBaselineByRegression(cycles, values, { ...options.regression, constraints: options.constraints });
-  return region ? clampBaselineRegion(region, cycles, options.constraints) : null;
+  if (!found) return null;
+  const region = clampBaselineRegion(found, cycles, options.constraints);
+  return options.rawValues
+    ? refineBaselineStart(cycles, options.rawValues, region, options.refinement)
+    : region;
 }
 
 export interface BaselineValidationOptions {
@@ -449,6 +571,28 @@ export function validateBaselineRegion(
   const stats = regionFlatnessRatios(cycles, values, checkRegion);
   return stats !== null && stats.relFlat <= maxRelativeFlatness && stats.relLin <= maxRelativeLinearity;
 }
+
+/**
+ * A note on what {@link whiteness} is *not* used for here.
+ *
+ * It is tempting to promote the same ratio into a §7 validation gate — reject any region whose
+ * residuals aren't white — and that was tried. It doesn't work, for a reason worth recording so it
+ * isn't re-proposed: the ratio is **scale-free**, which is exactly what makes it a good way to
+ * compare candidate regions on one curve and a bad way to accept or reject one in absolute terms.
+ * It cannot distinguish structure that matters from structure far below the noise the instrument
+ * can even resolve. A near-noiseless curve is the pathological case: with almost no scatter, *any*
+ * residual is ~100% structure, so the ratio collapses toward 0 and the gate fires hardest precisely
+ * where the linear fit is most nearly exact and the baseline matters least. On synthetic sigmoids
+ * with no noise at all it rejects every curve; on real data it flagged ten further wells of
+ * `20230829_135443_CT019138_SINGLE_STEP_.zpcr` invalid without catching anything
+ * {@link validateBaselineRegion} was missing.
+ *
+ * So the ratio drives {@link refineBaselineStart}'s *search* — where it only ever compares
+ * sub-regions of the same curve against each other, and a wrong answer costs a few baseline cycles
+ * rather than the whole result — and validation stays with the span-relative flatness/linearity
+ * bounds. `threshold.ts`'s `residualWhiteness` exposes the ratio as a per-curve diagnostic for a
+ * human reading a surprising Cq, which is the other job it is genuinely good at.
+ */
 
 /**
  * `pCRBaseLine` (§4), restricted to the three modes a first implementation covers — `Raw`,

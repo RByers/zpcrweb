@@ -8,16 +8,64 @@
  * instrument's own reported Cq — the same caveat `baseline.ts` carries.
  */
 
+import { meanSquaredSuccessiveDifference, median, stdDev, whiteness } from "./stats.js";
+
+/**
+ * How {@link baselineNoise} turns a baseline region's residuals into one noise number (§5.1).
+ *
+ * - `successiveDifference` (**default**) — the root-mean-square *successive difference*,
+ *   `sqrt(mean((r[i] − r[i−1])²) / 2)`, also called the MSSD or von Neumann estimator. Measures
+ *   only cycle-to-cycle scatter, so it is blind to any smooth trend the fitted baseline failed to
+ *   capture.
+ * - `residualStdDev` — the plain standard deviation of the residuals. What this library shipped
+ *   before, and what the textbook description of §5.1 implies.
+ *
+ * The two agree on a well whose baseline really is a straight line plus white noise, and diverge
+ * exactly when the baseline model is wrong. That divergence is the reason for the default: a
+ * standard deviation about a fitted line answers "how far is this curve from my model?", but the
+ * threshold rule needs "how much does this curve jitter?" — and those coincide only when the model
+ * is right. A well with a settling transient (block and optics still stabilizing over the first
+ * cycles, on top of the usual linear drift) leaves residuals that trace a smooth arc rather than
+ * scattering, so `residualStdDev` reports the size of that arc and the threshold inflates in
+ * proportion to how badly the line mis-described the well — pushing Cq later exactly where the
+ * curve is least well understood, and doing it per-well, which makes Cq incomparable across a
+ * plate.
+ *
+ * Measured over the committed samples' loaded curves, `residualStdDev / successiveDifference` runs
+ * to **4.2×** on `20260720.zpcr` and **8.7×** on `20230829_135443_CT019138_SINGLE_STEP_.zpcr`
+ * (median 5.5× there, where 67 of 72 curves carry a clearly non-white baseline). On the latter the
+ * old estimator put the group threshold at ≈1063 RFU and only 3 of 72 wells reported a Cq at all;
+ * the successive-difference estimator puts it at ≈178. On the former it closes the specific defect
+ * this option was introduced for: wells A3/B3 (HMPV Ma) and D3 (PIV3 Bo) carry the same dye and
+ * near-identical curves, but A3's transient gave it a residual spread of 11.1 against D3's 2.5, so
+ * the two targets' thresholds came out 3.3× apart. Under the default they are 3.7 and 2.7.
+ *
+ * **Where CFX stands is unknown.** Bio-Rad documents neither its noise statistic nor its
+ * multiplier, and the only observable is the pair of thresholds the sample `.pcrd` persisted. What
+ * those two anchors *do* say is that the successive-difference estimator makes the implied
+ * multiplier far more consistent between dyes — see {@link AutoThresholdOptions.multiplier}.
+ */
+export type NoiseEstimator = "successiveDifference" | "residualStdDev";
+
 export interface BaselineNoiseOptions {
+  /** Which statistic to reduce the region's residuals with. Default `"successiveDifference"` —
+   * see {@link NoiseEstimator}. */
+  estimator?: NoiseEstimator;
   /**
    * How many cycles at the *start* of the baseline region to leave out of the noise estimate.
    * Default **1**.
    *
    * The run's first read is routinely offset from the rest of the baseline — block and optics are
    * still settling — which §3.1 already acknowledges for cycle 0. It is one anomalous point in a
-   * short window, so it inflates the standard deviation out of proportion to its meaning, and
-   * because §5.1 multiplies that spread by a large constant ({@link AutoThresholdOptions.multiplier})
-   * the error is amplified straight into the threshold and hence into every Cq in the group.
+   * short window, so it inflates the spread out of proportion to its meaning, and because §5.1
+   * multiplies that spread by a large constant ({@link AutoThresholdOptions.multiplier}) the error
+   * is amplified straight into the threshold and hence into every Cq in the group.
+   *
+   * This still matters under the default `successiveDifference` estimator, and if anything matters
+   * slightly more: that estimator is immune to a smooth *trend* the baseline fit missed, but an
+   * isolated spike enters **two** successive differences rather than one squared deviation, so a
+   * lone bad read counts for more, not less. Trend robustness and outlier robustness are separate
+   * properties — see {@link NoiseEstimator}.
    *
    * Only the *noise statistic* skips it. The baseline line itself is still fitted over the whole
    * region ({@link fitLinearBaseline}) and the curve is still corrected across every cycle: the
@@ -29,11 +77,30 @@ export interface BaselineNoiseOptions {
   skipLeadingCycles?: number;
 }
 
+/** The residuals {@link baselineNoise} reduces: the corrected curve over its baseline region,
+ * less the leading cycles {@link BaselineNoiseOptions.skipLeadingCycles} drops. */
+function noiseResiduals(
+  cycles: number[],
+  correctedValues: number[],
+  region: { beginCycle: number; endCycle: number },
+  skipLeadingCycles: number,
+): number[] {
+  const all: number[] = [];
+  for (let i = 0; i < cycles.length; i++) {
+    if (cycles[i]! >= region.beginCycle && cycles[i]! <= region.endCycle) all.push(i);
+  }
+  const idx = all.length - skipLeadingCycles >= 3 ? all.slice(skipLeadingCycles) : all;
+  return idx.map((i) => correctedValues[i]!);
+}
+
 /**
- * §5.1: noise estimate for one well — the standard deviation of the baseline-corrected curve
- * over its baseline region. Pass an already-{@link subtractBaseline}d curve; in that region the
- * corrected values are residuals about zero, so their spread *is* the noise estimate the doc
- * calls for.
+ * §5.1: noise estimate for one well, over its baseline region. Pass an
+ * already-{@link subtractBaseline}d curve; in that region the corrected values are residuals about
+ * zero, so their spread is the quantity §5.1 calls for.
+ *
+ * Which statistic reduces those residuals is {@link BaselineNoiseOptions.estimator}'s choice, and
+ * the default is deliberately **not** the plain standard deviation — see {@link NoiseEstimator} for
+ * why, and for the measurements behind it.
  *
  * The region's leading cycle is excluded by default — see {@link BaselineNoiseOptions.skipLeadingCycles}.
  */
@@ -43,17 +110,55 @@ export function baselineNoise(
   region: { beginCycle: number; endCycle: number },
   options: BaselineNoiseOptions = {},
 ): number {
-  const skipLeadingCycles = options.skipLeadingCycles ?? 1;
-  const all: number[] = [];
-  for (let i = 0; i < cycles.length; i++) {
-    if (cycles[i]! >= region.beginCycle && cycles[i]! <= region.endCycle) all.push(i);
+  const residuals = noiseResiduals(
+    cycles,
+    correctedValues,
+    region,
+    options.skipLeadingCycles ?? 1,
+  );
+  if (residuals.length === 0) return 0;
+  // Below 3 points the successive differences are too few to average, so fall back to the spread.
+  if ((options.estimator ?? "successiveDifference") === "residualStdDev" || residuals.length < 3) {
+    return stdDev(residuals);
   }
-  const idx = all.length - skipLeadingCycles >= 3 ? all.slice(skipLeadingCycles) : all;
-  if (idx.length === 0) return 0;
-  const values = idx.map((i) => correctedValues[i]!);
-  const mean = values.reduce((a, b) => a + b, 0) / values.length;
-  const variance = values.reduce((s, v) => s + (v - mean) ** 2, 0) / values.length;
-  return Math.sqrt(variance);
+  return Math.sqrt(meanSquaredSuccessiveDifference(residuals) / 2);
+}
+
+/**
+ * **von Neumann's ratio** for a baseline region's residuals — mean squared successive difference
+ * divided by variance. A scale-free measure of how much of the residual is white noise rather than
+ * structure the baseline fit failed to describe:
+ *
+ * - **≈ 2** — white noise. Successive residuals are independent, so their differences carry twice
+ *   the variance of the residuals themselves. This is the value a correctly-modelled baseline gives.
+ * - **→ 0** — strongly serially correlated. The residuals trace a smooth path (a settling
+ *   transient, a curved drift, or the foot of amplification pulled into the region), which means
+ *   the straight-line baseline is the wrong model over this region.
+ * - **> 2** — alternating/anti-correlated residuals, e.g. an over-smoothed or aliased trace.
+ *
+ * The useful property is that it needs **no tuning constant and no scale**: unlike §3.2's
+ * flatness/linearity bounds — which are fractions of the curve's *whole span*, and so grow
+ * permissive exactly on the high-rising wells where a mis-fit baseline does the most damage — the
+ * ratio has a known null value that is the same for every curve, dye, run and instrument.
+ *
+ * Measured on the committed samples this separates cleanly with a wide margin: every curve whose
+ * baseline is visibly mis-modelled lands at 0.03–0.5, every clean one at 1.4–2.5. Returns `2` (the
+ * white-noise null) when the residuals have no spread to judge, so a flat-line curve is not
+ * reported as structured.
+ */
+export function residualWhiteness(
+  cycles: number[],
+  correctedValues: number[],
+  region: { beginCycle: number; endCycle: number },
+  options: BaselineNoiseOptions = {},
+): number {
+  const residuals = noiseResiduals(
+    cycles,
+    correctedValues,
+    region,
+    options.skipLeadingCycles ?? 1,
+  );
+  return whiteness(residuals);
 }
 
 export interface AutoThresholdOptions {
@@ -69,21 +174,30 @@ export interface AutoThresholdOptions {
    *
    * The order of magnitude comes from the only ground truth available: the thresholds CFX itself
    * persisted in `20260720_Luna_noRT.pcrd` (`autoCalculateThreshold="False"`, so these are the
-   * values the instrument's own analysis used). Against this pipeline's `baselineNoise` for the
-   * same wells:
+   * values the instrument's own analysis used). The plate loads three fluorophores and exactly two
+   * of them carry an override — `fluorId` 5 (FAM) and 12 (Texas Red), both 210.72; `fluorId` 4
+   * (Cy5) is left on `autoCalculateThreshold="True"` and is **not** an anchor. Dividing those by
+   * this pipeline's median {@link baselineNoise} over the four loaded wells of each dye:
    *
-   * | Fluor | CFX `thresholdOverrideValue` | median noise | ratio |
+   * | Fluor | CFX `thresholdOverrideValue` | via `residualStdDev` | via `successiveDifference` |
    * |---|---|---|---|
-   * | FAM | 210.72 | 4.98 | 42.3× |
-   * | Texas Red | 210.72 | 5.31 | 39.7× |
+   * | FAM | 210.72 | 2.33 → **90.3×** | 2.47 → **85.3×** |
+   * | Texas Red | 210.72 | 5.08 → **41.5×** | 2.65 → **79.6×** |
    *
-   * Those two anchors agree with each other within 6% but sit near **40×**, so the default of 20
-   * is deliberately *below* what they imply — chosen against how the resulting Cq values read on
-   * the samples in hand, where 40× lands them later than expected. Two anchors from a single run,
-   * both sharing one override value, are not enough to overrule that (see `threshold.md` §9); they
-   * fix the scale to tens rather than the textbook 3–10×, and the exact figure remains a judgement
-   * call. `computeCqTable`'s `autoThreshold` option makes it adjustable, and the web app puts it on
-   * a slider for exactly this reason.
+   * This is the sharpest evidence for the default {@link NoiseEstimator}: under `residualStdDev`
+   * the two anchors disagree by 2.2×, so "the" multiplier would depend on which dye it was
+   * calibrated against — disqualifying for a constant meant to generalize. Under the default they
+   * agree within 7%. The estimator change did not move the anchors closer by construction; it moved
+   * them closer because Texas Red's cohort happened to carry more baseline mis-fit than FAM's, and
+   * removing that from the statistic removed the disagreement with it.
+   *
+   * The shipped default of 20 nonetheless sits well *below* the ≈80 those anchors now imply, and
+   * that gap is a deliberate, unresolved judgement call rather than a measurement: re-anchoring to
+   * ≈80 lands every Cq on the samples in hand later than the curves suggest. Two anchors from one
+   * run on one instrument, sharing a single override value, are not enough to overrule that — see
+   * `threshold.md` §9. What they do settle is the scale: tens of multiples of this residual, not
+   * the textbook 3–10×. `computeCqTable`'s `autoThreshold` option makes it adjustable, and the web
+   * app puts it on a slider for exactly this reason.
    *
    * Expressing the same anchors as a fraction of the wells' amplification instead (7.5% and 10.1%
    * of median ΔRFU) fits them more loosely and disagrees sharply on other plates, which is why the
@@ -105,12 +219,7 @@ export function autoThreshold(noiseEstimates: number[], options: AutoThresholdOp
   const multiplier = options.multiplier ?? 20;
   const minThreshold = options.minThreshold ?? 0;
   if (noiseEstimates.length === 0) return minThreshold;
-
-  const sorted = noiseEstimates.slice().sort((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
-  const medianNoise = sorted.length % 2 === 0 ? (sorted[mid - 1]! + sorted[mid]!) / 2 : sorted[mid]!;
-
-  return Math.max(multiplier * medianNoise, minThreshold);
+  return Math.max(multiplier * median(noiseEstimates), minThreshold);
 }
 
 export interface ThresholdOptions {
