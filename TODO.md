@@ -29,10 +29,10 @@ Additional typed parsers for the archive files currently reachable only via the 
 
 To do immediately:
 
-- [ ] Open curves UI in 'target' mode by default
-- [ ] In the thresholds customization view, make hovering over a target show only those lines and also show a dotted line where the threshold is
-- [ ] By default in channels view only select channels which are present in the plate configuration.
-- [ ] Add a reset button to the channel/flourophore/target list exactly like for the wells
+- [x] ~~Open curves UI in 'target' mode by default~~
+- [x] ~~In the thresholds customization view, make hovering over a target show only those lines and also show a dotted line where the threshold is~~
+- [x] ~~By default in channels view only select channels which are present in the plate configuration.~~
+- [x] ~~Add a reset button to the channel/flourophore/target list exactly like for the wells~~
 
 Still planned:
 
