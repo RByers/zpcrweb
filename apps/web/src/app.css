@@ -1857,8 +1857,14 @@
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  padding: 2px 4px;
+  margin: 0 -4px;
+  border-radius: var(--radius-sm);
   font-size: 11px;
   color: var(--ink-2);
+}
+.analysis__threshold-row:hover {
+  background: var(--raised);
 }
 .analysis__threshold-row input {
   width: 72px;

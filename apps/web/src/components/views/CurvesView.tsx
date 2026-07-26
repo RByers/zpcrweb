@@ -1004,10 +1004,12 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
             </div>
             <div className="analysis__thresholds">
               {groupInfos
-                // The chip opt-out only hides a row while its chips are actually on screen; in
-                // channel mode the chips are channels, so a target disabled in dye space would
-                // otherwise vanish here with nothing to bring it back.
-                .filter((g) => (!calibrationOn || !settings.disabledFluors.has(g.target)) && g.curve)
+                // Every target with a matched calibration curve gets a row, regardless of the
+                // chip opt-out above — a target hidden from the chart still has a real threshold
+                // worth checking or overriding, and there'd otherwise be nothing on screen to
+                // bring a dye-space target back once its row (and the only obvious way to
+                // re-enable it) vanished along with its chip.
+                .filter((g) => g.curve)
                 .map((g) => {
                   const auto = groupThresholds.get(g.target);
                   const override = settings.thresholdOverrides.get(g.target);

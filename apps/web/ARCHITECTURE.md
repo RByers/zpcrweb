@@ -667,22 +667,25 @@ is: a per-target curve needs channel→dye color separation (`calibration.md`).
   "back to the derived default" throughout the rail. It is disabled while the row is already
   automatic.
 
-  The section sits in the Curves rail in **every** view mode, Channel included, and its rows are
-  always the target groups (`groupInfos`) — a threshold belongs to a target, not to an optical
-  filter, and an override feeds the run's one Cq table, so it moves the chart's Cq markers and the
-  hover cards' numbers exactly as it moves the table's. Channel mode used to hide it, on the
-  grounds that `channelCqTable`'s own groups are channels rather than targets; but that table is
-  resolved from the same `thresholdMultiplier`, so the slider was silently moving the channel
-  chart's Cq markers with no visible cause. Two consequences of that split are worth knowing: a
-  per-group *override* is keyed by target and so never reaches a channel curve's threshold (the
-  multiplier does), and the chip opt-out filters the rows only while the dye chips are actually on
-  screen — in Channel mode the chips are channels, so a target disabled back in dye space would
-  otherwise vanish from the section with nothing to bring it back. Each row's displayed automatic
-  value is read from the run's Cq table directly (`CurvesView`'s `groupThresholds`) rather than
-  from the filtered `tableRows`, so a group whose wells are all deselected still shows its real
-  threshold instead of an empty box.
+  The section sits in the Curves rail in **every** view mode, Channel included, and lists **every**
+  target group with a matched calibration curve (`groupInfos.filter(g => g.curve)`) — not just the
+  ones currently toggled on in the Targets/Fluorophores chip list above, and not gated by which
+  wells happen to be selected either: a target hidden from the chart, or a group whose wells are
+  all deselected, still has a real threshold worth checking or overriding, and hiding its row along
+  with its chip would leave nothing on screen to bring it back. A threshold belongs to a target,
+  not to an optical filter or a selection, and an override feeds the run's one Cq table, so it
+  moves the chart's Cq markers and the hover cards' numbers exactly as it moves the table's.
+  Channel mode used to hide the section, on the grounds that `channelCqTable`'s own groups are
+  channels rather than targets; but that table is resolved from the same `thresholdMultiplier`, so
+  the slider was silently moving the channel chart's Cq markers with no visible cause. One
+  consequence of that split is still worth knowing: a per-group *override* is keyed by target and
+  so never reaches a channel curve's threshold (the multiplier does). Each row's displayed
+  automatic value is read from the run's Cq table directly (`CurvesView`'s `groupThresholds`)
+  rather than from the display-filtered `tableRows`, for the same reason the row list itself
+  isn't filtered.
 
-  Hovering a row sets the same
+  Each row has a hover effect (`.analysis__threshold-row:hover` background tint, like the app's
+  other hoverable rail rows) backing up what it actually does: hovering sets the same
   `hoverHighlight` a target chip's hover sets (isolating that target's curves via
   `applyHighlight`) and additionally a dotted line at that target's threshold RFU, via
   `CurveChart`'s `thresholdLine` prop → `lib/uplot/chart.ts`'s `ThresholdLineState`/
@@ -694,13 +697,19 @@ is: a per-target curve needs channel→dye color separation (`calibration.md`).
   each isolated curve (the well series `applyHighlight` left at full opacity) gets its exact
   `CurveBaselineResult.baselineRegion` — auto-detected *per curve*, so two wells in the same
   target can legitimately show different ranges, e.g. a late-amplifying well's flat region
-  reaching much further right than an early one's — highlighted as a thicker overlay segment
-  along that stretch of its own line, plus a small "σ12.3"-style label (`CurveBaselineResult.
-  noise`) at its end. `PlotCurve`/`SeriesMeta` carry `baselineRegion`/`noise` alongside `cq`/
-  `baselineFormula` (same lookup-not-recompute rule) purely so `lib/uplot/chart.ts`'s
-  `overlayPlugin` can draw this without a second pass over the run's curves; nothing else reads
-  them. Gated on the same `thresholdLineState.value != null` signal as the dotted line above, so
-  it appears and disappears with it rather than needing its own hover state.
+  reaching much further right than an early one's — traced in a fixed highlighter yellow
+  (`REGION_MARK_COLOR`, deliberately not the curve's own color: tracing it in-hue read as barely a
+  thicker version of the line itself, next to invisible against the dark theme) with a dark halo
+  stroke under it, plus a small curve-colored dot and a "σ12.3"-style noise label
+  (`CurveBaselineResult.noise`) at its end — the dot ties the label back to which line it belongs
+  to now that the mark itself is a shared color. The label flips from above the point to below
+  whenever it would otherwise land on the dotted threshold line (the two are frequently close in
+  RFU by construction — the region tends to end near where a curve approaches its own threshold).
+  `PlotCurve`/`SeriesMeta` carry `baselineRegion`/`noise` alongside `cq`/`baselineFormula` (same
+  lookup-not-recompute rule) purely so `lib/uplot/chart.ts`'s `overlayPlugin` can draw this
+  without a second pass over the run's curves; nothing else reads them. Gated on the same
+  `thresholdLineState.value != null` signal as the dotted line above, so it appears and
+  disappears with it rather than needing its own hover state.
 
   Both hover effects are dye-space-only. In Channel mode a row's threshold is a level on the
   color-separated curve, not on the raw channel one, and no plotted curve carries the target's

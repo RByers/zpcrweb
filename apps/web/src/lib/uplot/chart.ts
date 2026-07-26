@@ -663,6 +663,11 @@ function yLabel(baseline: Baseline, curveView: CurveView): string {
  * redraw/hover.
  */
 const THRESHOLD_LINE_DASH = "2,3";
+/** Highlighter yellow for the baseline-region diagnostic (see below) — deliberately not a
+ * curve's own color, since tracing the segment in that same hue was next to invisible against a
+ * dark background at any low opacity. High-contrast against both the dark theme and every
+ * channel color in `channelColors.ts`. */
+const REGION_MARK_COLOR = "#fde047";
 
 function overlayPlugin(
   meta: SeriesMeta[],
@@ -783,6 +788,9 @@ function overlayPlugin(
         // Rail-driven threshold-hover line: a dotted horizontal line at the hovered target's
         // threshold RFU, spanning the full plotted cycle range.
         const tv = thresholdLineState.value;
+        // Kept outside the `if` below so the noise-label placement further down can steer clear
+        // of it rather than risk landing right on top of the dotted line.
+        let thresholdY: number | null = null;
         if (tv == null || u.scales.x!.min == null || u.scales.x!.max == null) {
           thresholdLine.style.display = "none";
         } else {
@@ -795,6 +803,7 @@ function overlayPlugin(
             thresholdLine.setAttribute("y1", String(y));
             thresholdLine.setAttribute("y2", String(y));
             thresholdLine.style.display = "";
+            thresholdY = y;
           } else {
             thresholdLine.style.display = "none";
           }
@@ -806,6 +815,12 @@ function overlayPlugin(
         // baseline-region auto-detection used and label its noise estimate. The region is
         // per-curve, so two wells in the same target can show different ranges — the point of
         // the indicator is making that visible rather than assumed.
+        //
+        // Drawn in a fixed highlighter color (not the curve's own), with a dark halo under both
+        // the marker and the text: tracing the segment in the curve's own hue just made it a
+        // marginally thicker version of itself, next to invisible against a dark background at
+        // low opacity. A small dot in the curve's real color anchors the label back to which
+        // line it belongs to.
         const activeRegions: { seriesIdx: number; m: SeriesMeta }[] = [];
         if (tv != null) {
           meta.forEach((m, i) => {
@@ -820,28 +835,42 @@ function overlayPlugin(
         }
         while (regionGroup.childElementCount < activeRegions.length) {
           const g = document.createElementNS(SVG_NS, "g");
-          const p = document.createElementNS(SVG_NS, "polyline");
-          p.setAttribute("fill", "none");
-          p.setAttribute("stroke-width", "4");
-          p.setAttribute("stroke-linecap", "round");
-          const t = document.createElementNS(SVG_NS, "text");
-          t.setAttribute("font-size", "11");
-          t.setAttribute("font-weight", "600");
-          t.setAttribute("font-family", "ui-monospace, monospace");
+          const halo = document.createElementNS(SVG_NS, "polyline");
+          halo.setAttribute("fill", "none");
+          halo.setAttribute("stroke", "#0b0d12");
+          halo.setAttribute("stroke-width", "7");
+          halo.setAttribute("stroke-linecap", "round");
+          const mark = document.createElementNS(SVG_NS, "polyline");
+          mark.setAttribute("fill", "none");
+          mark.setAttribute("stroke", REGION_MARK_COLOR);
+          mark.setAttribute("stroke-width", "3");
+          mark.setAttribute("stroke-linecap", "round");
+          const dot = document.createElementNS(SVG_NS, "circle");
+          dot.setAttribute("r", "3.5");
+          dot.setAttribute("stroke", "#0b0d12");
+          dot.setAttribute("stroke-width", "1.5");
+          const text = document.createElementNS(SVG_NS, "text");
+          text.setAttribute("font-size", "12");
+          text.setAttribute("font-weight", "700");
+          text.setAttribute("font-family", "ui-monospace, monospace");
+          text.setAttribute("fill", REGION_MARK_COLOR);
           // A dark stroke "halo" under the fill, so the label stays legible over whatever curve
-          // color or gridline it happens to land on — the plot is dark and busy right where this
-          // text sits (just past the region it's labelling).
-          t.setAttribute("paint-order", "stroke");
-          t.setAttribute("stroke", "#0b0d12");
-          t.setAttribute("stroke-width", "3");
-          g.append(p, t);
+          // color or gridline it happens to land on.
+          text.setAttribute("paint-order", "stroke");
+          text.setAttribute("stroke", "#0b0d12");
+          text.setAttribute("stroke-width", "3");
+          g.append(halo, mark, dot, text);
           regionGroup.appendChild(g);
         }
         activeRegions.forEach(({ seriesIdx, m }, gi) => {
           const g = regionGroup.children[gi] as SVGGElement;
-          const poly = g.firstElementChild as SVGPolylineElement;
-          const text = g.lastElementChild as SVGTextElement;
-          const color = (u.series[seriesIdx]!.stroke as string) ?? "#8aa0c0";
+          const [halo, mark, dot, text] = [...g.children] as [
+            SVGPolylineElement,
+            SVGPolylineElement,
+            SVGCircleElement,
+            SVGTextElement,
+          ];
+          const wellColor = (u.series[seriesIdx]!.stroke as string) ?? "#8aa0c0";
           const rowData = u.data[seriesIdx] as (number | null)[];
           const region = m.baselineRegion!;
           const pts: string[] = [];
@@ -859,16 +888,28 @@ function overlayPlugin(
             lastX = px;
             lastY = py;
           }
-          poly.setAttribute("points", pts.join(" "));
-          poly.setAttribute("stroke", color);
-          poly.setAttribute("stroke-opacity", pts.length > 1 ? "0.6" : "0");
-          if (Number.isFinite(lastX) && Number.isFinite(lastY)) {
-            text.setAttribute("x", String(lastX + 6));
-            text.setAttribute("y", String(lastY - 6));
-            text.setAttribute("fill", color);
+          const pointsAttr = pts.join(" ");
+          halo.setAttribute("points", pointsAttr);
+          mark.setAttribute("points", pointsAttr);
+          const visible = pts.length > 1 && Number.isFinite(lastX) && Number.isFinite(lastY);
+          halo.setAttribute("stroke-opacity", visible ? "0.85" : "0");
+          mark.setAttribute("stroke-opacity", visible ? "0.95" : "0");
+          if (visible) {
+            dot.setAttribute("cx", String(lastX));
+            dot.setAttribute("cy", String(lastY));
+            dot.setAttribute("fill", wellColor);
+            dot.style.display = "";
+            // Default above the point; flip below when that would land within a line's-width of
+            // the dotted threshold line, which otherwise routinely cuts right through the text —
+            // the two are drawn at similar RFU by construction (the region ends near where a
+            // curve approaches its own threshold).
+            const nearThresholdLine = thresholdY != null && Math.abs(lastY - 12 - thresholdY) < 8;
+            text.setAttribute("x", String(lastX + 8));
+            text.setAttribute("y", String(lastY + (nearThresholdLine ? 18 : -8)));
             text.textContent = `σ${m.noise!.toFixed(1)}`;
             text.style.display = "";
           } else {
+            dot.style.display = "none";
             text.style.display = "none";
           }
         });
