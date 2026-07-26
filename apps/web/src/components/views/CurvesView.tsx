@@ -813,14 +813,11 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
             separation, so it moves the RFU the table and the CSV export report too. */}
         {calibrationOn && (
           <div className="rail__section rail__row">
-            <Toggle
+            <Switch
               label="Subtract dark"
-              options={[
-                ["off", "Off"],
-                ["on", "On"],
-              ]}
-              value={settings.subtractDark ? "on" : "off"}
-              onChange={(v) => onChange({ subtractDark: v === "on" })}
+              checked={settings.subtractDark}
+              onChange={(v) => onChange({ subtractDark: v })}
+              title="Subtract each plate read's LED-off dark current before color separation"
             />
           </div>
         )}

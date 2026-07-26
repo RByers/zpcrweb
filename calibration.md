@@ -228,10 +228,12 @@ removed is *not* a constant: on the committed `20260720_Luna_noRT.pcrd` the amou
 B3/FAM ranges between ≈2099 and ≈2127 RFU over the run. So beyond moving reported RFU by ≈2100,
 it slightly perturbs the fitted baseline slope, and — because a dark reading carries its own
 measurement noise — it raises the median baseline noise the auto threshold is derived from
-(`threshold.md` §5.1). Measured on that run, enabling the stage moves the FAM threshold from
-292.8 to 310.5 and B3/FAM's Cq from 33.28 to 33.37; the Cy5 thresholds move considerably more
-(64.9 → 99.4), and the largest Cq shift across the plate is ≈0.6 cycles. Expect a modest Cq
-change, not none.
+(`threshold.md` §5.1). Measured on that run at the default threshold multiplier, enabling the
+stage moves the FAM threshold from 131 to 142 and B3/FAM's Cq from 32.1 to 32.2; the ENT rc / Cy5
+threshold moves proportionally more (32 → 49), carrying C3's Cq from 20.1 to 20.7 — the largest
+shift on the plate, ≈0.6 cycles. The two HMPV Ma / Texas Red wells do not move at all. Expect a
+modest Cq change, not none. (The absolute thresholds scale with the multiplier, so these figures
+track it; the RFU offset and the direction of the effect do not.)
 
 Leaving it off is what matches the reported RFU scale of the reference run measured in §8; that
 run simply had dark subtraction disabled.
