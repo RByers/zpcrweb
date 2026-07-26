@@ -5,6 +5,8 @@ import {
   parsePlateCsv,
   parsePltd,
   parseZpcr,
+  parseZpcrwebSettings,
+  writeZpcrwebSettings,
   type NormalizationMode,
   type PcrdContainer,
   type PlateDefinition,
@@ -16,17 +18,26 @@ import {
   fileId,
   getAllFiles,
   getAllSettings,
+  hasLegacyAnalysisFields,
   putFile,
   putSettings,
   type StoredSettings,
 } from "./db";
+import {
+  ANALYSIS_KEYS,
+  DEFAULT_THRESHOLD_MULTIPLIER,
+  analysisFromZpcrweb,
+  defaultAnalysisSettings,
+  isAnalysisKey,
+  zpcrwebFromAnalysis,
+  type AnalysisSettings,
+} from "./analysisSettings";
+import { AnalysisPersister } from "./analysisPersist";
 import { usePltdPassword } from "./pltdPassword";
 import { onHashChange, readHash, writeHash } from "./urlHash";
 
-/** The library's default for §5.1's auto-threshold multiplier, and the slider's starting point.
- * Must track `AutoThresholdOptions.multiplier`'s own default in `@zpcrweb/core`, which documents
- * where the figure comes from (and why it sits below what the CFX anchors imply). */
-export const DEFAULT_THRESHOLD_MULTIPLIER = 20;
+export { DEFAULT_THRESHOLD_MULTIPLIER } from "./analysisSettings";
+export type { AnalysisSettings } from "./analysisSettings";
 
 export type FileKind = "zpcr" | "pcrd" | "pltd" | "csv";
 /** The two kinds a plate — standalone or attached to a run — can be uploaded as. */
@@ -51,8 +62,19 @@ export type Scale = "linear" | "log";
  */
 export type FluorViewMode = "fluorophore" | "target" | "table";
 
-/** Per-file view settings, in-memory form (Sets for cheap toggling). */
-export interface FileSettings {
+/**
+ * Per-file settings, in-memory form (Sets for cheap toggling) — everything a view reads off
+ * `store.settings`, from both of the two places they're kept:
+ *
+ * - the fields declared below are **display** state, persisted per file in IndexedDB (`db.ts`);
+ * - the fields inherited from {@link AnalysisSettings} are **analysis** state, persisted in the
+ *   run's own archive as `zpcrweb.json` (`analysisSettings.ts`).
+ *
+ * The split is invisible to call sites on purpose: they patch one flat object through
+ * `updateSettings`, which routes each key to its own store. See `analysisSettings.ts` for why
+ * anything that changes a reported number has to live in the file.
+ */
+export interface FileSettings extends AnalysisSettings {
   enabledChannels: Set<number>;
   enabledWells: Set<string>; // "row,col"
   /** Reference columns (0-based) shown in the Reference chart. */
@@ -86,19 +108,6 @@ export interface FileSettings {
   /** When color separation is on, group/label curves by fluorophore or by target/gene (each
    * target listed separately, still colored by its channel/fluorophore — see `pltd.md`). */
   fluorViewMode: FluorViewMode;
-  /**
-   * Calibration matrix column normalization; see `calibration.md` §3. Deliberately **not**
-   * exposed in the UI: §5.1 divides the scaling back out, so all three modes report identical
-   * RFU for any full-column-rank matrix — it only changes conditioning, which matters solely
-   * for a rank-deficient one (more dyes than scanned channels). Kept as a setting so that case
-   * stays reachable, and so stored records keep round-tripping.
-   */
-  calibrationNormalization: NormalizationMode;
-  /**
-   * Whether the plate read's LED-off `DARKDATA` is subtracted from a reading before the solve —
-   * the optional dark-current stage of `calibration.md` §4.2. Off by default.
-   */
-  subtractDark: boolean;
   /** Fluorophore (or, in target view mode, target) names hidden from the dye-space curves (an
    * opt-out set, like `enabledChannels` inverted — new entries default to shown without needing
    * to know their names up front). */
@@ -110,25 +119,6 @@ export interface FileSettings {
    * the plate definition actually loads that fluor into that well. Off by default — the normal
    * behavior only draws curves pltd.md's per-well dye layers actually cover. */
   showUnloadedFluors: boolean;
-  /** Manual per-target threshold override (RFU), keyed by threshold group (target, or
-   * fluorophore on a plate with no targets). A group with no entry uses the auto threshold
-   * (`threshold.md` §5.1: 40 × median baseline noise across that group's wells). Edited in the
-   * Curves rail's "Threshold overrides" section; applies to the chart's Cq markers, the hover
-   * cards and the table alike, since all three read the run's one Cq table. */
-  thresholdOverrides: Map<string, number>;
-  /** Manual per-*curve* threshold override (RFU), keyed by `curveKey(row, col, fluor)` — one
-   * well's one dye. Outranks {@link thresholdOverrides}, which in turn outranks the auto value:
-   * a group threshold is a median that deliberately won't follow any single well, so this is the
-   * only way to correct one outlier without moving every other well with it. Edited in the
-   * Curves rail's Threshold section, under the fluorophore's expandable per-curve list. */
-  curveThresholdOverrides: Map<string, number>;
-  /** §5.1's auto-threshold multiplier: `threshold = k × median baseline noise` across the group's
-   * wells, for every group with no entry in {@link thresholdOverrides}. The scale comes from the
-   * thresholds CFX itself persisted in a `.pcrd` (see `AutoThresholdOptions.multiplier`), but those
-   * are two anchors from one run and the default sits deliberately below them — and it is the
-   * single knob that most affects where every Cq lands, so the Curves rail exposes it as a slider
-   * rather than burying it. */
-  thresholdMultiplier: number;
 }
 
 /** A file loaded into memory — bytes only. Parsing is derived (see {@link ZpcrStore.runs}),
@@ -209,6 +199,8 @@ export function wellKey(row: number, col: number): string {
   return `${row},${col}`;
 }
 
+/** The display half of the defaults; the analysis half comes from
+ * {@link defaultAnalysisSettings}, and from the file when it has a `zpcrweb.json`. */
 function defaultSettings(): FileSettings {
   const wells = new Set<string>();
   for (let row = 0; row < 8; row++) {
@@ -234,19 +226,15 @@ function defaultSettings(): FileSettings {
     // Auto: on once plate + calibration data are available (see CurvesView).
     calibration: null,
     fluorViewMode: "target",
-    calibrationNormalization: "global",
-    // The dark-current stage is optional and off by default, which is what matches the reported
-    // RFU scale of the reference run in `calibration.md` §8. See §4.2.
-    subtractDark: false,
     disabledFluors: new Set<string>(),
     disabledSamples: new Set<string>(),
     showUnloadedFluors: false,
-    thresholdOverrides: new Map<string, number>(),
-    curveThresholdOverrides: new Map<string, number>(),
-    thresholdMultiplier: DEFAULT_THRESHOLD_MULTIPLIER,
+    ...defaultAnalysisSettings(),
   };
 }
 
+/** Display state only — the analysis fields are pointedly not written, which is also what
+ * strips them from a pre-split record the first time anything else is saved. */
 function toStored(id: string, s: FileSettings): StoredSettings {
   return {
     fileId: id,
@@ -263,15 +251,36 @@ function toStored(id: string, s: FileSettings): StoredSettings {
     temps: [...s.temps],
     calibration: s.calibration,
     fluorViewMode: s.fluorViewMode,
-    calibrationNormalization: s.calibrationNormalization,
-    subtractDark: s.subtractDark,
     disabledFluors: [...s.disabledFluors],
     disabledSamples: [...s.disabledSamples],
     showUnloadedFluors: s.showUnloadedFluors,
-    thresholdOverrides: [...s.thresholdOverrides],
-    curveThresholdOverrides: [...s.curveThresholdOverrides],
-    thresholdMultiplier: s.thresholdMultiplier,
   };
+}
+
+/**
+ * The analysis settings a pre-split record still carries, for the one-time migration into the
+ * file. Returns `null` for a record with none — the ordinary case from here on.
+ *
+ * Only consulted when the file itself has no `zpcrweb.json`: the file is authoritative, and a
+ * stale IndexedDB record must never be able to override the thresholds a run was actually saved
+ * with. What it recovers is the pre-split user's work, which would otherwise silently revert to
+ * automatic thresholds on first load after upgrading.
+ */
+function legacyAnalysisFromStored(s: StoredSettings): Partial<AnalysisSettings> | null {
+  if (!hasLegacyAnalysisFields(s)) return null;
+  const out: Partial<AnalysisSettings> = {};
+  const overrides = s.thresholdOverrides ?? s.analysisThresholdOverrides;
+  if (overrides) out.thresholdOverrides = new Map(overrides);
+  if (s.curveThresholdOverrides) out.curveThresholdOverrides = new Map(s.curveThresholdOverrides);
+  if (s.thresholdMultiplier !== undefined) out.thresholdMultiplier = s.thresholdMultiplier;
+  // Records predating `subtractDark` carry the retired three-way calibrationBackground
+  // ("none"/"dark"/"plate"); only "dark" maps to the surviving stage.
+  if (s.subtractDark !== undefined) out.subtractDark = s.subtractDark;
+  else if (s.calibrationBackground !== undefined) out.subtractDark = s.calibrationBackground === "dark";
+  if (s.calibrationNormalization !== undefined) {
+    out.calibrationNormalization = s.calibrationNormalization;
+  }
+  return out;
 }
 
 function fromStored(s: StoredSettings): FileSettings {
@@ -295,18 +304,13 @@ function fromStored(s: StoredSettings): FileSettings {
     step: s.step ?? null,
     calibration: s.calibration ?? null,
     fluorViewMode: s.fluorViewMode ?? "fluorophore",
-    calibrationNormalization: s.calibrationNormalization ?? "global",
-    // Records written before this setting existed carry the retired three-way
-    // calibrationBackground ("none"/"dark"/"plate"); only "dark" maps to the surviving stage.
-    subtractDark: s.subtractDark ?? s.calibrationBackground === "dark",
     disabledFluors: new Set(s.disabledFluors ?? []),
     disabledSamples: new Set(s.disabledSamples ?? []),
     showUnloadedFluors: s.showUnloadedFluors ?? false,
     temps: new Set(s.temps ?? []),
-    // Older records carry these under the Analysis view's own name (see StoredSettings).
-    thresholdOverrides: new Map(s.thresholdOverrides ?? s.analysisThresholdOverrides ?? []),
-    curveThresholdOverrides: new Map(s.curveThresholdOverrides ?? []),
-    thresholdMultiplier: s.thresholdMultiplier ?? DEFAULT_THRESHOLD_MULTIPLIER,
+    // Analysis fields are *not* read from the record here — they come from the file, and are
+    // merged in by the store (see `legacyAnalysisFromStored` for the one migration exception).
+    ...defaultAnalysisSettings(),
   };
 }
 
@@ -356,7 +360,19 @@ export interface ZpcrStore {
   addFiles: (files: FileList | File[]) => Promise<void>;
   setActive: (id: string) => void;
   remove: (id: string) => Promise<void>;
+  /**
+   * Patch the active file's settings. Display keys land in IndexedDB, analysis keys
+   * ({@link ANALYSIS_KEYS}) in the file's own `zpcrweb.json` — one flat call either way; see
+   * {@link FileSettings}.
+   */
   updateSettings: (patch: Partial<FileSettings>) => void;
+  /**
+   * The file's bytes as they'd be saved to disk: the loaded archive plus the current analysis
+   * settings as a `zpcrweb.json` entry, so a downloaded copy carries the thresholds it's being
+   * read with. Built on demand rather than kept in `files` — rewriting the bytes in React state
+   * would re-parse the whole run and rebuild every derived value on each save.
+   */
+  exportBytes: (fileId: string) => Uint8Array | null;
 }
 
 export function useZpcrStore(): ZpcrStore {
@@ -370,6 +386,53 @@ export function useZpcrStore(): ZpcrStore {
   const [error, setError] = useState<string | null>(null);
   const saveTimers = useRef<Record<string, number>>({});
   const [password] = usePltdPassword();
+
+  // ── File-backed analysis settings ────────────────────────────────────────────────────────
+  // Kept in their own map rather than folded into `settingsMap`, because they have a different
+  // lifecycle: seeded from the file once it parses (which for a `.pcrd` means after the
+  // password), and written back into the file rather than into IndexedDB.
+  const [analysisMap, setAnalysisMap] = useState<Record<string, AnalysisSettings>>({});
+  /** Ids already seeded from their file, so a re-parse (password change, plate attach) never
+   * overwrites edits made since. */
+  const seeded = useRef(new Set<string>());
+  /** Pre-split IndexedDB analysis state, awaiting a file with no `zpcrweb.json` to migrate into.
+   * Populated once at hydration and consumed by the seeding effect below. */
+  const legacyAnalysis = useRef<Record<string, Partial<AnalysisSettings>>>({});
+  // Refs, not state, so the persister's `resolve` always sees current values without the
+  // persister having to be rebuilt (and its pending timers reset) on every keystroke.
+  const filesRef = useRef<LoadedFile[]>(files);
+  filesRef.current = files;
+  const analysisRef = useRef(analysisMap);
+  analysisRef.current = analysisMap;
+
+  const persister = useRef<AnalysisPersister>();
+  if (!persister.current) {
+    persister.current = new AnalysisPersister({
+      resolve: (id) => {
+        const file = filesRef.current.find((f) => f.id === id);
+        // Only a `.zpcr` has an archive to put an entry in. A `.pcrd` is a single encrypted XML
+        // document whose own `dataAnalysisParameters` we don't yet write (see `pcrd.md` §2.5),
+        // and a standalone plate file has no analysis at all — for those, edits are live for
+        // the session and then gone, which is the honest behavior while the file can't hold them.
+        if (!file || file.kind !== "zpcr") return null;
+        const settings = analysisRef.current[id];
+        if (!settings) return null;
+        return {
+          file: {
+            id: file.id,
+            name: file.name,
+            size: file.size,
+            addedAt: file.addedAt,
+            kind: file.kind,
+            bytes: file.bytes.slice().buffer,
+          },
+          settings,
+        };
+      },
+      onError: (e) => setError(e instanceof Error ? e.message : String(e)),
+    });
+  }
+  useEffect(() => persister.current!.attach(), []);
 
   // Hydrate from IndexedDB on mount.
   useEffect(() => {
@@ -388,7 +451,17 @@ export function useZpcrStore(): ZpcrStore {
         }));
         loaded.sort((a, b) => a.addedAt - b.addedAt);
         const map: Record<string, FileSettings> = {};
-        for (const s of storedSettings) map[s.fileId] = fromStored(s);
+        for (const s of storedSettings) {
+          map[s.fileId] = fromStored(s);
+          // One-time migration of pre-split records: stash the analysis half for the seeding
+          // effect, and immediately rewrite the record without it — `toStored` no longer emits
+          // those fields, so this both strips them and makes the migration idempotent.
+          const legacy = legacyAnalysisFromStored(s);
+          if (legacy) {
+            legacyAnalysis.current[s.fileId] = legacy;
+            void putSettings(toStored(s.fileId, map[s.fileId]!));
+          }
+        }
         setFiles(loaded);
         setSettingsMap(map);
         // A `#file=` from the URL wins over "most recently added", when it names something
@@ -478,11 +551,24 @@ export function useZpcrStore(): ZpcrStore {
         const { [id]: _drop, ...rest } = prev;
         return rest;
       });
+      // Drop any pending settings write for a file that no longer exists, and let it re-seed
+      // from its own bytes if it's ever loaded again.
+      persister.current!.forget(id);
+      seeded.current.delete(id);
+      setAnalysisMap((prev) => {
+        const { [id]: _drop, ...rest } = prev;
+        return rest;
+      });
     },
     [],
   );
 
-  const setActive = useCallback((id: string) => setActiveId(id), []);
+  // Switching files flushes anything pending: the window of unsaved analysis edits then only
+  // ever covers the file you're actually looking at.
+  const setActive = useCallback((id: string) => {
+    void persister.current!.flushAll();
+    setActiveId(id);
+  }, []);
 
   const attachPlate = useCallback(
     async (targetFileId: string, file: File) => {
@@ -524,23 +610,61 @@ export function useZpcrStore(): ZpcrStore {
     [files],
   );
 
-  const settings = activeId
-    ? settingsMap[activeId] ?? defaultSettings()
-    : null;
+  // One flat object per file, assembled from the two stores. The analysis half wins, so a
+  // display record written before the split (whose analysis fields `fromStored` now ignores)
+  // can't shadow what the file says.
+  const settings = useMemo<FileSettings | null>(() => {
+    if (!activeId) return null;
+    const display = settingsMap[activeId] ?? defaultSettings();
+    const analysis = analysisMap[activeId];
+    return analysis ? { ...display, ...analysis } : display;
+  }, [activeId, settingsMap, analysisMap]);
 
   const updateSettings = useCallback(
     (patch: Partial<FileSettings>) => {
       if (!activeId) return;
-      setSettingsMap((prev) => {
-        const current = prev[activeId] ?? defaultSettings();
-        const next = { ...current, ...patch };
-        // debounced persist
-        window.clearTimeout(saveTimers.current[activeId]);
-        saveTimers.current[activeId] = window.setTimeout(() => {
-          void putSettings(toStored(activeId, next));
-        }, 300);
-        return { ...prev, [activeId]: next };
-      });
+      // Split the patch by where each key is stored (see `FileSettings`). Callers stay unaware
+      // of the split; a single `onChange` may legitimately touch both halves.
+      const displayPatch: Partial<FileSettings> = {};
+      const analysisPatch: Partial<AnalysisSettings> = {};
+      let touchedAnalysis = false;
+      let touchedDisplay = false;
+      for (const [key, value] of Object.entries(patch)) {
+        if (isAnalysisKey(key)) {
+          (analysisPatch as Record<string, unknown>)[key] = value;
+          touchedAnalysis = true;
+        } else {
+          (displayPatch as Record<string, unknown>)[key] = value;
+          touchedDisplay = true;
+        }
+      }
+
+      if (touchedDisplay) {
+        setSettingsMap((prev) => {
+          const current = prev[activeId] ?? defaultSettings();
+          const next = { ...current, ...displayPatch };
+          // debounced persist
+          window.clearTimeout(saveTimers.current[activeId]);
+          saveTimers.current[activeId] = window.setTimeout(() => {
+            void putSettings(toStored(activeId, next));
+          }, 300);
+          return { ...prev, [activeId]: next };
+        });
+      }
+
+      if (touchedAnalysis) {
+        // An edit counts as seeding: if the user got to a control before the seeding effect ran,
+        // their value is the current one and must not be overwritten by the file's.
+        seeded.current.add(activeId);
+        setAnalysisMap((prev) => {
+          const next = { ...(prev[activeId] ?? defaultAnalysisSettings()), ...analysisPatch };
+          // Keep the ref current for a flush that fires before React re-renders.
+          analysisRef.current = { ...prev, [activeId]: next };
+          return analysisRef.current;
+        });
+        // Rate-limited archive rewrite — see `analysisPersist.ts`.
+        persister.current!.markDirty(activeId);
+      }
     },
     [activeId],
   );
@@ -565,6 +689,62 @@ export function useZpcrStore(): ZpcrStore {
 
   const activePlateFile = activeId ? plateFiles.get(activeId) ?? null : null;
 
+  /**
+   * Seed each file's analysis settings from its own `zpcrweb.json`, once — after hydration, after
+   * an upload, and (for an encrypted `.pcrd`) once a working password finally decodes it. A file
+   * that fails to parse stays unseeded rather than being seeded with defaults, so unlocking it
+   * later still picks up whatever it carries.
+   */
+  useEffect(() => {
+    const additions: Record<string, AnalysisSettings> = {};
+    for (const f of files) {
+      if (seeded.current.has(f.id)) continue;
+      let next: AnalysisSettings;
+      if (f.kind === "zpcr" || f.kind === "pcrd") {
+        const zpcr = runs.get(f.id)?.zpcr;
+        if (!zpcr) continue; // not decoded yet (needs a password, or failed) — try again later
+        const fromFile = parseZpcrwebSettings(zpcr);
+        next = analysisFromZpcrweb(fromFile);
+        const legacy = legacyAnalysis.current[f.id];
+        // The file is authoritative; pre-split IndexedDB state only fills a file that has
+        // nothing to say, and is then written into it so the migration happens exactly once.
+        if (!fromFile && legacy) {
+          next = { ...next, ...legacy };
+          persister.current!.markDirty(f.id);
+        }
+        delete legacyAnalysis.current[f.id];
+      } else {
+        // A standalone plate file has no curves and so no analysis — defaults keep `settings`
+        // a complete object for the views that read it.
+        next = defaultAnalysisSettings();
+      }
+      seeded.current.add(f.id);
+      additions[f.id] = next;
+    }
+    if (Object.keys(additions).length > 0) {
+      setAnalysisMap((prev) => {
+        analysisRef.current = { ...prev, ...additions };
+        return analysisRef.current;
+      });
+    }
+  }, [files, runs]);
+
+  const exportBytes = useCallback(
+    (id: string): Uint8Array | null => {
+      const file = files.find((f) => f.id === id);
+      if (!file) return null;
+      const analysis = analysisMap[id];
+      if (file.kind !== "zpcr" || !analysis) return file.bytes;
+      try {
+        return writeZpcrwebSettings(file.bytes, zpcrwebFromAnalysis(analysis));
+      } catch {
+        // A file we somehow can't re-zip still downloads as what was loaded.
+        return file.bytes;
+      }
+    },
+    [files, analysisMap],
+  );
+
   return {
     files,
     activeId,
@@ -583,5 +763,6 @@ export function useZpcrStore(): ZpcrStore {
     setActive,
     remove,
     updateSettings,
+    exportBytes,
   };
 }

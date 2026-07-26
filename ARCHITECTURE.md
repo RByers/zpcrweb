@@ -9,7 +9,9 @@ Every reverse-engineered Bio-Rad file format (or sub-format, like the shared ICF
 gets its own top-level `*.md` doc — [`plateread.md`](./plateread.md), [`dcal.md`](./dcal.md),
 [`pltd.md`](./pltd.md), [`pcrd.md`](./pcrd.md), [`icff.md`](./icff.md). The one non-format
 exception is [`calibration.md`](./calibration.md), which documents the channel→dye
-color-separation algorithm built on top of `.Dcal` rather than a byte layout. Each doc is
+color-separation algorithm built on top of `.Dcal` rather than a byte layout, and
+[`zpcrweb-json.md`](./zpcrweb-json.md), which documents the one entry we *write* into a `.zpcr`
+rather than one we decode. Each doc is
 self-contained and ends with a pointer to the `packages/core/src` module that implements it, so
 the doc is always the entry point for understanding *and* changing a decoder. See
 [`CLAUDE.md`](./CLAUDE.md) for the full doc ↔ code table.
@@ -131,7 +133,8 @@ zero dependencies, is actively maintained, and runs identically in Node and the 
 `.zpcr` archives are small (hundreds of KB), so we decompress the **whole** archive into
 memory up front (`unzipSync`). That keeps the rest of the library synchronous and lets the
 low-level archive API serve any file instantly. `fflate` also writes zips (`zipSync`), used by
-`attachPlate.ts` (see below) — the one write path in an otherwise read-only library.
+the library's two write paths: `attachPlate.ts` (see below) and `zpcrwebSettings.ts` (see
+below), in an otherwise read-only library.
 
 ## Plate CSV + attaching a plate (`plateCsv.ts`, `attachPlate.ts`)
 
@@ -153,6 +156,17 @@ adds), add the new entry, `zipSync` back to bytes. The web app calls this to "at
 a run": it rewrites the run's own in-memory bytes and re-persists them under the same file id,
 so the plate travels with the file with no separate override state to keep in sync — see
 `apps/web/ARCHITECTURE.md`.
+
+## Analysis settings in the archive (`zpcrwebSettings.ts`)
+
+The library's second write path, and the same idea one level up: a run's **analysis** parameters
+— thresholds, §5.1's auto-threshold multiplier, dark subtraction, calibration normalization —
+belong to the run, not to whichever browser opened it, because they are what decide the Cq it
+reports. `writeZpcrwebSettings` adds them to the archive as a `zpcrweb.json` entry;
+`parseZpcrwebSettings` reads them back through the already-decompressed `Zpcr.archive`, total and
+field-by-field so a hand-edited or newer document degrades instead of failing. Full schema and
+rationale in [`zpcrweb-json.md`](./zpcrweb-json.md); the app-side scheduling (why writes are
+rate-limited, and what a `.pcrd` does instead) in `apps/web/ARCHITECTURE.md`.
 
 ## Decoding pipeline
 

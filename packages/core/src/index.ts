@@ -47,6 +47,15 @@ export {
 export { parsePltd, parsePlatesetup2, isPltdName } from "./pltd.js";
 export { plateToCsv, parsePlateCsv, isPlateCsvName } from "./plateCsv.js";
 export { attachPlateToZpcr } from "./attachPlate.js";
+export {
+  parseZpcrwebSettings,
+  parseZpcrwebSettingsJson,
+  formatZpcrwebSettings,
+  writeZpcrwebSettings,
+  hasZpcrwebSettings,
+  ZPCRWEB_SETTINGS_NAME,
+  ZPCRWEB_SETTINGS_VERSION,
+} from "./zpcrwebSettings.js";
 export { parsePrcl, parseProtocol2, isPrclName } from "./prcl.js";
 export { parseDcal, findDcalBlock, isDcalName } from "./dcal.js";
 export { parsePcrd, isPcrdName, pcrdFromBlob } from "./pcrd.js";
@@ -125,6 +134,7 @@ export type {
   SampleType,
 } from "./pltd.js";
 export type { Dcal, DcalBlock, DcalSecurity, DcalSerials } from "./dcal.js";
+export type { ZpcrwebSettings, ZpcrwebAnalysisSettings } from "./zpcrwebSettings.js";
 export type {
   Prcl,
   PrclContainer,

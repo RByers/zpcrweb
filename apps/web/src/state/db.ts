@@ -1,7 +1,17 @@
 /**
- * Thin IndexedDB wrapper — no dependencies. Persists loaded `.zpcr` files (raw bytes, so
- * they survive reloads and are re-parsed on demand) and per-file view settings (which
- * channels/wells are enabled, baseline/scale mode).
+ * Thin IndexedDB wrapper — no dependencies. Two stores:
+ *
+ * - `files` — loaded `.zpcr`/`.pcrd`/plate files as raw bytes, so they survive reloads and are
+ *   re-parsed on demand. This is the app's *only* source of run data.
+ * - `settings` — per-file **display** state: which channels/wells/fluorophores are shown, log
+ *   vs. linear, which protocol step, whether to draw baselines. A per-person view onto a run.
+ *
+ * **Analysis state is deliberately absent.** Thresholds, the auto-threshold multiplier, dark
+ * subtraction and calibration normalization all change the numbers the app reports, so they
+ * belong to the run and travel inside the archive as its `zpcrweb.json` entry — see
+ * `state/analysisSettings.ts` and `zpcrweb-json.md`. {@link StoredSettings} still *declares*
+ * those fields, read-only, so records written before that split can be migrated into the file
+ * on load (see `fromStored`'s callers); nothing writes them any more.
  */
 
 const DB_NAME = "zpcrweb";
@@ -51,16 +61,6 @@ export interface StoredSettings {
   /** When color separation is on, group/label curves by fluorophore or by target/gene — or show
    * the Cq/ΔRFU table instead of the chart (`"table"`). */
   fluorViewMode?: "fluorophore" | "target" | "table";
-  /** Calibration normalization mode; see `calibration.md` §3. Not user-facing — see the
-   * FileSettings field of the same name for why. */
-  calibrationNormalization?: "none" | "column" | "global";
-  /** Whether the LED-off `DARKDATA` is subtracted before color separation; see `calibration.md`
-   * §4.2. Absent on older records, which migrate from {@link calibrationBackground} below. */
-  subtractDark?: boolean;
-  /** Retired three-way background selector ("none"/"dark"/"plate") — kept only so older records
-   * can be migrated to {@link subtractDark} ("dark" → true, else false). Empty-plate subtraction
-   * is gone; dark subtraction is the pipeline's one optional additive stage. */
-  calibrationBackground?: "none" | "dark" | "plate";
   /** Fluorophore (or, in target view mode, target) names hidden from the dye-space view. */
   disabledFluors?: string[];
   /** Curves view: sample names hidden from the plotted curves. */
@@ -68,21 +68,47 @@ export interface StoredSettings {
   /** When true, dye-space curves are drawn for every enabled well/fluor pair, even ones the
    * plate definition doesn't actually load into that well. Off by default. */
   showUnloadedFluors?: boolean;
-  /** Manual per-fluorophore threshold overrides (RFU), as `[fluor, value]` pairs. */
-  thresholdOverrides?: [string, number][];
-  /** Manual per-curve threshold overrides (RFU), as `["row,col,fluor", value]` pairs. */
-  curveThresholdOverrides?: [string, number][];
-  /** §5.1's auto-threshold multiplier. Absent on records written before it was adjustable, which
-   * fall back to the library default. */
-  thresholdMultiplier?: number;
   /** Retired: the standalone Analysis view's own target opt-out set. That view is now the Curves
    * view's table mode and shares the rail's {@link disabledFluors}, so these are ignored. */
   analysisDisabledTargets?: string[];
   /** Retired: the Analysis view's Cq-algorithm selector. Cq is always `threshold.md` §6.1's
    * threshold crossing now, so this is ignored. */
   analysisCqAlgorithm?: "Threshold" | "NoThreshold";
-  /** Retired name for {@link thresholdOverrides}, still read when migrating older records. */
+
+  // ── Migrated-away analysis fields ────────────────────────────────────────────────────────
+  // Read once on load and folded into the file's own `zpcrweb.json` (see the module comment and
+  // `legacyAnalysisFromStored` in `useZpcrStore.ts`), then dropped: nothing writes them, so the
+  // first save of any display setting rewrites the record without them.
+  /** @deprecated → `zpcrweb.json` `analysis.thresholdOverrides`. `[fluor, RFU]` pairs. */
+  thresholdOverrides?: [string, number][];
+  /** @deprecated → `zpcrweb.json` `analysis.curveThresholdOverrides`.
+   * `["row,col,fluor", RFU]` pairs. */
+  curveThresholdOverrides?: [string, number][];
+  /** @deprecated → `zpcrweb.json` `analysis.thresholdMultiplier`. */
+  thresholdMultiplier?: number;
+  /** @deprecated → `zpcrweb.json` `analysis.subtractDark`. */
+  subtractDark?: boolean;
+  /** @deprecated → `zpcrweb.json` `analysis.calibrationNormalization`. */
+  calibrationNormalization?: "none" | "column" | "global";
+  /** @deprecated Retired three-way background selector ("none"/"dark"/"plate"), migrated to
+   * {@link subtractDark} ("dark" → true, else false) and from there into the file. */
+  calibrationBackground?: "none" | "dark" | "plate";
+  /** @deprecated Retired name for {@link thresholdOverrides}, still read when migrating. */
   analysisThresholdOverrides?: [string, number][];
+}
+
+/** True when a stored record still carries analysis fields that now belong in the file — the
+ * trigger for the one-time migration, and for rewriting the record without them. */
+export function hasLegacyAnalysisFields(s: StoredSettings): boolean {
+  return (
+    s.thresholdOverrides !== undefined ||
+    s.curveThresholdOverrides !== undefined ||
+    s.analysisThresholdOverrides !== undefined ||
+    s.thresholdMultiplier !== undefined ||
+    s.subtractDark !== undefined ||
+    s.calibrationNormalization !== undefined ||
+    s.calibrationBackground !== undefined
+  );
 }
 
 function openDb(): Promise<IDBDatabase> {

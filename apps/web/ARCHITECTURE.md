@@ -202,26 +202,54 @@ a minimal IndexedDB wrapper with two object stores:
   attach changes `size`, so re-persisting after one just writes the same `id` again — no
   separate override record to keep in sync, see above). `kind` defaults to `"zpcr"` for records
   written before `.pcrd` support existed.
-- `settings` — `{ fileId, enabledChannels[], enabledWells[], enabledRefCols[], baseline,
-  curveView, drawBaseline, scale, … }`, so each file remembers its enabled wells/channels/
-  reference columns. `baseline` (Reference view's factory-relative ΔRFU/Drift %) and `curveView`
-  (the Curves view's display mode — baselining itself is never stored, since it's always the
-  auto-detected linear fit) are independent settings — see "Two baseline concepts" under
-  Reference view. `thresholdOverrides` (`[fluor, value][]`, manual per-fluorophore threshold RFU),
-  `curveThresholdOverrides` (`["row,col,fluor", value][]`, the same one curve at a time, and
-  outranking both the group override and the auto value) and `thresholdMultiplier` (§5.1's
-  auto-threshold `k`, absent on records written before it was adjustable) are the Curves rail's
-  Threshold section — see "Table mode" below. Older records may carry
-  it under its former name, `analysisThresholdOverrides`, alongside two settings of the retired
-  standalone Analysis view that are now simply ignored: `analysisDisabledTargets[]` (its own
-  target opt-out set, since folded into the shared `disabledFluors`) and `analysisCqAlgorithm`
-  (its Cq-algorithm selector — Cq is always §6.1's threshold crossing now). Writes
-  are debounced. Older records may still carry the retired `curveBaseline`/`curveBaselineRange`
-  fields (`state/db.ts`); `useZpcrStore.ts`'s `fromStored()` migrates `curveBaseline: "raw"` to
-  `curveView: "absolute"` (anything else to `"relative"`) and drops the region override entirely.
+- `settings` — **display state only**: `{ fileId, enabledChannels[], enabledWells[],
+  enabledRefCols[], baseline, curveView, drawBaseline, scale, … }`, so each file remembers its
+  enabled wells/channels/reference columns. `baseline` (Reference view's factory-relative
+  ΔRFU/Drift %) and `curveView` (the Curves view's display mode — baselining itself is never
+  stored, since it's always the auto-detected linear fit) are independent settings — see "Two
+  baseline concepts" under Reference view. Two settings of the retired standalone Analysis view
+  are simply ignored when present: `analysisDisabledTargets[]` (its own target opt-out set, since
+  folded into the shared `disabledFluors`) and `analysisCqAlgorithm` (its Cq-algorithm selector —
+  Cq is always §6.1's threshold crossing now). Writes are debounced by 300 ms. Older records may
+  still carry the retired `curveBaseline`/`curveBaselineRange` fields (`state/db.ts`);
+  `useZpcrStore.ts`'s `fromStored()` migrates `curveBaseline: "raw"` to `curveView: "absolute"`
+  (anything else to `"relative"`) and drops the region override entirely.
 
 Deleting a file removes both its `files` and `settings` records and drops it from memory —
 exposed as a clear affordance on each file chip.
+
+### Analysis state lives in the file, not in IndexedDB
+
+Anything that changes a **number** the app reports is stored in the run's own archive, as a
+`zpcrweb.json` entry (`zpcrweb-json.md`, `packages/core/src/zpcrwebSettings.ts`) — not in the
+`settings` store above. That is `thresholdOverrides` (manual per-fluorophore threshold RFU),
+`curveThresholdOverrides` (the same one curve at a time), `thresholdMultiplier` (§5.1's
+auto-threshold `k`), `subtractDark` (`calibration.md` §4.2) and `calibrationNormalization` (§3):
+the inputs `useRunAnalysis` uses to produce a different Cq for the same run. Keeping them per-browser made a run's interpretation invisible to whoever the
+file was sent to, and made clearing site data silently change the numbers.
+
+The split is invisible to views. `state/analysisSettings.ts` defines `AnalysisSettings` and the
+`ANALYSIS_KEYS` list; `FileSettings extends AnalysisSettings`, `store.settings` merges the two
+halves into one flat object, and `updateSettings` routes each key of a patch to its own store —
+so every call site keeps writing one `onChange({ … })` regardless of where the value lands.
+
+- **Seeding.** A file's settings are read from its `zpcrweb.json` once it parses — which for an
+  encrypted `.pcrd` means after the password lands, so the effect keyed on `runs` retries rather
+  than seeding defaults over a file it couldn't read yet. The file is authoritative; local state
+  never overrides it. The one exception is a one-time migration of pre-split IndexedDB records
+  (`legacyAnalysisFromStored`), which applies only to a file carrying no `zpcrweb.json` and is
+  then written into it.
+- **Writing** is rate-limited to one archive rewrite per file per minute, plus a flush on active-
+  file change, `visibilitychange` → `hidden`, and `pagehide` (`state/analysisPersist.ts`; the
+  first edit to an idle file writes immediately). The rewritten bytes go to IndexedDB only —
+  never back into `files` state, where they would re-parse the run and rebuild every derived
+  value on each save. `size` is deliberately left at the loaded file's size so `fileId()` still
+  dedupes a re-add of the same file.
+- **Downloads** go through `ZpcrStore.exportBytes`, which re-zips on demand, so a copy saved from
+  the Overview view carries the thresholds it was read with.
+- **`.pcrd` and standalone plate files can't hold it.** A `.pcrd` is one encrypted XML document,
+  not an archive (`pcrd.md` §1) — it has its own `dataAnalysisParameters` we decode but don't yet
+  write back, so analysis edits to a `.pcrd` are live for the session and then gone.
 
 ## Views
 
@@ -675,7 +703,8 @@ is: a per-target curve needs channel→dye color separation (`calibration.md`).
   and still reachable through `computeCqTable`, just not selectable), which is what makes a per-group
   threshold always meaningful and the override section always applicable.
 - **Threshold (`thresholdMultiplier` + `thresholdOverrides` + `curveThresholdOverrides`
-  settings):** §5.1's `resolveThreshold` over the median `baselineNoise` across a fluorophore's own
+  settings — all stored in the run's own `zpcrweb.json`, not IndexedDB; see "Analysis state
+  lives in the file" above):** §5.1's `resolveThreshold` over the median `baselineNoise` across a fluorophore's own
   wells, in the rail's collapsible "Threshold" section (`<details className="rail__details">`,
   chevron rotates open, like the Temperature section), rendered by
   `components/curves/ThresholdSection.tsx`. A **slider** at the top sets §5.1's multiplier `k` in

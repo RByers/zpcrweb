@@ -27,11 +27,16 @@ export function OverviewView({
   file,
   run,
   settings,
+  onDownload,
 }: {
   zpcr: Zpcr;
   /** The active run's own name/bytes — downloaded verbatim, so this is also how a `.zpcr`
    * attached via the Plates view's upload control gets back onto disk (see `PlatesView`). */
   file: { name: string; bytes: Uint8Array };
+  /** Bytes for the download button: the loaded archive plus the run's current analysis settings
+   * as its `zpcrweb.json` entry (`ZpcrStore.exportBytes`), so the copy that leaves the browser
+   * carries the thresholds it was read with. Falls back to `file.bytes` when absent. */
+  onDownload?: () => Uint8Array | null;
   /** The same run result the app resolved `zpcr` from — carries `.pcrd` container metadata
    * (`encrypted`) that `zpcr` alone doesn't expose; see {@link runEncryptionStatus}. */
   run: RunResult;
@@ -92,9 +97,9 @@ export function OverviewView({
         <div className="overview__toolbar">
           <button
             className="raw__download"
-            onClick={() => downloadBytes(file.name, file.bytes)}
+            onClick={() => downloadBytes(file.name, onDownload?.() ?? file.bytes)}
             aria-label={`Download ${file.name}`}
-            title="Download original file"
+            title="Download this file (including its zpcrweb.json analysis settings)"
           >
             <DownloadIcon />
           </button>

@@ -89,7 +89,13 @@ export function App() {
         ) : (
           <>
             {view === "overview" && (
-              <OverviewView zpcr={zpcr} file={active} run={activeRun!} settings={settings} />
+              <OverviewView
+                zpcr={zpcr}
+                file={active}
+                run={activeRun!}
+                settings={settings}
+                onDownload={() => store.exportBytes(active.id)}
+              />
             )}
             {view === "curves" && (
               <CurvesView
