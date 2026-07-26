@@ -166,6 +166,9 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
     }
   }, [plate, plateChannelSet, defaultEnabledChannels, settings.enabledChannels, onChange]);
 
+  const resetChannels = () => onChange({ enabledChannels: defaultEnabledChannels });
+  const resetFluors = () => onChange({ disabledFluors: new Set<string>() });
+
   const calibrationOn = settings.calibration ?? calibrationAvailable;
   const fluorViewMode: FluorViewMode = settings.fluorViewMode;
   /** Table mode replaces the chart with the run's Cq/ΔRFU table (the former Analysis view). It is
@@ -707,6 +710,17 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
               : groupByTarget && usingTargets
                 ? "Targets"
                 : "Fluorophores"}
+            <button
+              className="rail__link rail__icon-btn"
+              onClick={!calibrationOn ? resetChannels : resetFluors}
+              title={
+                !calibrationOn
+                  ? "Reset to the channels present in the plate configuration"
+                  : "Re-enable all"
+              }
+            >
+              <ResetIcon />
+            </button>
           </div>
           {calibrationOn ? (
             <>
