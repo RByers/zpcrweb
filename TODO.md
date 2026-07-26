@@ -27,9 +27,15 @@ Additional typed parsers for the archive files currently reachable only via the 
 
 ## Web app (`apps/web`)
 
+To do immediately:
+
+- [ ] Open curves UI in 'target' mode by default
+- [ ] In the thresholds customization view, make hovering over a target show only those lines and also show a dotted line where the threshold is
+- [ ] By default in channels view only select channels which are present in the plate configuration.
+- [ ] Add a reset button to the channel/flourophore/target list exactly like for the wells
+
 Still planned:
 
-- [ ] When a file is opened with an attached plate (pcrd or zpcr with embedded pltd), use the plate definition to determine the UI defaults (channels and wells to display etc.).
 - [ ] Add a plate editor which allows setting the flourophores used per well, as well as the tube types for the plate (clear / white).  Used for calibration adjustments and fluorophore display. Allow saving/naming plate files and applying them to runs. Remember the plate setting applied to each loaded run. Have an easy mechanism to copy/paste settings from one well to another or to all wells on a column/row/plate, or to duplicate a column/row across multiple columns/rows (eg. using click drag to select a region simple to copy/paste operations in spreadsheets)
 - [ ] Optionally allow writing the target and sample names per well in the plate editor, again with easy copy paste of some form. Then use these in the curves visualization (eg. on hover).
 - [ ] Add an option to apply flourophore-specific calibration to the run based on the calibration file data.
