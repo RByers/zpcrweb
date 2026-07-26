@@ -45,11 +45,18 @@ export interface PlotCurve {
   isReference: boolean;
   cycles: number[];
   mean: number[];
-  /** Std/min/max envelope; a color-separated curve has none of its own — pass `mean` for both
-   * min and max, and zeros for std, so the envelope collapses to nothing rather than lying. */
-  std: number[];
-  min: number[];
-  max: number[];
+  /**
+   * Std/min/max spread across the well's readings within each scan — **channel space only**, and
+   * omitted (not zero-filled) everywhere else. A color-separated curve has no spread of its own:
+   * calibration.md §5 solves a single concentration per channel vector, not a distribution. These
+   * used to be filled with `mean`/`mean`/`0` so the envelope "collapsed to nothing rather than
+   * lying", but a collapsed envelope still draws — a zero-height whisker and three tooltip rows
+   * restating the mean — which reads as a real measurement of zero spread. Absent means absent:
+   * no band, no whisker, no tooltip rows. All three travel together.
+   */
+  std?: number[];
+  min?: number[];
+  max?: number[];
   /** Cq (`threshold.md` §6), computed per the Analysis view's settings — `null`/undefined when
    * unamplified, squelched by the minimum-ΔRFU gate, or not computable. Drives the chart's Cq
    * marker and its tooltip row. */
@@ -205,9 +212,11 @@ export interface SeriesMeta {
   isReference: boolean;
   cycles: number[];
   mean: number[];
-  std: number[];
-  min: number[];
-  max: number[];
+  /** See {@link PlotCurve.std} — absent for every series that has no real spread (dye-space
+   * curves, the baseline overlay, the factory reference, temperatures). */
+  std?: number[];
+  min?: number[];
+  max?: number[];
   /** Per-cycle raw→plotted mapping this series was drawn with; lets the tooltip/band code
    * reposition min/max/std into plotted space without recomputing which baseline applied. */
   adjust: Adjust[];
@@ -247,9 +256,11 @@ export interface TooltipData {
   color: string;
   cycle: number;
   mean: number;
-  min: number;
-  max: number;
-  std: number;
+  /** See {@link PlotCurve.std}; all three absent together when this series has no real spread,
+   * and the tooltip then omits the rows entirely. */
+  min?: number;
+  max?: number;
+  std?: number;
   left: number;
   top: number;
   /** See {@link PlotCurve.cq}. */
@@ -396,9 +407,6 @@ export function buildChart(cfg: BuildChartConfig): {
         isReference: false,
         cycles: curve.cycles,
         mean: baselineRaw,
-        std: [],
-        min: [],
-        max: [],
         adjust,
         parentIndex: i,
       });
@@ -492,10 +500,8 @@ export function buildChart(cfg: BuildChartConfig): {
         dyeLabel: channelLabel(factory.channel),
         isReference: false,
         cycles,
+        // A factory reference is a single stored value per cycle, not a distribution — no spread.
         mean: factory.mean,
-        std: factory.mean.map(() => 0),
-        min: factory.mean,
-        max: factory.mean,
         adjust,
       });
       series.push({
@@ -521,9 +527,6 @@ export function buildChart(cfg: BuildChartConfig): {
       isReference: false,
       cycles: t.cycles,
       mean: t.celsius.map((v) => v ?? NaN),
-      std: [],
-      min: [],
-      max: [],
       adjust: [],
     });
     series.push({
@@ -537,7 +540,9 @@ export function buildChart(cfg: BuildChartConfig): {
   });
 
   // Min/max envelope bands — one per plotted well curve, so each channel of a well gets its own.
-  const computeBand = (c: PlotCurve, adjust: Adjust[]): BandData => {
+  // Curves with no spread of their own (dye space) get no band at all rather than a flat one.
+  const computeBand = (c: PlotCurve, adjust: Adjust[]): BandData | null => {
+    if (!c.min || !c.max) return null;
     const min: (number | null)[] = [];
     const max: (number | null)[] = [];
     for (let i = 0; i < c.mean.length; i++) {
@@ -551,7 +556,9 @@ export function buildChart(cfg: BuildChartConfig): {
   };
 
   const bands: BandData[] = cfg.bands
-    ? wellCurves.map((c, i) => computeBand(c, wellAdjusts[i]!))
+    ? wellCurves
+        .map((c, i) => computeBand(c, wellAdjusts[i]!))
+        .filter((b): b is BandData => b != null)
     : [];
 
   const thresholdLineState: ThresholdLineState = { value: null };
@@ -978,9 +985,6 @@ function overlayPlugin(
                   color: (u.series[best]!.stroke as string) ?? "#8aa0c0",
                   cycle: m.cycles[idx] ?? 0,
                   mean: plotted,
-                  min: plotted,
-                  max: plotted,
-                  std: 0,
                   left,
                   top,
                 }
@@ -989,16 +993,22 @@ function overlayPlugin(
           return;
         }
 
+        // A series with no spread (dye space — see `PlotCurve.std`) gets no whisker and no
+        // min/max/σ tooltip rows, rather than a zero-height whisker restating the mean.
+        const spread =
+          m.min && m.max && m.std
+            ? { min: m.min[idx] ?? 0, max: m.max[idx] ?? 0, std: m.std[idx] ?? 0 }
+            : null;
         const a = m.adjust[idx] ?? IDENTITY_ADJUST;
         const x = u.valToPos(m.cycles[idx] ?? 0, "x");
-        const yMax = u.valToPos((m.max[idx] ?? 0) * a.scale + a.shift, "y");
-        const yMin = u.valToPos((m.min[idx] ?? 0) * a.scale + a.shift, "y");
-        const stdOff = (m.std[idx] ?? 0) * a.scale;
+        const yMax = u.valToPos((spread?.max ?? 0) * a.scale + a.shift, "y");
+        const yMin = u.valToPos((spread?.min ?? 0) * a.scale + a.shift, "y");
+        const stdOff = (spread?.std ?? 0) * a.scale;
         const yHi = u.valToPos(plotted + stdOff, "y");
         const yLo = u.valToPos(plotted - stdOff, "y");
         const color = channelColor(m.channel);
 
-        if ([x, yMax, yMin, yHi, yLo].every(Number.isFinite)) {
+        if (spread && [x, yMax, yMin, yHi, yLo].every(Number.isFinite)) {
           const set = (el: SVGElement, attrs: Record<string, number | string>) => {
             for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, String(v));
           };
@@ -1029,9 +1039,7 @@ function overlayPlugin(
                 color,
                 cycle: m.cycles[idx] ?? 0,
                 mean: m.mean[idx] ?? 0,
-                min: m.min[idx] ?? 0,
-                max: m.max[idx] ?? 0,
-                std: m.std[idx] ?? 0,
+                ...(spread ?? {}),
                 left,
                 top,
                 cq: m.cq,

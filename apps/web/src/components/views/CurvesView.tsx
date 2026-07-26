@@ -14,7 +14,7 @@ import {
 } from "../../state/useZpcrStore";
 import { usePltdPassword } from "../../state/pltdPassword";
 import { channelColor, channelLabel } from "../../lib/channelColors";
-import { channelCurveKey, curveKey, useRunAnalysis } from "../../lib/runAnalysis";
+import { curveKey, useRunAnalysis } from "../../lib/runAnalysis";
 import type { CqTableEntry } from "@zpcrweb/core";
 import {
   analysisCsv,
@@ -76,7 +76,6 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
     loadedFluors,
     allFluorCurves,
     cqTable,
-    channelCqTable,
   } = run;
 
   // Every temperature the platereads carry, for this step. Which of them are plotted is a
@@ -353,17 +352,10 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
       noise: e?.noise ?? null,
     };
   };
-  // Channel space has no target to be consistent *with*: a raw channel curve mixes every dye
-  // emitting into that filter, so it carries its own Cq from its own table. See `channelCqTable`.
-  const channelCq = (row: number, col: number, channel: number) => {
-    const e = channelCqTable.get(channelCurveKey(row, col, channel));
-    return {
-      cq: e?.cq ?? null,
-      baselineFormula: e ? formatBaselineFormula(e.baselineFit) : null,
-      baselineRegion: e?.baselineRegion ?? null,
-      noise: e?.noise ?? null,
-    };
-  };
+  // Channel space gets no Cq of its own — see `RunAnalysis.cqTable`. A raw channel curve carries
+  // every dye that emits into that filter and belongs to no target, so quantifying it would be
+  // measuring crosstalk. Channel-space curves below therefore omit `cq`/`baseline*` entirely; what
+  // they carry instead, and dye-space curves don't, is the real min/max/σ spread of the readings.
 
   const plotCurves: PlotCurve[] = useMemo(
     () =>
@@ -378,9 +370,6 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
             isReference: c.isReference,
             cycles: c.cycles,
             mean: c.mean,
-            std: c.cycles.map(() => 0),
-            min: c.mean,
-            max: c.mean,
             sample: wellSample.get(wellKey(c.row, c.col)),
             ...dyeCq(c.row, c.col, c.dye),
           }))
@@ -397,7 +386,6 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
             min: c.min,
             max: c.max,
             sample: wellSample.get(wellKey(c.row, c.col)),
-            ...channelCq(c.row, c.col, c.channel),
           })),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [
@@ -409,7 +397,6 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
       hasNoTargetGroup,
       wellSample,
       cqTable,
-      channelCqTable,
     ],
   );
 
@@ -438,9 +425,6 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
               isReference: c.isReference,
               cycles: c.cycles,
               mean: c.mean,
-              std: c.cycles.map(() => 0),
-              min: c.mean,
-              max: c.mean,
               sample: wellSample.get(wellKey(c.row, c.col)),
               ...dyeCq(c.row, c.col, c.dye),
             }))
@@ -459,7 +443,6 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
               min: c.min,
               max: c.max,
               sample: wellSample.get(wellKey(c.row, c.col)),
-              ...channelCq(c.row, c.col, c.channel),
             })),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [
@@ -474,7 +457,6 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
       hasNoTargetGroup,
       wellSample,
       cqTable,
-      channelCqTable,
     ],
   );
 
@@ -504,7 +486,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
         .map((c) => ({
           key: `${c.dyeLabel}-${c.channel}`,
           label: c.dyeLabel,
-          cq: c.cq ?? null,
+          cq: c.cq,
           color: channelColor(c.channel),
           selected: isSelected(c),
         })),
@@ -524,7 +506,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
         key: `${c.row},${c.col}`,
         label: c.wellLabel,
         sublabel: c.sample,
-        cq: c.cq ?? null,
+        cq: c.cq,
         color: channelColor(c.channel),
         selected: isSelected(c),
       })),
@@ -586,7 +568,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
         key: `${c.row},${c.col}`,
         label: c.wellLabel,
         sublabel: c.sample,
-        cq: c.cq ?? null,
+        cq: c.cq,
         color: channelColor(channel),
         selected: isSelected(c),
       })),
@@ -602,7 +584,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
         key: `${c.row},${c.col}-${c.dyeLabel}`,
         label: c.dyeLabel,
         sublabel: c.wellLabel,
-        cq: c.cq ?? null,
+        cq: c.cq,
         color: channelColor(c.channel),
         selected: isSelected(c),
       })),

@@ -399,11 +399,18 @@ color-separated `allFluorCurves` — and, on top of those, the run's **Cq table*
   get their own entry — the Curves view can plot them with "Unloaded" on, and they need a Cq — but a
   dye that was never pipetted into a well doesn't set the bar for the wells that were. That's a
   data-validity gate, not a user filter.
-- **`channelCqTable`** — the same computation over raw *channel* curves, keyed by
-  `channelCurveKey(row, col, channel)`, for the Cq markers the Curves view draws while color
-  separation is off. A separate quantity rather than a second copy of the same one: a channel curve
-  mixes every dye emitting into that filter and belongs to no target. It shares the rail's
-  `thresholdMultiplier` (its per-group overrides, being target-keyed, never match a channel group).
+- **No channel-space analysis, at all.** There was a second table, `channelCqTable`, running the
+  same computation over the raw *channel* curves so the Curves view could mark Cq while color
+  separation was off. The arithmetic was real, the quantity wasn't: a raw channel reads everything
+  emitting into that filter, so an optical channel the plate assigns **no fluorophore** to still
+  produced a confident-looking Cq — one belonging to whichever neighbouring dye was bleeding into
+  it. Quantification is per-fluorophore *after* color separation, which is what the separation is
+  for, and CFX reports it that way too. Channel space is now purely a look at the raw signal: no
+  Cq, no threshold, no baseline fit. `PlotCurve.cq`/`baselineFormula`/`baselineRegion`/`noise` are
+  simply absent on a channel-space curve, so the chart's Cq ring, the tooltip's Cq/baseline rows
+  and the rail hover cards' Cq column all drop out together (`HoverCardRow.cq` distinguishes
+  `null` — "has no Cq", shown as "—" — from `undefined`, "Cq doesn't apply", which hides the
+  column).
 - **The dye-space solve is unconditional.** It used to be skipped while the Curves view was showing
   channel space (`dyeSpace`, a fifth parameter) since one pseudo-inverse per well per cycle is real
   work. It no longer is: the target thresholds and the CSV export are target-based in *every* view
@@ -554,7 +561,14 @@ only pieces the two views share.
 - **X axis:** integer cycles only — a tick per cycle, gridline + label every 5.
 - **Hover/tap tooltip:** a uPlot cursor plugin finds the nearest series (well curve, dark,
   factory overlay, or temperature) and reports its label, channel/dye, cycle, and
-  mean/min/max/std — or, for a temperature, just its °C. The search projects each series
+  mean, plus min/max/std **only where those exist** — or, for a temperature, just its °C.
+  Spread is a channel-space property: a color-separated curve is one solved concentration per
+  cycle (calibration.md §5), not a distribution, and the baseline overlay, factory reference and
+  temperature series have none either. `PlotCurve.std/min/max` are therefore optional and left
+  absent rather than filled with `mean`/`mean`/`0` as they once were — a "collapsed" envelope
+  still draws, as a zero-height hover whisker and three tooltip rows restating the mean, which
+  reads as a measured zero spread instead of no measurement. Band, whisker and rows now drop out
+  together. The search projects each series
   through **its own** scale, so proximity is measured in pixels across both axes. A well
   series also carries `baselineFormula` and `cq` (see "Table mode" below); when defined, the
   tooltip adds a "baseline" row (the fitted linear baseline, rendered as a formula — see
@@ -687,11 +701,11 @@ is: a per-target curve needs channel→dye color separation (`calibration.md`).
   with its chip would leave nothing on screen to bring it back. A threshold belongs to a target,
   not to an optical filter or a selection, and an override feeds the run's one Cq table, so it
   moves the chart's Cq markers and the hover cards' numbers exactly as it moves the table's.
-  Channel mode used to hide the section, on the grounds that `channelCqTable`'s own groups are
-  channels rather than targets; but that table is resolved from the same `thresholdMultiplier`, so
-  the slider was silently moving the channel chart's Cq markers with no visible cause. One
-  consequence of that split is still worth knowing: a per-group *override* is keyed by target and
-  so never reaches a channel curve's threshold (the multiplier does). Each row's displayed
+  Channel mode used to hide the section, on the grounds that the old `channelCqTable`'s groups were
+  channels rather than targets; that table is gone (see above), and with it the confusing part —
+  the section now shows the same thresholds in every mode, and in channel mode they simply describe
+  curves the chart isn't currently drawing in dye space rather than silently moving markers on it.
+  Each row's displayed
   automatic value is read from the run's Cq table directly (`CurvesView`'s `groupThresholds`)
   rather than from the display-filtered `tableRows`, for the same reason the row list itself
   isn't filtered.

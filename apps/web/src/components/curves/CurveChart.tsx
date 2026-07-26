@@ -184,18 +184,27 @@ export function CurveChart({
                     <td>mean</td>
                     <td>{formatRfu(tip.mean)}</td>
                   </tr>
-                  <tr>
-                    <td>min</td>
-                    <td>{formatRfu(tip.min)}</td>
-                  </tr>
-                  <tr>
-                    <td>max</td>
-                    <td>{formatRfu(tip.max)}</td>
-                  </tr>
-                  <tr>
-                    <td>std</td>
-                    <td>{tip.std.toFixed(2)}</td>
-                  </tr>
+                  {/* Spread rows only where there is real spread to report — channel space.
+                      A color-separated curve is one solved concentration per cycle, so it has
+                      no min/max/σ and these rows are omitted rather than shown as the mean. */}
+                  {tip.min != null && (
+                    <tr>
+                      <td>min</td>
+                      <td>{formatRfu(tip.min)}</td>
+                    </tr>
+                  )}
+                  {tip.max != null && (
+                    <tr>
+                      <td>max</td>
+                      <td>{formatRfu(tip.max)}</td>
+                    </tr>
+                  )}
+                  {tip.std != null && (
+                    <tr>
+                      <td>std</td>
+                      <td>{tip.std.toFixed(2)}</td>
+                    </tr>
+                  )}
                   {tip.kind === "well" && tip.baselineFormula != null && (
                     <tr>
                       <td>baseline</td>

@@ -13,7 +13,6 @@ import {
 } from "@zpcrweb/core";
 import { wellKey, type FileSettings } from "../state/useZpcrStore";
 import { NO_TARGET, targetGroups, type TargetGroup } from "./plateTargets";
-import { channelLabel } from "./channelColors";
 import {
   computeFluorCurves,
   matchFluorCalibrations,
@@ -49,11 +48,6 @@ export function curveKey(row: number, col: number, fluor: string): string {
   return `${row},${col},${fluor}`;
 }
 
-/** Identity of a channel-space curve, which belongs to no target — see {@link RunAnalysis.channelCqTable}. */
-export function channelCurveKey(row: number, col: number, channel: number): string {
-  return `${row},${col},ch${channel}`;
-}
-
 export interface RunAnalysis {
   /** The first plate entry in the archive, whatever its decode state — the views read
    * `needsPassword`/`error` off it to show the password prompt. */
@@ -87,17 +81,19 @@ export interface RunAnalysis {
   allFluorCurves: FluorCurve[];
   /**
    * The run's Cq values, one entry per well/fluorophore pair, keyed by {@link curveKey} — the only
-   * copy. Covers the whole plate regardless of any view's filters, so every view reads the same
-   * number for the same well.
+   * copy, and the only Cq the app computes at all. Covers the whole plate regardless of any view's
+   * filters, so every view reads the same number for the same well.
+   *
+   * **There is deliberately no channel-space equivalent.** There used to be one, marking Cq on the
+   * raw per-channel curves while color separation was off. It was real arithmetic but not a real
+   * measurement: a raw channel sees everything that emits into that filter, so an optical channel
+   * the plate assigns no fluorophore to still produced a confident-looking Cq — one belonging to
+   * whichever neighbouring dye was bleeding into it. Quantification is per-fluorophore, after
+   * color separation (that is what the separation is *for*), and the instrument reports it that
+   * way too. Channel space is now purely a look at the raw signal: no Cq, no threshold, no
+   * baseline fit.
    */
   cqTable: Map<string, CqTableEntry>;
-  /**
-   * Cq over the *raw channel* curves, keyed by {@link channelCurveKey} — what the Curves view marks
-   * while color separation is off. A separate quantity, not a second copy of the same one: a
-   * channel curve mixes every dye that emits into that filter and belongs to no target, so it has
-   * no well/target Cq to be consistent with. Computed the same way, over the whole plate.
-   */
-  channelCqTable: Map<string, CqTableEntry>;
   /** The *display* group a well/fluor pair belongs to — its target, the {@link NO_TARGET}
    * catch-all, or (on a plate with no targets at all) the fluorophore itself. Organizes chips,
    * table rows and colors. **Not** the threshold group — see {@link thresholdGroupOf}. */
@@ -320,29 +316,6 @@ export function useRunAnalysis(
     });
   }, [allFluorCurves, loadedFluors, settings.thresholdOverrides, settings.thresholdMultiplier]);
 
-  const channelCqTable = useMemo(() => {
-    const inputs: CqTableCurve[] = allCurves
-      .filter((c) => available.includes(c.channel))
-      .map((c) => ({
-        key: channelCurveKey(c.row, c.col, c.channel),
-        group: channelLabel(c.channel),
-        cycles: c.cycles,
-        values: c.mean,
-        contributesToThreshold: (loadedFluors.get(wellKey(c.row, c.col))?.size ?? 0) > 0,
-      }));
-    return computeCqTable(inputs, {
-      algorithm: CQ_ALGORITHM,
-      thresholdOverrides: settings.thresholdOverrides,
-      autoThreshold: { multiplier: settings.thresholdMultiplier },
-    });
-  }, [
-    allCurves,
-    available,
-    loadedFluors,
-    settings.thresholdOverrides,
-    settings.thresholdMultiplier,
-  ]);
-
   return {
     plateEntry,
     plate,
@@ -363,7 +336,6 @@ export function useRunAnalysis(
     groupInfos,
     allFluorCurves,
     cqTable,
-    channelCqTable,
     groupOf,
     thresholdGroupOf,
     thresholdGroups: calibratedFluors,
