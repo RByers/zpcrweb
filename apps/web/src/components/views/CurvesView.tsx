@@ -22,7 +22,6 @@ import {
   buildAnalysisRows,
 } from "../../lib/analysisRows";
 import { downloadText } from "../../lib/download";
-import type { CalibrationBackground } from "../../lib/fluorCurves";
 import { ChannelBar } from "../curves/ChannelBar";
 import { FluorBar, type FluorChip } from "../curves/FluorBar";
 import { SampleBar } from "../curves/SampleBar";
@@ -67,7 +66,6 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
     tube,
     fluorCals,
     calibrationAvailable,
-    plateBackgroundAvailable,
     wellFluorTargets,
     wellFluors,
     wellSample,
@@ -748,9 +746,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
           </details>
         )}
 
-        {/* Chart-only controls — nothing they change is visible in table mode. The Background
-            toggle below is not one of them: it feeds the color separation, so it moves the RFU
-            the table reports. */}
+        {/* Chart-only controls — nothing they change is visible in table mode. */}
         {!tableMode && (
           <>
             <div className="rail__section rail__row">
@@ -763,6 +759,9 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
                 value={settings.curveView}
                 onChange={(v) => onChange({ curveView: v as CurveView })}
               />
+            </div>
+
+            <div className="rail__section rail__row">
               <Switch
                 label="Draw baseline"
                 checked={settings.drawBaseline}
@@ -808,27 +807,21 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
           </>
         )}
 
+        {/* §4.2's optional dark-current stage. Only meaningful in dye space: with color separation
+            off the raw channel curves are shown as read. Deliberately outside the !tableMode
+            wrapper above, unlike the display controls it sits under: this one feeds the color
+            separation, so it moves the RFU the table and the CSV export report too. */}
         {calibrationOn && (
-          <div className="rail__section">
-            <div className="rail__row">
-              <Toggle
-                label="Background"
-                options={[
-                  ["none", "None"],
-                  ["dark", "Dark"],
-                  ["plate", "Plate"],
-                ]}
-                value={settings.calibrationBackground}
-                onChange={(v) =>
-                  onChange({ calibrationBackground: v as CalibrationBackground })
-                }
-              />
-            </div>
-            {settings.calibrationBackground === "plate" && !plateBackgroundAvailable && (
-              <div className="rail__note mono">
-                No {tube} empty-plate calibration in this file — no background subtracted.
-              </div>
-            )}
+          <div className="rail__section rail__row">
+            <Toggle
+              label="Subtract dark"
+              options={[
+                ["off", "Off"],
+                ["on", "On"],
+              ]}
+              value={settings.subtractDark ? "on" : "off"}
+              onChange={(v) => onChange({ subtractDark: v === "on" })}
+            />
           </div>
         )}
 

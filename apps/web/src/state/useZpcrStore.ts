@@ -11,7 +11,6 @@ import {
   type PltdContainer,
   type Zpcr,
 } from "@zpcrweb/core";
-import type { CalibrationBackground } from "../lib/fluorCurves";
 import {
   deleteFile,
   fileId,
@@ -95,8 +94,11 @@ export interface FileSettings {
    * stays reachable, and so stored records keep round-tripping.
    */
   calibrationNormalization: NormalizationMode;
-  /** Which additive background comes off a reading before the solve; see `calibration.md` §4.2. */
-  calibrationBackground: CalibrationBackground;
+  /**
+   * Whether the plate read's LED-off `DARKDATA` is subtracted from a reading before the solve —
+   * the optional dark-current stage of `calibration.md` §4.2. Off by default.
+   */
+  subtractDark: boolean;
   /** Fluorophore (or, in target view mode, target) names hidden from the dye-space curves (an
    * opt-out set, like `enabledChannels` inverted — new entries default to shown without needing
    * to know their names up front). */
@@ -227,9 +229,9 @@ function defaultSettings(): FileSettings {
     calibration: null,
     fluorViewMode: "fluorophore",
     calibrationNormalization: "global",
-    // No background subtraction by default — the choice that stays closest to the instrument
-    // software's own RFU scale. See `calibration.md` §4.2/§8 and CalibrationBackground.
-    calibrationBackground: "none",
+    // The dark-current stage is optional and off by default, which is what matches the reported
+    // RFU scale of the reference run in `calibration.md` §8. See §4.2.
+    subtractDark: false,
     disabledFluors: new Set<string>(),
     disabledSamples: new Set<string>(),
     showUnloadedFluors: false,
@@ -255,7 +257,7 @@ function toStored(id: string, s: FileSettings): StoredSettings {
     calibration: s.calibration,
     fluorViewMode: s.fluorViewMode,
     calibrationNormalization: s.calibrationNormalization,
-    calibrationBackground: s.calibrationBackground,
+    subtractDark: s.subtractDark,
     disabledFluors: [...s.disabledFluors],
     disabledSamples: [...s.disabledSamples],
     showUnloadedFluors: s.showUnloadedFluors,
@@ -282,7 +284,9 @@ function fromStored(s: StoredSettings): FileSettings {
     calibration: s.calibration ?? null,
     fluorViewMode: s.fluorViewMode ?? "fluorophore",
     calibrationNormalization: s.calibrationNormalization ?? "global",
-    calibrationBackground: s.calibrationBackground ?? "none",
+    // Records written before this setting existed carry the retired three-way
+    // calibrationBackground ("none"/"dark"/"plate"); only "dark" maps to the surviving stage.
+    subtractDark: s.subtractDark ?? s.calibrationBackground === "dark",
     disabledFluors: new Set(s.disabledFluors ?? []),
     disabledSamples: new Set(s.disabledSamples ?? []),
     showUnloadedFluors: s.showUnloadedFluors ?? false,

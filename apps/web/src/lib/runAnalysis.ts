@@ -17,7 +17,6 @@ import { channelLabel } from "./channelColors";
 import {
   computeFluorCurves,
   matchFluorCalibrations,
-  plateBackgroundLevels,
   resolveTubeType,
   type FluorCalibration,
   type FluorCorrections,
@@ -69,7 +68,6 @@ export interface RunAnalysis {
   fluorCals: FluorCalibration[];
   calibratedFluors: FluorCalibration[];
   calibrationAvailable: boolean;
-  plateBackgroundAvailable: boolean;
   stepTemperatureC: number;
   /** Target/gene assigned to each (well, fluor) pair — `Map<wellKey, Map<fluor, target>>`. */
   wellFluorTargets: Map<string, Map<string, string>>;
@@ -237,20 +235,13 @@ export function useRunAnalysis(
     const reads = zpcr.reads.filter((r) => r.step === activeStep);
     // §4.1: one position of the reference row — the first — per channel, LED on.
     const referenceLevel = available.map((ch) => reads.map((r) => r.get(ch, REFERENCE_ROW, 0).mean));
-    // §4.2: whichever additive background the user picked, as a per-cycle table. `dark` varies per
-    // scan (DARKDATA is re-read every cycle); `plate` is one temperature-interpolated constant,
-    // broadcast across the cycles so both take the same code path downstream.
+    // §4.2: the optional dark-current subtraction, as a per-cycle table — DARKDATA is re-read
+    // every scan, so the level varies cycle to cycle. Off by default, in which case nothing is
+    // subtracted and the stage is skipped entirely.
     const darkByChannel = new Map(darkCurves.map((d) => [d.channel, d]));
-    const plateLevels =
-      settings.calibrationBackground === "plate"
-        ? plateBackgroundLevels(calibrations, tube, stepTemperatureC, available)
-        : undefined;
-    const backgroundLevel =
-      settings.calibrationBackground === "dark"
-        ? available.map((ch) => darkByChannel.get(ch)?.mean ?? [])
-        : plateLevels
-          ? plateLevels.map((level) => reads.map(() => level))
-          : undefined;
+    const backgroundLevel = settings.subtractDark
+      ? available.map((ch) => darkByChannel.get(ch)?.mean ?? [])
+      : undefined;
     // §4.1: per-well gain factors, only ever present in a `.pcrd` (a `.zpcr` stores none), and only
     // when that run actually saved a set — otherwise the gain correction stays inactive and the
     // reference level correctly has no effect of its own.
@@ -271,17 +262,10 @@ export function useRunAnalysis(
     available,
     darkCurves,
     calibrations,
-    settings.calibrationBackground,
+    settings.subtractDark,
     tube,
     stepTemperatureC,
   ]);
-
-  // Whether the "Plate" background is actually backed by data — a file can carry .Dcal entries for
-  // other vessel types than this plate's, in which case that mode silently subtracts nothing.
-  const plateBackgroundAvailable = useMemo(
-    () => plateBackgroundLevels(calibrations, tube, stepTemperatureC, available) != null,
-    [calibrations, tube, stepTemperatureC, available],
-  );
 
   const allFluorCurves = useMemo(() => {
     if (!matrix || !dyeSpace) return [];
@@ -348,7 +332,6 @@ export function useRunAnalysis(
     fluorCals,
     calibratedFluors,
     calibrationAvailable,
-    plateBackgroundAvailable,
     stepTemperatureC,
     wellFluorTargets,
     wellFluors,

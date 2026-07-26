@@ -1,9 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
-  averagePlateBackground,
   buildCalibrationMatrix,
   buildDyeResponseCurve,
-  buildPlateBackgroundCurve,
   interpolateResponse,
   parseZpcr,
   preprocessChannelReadings,
@@ -225,92 +223,6 @@ describe("normalization mode does not change the reported RFU scale", () => {
         // produced concentrations around 1e9 — see calibration.md §3.
         expect(Math.abs(c)).toBeLessThan(1e5);
       }
-    }
-  });
-});
-
-describe("buildPlateBackgroundCurve", () => {
-  const dcal = calibrations().get("FAM_BR Clear.Dcal")!;
-  const background = buildPlateBackgroundCurve(dcal);
-
-  it("carries the plate type and one knot per calibrated temperature per channel", () => {
-    expect(background.plate).toBe(dcal.plate);
-    expect(background.channels).toHaveLength(dcal.channelCount);
-    for (const knots of background.channels) {
-      expect(knots.map((k) => k.temperatureC)).toEqual([20, 40, 60, 80]);
-    }
-  });
-
-  it("reports the empty-plate reading itself, not the dye-minus-empty difference", () => {
-    for (const temperatureC of [20, 40, 60, 80]) {
-      const emptyBlock = findDcalBlock(dcal, "empty", temperatureC)!;
-      for (let channel = 0; channel < dcal.channelCount; channel++) {
-        const knot = background.channels[channel]!.find((k) => k.temperatureC === temperatureC)!;
-        expect(knot.response).toBe(emptyBlock.values[channel * emptyBlock.wellCount]!);
-      }
-    }
-  });
-
-  it("is the zero point the response curve is measured from: response + background == dye", () => {
-    const response = buildDyeResponseCurve(dcal);
-    const dyeBlock = findDcalBlock(dcal, "dye", 60)!;
-    for (let channel = 0; channel < dcal.channelCount; channel++) {
-      const resp = interpolateResponse(response.channels[channel]!, 60);
-      const back = interpolateResponse(background.channels[channel]!, 60);
-      const dye = dyeBlock.values[channel * dyeBlock.wellCount]!;
-      // Exact except where the response floored a negative difference at zero.
-      expect(resp + back).toBeGreaterThanOrEqual(dye - 1e-6);
-      expect(resp + back).toBeCloseTo(Math.max(dye, back), 6);
-    }
-  });
-});
-
-describe("averagePlateBackground", () => {
-  it("returns undefined for an empty list", () => {
-    expect(averagePlateBackground([])).toBeUndefined();
-  });
-
-  it("averages knot-for-knot and keeps the first curve's plate type", () => {
-    const curve = (plate: string, a: number, b: number) => ({
-      plate,
-      channels: [
-        [
-          { temperatureC: 20, response: a },
-          { temperatureC: 40, response: b },
-        ],
-      ],
-    });
-    const averaged = averagePlateBackground([curve("BR Clear", 10, 20), curve("X", 20, 40)])!;
-    expect(averaged.plate).toBe("BR Clear");
-    expect(averaged.channels[0]).toEqual([
-      { temperatureC: 20, response: 15 },
-      { temperatureC: 40, response: 30 },
-    ]);
-  });
-
-  it("drops a temperature that is missing from any input rather than averaging over fewer", () => {
-    const full = {
-      plate: "BR Clear",
-      channels: [
-        [
-          { temperatureC: 20, response: 10 },
-          { temperatureC: 40, response: 20 },
-        ],
-      ],
-    };
-    const partial = { plate: "BR Clear", channels: [[{ temperatureC: 20, response: 30 }]] };
-    const averaged = averagePlateBackground([full, partial])!;
-    expect(averaged.channels[0]).toEqual([{ temperatureC: 20, response: 20 }]);
-  });
-
-  it("averages the real .Dcal empty blocks, which agree closely across dyes", () => {
-    const curves = [...calibrations().values()]
-      .filter((d) => d.plate.trim().toLowerCase() === "br clear")
-      .map((d) => buildPlateBackgroundCurve(d));
-    const averaged = averagePlateBackground(curves)!;
-    const at60 = interpolateResponse(averaged.channels[0]!, 60);
-    for (const curve of curves) {
-      expect(interpolateResponse(curve.channels[0]!, 60)).toBeCloseTo(at60, -2);
     }
   });
 });

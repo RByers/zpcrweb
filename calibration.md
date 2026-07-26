@@ -125,7 +125,7 @@ order matters:
    When it's off, the reference level is not merely inert — it is never read from the plate read at
    all, for any purpose. It exists solely to feed this one calculation.
 
-3. **Background subtraction** (§4.2), if enabled:
+3. **Dark-current subtraction** (§4.2), if enabled:
 
    ```
    corrected = corrected − backgroundLevel
@@ -209,46 +209,46 @@ a human to look at, surfaced in a calibration/service view rather than fed into 
 Be careful not to confuse that diagnostic sense of "drift" with the analysis option of the same
 name (§6).
 
-### 4.2 The additive background: which zero point?
+### 4.2 The additive background: dark-current subtraction
 
-Distinct from the reference level, there is a genuinely additive background to remove — and
-there are **two different candidates for it**. They are alternatives, not stages: subtracting
-both would double-count. Whichever is chosen is **subtracted outright** from every channel
-reading, after the gain correction.
+Distinct from the reference level, there is one genuinely additive background — the **dark
+current** — and subtracting it is an **optional stage** of the pipeline, disabled by default.
+When enabled, it is **subtracted outright** from every channel reading, after the gain
+correction; when disabled, nothing is subtracted and the stage is skipped entirely.
 
 **Dark data (LED off).** A reading taken with the **excitation source off**, capturing detector
 dark current and electronic offset — signal present regardless of illumination. Stored per plate
 read as **one record per channel, not per well** (see [`plateread.md`](./plateread.md)'s
 `DARKDATA`), because the offset is a property of the detection channel rather than of any plate
-position. Re-read every cycle. Skipped entirely when a plate read carries no dark record.
+position. Re-read every cycle, so the level varies cycle to cycle. Skipped when a plate read
+carries no dark record.
 
-**The empty-plate background.** The `.Dcal` `empty` blocks (§2), read as absolute values rather
-than differenced away — the fluorescence of an empty vessel of this plate type at this block
-temperature. It is *larger* than the dark level, by the plate/optics autofluorescence a LED-off
-reading cannot see: on the committed sample, channel 1 at 60 °C reads ≈2516 empty-plate against
-≈2124 dark, a ≈390 RFU gap. Static per run (a calibration constant), not per cycle.
+**This is not a display-only setting.** Because `DARKDATA` is re-read every cycle, the level
+removed is *not* a constant: on the committed `20260720_Luna_noRT.pcrd` the amount taken off
+B3/FAM ranges between ≈2099 and ≈2127 RFU over the run. So beyond moving reported RFU by ≈2100,
+it slightly perturbs the fitted baseline slope, and — because a dark reading carries its own
+measurement noise — it raises the median baseline noise the auto threshold is derived from
+(`threshold.md` §5.1). Measured on that run, enabling the stage moves the FAM threshold from
+292.8 to 310.5 and B3/FAM's Cq from 33.28 to 33.37; the Cy5 thresholds move considerably more
+(64.9 → 99.4), and the largest Cq shift across the plate is ≈0.6 cycles. Expect a modest Cq
+change, not none.
 
-**The empty-plate reading is the coordinate-consistent choice**, and this is the single most
-important thing to get right here. §2 defines every matrix column as `dyeReading − emptyReading`,
-so the matrix's origin — the point where all dye concentrations are zero — *is* the empty plate.
-Feeding it a reading measured from a different origin mixes coordinate systems: the leftover
-constant is unmixed into the dyes as though it were signal, lifting every dye's whole curve by a
-fixed amount. Subtracting the dark level alone removes part of that constant, not all of it, and
-is the one option that is consistent with neither origin.
+Leaving it off is what matches the reported RFU scale of the reference run measured in §8; that
+run simply had dark subtraction disabled.
 
-That is the argument from the math. It is **not** what matches observed instrument output, which
-is why the choice is exposed rather than settled — see §8, and note that all three options shift
-a curve by a constant and so change reported RFU but never curve shape, ΔRq or Cq.
+> The `.Dcal` `empty` blocks are **not** a second background candidate. They are consumed by §2
+> as the per-temperature baseline each matrix column is differenced against
+> (`dyeReading − emptyReading`) and have no separate role here.
 
-The reference level is a different mechanism again, and should not be conflated with either:
+The reference level is a different mechanism and should not be conflated with this one:
 
-| | Reference level (§4.1) | Dark data (§4.2) | Empty plate (§4.2) |
-|---|---|---|---|
-| Illumination | LED **on** | LED **off** | LED **on** |
-| Source | Reference row, per scan | `DARKDATA`, per scan | `.Dcal` `empty` blocks, static |
-| Captures | Optical/common-mode level through the real light path | Detector dark current + electronic offset | Dark current **plus** plate/optics autofluorescence |
-| Applied as | **Pivot** for gain scaling — removed then restored | **Subtracted** outright | **Subtracted** outright |
-| Net effect if gain correction is off | None | Still subtracted | Still subtracted |
+| | Reference level (§4.1) | Dark data (§4.2) |
+|---|---|---|
+| Illumination | LED **on** | LED **off** |
+| Source | Reference row, per scan | `DARKDATA`, per scan |
+| Captures | Optical/common-mode level through the real light path | Detector dark current + electronic offset |
+| Applied as | **Pivot** for gain scaling — removed then restored | **Subtracted** outright, when enabled |
+| Net effect if gain correction is off | None | Still subtracted |
 
 ## 5. Solving for dye concentrations
 
@@ -343,8 +343,6 @@ delta-baseline helper, which is a display transform rather than a baseline-fitti
 ```ts
 import {
   buildDyeResponseCurve,
-  buildPlateBackgroundCurve,
-  averagePlateBackground,
   buildCalibrationMatrix,
   interpolateResponse,
   preprocessChannelReadings,
@@ -358,15 +356,11 @@ const curves = dcals.map((dcal) => buildDyeResponseCurve(dcal));
 // Sample those curves at this reading's block temperature, over the scanned channels (§3).
 const matrix = buildCalibrationMatrix(curves, blockTemperatureC, { channels: zpcr.channels() });
 
-// The empty-plate origin those columns are measured from (§4.2) — every dye's .Dcal measures
-// the same physical empty plate, so average them rather than trusting one file.
-const background = averagePlateBackground(dcals.map((d) => buildPlateBackgroundCurve(d)))!;
-const backgroundLevel = zpcr
-  .channels()
-  .map((ch) => interpolateResponse(background.channels[ch] ?? [], blockTemperatureC));
+// The optional dark-current level (§4.2), from this plate read's own DARKDATA — one record per
+// channel. Omit `backgroundLevel` entirely to leave the stage off, which is the default.
+const backgroundLevel = zpcr.channels().map((ch) => darkByChannel.get(ch)!.mean[cycle]!);
 
-// Apply the same corrections a live reading needs (§4). `backgroundLevel` takes either the
-// empty-plate level above or the plate read's DARKDATA — one or the other, never both.
+// Apply the same corrections a live reading needs (§4).
 const corrected = preprocessChannelReadings(rawChannelMeans, {
   referenceLevel,
   wellFactor,
@@ -386,8 +380,8 @@ call is wasted work.
 
 - **The absolute RFU scale does not yet reproduce the instrument software's: a per-dye
   multiplicative constant is missing.** Reference measurements from the committed
-  `20260720_Luna_noRT.pcrd` (block 59.99 °C, `none` background — i.e. what this library reports
-  by default) against CFX Manager's own figures for the same run. End RFU is from its endpoint
+  `20260720_Luna_noRT.pcrd` (block 59.99 °C, dark subtraction off — i.e. what this library
+  reports by default) against CFX Manager's own figures for the same run. End RFU is from its endpoint
   table (exact); cycle-1 values were read off its chart (approximate):
 
   | Well | Dye | Cycle 45, here | CFX End RFU | here ÷ CFX | Cycle 1, here | CFX chart |
@@ -401,9 +395,10 @@ call is wasted work.
   library's cycle-1 values by the same per-dye ratio gives 2982, 2546 and 4014, against chart
   readings of "just over 3000", "just over 2600" and "a bit over 4000". Three things follow:
 
-  1. **`none` is the right background (§4.2).** The fit needs no additive term at all. A
-     different background choice would show up as an offset, and dark or empty-plate subtraction
-     would put B3/FAM's cycle 1 at 1152 or ≈765 against an observed ≈3000.
+  1. **This run had dark subtraction off (§4.2).** The fit needs no additive term at all, and
+     enabling the stage would show up as an offset — it would put B3/FAM's cycle 1 at ≈1152
+     against an observed ≈3000. That fixes the setting for this comparison; it says nothing
+     about the outstanding scale factor, which is multiplicative.
   2. **The constant is per-dye, not global** — Texas Red matches to 0.1% while FAM is 9.8% high
      and Cy5 8.2% low — **and not per-well**: FAM's two wells agree to ≈1%.
   3. **Curve shape, and therefore Cq, is unaffected**, since a per-dye scale is constant across

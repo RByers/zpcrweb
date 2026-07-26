@@ -57,74 +57,6 @@ export function buildDyeResponseCurve(dcal: Dcal, well = 0): DyeResponseCurve {
 }
 
 /**
- * The empty-plate background a `.Dcal` records, as a per-channel temperature curve — the same
- * `empty` blocks {@link buildDyeResponseCurve} subtracts, kept in absolute form instead of
- * differenced away.
- *
- * This is the **zero point of the calibration matrix's coordinate system**: a matrix column is
- * `dyeReading − emptyReading`, so a reading is only in those same coordinates once the
- * empty-plate level has been taken off it too. It sits above the LED-off dark level
- * (`DARKDATA`) by the plate/optics autofluorescence a dark reading cannot see, so subtracting
- * dark alone is a different — and smaller — correction. See `calibration.md` §4.2.
- */
-export interface PlateBackgroundCurve {
-  /** Plate/vessel type this background was measured on, e.g. `BR Clear` (see {@link Dcal.plate}). */
-  plate: string;
-  /** Knots per channel: `channels[channel]` is that channel's curve, sorted by temperature. */
-  channels: ResponseKnot[][];
-}
-
-/**
- * Build the empty-plate background curve from a `.Dcal`'s `empty` blocks (§4.2). Every dye's
- * `.Dcal` for a given plate type carries its own measurement of the same physical empty plate,
- * so they agree to within a few RFU; {@link averagePlateBackground} averages several rather
- * than trusting any one file.
- */
-export function buildPlateBackgroundCurve(dcal: Dcal, well = 0): PlateBackgroundCurve {
-  const temperatures = [...new Set(dcal.blocks.map((b) => b.temperatureC))].sort((a, b) => a - b);
-  const channels: ResponseKnot[][] = Array.from({ length: dcal.channelCount }, () => []);
-
-  for (const temperatureC of temperatures) {
-    const emptyBlock = findDcalBlock(dcal, "empty", temperatureC);
-    if (!emptyBlock) continue;
-    for (let channel = 0; channel < dcal.channelCount; channel++) {
-      const value = emptyBlock.values[channel * emptyBlock.wellCount + well] ?? 0;
-      channels[channel]!.push({ temperatureC, response: value });
-    }
-  }
-
-  return { plate: dcal.plate, channels };
-}
-
-/**
- * Average several {@link buildPlateBackgroundCurve} results knot-for-knot — they are repeated
- * measurements of one empty plate, one per dye's `.Dcal`. Returns `undefined` for an empty list.
- * A temperature missing from any input is dropped, so the result never mixes averages taken
- * over different numbers of files.
- */
-export function averagePlateBackground(
-  curves: PlateBackgroundCurve[],
-): PlateBackgroundCurve | undefined {
-  const [first] = curves;
-  if (!first) return undefined;
-
-  const channels = first.channels.map((knots, channel) =>
-    knots
-      .map(({ temperatureC }) => {
-        const values = curves.map(
-          (c) => c.channels[channel]?.find((k) => k.temperatureC === temperatureC)?.response,
-        );
-        if (values.some((v) => v === undefined)) return undefined;
-        const total = (values as number[]).reduce((a, b) => a + b, 0);
-        return { temperatureC, response: total / values.length };
-      })
-      .filter((k): k is ResponseKnot => k !== undefined),
-  );
-
-  return { plate: first.plate, channels };
-}
-
-/**
  * Sample a channel's response curve at an arbitrary block temperature: linear interpolation
  * between the two bracketing knots, or linear extrapolation past the first/last knot using that
  * end segment's slope (so any block temperature the instrument reports — not just the four
@@ -265,13 +197,9 @@ export interface ChannelPreprocessOptions {
    * Per-channel additive background to subtract (§4.2), applied after the gain correction. A
    * channel with no level here is left as-is; omit entirely rather than passing zeros.
    *
-   * Two different levels can legitimately go here and they are **alternatives, not cumulative**
-   * — see `calibration.md` §4.2 for which to pick:
-   *
-   * - the LED-off dark reading (a `.Plateread`'s `DARKDATA`) — detector dark current only;
-   * - the empty-plate background ({@link buildPlateBackgroundCurve}) — the zero point the
-   *   calibration matrix's columns are actually measured against, and so the one that leaves
-   *   the reading in the same coordinates as the matrix.
+   * The level to pass is the LED-off dark reading — a `.Plateread`'s `DARKDATA`, which captures
+   * detector dark current and electronic offset. This stage is optional and off by default; see
+   * `calibration.md` §4.2.
    */
   backgroundLevel?: number[];
 }

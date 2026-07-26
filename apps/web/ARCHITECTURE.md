@@ -486,11 +486,14 @@ only pieces the two views share.
   assembles the §4 corrections that go in first: the per-scan reference level from the reference
   row, the additive background, and the per-well gain factors when the run has them (a `.pcrd`
   thing — a `.zpcr` carries none, so only the background subtraction bites there). The
-  **"Background" toggle** picks that background per `calibration.md` §4.2 — `None` (the default,
-  the option closest to the instrument software's own RFU), `Dark` (the plate read's per-cycle
-  `DARKDATA`), or `Plate` (the `.Dcal` empty-plate level for this vessel type, interpolated to
-  the step's block temperature — the choice consistent with the matrix's own zero point). All
-  three shift a dye curve by a constant, so they move reported RFU but never shape or Cq.
+  **"Subtract dark" toggle** (`Off` by default) controls `calibration.md` §4.2's optional
+  dark-current stage: when on, the plate read's per-cycle `DARKDATA` is subtracted per channel;
+  when off, nothing is. `Off` is what matches the reported RFU scale of the run measured in §8.
+  It is **not** a display-only control: `DARKDATA` is re-read every cycle, so the level removed
+  varies slightly cycle to cycle, which perturbs the fitted baseline and raises the noise the
+  auto threshold derives from — on the committed sample it moves Cq by up to ≈0.6 cycles. It sits
+  directly below the Scale row but **outside** the chart-only `!tableMode` block, precisely
+  because it moves the numbers the table and CSV export report, not just the chart.
 
   There is deliberately **no normalization selector**: `calibration.md` §5.1 divides the column
   scaling back out, so every mode reports identical RFU for any full-column-rank matrix, and the

@@ -52,8 +52,12 @@ export interface StoredSettings {
   /** Calibration normalization mode; see `calibration.md` §3. Not user-facing — see the
    * FileSettings field of the same name for why. */
   calibrationNormalization?: "none" | "column" | "global";
-  /** Additive background removed before color separation; see `calibration.md` §4.2. Absent on
-   * records written before this setting existed, which then take the "none" default. */
+  /** Whether the LED-off `DARKDATA` is subtracted before color separation; see `calibration.md`
+   * §4.2. Absent on older records, which migrate from {@link calibrationBackground} below. */
+  subtractDark?: boolean;
+  /** Retired three-way background selector ("none"/"dark"/"plate") — kept only so older records
+   * can be migrated to {@link subtractDark} ("dark" → true, else false). Empty-plate subtraction
+   * is gone; dark subtraction is the pipeline's one optional additive stage. */
   calibrationBackground?: "none" | "dark" | "plate";
   /** Fluorophore (or, in target view mode, target) names hidden from the dye-space view. */
   disabledFluors?: string[];
