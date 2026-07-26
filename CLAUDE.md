@@ -77,8 +77,17 @@ committed in `samples/` and `packages/core/test/fixtures/`.
 
 ## UI testing
 
-**Always look at a screenshot of a UI change before committing it.** `tools/uishot.mjs` makes
-that cheap — one command, ~5s, ~1–2k tokens:
+Use your judgment about how much UI testing a change warrants — the goal is to stay fast and
+productive, with good tools available for when checking is actually worth it. A CSS tweak or a
+label change doesn't need a browser. A change to layout, charts, view switching or state
+handling usually does. When in doubt, one `uishot` run is cheap enough that it's not worth
+agonizing over.
+
+There are two tools, for two different jobs.
+
+### `tools/uishot.mjs` — look at it
+
+One command, ~5s, ~1–2k tokens:
 
 ```sh
 node tools/uishot.mjs                                   # Overview + Curves, default sample
@@ -93,7 +102,7 @@ contact-sheet PNG** — `tools/.uishot/shot.png` by default. Read that single im
 per-view screenshots. It also reports console errors, uncaught exceptions and failed page
 loads, which catch breakage a screenshot can't show.
 
-Cost control, in order of preference:
+Cost control, when you do run it:
 
 - **Fewer, bigger images.** Views are tiled into one sheet, so 4 views cost one image (~2k
   tokens), not four. Capture every view you touched in a single run.
@@ -104,19 +113,43 @@ Cost control, in order of preference:
   broken" check; raise it only when judging fine typography.
 - Skip it entirely for pure logic/decoder changes that render nothing.
 
+### `tools/uitest.mjs` — assert it
+
+```sh
+npm run test:ui
+```
+
+15 browser assertions covering the two URL contracts nothing else can catch: hash routing
+(deep links, back/forward, unknown-file and invalid-view fallbacks) and password handling
+(stripped from both URL forms, never leaked into the routing hash, an encrypted `.pcrd` still
+decrypting). A screenshot can't show that the back button works or that a secret reached the
+address bar, and the core Vitest suite has no DOM.
+
+Takes ~20s and needs Chrome, so it is **not** part of `npm test` — that stays fast and
+dependency-free. Run it when you touch `state/urlHash.ts`, `state/pltdPassword.ts`, or view
+selection. Both tools share `tools/harness.mjs` (the CDP client and dev-server/Chrome
+plumbing); add new checks there rather than starting a third script.
+
 ### When to use the MCP instead
 
 Reach for the **chrome-devtools MCP** when you need to *interact* — hover cards, drag,
 multi-step flows, or debugging why something is broken. Its accessibility snapshot and live
-console are worth the extra tokens for exploration; `uishot` is for the confirm-before-commit
-pass. The MCP isn't available in every environment (background jobs, restricted accounts) —
-`uishot` needs nothing but Node and the system Chrome, so prefer it when both would work.
+console are worth the extra tokens for exploration; the two tools above cover the
+check-your-work pass. The MCP isn't available in every environment (background jobs,
+restricted accounts) — `uishot`/`uitest` need nothing but Node and the system Chrome, so
+prefer them when both would work.
 
-If you drive Chrome by hand, use a random port (never 5173 — the user may have a dev server
-running there), set `CHROME_PATH` if Chrome isn't at `/Applications/Google Chrome.app`, and
-pass `--disable-component-update --disable-background-networking`. Without those two flags
-Chrome's auto-updater spawns a child that holds stdout open, and the run looks like a hang
-long after the page is done.
+**Always launch Chrome headless** (`--headless=new`), whichever route you take. This account
+has no interactive desktop session, so a headful Chrome has no display to open a window on —
+it will hang or fail rather than showing anything, and nobody is watching a screen for it
+anyway. If the MCP is configured to launch headful, pass it a headless option rather than
+working around the hang.
+
+Other flags that matter when driving Chrome by hand: use a random port (never 5173 — the user
+may have a dev server running there), set `CHROME_PATH` if Chrome isn't at
+`/Applications/Google Chrome.app`, and pass `--disable-component-update
+--disable-background-networking`. Without those two, Chrome's auto-updater spawns a child that
+holds stdout open and the run looks like a hang long after the page is done.
 
 ### Everything is in the URL hash, nothing in the query string
 

@@ -40,8 +40,35 @@ Still planned:
 ## Testing / infra
 
 - [ ] Add a browser-mode Vitest run to prove isomorphism in a real browser environment.
-- [ ] Add Playwright e2e tests for the web app (only if UI bugs prove frequent — per the
-      logic-in-library principle, app logic is minimal and the library carries the tests).
+- [x] ~~Add Playwright e2e tests for the web app~~ — done without Playwright: `tools/uitest.mjs`
+      (`npm run test:ui`) drives headless Chrome over CDP with no dependencies. 15 assertions,
+      ~9s. Scoped to the two URL contracts that regress silently (hash routing, password
+      handling); the logic-in-library principle still holds for everything else.
 - [ ] Add more sample `.zpcr` files (different block types, channel counts, cycle counts)
       as they become available.
 - [ ] CI workflow (install / typecheck / test / build).
+
+### UI tooling follow-ups
+
+- [ ] **Confirm the dev-server shutdown race.** `tools/harness.mjs`'s `killGroup()` signals the
+      whole process group and Chrome reliably reaps to zero, but a `ps` taken immediately after
+      `uishot`/`uitest` exits sometimes still shows 1–2 `vite` processes; a moment later they
+      are gone. Looks like normal async teardown rather than a leak — confirm with a short
+      poll, and if it is real, have `stop()` await process exit. Symptom to watch for: a stale
+      `--strictPort` collision on a rerun.
+- [ ] **Widen `uitest.mjs` coverage.** Natural next checks: a standalone `.pltd`/`.plt.csv`
+      exposing only the Plates + Raw tabs, multi-file switching through `FileBar` (including
+      that per-file settings don't bleed across files), and the `.pcrd` password prompt
+      appearing when no password is available.
+- [ ] **Decide whether `test:ui` runs in CI.** It is deliberately outside `npm test` (needs
+      Chrome, ~9s vs ~3s) and `process.exit(1)`s without a `secrets.json` password. To gate CI,
+      split the routing checks (no secret needed) from the password checks (secret required).
+- [ ] **Root `ARCHITECTURE.md` doesn't mention `tools/`.** CLAUDE.md and
+      `apps/web/ARCHITECTURE.md` cover the harness; a short "Tooling" section would close the
+      loop.
+- [ ] **`#file=` matches on name only.** Two loaded files sharing a name (different sizes, so
+      distinct `fileId()`s) are indistinguishable in the URL — first match wins. Rare enough to
+      ignore; a short id prefix could break the tie if it ever matters.
+- [ ] **Hash state is view + file only.** Selected wells/channels/fluorophores stay per-file in
+      IndexedDB. `state/urlHash.ts` was built to extend (more keys in the same query string) if
+      sharing a specific chart view becomes useful.

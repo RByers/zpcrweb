@@ -16,27 +16,21 @@
  *   node tools/uishot.mjs --file samples/foo.pcrd --views overview,plates,raw
  *   node tools/uishot.mjs --url /?foo=1 --views overview   # extra query params
  */
-import { spawn } from "node:child_process";
-import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { dirname, resolve, join } from "node:path";
-
-const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const CHROME =
-  process.env.CHROME_PATH ??
-  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
-
-// Chrome's auto-updater child holds stdout open and makes runs look like a hang; the
-// component-update/background-networking flags below are what keep it from spawning.
-const CHROME_FLAGS = [
-  "--headless=new",
-  "--disable-gpu",
-  "--no-first-run",
-  "--no-default-browser-check",
-  "--disable-component-update",
-  "--disable-background-networking",
-  "--disable-features=Translate,MediaRouter,OptimizationHints",
-];
+import {
+  Cdp,
+  REPO,
+  activeTab,
+  cfxPassword,
+  drainProblems,
+  loadFile,
+  openPage,
+  sleep,
+  startChrome,
+  startDevServer,
+  waitFor,
+} from "./harness.mjs";
 
 const VIEW_LABELS = {
   overview: "Overview",
@@ -55,7 +49,6 @@ function parseArgs(argv) {
     height: 760,
     maxWidth: 1400,
     url: "/",
-    keepOpen: false,
   };
   for (let i = 0; i < argv.length; i++) {
     const [k, inlineV] = argv[i].split(/=(.*)/s);
@@ -81,156 +74,11 @@ function parseArgs(argv) {
   return out;
 }
 
-function cfxPassword() {
-  const p = join(REPO, "secrets.json");
-  if (!existsSync(p)) return "";
-  try {
-    return JSON.parse(readFileSync(p, "utf8")).cfxPassword ?? "";
-  } catch {
-    return "";
-  }
-}
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
 // Progress goes to stderr so a stalled run shows where it stalled; the final report on
 // stdout stays clean enough to read in one glance.
 const t_start = Date.now();
 const step = (msg) =>
   process.stderr.write(`  [${((Date.now() - t_start) / 1000).toFixed(1)}s] ${msg}\n`);
-
-/** Poll `fn` until it returns truthy or `timeout` elapses. */
-async function waitFor(fn, { timeout = 20000, interval = 150, what = "condition" } = {}) {
-  const deadline = Date.now() + timeout;
-  for (;;) {
-    if (await fn()) return true;
-    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
-    await sleep(interval);
-  }
-}
-
-/** Minimal CDP client over a single page target's WebSocket. */
-class Cdp {
-  constructor(ws) {
-    this.ws = ws;
-    this.id = 0;
-    this.pending = new Map();
-    this.events = [];
-    ws.addEventListener("message", (ev) => {
-      const msg = JSON.parse(ev.data);
-      if (msg.id != null) {
-        const p = this.pending.get(msg.id);
-        this.pending.delete(msg.id);
-        if (!p) return;
-        if (msg.error) p.reject(new Error(`${p.method}: ${msg.error.message}`));
-        else p.resolve(msg.result);
-      } else {
-        this.events.push(msg);
-      }
-    });
-  }
-
-  static async connect(wsUrl) {
-    const ws = new WebSocket(wsUrl);
-    await new Promise((res, rej) => {
-      ws.addEventListener("open", res, { once: true });
-      ws.addEventListener("error", () => rej(new Error("CDP websocket failed")), { once: true });
-    });
-    return new Cdp(ws);
-  }
-
-  send(method, params = {}) {
-    const id = ++this.id;
-    this.ws.send(JSON.stringify({ id, method, params }));
-    return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject, method });
-      setTimeout(() => {
-        if (this.pending.delete(id)) reject(new Error(`${method}: CDP timeout`));
-      }, 30000);
-    });
-  }
-
-  /** Evaluate an expression in the page and return its JSON value. */
-  async eval(expression, { awaitPromise = false } = {}) {
-    const r = await this.send("Runtime.evaluate", {
-      expression,
-      returnByValue: true,
-      awaitPromise,
-    });
-    if (r.exceptionDetails) {
-      throw new Error(
-        `page eval threw: ${r.exceptionDetails.exception?.description ?? r.exceptionDetails.text}`,
-      );
-    }
-    return r.result.value;
-  }
-}
-
-/** Start the vite dev server on a free port; resolve with its base URL. */
-async function startDevServer() {
-  const port = 20000 + Math.floor(Math.random() * 20000);
-  const proc = spawn(
-    "npm",
-    ["run", "dev", "-w", "@zpcrweb/web", "--", "--port", String(port), "--strictPort"],
-    { cwd: REPO, stdio: ["ignore", "pipe", "pipe"] },
-  );
-  let log = "";
-  proc.stdout.on("data", (d) => (log += d));
-  proc.stderr.on("data", (d) => (log += d));
-  const base = `http://localhost:${port}`;
-  try {
-    await waitFor(
-      async () => {
-        if (proc.exitCode != null) throw new Error(`dev server exited:\n${log}`);
-        try {
-          const r = await fetch(base, { signal: AbortSignal.timeout(1000) });
-          return r.ok;
-        } catch {
-          return false;
-        }
-      },
-      { timeout: 45000, what: "dev server" },
-    );
-  } catch (e) {
-    proc.kill("SIGKILL");
-    throw e;
-  }
-  return { base, stop: () => proc.kill("SIGKILL") };
-}
-
-/** Launch headless Chrome; resolve with its CDP HTTP base and a stop handle. */
-async function startChrome(userDataDir, width, height) {
-  // Always start from a clean profile. The app keeps loaded files in IndexedDB, so a reused
-  // profile would carry a previous run's sample into this one — an extra file chip in every
-  // screenshot, and a different UI depending on what ran before.
-  rmSync(userDataDir, { recursive: true, force: true });
-  const port = 20000 + Math.floor(Math.random() * 20000);
-  const proc = spawn(
-    CHROME,
-    [
-      ...CHROME_FLAGS,
-      `--remote-debugging-port=${port}`,
-      `--user-data-dir=${userDataDir}`,
-      `--window-size=${width},${height}`,
-      "about:blank",
-    ],
-    { stdio: "ignore", detached: false },
-  );
-  const base = `http://127.0.0.1:${port}`;
-  await waitFor(
-    async () => {
-      if (proc.exitCode != null) throw new Error("chrome exited during startup");
-      try {
-        const r = await fetch(`${base}/json/version`, { signal: AbortSignal.timeout(1000) });
-        return r.ok;
-      } catch {
-        return false;
-      }
-    },
-    { timeout: 30000, what: "chrome devtools port" },
-  );
-  return { base, stop: () => proc.kill("SIGKILL") };
-}
 
 /**
  * Composite the captured views into one labelled contact sheet, scaled so the sheet is at
@@ -283,7 +131,7 @@ async function composite(cdpBase, shots, maxWidth) {
     })()`,
     { awaitPromise: true },
   );
-  cdp.ws.close();
+  cdp.close();
   return value;
 }
 
@@ -305,7 +153,10 @@ async function main() {
   step("starting dev server");
   const dev = await startDevServer();
   step(`dev server ${dev.base}; launching chrome`);
-  const chrome = await startChrome(join(scratch, "profile"), opts.width, opts.height);
+  const chrome = await startChrome(join(scratch, "profile"), {
+    width: opts.width,
+    height: opts.height,
+  });
   const problems = [];
   const shots = [];
 
@@ -315,17 +166,11 @@ async function main() {
     const q = new URLSearchParams();
     if (pw) q.set("cfxPassword", pw);
     const pageUrl = `${dev.base}${opts.url}${q.toString() ? `#${q}` : ""}`;
+    step(`chrome up; opening ${pageUrl.replace(/cfxPassword=[^&]*/, "cfxPassword=***")}`);
 
-    const res = await fetch(`${chrome.base}/json/new?${encodeURIComponent(pageUrl)}`, {
-      method: "PUT",
+    const cdp = await openPage(chrome.base, pageUrl, {
+      domains: ["Page", "Runtime", "Log", "DOM"],
     });
-    const target = await res.json();
-    step(`chrome up; opening ${pageUrl.replace(/cfxPassword=[^&]*/, 'cfxPassword=***')}`);
-    const cdp = await Cdp.connect(target.webSocketDebuggerUrl);
-    await cdp.send("Page.enable");
-    await cdp.send("Runtime.enable");
-    await cdp.send("Log.enable");
-    await cdp.send("DOM.enable");
     await cdp.send("Emulation.setDeviceMetricsOverride", {
       width: opts.width,
       height: opts.height,
@@ -333,48 +178,9 @@ async function main() {
       mobile: false,
     });
 
-    // Collect anything that would show up red in a devtools console.
-    const note = (kind, text) => {
-      if (!text) return;
-      // Vite's HMR client chatters on connect; not a page defect.
-      if (/\[vite\]/i.test(text)) return;
-      problems.push(`${kind}: ${text.slice(0, 300)}`);
-    };
-    const drain = () => {
-      for (const ev of cdp.events.splice(0)) {
-        if (ev.method === "Runtime.exceptionThrown") {
-          note("uncaught", ev.params.exceptionDetails?.exception?.description ??
-            ev.params.exceptionDetails?.text);
-        } else if (ev.method === "Runtime.consoleAPICalled" && /error|warning/.test(ev.params.type)) {
-          note(ev.params.type, ev.params.args?.map((a) => a.description ?? a.value).join(" "));
-        } else if (ev.method === "Log.entryAdded" && /error|warning/.test(ev.params.entry.level)) {
-          note(ev.params.entry.level, ev.params.entry.text);
-        }
-      }
-    };
-
-    await waitFor(() => cdp.eval("document.readyState === 'complete'"), { what: "page load" });
-
     step("page loaded");
     if (opts.file) {
-      const nodeId = await (async () => {
-        const { root } = await cdp.send("DOM.getDocument");
-        const r = await cdp.send("DOM.querySelector", {
-          nodeId: root.nodeId,
-          selector: 'input[type="file"]',
-        });
-        return r.nodeId;
-      })();
-      if (!nodeId) throw new Error("no file input found on the page");
-      await cdp.send("DOM.setFileInputFiles", {
-        nodeId,
-        files: [resolve(REPO, opts.file)],
-      });
-      // The run is parsed/decrypted async; the view tabs only exist once it lands.
-      await waitFor(
-        () => cdp.eval(`!!document.querySelector('[role="tab"]')`),
-        { what: "file to load (view tabs)", timeout: 60000 },
-      );
+      await loadFile(cdp, resolve(REPO, opts.file));
       step(`loaded ${opts.file}`);
     }
 
@@ -382,19 +188,10 @@ async function main() {
       const label = VIEW_LABELS[view];
       // Navigate via the URL hash rather than clicking the tab — one assignment, no
       // dependency on tab label text, and it exercises the same routing a shared link uses.
-      await cdp.eval(
-        `window.location.hash = ${JSON.stringify(`view=${view}`)}, undefined`,
-      );
-      const activeTab = () =>
-        cdp.eval(
-          `(() => {
-            const t = document.querySelector('[role="tab"][aria-selected="true"]');
-            return t ? t.textContent.trim() : "none";
-          })()`,
-        );
+      await cdp.eval(`window.location.hash = ${JSON.stringify(`view=${view}`)}, undefined`);
       let settled = "none";
       try {
-        await waitFor(async () => (settled = await activeTab()) === label, {
+        await waitFor(async () => (settled = await activeTab(cdp)) === label, {
           timeout: 5000,
           what: `view "${view}" to activate`,
         });
@@ -415,9 +212,9 @@ async function main() {
       });
       shots.push({ view: label, data });
       step(`captured ${label}`);
-      drain();
+      problems.push(...drainProblems(cdp));
     }
-    drain();
+    problems.push(...drainProblems(cdp));
 
     if (!shots.length) throw new Error("no views captured");
     step("compositing");

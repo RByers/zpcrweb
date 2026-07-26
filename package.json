@@ -11,6 +11,7 @@
     "build": "npm run build -w @zpcrweb/core",
     "dev": "npm run dev -w @zpcrweb/web",
     "test": "npm run test -w @zpcrweb/core",
+    "test:ui": "node tools/uitest.mjs",
     "typecheck": "npm run typecheck -w @zpcrweb/core"
   },
   "license": "GPL-3.0-or-later"
