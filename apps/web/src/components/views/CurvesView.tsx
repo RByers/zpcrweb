@@ -122,7 +122,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
     return s.size > 0 ? s : null;
   }, [plate]);
 
-  const setsEqual = (a: Set<string>, b: Set<string>) =>
+  const setsEqual = <T,>(a: Set<T>, b: Set<T>) =>
     a.size === b.size && [...a].every((k) => b.has(k));
 
   // Apply the plate-derived default exactly once per plate, and only while the selection still
@@ -139,6 +139,32 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
   }, [plate, nonEmptyWellSet, fullWellSet, settings.enabledWells, onChange]);
 
   const resetWells = () => onChange({ enabledWells: nonEmptyWellSet ?? fullWellSet });
+
+  // Channels assigned to a fluor in the plate configuration — the default selection for a newly
+  // opened file's raw Channels view (calibration off), and what its reset button restores.
+  const plateChannelSet = useMemo(() => {
+    if (!plate) return null;
+    const s = new Set<number>();
+    for (const f of plate.fluors) s.add(f.channel);
+    return s.size > 0 ? s : null;
+  }, [plate]);
+
+  const defaultEnabledChannels = useMemo(() => {
+    if (!plateChannelSet) return new Set(available);
+    const s = new Set(available.filter((ch) => plateChannelSet.has(ch)));
+    return s.size > 0 ? s : new Set(available);
+  }, [available, plateChannelSet]);
+
+  // Same apply-once-per-plate pattern as the wells default above.
+  const appliedChannelDefaultForPlate = useRef<typeof plate>(undefined);
+  useEffect(() => {
+    if (!plate || !plateChannelSet) return;
+    if (appliedChannelDefaultForPlate.current === plate) return;
+    appliedChannelDefaultForPlate.current = plate;
+    if (setsEqual(settings.enabledChannels, new Set([0, 1, 2, 3, 4]))) {
+      onChange({ enabledChannels: defaultEnabledChannels });
+    }
+  }, [plate, plateChannelSet, defaultEnabledChannels, settings.enabledChannels, onChange]);
 
   const calibrationOn = settings.calibration ?? calibrationAvailable;
   const fluorViewMode: FluorViewMode = settings.fluorViewMode;
