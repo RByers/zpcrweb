@@ -206,14 +206,36 @@ of the baseline, so that crossing it means "signal", not "noise".
 
 ```
 noise      = standard deviation of the baseline-region residuals
-threshold  = k × noise            (k ≈ 3.2)
+threshold  = k × noise            (k ≈ 40, see below)
 ```
 
 using the residuals *after* baseline subtraction, so the measure is of scatter about the fitted
-baseline rather than of the baseline's slope. A multiplier around **3.2** is a reasonable default:
-high enough that random excursions essentially never cross, low enough to catch amplification
-early. (The classic textbook choice is 10× the baseline standard deviation, which is markedly more
-conservative; instruments in practice use something nearer 3.)
+baseline rather than of the baseline's slope.
+
+The multiplier depends entirely on what "noise" means, and the textbook figures (3× as permissive,
+10× as the conservative classic) assume the raw well-to-well scatter of the baseline cycles. The
+residual measured here is a much smaller quantity: the curve has already been smoothed (§2) and had
+a line fitted tightly to its pre-amplification region subtracted (§3–§4). Multiplying *that* by 3.2
+puts the threshold a few RFU above baseline on a curve rising by thousands, so the crossing lands
+deep in the exponential's foot and every Cq comes out systematically early.
+
+**k ≈ 40** is calibrated against the only ground truth available — the thresholds CFX itself
+persisted in `20260720_Luna_noRT.pcrd`, where `autoCalculateThreshold="False"` means these are the
+values the instrument's own analysis actually used:
+
+| Fluor | CFX `thresholdOverrideValue` | median `baselineNoise` | ratio |
+|---|---|---|---|
+| FAM | 210.72 | 4.98 | 42.3× |
+| Texas Red | 210.72 | 5.31 | 39.7× |
+
+Two anchors from a single run, agreeing within 6%. That is enough to pin the order of magnitude and
+no more — see §9.
+
+An obvious alternative is to scale the threshold to the *amplification* rather than the noise. The
+same two anchors read as 7.5% and 10.1% of their wells' median ΔRFU: a looser fit, and one that
+disagrees sharply on other plates (on `20230829_135443_CT019138_SINGLE_STEP_.zpcr`, whose ΔRFU/noise
+ratio is ~4× higher, an 8% rule gives a threshold ~5× the noise-relative one). So the rule stays
+noise-relative.
 
 Two refinements that matter in practice:
 
@@ -222,13 +244,12 @@ Two refinements that matter in practice:
   across the wells in the group — the `subsetPopRDBaseLinePref` setting (**5**) suggests using a
   subset of the population rather than every well.
 - **Floor the threshold.** If a plate contains only flat wells, the noise estimate collapses and
-  the threshold approaches zero, so every well "crosses" at cycle 1. Impose a minimum absolute
-  RFU. `autoThreshold()` takes a `minThreshold` but defaults it to **0**, i.e. no floor, because no
-  defensible value has been pinned down yet — see §9. The effect is visible on real data: once §3.2
-  picks a *tight* baseline, the residual noise is genuinely small, so `3.2 × noise` lands a few RFU
-  above baseline on a curve that rises by thousands, and Cq comes out well before the visible
-  take-off. The reported Cq is then self-consistent but systematically early relative to what an
-  instrument using a fixed threshold (§5.2) would report for the same well.
+  the threshold approaches zero, so every well "crosses" at cycle 1. Impose a minimum absolute RFU.
+  `autoThreshold()` takes a `minThreshold` but defaults it to **0**, i.e. no floor, since no
+  defensible absolute value has been pinned down. In practice the §7 gates carry this weight
+  instead: the amplification squelch and the baseline-validation check decide *which* wells report a
+  Cq at all, and on the `20230829…SINGLE_STEP_` plate the same 33 wells report across every
+  multiplier from 3.2 to 40 — the multiplier moves the values, not the population.
 
 > A direct consequence, worth stating plainly: **a Cq is a property of a well *and the group it
 > was computed with*, not of the well's curve alone.** Change the set of wells in the group and the
@@ -352,7 +373,7 @@ For an implementation aiming to match a reference instrument:
 | Minimum baseline width | 3 cycles |
 | Baseline mode | Linear (fitted line subtracted) |
 | Baseline region method | Data window over the full run |
-| Threshold | Manual override if present, else ≈3.2 × baseline noise |
+| Threshold | Manual override if present, else ≈40 × baseline noise (§5.1) |
 | Cq algorithm | Threshold crossing, log-interpolated |
 | No Cq if trace ends under threshold | On |
 
@@ -363,12 +384,19 @@ For an implementation aiming to match a reference instrument:
   `threshold.ts` covers §5–§7 (threshold determination, both Cq algorithms, the amplification
   squelch). Not implemented: the `pDriftCorrection` reference-normalization baseline modes and
   `LinearBaseLineNormalizedCurveFit`'s refinement.
-- **No threshold floor.** §5.1 calls for one and `autoThreshold()` accepts a `minThreshold`, but
-  its default is 0. This is now the weakest link in the chain: with baseline detection no longer
-  eating into the rise, `3.2 × median baseline noise` is a very low bar, and it is what sets how
-  early every Cq lands. A floor expressed as an absolute RFU is instrument-dependent; a floor
-  expressed relative to the group's amplification span (a few percent of median ΔRFU, say) would
-  scale, but neither has been checked against a reference instrument.
+- **The threshold multiplier rests on two data points.** §5.1's k ≈ 40 is fitted to the two
+  fluorophores of `20260720_Luna_noRT.pcrd` for which CFX persisted an explicit
+  `thresholdOverrideValue`. They agree within 6%, but they come from one run on one instrument, and
+  both happen to share the same override value. More runs carrying `autoCalculateThreshold="False"`
+  would either confirm the constant or reveal that it tracks something else (dye, chemistry, plate
+  type). Since the multiplier sets how early every Cq lands, this is the single largest source of
+  systematic error left in the chain.
+- **Persisted analysis parameters are not yet honoured.** A `.pcrd` carries the whole
+  `dataAnalysisParameters` tree — including the per-fluorophore `thresholdOverrideValue` /
+  `autoCalculateThreshold` pair that §5.2 says should be authoritative, and the
+  `baselineBeginRepeat` / `baselineEndRepeat` region. Reading them would make a `.pcrd` reproduce
+  CFX's own numbers exactly rather than approximately. A `.zpcr` stores none of this, so auto
+  selection remains the only path there.
 - **Not validated.** These algorithms are specified to be *reasonable and precise*, but no Cq —
   and, for the baseline stages now implemented, no baseline region or corrected curve either —
   has been compared against a reference instrument's own reported values for the same well. Until

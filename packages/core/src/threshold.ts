@@ -31,7 +31,30 @@ export function baselineNoise(
 }
 
 export interface AutoThresholdOptions {
-  /** `T = multiplier × noise`. Default **3.2** — a reasonable value between the classic 10× and a permissive 3×. */
+  /**
+   * `T = multiplier × noise`. Default **40**.
+   *
+   * Far above the textbook 3–10× because `noise` here is not the quantity those figures describe.
+   * They assume the raw well-to-well scatter of the baseline cycles; {@link baselineNoise} measures
+   * the residual left over after §2 smoothing *and* subtraction of a line fitted tightly to the
+   * pre-amplification region, which is a much smaller number. Multiplying that residual by 3.2 puts
+   * the threshold a few RFU above baseline on a curve that rises by thousands, so the crossing
+   * lands deep in the exponential's foot and every Cq comes out systematically early.
+   *
+   * 40 is calibrated against the only ground truth available: the thresholds CFX itself persisted
+   * in `20260720_Luna_noRT.pcrd` (`autoCalculateThreshold="False"`, so these are the values the
+   * instrument's own analysis used). Against this pipeline's `baselineNoise` for the same wells:
+   *
+   * | Fluor | CFX `thresholdOverrideValue` | median noise | ratio |
+   * |---|---|---|---|
+   * | FAM | 210.72 | 4.98 | 42.3× |
+   * | Texas Red | 210.72 | 5.31 | 39.7× |
+   *
+   * Two anchors from one run, agreeing within 6% — enough to pin the order of magnitude, not enough
+   * to call the value validated (see `threshold.md` §9). Expressing the same anchors as a fraction
+   * of the wells' amplification instead (7.5% and 10.1% of median ΔRFU) fits them more loosely and
+   * disagrees sharply on other plates, which is why the rule stays noise-relative.
+   */
   multiplier?: number;
   /** Floor on the resulting threshold, in RFU. Default **0** (no floor) — the doc calls for a
    * floor without pinning a value; supply one appropriate to the instrument's noise floor. */
@@ -45,7 +68,7 @@ export interface AutoThresholdOptions {
  * result at `minThreshold` so an all-flat plate doesn't collapse the threshold toward zero.
  */
 export function autoThreshold(noiseEstimates: number[], options: AutoThresholdOptions = {}): number {
-  const multiplier = options.multiplier ?? 3.2;
+  const multiplier = options.multiplier ?? 40;
   const minThreshold = options.minThreshold ?? 0;
   if (noiseEstimates.length === 0) return minThreshold;
 

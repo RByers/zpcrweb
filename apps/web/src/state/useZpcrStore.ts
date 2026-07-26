@@ -105,7 +105,7 @@ export interface FileSettings {
   showUnloadedFluors: boolean;
   /** Manual per-target threshold override (RFU), keyed by threshold group (target, or
    * fluorophore on a plate with no targets). A group with no entry uses the auto threshold
-   * (`threshold.md` §5.1: 3.2 × median baseline noise across that group's wells). Edited in the
+   * (`threshold.md` §5.1: 40 × median baseline noise across that group's wells). Edited in the
    * Curves rail's "Threshold overrides" section; applies to the chart's Cq markers, the hover
    * cards and the table alike, since all three read the run's one Cq table. */
   thresholdOverrides: Map<string, number>;

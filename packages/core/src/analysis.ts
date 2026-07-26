@@ -20,6 +20,7 @@ import {
   isAmplified,
   resolveThreshold,
   type AmplificationOptions,
+  type AutoThresholdOptions,
   type CqAlgorithm,
 } from "./threshold.js";
 
@@ -159,6 +160,8 @@ export interface CqTableOptions {
   /** Manual per-group threshold overrides, keyed by {@link CqTableCurve.group}. A group with no
    * entry uses the auto threshold. */
   thresholdOverrides?: ReadonlyMap<string, number>;
+  /** §5.1 auto-threshold tuning for groups with no override — see {@link AutoThresholdOptions}. */
+  autoThreshold?: AutoThresholdOptions;
   /** Baseline subtraction mode; defaults to {@link ANALYSIS_BASELINE_MODE} and should normally be
    * left alone, so every view reports the same Cq. */
   baselineMode?: BaselineMode;
@@ -215,7 +218,10 @@ export function computeCqTable(
     const noises = cohortByGroup.get(group) ?? all;
     thresholdByGroup.set(
       group,
-      resolveThreshold(noises, { overrideValue: options.thresholdOverrides?.get(group) }),
+      resolveThreshold(noises, {
+        overrideValue: options.thresholdOverrides?.get(group),
+        auto: options.autoThreshold,
+      }),
     );
   }
 
