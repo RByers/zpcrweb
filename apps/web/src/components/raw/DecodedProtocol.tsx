@@ -45,7 +45,7 @@ function UndecodedNote({ prcl }: { prcl: Prcl }) {
 export function DecodedProtocol({ zpcr, name }: { zpcr: Zpcr; name: string }) {
   const { prcl, setPassword } = usePrclEntry(zpcr, name);
 
-  if (prcl.needsPassword || prcl.error) {
+  if (prcl.container.encrypted && (prcl.needsPassword || prcl.error)) {
     return (
       <div className="decoded">
         <PasswordPrompt wrong={!!prcl.error} onSubmit={setPassword} />
@@ -53,6 +53,7 @@ export function DecodedProtocol({ zpcr, name }: { zpcr: Zpcr; name: string }) {
       </div>
     );
   }
+  if (prcl.error) return <div className="decoded__na mono">{prcl.error}</div>;
   if (!prcl.protocol) return <div className="decoded__na mono">No protocol for {name}.</div>;
   const sourceHint =
     prcl.container.format === "zip"
@@ -128,7 +129,7 @@ export function ProtocolDetail({
 export function ProtocolXml({ zpcr, name }: { zpcr: Zpcr; name: string }) {
   const { prcl, setPassword } = usePrclEntry(zpcr, name);
   const xml = prcl.xml ?? "";
-  if (prcl.needsPassword || prcl.error) {
+  if (prcl.container.encrypted && (prcl.needsPassword || prcl.error)) {
     return (
       <div className="decoded">
         <PasswordPrompt wrong={!!prcl.error} onSubmit={setPassword} />
@@ -136,6 +137,7 @@ export function ProtocolXml({ zpcr, name }: { zpcr: Zpcr; name: string }) {
       </div>
     );
   }
+  if (prcl.error) return <div className="decoded__na mono">{prcl.error}</div>;
   if (prcl.container.format === "text") {
     return (
       <div className="decoded">

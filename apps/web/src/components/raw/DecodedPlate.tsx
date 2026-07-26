@@ -48,7 +48,7 @@ export function DecodedPlate({ zpcr, name }: { zpcr: Zpcr; name: string }) {
 
   const { pltd, setPassword } = usePltdEntry(zpcr, name);
 
-  if (pltd.needsPassword || pltd.error) {
+  if (pltd.container.encrypted && (pltd.needsPassword || pltd.error)) {
     return (
       <div className="decoded">
         <PasswordPrompt wrong={!!pltd.error} onSubmit={setPassword} />
@@ -56,6 +56,7 @@ export function DecodedPlate({ zpcr, name }: { zpcr: Zpcr; name: string }) {
       </div>
     );
   }
+  if (pltd.error) return <div className="decoded__na mono">{pltd.error}</div>;
   if (!pltd.plate) return <div className="decoded__na mono">No plate for {name}.</div>;
   const { container } = pltd;
   return (
@@ -84,7 +85,7 @@ function DecodedPlateCsv({ zpcr, name }: { zpcr: Zpcr; name: string }) {
 export function PlateXml({ zpcr, name }: { zpcr: Zpcr; name: string }) {
   const { pltd, setPassword } = usePltdEntry(zpcr, name);
   const xml = pltd.xml ?? "";
-  if (pltd.needsPassword || pltd.error) {
+  if (pltd.container.encrypted && (pltd.needsPassword || pltd.error)) {
     return (
       <div className="decoded">
         <PasswordPrompt wrong={!!pltd.error} onSubmit={setPassword} />
@@ -92,6 +93,7 @@ export function PlateXml({ zpcr, name }: { zpcr: Zpcr; name: string }) {
       </div>
     );
   }
+  if (pltd.error) return <div className="decoded__na mono">{pltd.error}</div>;
   if (!xml) return <div className="decoded__na mono">No XML for {name}.</div>;
   return <XmlTreeFromString xml={xml} />;
 }

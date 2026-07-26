@@ -572,11 +572,14 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
 
         {plateEntry && (
           <div className="rail__section">
-            {plateEntry.pltd.needsPassword || plateEntry.pltd.error ? (
+            {plateEntry.pltd.container.encrypted &&
+            (plateEntry.pltd.needsPassword || plateEntry.pltd.error) ? (
               <PasswordPrompt
                 wrong={!!plateEntry.pltd.error}
                 onSubmit={setPltdPassword}
               />
+            ) : plateEntry.pltd.error ? (
+              <div className="rail__note mono">{plateEntry.pltd.error}</div>
             ) : (
               <>
                 <div className="rail__row">

@@ -84,10 +84,12 @@ export function PlatesView({
           {attachControl}
           <PlateDownloadButton plate={pltd.plate} pltd={pltdBytes} />
         </div>
-        {pltd.needsPassword || pltd.error ? (
+        {pltd.container.encrypted && (pltd.needsPassword || pltd.error) ? (
           <div className="decoded">
             <PasswordPrompt wrong={!!pltd.error} onSubmit={setPassword} />
           </div>
+        ) : pltd.error ? (
+          <div className="decoded__na mono">{pltd.error}</div>
         ) : !pltd.plate ? (
           <div className="decoded__na mono">No plate for {entry.name}.</div>
         ) : (
