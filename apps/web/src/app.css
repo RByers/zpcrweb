@@ -1713,10 +1713,18 @@
   min-width: 0;
   min-height: 0;
   overflow: auto;
-  padding: 10px;
+  /* No padding-top: a `top: 0` sticky header pins to the scroll container's *content* box, so
+     any top padding leaves an uncovered strip that scrolled-away rows show through. The header's
+     own cell padding provides the spacing instead. */
+  padding: 0 10px 10px;
 }
 .analysis__tbl {
   width: 100%;
+}
+/* Restores the breathing room lost with the wrapper's padding-top — on the header cells, which
+   scroll-pin, so it stays part of the opaque band that covers the rows underneath. */
+.analysis__tbl thead th {
+  padding-top: 10px;
 }
 .analysis__row.is-unamplified {
   opacity: 0.45;
