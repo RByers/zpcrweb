@@ -75,7 +75,7 @@ export function App() {
             {view === "plates" && store.activePlateFile && (
               <StandalonePlateView file={active} result={store.activePlateFile} />
             )}
-            {view === "raw" && <StandaloneRawView file={active} />}
+            {view === "raw" && <StandaloneRawView key={active.id} file={active} />}
           </>
         ) : !zpcr ? (
           <div className="app__gate">
@@ -105,6 +105,7 @@ export function App() {
             )}
             {view === "plates" && (
               <PlatesView
+                key={active.id}
                 zpcr={zpcr}
                 fileId={active.id}
                 fileKind={active.kind}
@@ -113,12 +114,13 @@ export function App() {
             )}
             {view === "raw" && active.kind === "pcrd" && (
               <PcrdRawView
+                key={active.id}
                 zpcr={zpcr}
                 documentXml={activeRun?.documentXml ?? ""}
                 fileName={active.name}
               />
             )}
-            {view === "raw" && active.kind === "zpcr" && <RawFilesView zpcr={zpcr} />}
+            {view === "raw" && active.kind === "zpcr" && <RawFilesView key={active.id} zpcr={zpcr} />}
           </>
         )}
       </main>
