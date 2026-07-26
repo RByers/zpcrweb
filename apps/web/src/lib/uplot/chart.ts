@@ -53,6 +53,14 @@ export interface PlotCurve {
    * baselineFit`), rendered as a formula (e.g. "2000 + 4c") — surfaced in the tooltip so a
    * surprising Cq can be traced back to the baseline that was really applied. */
   baselineFormula?: string | null;
+  /** Diagnostic: the cycle range `CurveBaselineResult.baselineRegion` auto-detection settled on
+   * for this specific curve (`threshold.md` §2–§3) — surfaced (with {@link noise}) on the
+   * Threshold rail's hover, since the region is per-curve and can differ well-to-well even
+   * within one target group. */
+  baselineRegion?: BaselineRegion | null;
+  /** Diagnostic: `CurveBaselineResult.noise` — the §5.1 noise estimate this curve contributed to
+   * its group's threshold cohort. */
+  noise?: number | null;
   /** Sample name (`pltd.md`'s `conditionName`, `WellDefinition.sample`) for this curve's well,
    * when the plate assigns one — drives the rail's "sample" highlight/hover-card lookup. */
   sample?: string;
@@ -199,6 +207,10 @@ export interface SeriesMeta {
   cq?: number | null;
   /** See {@link PlotCurve.baselineFormula}. */
   baselineFormula?: string | null;
+  /** See {@link PlotCurve.baselineRegion}. */
+  baselineRegion?: BaselineRegion | null;
+  /** See {@link PlotCurve.noise}. */
+  noise?: number | null;
   /** See {@link PlotCurve.sample}. */
   sample?: string;
   /** For `kind: "baseline"` only: index into `meta`/`u.series` (well series, not row/col index —
@@ -338,6 +350,8 @@ export function buildChart(cfg: BuildChartConfig): {
       adjust,
       cq: curve.cq,
       baselineFormula: curve.baselineFormula,
+      baselineRegion: curve.baselineRegion,
+      noise: curve.noise,
       sample: curve.sample,
     });
     series.push({
@@ -664,6 +678,7 @@ function overlayPlugin(
   let bandGroup: SVGGElement;
   let cqGroup: SVGGElement;
   let thresholdLine: SVGLineElement;
+  let regionGroup: SVGGElement;
   let group: SVGGElement;
   let vline: SVGLineElement;
   let capMax: SVGLineElement;
@@ -701,6 +716,9 @@ function overlayPlugin(
         thresholdLine.setAttribute("stroke-dasharray", THRESHOLD_LINE_DASH);
         thresholdLine.style.display = "none";
         svg.appendChild(thresholdLine);
+
+        regionGroup = document.createElementNS(SVG_NS, "g");
+        svg.appendChild(regionGroup);
 
         group = document.createElementNS(SVG_NS, "g");
         group.style.display = "none";
@@ -784,6 +802,79 @@ function overlayPlugin(
             thresholdLine.style.display = "none";
           }
         }
+
+        // Rail-driven threshold-hover diagnostic: for whichever curves the hover isolated (the
+        // well series `applyHighlight` left at full opacity while a threshold row is hovered —
+        // same condition as the line above), highlight the exact cycle range its own
+        // baseline-region auto-detection used and label its noise estimate. The region is
+        // per-curve, so two wells in the same target can show different ranges — the point of
+        // the indicator is making that visible rather than assumed.
+        const activeRegions: { seriesIdx: number; m: SeriesMeta }[] = [];
+        if (tv != null) {
+          meta.forEach((m, i) => {
+            if (m.kind !== "well" || m.baselineRegion == null || m.noise == null) return;
+            const seriesIdx = i + 1;
+            if ((u.series[seriesIdx]!.alpha ?? 1) < 1) return;
+            activeRegions.push({ seriesIdx, m });
+          });
+        }
+        while (regionGroup.childElementCount > activeRegions.length) {
+          regionGroup.lastElementChild!.remove();
+        }
+        while (regionGroup.childElementCount < activeRegions.length) {
+          const g = document.createElementNS(SVG_NS, "g");
+          const p = document.createElementNS(SVG_NS, "polyline");
+          p.setAttribute("fill", "none");
+          p.setAttribute("stroke-width", "4");
+          p.setAttribute("stroke-linecap", "round");
+          const t = document.createElementNS(SVG_NS, "text");
+          t.setAttribute("font-size", "11");
+          t.setAttribute("font-weight", "600");
+          t.setAttribute("font-family", "ui-monospace, monospace");
+          // A dark stroke "halo" under the fill, so the label stays legible over whatever curve
+          // color or gridline it happens to land on — the plot is dark and busy right where this
+          // text sits (just past the region it's labelling).
+          t.setAttribute("paint-order", "stroke");
+          t.setAttribute("stroke", "#0b0d12");
+          t.setAttribute("stroke-width", "3");
+          g.append(p, t);
+          regionGroup.appendChild(g);
+        }
+        activeRegions.forEach(({ seriesIdx, m }, gi) => {
+          const g = regionGroup.children[gi] as SVGGElement;
+          const poly = g.firstElementChild as SVGPolylineElement;
+          const text = g.lastElementChild as SVGTextElement;
+          const color = (u.series[seriesIdx]!.stroke as string) ?? "#8aa0c0";
+          const rowData = u.data[seriesIdx] as (number | null)[];
+          const region = m.baselineRegion!;
+          const pts: string[] = [];
+          let lastX = NaN;
+          let lastY = NaN;
+          for (let i = 0; i < m.cycles.length; i++) {
+            const c = m.cycles[i]!;
+            if (c < region.beginCycle || c > region.endCycle) continue;
+            const y = rowData[i];
+            if (y == null) continue;
+            const px = u.valToPos(c, "x");
+            const py = u.valToPos(y, "y");
+            if (!Number.isFinite(px) || !Number.isFinite(py)) continue;
+            pts.push(`${px},${py}`);
+            lastX = px;
+            lastY = py;
+          }
+          poly.setAttribute("points", pts.join(" "));
+          poly.setAttribute("stroke", color);
+          poly.setAttribute("stroke-opacity", pts.length > 1 ? "0.6" : "0");
+          if (Number.isFinite(lastX) && Number.isFinite(lastY)) {
+            text.setAttribute("x", String(lastX + 6));
+            text.setAttribute("y", String(lastY - 6));
+            text.setAttribute("fill", color);
+            text.textContent = `σ${m.noise!.toFixed(1)}`;
+            text.style.display = "";
+          } else {
+            text.style.display = "none";
+          }
+        });
       },
 
       setCursor: (u: uPlot) => {

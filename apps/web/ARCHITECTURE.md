@@ -661,6 +661,17 @@ is: a per-target curve needs channel→dye color separation (`calibration.md`).
   so hovering doesn't rebuild the whole uPlot instance). Only meaningful in `curveView:
   "relative"` — the threshold/noise/Cq math (`threshold.md` §5–§6) is computed against the
   baseline-subtracted curve, not the raw one — so `CurvesView` passes `null` under "absolute".
+  The same hover also drives a per-curve diagnostic, for debugging a surprising auto threshold:
+  each isolated curve (the well series `applyHighlight` left at full opacity) gets its exact
+  `CurveBaselineResult.baselineRegion` — auto-detected *per curve*, so two wells in the same
+  target can legitimately show different ranges, e.g. a late-amplifying well's flat region
+  reaching much further right than an early one's — highlighted as a thicker overlay segment
+  along that stretch of its own line, plus a small "σ12.3"-style label (`CurveBaselineResult.
+  noise`) at its end. `PlotCurve`/`SeriesMeta` carry `baselineRegion`/`noise` alongside `cq`/
+  `baselineFormula` (same lookup-not-recompute rule) purely so `lib/uplot/chart.ts`'s
+  `overlayPlugin` can draw this without a second pass over the run's curves; nothing else reads
+  them. Gated on the same `thresholdLineState.value != null` signal as the dotted line above, so
+  it appears and disappears with it rather than needing its own hover state.
 - **Amplification / greying:** a row renders at reduced opacity
   (`.analysis__row.is-unamplified`) whenever it has no Cq (`cq == null`) — because the
   baseline-validation gate failed, because `isAmplified` (§7 — total rise under 10× baseline noise)

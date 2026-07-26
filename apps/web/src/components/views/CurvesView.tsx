@@ -344,13 +344,23 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
   // used to make the chart's markers, the hover cards and the Analysis table disagree.
   const dyeCq = (row: number, col: number, dye: string) => {
     const e = cqTable.get(curveKey(row, col, dye));
-    return { cq: e?.cq ?? null, baselineFormula: e ? formatBaselineFormula(e.baselineFit) : null };
+    return {
+      cq: e?.cq ?? null,
+      baselineFormula: e ? formatBaselineFormula(e.baselineFit) : null,
+      baselineRegion: e?.baselineRegion ?? null,
+      noise: e?.noise ?? null,
+    };
   };
   // Channel space has no target to be consistent *with*: a raw channel curve mixes every dye
   // emitting into that filter, so it carries its own Cq from its own table. See `channelCqTable`.
   const channelCq = (row: number, col: number, channel: number) => {
     const e = channelCqTable.get(channelCurveKey(row, col, channel));
-    return { cq: e?.cq ?? null, baselineFormula: e ? formatBaselineFormula(e.baselineFit) : null };
+    return {
+      cq: e?.cq ?? null,
+      baselineFormula: e ? formatBaselineFormula(e.baselineFit) : null,
+      baselineRegion: e?.baselineRegion ?? null,
+      noise: e?.noise ?? null,
+    };
   };
 
   const plotCurves: PlotCurve[] = useMemo(
