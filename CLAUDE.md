@@ -2,20 +2,29 @@
 
 ## Git workflow
 
-**No pull requests in this repo.** Work is committed directly onto branches and then merged into main. 
+**No pull requests in this repo, and history is always linear** — no merge commits, ever. Work is
+committed onto worktree branches and fast-forwarded into `main`.
 
 - Create worktrees on branches forked from the local `main` branch and do development there.
 - When work is complete, rebase the branch onto `main` and verify that tests pass.
-- Then merge feature/worktree branches into `main` locally (should fast-forward). After doing so delete the worktree and branch.
-- Don't open PRs, and don't push anything upstream to the `origin` or make any branches from there.
+- Then land it with `git merge --ff-only <branch>`. After doing so delete the worktree and branch.
+- If the fast-forward fails, the branch has fallen behind — rebase it again. Never reach for
+  `--no-ff` or `-m` to get unstuck, and never rebase commits already reachable from `origin/main`.
+- Don't open PRs, and don't create branches on `origin`. Pushing `main` to `origin` is a deploy
+  step the user performs by hand after a round of manual testing — don't push, and never
+  force-push.
+- History before `034a68a` (2026-07-24) still contains 14 merge commits from the old merge-based
+  flow. Leave them alone: rewriting them would rewrite 100+ already-pushed commits for purely
+  cosmetic gain.
 
 ### Worktree base ref
 
-`origin` here is a personal push target, not a shared upstream — this workflow never pushes to
-it (see above), so `origin/main` drifts far behind local `main` over time. `.claude/settings.json`
-sets `worktree.baseRef` to `"head"` so `EnterWorktree` branches from local `HEAD` (i.e. local
-`main`, when that's checked out) instead of the default `"fresh"` behavior, which branches from
-`origin/<default-branch>`. Without this, a new worktree ends up dozens of commits behind local
+`origin` here is a personal deploy target, not a shared upstream — `main` is pushed only after a
+round of manual testing (see above), so between deploys `origin/main` lags behind local `main`,
+sometimes by a lot. `.claude/settings.json` sets `worktree.baseRef` to `"head"` so `EnterWorktree`
+branches from local `HEAD` (i.e. local `main`, when that's checked out) instead of the default
+`"fresh"` behavior, which branches from `origin/<default-branch>`. Without this, a new worktree
+ends up dozens of commits behind local
 `main`; merging it back is still a clean fast-forward, but `ExitWorktree`'s cleanup then refuses
 to delete the worktree branch, since from its point of view it looks like a branch with many
 commits not yet reachable from `main` (Git only sees that `origin/main` isn't an ancestor of
@@ -32,14 +41,23 @@ not committed and must be re-applied on a fresh clone):
 git config --local pull.rebase false   # override a global pull.rebase=true
 git config --local pull.ff only        # a pull may only fast-forward, never rewrite history
 git config --local merge.ff only       # `git merge <worktree-branch>` fails unless it ff's
+git config --local merge.conflictStyle zdiff3  # conflict markers include the common ancestor
 git config --local rerere.enabled true # remember conflict resolutions
 git config --local rerere.autoupdate true
 ```
 
 `merge.ff = only` is what actually keeps history linear: if a worktree branch has fallen behind,
 the merge errors out instead of silently creating a merge commit, so you rebase it first.
-`pull.ff = only` matters because a plain `git pull` with `pull.rebase=true` will flatten any
-merge commits in local `main` and re-fight their resolutions — never `pull` here, just `push`.
+
+`pull.rebase = false` is load-bearing rather than redundant: `pull.rebase` outranks `pull.ff`, so
+without the local `false` a global `pull.rebase = true` would win and `pull.ff = only` would never
+take effect. Together they mean a `pull` can only fast-forward, and otherwise fails — it will
+never quietly rewrite local history.
+
+`merge.conflictStyle = zdiff3` adds the common-ancestor text to conflict markers, which makes the
+doc-heavy conflicts this repo produces much easier to resolve. Conflict style feeds the hashes
+rerere uses to recognize a conflict, so changing it later invalidates everything already learned
+in `.git/rr-cache`; leave it as-is.
 
 Whenever changes are made, review and update all ARCHITECTURE.md files to be a concise yet accurate summary of the application design, with pointers to other relevant files.
 
