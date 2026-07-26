@@ -68,8 +68,10 @@ export interface StoredSettings {
   /** When true, dye-space curves are drawn for every enabled well/fluor pair, even ones the
    * plate definition doesn't actually load into that well. Off by default. */
   showUnloadedFluors?: boolean;
-  /** Manual per-target threshold overrides (RFU), as `[target, value]` pairs. */
+  /** Manual per-fluorophore threshold overrides (RFU), as `[fluor, value]` pairs. */
   thresholdOverrides?: [string, number][];
+  /** Manual per-curve threshold overrides (RFU), as `["row,col,fluor", value]` pairs. */
+  curveThresholdOverrides?: [string, number][];
   /** §5.1's auto-threshold multiplier. Absent on records written before it was adjustable, which
    * fall back to the library default. */
   thresholdMultiplier?: number;

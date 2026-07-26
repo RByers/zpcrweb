@@ -304,7 +304,40 @@ describe("computeCqTable", () => {
     });
     const auto = computeCqTable([curve("0,0,FAM", "GeneA", amp(25))]);
     expect(table.get("0,0,FAM")!.threshold).toBe(4000);
+    expect(table.get("0,0,FAM")!.thresholdSource).toBe("group");
+    expect(auto.get("0,0,FAM")!.thresholdSource).toBe("auto");
     expect(table.get("0,0,FAM")!.cq).toBeGreaterThan(auto.get("0,0,FAM")!.cq!);
+  });
+
+  it("lets a per-curve override outrank its group's, for that curve only", () => {
+    const curves = [curve("0,0,FAM", "GeneA", amp(25)), curve("0,1,FAM", "GeneA", amp(25))];
+    const table = computeCqTable(curves, {
+      thresholdOverrides: new Map([["GeneA", 500]]),
+      curveThresholdOverrides: new Map([["0,0,FAM", 4000]]),
+    });
+    expect(table.get("0,0,FAM")!.threshold).toBe(4000);
+    expect(table.get("0,0,FAM")!.thresholdSource).toBe("curve");
+    // The group's own threshold is still reported, so a UI can show what the group is on even
+    // when every one of its curves overrode it.
+    expect(table.get("0,0,FAM")!.groupThreshold).toBe(500);
+    // Its plate-mate is untouched — a per-curve override moves one curve, never the group.
+    expect(table.get("0,1,FAM")!.threshold).toBe(500);
+    expect(table.get("0,1,FAM")!.thresholdSource).toBe("group");
+    expect(table.get("0,0,FAM")!.cq).toBeGreaterThan(table.get("0,1,FAM")!.cq!);
+  });
+
+  it("keeps an overridden curve in its group's noise cohort", () => {
+    // The override changes what this curve's Cq is measured against, not what its baseline noise
+    // is — so the auto threshold its plate-mates get must be exactly the same either way.
+    const curves = [curve("0,0,FAM", "G", amp(25)), curve("0,1,FAM", "G", flat())];
+    const withOverride = computeCqTable(curves, {
+      curveThresholdOverrides: new Map([["0,0,FAM", 4000]]),
+    });
+    const without = computeCqTable(curves);
+    expect(withOverride.get("0,1,FAM")!.threshold).toBeCloseTo(
+      without.get("0,1,FAM")!.threshold,
+      6,
+    );
   });
 
   it("keeps opted-out curves out of the noise cohort but still gives them a Cq", () => {

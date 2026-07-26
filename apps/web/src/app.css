@@ -1885,6 +1885,61 @@
 .analysis__threshold-row input.is-auto {
   color: var(--ink-muted);
 }
+/* An override *is* set. Tinted rather than merely brighter, so a manual threshold is visible as
+   manual at a glance — including on the collapsed fluorophore row, where the alternative was
+   noticing that one number stopped tracking the multiplier slider. */
+.analysis__threshold-row input.is-override {
+  background: var(--good-dim);
+  border-color: rgba(61, 220, 132, 0.45);
+  color: var(--ink);
+}
+.analysis__threshold-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+/* Expander for a fluorophore's own curves. A plain button so the rest of the row stays hoverable
+   as one unit (hovering the row marks the threshold on the chart), unlike the <details>/<summary>
+   the rail's collapsible sections use. */
+.analysis__threshold-chevron {
+  flex: none;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--ink-muted);
+  line-height: 1;
+}
+.analysis__threshold-chevron:disabled {
+  opacity: 0.25;
+}
+.analysis__threshold-chevron .rail__chevron {
+  margin-right: 0;
+}
+.analysis__threshold-chevron .rail__chevron.is-open {
+  transform: rotate(90deg);
+}
+/* One curve under its fluorophore: indented, dimmer, and carrying the two numbers the threshold
+   is actually made of (baseline region and noise) before its own override field. */
+.analysis__threshold-row--curve {
+  gap: 6px;
+  margin-left: 14px;
+  font-size: 10px;
+  color: var(--ink-muted);
+}
+.analysis__threshold-row--curve input {
+  width: 60px;
+  font-size: 10px;
+  padding: 2px 5px;
+}
+.analysis__threshold-well {
+  flex: none;
+  color: var(--ink-2);
+}
+.analysis__threshold-region,
+.analysis__threshold-noise {
+  flex: none;
+  white-space: nowrap;
+}
 .analysis__threshold-row .rail__link {
   flex: none;
 }

@@ -312,9 +312,16 @@ export function useRunAnalysis(
     return computeCqTable(inputs, {
       algorithm: CQ_ALGORITHM,
       thresholdOverrides: settings.thresholdOverrides,
+      curveThresholdOverrides: settings.curveThresholdOverrides,
       autoThreshold: { multiplier: settings.thresholdMultiplier },
     });
-  }, [allFluorCurves, loadedFluors, settings.thresholdOverrides, settings.thresholdMultiplier]);
+  }, [
+    allFluorCurves,
+    loadedFluors,
+    settings.thresholdOverrides,
+    settings.curveThresholdOverrides,
+    settings.thresholdMultiplier,
+  ]);
 
   return {
     plateEntry,

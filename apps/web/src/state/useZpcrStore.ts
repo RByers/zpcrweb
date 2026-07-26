@@ -116,6 +116,12 @@ export interface FileSettings {
    * Curves rail's "Threshold overrides" section; applies to the chart's Cq markers, the hover
    * cards and the table alike, since all three read the run's one Cq table. */
   thresholdOverrides: Map<string, number>;
+  /** Manual per-*curve* threshold override (RFU), keyed by `curveKey(row, col, fluor)` — one
+   * well's one dye. Outranks {@link thresholdOverrides}, which in turn outranks the auto value:
+   * a group threshold is a median that deliberately won't follow any single well, so this is the
+   * only way to correct one outlier without moving every other well with it. Edited in the
+   * Curves rail's Threshold section, under the fluorophore's expandable per-curve list. */
+  curveThresholdOverrides: Map<string, number>;
   /** §5.1's auto-threshold multiplier: `threshold = k × median baseline noise` across the group's
    * wells, for every group with no entry in {@link thresholdOverrides}. The scale comes from the
    * thresholds CFX itself persisted in a `.pcrd` (see `AutoThresholdOptions.multiplier`), but those
@@ -236,6 +242,7 @@ function defaultSettings(): FileSettings {
     disabledSamples: new Set<string>(),
     showUnloadedFluors: false,
     thresholdOverrides: new Map<string, number>(),
+    curveThresholdOverrides: new Map<string, number>(),
     thresholdMultiplier: DEFAULT_THRESHOLD_MULTIPLIER,
   };
 }
@@ -262,6 +269,7 @@ function toStored(id: string, s: FileSettings): StoredSettings {
     disabledSamples: [...s.disabledSamples],
     showUnloadedFluors: s.showUnloadedFluors,
     thresholdOverrides: [...s.thresholdOverrides],
+    curveThresholdOverrides: [...s.curveThresholdOverrides],
     thresholdMultiplier: s.thresholdMultiplier,
   };
 }
@@ -297,6 +305,7 @@ function fromStored(s: StoredSettings): FileSettings {
     temps: new Set(s.temps ?? []),
     // Older records carry these under the Analysis view's own name (see StoredSettings).
     thresholdOverrides: new Map(s.thresholdOverrides ?? s.analysisThresholdOverrides ?? []),
+    curveThresholdOverrides: new Map(s.curveThresholdOverrides ?? []),
     thresholdMultiplier: s.thresholdMultiplier ?? DEFAULT_THRESHOLD_MULTIPLIER,
   };
 }

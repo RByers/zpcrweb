@@ -44,6 +44,9 @@ interface Props {
    * row in the rail); `null`/`undefined` draws none. Meaningless outside `curveView: "relative"`
    * — see {@link ThresholdLineState}. */
   thresholdLine?: number | null;
+  /** Also mark each highlighted curve's own baseline region and σ (hovering a single curve's row
+   * in the rail's Threshold section) — see {@link ThresholdLineState.regions}. */
+  thresholdRegions?: boolean;
 }
 
 export function CurveChart({
@@ -58,6 +61,7 @@ export function CurveChart({
   bands,
   highlight = null,
   thresholdLine = null,
+  thresholdRegions = false,
 }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const plotRef = useRef<uPlot | null>(null);
@@ -71,6 +75,8 @@ export function CurveChart({
   highlightRef.current = highlight;
   const thresholdLineRef = useRef(thresholdLine);
   thresholdLineRef.current = thresholdLine;
+  const thresholdRegionsRef = useRef(thresholdRegions);
+  thresholdRegionsRef.current = thresholdRegions;
 
   // (Re)build the plot whenever the data or options change.
   useEffect(() => {
@@ -100,7 +106,12 @@ export function CurveChart({
     metaRef.current = meta;
     thresholdLineStateRef.current = thresholdLineState;
     applyHighlight(plotRef.current, meta, highlightRef.current);
-    setThresholdLine(plotRef.current, thresholdLineState, thresholdLineRef.current ?? null);
+    setThresholdLine(
+      plotRef.current,
+      thresholdLineState,
+      thresholdLineRef.current ?? null,
+      thresholdRegionsRef.current,
+    );
 
     return () => {
       plotRef.current?.destroy();
@@ -124,9 +135,14 @@ export function CurveChart({
 
   useEffect(() => {
     if (plotRef.current && thresholdLineStateRef.current) {
-      setThresholdLine(plotRef.current, thresholdLineStateRef.current, thresholdLine ?? null);
+      setThresholdLine(
+        plotRef.current,
+        thresholdLineStateRef.current,
+        thresholdLine ?? null,
+        thresholdRegions,
+      );
     }
-  }, [thresholdLine]);
+  }, [thresholdLine, thresholdRegions]);
 
   // Keep the plot sized to its container.
   useEffect(() => {

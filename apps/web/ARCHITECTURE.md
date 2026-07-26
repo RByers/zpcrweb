@@ -207,9 +207,11 @@ a minimal IndexedDB wrapper with two object stores:
   reference columns. `baseline` (Reference view's factory-relative ΔRFU/Drift %) and `curveView`
   (the Curves view's display mode — baselining itself is never stored, since it's always the
   auto-detected linear fit) are independent settings — see "Two baseline concepts" under
-  Reference view. `thresholdOverrides` (`[group, value][]`, manual per-group threshold RFU) and
-  `thresholdMultiplier` (§5.1's auto-threshold `k`, absent on records written before it was
-  adjustable) are the Curves rail's Threshold section — see "Table mode" below. Older records may carry
+  Reference view. `thresholdOverrides` (`[fluor, value][]`, manual per-fluorophore threshold RFU),
+  `curveThresholdOverrides` (`["row,col,fluor", value][]`, the same one curve at a time, and
+  outranking both the group override and the auto value) and `thresholdMultiplier` (§5.1's
+  auto-threshold `k`, absent on records written before it was adjustable) are the Curves rail's
+  Threshold section — see "Table mode" below. Older records may carry
   it under its former name, `analysisThresholdOverrides`, alongside two settings of the retired
   standalone Analysis view that are now simply ignored: `analysisDisabledTargets[]` (its own
   target opt-out set, since folded into the shared `disabledFluors`) and `analysisCqAlgorithm`
@@ -391,7 +393,8 @@ color-separated `allFluorCurves` — and, on top of those, the run's **Cq table*
   called: on `20260720.zpcr` the three Texas Red wells carry two targets and got thresholds 162 and
   49 RFU for near-identical curves, with one cohort a single well. It also matches the format — CFX
   persists `thresholdOverrideValue` per `fluorId`, never per target. `thresholdOverrides` is
-  therefore keyed by fluorophore name. Both are independent of the Curves view's
+  therefore keyed by fluorophore name; `curveThresholdOverrides` goes one level finer (see
+  "Threshold section" below) and is keyed by `curveKey`. Both are independent of the Curves view's
   Fluorophore/Target *display* mode, which used to re-group the thresholds under the chart and so
   produce different Cq values than the table for the same wells.
 - **Noise cohort:** only well/fluor pairs the plate actually loads (`loadedFluors`) contribute to a
@@ -671,77 +674,100 @@ is: a per-target curve needs channel→dye color separation (`calibration.md`).
   `"Threshold"`/`"NoThreshold"` selector is gone (§6.2's 2nd-derivative variant is still implemented
   and still reachable through `computeCqTable`, just not selectable), which is what makes a per-group
   threshold always meaningful and the override section always applicable.
-- **Threshold (`thresholdMultiplier` + `thresholdOverrides` settings):** §5.1's `resolveThreshold`
-  over the median `baselineNoise` across a group's own wells, in the rail's collapsible "Threshold"
-  section (`<details className="rail__details">`, chevron rotates open, like the Temperature
-  section). The section holds two controls. A **slider** sets §5.1's multiplier `k` in
+- **Threshold (`thresholdMultiplier` + `thresholdOverrides` + `curveThresholdOverrides`
+  settings):** §5.1's `resolveThreshold` over the median `baselineNoise` across a fluorophore's own
+  wells, in the rail's collapsible "Threshold" section (`<details className="rail__details">`,
+  chevron rotates open, like the Temperature section), rendered by
+  `components/curves/ThresholdSection.tsx`. A **slider** at the top sets §5.1's multiplier `k` in
   `threshold = k × median noise` (1–100, default 20, with a Reset link back to it): it is exposed
   rather than buried because the scale behind it rests on two anchors from a single run and it is
-  the one number that shifts every Cq on the plate — the per-group thresholds below it update live
-  as it moves, so its effect is visible rather than inferred. Below that, one **per-fluorophore
-  override** row each. Hovering a row isolates that fluor's curves, draws a dotted line at its
-  threshold, and opens a card breaking the number down — `median σ × k = RFU` over one row per
-  contributing well, each showing that well's baseline region and its own noise. That breakdown
-  earns its place now that neither input is self-evident: the noise is a successive-difference
-  statistic (`threshold.md` §5.2) and each region is independently start-trimmed (§3.4), so a
-  surprising threshold is usually one well's region, and the card says which. That input always carries a value — the live auto threshold when no override is set,
-  greyed via `.is-auto` — rather than sitting empty behind a placeholder, because an empty number
-  input steps from 0: one press of the down arrow would jump the threshold from ~200 to nothing.
-  Seeded this way the arrows nudge from where the threshold actually is, in whole RFU (`step={1}`).
-  A **reset** button per row clears the override and returns that group to the slider — the same
-  `<ResetIcon />` the Wells section uses for "reset to the plate definition", so one glyph means
-  "back to the derived default" throughout the rail. It is disabled while the row is already
-  automatic.
+  the one number that shifts every Cq on the plate — the thresholds below it update live as it
+  moves, so its effect is visible rather than inferred.
+
+  Below that, **one row per fluorophore, expandable to the curves behind it** (its own chevron
+  button, not a nested `<details>`, so the row stays hoverable as one unit). A fluorophore's
+  threshold is a median over exactly the curves listed under it, and each curve's line shows the
+  two numbers that median is made of: its own auto-detected baseline region (`cycles a–b`, plus a
+  ⚠ when the fit was rejected) and its own `σ` noise. Both inputs are less self-evident than they
+  look — noise is a successive-difference statistic (`threshold.md` §5.2) and each region is
+  independently start-trimmed (§3.4) — so a surprising threshold is usually one curve's region,
+  and the list says which. This replaced a hover card carrying the same breakdown: same
+  information, but transient, read-only, and long enough to run off screen on a full plate.
+
+  **Both levels are editable, and the finer one wins.** A row's number input sets
+  `thresholdOverrides[fluor]`; a curve's sets `curveThresholdOverrides[curveKey]`, which
+  `computeCqTable` applies over the group's threshold whatever that resolved to (`threshold.md`
+  §5.4). The group median deliberately refuses to follow any single well, which is right for the
+  default and leaves no other way to correct one well without moving every other well of that dye
+  with it. An input holding a manual value is tinted green (`.is-override`, `--good-dim`) so a
+  hand-set threshold never reads as something the run computed; an automatic one carries the live
+  auto value greyed via `.is-auto` rather than sitting empty behind a placeholder, because an empty
+  number input steps from 0 — one press of the down arrow would jump the threshold from ~200 to
+  nothing. Seeded this way the arrows nudge from where the threshold actually is, in whole RFU
+  (`step={1}`). A **reset** button per row clears that level's override — the same `<ResetIcon />`
+  the Wells section uses for "reset to the plate definition", so one glyph means "back to the
+  derived default" throughout the rail — and is disabled while the row is already automatic.
+
+  **Hover is two-level too.** Hovering a fluorophore row isolates its curves and draws a dotted
+  line at its threshold, and nothing more. Hovering one curve's row isolates that single curve
+  (`HighlightMatch`'s `"curve"` variant, matched on well label + fluorophore), draws the line at
+  the threshold *that curve* is measured against, and adds the region/σ overlay: the exact cycle
+  span its baseline was fitted over, traced on the curve in a fixed highlighter color with its
+  noise labelled at the end (`ThresholdLineState.regions`, `lib/uplot/chart.ts`). The overlay is
+  deliberately one curve at a time — drawn for a whole fluorophore's wells at once, the σ labels
+  overlapped into illegibility. In channel mode there is no dye-space curve to isolate and no
+  threshold on the raw channel curve, so a hover highlights the fluor's channel (or the curve's
+  well) and draws neither.
 
   The section sits in the Curves rail in **every** view mode, Channel included, and lists **every**
-  target group with a matched calibration curve (`groupInfos.filter(g => g.curve)`) — not just the
-  ones currently toggled on in the Targets/Fluorophores chip list above, and not gated by which
-  wells happen to be selected either: a target hidden from the chart, or a group whose wells are
-  all deselected, still has a real threshold worth checking or overriding, and hiding its row along
-  with its chip would leave nothing on screen to bring it back. A threshold belongs to a target,
-  not to an optical filter or a selection, and an override feeds the run's one Cq table, so it
-  moves the chart's Cq markers and the hover cards' numbers exactly as it moves the table's.
-  Channel mode used to hide the section, on the grounds that the old `channelCqTable`'s groups were
-  channels rather than targets; that table is gone (see above), and with it the confusing part —
-  the section now shows the same thresholds in every mode, and in channel mode they simply describe
-  curves the chart isn't currently drawing in dye space rather than silently moving markers on it.
-  Each row's displayed
-  automatic value is read from the run's Cq table directly (`CurvesView`'s `groupThresholds`)
-  rather than from the display-filtered `tableRows`, for the same reason the row list itself
-  isn't filtered.
+  fluorophore with a matched calibration curve (`thresholdGroups.filter(g => g.curve)`) — not just
+  the ones currently toggled on in the Targets/Fluorophores chip list above, and not gated by which
+  wells happen to be selected either: a dye hidden from the chart, or one whose wells are all
+  deselected, still has a real threshold worth checking or overriding, and hiding its row along
+  with its chip would leave nothing on screen to bring it back. An override feeds the run's one Cq
+  table, so it moves the chart's Cq markers and the hover cards' numbers exactly as it moves the
+  table's. Channel mode used to hide the section, on the grounds that the old `channelCqTable`'s
+  groups were channels rather than targets; that table is gone (see above), and with it the
+  confusing part — the section now shows the same thresholds in every mode, and in channel mode
+  they simply describe curves the chart isn't currently drawing in dye space rather than silently
+  moving markers on it. Each row's displayed automatic value is read from the run's Cq table
+  directly (`CurvesView`'s `groupThresholds`, reading `CqTableEntry.groupThreshold` rather than
+  `threshold` so an overridden well can't rewrite its fluorophore's displayed number) rather than
+  from the display-filtered `tableRows`, for the same reason the row list itself isn't filtered.
+  The per-curve list is the plate's *loaded* wells for that dye — exactly the §5.1 noise cohort.
 
   Each row has a hover effect (`.analysis__threshold-row:hover` background tint, like the app's
-  other hoverable rail rows) backing up what it actually does: hovering sets the same
-  `hoverHighlight` a target chip's hover sets (isolating that target's curves via
-  `applyHighlight`) and additionally a dotted line at that target's threshold RFU, via
-  `CurveChart`'s `thresholdLine` prop → `lib/uplot/chart.ts`'s `ThresholdLineState`/
-  `setThresholdLine` (a mutable holder + cheap `u.redraw`, the same pattern `applyHighlight` uses,
-  so hovering doesn't rebuild the whole uPlot instance). Only meaningful in `curveView:
-  "relative"` — the threshold/noise/Cq math (`threshold.md` §5–§6) is computed against the
-  baseline-subtracted curve, not the raw one — so `CurvesView` passes `null` under "absolute".
-  The same hover also drives a per-curve diagnostic, for debugging a surprising auto threshold:
-  each isolated curve (the well series `applyHighlight` left at full opacity) gets its exact
-  `CurveBaselineResult.baselineRegion` — auto-detected *per curve*, so two wells in the same
-  target can legitimately show different ranges, e.g. a late-amplifying well's flat region
-  reaching much further right than an early one's — traced in a fixed highlighter yellow
-  (`REGION_MARK_COLOR`, deliberately not the curve's own color: tracing it in-hue read as barely a
-  thicker version of the line itself, next to invisible against the dark theme) with a dark halo
-  stroke under it, plus a small curve-colored dot and a "σ12.3"-style noise label
-  (`CurveBaselineResult.noise`) at its end — the dot ties the label back to which line it belongs
-  to now that the mark itself is a shared color. The label flips from above the point to below
-  whenever it would otherwise land on the dotted threshold line (the two are frequently close in
-  RFU by construction — the region tends to end near where a curve approaches its own threshold).
-  `PlotCurve`/`SeriesMeta` carry `baselineRegion`/`noise` alongside `cq`/`baselineFormula` (same
-  lookup-not-recompute rule) purely so `lib/uplot/chart.ts`'s `overlayPlugin` can draw this
-  without a second pass over the run's curves; nothing else reads them. Gated on the same
-  `thresholdLineState.value != null` signal as the dotted line above, so it appears and
-  disappears with it rather than needing its own hover state.
+  other hoverable rail rows) backing up what it actually does: hovering a fluorophore row sets the
+  same `hoverHighlight` a chip's hover sets (isolating that dye's curves via `applyHighlight`) plus
+  a dotted line at its threshold RFU, via `CurveChart`'s `thresholdLine` prop →
+  `lib/uplot/chart.ts`'s `ThresholdLineState`/`setThresholdLine` (a mutable holder + cheap
+  `u.redraw`, the same pattern `applyHighlight` uses, so hovering doesn't rebuild the whole uPlot
+  instance). Only meaningful in `curveView: "relative"` — the threshold/noise/Cq math
+  (`threshold.md` §5–§6) is computed against the baseline-subtracted curve, not the raw one — so
+  `CurvesView` passes `null` under "absolute".
+
+  Hovering an individual **curve** row adds the per-curve diagnostic, for debugging a surprising
+  auto threshold: the isolated curve gets its exact `CurveBaselineResult.baselineRegion` —
+  auto-detected *per curve*, so two wells of one dye legitimately show different ranges, e.g. a
+  late-amplifying well's flat region reaching much further right than an early one's — traced in a
+  fixed highlighter yellow (`REGION_MARK_COLOR`, deliberately not the curve's own color: tracing it
+  in-hue read as barely a thicker version of the line itself, next to invisible against the dark
+  theme) with a dark halo stroke under it, plus a small curve-colored dot and a "σ12.3"-style noise
+  label (`CurveBaselineResult.noise`) at its end — the dot ties the label back to which line it
+  belongs to now that the mark itself is a shared color. The label flips from above the point to
+  below whenever it would otherwise land on the dotted threshold line (the two are frequently close
+  in RFU by construction — the region tends to end near where a curve approaches its own
+  threshold). `PlotCurve`/`SeriesMeta` carry `baselineRegion`/`noise` alongside
+  `cq`/`baselineFormula` (same lookup-not-recompute rule) purely so `lib/uplot/chart.ts`'s
+  `overlayPlugin` can draw this without a second pass over the run's curves; nothing else reads
+  them. It is gated on its own `ThresholdLineState.regions` flag rather than riding on the dotted
+  line, which is what keeps it to one curve at a time: it used to appear for every curve the hover
+  isolated, and a whole fluorophore's worth of σ labels overlapped into illegibility.
 
   Both hover effects are dye-space-only. In Channel mode a row's threshold is a level on the
-  color-separated curve, not on the raw channel one, and no plotted curve carries the target's
-  label — so `CurvesView` passes no threshold line (which also suppresses the baseline-region
-  overlay riding on it) and highlights the group's own channel instead, or nothing at all for a
-  group spanning several.
+  color-separated curve, not on the raw channel one, and no plotted curve carries the dye's label
+  — so `CurvesView` passes no threshold line and no regions, and highlights the fluorophore's own
+  channel (or, for a curve row, its well) instead.
 - **Amplification / greying:** a row renders at reduced opacity
   (`.analysis__row.is-unamplified`) whenever it has no Cq (`cq == null`) — because the
   baseline-validation gate failed, because `isAmplified` (§7 — total rise under 10× baseline noise)

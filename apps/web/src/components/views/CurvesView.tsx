@@ -5,7 +5,6 @@ import { computeWellTypes } from "../../lib/wellTypes";
 import { NO_TARGET } from "../../lib/plateTargets";
 import { SAMPLE_TYPE_META } from "../../lib/sampleType";
 import {
-  DEFAULT_THRESHOLD_MULTIPLIER,
   wellKey,
   type CurveView,
   type FileSettings,
@@ -15,7 +14,6 @@ import {
 import { usePltdPassword } from "../../state/pltdPassword";
 import { channelColor, channelLabel } from "../../lib/channelColors";
 import { curveKey, useRunAnalysis } from "../../lib/runAnalysis";
-import type { CqTableEntry } from "@zpcrweb/core";
 import {
   analysisCsv,
   analysisCsvFilename,
@@ -29,6 +27,11 @@ import { useHoverCard, type HoverCardData, type HoverCardRow } from "../curves/H
 import { WellMatrix } from "../curves/WellMatrix";
 import { CurveChart } from "../curves/CurveChart";
 import { CurveTable } from "../curves/CurveTable";
+import {
+  ThresholdSection,
+  type ThresholdCurveRow,
+  type ThresholdGroupRow,
+} from "../curves/ThresholdSection";
 import { TempBar } from "../curves/TempBar";
 import { PasswordPrompt } from "../PasswordPrompt";
 import { Toggle } from "../Toggle";
@@ -201,10 +204,14 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
   // curve(s) in the chart, the same way hovering the chart itself dims every other curve.
   const [hoverHighlight, setHoverHighlight] = useState<HighlightMatch | null>(null);
 
-  // Hovering a fluorophore's row in the Threshold rail also draws a dotted line at that
-  // threshold's RFU (see CurveChart's `thresholdLine` prop) — set alongside `hoverHighlight` so the
-  // two effects (isolate the fluor's curves, mark its threshold) always appear together.
-  const [hoverThresholdLine, setHoverThresholdLine] = useState<number | null>(null);
+  // Hovering a row in the Threshold rail also marks that threshold on the chart: a dotted line at
+  // its RFU, plus — for a single curve's row — that curve's baseline region and σ (see CurveChart's
+  // `thresholdLine`/`thresholdRegions` props). Set alongside `hoverHighlight` so isolating the
+  // curves and marking their threshold always appear together.
+  const [hoverThreshold, setHoverThreshold] = useState<{
+    value: number | null;
+    regions: boolean;
+  } | null>(null);
 
   // A hovered item should be shown even when it's individually disabled — the "peek" a rail
   // hover is supposed to give — so the visibility filters below let the hovered well/channel/
@@ -514,52 +521,6 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
     return { title: dyeLabel, rows };
   };
 
-  /**
-   * The Threshold rail's card: where this fluorophore's auto threshold actually came from.
-   *
-   * A threshold is `multiplier × median baseline noise` over the fluor's *loaded* wells
-   * (`threshold.md` §5.1), and both inputs are now less obvious than they look — noise is a
-   * successive-difference statistic rather than a spread (§5.2), and each well's baseline region is
-   * trimmed independently (§3.4). So a threshold that looks surprising is usually explained by one
-   * well's region or noise, and that is precisely what this lists: one row per contributing well,
-   * its baseline region, and its noise, under a subtitle showing the median that fell out of them.
-   */
-  const cardForThresholdGroup = (fluor: string): HoverCardData | null => {
-    const entries = plate
-      ? plate.wells
-          .filter((w) => w.loaded && (loadedFluors.get(wellKey(w.row, w.col))?.has(fluor) ?? false))
-          .map((w) => ({ w, e: cqTable.get(curveKey(w.row, w.col, fluor)) }))
-          .filter((x): x is { w: (typeof plate.wells)[number]; e: CqTableEntry } => !!x.e)
-      : [];
-    if (entries.length === 0) return null;
-
-    const override = settings.thresholdOverrides.get(fluor);
-    const threshold = entries[0]!.e.threshold;
-    const noises = entries.map((x) => x.e.noise).sort((a, b) => a - b);
-    const mid = noises.length >> 1;
-    const median =
-      noises.length % 2 === 0 ? (noises[mid - 1]! + noises[mid]!) / 2 : noises[mid]!;
-    const subtitle =
-      override !== undefined
-        ? `manual override — ${Math.round(threshold)} RFU`
-        : `median σ ${median.toFixed(2)} × ${settings.thresholdMultiplier} = ${Math.round(threshold)} RFU`;
-
-    return {
-      title: fluor,
-      subtitle,
-      rows: entries.map(({ w, e }) => ({
-        key: `${w.row},${w.col}`,
-        label: w.label,
-        sublabel: `cyc ${e.baselineRegion.beginCycle}\u2013${e.baselineRegion.endCycle}${e.baselineValid ? "" : " \u26a0"}`,
-        cq: null,
-        value: `\u03c3 ${e.noise.toFixed(2)}`,
-        selected: true,
-      })),
-    };
-  };
-
-  const thresholdCard = useHoverCard<string>(cardForThresholdGroup);
-
   const cardForChannel = (channel: number): HoverCardData | null => {
     const matches = allPlotCurves.filter((c) => c.channel === channel);
     if (matches.length === 0) return null;
@@ -655,9 +616,59 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
    * Threshold section keeps showing a real value even when a filter hides every row. */
   const groupThresholds = useMemo(() => {
     const m = new Map<string, number>();
-    for (const e of cqTable.values()) if (!m.has(e.group)) m.set(e.group, e.threshold);
+    // `groupThreshold`, not `threshold`: the latter is what that one curve is measured against,
+    // which a per-curve override replaces — reading it would let overriding a single well rewrite
+    // the number its whole fluorophore row displays.
+    for (const e of cqTable.values()) if (!m.has(e.group)) m.set(e.group, e.groupThreshold);
     return m;
   }, [cqTable]);
+
+  /** The Threshold section's rows: one per calibrated fluorophore, each carrying the curves its
+   * threshold was derived from — the plate's *loaded* wells for that dye, which is exactly the
+   * §5.1 noise cohort (`CqTableCurve.contributesToThreshold`). Every fluorophore with a matched
+   * calibration curve gets a row regardless of the chip opt-out above: one hidden from the chart
+   * still has a real threshold worth checking or overriding, and there'd otherwise be nothing on
+   * screen to bring it back once its row vanished with its chip. */
+  const thresholdRows = useMemo<ThresholdGroupRow[]>(
+    () =>
+      thresholdGroups
+        .filter((g) => g.curve)
+        .map((g) => ({
+          fluor: g.fluor,
+          channel: g.channel,
+          threshold: groupThresholds.get(g.fluor),
+          override: settings.thresholdOverrides.get(g.fluor),
+          curves: (plate?.wells ?? []).flatMap((w) => {
+            if (!w.loaded || !(loadedFluors.get(wellKey(w.row, w.col))?.has(g.fluor) ?? false)) {
+              return [];
+            }
+            const key = curveKey(w.row, w.col, g.fluor);
+            const e = cqTable.get(key);
+            if (!e) return [];
+            return [
+              {
+                key,
+                wellLabel: w.label,
+                beginCycle: e.baselineRegion.beginCycle,
+                endCycle: e.baselineRegion.endCycle,
+                noise: e.noise,
+                baselineValid: e.baselineValid,
+                threshold: e.threshold,
+                override: settings.curveThresholdOverrides.get(key),
+              },
+            ];
+          }),
+        })),
+    [
+      thresholdGroups,
+      groupThresholds,
+      plate,
+      loadedFluors,
+      cqTable,
+      settings.thresholdOverrides,
+      settings.curveThresholdOverrides,
+    ],
+  );
 
   const downloadCsv = () =>
     downloadText(
@@ -674,6 +685,53 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
     if (raw === "" || !Number.isFinite(value)) next.delete(group);
     else next.set(group, Math.round(value));
     onChange({ thresholdOverrides: next });
+  };
+
+  /** The same, one curve at a time — `raw` empty drops back to the fluorophore's threshold. */
+  const setCurveThresholdOverride = (key: string, raw: string) => {
+    const next = new Map(settings.curveThresholdOverrides);
+    const value = Number(raw);
+    if (raw === "" || !Number.isFinite(value)) next.delete(key);
+    else next.set(key, Math.round(value));
+    onChange({ curveThresholdOverrides: next });
+  };
+
+  /**
+   * Hovering a fluorophore's row in the Threshold section: isolate its curves and draw a dotted
+   * line at its threshold — and nothing else. The per-curve baseline-region/σ overlay stays off
+   * here; a dozen wells' worth of it at once was unreadable, and it's a curve at a time that the
+   * region actually explains anything. `null` clears the hover.
+   *
+   * In channel mode there is no dye-space curve to isolate, and the threshold is a level on the
+   * separated curve rather than on the raw channel one — so highlight the fluor's own channel
+   * instead and draw no line.
+   */
+  const hoverThresholdGroup = (g: ThresholdGroupRow | null) => {
+    if (!g) {
+      setHoverHighlight(null);
+      setHoverThreshold(null);
+      return;
+    }
+    setHoverHighlight(
+      calibrationOn
+        ? { kind: "fluor", fluor: g.fluor }
+        : g.channel != null
+          ? { kind: "channel", channel: g.channel }
+          : null,
+    );
+    setHoverThreshold(calibrationOn ? { value: g.threshold ?? null, regions: false } : null);
+  };
+
+  /** Hovering one curve's row: isolate that single curve, mark the threshold *it* is measured
+   * against (its own override, when it has one), and add the baseline-region/σ overlay — the
+   * diagnostic that explains where that curve's noise came from. */
+  const hoverThresholdCurve = (g: ThresholdGroupRow, c: ThresholdCurveRow) => {
+    setHoverHighlight(
+      calibrationOn
+        ? { kind: "curve", label: c.wellLabel, fluor: g.fluor }
+        : { kind: "well", label: c.wellLabel },
+    );
+    setHoverThreshold(calibrationOn ? { value: c.threshold, regions: true } : null);
   };
 
   const logBaselined = settings.scale === "log" && settings.curveView === "relative";
@@ -996,118 +1054,15 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
                 Threshold
               </span>
             </summary>
-            {/* §5.1's `k` in `threshold = k × median baseline noise`. Adjustable because the
-                calibrated default rests on two anchors from a single run (see
-                `AutoThresholdOptions.multiplier`), and because it is the one number that moves
-                every Cq on the plate — the per-group thresholds below update live as it moves, so
-                its effect is visible rather than inferred. Overridden groups ignore it. */}
-            <div className="threshold-k">
-              <div className="threshold-k__head">
-                <span>Auto threshold</span>
-                <span className="threshold-k__value mono">
-                  {settings.thresholdMultiplier}× noise
-                </span>
-              </div>
-              <input
-                type="range"
-                min={1}
-                max={100}
-                step={1}
-                value={settings.thresholdMultiplier}
-                aria-label="Auto-threshold multiplier, in multiples of median baseline noise"
-                onChange={(e) =>
-                  onChange({ thresholdMultiplier: Number(e.currentTarget.value) })
-                }
-              />
-              <div className="threshold-k__foot">
-                <span className="threshold-k__hint mono">
-                  Default {DEFAULT_THRESHOLD_MULTIPLIER}×
-                </span>
-                <button
-                  type="button"
-                  className="rail__link"
-                  disabled={settings.thresholdMultiplier === DEFAULT_THRESHOLD_MULTIPLIER}
-                  onClick={() =>
-                    onChange({ thresholdMultiplier: DEFAULT_THRESHOLD_MULTIPLIER })
-                  }
-                >
-                  Reset
-                </button>
-              </div>
-            </div>
-            {/* Keyed by fluorophore, not target: a threshold is derived from baseline noise,
-                which is a property of the dye and the optics rather than of the biological label
-                on the well — see `RunAnalysis.thresholdGroupOf`. */}
-            <div className="analysis__thresholds">
-              {thresholdGroups
-                // Every fluorophore with a matched calibration curve gets a row, regardless of the
-                // chip opt-out above — one hidden from the chart still has a real threshold worth
-                // checking or overriding, and there'd otherwise be nothing on screen to bring it
-                // back once its row (and the only obvious way to re-enable it) vanished with its
-                // chip.
-                .filter((g) => g.curve)
-                .map((g) => {
-                  const auto = groupThresholds.get(g.fluor);
-                  const override = settings.thresholdOverrides.get(g.fluor);
-                  const isAuto = override === undefined;
-                  // The field always carries a value — the live auto threshold when there's no
-                  // override — rather than sitting empty behind a placeholder. An empty number
-                  // input steps from 0, so one press of the down arrow used to jump the threshold
-                  // from (say) 210 to nothing-or-zero; seeded this way the arrows nudge from where
-                  // the threshold actually is. Whole RFU only: a threshold is a level on a curve
-                  // running to thousands, and sub-unit steps are below anything the reading means.
-                  const shown = isAuto ? (auto != null ? Math.round(auto) : "") : override;
-                  const thresholdValue = isAuto ? auto : override;
-                  return (
-                    <div
-                      key={g.fluor}
-                      className="analysis__threshold-row mono"
-                      onMouseEnter={(e) => {
-                        // In channel mode there is no dye-space curve to isolate, and the threshold
-                        // is a level on the separated curve rather than on the raw channel one — so
-                        // highlight the fluor's own channel instead and draw no line. The card is
-                        // shown either way: its noise/region breakdown explains the number
-                        // regardless of which space the chart is currently in.
-                        setHoverHighlight(
-                          calibrationOn
-                            ? { kind: "fluor", fluor: g.fluor }
-                            : g.channel != null
-                              ? { kind: "channel", channel: g.channel }
-                              : null,
-                        );
-                        setHoverThresholdLine(calibrationOn ? (thresholdValue ?? null) : null);
-                        thresholdCard.show(g.fluor, e.currentTarget);
-                      }}
-                      onMouseLeave={() => {
-                        setHoverHighlight(null);
-                        setHoverThresholdLine(null);
-                        thresholdCard.hide();
-                      }}
-                    >
-                      <span>{g.fluor}</span>
-                      <input
-                        type="number"
-                        step={1}
-                        value={shown}
-                        className={isAuto ? "is-auto" : ""}
-                        aria-label={`${g.fluor} threshold in RFU`}
-                        onChange={(e) => setThresholdOverride(g.fluor, e.currentTarget.value)}
-                      />
-                      <button
-                        type="button"
-                        className="rail__link rail__icon-btn"
-                        disabled={isAuto}
-                        aria-label={`Reset ${g.fluor} to its automatic threshold`}
-                        title={`Reset ${g.fluor} to its automatic threshold`}
-                        onClick={() => setThresholdOverride(g.fluor, "")}
-                      >
-                        <ResetIcon />
-                      </button>
-                    </div>
-                  );
-                })}
-            </div>
-            {thresholdCard.node}
+            <ThresholdSection
+              groups={thresholdRows}
+              multiplier={settings.thresholdMultiplier}
+              onMultiplierChange={(v) => onChange({ thresholdMultiplier: v })}
+              onGroupOverride={setThresholdOverride}
+              onCurveOverride={setCurveThresholdOverride}
+              onHoverGroup={hoverThresholdGroup}
+              onHoverCurve={hoverThresholdCurve}
+            />
           </details>
         )}
 
@@ -1161,7 +1116,10 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
             scale={settings.scale}
             bands={!calibrationOn && settings.bands}
             highlight={hoverHighlight}
-            thresholdLine={settings.curveView === "relative" ? hoverThresholdLine : null}
+            thresholdLine={
+              settings.curveView === "relative" ? (hoverThreshold?.value ?? null) : null
+            }
+            thresholdRegions={settings.curveView === "relative" && !!hoverThreshold?.regions}
           />
         </section>
       )}

@@ -447,6 +447,17 @@ and wrong: the plate's own dyes are `fluorId` 5 (FAM) and 12 (Texas Red), both *
 `fluorId` 4 (Cy5) on `autoCalculateThreshold="True"` with no override at all. Only the two 210.72
 values are usable as calibration anchors (§5.1).
 
+**Per-curve overrides are ours, not the format's.** `computeCqTable()` also accepts
+`curveThresholdOverrides`, keyed by curve (one well, one fluorophore) rather than by group, and a
+curve listed there uses that threshold whatever its group resolved to — auto or overridden. The
+file format has no equivalent: CFX persists a threshold per `fluorId` and nothing finer. It exists
+because §5.1's median deliberately refuses to follow any single well, which is right for the
+default and leaves no way to correct one well whose baseline region or noise came out wrong
+(§3.4, §5.2) without moving every other well of that dye with it. An overridden curve still joins
+its group's noise cohort: its noise is a real measurement, and dropping it would change every
+*other* curve's threshold as a side effect. `CqTableEntry.thresholdSource` reports which of the
+three levels a given entry's threshold came from.
+
 ## 6. Cq — two algorithms
 
 > Implemented by `findThresholdCrossing()` (§6.1), `findInflectionCq()` (§6.2) and `computeCq()`

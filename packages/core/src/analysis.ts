@@ -152,8 +152,18 @@ export interface CqTableCurve {
 /** One well/target pair's analysis result — every Cq-related number the UI shows for it. */
 export interface CqTableEntry extends CurveBaselineResult {
   group: string;
-  /** The §5.1 threshold resolved for {@link group}, shared by every curve in it. */
+  /** The threshold this curve's Cq was actually taken against: the §5.1 value resolved for
+   * {@link group} and shared by every curve in it, unless a per-curve override replaced it —
+   * see {@link thresholdSource}. */
   threshold: number;
+  /** The threshold resolved for {@link group} as a whole — §5.1's auto value, or a manual override
+   * on the group. Equal to {@link threshold} unless a per-curve override replaced it, and reported
+   * separately so a UI can show what the group is on without having to find a curve that didn't
+   * override it (there might not be one). */
+  groupThreshold: number;
+  /** Where {@link threshold} came from: §5.1's auto value, a manual override on the whole
+   * {@link group}, or a manual override on this curve alone (which outranks the other two). */
+  thresholdSource: "auto" | "group" | "curve";
   cq: number | null;
 }
 
@@ -163,6 +173,21 @@ export interface CqTableOptions {
   /** Manual per-group threshold overrides, keyed by {@link CqTableCurve.group}. A group with no
    * entry uses the auto threshold. */
   thresholdOverrides?: ReadonlyMap<string, number>;
+  /**
+   * Manual per-*curve* threshold overrides, keyed by {@link CqTableCurve.key} — the finest grain a
+   * threshold can be set at, and the highest precedence: a curve listed here uses that value
+   * whatever its group resolved to, override or auto.
+   *
+   * A group threshold is a median over a cohort (§5.1), which is the right default precisely
+   * because it refuses to follow any single well — but that also means one well with an unusual
+   * baseline can't be corrected by moving the group without moving every other well with it. This
+   * is the escape hatch for that well.
+   *
+   * An overridden curve still joins its group's noise cohort: its baseline noise is a real
+   * measurement, and dropping it would silently change every *other* curve's threshold as a side
+   * effect of editing this one.
+   */
+  curveThresholdOverrides?: ReadonlyMap<string, number>;
   /** §5.1 auto-threshold tuning for groups with no override — see {@link AutoThresholdOptions}. */
   autoThreshold?: AutoThresholdOptions;
   /** Baseline subtraction mode; defaults to {@link ANALYSIS_BASELINE_MODE} and should normally be
@@ -177,7 +202,9 @@ export interface CqTableOptions {
  * `key`.
  *
  * This is deliberately the single implementation, and callers are expected to build it over a
- * run's *whole* plate, once, and then read individual entries out of it. A Cq is not a property of
+ * run's *whole* plate, once, and then read individual entries out of it. (The one thing that *is*
+ * per-curve is {@link CqTableOptions.curveThresholdOverrides}, an explicit user decision about one
+ * curve — not a threshold re-derived from a subset.) A Cq is not a property of
  * a curve alone: its group's threshold is the median baseline noise over the curves handed in, so
  * computing it a second time over a filtered subset (only the plotted wells, only the enabled
  * targets, …) yields a *different, equally defensible* Cq for the very same well — which is how
@@ -231,7 +258,17 @@ export function computeCqTable(
   const table = new Map<string, CqTableEntry>();
   unique.forEach((c, i) => {
     const b = baselines[i]!;
-    const threshold = thresholdByGroup.get(c.group) ?? 0;
+    // Per-curve override outranks the group's threshold, whether that was itself an override or
+    // §5.1's auto value — it is the more specific statement about this exact curve.
+    const curveOverride = options.curveThresholdOverrides?.get(c.key);
+    const groupThreshold = thresholdByGroup.get(c.group) ?? 0;
+    const threshold = curveOverride ?? groupThreshold;
+    const thresholdSource =
+      curveOverride !== undefined
+        ? "curve"
+        : options.thresholdOverrides?.get(c.group) !== undefined
+          ? "group"
+          : "auto";
     const cq = computeCq(c.cycles, b.correctedValues, {
       algorithm,
       threshold: algorithm === "Threshold" ? threshold : undefined,
@@ -239,7 +276,7 @@ export function computeCqTable(
       amplification: options.amplification,
       baselineValid: b.baselineValid,
     });
-    table.set(c.key, { ...b, group: c.group, threshold, cq });
+    table.set(c.key, { ...b, group: c.group, threshold, groupThreshold, thresholdSource, cq });
   });
   return table;
 }

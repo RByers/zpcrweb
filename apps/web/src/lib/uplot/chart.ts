@@ -191,6 +191,8 @@ export interface FactoryCurve {
 export type HighlightMatch =
   | { kind: "target"; dyeLabel: string }
   | { kind: "fluor"; fluor: string }
+  /** One curve: a single well/fluorophore pair, the finest grain the chart can isolate. */
+  | { kind: "curve"; label: string; fluor: string }
   | { kind: "well"; label: string }
   | { kind: "channel"; channel: number }
   | { kind: "sample"; sample: string };
@@ -310,12 +312,23 @@ export interface ThresholdLineState {
    * Only meaningful when the chart is plotting `curveView: "relative"` — the space the
    * threshold/noise/Cq math (`threshold.md` §5–§6) actually operates in. */
   value: number | null;
+  /** Whether to also mark each highlighted curve's own baseline region and label its noise.
+   * Independent of {@link value}: hovering a whole fluorophore draws just its threshold line
+   * (a dozen σ labels at once was unreadable), while hovering one curve — where the region is
+   * the point — draws both. */
+  regions: boolean;
 }
 
-/** Update the threshold-hover line and redraw without rebuilding series/paths — the same
- * cheap-redraw pattern {@link applyHighlight} uses. */
-export function setThresholdLine(u: uPlot, state: ThresholdLineState, value: number | null): void {
+/** Update the threshold-hover line/region overlay and redraw without rebuilding series/paths —
+ * the same cheap-redraw pattern {@link applyHighlight} uses. */
+export function setThresholdLine(
+  u: uPlot,
+  state: ThresholdLineState,
+  value: number | null,
+  regions = false,
+): void {
   state.value = value;
+  state.regions = regions;
   u.redraw(false, false);
 }
 
@@ -561,7 +574,7 @@ export function buildChart(cfg: BuildChartConfig): {
         .filter((b): b is BandData => b != null)
     : [];
 
-  const thresholdLineState: ThresholdLineState = { value: null };
+  const thresholdLineState: ThresholdLineState = { value: null, regions: false };
 
   const options: uPlot.Options = {
     width: cfg.width,
@@ -653,6 +666,7 @@ export function applyHighlight(u: uPlot, meta: SeriesMeta[], match: HighlightMat
         ((match.kind === "well" && m.label === match.label) ||
           (match.kind === "target" && m.dyeLabel === match.dyeLabel) ||
           (match.kind === "fluor" && m.fluor === match.fluor) ||
+          (match.kind === "curve" && m.label === match.label && m.fluor === match.fluor) ||
           (match.kind === "channel" && m.channel === match.channel) ||
           (match.kind === "sample" && m.sample === match.sample)));
     u.series[i + 1]!.alpha = isMatch ? 1 : 0.12;
@@ -828,11 +842,12 @@ function overlayPlugin(
         }
 
         // Rail-driven threshold-hover diagnostic: for whichever curves the hover isolated (the
-        // well series `applyHighlight` left at full opacity while a threshold row is hovered —
-        // same condition as the line above), highlight the exact cycle range its own
-        // baseline-region auto-detection used and label its noise estimate. The region is
+        // well series `applyHighlight` left at full opacity), highlight the exact cycle range its
+        // own baseline-region auto-detection used and label its noise estimate. The region is
         // per-curve, so two wells in the same target can show different ranges — the point of
-        // the indicator is making that visible rather than assumed.
+        // the indicator is making that visible rather than assumed. Which is also why it is drawn
+        // only when the hover isolated *one* curve (`state.regions`): drawn for a whole
+        // fluorophore's wells at once, the σ labels overlapped into noise of a different kind.
         //
         // Drawn in a fixed highlighter color (not the curve's own), with a dark halo under both
         // the marker and the text: tracing the segment in the curve's own hue just made it a
@@ -840,7 +855,7 @@ function overlayPlugin(
         // low opacity. A small dot in the curve's real color anchors the label back to which
         // line it belongs to.
         const activeRegions: { seriesIdx: number; m: SeriesMeta }[] = [];
-        if (tv != null) {
+        if (thresholdLineState.regions) {
           meta.forEach((m, i) => {
             if (m.kind !== "well" || m.baselineRegion == null || m.noise == null) return;
             const seriesIdx = i + 1;

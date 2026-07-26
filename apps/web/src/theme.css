@@ -31,6 +31,9 @@
   /* State */
   --danger: #ff5a5a;
   --good: #3ddc84;
+  /* Tint for a field holding a value the user set by hand (see `.is-override`) — the dark theme's
+     equivalent of the pale green a light UI would use. */
+  --good-dim: rgba(61, 220, 132, 0.16);
   --warn: #ffa53d;
 
   /* Type */

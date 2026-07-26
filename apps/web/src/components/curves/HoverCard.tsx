@@ -13,10 +13,6 @@ export interface HoverCardRow {
    * `undefined` is a curve Cq doesn't apply to at all — a channel-space curve, which is a raw
    * filter reading and never quantified (see `RunAnalysis.cqTable`) — and drops the column. */
   cq?: number | null;
-  /** Overrides the trailing Cq column with arbitrary pre-formatted text. For cards whose subject
-   * isn't a Cq — the Threshold rail's card lists each well's baseline noise instead, since that is
-   * what the threshold is actually derived from. */
-  value?: string;
   color?: string;
   selected: boolean;
 }
@@ -56,8 +52,8 @@ export function HoverCard({
                 {r.color && <span className="curvecard__swatch" style={{ background: r.color }} />}
                 <span className="curvecard__label">{r.label}</span>
                 {r.sublabel && <span className="curvecard__sub">{r.sublabel}</span>}
-                {(r.value != null || r.cq !== undefined) && (
-                  <span className="curvecard__cq">{r.value ?? formatCq(r.cq ?? null)}</span>
+                {r.cq !== undefined && (
+                  <span className="curvecard__cq">{formatCq(r.cq ?? null)}</span>
                 )}
               </div>
             ))}
