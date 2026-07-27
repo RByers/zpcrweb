@@ -11,6 +11,14 @@ import { readCfxPassword } from "./secrets.js";
 
 const PW = readCfxPassword();
 
+/**
+ * The dye→channel lookup `zpcr.plates()` builds from an archive's `.Dcal` set, for the two dyes
+ * {@link syntheticPlate} uses. Round-trip tests have to pass it: the CSV labels its fluor columns
+ * by dye alone, so the channel comes back from calibration or not at all — there is deliberately
+ * no positional fallback to paper over its absence.
+ */
+const SYNTHETIC_CHANNELS = (fluor: string) => ({ FAM: 0, HEX: 1 })[fluor];
+
 function syntheticPlate(): PlateDefinition {
   const samples: string[] = [];
   const wells = Array.from({ length: 8 * 12 }, (_, index) => {
@@ -61,13 +69,13 @@ describe("plate CSV round-trip", () => {
   it("round-trips a synthetic plate exactly, including escaped delimiters", () => {
     const plate = syntheticPlate();
     const csv = plateToCsv(plate);
-    const back = parsePlateCsv(csv);
+    const back = parsePlateCsv(csv, { channelForFluor: SYNTHETIC_CHANNELS });
     expect(back).toEqual(plate);
   });
 
   it("marks a well with no fluor cell filled in as unloaded", () => {
     const plate = syntheticPlate();
-    const back = parsePlateCsv(plateToCsv(plate));
+    const back = parsePlateCsv(plateToCsv(plate), { channelForFluor: SYNTHETIC_CHANNELS });
     expect(back.wells[2]!.loaded).toBe(false);
     expect(back.wells[0]!.loaded).toBe(true);
   });
@@ -87,7 +95,7 @@ describe("plate CSV round-trip", () => {
     expect(lines.some((l) => l.startsWith("A3,"))).toBe(false);
     expect(lines.filter((l) => /^[A-H]\d/.test(l))).toHaveLength(16);
     // …and they come back as empty wells, so the plate is unchanged.
-    expect(parsePlateCsv(plateToCsv(plate))).toEqual(plate);
+    expect(parsePlateCsv(plateToCsv(plate), { channelForFluor: SYNTHETIC_CHANNELS })).toEqual(plate);
   });
 
   it("writes and re-reads a plate with no non-blank wells", () => {
@@ -107,7 +115,7 @@ describe("plate CSV round-trip", () => {
         quantity: undefined,
       })),
     };
-    expect(parsePlateCsv(plateToCsv(blank))).toEqual(blank);
+    expect(parsePlateCsv(plateToCsv(blank), { channelForFluor: SYNTHETIC_CHANNELS })).toEqual(blank);
   });
 
   it("resolves channels from calibration, not from the column order", () => {
@@ -127,9 +135,13 @@ describe("plate CSV round-trip", () => {
       { fluor: "Tex 615", channel: 2 },
       { fluor: "Cy5", channel: 3 },
     ]);
-    // An unknown dye still gets a column position rather than being dropped.
-    expect(parsePlateCsv(csv, { channelForFluor: () => undefined }).fluors.map((f) => f.channel))
-      .toEqual([0, 1, 2]);
+    // A dye the lookup doesn't know keeps its column (it's still a real fluor on the plate) but
+    // gets NO channel — never the column's position, which would read as a real channel.
+    expect(parsePlateCsv(csv, { channelForFluor: () => undefined }).fluors).toEqual([
+      { fluor: "FAM", channel: undefined },
+      { fluor: "Tex 615", channel: undefined },
+      { fluor: "Cy5", channel: undefined },
+    ]);
   });
 
   it("wires the calibration lookup up for a real archive's .plt.csv entry", () => {
@@ -160,15 +172,21 @@ describe("plate CSV round-trip", () => {
     ]);
   });
 
-  it("falls back to column order with neither a suffix nor a calibration lookup", () => {
+  it("leaves the channel unknown with neither a suffix nor a calibration lookup", () => {
+    // Column order is not a channel. Deriving one from it (this used to) produces a plausible
+    // wrong answer — the dye is coloured and grouped as a neighbouring channel — where undefined
+    // produces a visible "Ch?".
     const csv = [
       "Well,SampleType,Sample,Replicate,Quantity,FAM,HEX",
       "A1,unknown,,,,GeneA,GeneB",
     ].join("\r\n");
-    expect(parsePlateCsv(csv).fluors).toEqual([
-      { fluor: "FAM", channel: 0 },
-      { fluor: "HEX", channel: 1 },
+    const { fluors, wells } = parsePlateCsv(csv);
+    expect(fluors).toEqual([
+      { fluor: "FAM", channel: undefined },
+      { fluor: "HEX", channel: undefined },
     ]);
+    // …and the per-well copies agree; nothing downstream re-derives one.
+    expect(wells[0]!.fluors.map((f) => f.channel)).toEqual([undefined, undefined]);
   });
 
   it("treats wells left out of the table as empty", () => {
@@ -216,7 +234,7 @@ describe("plate CSV round-trip", () => {
     const csv = plateToCsv(plate);
     expect(csv).not.toMatch(/wcOther/);
     expect(csv.split("\r\n").find((l) => l.startsWith("A1,"))).toMatch(/^A1,wcSomethingNew,/);
-    expect(parsePlateCsv(csv)).toEqual(plate);
+    expect(parsePlateCsv(csv, { channelForFluor: SYNTHETIC_CHANNELS })).toEqual(plate);
   });
 
   it("accepts a raw wc* code in the SampleType cell and normalizes it", () => {
@@ -240,7 +258,7 @@ describe("plate CSV round-trip", () => {
     const plate = { ...syntheticPlate(), plateType: "", scanMode: "", standardUnits: "" };
     const csv = plateToCsv(plate);
     expect(csv).not.toMatch(/# (plateType|scanMode|standardUnits):/);
-    expect(parsePlateCsv(csv)).toEqual(plate);
+    expect(parsePlateCsv(csv, { channelForFluor: SYNTHETIC_CHANNELS })).toEqual(plate);
   });
 
   it("ignores trailing commas a spreadsheet adds to the header lines", () => {

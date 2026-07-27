@@ -11,9 +11,10 @@ export interface FluorChip {
    * (target mode). */
   sublabel: string;
   /** Optical channel — used only for coloring, so a channel's hue stays consistent between
-   * channel-space and dye-space views. `null` when the chip covers more than one channel (a
-   * target spanning several fluorophores), which colors it neutrally instead. */
-  channel: number | null;
+   * channel-space and dye-space views. Nullish when the chip covers more than one channel (a
+   * target spanning several fluorophores) or when the channel isn't known at all, either of
+   * which colors it neutrally instead. */
+  channel?: number | null;
   /** False when no matching `.Dcal` calibration was found — shown dimmed and non-interactive,
    * so its absence from the plot is visible rather than silent. */
   calibrated: boolean;

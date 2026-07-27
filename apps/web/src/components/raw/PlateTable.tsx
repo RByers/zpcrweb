@@ -1,5 +1,9 @@
 import { isBlankWell, type PlateDefinition } from "@zpcrweb/core";
-import { channelColor } from "../../lib/channelColors";
+import {
+  FluorChannelChip,
+  UnknownChannelNote,
+  hasUnknownChannel,
+} from "../plate/FluorChannelChip";
 import { SAMPLE_TYPE_META } from "../../lib/sampleType";
 import { plateDisplayName } from "../../lib/plateNames";
 
@@ -40,6 +44,7 @@ export function PlateTable({ plate, sourceHint }: { plate: PlateDefinition; sour
             <dd>{plate.standardUnits || "—"}</dd>
           </div>
         </dl>
+        {hasUnknownChannel(plate.fluors) && <UnknownChannelNote />}
         {sourceHint && <span className="decoded__hint mono">{sourceHint}</span>}
       </section>
 
@@ -73,14 +78,12 @@ export function PlateTable({ plate, sourceHint }: { plate: PlateDefinition; sour
                       {w.fluors.length ? (
                         <span className="plate__fluors plate__fluors--inline">
                           {w.fluors.map((f) => (
-                            <span key={f.channel} className="plate__chip mono">
-                              <span
-                                className="decoded__swatch"
-                                style={{ background: channelColor(f.channel) }}
-                              />
-                              {f.fluor}
-                              {f.target ? `→${f.target}` : ""}
-                            </span>
+                            <FluorChannelChip
+                              key={f.fluor}
+                              fluor={f.fluor + (f.target ? `→${f.target}` : "")}
+                              channel={f.channel}
+                              compact
+                            />
                           ))}
                         </span>
                       ) : (

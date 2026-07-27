@@ -203,10 +203,11 @@ alongside `"zpcr"`/`"pcrd"`:
   `StandalonePlateView`/`StandaloneRawView` instead of the normal five-view `Zpcr`-gated branch
   — both are thin, `Zpcr`-free versions of `PlatesView`/`RawFilesView` operating directly on the
   file's own bytes. A standalone `.plt.csv` names its fluor columns by dye with no channel, and
-  carries no calibration of its own to resolve them against, so `plateCsvChannels` pools a
-  `dyeChannelLookup` across every loaded run — which channel a dye is read on is a property of
-  the instrument's optics, not of the plate, so any run in the session answers it. With no run
-  loaded, channels fall back to column position.
+  carries no calibration of its own to resolve them against, so its channels are simply
+  **unknown** — no `channelForFluor` is passed. Nothing is inferred from column order, and the
+  mapping isn't borrowed from some other run that happens to be loaded, since that would be a
+  guess about a different instrument's optics. The UI says so explicitly instead (see
+  `FluorChannelChip`, below).
 - **Attach (replace a run's plate)** — `PlatesView`'s upload control (`.zpcr` runs only; a
   `.pcrd` shows an explanatory note instead, since it has no real archive to add an entry to)
   calls `store.attachPlate(fileId, file)`, which rewrites the run's own bytes via
@@ -1031,6 +1032,18 @@ per-well data. Channels 1–5 are the standard dye set; **channel 6 is a real si
 (labelled FRET)**, not the dark/reference data — those are stored separately (`DARKDATA` and
 the reference row inside `WELLDATA`). Channel 6 is off by default since standard runs don't
 use it.
+
+**Unknown channels.** A fluor's channel is optional (`PlateFluor.channel?`) — a `.plt.csv`
+labels its columns by dye alone, so a dye no `.Dcal` covers, or any plate CSV opened standalone,
+has no channel at all. Nothing is ever guessed: `channelColor(undefined)` returns `NEUTRAL_COLOR`
+and `channelLabel(undefined)` returns `UNKNOWN_CHANNEL_LABEL` (`Ch?`). One shared component,
+`components/plate/FluorChannelChip.tsx`, renders every dye chip in both the Plates and Raw views —
+dashed outline plus a `Ch?` marker and an explanatory `title` when the channel is unknown, and
+`hasUnknownChannel(plate.fluors)` gates its `UnknownChannelNote` footnote under the fluor list.
+The rest of the pipeline treats `undefined` as "not in any channel" rather than channel 0:
+`fluorCurves.ts` propagates it, and `chart.ts`'s dark-overlay `presentChannels` set filters it
+out. That only costs colouring and grouping — the color-separation solve keys off `.Dcal`
+response curves, not channel numbers.
 
 ## Styling & responsiveness
 

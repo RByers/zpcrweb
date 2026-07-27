@@ -172,8 +172,10 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
   // opened file's raw Channels view (calibration off), and what its reset button restores.
   const plateChannelSet = useMemo(() => {
     if (!plate) return null;
+    // Fluors whose channel is unknown select nothing: this drives which raw optical channels to
+    // show, and there is no channel to show for them (see `PlateFluor.channel`).
     const s = new Set<number>();
-    for (const f of plate.fluors) s.add(f.channel);
+    for (const f of plate.fluors) if (f.channel !== undefined) s.add(f.channel);
     return s.size > 0 ? s : null;
   }, [plate]);
 

@@ -166,11 +166,15 @@ round-trips: since `other` means "a code we didn't recognize" rather than a type
 writes the preserved `sampleTypeRaw` instead of inventing a `wcOther` that no CFX tool emits.
 `parseZpcr` builds that dye→channel map lazily (via `dcal.ts`'s `dyeChannelLookup`) and hands
 it to `parsePlateCsv` as `channelForFluor`; an explicit `FAM Ch1`-style suffix still wins if a
-file carries one, and a dye in neither falls back to its column position. **Anything that
-parses a plate CSV must supply that lookup** — without it the fallback quietly shifts every
-dye past the first onto a neighbouring channel, which looks plausible rather than missing. Go
-through `zpcr.plates()` where an archive is in hand, and build a lookup from `calibrations()`
-where one isn't. Wells with nothing on them aren't written at
+file carries one, and a dye in neither leaves `channel` **undefined** — there is deliberately
+no positional fallback, because column order carries no meaning and inferring a channel from it
+produces a wrong answer that looks plausible rather than a missing one. `WellFluor.channel` and
+`PlateFluor.channel` are therefore optional all the way through, and consumers must render the
+gap as unknown rather than substituting a default (the web app shows `Ch?`, a neutral swatch and
+a footnote; see `apps/web/ARCHITECTURE.md`). Go through `zpcr.plates()` where an archive is in
+hand, so the lookup is wired up; a plate CSV read on its own simply has unknown channels.
+Channels only drive colouring and grouping, never the color-separation solve, so an unknown one
+costs presentation rather than correctness. Wells with nothing on them aren't written at
 all, and a well missing from the table parses back as empty, so only `vessel` and the
 `rows`/`columns` extent really matter in the header — everything else is an optional
 display-only passenger. The plate's `identityKey` (its user-facing name) isn't in the file

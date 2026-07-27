@@ -40,8 +40,10 @@ function hexToRgba(hex: string, alpha: number): string {
  * never guesses a dye from a channel index; see `channelColors.ts`.
  */
 export interface PlotCurve {
-  /** Optical channel — used only for color. */
-  channel: number;
+  /** Optical channel — used only for color. Undefined for a dye-space curve whose plate doesn't
+   * know the channel, which draws in the neutral color (see `channelColor`). Channel-space
+   * curves always have one: they *are* a channel's readings. */
+  channel?: number;
   dyeLabel: string;
   /** The raw fluorophore name, when this is a dye-space curve. Distinct from {@link dyeLabel},
    * which is the *display* grouping and carries the target name when the view groups by target.
@@ -258,8 +260,9 @@ export interface SeriesMeta {
    * cursor hit-testing (see `setCursor` below) since it carries no meaningful tooltip of its
    * own. */
   kind: "well" | "dark" | "factory" | "temp" | "baseline";
-  /** Optical channel for well/dark series; -1 for temperature series. */
-  channel: number;
+  /** Optical channel for well/dark series; -1 for temperature series. Undefined for a
+   * dye-space series whose channel isn't known (see {@link PlotCurve.channel}). */
+  channel?: number;
   /** Reference/plate column, for a factory-overlay series; -1 for every other kind. */
   col: number;
   label: string;
@@ -311,8 +314,9 @@ interface BandData {
 export interface TooltipData {
   kind: "well" | "dark" | "factory" | "temp";
   label: string;
-  /** Optical channel for well/dark series; -1 for temperature series. */
-  channel: number;
+  /** Optical channel for well/dark series; -1 for temperature series. Undefined for a
+   * dye-space series whose channel isn't known (see {@link PlotCurve.channel}). */
+  channel?: number;
   /** Reference/plate column, for a factory-overlay series; -1 for every other kind. */
   col: number;
   dye: string;
@@ -489,7 +493,10 @@ export function buildChart(cfg: BuildChartConfig): {
     });
   }
 
-  const presentChannels = new Set(wellCurves.map((c) => c.channel));
+  // A curve with no known channel contributes no dark overlay — there's no channel to overlay.
+  const presentChannels = new Set(
+    wellCurves.map((c) => c.channel).filter((ch): ch is number => ch !== undefined),
+  );
   for (const channel of presentChannels) {
     const dark = darkByChannel.get(channel);
     if (!dark) continue;

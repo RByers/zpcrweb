@@ -14,7 +14,11 @@ export function plateTargets(plate: PlateDefinition): { name: string; channel: n
   const channelByTarget = new Map<string, number>();
   for (const w of plate.wells) {
     for (const wf of w.fluors) {
-      if (wf.target && !channelByTarget.has(wf.target)) channelByTarget.set(wf.target, wf.channel);
+      // Only a known channel colors a target; an unknown one leaves it neutral rather than
+      // borrowing a hue (see `PlateFluor.channel`).
+      if (wf.target && wf.channel !== undefined && !channelByTarget.has(wf.target)) {
+        channelByTarget.set(wf.target, wf.channel);
+      }
     }
   }
   return plate.targets.map((name) => ({ name, channel: channelByTarget.get(name) ?? null }));
@@ -26,9 +30,9 @@ export interface TargetGroup {
   target: string;
   /** Every fluorophore this target is loaded as, in plate order — the chip's sublabel. */
   fluors: string[];
-  /** Optical channel for coloring, or `null` when the group spans several fluorophores and no
-   * single channel hue would represent it (see `channelColor`). */
-  channel: number | null;
+  /** Optical channel for coloring, or nullish when the group spans several fluorophores and no
+   * single channel hue would represent it, or when the channel isn't known (see `channelColor`). */
+  channel?: number | null;
   /** Calibration curve of the first of `fluors` that has one — unset when none do, which shows
    * the group as present-but-uncalibrated. */
   curve?: DyeResponseCurve;
@@ -68,7 +72,8 @@ export function targetGroups(
       target,
       fluors,
       // A plate fluor with no `.Dcal` match still has a channel of its own (from the plate), so
-      // a single-fluor group is colored even while uncalibrated.
+      // a single-fluor group is colored even while uncalibrated — unless that channel is itself
+      // unknown, which lands on the same neutral as a multi-fluor group.
       channel: fluors.length === 1 ? (cals[0]?.channel ?? null) : null,
       curve: cals.find((c) => c?.curve)?.curve,
     };

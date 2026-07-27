@@ -57,8 +57,11 @@ const SAMPLE_TYPE_MAP: Record<string, SampleType> = {
 export interface WellFluor {
   /** Fluorophore/dye name, e.g. `FAM`, `SYBR`, `HEX` — an open string set. */
   fluor: string;
-  /** 0-based optical channel position the dye maps to (`channelPosition`). */
-  channel: number;
+  /**
+   * 0-based optical channel position the dye maps to (`channelPosition`), or **undefined when
+   * it isn't known** — see {@link PlateFluor.channel}.
+   */
+  channel?: number;
   /** Target/gene name for this well+fluor, if assigned. */
   target?: string;
 }
@@ -93,8 +96,20 @@ export interface WellDefinition {
 export interface PlateFluor {
   /** Fluorophore/dye name. */
   fluor: string;
-  /** 0-based optical channel position. */
-  channel: number;
+  /**
+   * 0-based optical channel position, or **undefined when it isn't known**.
+   *
+   * A `.pltd` always states it, so plates decoded from one (or from a `.pcrd`'s embedded plate
+   * setup) always have it. A `.plt.csv` names its fluor columns by dye alone and relies on the
+   * run's `.Dcal` set to resolve them (see `plateCsv.ts`), so a dye no calibration covers — or
+   * a plate CSV opened with no run at all — legitimately has no channel.
+   *
+   * There is deliberately no fallback. A channel is a physical fact about the optics; guessing
+   * one from, say, column order yields a plausible-looking wrong answer that colors and groups
+   * the dye as a neighbour, which is worse than admitting it's unknown. Consumers must handle
+   * undefined by showing it as unknown, not by substituting a default.
+   */
+  channel?: number;
   /** Bio-Rad internal fluor id, when present. */
   fluorId?: string;
 }
@@ -197,6 +212,16 @@ export function toSampleType(raw: string): SampleType {
  * Exported so `pcrd.ts` can reuse it for the `plateSetup2` subtree embedded in a `.pcrd`
  * document (same schema, different root-tag case — tag matching here is case-insensitive).
  */
+/**
+ * Order fluors by optical channel, with unknown-channel ones last (in their existing relative
+ * order). Exported because every surface that lists a plate's fluors wants the same ordering.
+ */
+export function byChannel(a: { channel?: number }, b: { channel?: number }): number {
+  if (a.channel === undefined) return b.channel === undefined ? 0 : 1;
+  if (b.channel === undefined) return -1;
+  return a.channel - b.channel;
+}
+
 export function parsePlatesetup2(xml: string): PlateDefinition {
   const root = firstTagAttrs(xml, "platesetup2");
   const rows = Number(root.rows ?? 8) || 8;
@@ -269,8 +294,9 @@ export function parsePlatesetup2(xml: string): PlateDefinition {
     }
   }
 
-  // Keep each well's fluors in channel order for stable display.
-  for (const well of wells) well.fluors.sort((a, b) => a.channel - b.channel);
+  // Keep each well's fluors in channel order for stable display, with channel-less ones last
+  // (a `.pltd` always states a channel, but the shared type allows none — see `PlateFluor`).
+  for (const well of wells) well.fluors.sort(byChannel);
 
   return {
     plateName: root.plateName ?? "",

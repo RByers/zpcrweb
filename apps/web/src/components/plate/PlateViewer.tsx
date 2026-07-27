@@ -1,6 +1,12 @@
 import { useState } from "react";
 import type { PlateDefinition, WellDefinition } from "@zpcrweb/core";
 import { channelColor, channelLabel } from "../../lib/channelColors";
+import {
+  FluorChannelChip,
+  UNKNOWN_CHANNEL_TITLE,
+  UnknownChannelNote,
+  hasUnknownChannel,
+} from "./FluorChannelChip";
 import { ROW_LABELS, SAMPLE_TYPE_META } from "../../lib/sampleType";
 import { plateDisplayName } from "../../lib/plateNames";
 
@@ -36,12 +42,10 @@ export function PlateViewer({ plate, sourceHint }: { plate: PlateDefinition; sou
           </dl>
           <div className="plate__fluors">
             {plate.fluors.map((f) => (
-              <span key={f.channel + f.fluor} className="plate__chip mono">
-                <span className="decoded__swatch" style={{ background: channelColor(f.channel) }} />
-                {f.fluor} <span className="plate__chipch">{channelLabel(f.channel)}</span>
-              </span>
+              <FluorChannelChip key={f.fluor} fluor={f.fluor} channel={f.channel} />
             ))}
           </div>
+          {hasUnknownChannel(plate.fluors) && <UnknownChannelNote />}
           {sourceHint && <span className="decoded__hint mono">{sourceHint}</span>}
         </section>
 
@@ -133,7 +137,7 @@ function WellCell({
           {well.sample && <span className="plate__wellsample">{well.sample}</span>}
           <span className="plate__welltargets">
             {well.fluors.map((f) => (
-              <span key={f.channel} className="plate__target" style={{ color: channelColor(f.channel) }}>
+              <span key={f.fluor} className="plate__target" style={{ color: channelColor(f.channel) }}>
                 {f.target || f.fluor}
               </span>
             ))}
@@ -169,12 +173,17 @@ function WellDetail({ well }: { well: WellDefinition }) {
           </thead>
           <tbody>
             {well.fluors.map((f) => (
-              <tr key={f.channel}>
+              <tr key={f.fluor}>
                 <td>
                   <span className="decoded__swatch" style={{ background: channelColor(f.channel) }} />
                   {f.fluor}
                 </td>
-                <td>{channelLabel(f.channel)}</td>
+                <td
+                  className={f.channel === undefined ? "plate__chipch--unknown" : undefined}
+                  title={f.channel === undefined ? UNKNOWN_CHANNEL_TITLE : undefined}
+                >
+                  {channelLabel(f.channel)}
+                </td>
                 <td>{f.target ?? <span className="decoded__empty">∅</span>}</td>
               </tr>
             ))}

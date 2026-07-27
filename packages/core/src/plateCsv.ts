@@ -140,8 +140,12 @@ const FIXED_COLUMNS = ["Well", "SampleType", "Sample", "Replicate", "Quantity"];
  * written, because a dye is only ever read on one channel and the run's own `.Dcal`
  * calibration says which (`Dcal.primaryChannel`) — see {@link ParsePlateCsvOptions.channelForFluor},
  * which `zpcr.plates()` wires up. An explicit ` Ch<n>` suffix (1-based, the "FAM Ch1" form the
- * app displays) is still honoured if a file carries one, and wins over the lookup; with
- * neither, a column falls back to its position among the fluor columns.
+ * app displays) is still honoured if a file carries one, and wins over the lookup.
+ *
+ * With neither, the channel is **unknown** (`PlateFluor.channel` undefined) — not the column's
+ * position. Column order carries no meaning here, so deriving a channel from it invents a
+ * physical fact, and one that reads as valid downstream: the dye gets a neighbouring channel's
+ * color and grouping rather than being flagged.
  */
 const FLUOR_COLUMN_RE = /^(.*?)\s+Ch(\d+)$/;
 
@@ -223,10 +227,10 @@ export interface ParsePlateCsvOptions {
    * plate simply has no identity. */
   sourceName?: string;
   /** Which optical channel a dye is read on, normally from the run's `.Dcal` calibration
-   * (`Dcal.primaryChannel` — `zpcr.plates()` supplies this). Called for every fluor column that
-   * doesn't spell its channel out; returning `undefined` (an unknown dye) falls back to the
-   * column's position. Channels are only ever used for coloring and grouping, never for the
-   * color-separation solve itself, so a fallback is a display wart rather than a wrong number. */
+   * (`Dcal.primaryChannel` — `zpcr.plates()` supplies this; build one with `dyeChannelLookup`).
+   * Called for every fluor column that doesn't spell its channel out. Returning `undefined` —
+   * an unknown dye, or no lookup passed at all — leaves that fluor's channel unset, which
+   * consumers surface as unknown; nothing is substituted for it. */
   channelForFluor?: (fluor: string) => number | undefined;
 }
 
@@ -273,11 +277,12 @@ export function parsePlateCsv(text: string, options: ParsePlateCsvOptions = {}):
   const fluorColumns = header
     .map((name, column) => ({ name, column }))
     .filter(({ name }) => name !== "" && !FIXED_COLUMNS.includes(name))
-    .map(({ name, column }, ordinal) => {
+    .map(({ name, column }) => {
       const m = FLUOR_COLUMN_RE.exec(name);
       const fluor = m ? m[1]!.trim() : name;
       if (!fluor) throw new Error(`Plate CSV: malformed fluor column "${name}"`);
-      const channel = m ? Number(m[2]) - 1 : channelForFluor?.(fluor) ?? ordinal;
+      // Undefined when neither the label nor the calibration says — never the column position.
+      const channel = m ? Number(m[2]) - 1 : channelForFluor?.(fluor);
       return { fluor, channel, column };
     });
   const fluors: PlateFluor[] = fluorColumns.map(({ fluor, channel }) => ({ fluor, channel }));

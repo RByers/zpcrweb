@@ -16,7 +16,9 @@ export interface AnalysisRow {
    * targets at all — the fluorophore itself. See `RunAnalysis.groupOf`. */
   target: string;
   fluor: string;
-  channel: number;
+  /** Optical channel, or null/undefined when it isn't known — exported as `Ch?` (see
+   * `channelLabel`). Display only; no reported number depends on it. */
+  channel?: number | null;
   row: number;
   col: number;
   wellLabel: string;

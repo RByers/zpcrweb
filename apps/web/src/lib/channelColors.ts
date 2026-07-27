@@ -40,16 +40,26 @@ export const CHANNEL_INFO: readonly ChannelInfo[] = [
  * misrepresent the group. */
 export const NEUTRAL_COLOR = "#8aa0c0";
 
-/** Color for a channel index, or {@link NEUTRAL_COLOR} for `null`/out-of-range (no single
- * channel). */
-export function channelColor(index: number | null): string {
+/** Color for a channel index, or {@link NEUTRAL_COLOR} for `null`/`undefined`/out-of-range —
+ * no single channel, including a plate fluor whose channel isn't known (see `UNKNOWN_CHANNEL_LABEL`).
+ * Neutral is deliberately not one of the six hues: an unknown channel must not read as a real one. */
+export function channelColor(index: number | null | undefined): string {
   return (index != null && CHANNEL_INFO[index]?.color) || NEUTRAL_COLOR;
 }
 
 /**
- * Display label for a channel in channel-space views — always "Ch1"–"Ch6", never a dye guess.
- * "Ch" rather than "C" to avoid ambiguity with a well column/position.
+ * What a fluor whose optical channel isn't known is labelled. A plate CSV names its fluor
+ * columns by dye alone, and only the run's `.Dcal` set says which channel a dye is read on — so
+ * a dye no calibration covers, or a plate CSV opened with no run, has no channel and is shown
+ * as this rather than being assigned a plausible-looking one.
  */
-export function channelLabel(index: number): string {
-  return `Ch${index + 1}`;
+export const UNKNOWN_CHANNEL_LABEL = "Ch?";
+
+/**
+ * Display label for a channel in channel-space views — always "Ch1"–"Ch6", never a dye guess,
+ * and {@link UNKNOWN_CHANNEL_LABEL} when there is no channel to name. "Ch" rather than "C" to
+ * avoid ambiguity with a well column/position.
+ */
+export function channelLabel(index: number | null | undefined): string {
+  return index == null ? UNKNOWN_CHANNEL_LABEL : `Ch${index + 1}`;
 }

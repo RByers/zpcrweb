@@ -33,8 +33,10 @@ export function resolveTubeType(plateName: string | undefined): TubeType {
 /** One fluorophore present on the plate, with its calibration curve if a matching `.Dcal` was found. */
 export interface FluorCalibration {
   fluor: string;
-  /** Primary optical channel — used only for coloring/labeling, never fed into the solve itself. */
-  channel: number;
+  /** Primary optical channel — used only for coloring/labeling, never fed into the solve itself.
+   * Undefined when the plate doesn't know it (see `PlateFluor.channel`); the solve is unaffected,
+   * since it works off the `.Dcal` response curves and never this field. */
+  channel?: number;
   curve?: DyeResponseCurve;
 }
 
@@ -45,7 +47,7 @@ export interface FluorCalibration {
  * dropping it.
  */
 export function matchFluorCalibrations(
-  plateFluors: { fluor: string; channel: number }[],
+  plateFluors: { fluor: string; channel?: number }[],
   calibrations: DcalEntry[],
   tube: TubeType,
 ): FluorCalibration[] {
@@ -104,8 +106,9 @@ function columnAt(table: number[][] | undefined, i: number): number[] | undefine
 /** One fluorophore's separated concentration curve for a single well — mirrors `WellCurve`. */
 export interface FluorCurve {
   dye: string;
-  /** The fluor's primary channel, carried through for consistent coloring only. */
-  channel: number;
+  /** The fluor's primary channel, carried through for consistent coloring only — undefined when
+   * the plate doesn't know it, which colors the curve neutrally rather than as some channel. */
+  channel?: number;
   row: number;
   col: number;
   wellLabel: string;
@@ -133,7 +136,7 @@ export function computeFluorCurves(
   wellCurves: WellCurve[],
   matrix: CalibrationMatrix,
   channels: number[],
-  dyeChannels: number[],
+  dyeChannels: (number | undefined)[],
   corrections: FluorCorrections = {},
 ): FluorCurve[] {
   const byWell = new Map<string, Map<number, WellCurve>>();
@@ -169,7 +172,8 @@ export function computeFluorCurves(
     matrix.dyes.forEach((dye, d) => {
       out.push({
         dye,
-        channel: dyeChannels[d] ?? 0,
+        // Left undefined when unknown — never defaulted to a real channel index.
+        channel: dyeChannels[d],
         row: first.row,
         col: first.col,
         wellLabel: first.wellLabel,

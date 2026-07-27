@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   attachPlateToZpcr,
-  dyeChannelLookup,
   parsePcrd,
   parsePlateCsv,
   parsePltd,
@@ -186,7 +185,6 @@ function parsePlateBytes(
   bytes: Uint8Array,
   password: string,
   name: string,
-  channelForFluor?: (fluor: string) => number | undefined,
 ): PlateFileResult {
   if (kind === "pltd") {
     const pltd = parsePltd(bytes, password ? { password } : undefined);
@@ -198,12 +196,14 @@ function parsePlateBytes(
     };
   }
   try {
-    // The file name is the plate's identity — a `.plt.csv` carries no identityKey of its own —
-    // and its fluor columns are dye names with no channel, resolved via `channelForFluor`
-    // (see `plateCsv.ts`). Standing on its own, a plate CSV has no calibration of its own to
-    // consult, so the lookup comes from whatever runs are loaded alongside it.
+    // The file name is the plate's identity — a `.plt.csv` carries no identityKey of its own.
+    //
+    // No `channelForFluor`: standing on its own, a plate CSV has no `.Dcal` set to resolve its
+    // dye-named fluor columns against, so every fluor's channel is simply unknown and the
+    // plate views show it as such. Borrowing the mapping from some other run that happens to be
+    // loaded would be a guess about a different instrument's optics.
     return {
-      plate: parsePlateCsv(new TextDecoder().decode(bytes), { sourceName: name, channelForFluor }),
+      plate: parsePlateCsv(new TextDecoder().decode(bytes), { sourceName: name }),
       needsPassword: false,
       error: null,
     };
@@ -769,31 +769,15 @@ export function useZpcrStore(): ZpcrStore {
 
   const activeRun = activeId ? runs.get(activeId) ?? null : null;
 
-  /**
-   * Dye → optical channel for standalone plate CSVs, pooled from every loaded run's `.Dcal`
-   * set. A plate CSV opened on its own carries no calibration, but which channel a dye is read
-   * on is a property of the instrument's optics, not of the plate — so any run in the session
-   * answers it, and runs from the same instrument agree. With no run loaded there's nothing to
-   * consult and channels fall back to column position.
-   *
-   * Only built when a plate CSV is actually loaded: `calibrations()` decodes every `.Dcal` in
-   * an archive (typically 28), which isn't free.
-   */
-  const plateCsvChannels = useMemo(() => {
-    if (!files.some((f) => f.kind === "csv")) return undefined;
-    const dcals = [...runs.values()].flatMap((r) => r.zpcr?.calibrations() ?? []).map((e) => e.dcal);
-    return dcals.length ? dyeChannelLookup(dcals) : undefined;
-  }, [files, runs]);
-
   const plateFiles = useMemo(() => {
     const map = new Map<string, PlateFileResult>();
     for (const f of files) {
       if (f.kind === "pltd" || f.kind === "csv") {
-        map.set(f.id, parsePlateBytes(f.kind, f.bytes, password, f.name, plateCsvChannels));
+        map.set(f.id, parsePlateBytes(f.kind, f.bytes, password, f.name));
       }
     }
     return map;
-  }, [files, password, plateCsvChannels]);
+  }, [files, password]);
 
   const activePlateFile = activeId ? plateFiles.get(activeId) ?? null : null;
 
