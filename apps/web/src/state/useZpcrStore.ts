@@ -44,7 +44,9 @@ export type FileKind = "zpcr" | "pcrd" | "pltd" | "csv";
 /** The two kinds a plate — standalone or attached to a run — can be uploaded as. */
 export type PlateFileKind = "pltd" | "csv";
 
-export type ViewId = "overview" | "curves" | "plates" | "reference" | "raw";
+/** `"about"` is not a tab in {@link ViewSelector} — it's reached by clicking the logo — but it
+ * is a view like any other, so it's linkable (`#view=about`) and works with back/forward. */
+export type ViewId = "overview" | "curves" | "plates" | "reference" | "raw" | "about";
 /** Reference view only — drift relative to the factory calibration value; see `ReferenceView`. */
 export type Baseline = "raw" | "delta" | "percent";
 /**

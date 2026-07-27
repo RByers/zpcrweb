@@ -60,11 +60,19 @@
   border-bottom: 1px solid var(--border);
   background: linear-gradient(180deg, var(--panel), transparent);
 }
+/* Also a <button> (it opens the About view), so it opts out of the global button chrome. */
 .app__logo {
   font-weight: 700;
   letter-spacing: 0.06em;
   color: var(--ink);
   text-shadow: 0 0 12px var(--neon-cyan-dim);
+  border: 0;
+  background: transparent;
+  padding: 0;
+}
+.app__logo:hover {
+  background: transparent;
+  text-shadow: 0 0 16px var(--neon-cyan);
 }
 .app__logo::first-letter {
   color: var(--neon-cyan);
@@ -92,6 +100,48 @@
   border-radius: var(--radius-sm);
   color: #ffd9d9;
   z-index: 20;
+}
+
+/* ---- About -------------------------------------------------------------- */
+.about {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
+  padding: 24px;
+}
+.about__card {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  max-width: 46ch;
+  padding: clamp(24px, 6cqi, 48px);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel);
+  text-align: center;
+}
+.about__logo {
+  margin: 0;
+  font-size: clamp(22px, 5cqi, 32px);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-shadow: 0 0 16px var(--neon-cyan-dim);
+}
+.about__logo::first-letter {
+  color: var(--neon-cyan);
+}
+.about__line {
+  margin: 0;
+  color: var(--ink-2);
+}
+.about__line a {
+  color: var(--neon-cyan);
+}
+.about__back {
+  margin-block-start: 10px;
+  color: var(--ink-2);
 }
 
 /* ---- DropZone ----------------------------------------------------------- */

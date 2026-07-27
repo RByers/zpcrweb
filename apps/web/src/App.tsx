@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import { useZpcrStore } from "./state/useZpcrStore";
 import { usePltdPassword } from "./state/pltdPassword";
 import { formatLoadHash } from "./state/urlHash";
@@ -13,6 +14,8 @@ import { RawFilesView } from "./components/views/RawFilesView";
 import { PcrdRawView } from "./components/views/PcrdRawView";
 import { StandalonePlateView } from "./components/views/StandalonePlateView";
 import { StandaloneRawView } from "./components/views/StandaloneRawView";
+import { AboutView } from "./components/views/AboutView";
+import type { ViewId } from "./state/useZpcrStore";
 
 const STANDALONE_VIEWS = ["plates", "raw"] as const;
 
@@ -23,10 +26,24 @@ const STANDALONE_VIEWS = ["plates", "raw"] as const;
  */
 const EXAMPLE_FILE = "examples/20260726_S183-S185_RVP.zpcr";
 
+/** The wordmark, doubling as the link to the About page. */
+function Logo({ onClick }: { onClick: () => void }) {
+  return (
+    <button className="app__logo mono" onClick={onClick} title="About zpcrweb">
+      zpcr//web
+    </button>
+  );
+}
+
 export function App() {
   const store = useZpcrStore();
   const { active, activeRun, settings } = store;
   const [, setPassword] = usePltdPassword();
+  // Where "← back" on the About page returns to, so opening About and leaving again is a no-op.
+  const lastView = useRef<ViewId>("curves");
+  if (store.view !== "about") lastView.current = store.view;
+  const showAbout = () => store.setView("about");
+  const leaveAbout = () => store.setView(lastView.current);
 
   if (store.loading) {
     return <div className="splash mono">initializing…</div>;
@@ -45,15 +62,19 @@ export function App() {
     return (
       <div className="app app--empty">
         <header className="app__brand">
-          <span className="app__logo mono">zpcr//web</span>
+          <Logo onClick={showAbout} />
           <span className="app__tag">Bio-Rad CFX qPCR viewer</span>
         </header>
-        <div className="app__welcome">
-          <DropZone onFiles={store.addFiles} large />
-          <button type="button" className="app__example mono" onClick={loadExample}>
-            Load an example file
-          </button>
-        </div>
+        {store.view === "about" ? (
+          <AboutView onBack={leaveAbout} />
+        ) : (
+          <div className="app__welcome">
+            <DropZone onFiles={store.addFiles} large />
+            <button type="button" className="app__example mono" onClick={loadExample}>
+              Load an example file
+            </button>
+          </div>
+        )}
         {store.error && <div className="app__error mono">{store.error}</div>}
       </div>
     );
@@ -63,14 +84,18 @@ export function App() {
   const zpcr = isStandalonePlate ? null : activeRun?.zpcr ?? null;
   // `store.view` is global (not per-file), so switching to a standalone entry can land on a
   // view its restricted tab set doesn't have (e.g. "curves") — fall back to "plates" then.
-  const view = isStandalonePlate && !STANDALONE_VIEWS.includes(store.view as (typeof STANDALONE_VIEWS)[number])
-    ? "plates"
-    : store.view;
+  // "about" is file-independent, so it survives regardless.
+  const view =
+    isStandalonePlate &&
+    store.view !== "about" &&
+    !STANDALONE_VIEWS.includes(store.view as (typeof STANDALONE_VIEWS)[number])
+      ? "plates"
+      : store.view;
 
   return (
     <div className="app">
       <header className="app__header">
-        <span className="app__logo mono">zpcr//web</span>
+        <Logo onClick={showAbout} />
         {(zpcr || isStandalonePlate) && (
           <ViewSelector
             value={view}
@@ -92,7 +117,9 @@ export function App() {
       />
 
       <main className="app__main">
-        {isStandalonePlate ? (
+        {view === "about" ? (
+          <AboutView onBack={leaveAbout} />
+        ) : isStandalonePlate ? (
           <>
             {view === "plates" && store.activePlateFile && (
               <StandalonePlateView file={active} result={store.activePlateFile} />

@@ -343,6 +343,13 @@ so every call site keeps writing one `onChange({ … })` regardless of where the
   grid density for being able to read sample identity and target without opening the
   click-through well detail panel.
 - **Raw** — `RawFilesView` for `.zpcr`, `PcrdRawView` for `.pcrd` (see "Raw views" below).
+- **About** — `AboutView` (`components/views/AboutView.tsx`): a static credits card (name,
+  author link, GitHub link). It's the one view with no tab in `ViewSelector` — the header
+  wordmark is a `<button>` that switches to it — and the one that renders with no file loaded,
+  so the empty state's `app--empty` branch shows it in place of the large drop zone. `App`
+  keeps the last non-About view in a ref so the card's "← back" returns where the user was;
+  with a file loaded the tab strip stays visible (no tab selected) as a second way out. Being
+  file-independent, it is also exempt from the standalone-plate view fallback.
 
 ### Decoded views (`components/raw/DecodedView.tsx`)
 

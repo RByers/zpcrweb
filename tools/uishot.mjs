@@ -38,6 +38,9 @@ const VIEW_LABELS = {
   plates: "Plates",
   reference: "Reference",
   raw: "Raw files",
+  // Reached by clicking the logo, so it has no tab to go `aria-selected` — matched by the
+  // rendered card instead (see the `settle` branch below).
+  about: null,
 };
 
 function parseArgs(argv) {
@@ -186,15 +189,22 @@ async function main() {
 
     for (const view of opts.views) {
       const label = VIEW_LABELS[view];
+      const caption = label ?? "About";
       // Navigate via the URL hash rather than clicking the tab — one assignment, no
       // dependency on tab label text, and it exercises the same routing a shared link uses.
       await cdp.eval(`window.location.hash = ${JSON.stringify(`view=${view}`)}, undefined`);
       let settled = "none";
       try {
-        await waitFor(async () => (settled = await activeTab(cdp)) === label, {
-          timeout: 5000,
-          what: `view "${view}" to activate`,
-        });
+        await waitFor(
+          async () =>
+            label === null
+              ? (settled = (await cdp.eval("!!document.querySelector('.about')")) ? view : "none") === view
+              : (settled = await activeTab(cdp)) === label,
+          {
+            timeout: 5000,
+            what: `view "${view}" to activate`,
+          },
+        );
       } catch {
         problems.push(
           `view "${view}" did not activate (tab shows "${settled}") — not available for this file?`,
@@ -210,8 +220,8 @@ async function main() {
         format: "png",
         captureBeyondViewport: false,
       });
-      shots.push({ view: label, data });
-      step(`captured ${label}`);
+      shots.push({ view: caption, data });
+      step(`captured ${caption}`);
       problems.push(...drainProblems(cdp));
     }
     problems.push(...drainProblems(cdp));
