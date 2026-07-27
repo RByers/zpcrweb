@@ -3,6 +3,14 @@
 Deferred work, captured so we can come back to it. The long-term goal is a **full
 visualizer for everything** inside a `.zpcr` archive.
 
+## Immediately next
+
+- [ ] It seems common for a negative curve to grow in the first 5 cycles then level off flat. It seems like we should be picking the large later flat line as the baseline but we often pick the start instead. See 20230829's well F5 and 20260726 D4 FAM.
+- [ ] Add a 'Calibration' tab which provides a nice vizualization of all calibration files, on a chart. By default only the ones in use in the analysis should be shown, but others can be enabled manually (similar to how fluorophores work in the chart view). Also provide a channel selector which can be enabled and disabled just like in curves view (share as much code/CSS as is reasonable). The chart should have temperature on the X axis and RFU on the Y axis, interpolating exactly as our algorithm does (if linear then that's trivial - don't draw extra points).
+- [ ] When loading a pltd file, the raw files view xml should use the pretty xml printer with collapsable nodes
+- [ ] Enable sorting on the table view. Click to sort by Cq or well.
+- [ ] Review all indexedb storage beyond the data files. Remove anything which effects the analysis (like threshold overrides) - that should come strictly from the file. Whenever such state exists, add a new entry to the zpcr file, call it "zpcrweb.json". In order to make storing this efficient, use a debounce system and pagehide handler - eg. only recreate the zip file in the indexeddb from the in-memory state at most once a minute and on pagehide. When a zpcr file is loaded, read these settings from it (if any) to initialize state. Consider whether we can remove everything from indexeddb other than the files now - what would we lose, and is it just transient state which could be stored in the URL (like the active view mode)?
+
 ## Library (`@zpcrweb/core`)
 
 Additional typed parsers for the archive files currently reachable only via the low-level
@@ -27,15 +35,6 @@ Additional typed parsers for the archive files currently reachable only via the 
 
 ## Web app (`apps/web`)
 
-To do immediately:
-
-- [x] ~~Open curves UI in 'target' mode by default~~
-- [x] ~~In the thresholds customization view, make hovering over a target show only those lines and also show a dotted line where the threshold is~~
-- [x] ~~By default in channels view only select channels which are present in the plate configuration.~~
-- [x] ~~Add a reset button to the channel/flourophore/target list exactly like for the wells~~
-
-Still planned:
-
 - [ ] Add a plate editor which allows setting the flourophores used per well, as well as the tube types for the plate (clear / white).  Used for calibration adjustments and fluorophore display. Allow saving/naming plate files and applying them to runs. Remember the plate setting applied to each loaded run. Have an easy mechanism to copy/paste settings from one well to another or to all wells on a column/row/plate, or to duplicate a column/row across multiple columns/rows (eg. using click drag to select a region simple to copy/paste operations in spreadsheets)
 - [ ] Optionally allow writing the target and sample names per well in the plate editor, again with easy copy paste of some form. Then use these in the curves visualization (eg. on hover).
 - [ ] Add an option to apply flourophore-specific calibration to the run based on the calibration file data.
@@ -46,10 +45,6 @@ Still planned:
 ## Testing / infra
 
 - [ ] Add a browser-mode Vitest run to prove isomorphism in a real browser environment.
-- [x] ~~Add Playwright e2e tests for the web app~~ — done without Playwright: `tools/uitest.mjs`
-      (`npm run test:ui`) drives headless Chrome over CDP with no dependencies. 15 assertions,
-      ~9s. Scoped to the two URL contracts that regress silently (hash routing, password
-      handling); the logic-in-library principle still holds for everything else.
 - [ ] Add more sample `.zpcr` files (different block types, channel counts, cycle counts)
       as they become available.
 - [ ] CI workflow (install / typecheck / test / build).
@@ -72,9 +67,6 @@ Still planned:
 - [ ] **Root `ARCHITECTURE.md` doesn't mention `tools/`.** CLAUDE.md and
       `apps/web/ARCHITECTURE.md` cover the harness; a short "Tooling" section would close the
       loop.
-- [ ] **`#file=` matches on name only.** Two loaded files sharing a name (different sizes, so
-      distinct `fileId()`s) are indistinguishable in the URL — first match wins. Rare enough to
-      ignore; a short id prefix could break the tie if it ever matters.
 - [ ] **Hash state is view + file only.** Selected wells/channels/fluorophores stay per-file in
       IndexedDB. `state/urlHash.ts` was built to extend (more keys in the same query string) if
       sharing a specific chart view becomes useful.
