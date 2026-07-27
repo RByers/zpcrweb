@@ -9,7 +9,7 @@ const coreSrc = fileURLToPath(new URL("../../packages/core/src/index.ts", import
 
 export default defineConfig({
   plugins: [react()],
-  server: { port: 5173 },
+  server: { port: 5173, host: true },
   resolve: {
     alias: {
       "@zpcrweb/core": coreSrc,
