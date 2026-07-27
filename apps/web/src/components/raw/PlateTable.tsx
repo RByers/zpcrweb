@@ -1,6 +1,7 @@
 import { isBlankWell, type PlateDefinition } from "@zpcrweb/core";
 import { channelColor } from "../../lib/channelColors";
 import { SAMPLE_TYPE_META } from "../../lib/sampleType";
+import { plateDisplayName } from "../../lib/plateNames";
 
 /**
  * Raw plate data as a table: one row per well that carries anything, in plate order, with its
@@ -18,10 +19,14 @@ export function PlateTable({ plate, sourceHint }: { plate: PlateDefinition; sour
     <div className="decoded">
       <section className="decoded__block">
         <h3 className="decoded__h">
-          {plate.plateName || "Plate"} — {plate.rows}×{plate.columns}, {plate.dyeCount}{" "}
+          {plateDisplayName(plate)} — {plate.rows}×{plate.columns}, {plate.dyeCount}{" "}
           {plate.dyeCount === 1 ? "dye" : "dyes"}
         </h3>
         <dl className="decoded__dl mono">
+          <div className="decoded__pair">
+            <dt>Vessel</dt>
+            <dd>{plate.plateName || "—"}</dd>
+          </div>
           <div className="decoded__pair">
             <dt>Scan mode</dt>
             <dd>{plate.scanMode || "—"}</dd>

@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { PlateDefinition, WellDefinition } from "@zpcrweb/core";
 import { channelColor, channelLabel } from "../../lib/channelColors";
 import { ROW_LABELS, SAMPLE_TYPE_META } from "../../lib/sampleType";
+import { plateDisplayName } from "../../lib/plateNames";
 
 /**
  * The visual plate map for any {@link PlateDefinition}: an 8×12 grid coloured by sample type,
@@ -23,7 +24,7 @@ export function PlateViewer({ plate, sourceHint }: { plate: PlateDefinition; sou
       <div className="plateviewer__main">
         <section className="decoded__block">
           <h3 className="decoded__h">
-            {plate.identityKey || plate.plateName || "Plate"} — {plate.rows}×{plate.columns},{" "}
+            {plateDisplayName(plate)} — {plate.rows}×{plate.columns},{" "}
             {plate.dyeCount} {plate.dyeCount === 1 ? "dye" : "dyes"}
           </h3>
           <dl className="decoded__dl mono">

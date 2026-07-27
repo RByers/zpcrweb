@@ -199,8 +199,11 @@ export function isPlateCsvName(name: string): boolean {
 }
 
 /** The plate's identity from the file/entry name it was read from: strip the `.plt.csv` (or
- * bare `.csv`) this module writes, and any directory part. `"S183-S185-RVP.plt.csv"` →
- * `"S183-S185-RVP.plt"`, which is exactly the `identityKey` a `.pltd`-sourced plate carries. */
+ * bare `.csv`) this module writes, and any directory part — `"S183-S185-RVP.plt.csv"` →
+ * `"S183-S185-RVP"`. A `.pltd`-sourced plate's `identityKey` keeps its `.pltd` extension (CFX
+ * stores the file name verbatim, e.g. `"Qualification_Plate_96.pltd"`), so the two aren't
+ * byte-identical; consumers that display either one strip the extension anyway (the web app's
+ * `plateDisplayName`). */
 function identityFromName(name: string): string | undefined {
   const base = name.split(/[/\\]/).pop() ?? name;
   return base.replace(/\.(plt\.)?csv$/i, "") || undefined;

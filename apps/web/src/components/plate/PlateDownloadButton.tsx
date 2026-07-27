@@ -2,18 +2,12 @@ import { useRef } from "react";
 import type { PlateDefinition } from "@zpcrweb/core";
 import { plateToCsv } from "@zpcrweb/core";
 import { downloadBytes, downloadText } from "../../lib/download";
+import { stripPlateExt } from "../../lib/plateNames";
 import { DownloadIcon } from "../DownloadIcon";
 
 /** Sanitize a plate name / entry name into a safe file basename. */
 function sanitize(s: string): string {
   return s.replace(/[\\/:*?"<>|]+/g, "_").trim() || "plate";
-}
-
-/** Drop a trailing `.pltd`/`.csv`/`.plt.csv` extension — `identityKey` and archive entry names
- * are typically a source file name (e.g. `FirstExperiment.pltd`), and the `.plt.csv` we write
- * shouldn't stack a second extension on top of it. */
-function stripPlateExt(s: string): string {
-  return s.replace(/\.(pltd|plt\.csv|csv)$/i, "");
 }
 
 interface Props {
