@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { wellLabel, type Zpcr, type TemperatureCurve } from "@zpcrweb/core";
-import { formatBaselineFormula } from "../../lib/cq";
 import { computeWellTypes } from "../../lib/wellTypes";
 import { NO_TARGET } from "../../lib/plateTargets";
 import { SAMPLE_TYPE_META } from "../../lib/sampleType";
@@ -13,7 +12,12 @@ import {
 } from "../../state/useZpcrStore";
 import { usePltdPassword } from "../../state/pltdPassword";
 import { channelColor, channelLabel } from "../../lib/channelColors";
-import { curveKey, useRunAnalysis } from "../../lib/runAnalysis";
+import {
+  channelCurveKey,
+  curveKey,
+  darkCurveKey,
+  useRunAnalysis,
+} from "../../lib/runAnalysis";
 import {
   analysisCsv,
   analysisCsvFilename,
@@ -79,6 +83,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
     loadedFluors,
     allFluorCurves,
     cqTable,
+    plainBaselines,
   } = run;
 
   // Every temperature the platereads carry, for this step. Which of them are plotted is a
@@ -92,13 +97,15 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
     [allTemps, settings.temps],
   );
 
-  // Dark lines/subtraction only concern the enabled, available channels.
+  // Dark lines/subtraction only concern the enabled, available channels. Each carries its
+  // display baseline from the run's analysis, like every other plotted series — the "Relative"
+  // view baselines the dark overlay too.
   const enabledDark = useMemo(
     () =>
-      darkCurves.filter(
-        (d) => available.includes(d.channel) && settings.enabledChannels.has(d.channel),
-      ),
-    [darkCurves, available, settings.enabledChannels],
+      darkCurves
+        .filter((d) => available.includes(d.channel) && settings.enabledChannels.has(d.channel))
+        .map((d) => ({ ...d, analysis: plainBaselines.get(darkCurveKey(d.channel)) })),
+    [darkCurves, available, settings.enabledChannels, plainBaselines],
   );
 
   // ---- Plate-derived selection state -----------------------------------------------------
@@ -371,23 +378,19 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
   // channel vector, not a distribution) — so bands and the dark overlay are both
   // channel-space-only concepts, hidden once color separation is on.
 
-  // Cq and the fitted baseline for one plotted curve — *looked up*, never recomputed. The run's
-  // table (`runAnalysis.ts`) already holds exactly one value per well/fluor pair, computed over the
-  // whole plate; deriving it again from whatever subset happens to be plotted is precisely what
-  // used to make the chart's markers, the hover cards and the Analysis table disagree.
-  const dyeCq = (row: number, col: number, dye: string) => {
-    const e = cqTable.get(curveKey(row, col, dye));
-    return {
-      cq: e?.cq ?? null,
-      baselineFormula: e ? formatBaselineFormula(e.baselineFit) : null,
-      baselineRegion: e?.baselineRegion ?? null,
-      noise: e?.noise ?? null,
-    };
-  };
+  // The analysis record for one plotted curve — *looked up*, never recomputed. The run's tables
+  // (`runAnalysis.ts`) already hold exactly one record per curve, computed over the whole plate;
+  // deriving one again from whatever subset happens to be plotted is precisely what used to make
+  // the chart's markers, the hover cards and the Analysis table disagree. Everything the chart
+  // draws about a curve's baseline, threshold or Cq comes from here.
+  const dyeAnalysis = (row: number, col: number, dye: string) => cqTable.get(curveKey(row, col, dye));
   // Channel space gets no Cq of its own — see `RunAnalysis.cqTable`. A raw channel curve carries
   // every dye that emits into that filter and belongs to no target, so quantifying it would be
-  // measuring crosstalk. Channel-space curves below therefore omit `cq`/`baseline*` entirely; what
-  // they carry instead, and dye-space curves don't, is the real min/max/σ spread of the readings.
+  // measuring crosstalk. Its record is therefore the baseline-only kind: enough for the "Relative"
+  // view to subtract the same baseline the rest of the app would, with no Cq or threshold attached.
+  // What channel curves carry instead, and dye-space curves don't, is the real min/max/σ spread.
+  const channelAnalysis = (row: number, col: number, channel: number) =>
+    plainBaselines.get(channelCurveKey(row, col, channel));
 
   const plotCurves: PlotCurve[] = useMemo(
     () =>
@@ -403,7 +406,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
             cycles: c.cycles,
             mean: c.mean,
             sample: wellSample.get(wellKey(c.row, c.col)),
-            ...dyeCq(c.row, c.col, c.dye),
+            analysis: dyeAnalysis(c.row, c.col, c.dye),
           }))
         : visibleChannel.map((c) => ({
             channel: c.channel,
@@ -418,6 +421,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
             min: c.min,
             max: c.max,
             sample: wellSample.get(wellKey(c.row, c.col)),
+            analysis: channelAnalysis(c.row, c.col, c.channel),
           })),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [
@@ -458,7 +462,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
               cycles: c.cycles,
               mean: c.mean,
               sample: wellSample.get(wellKey(c.row, c.col)),
-              ...dyeCq(c.row, c.col, c.dye),
+              analysis: dyeAnalysis(c.row, c.col, c.dye),
             }))
         : allCurves
             .filter((c) => available.includes(c.channel))
@@ -475,6 +479,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
               min: c.min,
               max: c.max,
               sample: wellSample.get(wellKey(c.row, c.col)),
+              analysis: channelAnalysis(c.row, c.col, c.channel),
             })),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [
@@ -518,7 +523,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
         .map((c) => ({
           key: `${c.dyeLabel}-${c.channel}`,
           label: c.dyeLabel,
-          cq: c.cq,
+          cq: c.analysis?.cq,
           color: channelColor(c.channel),
           selected: isSelected(c),
         })),
@@ -538,7 +543,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
         key: `${c.row},${c.col}`,
         label: c.wellLabel,
         sublabel: c.sample,
-        cq: c.cq,
+        cq: c.analysis?.cq,
         color: channelColor(c.channel),
         selected: isSelected(c),
       })),
@@ -554,7 +559,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
         key: `${c.row},${c.col}`,
         label: c.wellLabel,
         sublabel: c.sample,
-        cq: c.cq,
+        cq: c.analysis?.cq,
         color: channelColor(channel),
         selected: isSelected(c),
       })),
@@ -570,7 +575,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
         key: `${c.row},${c.col}-${c.dyeLabel}`,
         label: c.dyeLabel,
         sublabel: c.wellLabel,
-        cq: c.cq,
+        cq: c.analysis?.cq,
         color: channelColor(c.channel),
         selected: isSelected(c),
       })),
@@ -1135,7 +1140,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
         </div>
         {!tableMode && logBaselined && (
           <div className="rail__note mono">
-            Log + baseline: each curve shifted so its own minimum reads 1.
+            Log + baseline: all curves shifted alike so the plot's minimum reads 1.
           </div>
         )}
       </aside>

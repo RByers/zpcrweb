@@ -416,10 +416,41 @@ genuine abbreviation differences, not just casing — `assemblyName` → `ANm`) 
 reshaping one into the other, so `RunLogTable` (`parsed: RunLogParsed`) renders either
 format's real elements without either one faking the other's schema.
 
-## One Cq per well/target: `lib/runAnalysis.ts`
+## One analysis per run: `lib/runAnalysis.ts`
 
-`useRunAnalysis(zpcr, settings, pltdPassword, activeStep)` is the single run-level
-derivation the Curves view's chart, hover cards and table mode share: plate + password state,
+**The rule: analysis is computed once, here, by the library — and every other module in the app is
+downstream of it.** Nothing else calls `baseline.ts`/`threshold.ts`, and no view derives a
+baseline, noise estimate, threshold or Cq of its own, not even for something as apparently
+cosmetic as where to draw a line. A curve's analysis travels with it as one record
+(`CurveAnalysis`), and a view's job is to project that record onto the screen.
+
+This is enforced by construction rather than convention: `lib/uplot/chart.ts` imports no analysis
+function at all, and what it plots in the "Relative" view *is* `CurveAnalysis.correctedValues` —
+the very array the Cq was computed from — rather than a re-derivation that happens to agree.
+
+The rule exists because the two implementations that used to coexist drifted, silently and
+visibly:
+
+- The chart auto-detected its own baseline region with `autoBaselineRegion(cycles,
+  smoothCurve(values))`, omitting the `rawValues` argument that enables `refineBaselineStart`'s
+  start-trim. The analysis passed it. On `20260726`'s well A4 / Texas Red that was cycles 2–28
+  against 11–28, two different fitted lines, and a plotted curve sitting ~17 RFU below the one the
+  Cq had been taken on — so the rail's threshold line (48.6 RFU) passed well above a Cq ring drawn
+  at 31.7.
+- The Cq ring was then placed by interpolating the plotted curve *linearly* at the fractional Cq,
+  while `findThresholdCrossing` had located that Cq by interpolating in *log* space — a second,
+  independent disagreement worth another ~3% of the threshold on a steeply rising curve.
+- On a log scale, `logFloor` lifted **each curve** by its own offset while the threshold line was
+  drawn at the bare threshold value, so the line was at the right height for no curve at all.
+
+All three were arithmetic that was individually reasonable and collectively inconsistent, which is
+what re-derivation buys. The fixes were structural, not local: the chart consumes the analysis, the
+Cq ring is placed *at* `(cq, threshold)` and projected through `SeriesMeta.plotDelta` (so it lands
+on the threshold line by construction rather than by agreement), and the log-scale shift became one
+shared constant for the whole plot.
+
+`useRunAnalysis(zpcr, settings, pltdPassword, activeStep)` is that single run-level
+derivation, shared by the Curves view's chart, hover cards and table mode: plate + password state,
 fluorophore/target groups
 (`lib/plateTargets.ts`), the calibration matrix and `calibration.md` §4 corrections, the
 color-separated `allFluorCurves` — and, on top of those, the run's **Cq table**.
@@ -432,6 +463,16 @@ color-separated `allFluorCurves` — and, on top of those, the run's **Cq table*
   curves, over every curve, and over the standalone Analysis view's enabled wells) had the same well
   showing a Cq in one place and "—" in another. Display filters — enabled wells, disabled targets, sample and
   fluor toggles, the view-mode switch — now change only which entries are *shown*.
+- **`plainBaselines`** — the same `baselineCorrectCurve()` call, for the plotted series that carry
+  no Cq: the raw per-channel curves (`channelCurveKey`) and the dark overlay (`darkCurveKey`). The
+  "Relative" view baselines whatever it is plotting, channel space and the dark line included, so
+  those series need a baseline even though they will never be quantified — and it must be the same
+  baseline the rest of the app would compute, which is exactly what a second implementation in the
+  chart failed to be. Like the Cq table, it is built over the whole run, not the plotted subset.
+- **`CurveAnalysis`** is the union of the two: `CurveBaselineResult` plus optional `cq`/`threshold`.
+  A dye curve's record is its `CqTableEntry` (both present); a channel or dark curve's is the
+  baseline-only kind. One optional type means the chart treats every series identically and
+  "quantified" is simply `threshold != null`.
 - **Grouping** is two separate things, deliberately. `groupOf(row, col, fluor)` is the *display*
   group — the pair's target/gene, the shared `"(none)"` catch-all when it has none, or the
   fluorophore on a plate with no targets — and organizes chips, table rows and colors.
@@ -458,11 +499,11 @@ color-separated `allFluorCurves` — and, on top of those, the run's **Cq table*
   produced a confident-looking Cq — one belonging to whichever neighbouring dye was bleeding into
   it. Quantification is per-fluorophore *after* color separation, which is what the separation is
   for, and CFX reports it that way too. Channel space is now purely a look at the raw signal: no
-  Cq, no threshold, no baseline fit. `PlotCurve.cq`/`baselineFormula`/`baselineRegion`/`noise` are
-  simply absent on a channel-space curve, so the chart's Cq ring, the tooltip's Cq/baseline rows
-  and the rail hover cards' Cq column all drop out together (`HoverCardRow.cq` distinguishes
-  `null` — "has no Cq", shown as "—" — from `undefined`, "Cq doesn't apply", which hides the
-  column).
+  Cq, no threshold, no quoted baseline fit. A channel curve's `PlotCurve.analysis` is the
+  baseline-only `plainBaselines` record — enough to plot it in the "Relative" view, with `cq` and
+  `threshold` absent — so the chart's Cq ring, the tooltip's Cq and baseline rows and the rail
+  hover cards' Cq column all drop out together (`HoverCardRow.cq` distinguishes `null` — "has no
+  Cq", shown as "—" — from `undefined`, "Cq doesn't apply", which hides the column).
 - **The dye-space solve is unconditional.** It used to be skipped while the Curves view was showing
   channel space (`dyeSpace`, a fifth parameter) since one pseudo-inverse per well per cycle is real
   work. It no longer is: the target thresholds and the CSV export are target-based in *every* view
@@ -522,11 +563,17 @@ only pieces the two views share.
   ΔRFU/Drift %, which are factory-relative, not a fitted baseline — see "Two baseline concepts"
   under Reference view below. Also Relative ↔ Log (uPlot `distr: 3`).
   - *Log + baseline:* a relative (baseline-corrected) curve can go ≤ 0, undefined on a log axis,
-    so each curve is shifted up by a constant (a "min-1" baseline, `logFloor` in
-    `lib/uplot/chart.ts`) so its own minimum reads 1, with an inline note. A no-op when the curve
-    is already positive (absolute view is unaffected).
-- **`drawBaseline` setting (off by default):** overlays each well curve's own fitted baseline
-  line as a separate uPlot series, at 50% opacity of the curve's own color
+    so every RFU series is shifted up by **one shared constant** (`applyLogFloor` in
+    `lib/uplot/chart.ts`), enough for the lowest point anywhere on the plot to read 1, with an
+    inline note. A no-op when nothing on the plot is non-positive (absolute view is unaffected).
+    Shared rather than per curve: lifting each curve by its own minimum looked tidier but gave
+    every curve a different y offset, so two curves at the same RFU drew at different heights, the
+    axis labels described no curve in particular, and one threshold could not be drawn as one line
+    — it sat at a different pixel row per curve, which is how the rail's dotted line came to miss
+    the Cq rings on a log scale.
+- **`drawBaseline` setting (off by default):** overlays each well curve's fitted baseline
+  (`CurveAnalysis.baselineFit`, looked up — never re-fitted) as a separate uPlot series, at 50%
+  opacity of the curve's own color
   (`hexToRgba(color, BASELINE_LINE_ALPHA)` in `chart.ts`) — plotted through the *same* per-cycle
   `Adjust` the well curve itself uses, so it reads correctly in either view: the real trend line
   under Absolute, a near-zero reference line under Relative (subtracting a line from itself is
@@ -631,12 +678,13 @@ only pieces the two views share.
   reads as a measured zero spread instead of no measurement. Band, whisker and rows now drop out
   together. The search projects each series
   through **its own** scale, so proximity is measured in pixels across both axes. A well
-  series also carries `baselineFormula` and `cq` (see "Table mode" below); when defined, the
+  series also carries its `analysis` record (see "Table mode" below); for a quantified curve the
   tooltip adds a "baseline" row (the fitted linear baseline, rendered as a formula — see
   `CurveBaselineResult.baselineFit`/`formatBaselineFormula()` above) right before a Cq row, and
-  the chart draws a small ring on the curve at its (interpolated) Cq position — the same marker
-  logic (`cqMarkers` in `buildChart()`) that makes an unamplified or off-curve well show no
-  marker at all.
+  the chart draws a small ring at that curve's `(cq, threshold)` — the crossing point *by
+  definition*, projected into plotted space through `SeriesMeta.plotDelta`, so the ring sits on the
+  curve and on the rail's threshold line without either being re-derived from the other
+  (`cqMarkers` in `buildChart()`). A curve with no Cq — unamplified, or squelched — gets no ring.
 - **Color separation (dye space) and the channel/fluorophore/target selector** (also labelled
   "View" in the rail, distinct from the baseline `CurveView` toggle above): `lib/fluorCurves.ts`
   matches
@@ -798,7 +846,10 @@ is: a per-target curve needs channel→dye color separation (`calibration.md`).
   Each row has a hover effect (`.analysis__threshold-row:hover` background tint, like the app's
   other hoverable rail rows) backing up what it actually does: hovering a fluorophore row sets the
   same `hoverHighlight` a chip's hover sets (isolating that dye's curves via `applyHighlight`) plus
-  a dotted line at its threshold RFU, via `CurveChart`'s `thresholdLine` prop →
+  a dotted line at its threshold RFU — drawn per highlighted curve at `threshold + plotDelta` and
+  deduplicated by pixel row, which is one line in practice (every curve on a plot shares one
+  `plotDelta` in the "Relative" view) but cannot drift away from the Cq rings if that ever stops
+  being true — via `CurveChart`'s `thresholdLine` prop →
   `lib/uplot/chart.ts`'s `ThresholdLineState`/`setThresholdLine` (a mutable holder + cheap
   `u.redraw`, the same pattern `applyHighlight` uses, so hovering doesn't rebuild the whole uPlot
   instance). Only meaningful in `curveView: "relative"` — the threshold/noise/Cq math
@@ -821,8 +872,8 @@ is: a per-target curve needs channel→dye color separation (`calibration.md`).
   belongs to now that the mark itself is a shared color. The label flips from above the point to
   below whenever it would otherwise land on the dotted threshold line (the two are frequently close
   in RFU by construction — the region tends to end near where a curve approaches its own
-  threshold). `PlotCurve`/`SeriesMeta` carry `baselineRegion`/`noise` alongside
-  `cq`/`baselineFormula` (same lookup-not-recompute rule) purely so `lib/uplot/chart.ts`'s
+  threshold). `PlotCurve`/`SeriesMeta` carry the whole `analysis` record (the lookup-not-recompute
+  rule at the top of this section) purely so `lib/uplot/chart.ts`'s
   `overlayPlugin` can draw this without a second pass over the run's curves; nothing else reads
   them. It is gated on its own `ThresholdLineState.regions` flag rather than riding on the dotted
   line, which is what keeps it to one curve at a time: it used to appear for every curve the hover

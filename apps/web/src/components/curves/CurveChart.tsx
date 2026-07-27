@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import uPlot from "uplot";
-import type { DarkCurve, TemperatureCurve } from "@zpcrweb/core";
+import type { TemperatureCurve } from "@zpcrweb/core";
 import type { Baseline, CurveView, Scale } from "../../state/useZpcrStore";
 import {
   applyHighlight,
@@ -9,6 +9,7 @@ import {
   type FactoryCurve,
   type HighlightMatch,
   type PlotCurve,
+  type PlotDarkCurve,
   type SeriesMeta,
   type ThresholdLineState,
   type TooltipData,
@@ -22,7 +23,7 @@ const NO_FACTORY_CURVES: FactoryCurve[] = [];
 
 interface Props {
   curves: PlotCurve[];
-  darkCurves: DarkCurve[];
+  darkCurves: PlotDarkCurve[];
   /** Factory-calibration reference overlay (Reference view); empty draws none. */
   factoryCurves?: FactoryCurve[];
   /** Temperature series for the right-hand °C axis; empty hides that axis. */

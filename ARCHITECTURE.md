@@ -27,6 +27,17 @@ the doc is always the entry point for understanding *and* changing a decoder. Se
 - Minimal dependencies. One reputable dependency (`fflate`) for ZIP decompression; nothing
   else at runtime.
 - An extensive test suite validated against real instrument samples.
+- **One analysis per run, computed by the library, and every consumer downstream of it.** A
+  baseline, a noise estimate, a threshold and a Cq are not independent numbers a caller can work
+  out for itself: they are one derivation, and re-deriving any part of it somewhere else produces a
+  *second, equally defensible* answer that then disagrees with the first. So the library owns the
+  computation (`analysis.ts`'s `baselineCorrectCurve`/`computeCqTable`), a consumer runs it **once
+  per run over the whole plate** (in the web app, `useRunAnalysis`), and everything else — tables,
+  hover cards, exports, and the chart's curves, markers and threshold lines alike — reads the
+  result. No consumer, the renderer least of all, calls into `baseline.ts`/`threshold.ts` on its
+  own. This is not a style preference: the two places that used to run their own copy drifted
+  apart, and the drift was visible on screen as a threshold line that missed the Cq marker it was
+  supposed to run through (see `apps/web/ARCHITECTURE.md`, "One analysis per run").
 
 ## Monorepo
 

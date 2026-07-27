@@ -1,10 +1,13 @@
 import { useMemo } from "react";
 import {
+  ANALYSIS_BASELINE_MODE,
+  baselineCorrectCurve,
   buildCalibrationMatrix,
   computeCqTable,
   REFERENCE_ROW,
   type CqTableCurve,
   type CqTableEntry,
+  type CurveBaselineResult,
   type DarkCurve,
   type PlateDefinition,
   type PltdEntry,
@@ -47,6 +50,32 @@ const CQ_ALGORITHM = "Threshold" as const;
 export function curveKey(row: number, col: number, fluor: string): string {
   return `${row},${col},${fluor}`;
 }
+
+/** Identity of one raw per-channel curve, for {@link RunAnalysis.plainBaselines}. */
+export function channelCurveKey(row: number, col: number, channel: number): string {
+  return `ch:${row},${col},${channel}`;
+}
+
+/** Identity of one channel's dark (LED-off) overlay, for {@link RunAnalysis.plainBaselines}. */
+export function darkCurveKey(channel: number): string {
+  return `dark:${channel}`;
+}
+
+/**
+ * The analysis record every plotted series carries — the *only* description of a curve's baseline
+ * anywhere downstream of this module.
+ *
+ * A dye-space curve's record is its {@link CqTableEntry}, which additionally carries the Cq and the
+ * threshold it was taken against. A channel-space or dark curve's is a plain
+ * {@link CurveBaselineResult}: those series are baselined for *display* but quantify nothing, so
+ * `cq`/`threshold` are simply absent (see {@link RunAnalysis.cqTable} for why channel space gets no
+ * Cq). One optional type covers both, so a consumer that only needs the baseline — the chart —
+ * treats every series identically.
+ */
+export type CurveAnalysis = CurveBaselineResult & {
+  cq?: number | null;
+  threshold?: number | null;
+};
 
 export interface RunAnalysis {
   /** The first plate entry in the archive, whatever its decode state — the views read
@@ -94,6 +123,20 @@ export interface RunAnalysis {
    * baseline fit.
    */
   cqTable: Map<string, CqTableEntry>;
+  /**
+   * The baseline half of the same analysis, for the plotted series that have no Cq: the raw
+   * per-channel curves ({@link channelCurveKey}) and the dark overlay ({@link darkCurveKey}).
+   *
+   * The Curves view's "Relative" mode subtracts a fitted baseline from *whatever* it is plotting,
+   * channel space included — so those series need a baseline even though they will never be
+   * quantified. It comes from the same library call ({@link baselineCorrectCurve}, the one
+   * {@link computeCqTable} makes internally) at the same single point in the app, which is the
+   * whole point: the chart used to run its own copy of the auto-detection, and the copy had
+   * drifted — it skipped the `refineBaselineStart` trim, so it plotted curves baselined over a
+   * region the Cq had not been computed on, and the threshold line missed the Cq marker by the
+   * difference.
+   */
+  plainBaselines: Map<string, CurveBaselineResult>;
   /** The *display* group a well/fluor pair belongs to — its target, the {@link NO_TARGET}
    * catch-all, or (on a plate with no targets at all) the fluorophore itself. Organizes chips,
    * table rows and colors. **Not** the threshold group — see {@link thresholdGroupOf}. */
@@ -324,6 +367,23 @@ export function useRunAnalysis(
     settings.thresholdMultiplier,
   ]);
 
+  // Display baselines for the no-Cq series — see `RunAnalysis.plainBaselines`. Computed over the
+  // whole run rather than the plotted subset, like the Cq table, so toggling a well or a channel
+  // can never change what another curve looks like.
+  const plainBaselines = useMemo(() => {
+    const m = new Map<string, CurveBaselineResult>();
+    for (const c of allCurves) {
+      m.set(
+        channelCurveKey(c.row, c.col, c.channel),
+        baselineCorrectCurve(c.cycles, c.mean, ANALYSIS_BASELINE_MODE),
+      );
+    }
+    for (const d of darkCurves) {
+      m.set(darkCurveKey(d.channel), baselineCorrectCurve(d.cycles, d.mean, ANALYSIS_BASELINE_MODE));
+    }
+    return m;
+  }, [allCurves, darkCurves]);
+
   return {
     plateEntry,
     plate,
@@ -344,6 +404,7 @@ export function useRunAnalysis(
     groupInfos,
     allFluorCurves,
     cqTable,
+    plainBaselines,
     groupOf,
     thresholdGroupOf,
     thresholdGroups: calibratedFluors,

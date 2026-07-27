@@ -1,16 +1,25 @@
+/**
+ * The Curves/Reference chart: uPlot options, series and the SVG overlay drawn on top of them.
+ *
+ * **This module is a renderer, not an analysis.** It never calls into `baseline.ts`/`threshold.ts`
+ * and never derives a baseline, threshold, noise estimate or Cq of its own. Every one of those
+ * arrives already computed, on {@link PlotCurve.analysis}, from the run's single analysis
+ * (`runAnalysis.ts`). Anything the chart draws that relates to a curve's baseline is a pure
+ * function of that record — which is what makes it *impossible* for the plotted curve, the Cq
+ * marker and the threshold line to disagree. They used to: this file ran a second, subtly
+ * different copy of the auto-detection (it skipped the `refineBaselineStart` trim), so the curve
+ * on screen had been baselined over a different cycle range than the Cq had.
+ *
+ * If something here needs a number the analysis doesn't carry, add it to `CurveAnalysis` and
+ * compute it in the library — do not compute it here.
+ */
+
 import uPlot from "uplot";
-import {
-  autoBaselineRegion,
-  clampBaselineRegion,
-  fitLinearBaseline,
-  smoothCurve,
-  subtractBaseline,
-  type BaselineRegion,
-  type DarkCurve,
-  type TemperatureCurve,
-} from "@zpcrweb/core";
+import type { DarkCurve, TemperatureCurve } from "@zpcrweb/core";
 import { channelColor, channelLabel } from "../channelColors";
 import { tempColor } from "../tempColors";
+import { formatBaselineFormula } from "../cq";
+import type { CurveAnalysis } from "../runAnalysis";
 import type { Baseline, CurveView, Scale } from "../../state/useZpcrStore";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -57,49 +66,69 @@ export interface PlotCurve {
   std?: number[];
   min?: number[];
   max?: number[];
-  /** Cq (`threshold.md` §6), computed per the Analysis view's settings — `null`/undefined when
-   * unamplified, squelched by the minimum-ΔRFU gate, or not computable. Drives the chart's Cq
-   * marker and its tooltip row. */
-  cq?: number | null;
-  /** Diagnostic: the linear baseline actually fitted for this curve (`CurveBaselineResult.
-   * baselineFit`), rendered as a formula (e.g. "2000 + 4c") — surfaced in the tooltip so a
-   * surprising Cq can be traced back to the baseline that was really applied. */
-  baselineFormula?: string | null;
-  /** Diagnostic: the cycle range `CurveBaselineResult.baselineRegion` auto-detection settled on
-   * for this specific curve (`threshold.md` §2–§3) — surfaced (with {@link noise}) on the
-   * Threshold rail's hover, since the region is per-curve and can differ well-to-well even
-   * within one target group. */
-  baselineRegion?: BaselineRegion | null;
-  /** Diagnostic: `CurveBaselineResult.noise` — the §5.1 noise estimate this curve contributed to
-   * its group's threshold cohort. */
-  noise?: number | null;
+  /**
+   * This curve's analysis record, looked up from the run's single analysis
+   * (`runAnalysis.ts` — {@link CurveAnalysis}). Everything baseline-, threshold- or Cq-related the
+   * chart draws is read from here: the "Relative" view plots `correctedValues`, "Draw baseline"
+   * draws `baselineFit`, the Cq ring sits where `cq` crosses `threshold`, and the rail's
+   * threshold-hover diagnostic marks `baselineRegion`/`noise`.
+   *
+   * **This module computes none of it** — see the note at the top of the file. Absent for a series
+   * the run analyses no further (temperatures), and for any curve whose record is still loading.
+   */
+  analysis?: CurveAnalysis;
   /** Sample name (`pltd.md`'s `conditionName`, `WellDefinition.sample`) for this curve's well,
    * when the plate assigns one — drives the rail's "sample" highlight/hover-card lookup. */
   sample?: string;
 }
 
 /** Values <= 0 are undefined on a log axis; render them as gaps. Should be a no-op once
- * {@link logFloor} has shifted the curve's own minimum to 1 — kept as a fail-safe. */
+ * {@link applyLogFloor} has lifted the plot's minimum to 1 — kept as a fail-safe. */
 function logSafe(values: number[], scale: Scale): (number | null)[] {
   if (scale !== "log") return values;
   return values.map((v) => (v <= 0 ? null : v));
 }
 
 /**
- * A curve normalized to its own baseline (or a factory delta/%) fluctuates around 0 and can
- * dip negative — undefined on a log axis. Rather than punching gaps in the line there, shift
- * the whole curve up by a constant so its own minimum reads 1 (a "min-1" baseline): the log
- * scale then shows the curve's full shape/growth, just anchored to "this curve's noise floor"
- * instead of the underlying unit's zero. A no-op when the curve is already positive (e.g. the
- * raw baseline, where RFU readings never go non-positive) or when `scale` isn't `"log"`.
+ * A curve normalized to its own baseline (or a factory delta/%) fluctuates around 0 and can dip
+ * negative — undefined on a log axis. Rather than punching gaps in the line there, every RFU
+ * series is shifted up by **one shared constant**, so that the lowest point anywhere on the plot
+ * reads 1: the log scale then shows each curve's full shape and growth, anchored to "the plot's
+ * noise floor" instead of the underlying unit's zero.
+ *
+ * Shared, not per curve. Lifting each curve by its *own* minimum used to look tidier, but it gave
+ * every curve a different y offset — so two curves at the same RFU were drawn at different
+ * heights, the axis labels were true of no curve in particular, and one threshold could not be
+ * drawn as one line (it sat at a different pixel row for each curve, which is how the rail's
+ * dotted line came to miss the Cq rings on a log scale). One shift keeps the axis meaning the same
+ * thing everywhere on the plot, at the cost of lifting the quieter curves a little further than
+ * they need.
+ *
+ * Mutates the adjusts in place, since the band and tooltip code holds the same arrays; a no-op
+ * when nothing on the plot is non-positive, or when `scale` isn't `"log"`. Temperature series ride
+ * their own axis and are left alone.
  */
-function logFloor(values: number[], adjust: Adjust[], scale: Scale): Adjust[] {
-  if (scale !== "log" || values.length === 0) return adjust;
-  const plotted = applyAdjust(values, adjust);
-  const min = Math.min(...plotted);
-  if (min > 0) return adjust;
+function applyLogFloor(rows: (number | null)[][], meta: SeriesMeta[], scale: Scale): void {
+  if (scale !== "log") return;
+  let min = Infinity;
+  meta.forEach((m, i) => {
+    if (m.kind === "temp") return;
+    for (const v of rows[i + 1]!) if (v != null && v < min) min = v;
+  });
+  if (!Number.isFinite(min) || min > 0) return;
   const shiftUp = 1 - min;
-  return adjust.map((a) => ({ scale: a.scale, shift: a.shift + shiftUp }));
+  // The "draw baseline" overlay deliberately shares its parent curve's `adjust` array, so shift
+  // each array once rather than once per series that points at it.
+  const shifted = new Set<Adjust[]>();
+  meta.forEach((m, i) => {
+    if (m.kind === "temp") return;
+    if (!shifted.has(m.adjust)) {
+      shifted.add(m.adjust);
+      for (const a of m.adjust) a.shift += shiftUp;
+    }
+    const row = rows[i + 1]!;
+    for (let j = 0; j < row.length; j++) if (row[j] != null) row[j]! += shiftUp;
+  });
 }
 
 /**
@@ -119,32 +148,53 @@ function applyAdjust(values: number[], adjust: Adjust[]): number[] {
   return values.map((v, i) => v * adjust[i]!.scale + adjust[i]!.shift);
 }
 
-/** Fallback baseline region (`threshold.md` §3.1/§8) when auto-detection finds no confident
- * onset — cycles 2–9, clamped to the run's actual cycle count. */
-function fallbackRegion(cycles: number[]) {
-  return clampBaselineRegion({ beginCycle: 2, endCycle: 9 }, cycles);
+/** See {@link SeriesMeta.plotDelta} — the plotted line minus the analysis' corrected values. */
+function plotDelta(
+  values: number[],
+  adjust: Adjust[],
+  analysis: CurveAnalysis | undefined,
+): number[] | undefined {
+  if (!analysis) return undefined;
+  return values.map((v, i) => {
+    const a = adjust[i] ?? IDENTITY_ADJUST;
+    return v * a.scale + a.shift - (analysis.correctedValues[i] ?? v);
+  });
+}
+
+/** Linear interpolation of a per-cycle series at a fractional cycle — used to evaluate
+ * {@link SeriesMeta.plotDelta} at a Cq, which lands between two reads. Exact for the quantities
+ * it's applied to: `plotDelta` is either constant or the fitted baseline, both linear in cycle. */
+function interpolateAt(cycles: number[], values: number[], cycle: number): number | null {
+  for (let i = 0; i < cycles.length - 1; i++) {
+    const c0 = cycles[i]!;
+    const c1 = cycles[i + 1]!;
+    if (cycle < c0 || cycle > c1) continue;
+    const v0 = values[i];
+    const v1 = values[i + 1];
+    if (v0 == null || v1 == null) return null;
+    const span = c1 - c0;
+    return span === 0 ? v0 : v0 + ((cycle - c0) / span) * (v1 - v0);
+  }
+  return null;
 }
 
 /**
- * The flat pre-amplification region for a curve (`threshold.md` §2–§3,
- * `packages/core/src/baseline.ts`) — always auto-detected on a smoothed copy (for robust onset
- * detection — see §2), falling back to cycles 2–9 if detection finds nothing confident. No
- * manual override: baselining is no longer a user-configurable region.
+ * Curves-view baselining: `"relative"` plots the curve's already-corrected values from its
+ * analysis record — the very same array the Cq was computed on — expressed as the per-cycle shift
+ * that turns the raw curve into it. `"absolute"` plots the curve unmodified, as does any series
+ * with no analysis record to draw on.
+ *
+ * That the shift is *derived* from `correctedValues` rather than re-fitted is the whole mechanism:
+ * there is one baseline per curve in the app, and this is a projection of it.
  */
-function resolveBaselineRegion(cycles: number[], values: number[]): BaselineRegion {
-  return autoBaselineRegion(cycles, smoothCurve(values)) ?? fallbackRegion(cycles);
-}
-
-/**
- * Curves-view baselining (`threshold.md` §2–§4, `packages/core/src/baseline.ts`): `"relative"`
- * finds the auto-detected baseline region and subtracts the fitted line from it
- * (`LinearBaseLineNormalized`); `"absolute"` skips this entirely and plots the curve unmodified.
- */
-function algorithmAdjust(cycles: number[], values: number[], view: CurveView): Adjust[] {
-  if (view === "absolute" || values.length === 0) return values.map(() => IDENTITY_ADJUST);
-
-  const region = resolveBaselineRegion(cycles, values);
-  const corrected = subtractBaseline(cycles, values, region, "LinearBaseLineNormalized");
+function algorithmAdjust(
+  values: number[],
+  analysis: CurveAnalysis | undefined,
+  view: CurveView,
+): Adjust[] {
+  // Fresh objects per cycle, never a shared constant: `applyLogFloor` shifts adjusts in place.
+  if (view === "absolute" || !analysis) return values.map(() => ({ scale: 1, shift: 0 }));
+  const corrected = analysis.correctedValues;
   return values.map((v, i) => ({ scale: 1, shift: (corrected[i] ?? v) - v }));
 }
 
@@ -158,8 +208,8 @@ function algorithmAdjust(cycles: number[], values: number[], view: CurveView): A
  * which for `"absolute"` is the identity.
  */
 function wellAdjust(
-  cycles: number[],
   values: number[],
+  analysis: CurveAnalysis | undefined,
   factory: number[] | undefined,
   baseline: Baseline,
   curveView: CurveView,
@@ -173,8 +223,13 @@ function wellAdjust(
       return { scale: f !== 0 ? 100 / f : 1, shift: f !== 0 ? -100 : 0 };
     });
   }
-  return algorithmAdjust(cycles, values, curveView);
+  return algorithmAdjust(values, analysis, curveView);
 }
+
+/** A dark (LED-off) overlay series, carrying the same kind of analysis record a well curve does so
+ * the "Relative" view can baseline it the same way — it quantifies nothing, so the record is the
+ * baseline-only kind (`RunAnalysis.plainBaselines`). */
+export type PlotDarkCurve = DarkCurve & { analysis?: CurveAnalysis };
 
 /** A factory-calibration reference value, overlaid as a dotted flat line per (channel, col) —
  * see the Reference view. Purely a display overlay, like {@link DarkCurve}. */
@@ -222,14 +277,20 @@ export interface SeriesMeta {
   /** Per-cycle raw→plotted mapping this series was drawn with; lets the tooltip/band code
    * reposition min/max/std into plotted space without recomputing which baseline applied. */
   adjust: Adjust[];
-  /** See {@link PlotCurve.cq}. */
-  cq?: number | null;
-  /** See {@link PlotCurve.baselineFormula}. */
-  baselineFormula?: string | null;
-  /** See {@link PlotCurve.baselineRegion}. */
-  baselineRegion?: BaselineRegion | null;
-  /** See {@link PlotCurve.noise}. */
-  noise?: number | null;
+  /** See {@link PlotCurve.analysis}. */
+  analysis?: CurveAnalysis;
+  /**
+   * Per cycle, how far the *plotted* line sits above this series' baseline-corrected values —
+   * `plotted[i] − correctedValues[i]`, the offset between the space thresholds and Cq live in and
+   * the space the curve is actually drawn in. Zero in the "Relative" view on a linear scale;
+   * a constant there under a log scale ({@link logFloor}'s per-curve shift); the fitted baseline
+   * itself in the "Absolute" view.
+   *
+   * It exists so the threshold line and the Cq ring can be placed *by construction* rather than
+   * by re-deriving where the curve crosses: a threshold `T` is at `T + plotDelta` on screen, and
+   * that is where both are drawn. Absent for a series with no analysis record.
+   */
+  plotDelta?: number[];
   /** See {@link PlotCurve.sample}. */
   sample?: string;
   /** For `kind: "baseline"` only: index into `meta`/`u.series` (well series, not row/col index —
@@ -265,9 +326,11 @@ export interface TooltipData {
   std?: number;
   left: number;
   top: number;
-  /** See {@link PlotCurve.cq}. */
+  /** `CurveAnalysis.cq` for the hovered curve (`threshold.md` §6) — absent where the run computes
+   * none (channel space, the dark/factory overlays). */
   cq?: number | null;
-  /** See {@link PlotCurve.baselineFormula}. */
+  /** The linear baseline this curve was actually corrected with (`CurveAnalysis.baselineFit`),
+   * rendered as a formula (e.g. "2000 + 4c"), so a surprising Cq can be traced back to it. */
   baselineFormula?: string | null;
 }
 
@@ -275,7 +338,7 @@ export interface BuildChartConfig {
   wellCurves: PlotCurve[];
   /** Dark (LED-off) background series to overlay as dotted lines; empty draws none. Purely a
    * display overlay — never subtracted from `wellCurves`. */
-  darkCurves: DarkCurve[];
+  darkCurves: PlotDarkCurve[];
   /** Factory-calibration reference values to overlay as dotted flat lines, matched to
    * `wellCurves` by (channel, col); empty draws none. See the Reference view. */
   factoryCurves: FactoryCurve[];
@@ -342,7 +405,7 @@ export function buildChart(cfg: BuildChartConfig): {
   const cycles =
     wellCurves[0]?.cycles ?? darkCurves[0]?.cycles ?? tempCurves[0]?.cycles ?? [];
 
-  const darkByChannel = new Map<number, DarkCurve>();
+  const darkByChannel = new Map<number, PlotDarkCurve>();
   for (const d of darkCurves) darkByChannel.set(d.channel, d);
 
   const factoryByKey = new Map<string, FactoryCurve>();
@@ -350,7 +413,8 @@ export function buildChart(cfg: BuildChartConfig): {
 
   // Dark curves have no factory match, so the factory-relative baseline modes never apply to
   // them — only the curves-view algorithm mode does.
-  const nonWellAdjust = (values: number[]): Adjust[] => algorithmAdjust(cycles, values, curveView);
+  const nonWellAdjust = (values: number[], analysis?: CurveAnalysis): Adjust[] =>
+    algorithmAdjust(values, analysis, curveView);
 
   const rows: (number | null)[][] = [cycles.map((c) => c)];
   const meta: SeriesMeta[] = [];
@@ -361,13 +425,9 @@ export function buildChart(cfg: BuildChartConfig): {
 
   for (const curve of wellCurves) {
     const factory = factoryByKey.get(`${curve.channel},${curve.col}`);
-    const adjust = logFloor(
-      curve.mean,
-      wellAdjust(curve.cycles, curve.mean, factory?.mean, baseline, curveView),
-      scale,
-    );
+    const adjust = wellAdjust(curve.mean, curve.analysis, factory?.mean, baseline, curveView);
     wellAdjusts.push(adjust);
-    rows.push(logSafe(applyAdjust(curve.mean, adjust), scale));
+    rows.push(applyAdjust(curve.mean, adjust));
     meta.push({
       kind: "well",
       channel: curve.channel,
@@ -382,10 +442,7 @@ export function buildChart(cfg: BuildChartConfig): {
       min: curve.min,
       max: curve.max,
       adjust,
-      cq: curve.cq,
-      baselineFormula: curve.baselineFormula,
-      baselineRegion: curve.baselineRegion,
-      noise: curve.noise,
+      analysis: curve.analysis,
       sample: curve.sample,
     });
     series.push({
@@ -406,10 +463,10 @@ export function buildChart(cfg: BuildChartConfig): {
   if (cfg.drawBaseline) {
     wellCurves.forEach((curve, i) => {
       const adjust = wellAdjusts[i]!;
-      const region = resolveBaselineRegion(curve.cycles, curve.mean);
-      const fit = fitLinearBaseline(curve.cycles, curve.mean, region);
+      const fit = curve.analysis?.baselineFit;
+      if (!fit) return;
       const baselineRaw = curve.cycles.map((c) => fit.intercept + fit.slope * c);
-      rows.push(logSafe(applyAdjust(baselineRaw, adjust), scale));
+      rows.push(applyAdjust(baselineRaw, adjust));
       meta.push({
         kind: "baseline",
         channel: curve.channel,
@@ -432,41 +489,12 @@ export function buildChart(cfg: BuildChartConfig): {
     });
   }
 
-  // Cq markers: one per well curve with a defined Cq, positioned by linearly interpolating the
-  // curve's already-plotted (baseline-adjusted, log-safe) values at the fractional Cq cycle —
-  // the same values the line itself is drawn from.
-  const cqMarkers: { x: number; y: number; color: string; seriesIdx: number }[] = [];
-  wellCurves.forEach((curve, i) => {
-    if (curve.cq == null) return;
-    const plottedRow = rows[i + 1] as (number | null)[];
-    const cycles = curve.cycles;
-    let lo = -1;
-    for (let j = 0; j < cycles.length - 1; j++) {
-      if (curve.cq! >= cycles[j]! && curve.cq! <= cycles[j + 1]!) {
-        lo = j;
-        break;
-      }
-    }
-    if (lo < 0) return;
-    const y0 = plottedRow[lo];
-    const y1 = plottedRow[lo + 1];
-    if (y0 == null || y1 == null) return;
-    const span = cycles[lo + 1]! - cycles[lo]!;
-    const frac = span !== 0 ? (curve.cq! - cycles[lo]!) / span : 0;
-    cqMarkers.push({
-      x: curve.cq!,
-      y: y0 + frac * (y1 - y0),
-      color: channelColor(curve.channel),
-      seriesIdx: i + 1,
-    });
-  });
-
   const presentChannels = new Set(wellCurves.map((c) => c.channel));
   for (const channel of presentChannels) {
     const dark = darkByChannel.get(channel);
     if (!dark) continue;
-    const adjust = logFloor(dark.mean, nonWellAdjust(dark.mean), scale);
-    rows.push(logSafe(applyAdjust(dark.mean, adjust), scale));
+    const adjust = nonWellAdjust(dark.mean, dark.analysis);
+    rows.push(applyAdjust(dark.mean, adjust));
     meta.push({
       kind: "dark",
       channel,
@@ -499,12 +527,11 @@ export function buildChart(cfg: BuildChartConfig): {
     for (const key of presentPairs) {
       const factory = factoryByKey.get(key);
       if (!factory) continue;
-      const adjust = logFloor(
-        factory.mean,
-        wellAdjust(cycles, factory.mean, factory.mean, baseline, curveView),
-        scale,
-      );
-      rows.push(logSafe(applyAdjust(factory.mean, adjust), scale));
+      // A factory reference is a stored constant, not a measured curve, so it has no baseline of
+      // its own to subtract — only the factory-relative modes (which are what this line *is*)
+      // apply. The Reference view, the only caller that supplies these, passes `"absolute"`.
+      const adjust = wellAdjust(factory.mean, undefined, factory.mean, baseline, curveView);
+      rows.push(applyAdjust(factory.mean, adjust));
       meta.push({
         kind: "factory",
         channel: factory.channel,
@@ -549,6 +576,40 @@ export function buildChart(cfg: BuildChartConfig): {
       width: t.kind === "setpoint" ? 1 : 1.5,
       dash: t.kind === "setpoint" ? SETPOINT_DASH : TEMP_DASH,
       points: { show: false },
+    });
+  });
+
+  // Everything above is plotted in its own natural units; these three passes finish the job for
+  // the whole plot at once, in order: lift every series onto a plottable log floor (one shared
+  // shift), record where each series' threshold now sits relative to the drawn line, and blank
+  // whatever is still non-positive. Done here rather than per series precisely so the shift is
+  // one number for the plot instead of one per curve — see `applyLogFloor`.
+  applyLogFloor(rows, meta, scale);
+  meta.forEach((m, i) => {
+    m.plotDelta = plotDelta(m.mean, m.adjust, m.analysis);
+    if (m.kind !== "temp") rows[i + 1] = logSafe(rows[i + 1] as number[], scale);
+  });
+
+  // Cq markers: one ring per well curve with a defined Cq, placed *at its threshold* — Cq is by
+  // definition the cycle at which the corrected curve reaches it, so `(cq, threshold)` is the
+  // crossing point, and projecting it through `plotDelta` puts the ring exactly on the threshold
+  // line the rail draws (and exactly on the curve, since the curve is what defines the crossing).
+  //
+  // It used to be placed by interpolating the plotted curve linearly at the fractional Cq. That
+  // silently disagreed with the crossing itself, which `findThresholdCrossing` interpolates in
+  // *log* space: on a curve doubling between reads the ring came out ~10% of the threshold above
+  // the line. Reading the threshold rather than re-deriving the crossing has no such gap to open.
+  const cqMarkers: { x: number; y: number; color: string; seriesIdx: number }[] = [];
+  wellCurves.forEach((curve, i) => {
+    const { cq, threshold } = curve.analysis ?? {};
+    if (cq == null || threshold == null) return;
+    const delta = interpolateAt(curve.cycles, meta[i]!.plotDelta ?? [], cq);
+    if (delta == null) return;
+    cqMarkers.push({
+      x: cq,
+      y: threshold + delta,
+      color: channelColor(curve.channel),
+      seriesIdx: i + 1,
     });
   });
 
@@ -711,7 +772,7 @@ function overlayPlugin(
   let svg: SVGSVGElement;
   let bandGroup: SVGGElement;
   let cqGroup: SVGGElement;
-  let thresholdLine: SVGLineElement;
+  let thresholdGroup: SVGGElement;
   let regionGroup: SVGGElement;
   let group: SVGGElement;
   let vline: SVGLineElement;
@@ -745,11 +806,8 @@ function overlayPlugin(
         cqGroup = document.createElementNS(SVG_NS, "g");
         svg.appendChild(cqGroup);
 
-        thresholdLine = line();
-        thresholdLine.setAttribute("stroke", "#e6e6e6");
-        thresholdLine.setAttribute("stroke-dasharray", THRESHOLD_LINE_DASH);
-        thresholdLine.style.display = "none";
-        svg.appendChild(thresholdLine);
+        thresholdGroup = document.createElementNS(SVG_NS, "g");
+        svg.appendChild(thresholdGroup);
 
         regionGroup = document.createElementNS(SVG_NS, "g");
         svg.appendChild(regionGroup);
@@ -797,8 +855,8 @@ function overlayPlugin(
           );
         });
 
-        // Cq markers: one small ring per curve with a defined Cq, at its (interpolated)
-        // position on the plotted line.
+        // Cq markers: one small ring per curve with a defined Cq, at the point where its corrected
+        // curve reaches its threshold (see `cqMarkers`).
         while (cqGroup.childElementCount > cqMarkers.length) {
           cqGroup.lastElementChild!.remove();
         }
@@ -818,27 +876,52 @@ function overlayPlugin(
         });
 
         // Rail-driven threshold-hover line: a dotted horizontal line at the hovered target's
-        // threshold RFU, spanning the full plotted cycle range.
+        // threshold RFU, spanning the full plotted cycle range and drawn where each highlighted
+        // curve actually carries that threshold — `tv + plotDelta` (see `SeriesMeta.plotDelta`),
+        // the same projection the Cq rings use, so the line always runs through them.
+        //
+        // In practice that is one line — every curve on a plot shares one `plotDelta` in the
+        // "Relative" view (0 on a linear scale, `applyLogFloor`'s shared offset on a log one) — but
+        // it is drawn per highlighted curve and deduplicated by pixel row rather than assumed, so
+        // the line cannot drift away from the rings it belongs to whatever the projection does.
         const tv = thresholdLineState.value;
-        // Kept outside the `if` below so the noise-label placement further down can steer clear
-        // of it rather than risk landing right on top of the dotted line.
-        let thresholdY: number | null = null;
-        if (tv == null || u.scales.x!.min == null || u.scales.x!.max == null) {
-          thresholdLine.style.display = "none";
-        } else {
+        // Kept for the noise-label placement further down, so it can steer clear of the lines
+        // rather than risk landing right on top of one.
+        const thresholdYs: number[] = [];
+        if (tv != null && u.scales.x!.min != null && u.scales.x!.max != null) {
           const x1 = u.valToPos(u.scales.x!.min, "x");
           const x2 = u.valToPos(u.scales.x!.max, "x");
-          const y = u.valToPos(tv, "y");
-          if ([x1, x2, y].every(Number.isFinite)) {
-            thresholdLine.setAttribute("x1", String(x1));
-            thresholdLine.setAttribute("x2", String(x2));
-            thresholdLine.setAttribute("y1", String(y));
-            thresholdLine.setAttribute("y2", String(y));
-            thresholdLine.style.display = "";
-            thresholdY = y;
-          } else {
-            thresholdLine.style.display = "none";
+          const seen = new Set<number>();
+          if (Number.isFinite(x1) && Number.isFinite(x2)) {
+            meta.forEach((m, i) => {
+              if (m.kind !== "well" || !m.plotDelta) return;
+              if ((u.series[i + 1]!.alpha ?? 1) < 1) return;
+              const y = u.valToPos(tv + (m.plotDelta[0] ?? 0), "y");
+              if (!Number.isFinite(y)) return;
+              const row = Math.round(y);
+              if (seen.has(row)) return;
+              seen.add(row);
+              thresholdYs.push(y);
+            });
           }
+          while (thresholdGroup.childElementCount > thresholdYs.length) {
+            thresholdGroup.lastElementChild!.remove();
+          }
+          while (thresholdGroup.childElementCount < thresholdYs.length) {
+            const l = line();
+            l.setAttribute("stroke", "#e6e6e6");
+            l.setAttribute("stroke-dasharray", THRESHOLD_LINE_DASH);
+            thresholdGroup.appendChild(l);
+          }
+          thresholdYs.forEach((y, i) => {
+            const l = thresholdGroup.children[i] as SVGLineElement;
+            l.setAttribute("x1", String(x1));
+            l.setAttribute("x2", String(x2));
+            l.setAttribute("y1", String(y));
+            l.setAttribute("y2", String(y));
+          });
+        } else {
+          thresholdGroup.replaceChildren();
         }
 
         // Rail-driven threshold-hover diagnostic: for whichever curves the hover isolated (the
@@ -857,7 +940,7 @@ function overlayPlugin(
         const activeRegions: { seriesIdx: number; m: SeriesMeta }[] = [];
         if (thresholdLineState.regions) {
           meta.forEach((m, i) => {
-            if (m.kind !== "well" || m.baselineRegion == null || m.noise == null) return;
+            if (m.kind !== "well" || !m.analysis) return;
             const seriesIdx = i + 1;
             if ((u.series[seriesIdx]!.alpha ?? 1) < 1) return;
             activeRegions.push({ seriesIdx, m });
@@ -905,7 +988,7 @@ function overlayPlugin(
           ];
           const wellColor = (u.series[seriesIdx]!.stroke as string) ?? "#8aa0c0";
           const rowData = u.data[seriesIdx] as (number | null)[];
-          const region = m.baselineRegion!;
+          const region = m.analysis!.baselineRegion;
           const pts: string[] = [];
           let lastX = NaN;
           let lastY = NaN;
@@ -933,13 +1016,13 @@ function overlayPlugin(
             dot.setAttribute("fill", wellColor);
             dot.style.display = "";
             // Default above the point; flip below when that would land within a line's-width of
-            // the dotted threshold line, which otherwise routinely cuts right through the text —
+            // a dotted threshold line, which otherwise routinely cuts right through the text —
             // the two are drawn at similar RFU by construction (the region ends near where a
             // curve approaches its own threshold).
-            const nearThresholdLine = thresholdY != null && Math.abs(lastY - 12 - thresholdY) < 8;
+            const nearThresholdLine = thresholdYs.some((ty) => Math.abs(lastY - 12 - ty) < 8);
             text.setAttribute("x", String(lastX + 8));
             text.setAttribute("y", String(lastY + (nearThresholdLine ? 18 : -8)));
-            text.textContent = `σ${m.noise!.toFixed(1)}`;
+            text.textContent = `σ${m.analysis!.noise.toFixed(1)}`;
             text.style.display = "";
           } else {
             dot.style.display = "none";
@@ -1057,8 +1140,15 @@ function overlayPlugin(
                 ...(spread ?? {}),
                 left,
                 top,
-                cq: m.cq,
-                baselineFormula: m.baselineFormula,
+                cq: m.analysis?.cq,
+                // Only for a curve the run actually quantifies (dye space — a `threshold` means a
+                // Cq was taken against it). A channel curve carries a baseline so the "Relative"
+                // view can plot it, but quoting that fit in the tooltip would read as an analysis
+                // of a signal the app deliberately doesn't analyse — see `RunAnalysis.cqTable`.
+                baselineFormula:
+                  m.analysis?.threshold != null
+                    ? formatBaselineFormula(m.analysis.baselineFit)
+                    : null,
               }
             : null,
         );
