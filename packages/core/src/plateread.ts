@@ -1,4 +1,10 @@
-import type { PlateRead, WellReading, WellTable } from "./types.js";
+import type {
+  PlateRead,
+  PlateReadField,
+  PlateReadTemp,
+  WellReading,
+  WellTable,
+} from "./types.js";
 import { icffFieldMap, parseIcff, type IcffEntry } from "./icff.js";
 import { extractTemps } from "./temps.js";
 
@@ -47,6 +53,33 @@ export function buildWellTable(record: (index: number) => WellReading): WellTabl
   );
 }
 
+/** The three big-endian version/magic words at 0x000, or `[]` if the file is too short. */
+function versionWords(bytes: Uint8Array): number[] {
+  if (bytes.length < 12) return [];
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  return [view.getInt32(0, false), view.getInt32(4, false), view.getInt32(8, false)];
+}
+
+/**
+ * Best-effort human value for one descriptor-dictionary entry. ICFF carries no type tag (see
+ * `icff.md`), so this is a heuristic: a temperature where `extractTemps` recognized one (which
+ * is also what decides int-vs-float for those fields), the field's text when it looks like a
+ * string, the big-endian int for any other 4-byte scalar, and a byte count for the bulk float
+ * arrays. Every raw decoding travels alongside in `PlateReadField.binary`, so nothing is lost
+ * to a caller that wants to second-guess this.
+ */
+function fieldValue(entry: IcffEntry, temps: Map<string, PlateReadTemp>): string {
+  const temp = temps.get(entry.name);
+  // Rounded: a float32 °C reading prints as 59.9900016784668 otherwise, and this is the
+  // display value — `temps`/`blockTempC` keep the full precision for anything computational.
+  if (temp) return `${Number(temp.celsius.toFixed(2))} °C`;
+  if (entry.text) return entry.text;
+  if (entry.int !== undefined) return String(entry.int);
+  // A bulk array — or a field `parseIcff` declined to decode, which is an empty string rather
+  // than a byte count it can't stand behind.
+  return entry.length > 4 ? `«${entry.length} B»` : "";
+}
+
 /**
  * Decode a single `.Plateread` file.
  *
@@ -83,6 +116,15 @@ export function decodePlateRead(
   const temps = extractTemps(descriptors);
   const blockTempC = temps.find((t) => t.key === "BLOCKTEMP")?.celsius;
 
+  // The whole dictionary as a uniform key/value table (see `PlateRead.fields`) — the same
+  // shape a `.pcrd`-origin read builds from its XML header, so consumers render one table.
+  const tempsByKey = new Map(temps.map((t) => [t.key, t]));
+  const headerFields: PlateReadField[] = descriptors.map((entry) => ({
+    name: entry.name,
+    value: fieldValue(entry, tempsByKey),
+    binary: entry,
+  }));
+
   const dateTime = fields.get("DATETIME")?.text;
   const timestamp =
     dateTime && !Number.isNaN(Date.parse(dateTime)) ? dateTime : undefined;
@@ -103,6 +145,8 @@ export function decodePlateRead(
     blockTempC,
     temps,
     timestamp,
+    fields: headerFields,
+    binaryFile: { size: bytes.length, versionWords: versionWords(bytes) },
     wells,
     dark,
   };
@@ -132,15 +176,15 @@ export interface PlatereadDetail {
   fields: IcffEntry[];
 }
 
-/** Fully decode a `.Plateread` file's structure (version words + ICFF index entries). Tolerant
- * of a buffer too short to be a real `.Plateread` (e.g. empty bytes for a format with no
- * binary layout at all) — `versionWords` is empty and `fields` is `[]` rather than throwing,
- * matching `parseIcff`'s own graceful degradation just below. */
+/**
+ * Decode a `.Plateread` file's structure alone (version words + ICFF index entries), without
+ * the fluorescence tables — for inspecting a file's raw layout. A decoded {@link PlateRead}
+ * already carries the same information as `binaryFile` + `fields`, so prefer those when you
+ * have one.
+ *
+ * Tolerant of a buffer too short to be a real `.Plateread`: `versionWords` is empty and
+ * `fields` is `[]` rather than throwing, matching `parseIcff`'s own graceful degradation.
+ */
 export function decodePlateReadDetail(bytes: Uint8Array): PlatereadDetail {
-  const versionWords: number[] = [];
-  if (bytes.length >= 12) {
-    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-    versionWords.push(view.getInt32(0, false), view.getInt32(4, false), view.getInt32(8, false));
-  }
-  return { size: bytes.length, versionWords, fields: parseIcff(bytes) };
+  return { size: bytes.length, versionWords: versionWords(bytes), fields: parseIcff(bytes) };
 }

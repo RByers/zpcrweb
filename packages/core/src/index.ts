@@ -98,6 +98,8 @@ export type {
   Zpcr,
   RunMetadata,
   PlateRead,
+  PlateReadField,
+  PlateReadBinaryFile,
   WellReading,
   WellTable,
   WellCurve,

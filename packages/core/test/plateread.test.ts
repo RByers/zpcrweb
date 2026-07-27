@@ -67,6 +67,36 @@ describe("plateread decoding", () => {
 
 });
 
+describe("PlateRead.fields — the format-neutral header table", () => {
+  const zpcr = parseZpcr(readSampleBytes());
+  const read = zpcr.reads[0]!;
+
+  it("exposes the whole descriptor dictionary as key/value pairs, with ICFF provenance", () => {
+    const detail = decodePlateReadDetail(zpcr.archive.bytes(read.fileName));
+    expect(read.fields.map((f) => f.name)).toEqual(detail.fields.map((f) => f.name));
+    expect(read.fields.every((f) => f.binary !== undefined)).toBe(true);
+    const cycle = read.fields.find((f) => f.name === "CYCLE")!;
+    expect(cycle.value).toBe(String(read.cycle));
+    expect(cycle.binary!.offset).toBeGreaterThan(0);
+  });
+
+  it("renders untyped values by their decoded meaning: °C, text, byte counts", () => {
+    const value = (name: string) => read.fields.find((f) => f.name === name)?.value;
+    // A temperature reads as a temperature, not as the int32 reinterpretation of its bytes,
+    // and is rounded for display (the raw float32 prints as 59.9900016784668).
+    expect(value("BLOCKTEMP")).toBe(`${Number(read.blockTempC!.toFixed(2))} °C`);
+    expect(value("BLOCKTEMP")).toMatch(/^\d+(\.\d{1,2})? °C$/);
+    expect(value("DATETIME")).toBe(read.timestamp);
+    // The bulk float arrays have no scalar value — their offsets, in `binary`, are the point.
+    expect(value("WELLDATA")).toMatch(/^«\d+ B»$/);
+  });
+
+  it("reports the backing binary file, which a .pcrd-origin read has no equivalent of", () => {
+    expect(read.binaryFile!.size).toBe(zpcr.archive.bytes(read.fileName).length);
+    expect(read.binaryFile!.versionWords).toHaveLength(3);
+  });
+});
+
 describe("decodePlateReadDetail", () => {
   it("decodes version words + fields from a real .Plateread", () => {
     const zpcr = parseZpcr(readSampleBytes());
@@ -77,8 +107,8 @@ describe("decodePlateReadDetail", () => {
   });
 
   it("degrades gracefully (no throw) on buffers too short to be a real .Plateread", () => {
-    // A .pcrd-derived PlateRead has no binary archive entry at all — DecodedPlateread.tsx
-    // calls this with an empty buffer in that case, so it must never throw.
+    // Callers hand it whatever bytes they have; a buffer with no ICFF footer must degrade
+    // rather than throw.
     expect(decodePlateReadDetail(new Uint8Array(0))).toEqual({
       size: 0,
       versionWords: [],

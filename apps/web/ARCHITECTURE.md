@@ -22,14 +22,16 @@ app is format-agnostic:
   `Zpcr` alone) for its "Encrypted" block: a `.pcrd`'s own `container.encrypted` for a `.pcrd`,
   or any embedded `.pltd`/`.prcl` entry's `container.encrypted` (via `zpcr.plates()`/
   `zpcr.protocols()`) for a `.zpcr` — see `lib/encryptionStatus.ts`.
-- `DecodedPlateread` (the `.Plateread` typed view) shows the WELLDATA/DARKDATA tables from the
-  already-decoded `PlateRead` object either way; it only conditionally shows the binary-only
-  "descriptor dictionary" section (`decodePlateReadDetail` finds nothing when there's no
-  matching binary archive entry — always the case for a `.pcrd`-origin read, since a `.pcrd`
-  has no archive entries at all — which is the signal used to hide that section). In its place,
-  a `.pcrd`-origin read shows a key/value table of `PlateRead.headerFields` — the
-  `Hdr/PlateReadDataHeader` XML element's own child elements, name and text content, decoded
-  once in `pcrd.ts` rather than re-parsed in the component.
+- `DecodedPlateread` (the plate-read typed view) takes just a `PlateRead` and reads everything
+  off it — WELLDATA/DARKDATA tables and one "Header fields" key/value table built from
+  `PlateRead.fields`, which the core decodes from a binary read's descriptor dictionary or a
+  `.pcrd` read's XML header alike (see the root
+  [`ARCHITECTURE.md`](../../ARCHITECTURE.md#two-input-formats-one-output-shape)). It doesn't
+  touch `Zpcr.archive`, so it never has to ask whether `read.fileName` names a real file. Two
+  things are still shown conditionally, because they exist only for a binary read: the
+  file-structure numbers (`read.binaryFile` — size and version words) and the extra ICFF
+  columns beside each value (offset/length/flag and every scalar decoding, from
+  `PlateReadField.binary`).
 - `RunInfoTable` and `ProtocolDecoded` (`components/raw/DecodedView.tsx`) take plain
   `text: string` rather than `(zpcr, name)`, so both `RawFilesView` (`.zpcr`'s real files, by
   name) and `PcrdRawView` (a `.pcrd`'s real XML nodes, by direct reference) can feed them

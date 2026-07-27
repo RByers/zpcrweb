@@ -360,7 +360,7 @@ function PcrdRawContent({
     if (mode === "xml") return <XmlTree roots={el ? [el] : []} />;
     const read = zpcr.reads[entry.index];
     if (!read) return <div className="decoded__na mono">No decoded read.</div>;
-    return <DecodedPlateread zpcr={zpcr} read={read} />;
+    return <DecodedPlateread read={read} />;
   }
 
   if (entry.kind === "calibration") {

@@ -23,6 +23,7 @@ import type {
   CurveOptions,
   DcalEntry,
   PlateRead,
+  PlateReadField,
   PlateReadTemp,
   PltdEntry,
   PrclEntry,
@@ -173,11 +174,15 @@ function decodePcrdPlateRead(el: XmlElement, index: number): PlateRead {
     }),
   );
 
-  const headerFields = hdr
+  // The XML header's own children as the same uniform key/value table a binary read builds
+  // from its descriptor dictionary (see `PlateRead.fields`); no `binary` provenance, since
+  // these values are typed text rather than an untyped byte range. `DrkCrnt` is the nested
+  // DARKDATA array, surfaced as `dark` instead of as a header scalar.
+  const fields: PlateReadField[] = hdr
     ? splitElements(hdr)
         .filter((e) => e.name.toLowerCase() !== "drkcrnt")
         .map((e) => ({ name: e.name, value: unescapeXml(e.inner) }))
-    : undefined;
+    : [];
 
   const cycle = num("Cycle");
   // Not a real file — there's no `.Plateread` inside a `.pcrd`. `PlateRead.fileName` still
@@ -197,7 +202,7 @@ function decodePcrdPlateRead(el: XmlElement, index: number): PlateRead {
     blockTempC: temps.find((t) => t.key === "BLOCKTEMP")?.celsius,
     temps,
     timestamp,
-    headerFields,
+    fields,
     wells,
     dark,
   };
@@ -534,6 +539,7 @@ function buildZpcr(root: XmlElement[]): Zpcr {
           channelMask: 0,
           fileName: `plateRead[${index}]`,
           temps: [],
+          fields: [],
           wells: buildWellTable(missingReading),
           dark: Array.from({ length: CHANNELS }, missingReading),
         };

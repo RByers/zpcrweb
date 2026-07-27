@@ -7,6 +7,8 @@
  * the reverse-engineered `.Plateread` binary format.
  */
 
+import type { IcffEntry } from "./icff.js";
+
 /** A single well/channel optical reading: four floats from the WELLDATA table. */
 export interface WellReading {
   /** Mean fluorescence — the primary value that forms the amplification curve. */
@@ -48,6 +50,35 @@ export interface TemperatureCurve {
   celsius: (number | null)[];
 }
 
+/**
+ * One field of a plate read's header, as a display-ready key/value pair — the format-neutral
+ * unit of {@link PlateRead.fields}.
+ */
+export interface PlateReadField {
+  /** Field name as the source spells it: `BLOCKTEMP` from a binary read, `BlockTmp` from XML. */
+  name: string;
+  /**
+   * Human-readable value. For an XML-sourced read this is the element's text verbatim; for a
+   * binary one it is a best-effort decoding of an untyped ICFF field (see
+   * {@link PlateReadField.binary}).
+   */
+  value: string;
+  /**
+   * The raw ICFF index entry behind a binary-sourced field — offset, length, flag and every
+   * possible scalar decoding. Absent for an XML-sourced read, which has typed text instead of
+   * an untyped byte range. Consumers that just want a key/value table can ignore this.
+   */
+  binary?: IcffEntry;
+}
+
+/** The binary `.Plateread` file a read was decoded from, when there was one. */
+export interface PlateReadBinaryFile {
+  /** File size in bytes. */
+  size: number;
+  /** The three big-endian version/magic words at 0x000 (see `plateread.md` §2). */
+  versionWords: number[];
+}
+
 /** One plate read == one PCR cycle == one `.Plateread` file, fully decoded. */
 export interface PlateRead {
   /** 1-based position in the ordered read series (by filename suffix). */
@@ -77,12 +108,24 @@ export interface PlateRead {
   /** Read timestamp string from the header, if present (best-effort). */
   timestamp?: string;
   /**
-   * Every child element of `Hdr/PlateReadDataHeader`, name and text content, in document
-   * order — only populated for a `.pcrd`-origin read (see `pcrd.md` §2.2), which has no
-   * binary descriptor dictionary to show instead. `DrkCrnt` (the nested DARKDATA array,
-   * shown separately via {@link dark}) is omitted.
+   * Every field in this read's header, in source order — one key/value table whatever the
+   * read was decoded from. A binary read fills it from the file's own descriptor dictionary
+   * (`plateread.md` §3), a `.pcrd`-origin read from the child elements of
+   * `Hdr/PlateReadDataHeader` (`pcrd.md` §2.2). Field *names* still differ between the two
+   * formats (`BLOCKTEMP` vs `BlockTmp`) — this unifies the shape, not the instrument's
+   * vocabulary; {@link temps} is where the two are reconciled to common keys.
+   *
+   * The nested `DrkCrnt` element is omitted on the XML side (it is the DARKDATA array, not a
+   * header scalar — see {@link dark}); the binary side's WELLDATA/DARKDATA entries are kept,
+   * since there the dictionary is the file's complete schema and their offsets are the point.
    */
-  headerFields?: { name: string; value: string }[];
+  fields: PlateReadField[];
+  /**
+   * The binary `.Plateread` file this read came from — present only for a read decoded from
+   * one. A `.pcrd`-origin read is an element inside a larger document, with no file of its
+   * own, so this is undefined and {@link fileName} is a synthetic label.
+   */
+  binaryFile?: PlateReadBinaryFile;
   /**
    * The full WELLDATA fluorescence table as `wells[channel][row][col]` — 6 optical
    * channels × 9 rows × 12 columns = 648 records. Rows 0–7 are plate rows A–H; row 8

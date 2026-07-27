@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { decodePlateReadDetail, type PlateRead, type Zpcr } from "@zpcrweb/core";
+import { useState } from "react";
+import type { PlateRead } from "@zpcrweb/core";
 import { channelColor, channelLabel } from "../../lib/channelColors";
 
 type Stat = "mean" | "std" | "min" | "max";
@@ -8,26 +8,19 @@ const ROW_LABELS = ["A", "B", "C", "D", "E", "F", "G", "H", "R"];
 const COLS = 12;
 
 /**
- * Fully decoded view of a single `.Plateread`. Everything comes from the file's own
- * descriptor dictionary (self-describing schema), so no offsets are hardcoded here: the
- * version words, every named field with its offset/length/type and decoded value, the
- * DARKDATA table, and the WELLDATA fluorescence grid.
+ * Fully decoded view of a single plate read, from either source format. Everything is read
+ * off the already-decoded `PlateRead`: its header fields as one key/value table (the binary
+ * file's own descriptor dictionary or the `.pcrd` XML header's children — `PlateRead.fields`
+ * unifies them, so nothing here re-parses a file or branches on format), the DARKDATA table,
+ * and the WELLDATA fluorescence grid. The extra ICFF columns and the file-structure numbers
+ * appear only when the read has a binary file behind it, since only then do they exist.
  */
-export function DecodedPlateread({ zpcr, read }: { zpcr: Zpcr; read: PlateRead }) {
+export function DecodedPlateread({ read }: { read: PlateRead }) {
   const [channel, setChannel] = useState(2);
   const [stat, setStat] = useState<Stat>("mean");
 
-  // A `.pcrd`-origin read has no real archive entry at all (a `.pcrd` has no inner files —
-  // see Zpcr.archive's doc comment), so there's nothing to decode structurally; guard the
-  // lookup rather than assuming `read.fileName` names a real entry. decodePlateReadDetail()
-  // on empty bytes finds no ICFF footer and returns no fields, so the binary-only sections
-  // below are skipped in that case.
-  const bytes = useMemo(
-    () => (zpcr.archive.entries.includes(read.fileName) ? zpcr.archive.bytes(read.fileName) : new Uint8Array(0)),
-    [zpcr, read.fileName],
-  );
-  const detail = useMemo(() => decodePlateReadDetail(bytes), [bytes]);
-  const isBinary = detail.fields.length > 0;
+  const binaryFile = read.binaryFile;
+  const hasIcff = read.fields.some((f) => f.binary);
   const channelCount = read.dark.length;
 
   const fmt = (v: number) => (stat === "std" ? v.toFixed(2) : v.toFixed(1));
@@ -37,15 +30,15 @@ export function DecodedPlateread({ zpcr, read }: { zpcr: Zpcr; read: PlateRead }
       <section className="decoded__block">
         <h3 className="decoded__h">File structure</h3>
         <dl className="decoded__dl mono">
-          {isBinary && (
+          {binaryFile && (
             <>
               <div className="decoded__pair">
                 <dt>Size</dt>
-                <dd>{detail.size.toLocaleString()} B</dd>
+                <dd>{binaryFile.size.toLocaleString()} B</dd>
               </div>
               <div className="decoded__pair">
                 <dt>Version</dt>
-                <dd>{detail.versionWords.join(" · ")} (BE)</dd>
+                <dd>{binaryFile.versionWords.join(" · ")} (BE)</dd>
               </div>
             </>
           )}
@@ -58,74 +51,70 @@ export function DecodedPlateread({ zpcr, read }: { zpcr: Zpcr; read: PlateRead }
             <dd>{read.timestamp ?? "—"}</dd>
           </div>
         </dl>
-        {!isBinary && read.headerFields && read.headerFields.length > 0 && (
-          <>
-            <div className="decoded__gridwrap">
-              <table className="decoded__tbl mono">
-                <thead>
-                  <tr>
-                    <th>Field</th>
-                    <th>Value</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {read.headerFields.map((f) => (
-                    <tr key={f.name}>
-                      <td className="decoded__fname">{f.name}</td>
-                      <td className="decoded__ftext">{f.value}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </>
-        )}
       </section>
 
-      {isBinary && (
+      {read.fields.length > 0 && (
         <section className="decoded__block">
           <h3 className="decoded__h">
-            Descriptor dictionary — every field, from the file's own schema
+            {hasIcff
+              ? "Header fields — the file's own descriptor dictionary, every entry"
+              : "Header fields — every element of the read's XML header"}
           </h3>
-          <p className="decoded__hint mono">
-            Scalars are big-endian; the WELLDATA/DARKDATA float arrays are little-endian.
-            Fields with an unclear purpose are shown with their raw value.
-          </p>
+          {hasIcff && (
+            <p className="decoded__hint mono">
+              Scalars are big-endian; the WELLDATA/DARKDATA float arrays are little-endian.
+              The dictionary carries no types, so Value is a best-effort reading — the raw
+              columns beside it show every decoding of the same bytes.
+            </p>
+          )}
           <div className="decoded__gridwrap">
             <table className="decoded__tbl decoded__fields mono">
               <thead>
                 <tr>
                   <th>Field</th>
-                  <th>Offset</th>
-                  <th>Len</th>
-                  <th>Flag</th>
-                  <th>int (BE)</th>
-                  <th>float (BE)</th>
-                  <th>text / hex</th>
+                  <th>Value</th>
+                  {hasIcff && (
+                    <>
+                      <th>Offset</th>
+                      <th>Len</th>
+                      <th>Flag</th>
+                      <th>int (BE)</th>
+                      <th>float (BE)</th>
+                      <th>text / hex</th>
+                    </>
+                  )}
                 </tr>
               </thead>
               <tbody>
-                {detail.fields.map((f) => (
-                  <tr key={f.name}>
-                    <td className="decoded__fname">{f.name}</td>
-                    <td>0x{f.offset.toString(16)}</td>
-                    <td>{f.length}</td>
-                    <td>{f.flag}</td>
-                    <td>{f.length === 4 ? f.int : ""}</td>
-                    <td>
-                      {f.length === 4 && f.float !== undefined
-                        ? f.float.toFixed(Math.abs(f.float) < 1000 ? 3 : 0)
-                        : ""}
-                    </td>
-                    <td className="decoded__ftext">
-                      {f.text !== undefined
-                        ? f.text
-                        : f.length > 4
-                          ? `«${f.length} B» 0x${f.hex}`
-                          : ""}
-                    </td>
-                  </tr>
-                ))}
+                {read.fields.map((f) => {
+                  const b = f.binary;
+                  return (
+                    <tr key={f.name}>
+                      <td className="decoded__fname">{f.name}</td>
+                      <td className="decoded__ftext">{f.value}</td>
+                      {hasIcff && (
+                        <>
+                          <td>{b ? `0x${b.offset.toString(16)}` : ""}</td>
+                          <td>{b?.length ?? ""}</td>
+                          <td>{b?.flag ?? ""}</td>
+                          <td>{b && b.length === 4 ? b.int : ""}</td>
+                          <td>
+                            {b && b.length === 4 && b.float !== undefined
+                              ? b.float.toFixed(Math.abs(b.float) < 1000 ? 3 : 0)
+                              : ""}
+                          </td>
+                          <td className="decoded__ftext">
+                            {b?.text !== undefined
+                              ? b.text
+                              : b && b.length > 4
+                                ? `«${b.length} B» 0x${b.hex}`
+                                : ""}
+                          </td>
+                        </>
+                      )}
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

@@ -45,7 +45,7 @@ export function DecodedView({ zpcr, name }: Props) {
   if (kind === "plateread") {
     const read = zpcr.reads.find((r) => r.fileName === name);
     if (!read) return <div className="decoded__na mono">No decoded read for {name}.</div>;
-    return <DecodedPlateread zpcr={zpcr} read={read} />;
+    return <DecodedPlateread read={read} />;
   }
 
   if (kind === "plate") return <DecodedPlate zpcr={zpcr} name={name} />;

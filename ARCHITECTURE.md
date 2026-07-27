@@ -107,6 +107,18 @@ than let that difference leak into every consumer, `parsePcrd` decodes straight 
   plate reads are decoded from `<PlateRead>` XML elements (`decodePcrdPlateRead` in `pcrd.ts`)
   into the identical `PlateRead` interface `decodePlateRead` produces from the binary
   `.Plateread` layout — same `wells`/`dark`/`temps`, different source bytes.
+- **`PlateRead.fields`** — a read's header as one key/value table whatever it was decoded
+  from: the binary file's ICFF descriptor dictionary, or the `.pcrd` header element's
+  children. The formats disagree on *names* (`BLOCKTEMP` vs `BlockTmp`) and on whether a value
+  is typed — an ICFF field is an untyped byte range, so each entry also carries the raw index
+  entry as `PlateReadField.binary` for a consumer that wants every possible decoding, and
+  `value` is a best-effort reading (`temps.ts`'s own int-vs-float rule for temperatures, text
+  where the field is a string, a byte count for the bulk arrays). What the interface unifies
+  is the shape, not the instrument's vocabulary; `temps` remains where the two vocabularies
+  are actually reconciled to common keys. The binary file itself — size and version words —
+  hangs off the optional `PlateRead.binaryFile`, absent for a `.pcrd` read, which is an
+  element of a larger document rather than a file. The net effect is that a consumer renders
+  one table and never reaches back into `Zpcr.archive` to re-parse the file a read came from.
 - **`Zpcr.archive`** — a `.pcrd` has no inner files at all (it's one XML document, not an
   archive), so for a `.pcrd`-derived `Zpcr` this is an honestly empty `ArchiveAccess`:
   `entries` is `[]` and the accessors throw. This library does **not** pretend a `.pcrd` has
