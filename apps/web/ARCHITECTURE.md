@@ -112,7 +112,7 @@ copied afterwards is a plain bookmark. Like the view, it is captured in a `useSt
 (first render, before any effect) so the state → URL sync can't strip it first; the fetch itself
 waits for hydration, since replacing a same-named copy needs to know what's already stored.
 
-The welcome screen's **"Load an example file"** button is just a link to one of these: it assigns
+The About/welcome card's **"Load an example file"** button is just a link to one of these: it assigns
 `formatLoadHash(EXAMPLE_FILE)` to `location.hash` rather than calling `addUrl`, so the button and
 an external deep link are one code path and the resulting URL is shareable. The example is
 `apps/web/public/examples/`, a symlink to the repo's `samples/` — Vite dereferences it into
@@ -343,13 +343,18 @@ so every call site keeps writing one `onChange({ … })` regardless of where the
   grid density for being able to read sample identity and target without opening the
   click-through well detail panel.
 - **Raw** — `RawFilesView` for `.zpcr`, `PcrdRawView` for `.pcrd` (see "Raw views" below).
-- **About** — `AboutView` (`components/views/AboutView.tsx`): a static credits card (name,
-  author link, GitHub link). It's the one view with no tab in `ViewSelector` — the header
-  wordmark is a `<button>` that switches to it — and the one that renders with no file loaded,
-  so the empty state's `app--empty` branch shows it in place of the large drop zone. `App`
-  keeps the last non-About view in a ref so the card's "← back" returns where the user was;
-  with a file loaded the tab strip stays visible (no tab selected) as a second way out. Being
-  file-independent, it is also exempt from the standalone-plate view fallback.
+- **About** — `AboutView` (`components/views/AboutView.tsx`): one card carrying both the credits
+  (name, the "nothing leaves your device" line, author and GitHub links) *and* the large
+  `DropZone` plus the "Load an example file" button. About and the welcome screen used to be two
+  separate screens; they're one now, so a first-time visitor sees what the app is and where their
+  data goes on the same screen that asks for a file, and there's a single place to keep current.
+  It's the one view with no tab in `ViewSelector` — the header wordmark is a `<button>` that
+  switches to it — and the one that renders with no file loaded, so the empty state's
+  `app--empty` branch shows it unconditionally. `onBack` is what distinguishes the two uses:
+  `App` keeps the last non-About view in a ref and passes `onBack` only when a file is loaded, so
+  "← back" returns where the user was and the welcome screen (with nowhere to go back to) omits
+  the button; with a file loaded the tab strip stays visible (no tab selected) as a second way
+  out. Being file-independent, it is also exempt from the standalone-plate view fallback.
 
 ### Decoded views (`components/raw/DecodedView.tsx`)
 

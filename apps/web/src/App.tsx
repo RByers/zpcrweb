@@ -45,36 +45,30 @@ export function App() {
   const showAbout = () => store.setView("about");
   const leaveAbout = () => store.setView(lastView.current);
 
+  // The example goes through the `#load=` hash key rather than calling `addUrl` directly, so
+  // the button and an external deep link are the same code path — and so the URL it produces
+  // is one you can copy and send. Assigning an unchanged hash fires no `hashchange`, so a
+  // repeat click (after a failed fetch, say) falls back to loading it directly.
+  const loadExample = () => {
+    const hash = formatLoadHash(EXAMPLE_FILE);
+    if (window.location.hash.replace(/^#/, "") === hash) void store.addUrl(EXAMPLE_FILE);
+    else window.location.hash = hash;
+  };
+
   if (store.loading) {
     return <div className="splash mono">initializing…</div>;
   }
 
   if (!active || !settings) {
-    // The example goes through the `#load=` hash key rather than calling `addUrl` directly, so
-    // the button and an external deep link are the same code path — and so the URL it produces
-    // is one you can copy and send. Assigning an unchanged hash fires no `hashchange`, so a
-    // repeat click (after a failed fetch, say) falls back to loading it directly.
-    const loadExample = () => {
-      const hash = formatLoadHash(EXAMPLE_FILE);
-      if (window.location.hash.replace(/^#/, "") === hash) void store.addUrl(EXAMPLE_FILE);
-      else window.location.hash = hash;
-    };
+    // No file yet, so About *is* the welcome screen — it carries the drop target. There's no
+    // previous view to go back to, hence no `onBack`.
     return (
       <div className="app app--empty">
         <header className="app__brand">
           <Logo onClick={showAbout} />
           <span className="app__tag">Bio-Rad CFX qPCR viewer</span>
         </header>
-        {store.view === "about" ? (
-          <AboutView onBack={leaveAbout} />
-        ) : (
-          <div className="app__welcome">
-            <DropZone onFiles={store.addFiles} large />
-            <button type="button" className="app__example mono" onClick={loadExample}>
-              Load an example file
-            </button>
-          </div>
-        )}
+        <AboutView onFiles={store.addFiles} onLoadExample={loadExample} />
         {store.error && <div className="app__error mono">{store.error}</div>}
       </div>
     );
@@ -118,7 +112,11 @@ export function App() {
 
       <main className="app__main">
         {view === "about" ? (
-          <AboutView onBack={leaveAbout} />
+          <AboutView
+            onFiles={store.addFiles}
+            onLoadExample={loadExample}
+            onBack={leaveAbout}
+          />
         ) : isStandalonePlate ? (
           <>
             {view === "plates" && store.activePlateFile && (

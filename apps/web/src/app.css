@@ -21,35 +21,6 @@
   grid-template-rows: var(--header-h) 1fr;
   padding: 0;
 }
-/* Welcome screen: the drop zone keeps the flexible row it had on its own, with the example
-   shortcut tucked under it. */
-.app__welcome {
-  display: grid;
-  grid-template-rows: 1fr auto;
-  min-height: 0;
-}
-.app__welcome .dropzone--large {
-  margin-bottom: 0;
-}
-.app__example {
-  justify-self: center;
-  margin: 14px 0 clamp(16px, 6cqi, 64px);
-  padding: 8px 16px;
-  background: transparent;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  color: var(--neon-cyan);
-  font-size: 13px;
-  cursor: pointer;
-  transition: border-color 120ms, background 120ms, box-shadow 120ms;
-}
-.app__example:hover,
-.app__example:focus-visible {
-  border-color: var(--neon-cyan);
-  background: var(--neon-cyan-dim);
-  box-shadow: 0 0 24px var(--neon-cyan-dim) inset;
-}
-
 .app__header,
 .app__brand {
   display: flex;
@@ -102,7 +73,9 @@
   z-index: 20;
 }
 
-/* ---- About -------------------------------------------------------------- */
+/* ---- About / welcome ---------------------------------------------------- */
+/* One view for both: credits plus the drop target, so the empty state and the logo's About page
+   are the same page. */
 .about {
   display: grid;
   place-items: center;
@@ -115,12 +88,38 @@
   display: grid;
   justify-items: center;
   gap: 10px;
-  max-width: 46ch;
-  padding: clamp(24px, 6cqi, 48px);
+  width: min(56ch, 100%);
+  padding: clamp(20px, 5cqi, 40px);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--panel);
   text-align: center;
+}
+.about__privacy {
+  color: var(--ink-muted);
+}
+/* Inside the card the drop zone provides its own spacing, so it drops the standalone margins. */
+.about__card .dropzone--large {
+  justify-self: stretch;
+  margin: 14px 0 0;
+  padding: clamp(20px, 5cqi, 40px);
+}
+.about__example {
+  margin-block-end: 6px;
+  padding: 8px 16px;
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--neon-cyan);
+  font-size: 13px;
+  cursor: pointer;
+  transition: border-color 120ms, background 120ms, box-shadow 120ms;
+}
+.about__example:hover,
+.about__example:focus-visible {
+  border-color: var(--neon-cyan);
+  background: var(--neon-cyan-dim);
+  box-shadow: 0 0 24px var(--neon-cyan-dim) inset;
 }
 .about__logo {
   margin: 0;
