@@ -1,10 +1,11 @@
-# zpcrweb (pronounced Zed-PCR web 🇨🇦)
+# zpcrweb 
 
-Tools for reading **Bio-Rad CFX** qPCR `.zpcr` files — an isomorphic TypeScript library plus
-a cyberpunk-dark web app built on top of it, serving from [https://zpcr.rbyers.ca](https://zpcr.rbyers.ca/).
+zpcrweb (pronounced Zed-PCR web 🇨🇦) is a set of tools for reading and analyzed **[Bio-Rad CFX](https://www.bio-rad.com/en-ca/product/cfx96-system?ID=OK1G048UU)** qPCR `.zpcr` files. It contains an isomorphic TypeScript library plus a cyberpunk-dark web app built on top of it.
+
+Access it at [https://zpcr.rbyers.ca](https://zpcr.rbyers.ca/).
 
 I built this because:
- - I just bought a used CFX thermocycler for my [home lab](https://lab.rbyers.ca/) and didn't have $2,000 extra budget for CFX Maestro.
+ - I just bought a used CFX thermocycler for my [home lab](https://lab.rbyers.ca/) and didn't have $2,800 extra budget for CFX Maestro.
  - I'd rather not buy a dedicated Windows machine and install drivers (I mostly use a Mac). 
  - I prefer to really learn how the device works under the hood and want to customize my workflow with automation anyway.
 
