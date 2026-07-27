@@ -5,16 +5,14 @@ import { ROW_LABELS, SAMPLE_TYPE_META } from "../../lib/sampleType";
 
 /**
  * The visual plate map for any {@link PlateDefinition}: an 8×12 grid coloured by sample type,
- * each well showing its loaded fluorophores (channel dots); click a well for its full detail
- * (fluors → targets, sample, replicate, quantity). Used both by the "Plates" tab
- * (for a `.zpcr`'s embedded `.pltd` entries) and a `.pcrd`'s already-decrypted `plateSetup2`
- * subtree — same component either way, only the source of the {@link PlateDefinition} differs.
+ * each well showing its sample name and per-fluorophore targets (coloured by channel); click a
+ * well for its full detail (fluors → targets, sample, replicate, quantity). Used both by the
+ * "Plates" tab (for a `.zpcr`'s embedded `.pltd` entries) and a `.pcrd`'s already-decrypted
+ * `plateSetup2` subtree — same component either way, only the source of the
+ * {@link PlateDefinition} differs.
  */
-type CellMode = "compact" | "detailed";
-
 export function PlateViewer({ plate, sourceHint }: { plate: PlateDefinition; sourceHint?: string }) {
   const [selected, setSelected] = useState<number | null>(null);
-  const [cellMode, setCellMode] = useState<CellMode>("detailed");
   // Gated on `loaded` exactly as the cells are (see `WellCell`), so the legend lists the colors
   // actually on screen. Without the gate an unloaded well's configured sample type — often just
   // enum filler — added a swatch to the legend that no cell ever showed.
@@ -47,30 +45,8 @@ export function PlateViewer({ plate, sourceHint }: { plate: PlateDefinition; sou
         </section>
 
         <section className="decoded__block">
-          <div className="decoded__controls">
-            <div className="segmented segmented--sm">
-              <button
-                className={"segmented__item" + (cellMode === "compact" ? " is-active" : "")}
-                onClick={() => setCellMode("compact")}
-              >
-                Compact
-              </button>
-              <button
-                className={"segmented__item" + (cellMode === "detailed" ? " is-active" : "")}
-                onClick={() => setCellMode("detailed")}
-              >
-                Detailed
-              </button>
-            </div>
-          </div>
-
           <div className="decoded__gridwrap">
-            <table
-              className={
-                "decoded__grid plate__grid mono" +
-                (cellMode === "detailed" ? " plate__grid--detailed" : "")
-              }
-            >
+            <table className="decoded__grid plate__grid mono">
               <thead>
                 <tr>
                   <th />
@@ -89,7 +65,6 @@ export function PlateViewer({ plate, sourceHint }: { plate: PlateDefinition; sou
                         <WellCell
                           key={col}
                           well={w}
-                          mode={cellMode}
                           selected={selected === w.index}
                           onClick={() => setSelected(w.index)}
                         />
@@ -123,12 +98,10 @@ export function PlateViewer({ plate, sourceHint }: { plate: PlateDefinition; sou
 
 function WellCell({
   well,
-  mode,
   selected,
   onClick,
 }: {
   well: WellDefinition;
-  mode: CellMode;
   selected: boolean;
   onClick: () => void;
 }) {
@@ -149,40 +122,22 @@ function WellCell({
 
   return (
     <td
-      className={
-        "plate__well" +
-        (mode === "detailed" ? " plate__well--detailed" : "") +
-        (well.loaded ? "" : " is-empty") +
-        (selected ? " is-sel" : "")
-      }
+      className={"plate__well" + (well.loaded ? "" : " is-empty") + (selected ? " is-sel" : "")}
       style={well.loaded ? { background: meta.color + "22", borderColor: meta.color + "55" } : undefined}
       title={title}
       onClick={onClick}
     >
-      {mode === "compact" ? (
+      {well.loaded && (
         <>
-          <span className="plate__welltype" style={{ color: meta.color }}>
-            {well.loaded ? meta.abbr : ""}
-          </span>
-          <span className="plate__dots">
+          {well.sample && <span className="plate__wellsample">{well.sample}</span>}
+          <span className="plate__welltargets">
             {well.fluors.map((f) => (
-              <span key={f.channel} className="plate__dot" style={{ background: channelColor(f.channel) }} />
+              <span key={f.channel} className="plate__target" style={{ color: channelColor(f.channel) }}>
+                {f.target || f.fluor}
+              </span>
             ))}
           </span>
         </>
-      ) : (
-        well.loaded && (
-          <>
-            {well.sample && <span className="plate__wellsample">{well.sample}</span>}
-            <span className="plate__welltargets">
-              {well.fluors.map((f) => (
-                <span key={f.channel} className="plate__target" style={{ color: channelColor(f.channel) }}>
-                  {f.target || f.fluor}
-                </span>
-              ))}
-            </span>
-          </>
-        )
       )}
     </td>
   );
