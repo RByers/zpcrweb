@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { isPlateCsvName, parsePltd, type Pltd, type Zpcr } from "@zpcrweb/core";
+import { Pair } from "./Pair";
 import { PlateTable } from "./PlateTable";
 import { XmlTreeFromString } from "../../lib/xmlTree";
 import { usePltdPassword } from "../../state/pltdPassword";
@@ -103,13 +104,4 @@ export function PlateXml({ zpcr, name }: { zpcr: Zpcr; name: string }) {
   if (pltd.error) return <div className="decoded__na mono">{pltd.error}</div>;
   if (!xml) return <div className="decoded__na mono">No XML for {name}.</div>;
   return <XmlTreeFromString xml={xml} />;
-}
-
-function Pair({ k, v }: { k: string; v: string }) {
-  return (
-    <div className="decoded__pair">
-      <dt>{k}</dt>
-      <dd>{v}</dd>
-    </div>
-  );
 }

@@ -3,6 +3,7 @@ import { parsePrcl, type Prcl, type ProtocolDocument, type Zpcr } from "@zpcrweb
 import { usePltdPassword } from "../../state/pltdPassword";
 import { PasswordPrompt } from "../PasswordPrompt";
 import { ProtocolDecoded } from "./DecodedView";
+import { Pair } from "./Pair";
 import { ProtocolStepsTable } from "./ProtocolSteps";
 import { XmlTreeFromString } from "../../lib/xmlTree";
 
@@ -147,13 +148,4 @@ export function ProtocolXml({ zpcr, name }: { zpcr: Zpcr; name: string }) {
   }
   if (!xml) return <div className="decoded__na mono">No XML for {name}.</div>;
   return <XmlTreeFromString xml={xml} />;
-}
-
-function Pair({ k, v }: { k: string; v: string }) {
-  return (
-    <div className="decoded__pair">
-      <dt>{k}</dt>
-      <dd>{v}</dd>
-    </div>
-  );
 }

@@ -9,6 +9,7 @@ import {
 } from "./FluorChannelChip";
 import { ROW_LABELS, SAMPLE_TYPE_META } from "../../lib/sampleType";
 import { plateDisplayName } from "../../lib/plateNames";
+import { Pair } from "../raw/Pair";
 
 /**
  * The visual plate map for any {@link PlateDefinition}: an 8×12 grid coloured by sample type,
@@ -191,14 +192,5 @@ function WellDetail({ well }: { well: WellDefinition }) {
         </table>
       )}
     </section>
-  );
-}
-
-function Pair({ k, v }: { k: string; v: string }) {
-  return (
-    <div className="decoded__pair">
-      <dt>{k}</dt>
-      <dd>{v}</dd>
-    </div>
   );
 }

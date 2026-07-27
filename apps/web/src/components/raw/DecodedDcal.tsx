@@ -1,6 +1,7 @@
 import { Fragment, useMemo } from "react";
 import { findDcalBlock, parseDcal, type Dcal, type DcalBlock, type Zpcr } from "@zpcrweb/core";
 import { channelColor, channelLabel } from "../../lib/channelColors";
+import { Pair } from "./Pair";
 
 const TEMPS = [20, 40, 60, 80];
 
@@ -172,15 +173,6 @@ function BlockRow({
         </td>
       ))}
     </tr>
-  );
-}
-
-function Pair({ k, v }: { k: string; v: string }) {
-  return (
-    <div className="decoded__pair">
-      <dt>{k}</dt>
-      <dd>{v}</dd>
-    </div>
   );
 }
 
