@@ -155,7 +155,8 @@ ever needs to read. Instead, `plateCsv.ts` defines a small zpcrweb-only plain-te
 format — CSV, canonical extension **`.plt.csv`** (`plateToCsv`/`parsePlateCsv`,
 `isPlateCsvName`) — as the thing the app can actually produce: one `# key: value` header block
 of plate-level metadata, then one CSV row per well. The fixed columns (`Well`, `SampleType`,
-`Sample`, `Replicate`, `Quantity`) are followed by one column per fluorophore, labelled with
+`Sample`, plus `Replicate`/`Quantity` when any well on the plate uses them — most don't, and a
+column of empty cells says nothing) are followed by one column per fluorophore, labelled with
 the dye name, whose cells hold only that well's target for it (empty = fluor absent, `+` =
 present with no target) — so a plate reads as a target-per-fluor grid in a spreadsheet. Those
 columns are the plate's whole fluor list; the channel isn't written, since a dye is read on
@@ -175,9 +176,8 @@ a footnote; see `apps/web/ARCHITECTURE.md`). Go through `zpcr.plates()` where an
 hand, so the lookup is wired up; a plate CSV read on its own simply has unknown channels.
 Channels only drive colouring and grouping, never the color-separation solve, so an unknown one
 costs presentation rather than correctness. Wells with nothing on them aren't written at
-all, and a well missing from the table parses back as empty, so only `vessel` and the
-`rows`/`columns` extent really matter in the header — everything else is an optional
-display-only passenger. The plate's `identityKey` (its user-facing name) isn't in the file
+all, and a well missing from the table parses back as empty, so the only header line that
+really matters is `vessel` — everything else is an optional display-only passenger. The plate's `identityKey` (its user-facing name) isn't in the file
 either: the file/archive-entry name *is* that identity, so `parsePlateCsv`'s `sourceName`
 derives it from the name its caller read the text under.
 
@@ -185,9 +185,11 @@ The `vessel` header carries `PlateDefinition.plateName`, and is deliberately *no
 `plateName`: that field is the consumable type (`BR Clear`/`BR White` — see pltd.md "Vessel
 type"), which is what picks the tube type the dye response curve is built for, and the similar
 name invited reading it as the plate's own name when the file name is that. It also sits next
-to a real `plateType` header, CFX's unrelated template category. Files written before the
-rename spell it `plateName` and are still read; `vessel` wins if both appear. Header values are read up to the
-first comma, since a spreadsheet round-trip pads comment lines with trailing commas. It's
+to a real `plateType` header, CFX's unrelated template category. The plate's extent rides on
+the same line as a second field — `# vessel: BR Clear, 8x12` — since it's one more fact about
+the physical plate; absent, it's inferred from the well labels. Header values are split on
+commas with trailing empty fields dropped, since a spreadsheet round-trip pads comment lines
+with trailing commas — so a header value can't itself contain one. It's
 deliberately not a CFX format (no `meta`/`fluorId` fidelity), so it isn't a decoder doc in the
 table above.
 

@@ -120,10 +120,9 @@ describe("plate CSV round-trip", () => {
 
   it("resolves channels from calibration, not from the column order", () => {
     const csv = [
-      "# rows: 1",
-      "# columns: 1",
-      "Well,SampleType,Sample,Replicate,Quantity,FAM,Tex 615,Cy5",
-      "A1,unknown,,,,GeneA,GeneB,GeneC",
+      "# vessel: BR Clear, 1x1",
+      "Well,SampleType,Sample,FAM,Tex 615,Cy5",
+      "A1,unknown,,GeneA,GeneB,GeneC",
     ].join("\r\n");
     // What `zpcr.plates()` passes in, from the archive's `.Dcal` primaryChannel fields.
     const channels = new Map([["fam", 0], ["tex 615", 2], ["cy5", 3]]);
@@ -160,10 +159,9 @@ describe("plate CSV round-trip", () => {
 
   it("honours an explicit Ch<n> suffix over the calibration lookup", () => {
     const csv = [
-      "# rows: 1",
-      "# columns: 1",
-      "Well,SampleType,Sample,Replicate,Quantity,FAM Ch1,Tex 615 Ch3,Cy5 Ch4",
-      "A1,unknown,,,,GeneA,GeneB,GeneC",
+      "# vessel: BR Clear, 1x1",
+      "Well,SampleType,Sample,FAM Ch1,Tex 615 Ch3,Cy5 Ch4",
+      "A1,unknown,,GeneA,GeneB,GeneC",
     ].join("\r\n");
     expect(parsePlateCsv(csv, { channelForFluor: () => 5 }).fluors).toEqual([
       { fluor: "FAM", channel: 0 },
@@ -177,8 +175,8 @@ describe("plate CSV round-trip", () => {
     // wrong answer — the dye is coloured and grouped as a neighbouring channel — where undefined
     // produces a visible "Ch?".
     const csv = [
-      "Well,SampleType,Sample,Replicate,Quantity,FAM,HEX",
-      "A1,unknown,,,,GeneA,GeneB",
+      "Well,SampleType,Sample,FAM,HEX",
+      "A1,unknown,,GeneA,GeneB",
     ].join("\r\n");
     const { fluors, wells } = parsePlateCsv(csv);
     expect(fluors).toEqual([
@@ -191,10 +189,9 @@ describe("plate CSV round-trip", () => {
 
   it("treats wells left out of the table as empty", () => {
     const csv = [
-      "# rows: 8",
-      "# columns: 12",
-      "Well,SampleType,Sample,Replicate,Quantity,FAM Ch1",
-      "B2,unknown,S1,,,GeneA",
+      "# vessel: BR Clear, 8x12",
+      "Well,SampleType,Sample,FAM Ch1",
+      "B2,unknown,S1,GeneA",
     ].join("\r\n");
     const plate = parsePlateCsv(csv);
     expect(plate.wells).toHaveLength(96);
@@ -206,25 +203,51 @@ describe("plate CSV round-trip", () => {
     }
   });
 
-  it("writes the vessel as `# vessel:`, not `# plateName:`", () => {
+  it("writes the vessel and the plate extent on one `# vessel:` line", () => {
     const csv = plateToCsv(syntheticPlate());
-    expect(csv).toContain("# vessel: BR White\r\n");
-    expect(csv).not.toMatch(/# plateName:/);
+    expect(csv).toContain("# vessel: BR White, 8x12\r\n");
+    expect(csv).not.toMatch(/# (plateName|rows|columns):/);
   });
 
-  it("still reads the pre-rename `# plateName:` spelling", () => {
-    // Plate CSVs already written into a `.zpcr` use it; losing the vessel would silently change
-    // which half of the calibration data the run's dye response curve is built from.
+  it("sizes the plate from the vessel line's extent, past the last labelled well", () => {
     const csv = [
-      "# plateName: BR White",
-      "# rows: 1",
-      "# columns: 1",
-      "Well,SampleType,Sample,Replicate,Quantity,FAM",
-      "A1,unknown,,,,GeneA",
+      "# vessel: BR White, 8x12",
+      "Well,SampleType,Sample,FAM",
+      "A1,unknown,,GeneA",
     ].join("\r\n");
-    expect(parsePlateCsv(csv).plateName).toBe("BR White");
-    // …and `vessel` wins if a file somehow carries both.
-    expect(parsePlateCsv(`# vessel: BR Clear\r\n${csv}`).plateName).toBe("BR Clear");
+    const plate = parsePlateCsv(csv);
+    expect(plate.plateName).toBe("BR White");
+    expect([plate.rows, plate.columns]).toEqual([8, 12]);
+    expect(plate.wells).toHaveLength(96);
+    // Without the extent it falls back to the well labels — a 1x1 plate here.
+    const noExtent = parsePlateCsv(csv.replace(", 8x12", ""));
+    expect([noExtent.rows, noExtent.columns, noExtent.plateName]).toEqual([1, 1, "BR White"]);
+  });
+
+  it("omits Replicate/Quantity when no well fills them in, and reads a file without them", () => {
+    const plate = syntheticPlate();
+    const bare = {
+      ...plate,
+      wells: plate.wells.map((w) => ({ ...w, replicate: undefined, quantity: undefined })),
+    };
+    const csv = plateToCsv(bare);
+    expect(csv.split("\r\n").find((l) => l.startsWith("Well,"))).toBe(
+      "Well,SampleType,Sample,FAM,HEX",
+    );
+    expect(parsePlateCsv(csv, { channelForFluor: SYNTHETIC_CHANNELS })).toEqual(bare);
+  });
+
+  it("writes only the one of Replicate/Quantity that is used", () => {
+    const plate = syntheticPlate();
+    const replicateOnly = {
+      ...plate,
+      wells: plate.wells.map((w) => ({ ...w, quantity: undefined })),
+    };
+    const csv = plateToCsv(replicateOnly);
+    expect(csv.split("\r\n").find((l) => l.startsWith("Well,"))).toBe(
+      "Well,SampleType,Sample,Replicate,FAM,HEX",
+    );
+    expect(parsePlateCsv(csv, { channelForFluor: SYNTHETIC_CHANNELS })).toEqual(replicateOnly);
   });
 
   it("writes the raw code for an `other` well, and round-trips it without inventing wcOther", () => {
@@ -239,12 +262,11 @@ describe("plate CSV round-trip", () => {
 
   it("accepts a raw wc* code in the SampleType cell and normalizes it", () => {
     const csv = [
-      "# rows: 1",
-      "# columns: 3",
-      "Well,SampleType,Sample,Replicate,Quantity,FAM Ch1",
-      "A1,wcNTC,,,,GeneA",
-      "A2,ntc,,,,GeneA",
-      "A3,wcFirst,,,,",
+      "# vessel: BR Clear, 1x3",
+      "Well,SampleType,Sample,FAM Ch1",
+      "A1,wcNTC,,GeneA",
+      "A2,ntc,,GeneA",
+      "A3,wcFirst,,",
     ].join("\r\n");
     const wells = parsePlateCsv(csv).wells;
     // A hand-written CFX code reads the same as the normalized name, and the enum filler that

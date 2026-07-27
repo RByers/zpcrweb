@@ -18,17 +18,22 @@
  * `SampleType` holds a normalized {@link SampleType} name; a raw CFX `wellSampleType` code is
  * accepted there too and normalized on read (see {@link SAMPLE_TYPE_TO_RAW}).
  *
- * Only `vessel` is always written: `rows`/`columns` fall back to the extent implied by the
- * well labels, and `plateType`/`scanMode`/`standardUnits` are display-only passengers from a
- * `.pltd`, omitted when empty. `vessel` holds `PlateDefinition.plateName` — the consumable type
- * (`BR Clear`, `BR White`), which is all that field ever means despite CFX's attribute name —
- * and is spelled `vessel` here so it can't be mistaken for the plate's own name, which is the
- * file name (see `identityKey` below). Files written before that rename spell it `plateName`,
- * and are still read. The plate's `identityKey` isn't written at all — the file or
+ * `Replicate` and `Quantity` are omitted entirely when no well on the plate carries one — which
+ * is most plates — rather than written as a column of empty cells. They're read whenever
+ * present, in any column position.
+ *
+ * Only `vessel` is always written, as `# vessel: <name>, <rows>x<columns>`: the extent rides
+ * along on that line, and falls back to the extent implied by the well labels when absent.
+ * `plateType`/`scanMode`/`standardUnits` are display-only passengers from a `.pltd`, omitted
+ * when empty. `vessel` holds `PlateDefinition.plateName` — the consumable type (`BR Clear`,
+ * `BR White`), which is all that field ever means despite CFX's attribute name — and is spelled
+ * `vessel` here so it can't be mistaken for the plate's own name, which is the file name (see
+ * `identityKey` below). The plate's `identityKey` isn't written at all — the file or
  * archive-entry name *is* the plate's identity, and {@link parsePlateCsv}'s `sourceName` puts
- * it back. Header values are read up to the first comma, so a file round-tripped through a
- * spreadsheet — which pads every comment line out to the table's column count with trailing
- * commas — still parses.
+ * it back. Header values are split on commas with trailing empty fields dropped, so a file
+ * round-tripped through a spreadsheet — which pads every comment line out to the table's column
+ * count with trailing commas — still parses; a header value therefore can't itself contain a
+ * comma (the vessel line's second field is the extent).
  */
 
 import { toSampleType } from "./pltd.js";
@@ -133,7 +138,12 @@ function parseCsvTable(text: string): string[][] {
 /** Fluor cell contents meaning "this fluor is in the well, but has no target". */
 const PRESENT_NO_TARGET = "+";
 
-const FIXED_COLUMNS = ["Well", "SampleType", "Sample", "Replicate", "Quantity"];
+/** Columns every file carries, and which {@link parsePlateCsv} insists on. */
+const REQUIRED_COLUMNS = ["Well", "SampleType", "Sample"];
+/** Columns written only when some well fills one in, and read whenever present. */
+const OPTIONAL_COLUMNS = ["Replicate", "Quantity"];
+/** Everything that isn't a fluor column. */
+const FIXED_COLUMNS = [...REQUIRED_COLUMNS, ...OPTIONAL_COLUMNS];
 
 /**
  * A fluor column is labelled with the dye name alone (`FAM`, `Tex 615`). The channel isn't
@@ -172,19 +182,27 @@ export function plateToCsv(plate: PlateDefinition): string {
   // `parsePlateCsv`'s `sourceName` puts it back.
   // `vessel`, not `plateName`: the value is a plastic/consumable type (`BR Clear`, `BR White`),
   // which is what the field means in a `.pltd` too — CFX just gave it a misleading attribute
-  // name. See `parsePlateCsv`, which still reads the old `plateName` spelling.
-  out += `# vessel: ${plate.plateName}\r\n`;
+  // name. The plate's extent rides on the same line (`BR Clear, 8x12`) — it's one fact about
+  // the physical plate, and two more header lines to say `8` and `12` was noise.
+  out += `# vessel: ${plate.plateName}, ${plate.rows}x${plate.columns}\r\n`;
   // Optional, and omitted when empty: nothing computes with these three, they're just carried
   // through from a `.pltd` for display. `plateType` is CFX's template category
   // (`OtherStdTemplate` in every file inspected) and is unrelated to the vessel above.
   if (plate.plateType) out += `# plateType: ${plate.plateType}\r\n`;
   if (plate.scanMode) out += `# scanMode: ${plate.scanMode}\r\n`;
   if (plate.standardUnits) out += `# standardUnits: ${plate.standardUnits}\r\n`;
-  out += `# rows: ${plate.rows}\r\n`;
-  out += `# columns: ${plate.columns}\r\n`;
-  out += csvRow([...FIXED_COLUMNS, ...plate.fluors.map((f) => f.fluor)]);
-  for (const w of plate.wells) {
-    if (isBlankWell(w)) continue;
+  // A column of empty cells says nothing; most plates use neither of these, so leave them out
+  // unless some well actually fills one in.
+  const written = plate.wells.filter((w) => !isBlankWell(w));
+  const hasReplicate = written.some((w) => w.replicate !== undefined);
+  const hasQuantity = written.some((w) => w.quantity !== undefined);
+  out += csvRow([
+    ...REQUIRED_COLUMNS,
+    ...(hasReplicate ? ["Replicate"] : []),
+    ...(hasQuantity ? ["Quantity"] : []),
+    ...plate.fluors.map((f) => f.fluor),
+  ]);
+  for (const w of written) {
     const byFluor = new Map(w.fluors.map((f) => [f.fluor, f]));
     out += csvRow([
       w.label,
@@ -192,8 +210,8 @@ export function plateToCsv(plate: PlateDefinition): string {
       // information survives the round-trip and a human can see what the plate actually said.
       w.sampleType === "other" ? w.sampleTypeRaw || "other" : w.sampleType,
       w.sample ?? "",
-      w.replicate !== undefined ? String(w.replicate) : "",
-      w.quantity !== undefined ? String(w.quantity) : "",
+      ...(hasReplicate ? [w.replicate !== undefined ? String(w.replicate) : ""] : []),
+      ...(hasQuantity ? [w.quantity !== undefined ? String(w.quantity) : ""] : []),
       ...plate.fluors.map((pf) => {
         const f = byFluor.get(pf.fluor);
         if (!f) return "";
@@ -242,16 +260,21 @@ export interface ParsePlateCsvOptions {
 export function parsePlateCsv(text: string, options: ParsePlateCsvOptions = {}): PlateDefinition {
   const { sourceName, channelForFluor } = options;
   const lines = text.split(/\r?\n/);
-  const meta: Record<string, string> = {};
+  /** Each header line's value, split on commas — the vessel line carries two fields
+   * (`BR Clear, 8x12`). Trailing empty fields are dropped, because a spreadsheet round-trip pads
+   * every comment line out to the table's column count with commas. */
+  const meta: Record<string, string[]> = {};
   let i = 0;
   while (i < lines.length && lines[i]!.trim().startsWith("#")) {
-    // The value stops at the first comma: a spreadsheet round-trip pads every comment line out
-    // to the table's column count with trailing commas, which would otherwise end up in the
-    // value. Header values therefore can't contain a comma (the `fluors` list uses `;`).
-    const m = /^#\s*([^:,]+):\s*([^,]*)/.exec(lines[i]!.trim());
-    if (m) meta[m[1]!.trim()] = m[2]!.trim();
+    const m = /^#\s*([^:,]+):\s*(.*)$/.exec(lines[i]!.trim());
+    if (m) {
+      const fields = m[2]!.split(",").map((f) => f.trim());
+      while (fields.length && fields[fields.length - 1] === "") fields.pop();
+      meta[m[1]!.trim()] = fields;
+    }
     i++;
   }
+  const field = (key: string, n = 0): string | undefined => meta[key]?.[n];
 
   const rows = parseCsvTable(lines.slice(i).join("\n")).filter(
     (r) => !(r.length === 1 && r[0] === ""),
@@ -259,17 +282,20 @@ export function parsePlateCsv(text: string, options: ParsePlateCsvOptions = {}):
   if (rows.length === 0) throw new Error("Plate CSV: empty file (no header row)");
   const header = rows[0]!.map((c) => c.trim());
   const idx = Object.fromEntries(FIXED_COLUMNS.map((c) => [c, header.indexOf(c)]));
-  for (const c of FIXED_COLUMNS) {
+  for (const c of REQUIRED_COLUMNS) {
     if (idx[c] === -1) throw new Error(`Plate CSV: missing "${c}" column`);
   }
 
-  const declaredRows = Number(meta.rows);
-  const declaredCols = Number(meta.columns);
+  // Extent from the vessel line's second field (`# vessel: BR Clear, 8x12`); absent, it's
+  // inferred from the well labels below.
+  const extent = /^(\d+)\s*x\s*(\d+)$/i.exec(field("vessel", 1) ?? "");
+  const declaredRows = extent ? Number(extent[1]) : NaN;
+  const declaredCols = extent ? Number(extent[2]) : NaN;
   const dataRows = rows.slice(1);
   // A table with no rows at all is only meaningful if the extent is declared — every well is
   // then simply empty (an all-empty plate writes no rows).
   if (dataRows.length === 0 && !(declaredRows > 0 && declaredCols > 0)) {
-    throw new Error("Plate CSV: no well rows, and no rows/columns header to size the plate");
+    throw new Error("Plate CSV: no well rows, and no vessel extent to size the plate");
   }
 
   // Every column that isn't one of the fixed ones is a fluor column, and those columns are the
@@ -342,10 +368,13 @@ export function parsePlateCsv(text: string, options: ParsePlateCsvOptions = {}):
       wellFluors.push(cell === PRESENT_NO_TARGET ? { fluor, channel } : { fluor, channel, target: cell });
     }
     const sample = (r[idx.Sample!] ?? "").trim() || undefined;
-    const replicateRaw = (r[idx.Replicate!] ?? "").trim();
-    const replicate = replicateRaw === "" ? undefined : Number(replicateRaw);
-    const quantityRaw = (r[idx.Quantity!] ?? "").trim();
-    const quantity = quantityRaw === "" ? undefined : Number(quantityRaw);
+    // Both columns are optional: a missing column reads the same as an empty cell.
+    const optional = (column: number): number | undefined => {
+      const raw = column === -1 ? "" : (r[column] ?? "").trim();
+      return raw === "" ? undefined : Number(raw);
+    };
+    const replicate = optional(idx.Replicate!);
+    const quantity = optional(idx.Quantity!);
 
     wells[wellIndex] = {
       index: wellIndex,
@@ -365,17 +394,14 @@ export function parsePlateCsv(text: string, options: ParsePlateCsvOptions = {}):
   });
 
   return {
-    // `plateName` is the pre-rename spelling of `vessel`, still read so plate CSVs already
-    // written into a `.zpcr` keep their vessel (and so the dye response curve keeps resolving
-    // to the right tube type) instead of silently reading as an empty string.
-    plateName: meta.vessel ?? meta.plateName ?? "",
+    plateName: field("vessel") ?? "",
     identityKey: sourceName ? identityFromName(sourceName) : undefined,
     rows: rowsCount,
     columns,
     dyeCount: fluors.length,
-    scanMode: meta.scanMode ?? "",
-    plateType: meta.plateType ?? "",
-    standardUnits: meta.standardUnits ?? "",
+    scanMode: field("scanMode") ?? "",
+    plateType: field("plateType") ?? "",
+    standardUnits: field("standardUnits") ?? "",
     fluors,
     targets: [...targets],
     samples: [...samples],
