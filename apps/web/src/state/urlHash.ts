@@ -13,9 +13,16 @@
  * `URLSearchParams` handles the encoding in both directions.
  *
  * Files themselves live only in the browser's IndexedDB — a link naming a file the recipient
- * hasn't loaded can't fetch it, so {@link applyHash}'s caller falls back to the default file
- * and keeps the view. The hash is a bookmark within *this* browser's loaded set, plus a way to
- * make back/forward work across view switches.
+ * hasn't loaded can't fetch it, so the caller falls back to the default file and keeps the
+ * view. The hash is a bookmark within *this* browser's loaded set, plus a way to make
+ * back/forward work across view switches.
+ *
+ * `#load=<url>` is the exception that lets a link carry the file itself: the app fetches that
+ * URL and loads the result as if it had been dropped on the drop zone (see `useZpcrStore`'s
+ * `addUrl`). Unlike `file`/`view` it is an **instruction, not state** — {@link formatHash}
+ * never writes it back, so it's consumed once and then replaced by the ordinary
+ * `#file=…&view=…` the loaded file produces. That's what keeps a reload from re-fetching (the
+ * file is in IndexedDB by then) and keeps a copied URL a plain bookmark.
  */
 import type { ViewId } from "./useZpcrStore";
 
@@ -25,6 +32,9 @@ export interface HashState {
   /** Active file's `name` (not its id — ids hash name+size and aren't portable). */
   file?: string;
   view?: ViewId;
+  /** URL to fetch a file from, relative to the app or absolute. Read-only: parsed from the
+   * hash, never serialized back into it — see the module comment. */
+  load?: string;
 }
 
 function isViewId(v: string | null): v is ViewId {
@@ -39,18 +49,36 @@ export function readHash(): HashState {
     const q = new URLSearchParams(raw);
     const view = q.get("view");
     const file = q.get("file");
-    return { file: file || undefined, view: isViewId(view) ? view : undefined };
+    const load = q.get("load");
+    return {
+      file: file || undefined,
+      view: isViewId(view) ? view : undefined,
+      load: load || undefined,
+    };
   } catch {
     return {};
   }
 }
 
-/** Serialize state to a hash string (no leading `#`). */
+/**
+ * Serialize state to a hash string (no leading `#`). `load` is deliberately not written: it
+ * describes a fetch to perform, not a state to restore, and the file it produces is already
+ * described by `file`.
+ */
 export function formatHash(state: HashState): string {
   const q = new URLSearchParams();
   if (state.file) q.set("file", state.file);
   if (state.view) q.set("view", state.view);
   return q.toString();
+}
+
+/**
+ * The hash (no leading `#`) that asks the app to fetch and load `url`. Assigning it to
+ * `location.hash` is how in-app "load this file" links work — same code path as an external
+ * deep link, rather than a second way in.
+ */
+export function formatLoadHash(url: string): string {
+  return new URLSearchParams({ load: url }).toString();
 }
 
 /**

@@ -157,6 +157,11 @@ holds stdout open and the run looks like a hang long after the page is done.
   behind the prompt. Pull it from `secrets.json` (see Secrets, above) and URL-escape it — the
   password can contain characters like `#`.
 - `#file=<name>&view=<overview|curves|plates|reference|raw>` selects the active file and view.
+- `#load=<url>` fetches a file and loads it — the only key that can put a file the browser
+  doesn't already have into the app. It's consumed on load and replaced by the `#file=` the
+  loaded file produces, so it never survives in the address bar. `apps/web/public/examples/`
+  (a symlink to `samples/`) is what the welcome screen's "Load an example file" button loads,
+  via this key.
 
 Both are hash keys in one query string (`#cfxPassword=…&view=curves`), parsed by
 `state/pltdPassword.ts` and `state/urlHash.ts`. **The password is in the fragment because it's

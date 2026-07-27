@@ -338,6 +338,22 @@ function fileKind(name: string): FileKind | null {
   return null;
 }
 
+/**
+ * The file name a `#load=` URL delivers: its last path segment, percent-decoded (query and
+ * fragment dropped). The name is the app's user-facing identity for a file — it's what `#file=`
+ * links to and what the file bar shows — so a URL-loaded file is named after its path, exactly
+ * as the same file downloaded and dropped would be.
+ */
+function fileNameFromUrl(url: string): string {
+  const path = new URL(url, window.location.href).pathname;
+  const last = path.split("/").filter(Boolean).at(-1) ?? "";
+  try {
+    return decodeURIComponent(last);
+  } catch {
+    return last; // malformed %-escapes: the raw segment is still a usable name
+  }
+}
+
 /** `.pltd` or `.csv`/`.plt.csv` (case-insensitive), or `null` — the two formats accepted for
  * attaching a plate to a run (see the Plates view's upload control). */
 function plateFileKind(name: string): PlateFileKind | null {
@@ -373,6 +389,12 @@ export interface ZpcrStore {
   loading: boolean;
   error: string | null;
   addFiles: (files: FileList | File[]) => Promise<void>;
+  /**
+   * Fetch a file over HTTP and load it as if it had been dropped — the `#load=<url>` hash key's
+   * implementation, and how the welcome screen's example button works. The name comes from the
+   * URL's last path segment (see {@link fileNameFromUrl}).
+   */
+  addUrl: (url: string) => Promise<void>;
   setActive: (id: string) => void;
   remove: (id: string) => Promise<void>;
   /**
@@ -397,6 +419,10 @@ export function useZpcrStore(): ZpcrStore {
   // Seed the view from the URL hash so a shared link opens on the right tab with no flash of
   // the default one (see `urlHash.ts`); the file half can only be resolved after hydration.
   const [view, setView] = useState<ViewId>(() => readHash().view ?? "curves");
+  // A `#load=<url>` to fetch, from the URL the app was opened with or from a later hash change
+  // (the welcome screen's example button is one). Captured during the first render — i.e. before
+  // any effect, and so before the state→URL sync below rewrites the hash without it.
+  const [pendingLoad, setPendingLoad] = useState<string | null>(() => readHash().load ?? null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const saveTimers = useRef<Record<string, number>>({});
@@ -516,6 +542,7 @@ export function useZpcrStore(): ZpcrStore {
     return onHashChange(() => {
       const h = readHash();
       if (h.view) setView(h.view);
+      if (h.load) setPendingLoad(h.load);
       if (h.file) {
         const match = files.find((f) => f.name === h.file);
         if (match) setActiveId(match.id);
@@ -523,59 +550,105 @@ export function useZpcrStore(): ZpcrStore {
     });
   }, [files]);
 
-  const addFiles = useCallback(async (input: FileList | File[]) => {
-    const list = Array.from(input)
-      .map((file) => ({ file, kind: fileKind(file.name) }))
-      .filter((f): f is { file: File; kind: FileKind } => f.kind !== null);
-    let lastId: string | null = null;
-    for (const { file, kind } of list) {
-      try {
-        const buf = await file.arrayBuffer();
-        const bytes = new Uint8Array(buf);
-        // Validate the container eagerly so obviously-bad files are rejected up front; a
-        // .pcrd/.pltd's payload may still need a password, resolved reactively via `runs`/
-        // `plateFiles`.
-        if (kind === "zpcr") parseZpcr(bytes);
-        else if (kind === "pcrd") parsePcrd(bytes);
-        else if (kind === "pltd") parsePltd(bytes);
-        else parsePlateCsv(new TextDecoder().decode(bytes));
-        const id = fileId(file.name, file.size);
-        const addedAt = Date.now();
-        await putFile({ id, name: file.name, size: file.size, addedAt, bytes: buf, kind });
-        lastId = id;
-        setFiles((prev) => {
-          const rest = prev.filter((f) => f.id !== id);
-          return [...rest, { id, name: file.name, size: file.size, addedAt, kind, bytes }];
-        });
-      } catch (e) {
-        setError(`${file.name}: ${e instanceof Error ? e.message : String(e)}`);
-      }
-    }
-    if (lastId) setActiveId(lastId);
+  /** Drop everything keyed by a file id except the `files` list itself — the cleanup
+   * {@link remove} and the same-name replacement in {@link addFiles} both need. */
+  const forget = useCallback(async (id: string) => {
+    await deleteFile(id);
+    setSettingsMap((prev) => {
+      const { [id]: _drop, ...rest } = prev;
+      return rest;
+    });
+    // Drop any pending settings write for a file that no longer exists, and let it re-seed
+    // from its own bytes if it's ever loaded again.
+    persister.current!.forget(id);
+    seeded.current.delete(id);
+    setAnalysisMap((prev) => {
+      const { [id]: _drop, ...rest } = prev;
+      return rest;
+    });
   }, []);
+
+  const addFiles = useCallback(
+    async (input: FileList | File[]) => {
+      const list = Array.from(input)
+        .map((file) => ({ file, kind: fileKind(file.name) }))
+        .filter((f): f is { file: File; kind: FileKind } => f.kind !== null);
+      let lastId: string | null = null;
+      for (const { file, kind } of list) {
+        try {
+          const buf = await file.arrayBuffer();
+          const bytes = new Uint8Array(buf);
+          // Validate the container eagerly so obviously-bad files are rejected up front; a
+          // .pcrd/.pltd's payload may still need a password, resolved reactively via `runs`/
+          // `plateFiles`.
+          if (kind === "zpcr") parseZpcr(bytes);
+          else if (kind === "pcrd") parsePcrd(bytes);
+          else if (kind === "pltd") parsePltd(bytes);
+          else parsePlateCsv(new TextDecoder().decode(bytes));
+          const id = fileId(file.name, file.size);
+          // Re-loading a name that's already here replaces it. Ids hash name+size, so an edited
+          // file (attached plate, saved thresholds, a re-export) gets a *different* id under the
+          // same name — without this it would sit alongside the stale copy as an
+          // indistinguishable second chip, and `#file=` would have two candidates to mean.
+          const superseded = filesRef.current.filter((f) => f.name === file.name && f.id !== id);
+          for (const old of superseded) await forget(old.id);
+          const supersededIds = new Set(superseded.map((f) => f.id));
+          const addedAt = Date.now();
+          await putFile({ id, name: file.name, size: file.size, addedAt, bytes: buf, kind });
+          lastId = id;
+          setFiles((prev) => {
+            const rest = prev.filter((f) => f.id !== id && !supersededIds.has(f.id));
+            return [...rest, { id, name: file.name, size: file.size, addedAt, kind, bytes }];
+          });
+        } catch (e) {
+          setError(`${file.name}: ${e instanceof Error ? e.message : String(e)}`);
+        }
+      }
+      if (lastId) setActiveId(lastId);
+    },
+    [forget],
+  );
+
+  /**
+   * Fetch → `addFiles`, so a URL-loaded file goes through exactly the same validate/persist path
+   * as a dropped one. `credentials: "omit"` because the URL comes from a link: a shared
+   * `#load=` must not be able to use the recipient's cookies to fetch something private and pull
+   * it into the page. Cross-origin URLs are allowed but need CORS, like any other fetch.
+   */
+  const addUrl = useCallback(
+    async (url: string) => {
+      const name = fileNameFromUrl(url);
+      try {
+        if (!fileKind(name)) throw new Error("not a .zpcr, .pcrd, .pltd or .csv file");
+        const res = await fetch(url, { credentials: "omit" });
+        if (!res.ok) throw new Error(`fetch failed (HTTP ${res.status})`);
+        await addFiles([new File([await res.arrayBuffer()], name)]);
+      } catch (e) {
+        setError(`${url}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    },
+    [addFiles],
+  );
+
+  // Perform a pending `#load=`, once hydration has finished — a URL-loaded file replaces any
+  // same-named copy already in IndexedDB (see `addFiles`), which only works once we know what's
+  // there. Cleared before the fetch starts so a failure isn't retried on every re-render.
+  useEffect(() => {
+    if (loading || !pendingLoad) return;
+    setPendingLoad(null);
+    void addUrl(pendingLoad);
+  }, [loading, pendingLoad, addUrl]);
 
   const remove = useCallback(
     async (id: string) => {
-      await deleteFile(id);
+      await forget(id);
       setFiles((prev) => {
         const next = prev.filter((f) => f.id !== id);
         setActiveId((cur) => (cur === id ? next.at(-1)?.id ?? null : cur));
         return next;
       });
-      setSettingsMap((prev) => {
-        const { [id]: _drop, ...rest } = prev;
-        return rest;
-      });
-      // Drop any pending settings write for a file that no longer exists, and let it re-seed
-      // from its own bytes if it's ever loaded again.
-      persister.current!.forget(id);
-      seeded.current.delete(id);
-      setAnalysisMap((prev) => {
-        const { [id]: _drop, ...rest } = prev;
-        return rest;
-      });
     },
-    [],
+    [forget],
   );
 
   // Switching files flushes anything pending: the window of unsaved analysis edits then only
@@ -793,6 +866,7 @@ export function useZpcrStore(): ZpcrStore {
     loading,
     error,
     addFiles,
+    addUrl,
     setActive,
     remove,
     updateSettings,

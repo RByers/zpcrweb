@@ -12,7 +12,8 @@
  * Deliberately *not* part of `npm test`: it needs Chrome and takes ~20s, while the core suite
  * is dependency-free and runs in ~3s. Exits non-zero on any failure.
  */
-import { join } from "node:path";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import {
   REPO,
   activeTab,
@@ -27,6 +28,33 @@ import {
 
 const ZPCR = join(REPO, "samples/20260720_FirstQualification.zpcr");
 const PCRD = join(REPO, "samples/20260720_Luna_noRT.pcrd");
+const EXAMPLE = "20260726_S183-S185_RVP.zpcr";
+/** Written by {@link makeDupe}: the example under its own name but a different size. */
+const DUPE = join(REPO, "tools/.uishot/dupe", EXAMPLE);
+
+/**
+ * A same-name, *different-size* copy of the example — the only way to exercise the replace rule,
+ * since `fileId()` hashes name+size and a byte-identical reload is simply the same id. Four
+ * trailing zero bytes: a ZIP reader finds the end-of-central-directory by scanning backwards, so
+ * the archive still parses.
+ */
+function makeDupe() {
+  mkdirSync(dirname(DUPE), { recursive: true });
+  writeFileSync(DUPE, Buffer.concat([readFileSync(join(REPO, "samples", EXAMPLE)), Buffer.alloc(4)]));
+}
+
+/** Reload `url` with an empty IndexedDB, via `about:blank` so the app really re-boots (a
+ * same-document hash change would not). */
+async function emptyReload(cdp, url) {
+  await cdp.eval(
+    `new Promise(r => { const q = indexedDB.deleteDatabase("zpcrweb");
+       q.onsuccess = q.onerror = q.onblocked = () => r(true); })`,
+  );
+  await cdp.send("Page.navigate", { url: "about:blank" });
+  await sleep(200);
+  await cdp.send("Page.navigate", { url });
+  await waitFor(() => cdp.eval("document.readyState==='complete'"), { what: "reload" });
+}
 
 const results = [];
 function check(name, ok, detail = "") {
@@ -95,6 +123,56 @@ async function routingChecks(chrome, origin, pw) {
   cdp.close();
 }
 
+/**
+ * `#load=<url>` and the welcome screen's example button — the one hash key that reaches the
+ * network, plus the "same name replaces" rule. All three are invisible to Vitest (no DOM, no
+ * fetch) and to a screenshot (which can't show that a second copy *didn't* appear).
+ */
+async function loadChecks(chrome, origin) {
+  console.log("\nload from URL");
+  const cdp = await openPage(chrome.base, origin);
+  await sleep(600);
+
+  // 1. The welcome screen offers the example, and clicking it loads it.
+  const clicked = await cdp.eval(
+    `(() => { const b = [...document.querySelectorAll("button")]
+        .find(x => /load an example/i.test(x.textContent || "")); b && b.click(); return !!b; })()`,
+  );
+  check("welcome screen offers an example file", clicked === true);
+  await waitFor(() => cdp.eval(`/file=/.test(window.location.hash)`), { what: "example loaded" });
+  const exampleHash = await cdp.eval("window.location.hash");
+  check(
+    "example button loads the served sample",
+    /file=20260726_S183-S185_RVP\.zpcr/.test(exampleHash),
+    exampleHash,
+  );
+  check("the load= instruction is consumed, not left in the hash", !/load=/.test(exampleHash));
+
+  // 2. Same name, different bytes (a 4-byte-longer copy — ids hash name+size, so this is a new
+  //    id) must replace the chip rather than add an indistinguishable second one.
+  await loadFile(cdp, DUPE);
+  await sleep(800);
+  const chips = await cdp.eval(`document.querySelectorAll(".filechip").length`);
+  check("re-loading a name replaces the file instead of duplicating it", chips === 1, `${chips} chips`);
+
+  // 3. A cold deep link does the fetch on its own, with nothing in IndexedDB to fall back on.
+  await emptyReload(cdp, `${origin}#load=examples/20260726_S183-S185_RVP.zpcr&view=plates`);
+  await waitFor(() => cdp.eval(`document.querySelectorAll(".filechip").length === 1`), {
+    what: "deep-linked file",
+  });
+  const cold = await tabBecomes(cdp, "Plates");
+  check("cold #load= link fetches the file and honors view=", cold === "Plates", `tab "${cold}"`);
+
+  // 4. A bad URL surfaces an error rather than hanging on the welcome screen.
+  await emptyReload(cdp, `${origin}#load=examples/nope.zpcr`);
+  await sleep(1200);
+  const errored = await cdp.eval(`!!document.querySelector(".app__error")`);
+  const stillWelcome = await cdp.eval(`!!document.querySelector(".app--empty")`);
+  check("a #load= that 404s reports an error and keeps the welcome screen", errored && stillWelcome);
+
+  cdp.close();
+}
+
 async function passwordChecks(chrome, origin, pw) {
   console.log("\npassword handling");
 
@@ -148,6 +226,9 @@ async function main() {
   const chrome = await startChrome(join(REPO, "tools/.uishot/testprofile"));
   try {
     const origin = `${dev.base}/`;
+    // First, while IndexedDB is still empty and the welcome screen is showing.
+    makeDupe();
+    await loadChecks(chrome, origin);
     await routingChecks(chrome, origin, pw);
     await passwordChecks(chrome, origin, pw);
   } finally {

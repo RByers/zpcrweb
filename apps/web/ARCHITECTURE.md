@@ -96,6 +96,36 @@ the echo one direction provokes in the other terminates rather than looping:
 The view is also seeded synchronously from the hash in `useState`'s initializer, so a shared
 link opens on the right tab with no flash of the default one.
 
+### `#load=<url>` — the file itself in a link
+
+`#file=` can only name a file the recipient already has. `#load=<url>` closes that gap: the app
+fetches the URL and runs the bytes through the same `addFiles` path a drop uses
+(`useZpcrStore`'s `addUrl`), naming the file after the URL's last path segment. The fetch is
+`credentials: "omit"` — the URL arrives in a link, so it must not be able to use the recipient's
+cookies to pull something private into the page; cross-origin URLs work only with CORS, as any
+other fetch would.
+
+Unlike `file`/`view` it is an **instruction, not state**: `formatHash` never writes it back, so
+it is consumed once and immediately replaced by the ordinary `#file=…&view=…` the loaded file
+produces. A reload therefore reads the file from IndexedDB instead of re-fetching, and a URL
+copied afterwards is a plain bookmark. Like the view, it is captured in a `useState` initializer
+(first render, before any effect) so the state → URL sync can't strip it first; the fetch itself
+waits for hydration, since replacing a same-named copy needs to know what's already stored.
+
+The welcome screen's **"Load an example file"** button is just a link to one of these: it assigns
+`formatLoadHash(EXAMPLE_FILE)` to `location.hash` rather than calling `addUrl`, so the button and
+an external deep link are one code path and the resulting URL is shareable. The example is
+`apps/web/public/examples/`, a symlink to the repo's `samples/` — Vite dereferences it into
+`dist/` at build time, so the file is served for real without a second copy in git.
+
+### Same name replaces
+
+`addFiles` drops any already-loaded file with the same **name** before adding a new one. Ids
+hash name+size, so an edited file (a plate attached, thresholds saved, a re-export) comes back
+under a new id with the old name — without this it would sit in the file bar as an
+indistinguishable second chip, and `#file=` would have two candidates to mean. This is what makes
+clicking the example twice, or re-loading a file you just downloaded, do the obvious thing.
+
 The decryption password shares this one hash query string (`#cfxPassword=…`, see the `.pcrd`
 password gate above) rather than living in `?…`. A fragment is never sent to the server, so a
 secret placed there can't reach access logs, proxies/CDNs or a `Referer` header;

@@ -1,5 +1,6 @@
 import { useZpcrStore } from "./state/useZpcrStore";
 import { usePltdPassword } from "./state/pltdPassword";
+import { formatLoadHash } from "./state/urlHash";
 import { DropZone } from "./components/DropZone";
 import { FileBar } from "./components/FileBar";
 import { ViewSelector } from "./components/ViewSelector";
@@ -15,6 +16,13 @@ import { StandaloneRawView } from "./components/views/StandaloneRawView";
 
 const STANDALONE_VIEWS = ["plates", "raw"] as const;
 
+/**
+ * The run offered on the welcome screen, served from `public/examples/` (a symlink to the
+ * repo's `samples/`, so there's one copy of the file). Relative to the page, so it works on a
+ * dev server, on a subpath deploy, and offline-cached alike.
+ */
+const EXAMPLE_FILE = "examples/20260726_S183-S185_RVP.zpcr";
+
 export function App() {
   const store = useZpcrStore();
   const { active, activeRun, settings } = store;
@@ -25,13 +33,27 @@ export function App() {
   }
 
   if (!active || !settings) {
+    // The example goes through the `#load=` hash key rather than calling `addUrl` directly, so
+    // the button and an external deep link are the same code path — and so the URL it produces
+    // is one you can copy and send. Assigning an unchanged hash fires no `hashchange`, so a
+    // repeat click (after a failed fetch, say) falls back to loading it directly.
+    const loadExample = () => {
+      const hash = formatLoadHash(EXAMPLE_FILE);
+      if (window.location.hash.replace(/^#/, "") === hash) void store.addUrl(EXAMPLE_FILE);
+      else window.location.hash = hash;
+    };
     return (
       <div className="app app--empty">
         <header className="app__brand">
           <span className="app__logo mono">zpcr//web</span>
           <span className="app__tag">Bio-Rad CFX qPCR viewer</span>
         </header>
-        <DropZone onFiles={store.addFiles} large />
+        <div className="app__welcome">
+          <DropZone onFiles={store.addFiles} large />
+          <button type="button" className="app__example mono" onClick={loadExample}>
+            Load an example file
+          </button>
+        </div>
         {store.error && <div className="app__error mono">{store.error}</div>}
       </div>
     );
