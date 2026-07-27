@@ -188,6 +188,33 @@ describe("plate CSV round-trip", () => {
     }
   });
 
+  it("writes the raw code for an `other` well, and round-trips it without inventing wcOther", () => {
+    const plate = syntheticPlate();
+    plate.wells[0]!.sampleType = "other";
+    plate.wells[0]!.sampleTypeRaw = "wcSomethingNew";
+    const csv = plateToCsv(plate);
+    expect(csv).not.toMatch(/wcOther/);
+    expect(csv.split("\r\n").find((l) => l.startsWith("A1,"))).toMatch(/^A1,wcSomethingNew,/);
+    expect(parsePlateCsv(csv)).toEqual(plate);
+  });
+
+  it("accepts a raw wc* code in the SampleType cell and normalizes it", () => {
+    const csv = [
+      "# rows: 1",
+      "# columns: 3",
+      "Well,SampleType,Sample,Replicate,Quantity,FAM Ch1",
+      "A1,wcNTC,,,,GeneA",
+      "A2,ntc,,,,GeneA",
+      "A3,wcFirst,,,,",
+    ].join("\r\n");
+    const wells = parsePlateCsv(csv).wells;
+    // A hand-written CFX code reads the same as the normalized name, and the enum filler that
+    // `.pltd` uses for an unset well reads as empty rather than `other`.
+    expect(wells[0]!).toMatchObject({ sampleType: "ntc", sampleTypeRaw: "wcNTC" });
+    expect(wells[1]!).toMatchObject({ sampleType: "ntc", sampleTypeRaw: "wcNTC" });
+    expect(wells[2]!).toMatchObject({ sampleType: "empty", sampleTypeRaw: "wcEmpty", loaded: false });
+  });
+
   it("omits plateType/scanMode/standardUnits when empty, and parses a file without them", () => {
     const plate = { ...syntheticPlate(), plateType: "", scanMode: "", standardUnits: "" };
     const csv = plateToCsv(plate);

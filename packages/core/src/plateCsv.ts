@@ -15,6 +15,9 @@
  * separate header line to keep in sync. A well with no fluor cell filled in is unloaded
  * (`loaded: false`), and a well left out of the table entirely is empty.
  *
+ * `SampleType` holds a normalized {@link SampleType} name; a raw CFX `wellSampleType` code is
+ * accepted there too and normalized on read (see {@link SAMPLE_TYPE_TO_RAW}).
+ *
  * Only `plateName` is always written: `rows`/`columns` fall back to the extent implied by the
  * well labels, and `plateType`/`scanMode`/`standardUnits` are display-only passengers from a
  * `.pltd`, omitted when empty. The plate's `identityKey` isn't written at all — the file or
@@ -24,9 +27,17 @@
  * commas — still parses.
  */
 
+import { toSampleType } from "./pltd.js";
 import type { PlateDefinition, PlateFluor, SampleType, WellDefinition, WellFluor } from "./pltd.js";
 
-const SAMPLE_TYPE_TO_RAW: Record<SampleType, string> = {
+/**
+ * Normalized type → the `wellSampleType` code a `.pltd` would carry. `other` is deliberately
+ * absent: it isn't a code, it's "we didn't recognize the code", so a well of that type writes
+ * its preserved {@link WellDefinition.sampleTypeRaw} into the SampleType cell instead (and
+ * {@link parsePlateCsv} normalizes it back). Inventing a `wcOther` here, as an earlier version
+ * did, both fabricated a code CFX never emits and lost the real one on every round-trip.
+ */
+const SAMPLE_TYPE_TO_RAW: Record<Exclude<SampleType, "other">, string> = {
   unknown: "wcSample",
   standard: "wcStandard",
   ntc: "wcNTC",
@@ -36,9 +47,8 @@ const SAMPLE_TYPE_TO_RAW: Record<SampleType, string> = {
   empty: "wcEmpty",
   passiveRef: "wcPassiveRef",
   custom: "wcCustom",
-  other: "wcOther",
 };
-const SAMPLE_TYPES = Object.keys(SAMPLE_TYPE_TO_RAW) as SampleType[];
+const SAMPLE_TYPES = [...Object.keys(SAMPLE_TYPE_TO_RAW), "other"] as SampleType[];
 
 function indexToRowLetters(n: number): string {
   let s = "";
@@ -166,7 +176,9 @@ export function plateToCsv(plate: PlateDefinition): string {
     const byFluor = new Map(w.fluors.map((f) => [f.fluor, f]));
     out += csvRow([
       w.label,
-      w.sampleType,
+      // `other` isn't a type name worth writing — write the code we couldn't recognize, so the
+      // information survives the round-trip and a human can see what the plate actually said.
+      w.sampleType === "other" ? w.sampleTypeRaw || "other" : w.sampleType,
       w.sample ?? "",
       w.replicate !== undefined ? String(w.replicate) : "",
       w.quantity !== undefined ? String(w.quantity) : "",
@@ -298,10 +310,15 @@ export function parsePlateCsv(text: string, options: ParsePlateCsvOptions = {}):
     const w = wells[wellIndex];
     if (!w) throw new Error(`Plate CSV: well "${parsedLabels[i]!.label}" is outside the ${rowsCount}x${columns} plate`);
 
+    // The cell holds a normalized type name; a blank cell means an empty well. Anything else is
+    // taken to be a raw `wellSampleType` code — that's how `plateToCsv` writes an `other` well,
+    // and it also lets a hand-authored file name a CFX code directly (`wcNTC` reads as `ntc`).
     const sampleTypeCell = (r[idx.SampleType!] ?? "").trim();
     const sampleType: SampleType = SAMPLE_TYPES.includes(sampleTypeCell as SampleType)
       ? (sampleTypeCell as SampleType)
-      : "empty";
+      : sampleTypeCell === ""
+        ? "empty"
+        : toSampleType(sampleTypeCell);
     const wellFluors: WellFluor[] = [];
     for (const { fluor, channel, column } of fluorColumns) {
       const cell = (r[column] ?? "").trim();
@@ -322,7 +339,7 @@ export function parsePlateCsv(text: string, options: ParsePlateCsvOptions = {}):
       loaded: wellFluors.length > 0,
       fluors: wellFluors,
       sampleType,
-      sampleTypeRaw: SAMPLE_TYPE_TO_RAW[sampleType] ?? sampleTypeCell,
+      sampleTypeRaw: sampleType === "other" ? sampleTypeCell : SAMPLE_TYPE_TO_RAW[sampleType],
       sample,
       replicate,
       quantity,

@@ -15,7 +15,10 @@ type CellMode = "compact" | "detailed";
 export function PlateViewer({ plate, sourceHint }: { plate: PlateDefinition; sourceHint?: string }) {
   const [selected, setSelected] = useState<number | null>(null);
   const [cellMode, setCellMode] = useState<CellMode>("detailed");
-  const typesPresent = [...new Set(plate.wells.map((w) => w.sampleType))];
+  // Gated on `loaded` exactly as the cells are (see `WellCell`), so the legend lists the colors
+  // actually on screen. Without the gate an unloaded well's configured sample type — often just
+  // enum filler — added a swatch to the legend that no cell ever showed.
+  const typesPresent = [...new Set(plate.wells.map((w) => (w.loaded ? w.sampleType : "empty")))];
 
   return (
     <div className="plateviewer">

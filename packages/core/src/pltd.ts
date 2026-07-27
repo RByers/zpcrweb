@@ -28,7 +28,7 @@ export type SampleType =
   | "nrt" // wcNRT — no reverse-transcriptase control
   | "positiveControl" // wcPostiveControl (Bio-Rad's spelling)
   | "negativeControl" // wcNegativeControl
-  | "empty" // wcEmpty / wcBlank
+  | "empty" // wcEmpty / wcBlank / wcFirst / wcLast
   | "passiveRef" // wcPassiveRef
   | "custom" // wcCustom
   | "other"; // any other/unrecognized code (see WellDefinition.sampleTypeRaw)
@@ -43,6 +43,12 @@ const SAMPLE_TYPE_MAP: Record<string, SampleType> = {
   wcNegativeControl: "negativeControl",
   wcEmpty: "empty",
   wcBlank: "empty",
+  // Enum bounds, not real members: CFX's serializer emits the alias name for the enum's zero
+  // value, and every `wcFirst` well observed in the samples is blank — `wellLoadedFluor="False"`,
+  // no target, no sample, `replicateNumber="-1"`, `sampleQuantity="NaN"`. So they mean "unset",
+  // and mapping them to `empty` keeps `other` meaning "a code we genuinely don't recognize".
+  wcFirst: "empty",
+  wcLast: "empty",
   wcPassiveRef: "passiveRef",
   wcCustom: "custom",
 };
@@ -177,7 +183,12 @@ export interface PltdOptions {
 // platesetup2 XML
 // ---------------------------------------------------------------------------
 
-function toSampleType(raw: string): SampleType {
+/**
+ * Normalize a raw `wellSampleType` code. Unrecognized codes become `other`, which is why
+ * {@link WellDefinition.sampleTypeRaw} always keeps the original. Exported so `plateCsv.ts` can
+ * normalize a raw code that appears in a plate CSV's SampleType cell the same way.
+ */
+export function toSampleType(raw: string): SampleType {
   return SAMPLE_TYPE_MAP[raw] ?? "other";
 }
 

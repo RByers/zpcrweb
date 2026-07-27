@@ -292,7 +292,9 @@ so every call site keeps writing one `onChange({ … })` regardless of where the
   see "Standalone plate entries and attach" below) and a `PlateDownloadButton`. Per-sample-type color/label/abbreviation lives in one place,
   `lib/sampleType.ts`'s `SAMPLE_TYPE_META` — grey for empty, purple for other, green for positive
   control, red for negative control, blue for unknown — shared with the Curves view's well-selection matrix (see
-  below) so the two grids read the same way. A sidebar lists plates when there's more than one
+  below) so the two grids read the same way. A cell is colored by its sample type only when the
+  well is `loaded`, and unloaded wells read as empty; the legend applies the same gate, so it
+  lists exactly the colors on screen rather than types only an unloaded well carries. A sidebar lists plates when there's more than one
   (multiple `.pltd` entries in a `.zpcr`); a `.pcrd`'s single embedded plate setup shows
   directly. This is the same grid
   component (`PlateViewer`, formerly `PlateDetail`) previously embedded in the Raw view's

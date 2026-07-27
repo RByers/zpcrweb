@@ -92,6 +92,49 @@ describe("pltd — decoded plate structure (plaintext samples, no secret needed)
   });
 });
 
+describe("pltd — wellSampleType normalization", () => {
+  function platesetup2(codes: string[]): string {
+    const wells = codes
+      .map(
+        (code, i) =>
+          `<wellSample replicateNumber="-1" sampleQuantity="NaN" wellSampleType="${code}" ` +
+          `plateIndex="${i}" wellLoadedFluor="${code === "wcFirst" || code === "wcLast" ? "False" : "True"}" ` +
+          `geneName="" conditionName="" />`,
+      )
+      .join("");
+    return (
+      `<platesetup2 plateName="T" rows="1" columns="${codes.length}" dyes="1">` +
+      `<dyeLayer><fluor fluorName="FAM" channelPosition="0"/>${wells}</dyeLayer></platesetup2>`
+    );
+  }
+
+  it("maps the enum bounds wcFirst/wcLast to empty, not other", () => {
+    const plate = parsePlatesetup2(platesetup2(["wcFirst", "wcLast"]));
+    expect(plate.wells.map((w) => w.sampleType)).toEqual(["empty", "empty"]);
+    // The raw code is still preserved, so the filler stays visible in the well detail.
+    expect(plate.wells.map((w) => w.sampleTypeRaw)).toEqual(["wcFirst", "wcLast"]);
+    expect(plate.wells.every((w) => !w.loaded)).toBe(true);
+  });
+
+  it("still falls back to other for a genuinely unrecognized code", () => {
+    const plate = parsePlatesetup2(platesetup2(["wcSomethingNew"]));
+    expect(plate.wells[0]!.sampleType).toBe("other");
+    expect(plate.wells[0]!.sampleTypeRaw).toBe("wcSomethingNew");
+  });
+
+  it("normalizes the real sample-type codes", () => {
+    const codes = ["wcSample", "wcStandard", "wcNTC", "wcNRT", "wcPostiveControl", "wcNegativeControl"];
+    expect(parsePlatesetup2(platesetup2(codes)).wells.map((w) => w.sampleType)).toEqual([
+      "unknown",
+      "standard",
+      "ntc",
+      "nrt",
+      "positiveControl",
+      "negativeControl",
+    ]);
+  });
+});
+
 describe.skipIf(!PW)("pltd — decryption pipeline (requires secrets.json)", () => {
   it("decrypts the method-8 entry to the same plaintext committed in samples/", () => {
     const pltd = parseZpcr(readMultistepBytes()).plates(PW)[0]!.pltd;

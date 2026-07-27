@@ -145,19 +145,36 @@ an empty tube.
 
 ### Sample-type enum (`wellSampleType`)
 
-| Code | Meaning | Normalized |
-|------|---------|------------|
-| `wcSample` | Unknown | `unknown` |
-| `wcStandard` | Standard (has quantity) | `standard` |
-| `wcNTC` | No-template control | `ntc` |
-| `wcNRT` | No-reverse-transcriptase control | `nrt` |
-| `wcPostiveControl` | Positive control (Bio-Rad's spelling) | `positiveControl` |
-| `wcNegativeControl` | Negative control | `negativeControl` |
-| `wcEmpty` / `wcBlank` | Empty / not loaded | `empty` |
-| `wcPassiveRef` | Passive reference | `passiveRef` |
-| `wcCustom` | Custom | `custom` |
+| Code | Meaning | Normalized | Observed? |
+|------|---------|------------|-----------|
+| `wcSample` | Unknown | `unknown` | yes |
+| `wcStandard` | Standard (has quantity) | `standard` | yes |
+| `wcNTC` | No-template control | `ntc` | yes |
+| `wcNRT` | No-reverse-transcriptase control | `nrt` | yes |
+| `wcPostiveControl` | Positive control (Bio-Rad's spelling) | `positiveControl` | yes |
+| `wcNegativeControl` | Negative control | `negativeControl` | yes |
+| `wcFirst` / `wcLast` | Enum bounds — filler for an unset well | `empty` | `wcFirst` only |
+| `wcEmpty` / `wcBlank` | Empty / not loaded | `empty` | no |
+| `wcPassiveRef` | Passive reference | `passiveRef` | no |
+| `wcCustom` | Custom | `custom` | no |
 
-(`wcFirst`/`wcLast` are enum bounds and appear as filler in some files.)
+Anything else normalizes to `other`; `sampleTypeRaw` always keeps the original code.
+
+**"Observed?" means: does the code appear in any sample in `samples/`.** The four `no` rows are
+accepted on the decode side but have never actually been seen — treat their spelling as a guess.
+The only `wcEmpty` anywhere in the corpus is one this project's own plate-CSV writer emitted.
+
+`wcFirst`/`wcLast` are the enum's bounds rather than real members: CFX's serializer emits the
+alias name when a member shares the enum's zero value. Every `wcFirst` well in the samples is
+blank in every other respect — `wellLoadedFluor="False"`, no `geneName`, no `conditionName`,
+`replicateNumber="-1"`, `sampleQuantity="NaN"` — so they mean "unset", and both normalize to
+`empty`. Mapping them anywhere else (they were previously `other`) makes 24 empty wells of
+`20230829_135443_CT019138_SINGLE_STEP_.zpcr` masquerade as a distinct sample type.
+
+Note that `unknown`, and the other normalized names, are **this library's** vocabulary, not
+Bio-Rad's: no CFX file contains the string "Unknown". `unknown` is the qPCR term (and CFX
+Manager's own UI label) for a well that is neither a standard nor a control — the thing a
+standard curve quantifies — which is what `wcSample` means.
 
 ---
 

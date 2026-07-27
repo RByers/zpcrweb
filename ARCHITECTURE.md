@@ -160,6 +160,10 @@ the dye name, whose cells hold only that well's target for it (empty = fluor abs
 present with no target) — so a plate reads as a target-per-fluor grid in a spreadsheet. Those
 columns are the plate's whole fluor list; the channel isn't written, since a dye is read on
 exactly one channel and the run's own `.Dcal` set says which (`Dcal.primaryChannel`).
+The `SampleType` cell holds a normalized type name (`unknown`, `ntc`, …), but a raw CFX
+`wellSampleType` code is accepted too and normalized on read — which is how an `other` well
+round-trips: since `other` means "a code we didn't recognize" rather than a type, `plateToCsv`
+writes the preserved `sampleTypeRaw` instead of inventing a `wcOther` that no CFX tool emits.
 `parseZpcr` builds that dye→channel map lazily (via `dcal.ts`'s `dyeChannelLookup`) and hands
 it to `parsePlateCsv` as `channelForFluor`; an explicit `FAM Ch1`-style suffix still wins if a
 file carries one, and a dye in neither falls back to its column position. **Anything that
