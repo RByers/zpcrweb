@@ -54,8 +54,8 @@ export function OverviewView({
   const [password] = usePltdPassword();
   const plate = useMemo(() => zpcr.plates(password || undefined)[0]?.pltd.plate ?? null, [zpcr, password]);
   const encStatus = useMemo(() => runEncryptionStatus(run, password), [run, password]);
-  const targets = useMemo(() => (plate ? plateTargets(plate) : []), [plate]);
-  const samples = plate?.samples ?? [];
+  const plateTargetList = useMemo(() => (plate ? plateTargets(plate) : []), [plate]);
+  const plateSamples = plate?.samples ?? [];
 
   // The run's Cq table, so each chip can say how many of its curves amplified. Read from the same
   // `useRunAnalysis` the Curves view uses (over the same first step) rather than tallied here, so
@@ -69,6 +69,16 @@ export function OverviewView({
   const { byTarget, bySample } = useMemo(
     () => chipCounts(plate, analysis.cqTable),
     [plate, analysis.cqTable],
+  );
+
+  // Most-amplified first, so the chips that carry the run's signal lead each list.
+  const targets = useMemo(
+    () => byCountsDesc(plateTargetList, (t) => byTarget.get(t.name)),
+    [plateTargetList, byTarget],
+  );
+  const samples = useMemo(
+    () => byCountsDesc(plateSamples, (s) => bySample.get(s)),
+    [plateSamples, bySample],
   );
 
   const tiles: Tile[] = [
@@ -215,6 +225,22 @@ function chipCounts(
     }
   }
   return { byTarget, bySample };
+}
+
+/**
+ * Orders chips by positive curves descending, then by total curves descending — the tally
+ * {@link CountChip} already shows, so the list reads top-to-bottom in the same order as the
+ * numbers on the chips. Items with no counts at all (an uncalibrated run, or a name whose wells
+ * were never loaded) sort to the end at 0/0, and ties keep the plate's own order, since `sort`
+ * is stable.
+ */
+function byCountsDesc<T>(items: readonly T[], counts: (item: T) => Counts | undefined): T[] {
+  const pos = (item: T) => counts(item)?.pos ?? 0;
+  const total = (item: T) => {
+    const c = counts(item);
+    return c ? c.pos + c.neg : 0;
+  };
+  return [...items].sort((a, b) => pos(b) - pos(a) || total(b) - total(a));
 }
 
 /**
