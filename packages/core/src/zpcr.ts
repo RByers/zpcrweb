@@ -22,6 +22,7 @@ import {
   toChannels,
   toCurves,
   toDarkCurves,
+  toLedCurves,
   toSteps,
   toTemperatureCurves,
 } from "./pivot.js";
@@ -124,6 +125,7 @@ export function parseZpcr(data: Uint8Array | ArrayBuffer): Zpcr {
     curves: (options?: CurveOptions) => toCurves(reads, options),
     darkCurves: (step?: number) => toDarkCurves(reads, step),
     temperatureCurves: (step?: number) => toTemperatureCurves(reads, step),
+    ledCurves: (step?: number) => toLedCurves(reads, step),
     steps: () => toSteps(reads),
     channels: () => toChannels(reads),
     plates: (password?: string): PltdEntry[] =>

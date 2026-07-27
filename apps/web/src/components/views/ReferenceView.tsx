@@ -8,6 +8,7 @@ import { CurveChart } from "../curves/CurveChart";
 import { Toggle } from "../Toggle";
 import { RefCalPanel } from "./RefCalPanel";
 import type { FactoryCurve, PlotCurve } from "../../lib/uplot/chart";
+import { noRightAxis } from "../../lib/rightAxis";
 
 interface Props {
   zpcr: Zpcr;
@@ -173,7 +174,7 @@ export function ReferenceView({ zpcr, settings, onChange }: Props) {
             curves={plotCurves}
             darkCurves={[]}
             factoryCurves={factoryCurves}
-            tempCurves={[]}
+            aux={noRightAxis()}
             baseline={settings.baseline}
             curveView="absolute"
             drawBaseline={false}

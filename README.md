@@ -91,6 +91,7 @@ const zpcr = await zpcrFromBlob(file);
 | `Zpcr.curves(opts)` | Well-centric `WellCurve[]` amplification curves |
 | `Zpcr.darkCurves(step)` | Per-channel dark (LED-off) background across cycles |
 | `Zpcr.temperatureCurves(step)` | Per-field `TemperatureCurve[]` (°C per cycle) |
+| `Zpcr.ledCurves(step)` | Per-channel `LedCurve[]` — LED drive current (DAC counts per cycle) |
 | `Zpcr.archive` | Low-level `entries` / `bytes` / `text` / `hexDump` access |
 
 See [`ARCHITECTURE.md`](./ARCHITECTURE.md) for design details and

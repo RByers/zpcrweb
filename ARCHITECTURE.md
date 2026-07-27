@@ -322,8 +322,11 @@ raw bytes ─▶ fflate.unzipSync ─▶ { name: Uint8Array }
   emits a temperature this code has never seen surfaces it with no code change (there are no
   per-row block temperatures, gradient runs included — `plateread.md` §3). Measured floats
   and int set points are told apart by plausibility (see the module comment).
+- **`leds.ts`** — the same name-matched extraction for the six `LEDCURRENT*` fields: each
+  optical channel's excitation-LED drive setting, in DAC counts (`RunInfo.xml`'s
+  `LEDDACValsCal`), with no invented conversion to milliamps.
 - **`pivot.ts`** — transforms run-centric reads into well-centric curves, per-channel dark
-  curves, and per-field temperature series.
+  curves, per-field temperature series, and per-channel LED-current series.
 - **`pltd.ts`** — decodes `.pltd` plate-definition entries into a typed `PlateDefinition`
   (`zpcr.plates()`): each `.pltd` is a single-entry ZIP whose payload is ZipCrypto-encrypted
   and DEFLATE/DEFLATE64-compressed, wrapping a `<platesetup2>` XML plate map. See

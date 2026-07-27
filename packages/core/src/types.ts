@@ -79,6 +79,38 @@ export interface PlateReadBinaryFile {
   versionWords: number[];
 }
 
+/**
+ * One LED drive-current field from a plateread's descriptor dictionary — the excitation LED's
+ * calibrated DAC setting for one optical channel (`RunInfo.xml`'s `LEDDACValsCal`).
+ */
+export interface PlateReadLed {
+  /** Raw field name, e.g. `LEDCURRENT01`. Stable identity across reads. */
+  key: string;
+  /** Human label — the channel driven, e.g. `Ch1`; the raw name for an unrecognized field. */
+  label: string;
+  /** 0-based optical channel the LED drives, or undefined if the name carries no channel. */
+  channel?: number;
+  /**
+   * Drive setting in DAC counts, **not** milliamps: the archive records the calibrated DAC
+   * value with no DAC→current transfer function, so no conversion is invented.
+   */
+  dac: number;
+}
+
+/** An LED drive-current series across the reads of a run — one channel, one value per cycle. */
+export interface LedCurve {
+  /** Field name, e.g. `LEDCURRENT01`. */
+  key: string;
+  /** Human label, e.g. `Ch1`. */
+  label: string;
+  /** 0-based optical channel the LED drives, or undefined if the field names none. */
+  channel?: number;
+  /** Cycle numbers, ascending — aligned index-for-index with {@link dac}. */
+  cycles: number[];
+  /** DAC counts per cycle, aligned with {@link cycles}; null where the read lacked the field. */
+  dac: (number | null)[];
+}
+
 /** One plate read == one PCR cycle == one `.Plateread` file, fully decoded. */
 export interface PlateRead {
   /** 1-based position in the ordered read series (by filename suffix). */
@@ -105,6 +137,12 @@ export interface PlateRead {
    * Observed CFX96 firmware emits block/ambient/shuttle/sample/lid plus the fan set points.
    */
   temps: PlateReadTemp[];
+  /**
+   * Every LED drive current in the file's descriptor dictionary, in file order — any
+   * `LEDCURRENT*` field, so a firmware emitting a different channel count surfaces
+   * automatically. Observed CFX96 firmware emits one per optical channel (six).
+   */
+  leds: PlateReadLed[];
   /** Read timestamp string from the header, if present (best-effort). */
   timestamp?: string;
   /**
@@ -345,6 +383,11 @@ export interface Zpcr {
   darkCurves(step?: number): DarkCurve[];
   /** Every temperature field's series across cycles, for plotting against the curves. */
   temperatureCurves(step?: number): TemperatureCurve[];
+  /**
+   * Every LED drive current's series across cycles (DAC counts), for plotting against the
+   * curves on the same right-hand axis the temperatures use.
+   */
+  ledCurves(step?: number): LedCurve[];
   /** Distinct protocol PLATEREAD steps, in first-appearance order. */
   steps(): PlateReadStep[];
   /**

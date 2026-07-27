@@ -99,8 +99,17 @@ export interface FileSettings extends AnalysisSettings {
   /**
    * Temperature field keys (e.g. `BLOCKTEMP`) plotted on the chart's right axis. Empty
    * hides the temperature axis entirely.
+   *
+   * Mutually exclusive with {@link leds} — there is one right axis, and °C and DAC counts share
+   * no scale, so `updateSettings` clears whichever set the caller didn't just fill (see
+   * `rightAxis.ts`).
    */
   temps: Set<string>;
+  /**
+   * LED drive-current field keys (e.g. `LEDCURRENT01`) plotted on the chart's right axis, in
+   * DAC counts. Empty hides the axis; non-empty clears {@link temps}.
+   */
+  leds: Set<string>;
   /**
    * Channel→dye color separation (see `calibration.md`). `null` auto-enables it once plate
    * data and matching `.Dcal` calibration data are both available; `true`/`false` is an
@@ -238,8 +247,10 @@ function defaultSettings(): FileSettings {
     showDark: false,
     bands: false,
     step: null,
-    // Temperatures are off by default — they are instrument context, not the measurement.
+    // Temperatures and LED currents are off by default — instrument context, not the
+    // measurement.
     temps: new Set<string>(),
+    leds: new Set<string>(),
     // Auto: on once plate + calibration data are available (see CurvesView).
     calibration: null,
     fluorViewMode: "target",
@@ -266,6 +277,7 @@ function toStored(id: string, s: FileSettings): StoredSettings {
     bands: s.bands,
     step: s.step ?? null,
     temps: [...s.temps],
+    leds: [...s.leds],
     calibration: s.calibration,
     fluorViewMode: s.fluorViewMode,
     disabledFluors: [...s.disabledFluors],
@@ -325,6 +337,9 @@ function fromStored(s: StoredSettings): FileSettings {
     disabledSamples: new Set(s.disabledSamples ?? []),
     showUnloadedFluors: s.showUnloadedFluors ?? false,
     temps: new Set(s.temps ?? []),
+    // A record written before the LED series existed has no `leds`; both being non-empty is
+    // impossible by construction (see `updateSettings`), so nothing needs reconciling here.
+    leds: new Set(s.leds ?? []),
     // Analysis fields are *not* read from the record here — they come from the file, and are
     // merged in by the store (see `legacyAnalysisFromStored` for the one migration exception).
     ...defaultAnalysisSettings(),
@@ -733,6 +748,10 @@ export function useZpcrStore(): ZpcrStore {
         setSettingsMap((prev) => {
           const current = prev[activeId] ?? defaultSettings();
           const next = { ...current, ...displayPatch };
+          // One right axis, two candidates for it: filling either set empties the other, here
+          // rather than at each call site so no control can leave both on (see `rightAxis.ts`).
+          if (displayPatch.temps?.size) next.leds = new Set();
+          if (displayPatch.leds?.size) next.temps = new Set();
           // debounced persist
           window.clearTimeout(saveTimers.current[activeId]);
           saveTimers.current[activeId] = window.setTimeout(() => {

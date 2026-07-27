@@ -26,9 +26,9 @@ Additional typed parsers for the archive files currently reachable only via the 
 - [ ] **`.alf` run log** — the `*_…_Luna_noRT.alf` tab/`*`-delimited step-by-step run log
       (per-step temperatures, timestamps, elapsed time, error state).
 - [ ] **`runlog.xml`** — full structured run event log.
-- [ ] **Plateread header** — LED currents ×6 and fan/lid state are decoded via the
-      descriptor dictionary but only reachable through `decodePlateReadDetail`; promote them
-      to the typed `PlateRead` surface like the temperatures now are.
+- [ ] **Plateread header** — fan/lid state is decoded via the descriptor dictionary but only
+      reachable through `decodePlateReadDetail`; promote it to the typed `PlateRead` surface like
+      the temperatures and LED currents now are.
 - [ ] **`FactoryRefRowCal`** — parse the factory reference-row calibration array in
       `RunInfo.xml` into typed per-well records.
 

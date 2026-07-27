@@ -193,6 +193,9 @@ describe("pcrd — decoded structure (real document, re-wrapped, no secret neede
       expect(a.step).toBe(b.step);
       expect(a.channelMask).toBe(b.channelMask);
       expect(a.blockTempC).toBeCloseTo(b.blockTempC!, 2);
+      // `LedCur01`…`LedCur06` decode to the same DAC settings the binary `LEDCURRENT*` fields
+      // carry, so both formats feed one LED-current pivot.
+      expect(a.leds).toEqual(b.leds);
       for (let ch = 0; ch < a.wells.length; ch++) {
         for (let row = 0; row < a.wells[ch]!.length; row++) {
           for (let col = 0; col < a.wells[ch]![row]!.length; col++) {
@@ -226,12 +229,20 @@ describe("pcrd — decoded structure (real document, re-wrapped, no secret neede
     expect(read.fields.map((f) => f.name)).not.toContain("DrkCrnt");
   });
 
-  it("pivots into curves/darkCurves/temperatureCurves like a .zpcr", () => {
+  it("pivots into curves/darkCurves/temperatureCurves/ledCurves like a .zpcr", () => {
     const zpcr = pcrd.zpcr!;
     const curves = zpcr.curves();
     expect(curves.length).toBeGreaterThan(0);
     expect(curves[0]!.cycles).toHaveLength(45);
     expect(zpcr.darkCurves()).toHaveLength(6);
+    expect(zpcr.ledCurves().map((c) => c.label)).toEqual([
+      "Ch1",
+      "Ch2",
+      "Ch3",
+      "Ch4",
+      "Ch5",
+      "Ch6",
+    ]);
     expect(zpcr.channels().length).toBeGreaterThan(0);
     expect(zpcr.steps().length).toBeGreaterThan(0);
   });

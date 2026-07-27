@@ -15,9 +15,8 @@
  */
 
 import uPlot from "uplot";
-import type { DarkCurve, TemperatureCurve } from "@zpcrweb/core";
+import type { DarkCurve } from "@zpcrweb/core";
 import { channelColor, channelLabel } from "../channelColors";
-import { tempColor } from "../tempColors";
 import { formatBaselineFormula } from "../cq";
 import type { CurveAnalysis } from "../runAnalysis";
 import type { Baseline, CurveView, Scale } from "../../state/useZpcrStore";
@@ -76,7 +75,8 @@ export interface PlotCurve {
    * threshold-hover diagnostic marks `baselineRegion`/`noise`.
    *
    * **This module computes none of it** — see the note at the top of the file. Absent for a series
-   * the run analyses no further (temperatures), and for any curve whose record is still loading.
+   * the run analyses no further (right-axis series), and for any curve whose record is still
+   * loading.
    */
   analysis?: CurveAnalysis;
   /** Sample name (`pltd.md`'s `conditionName`, `WellDefinition.sample`) for this curve's well,
@@ -107,14 +107,14 @@ function logSafe(values: number[], scale: Scale): (number | null)[] {
  * they need.
  *
  * Mutates the adjusts in place, since the band and tooltip code holds the same arrays; a no-op
- * when nothing on the plot is non-positive, or when `scale` isn't `"log"`. Temperature series ride
+ * when nothing on the plot is non-positive, or when `scale` isn't `"log"`. Right-axis series ride
  * their own axis and are left alone.
  */
 function applyLogFloor(rows: (number | null)[][], meta: SeriesMeta[], scale: Scale): void {
   if (scale !== "log") return;
   let min = Infinity;
   meta.forEach((m, i) => {
-    if (m.kind === "temp") return;
+    if (m.kind === "aux") return;
     for (const v of rows[i + 1]!) if (v != null && v < min) min = v;
   });
   if (!Number.isFinite(min) || min > 0) return;
@@ -123,7 +123,7 @@ function applyLogFloor(rows: (number | null)[][], meta: SeriesMeta[], scale: Sca
   // each array once rather than once per series that points at it.
   const shifted = new Set<Adjust[]>();
   meta.forEach((m, i) => {
-    if (m.kind === "temp") return;
+    if (m.kind === "aux") return;
     if (!shifted.has(m.adjust)) {
       shifted.add(m.adjust);
       for (const a of m.adjust) a.shift += shiftUp;
@@ -259,8 +259,8 @@ export interface SeriesMeta {
   /** `"baseline"` is the "draw baseline" overlay line — a pure display series, excluded from
    * cursor hit-testing (see `setCursor` below) since it carries no meaningful tooltip of its
    * own. */
-  kind: "well" | "dark" | "factory" | "temp" | "baseline";
-  /** Optical channel for well/dark series; -1 for temperature series. Undefined for a
+  kind: "well" | "dark" | "factory" | "aux" | "baseline";
+  /** Optical channel for well/dark series; -1 for a right-axis series. Undefined for a
    * dye-space series whose channel isn't known (see {@link PlotCurve.channel}). */
   channel?: number;
   /** Reference/plate column, for a factory-overlay series; -1 for every other kind. */
@@ -273,7 +273,7 @@ export interface SeriesMeta {
   cycles: number[];
   mean: number[];
   /** See {@link PlotCurve.std} — absent for every series that has no real spread (dye-space
-   * curves, the baseline overlay, the factory reference, temperatures). */
+   * curves, the baseline overlay, the factory reference, right-axis series). */
   std?: number[];
   min?: number[];
   max?: number[];
@@ -311,10 +311,47 @@ interface BandData {
   max: (number | null)[];
 }
 
-export interface TooltipData {
-  kind: "well" | "dark" | "factory" | "temp";
+/**
+ * One series on the chart's right-hand axis — instrument context (temperatures, LED currents)
+ * rather than plate data. Format-agnostic on purpose: the chart draws whatever
+ * `rightAxis.ts` maps onto this shape and knows nothing about what it means.
+ */
+export interface AuxCurve {
+  /** Stable identity of the underlying field, e.g. `BLOCKTEMP` / `LEDCURRENT01`. */
+  key: string;
+  /** Short display name, e.g. `Block` / `Ch1`. */
   label: string;
-  /** Optical channel for well/dark series; -1 for temperature series. Undefined for a
+  color: string;
+  /** A configured set point rather than a reading — drawn with a finer dash. */
+  setpoint?: boolean;
+  cycles: number[];
+  /** One value per cycle, aligned with {@link cycles}; `null` where the read lacked the field. */
+  values: (number | null)[];
+}
+
+/**
+ * The chart's whole right-hand axis: the series on it plus how to label and format it. One axis,
+ * one unit — temperatures and LED currents can't occupy it at once (see `rightAxis.ts`). No
+ * curves hides the axis entirely.
+ */
+export interface AuxAxis {
+  /** Axis label, e.g. `Temperature (°C)`. */
+  label: string;
+  /** Unit shown in each series' name and in the tooltip, e.g. `°C` / `DAC`. */
+  unit: string;
+  /** Tooltip row label for a value on this axis, e.g. `temp` / `LED`. */
+  rowLabel: string;
+  /** Decimal places for the axis ticks and the rail's value preview. */
+  decimals: number;
+  /** Decimal places for a value in the hovercard, where the extra precision is the point. */
+  tipDecimals: number;
+  curves: AuxCurve[];
+}
+
+export interface TooltipData {
+  kind: "well" | "dark" | "factory" | "aux";
+  label: string;
+  /** Optical channel for well/dark series; -1 for a right-axis series. Undefined for a
    * dye-space series whose channel isn't known (see {@link PlotCurve.channel}). */
   channel?: number;
   /** Reference/plate column, for a factory-overlay series; -1 for every other kind. */
@@ -333,6 +370,11 @@ export interface TooltipData {
   /** `CurveAnalysis.cq` for the hovered curve (`threshold.md` §6) — absent where the run computes
    * none (channel space, the dark/factory overlays). */
   cq?: number | null;
+  /** For `kind: "aux"` only: how to present the value — {@link AuxAxis.rowLabel},
+   * {@link AuxAxis.unit} and {@link AuxAxis.decimals} of the axis it was read off. */
+  rowLabel?: string;
+  unit?: string;
+  decimals?: number;
   /** The linear baseline this curve was actually corrected with (`CurveAnalysis.baselineFit`),
    * rendered as a formula (e.g. "2000 + 4c"), so a surprising Cq can be traced back to it. */
   baselineFormula?: string | null;
@@ -346,8 +388,9 @@ export interface BuildChartConfig {
   /** Factory-calibration reference values to overlay as dotted flat lines, matched to
    * `wellCurves` by (channel, col); empty draws none. See the Reference view. */
   factoryCurves: FactoryCurve[];
-  /** Temperature series to plot on the right-hand °C axis (empty to hide the axis). */
-  tempCurves: TemperatureCurve[];
+  /** What rides the right-hand axis — temperatures or LED currents, never both (see
+   * `rightAxis.ts`); an axis with no curves hides itself. */
+  aux: AuxAxis;
   baseline: Baseline;
   /** Curves-view display mode; `ReferenceView` always passes `"absolute"` (its baselining is
    * entirely the factory-relative `baseline` above). */
@@ -366,10 +409,11 @@ export interface BuildChartConfig {
 const REF_DASH = [3, 3];
 const DARK_DOT = [1, 3];
 const FACTORY_DOT = [1, 3];
-const TEMP_DASH = [5, 4];
+const AUX_DASH = [5, 4];
+/** Set points are configured thresholds, not readings — a finer dash than a measured series. */
 const SETPOINT_DASH = [2, 4];
-/** uPlot scale key for the right-hand temperature axis. */
-const TEMP_SCALE = "temp";
+/** uPlot scale key for the right-hand auxiliary axis (temperatures or LED currents). */
+const AUX_SCALE = "aux";
 
 /** Mutable holder for the rail-driven threshold-hover line (see {@link setThresholdLine}) — a
  * plain object rather than a plugin option so its value can be updated on every hover without
@@ -405,9 +449,10 @@ export function buildChart(cfg: BuildChartConfig): {
   meta: SeriesMeta[];
   thresholdLineState: ThresholdLineState;
 } {
-  const { wellCurves, darkCurves, factoryCurves, tempCurves, baseline, curveView, scale } = cfg;
+  const { wellCurves, darkCurves, factoryCurves, aux, baseline, curveView, scale } = cfg;
+  const auxCurves = aux.curves;
   const cycles =
-    wellCurves[0]?.cycles ?? darkCurves[0]?.cycles ?? tempCurves[0]?.cycles ?? [];
+    wellCurves[0]?.cycles ?? darkCurves[0]?.cycles ?? auxCurves[0]?.cycles ?? [];
 
   const darkByChannel = new Map<number, PlotDarkCurve>();
   for (const d of darkCurves) darkByChannel.set(d.channel, d);
@@ -561,27 +606,27 @@ export function buildChart(cfg: BuildChartConfig): {
     }
   }
 
-  // Temperatures ride the right-hand °C axis so they can share the x axis with the curves
-  // without distorting the RFU scale.
-  tempCurves.forEach((t, i) => {
-    rows.push(t.celsius);
+  // Instrument context (temperatures or LED currents) rides the right-hand axis so it can share
+  // the x axis with the curves without distorting the RFU scale.
+  auxCurves.forEach((c) => {
+    rows.push(c.values);
     meta.push({
-      kind: "temp",
+      kind: "aux",
       channel: -1,
       col: -1,
-      label: t.label,
+      label: c.label,
       dyeLabel: "",
       isReference: false,
-      cycles: t.cycles,
-      mean: t.celsius.map((v) => v ?? NaN),
+      cycles: c.cycles,
+      mean: c.values.map((v) => v ?? NaN),
       adjust: [],
     });
     series.push({
-      label: `${t.label} (°C)`,
-      scale: TEMP_SCALE,
-      stroke: tempColor(i, t.kind),
-      width: t.kind === "setpoint" ? 1 : 1.5,
-      dash: t.kind === "setpoint" ? SETPOINT_DASH : TEMP_DASH,
+      label: `${c.label} (${aux.unit})`,
+      scale: AUX_SCALE,
+      stroke: c.color,
+      width: c.setpoint ? 1 : 1.5,
+      dash: c.setpoint ? SETPOINT_DASH : AUX_DASH,
       points: { show: false },
     });
   });
@@ -594,7 +639,7 @@ export function buildChart(cfg: BuildChartConfig): {
   applyLogFloor(rows, meta, scale);
   meta.forEach((m, i) => {
     m.plotDelta = plotDelta(m.mean, m.adjust, m.analysis);
-    if (m.kind !== "temp") rows[i + 1] = logSafe(rows[i + 1] as number[], scale);
+    if (m.kind !== "aux") rows[i + 1] = logSafe(rows[i + 1] as number[], scale);
   });
 
   // Cq markers: one ring per well curve with a defined Cq, placed *at its threshold* — Cq is by
@@ -651,8 +696,8 @@ export function buildChart(cfg: BuildChartConfig): {
     scales: {
       x: { time: false },
       y: { distr: scale === "log" ? 3 : 1 },
-      // Padded a little so the temperature traces don't sit flush against the plot edges.
-      [TEMP_SCALE]: {
+      // Padded a little so the right-axis traces don't sit flush against the plot edges.
+      [AUX_SCALE]: {
         distr: 1,
         range: (_u, min, max) => {
           const pad = Math.max(0.5, (max - min) * 0.15);
@@ -690,16 +735,16 @@ export function buildChart(cfg: BuildChartConfig): {
         font: "11px ui-monospace, monospace",
         size: 62,
       },
-      // Right-hand temperature axis — only drawn when temperatures are shown.
+      // Right-hand auxiliary axis — only drawn when something occupies it.
       {
-        scale: TEMP_SCALE,
+        scale: AUX_SCALE,
         side: 1,
-        show: tempCurves.length > 0,
+        show: auxCurves.length > 0,
         stroke: "#7f93b5",
         grid: { show: false },
         ticks: { stroke: "rgba(120,200,255,0.12)", width: 1 },
-        values: (_u, splits) => splits.map((v) => v.toFixed(1)),
-        label: "Temperature (°C)",
+        values: (_u, splits) => splits.map((v) => v.toFixed(aux.decimals)),
+        label: aux.label,
         labelSize: 30,
         labelFont: "12px system-ui",
         font: "11px ui-monospace, monospace",
@@ -709,7 +754,7 @@ export function buildChart(cfg: BuildChartConfig): {
     cursor: { focus: { prox: 24 }, points: { size: 6 } },
     focus: { alpha: 0.12 },
     legend: { show: false },
-    plugins: [overlayPlugin(meta, bands, cqMarkers, thresholdLineState, cfg.onHover)],
+    plugins: [overlayPlugin(meta, bands, cqMarkers, thresholdLineState, aux, cfg.onHover)],
   };
 
   return { data: rows as uPlot.AlignedData, options, meta, thresholdLineState };
@@ -774,6 +819,8 @@ function overlayPlugin(
   bands: BandData[],
   cqMarkers: { x: number; y: number; color: string; seriesIdx: number }[],
   thresholdLineState: ThresholdLineState,
+  /** How to present a right-axis value in the hovercard (see {@link AuxAxis}). */
+  aux: AuxAxis,
   onHover: (t: TooltipData | null) => void,
 ): uPlot.Plugin {
   let svg: SVGSVGElement;
@@ -1053,7 +1100,7 @@ function overlayPlugin(
           if (meta[s - 1]?.kind === "baseline") continue;
           const val = (u.data[s] as (number | null)[])[idx];
           if (val == null || Number.isNaN(val)) continue;
-          // Temperature series live on the right-hand scale, so project through the
+          // Right-axis series live on the right-hand scale, so project through the
           // series' own scale rather than assuming "y".
           const py = u.valToPos(val, u.series[s]!.scale ?? "y");
           const dist = Math.abs(py - top);
@@ -1076,13 +1123,13 @@ function overlayPlugin(
 
         const plotted = (u.data[best] as (number | null)[])[idx] as number;
 
-        if (m.kind === "temp") {
-          // A temperature is a single scalar per read — no min/max/σ to whisker.
+        if (m.kind === "aux") {
+          // A right-axis reading is a single scalar per read — no min/max/σ to whisker.
           group.style.display = "none";
           onHover(
             near
               ? {
-                  kind: "temp",
+                  kind: "aux",
                   label: m.label,
                   channel: -1,
                   col: -1,
@@ -1090,6 +1137,9 @@ function overlayPlugin(
                   color: (u.series[best]!.stroke as string) ?? "#8aa0c0",
                   cycle: m.cycles[idx] ?? 0,
                   mean: plotted,
+                  rowLabel: aux.rowLabel,
+                  unit: aux.unit,
+                  decimals: aux.tipDecimals,
                   left,
                   top,
                 }

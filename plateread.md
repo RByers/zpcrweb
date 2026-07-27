@@ -186,6 +186,19 @@ XML likewise has no per-row temperature element. A gradient run is the strongest
 case for such a field, so this is treated as settled rather than merely unobserved —
 `temps.test.ts` guards it.
 
+### LED currents
+
+Six **LED drive currents** (big-endian int32), `LEDCURRENT01`…`LEDCURRENT06`, one per optical
+channel: the calibrated DAC setting the instrument drives each excitation LED at. They match
+`RunInfo.xml`'s `LEDDACValsCal` exactly — `92,97,76,123,185,161` in every sample archive here
+(same instrument) — and are constant across every read of a run: they are calibration settings,
+not measurements, so a step in one would mean the instrument re-drove that LED mid-run.
+
+The values are **DAC counts, not milliamps**: nothing in the archive gives the DAC→current
+transfer function, so no unit conversion is applied. `leds.ts` extracts **any** field whose name
+starts with `LEDCURRENT`, with the trailing 1-based number as the channel link, so a firmware
+emitting a different channel count needs no decoder change (mirroring `temps.ts`).
+
 ---
 
 ## 4. Descriptor dictionary (`0x2AB9`–end) — the authoritative schema

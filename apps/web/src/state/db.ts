@@ -56,6 +56,9 @@ export interface StoredSettings {
   step: number | null;
   /** Temperature field keys plotted on the right axis, e.g. `["BLOCKTEMP"]`. */
   temps?: string[];
+  /** LED drive-current field keys plotted on the right axis, e.g. `["LEDCURRENT01"]`. Never
+   * non-empty at the same time as {@link temps} — the two share one axis. */
+  leds?: string[];
   /** Color separation: on/off, or unset to auto-enable when plate + calibration data exist. */
   calibration?: boolean | null;
   /** When color separation is on, group/label curves by fluorophore or by target/gene — or show

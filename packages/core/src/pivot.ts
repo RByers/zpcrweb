@@ -1,7 +1,9 @@
 import type {
   CurveOptions,
   DarkCurve,
+  LedCurve,
   PlateRead,
+  PlateReadLed,
   PlateReadStep,
   PlateReadTemp,
   TemperatureCurve,
@@ -158,5 +160,36 @@ export function toTemperatureCurves(
       cycles,
       celsius,
     };
+  });
+}
+
+/**
+ * Pivot the per-read LED drive currents into one series per field, in file order — the same
+ * union-of-keys treatment {@link toTemperatureCurves} gives temperatures, so a field missing
+ * from some reads yields a series with `null` gaps rather than being dropped.
+ *
+ * The values are DAC counts (see {@link PlateReadLed.dac}). They are calibration settings, so
+ * on a healthy run they are constant across the whole series; a step in one of them means the
+ * instrument re-drove that channel's LED mid-run, which is exactly what makes them worth
+ * plotting against the curves.
+ */
+export function toLedCurves(allReads: PlateRead[], step?: number): LedCurve[] {
+  const reads =
+    step === undefined ? allReads : allReads.filter((r) => r.step === step);
+  const cycles = reads.map((r) => r.cycle);
+
+  const order: string[] = [];
+  const info = new Map<string, PlateReadLed>();
+  for (const read of reads) {
+    for (const l of read.leds) {
+      if (!info.has(l.key)) order.push(l.key);
+      info.set(l.key, l);
+    }
+  }
+
+  return order.map((key) => {
+    const meta = info.get(key) as PlateReadLed;
+    const dac = reads.map((r) => r.leds.find((l) => l.key === key)?.dac ?? null);
+    return { key, label: meta.label, channel: meta.channel, cycles, dac };
   });
 }

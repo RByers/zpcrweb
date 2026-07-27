@@ -20,6 +20,7 @@ export {
   toCurves,
   toDarkCurves,
   toTemperatureCurves,
+  toLedCurves,
   toSteps,
   toChannels,
   wellLabel,
@@ -27,6 +28,7 @@ export {
 } from "./pivot.js";
 export { parseFactoryRefRowCal, compareRefToCal } from "./refcal.js";
 export { extractTemps, tempLabel } from "./temps.js";
+export { extractLeds, ledLabel, ledChannel } from "./leds.js";
 export { parseIcff, icffFieldMap } from "./icff.js";
 export {
   parseRunInfo,
@@ -108,6 +110,8 @@ export type {
   PlateReadTemp,
   TemperatureCurve,
   TempKind,
+  PlateReadLed,
+  LedCurve,
   CurveOptions,
   PlateReadStep,
   ArchiveAccess,

@@ -50,12 +50,14 @@ import {
 } from "./xmlLite.js";
 import { parseRunInfo } from "./runinfo.js";
 import { extractTemps } from "./temps.js";
+import { extractLeds } from "./leds.js";
 import { buildWellTable, CHANNELS, COLUMNS, WELLS_PER_CHANNEL } from "./plateread.js";
 import {
   toChannels,
   toCurves,
   toDarkCurves,
   toSteps,
+  toLedCurves,
   toTemperatureCurves,
 } from "./pivot.js";
 import { compareRefToCal, parseFactoryRefRowCal } from "./refcal.js";
@@ -123,6 +125,19 @@ function missingReading(): WellReading {
   return { mean: NaN, std: NaN, min: NaN, max: NaN };
 }
 
+/** Maps a `PlateReadDataHeader` LED-current field name to the canonical `LEDCURRENT*` key
+ * `leds.ts` expects (the names the binary descriptor dictionary uses — `plateread.md` §3), so
+ * extraction/labeling is shared verbatim with the binary decoder. The XML spells them
+ * `LedCur01`…`LedCur06` (`pcrd.md` §2.2). */
+const LED_FIELD_MAP: Record<string, string> = {
+  LedCur01: "LEDCURRENT01",
+  LedCur02: "LEDCURRENT02",
+  LedCur03: "LEDCURRENT03",
+  LedCur04: "LEDCURRENT04",
+  LedCur05: "LEDCURRENT05",
+  LedCur06: "LEDCURRENT06",
+};
+
 /** Parse a `;`-separated `PAr` float list into `WellReading` records of four floats each. */
 function parsePAr(text: string): WellReading[] {
   if (!text) return [];
@@ -174,6 +189,18 @@ function decodePcrdPlateRead(el: XmlElement, index: number): PlateRead {
     }),
   );
 
+  const leds = extractLeds(
+    Object.entries(LED_FIELD_MAP).flatMap(([xmlName, canonical]) => {
+      const v = scalar(xmlName);
+      if (v === undefined || v === "") return [];
+      const value = Number(v);
+      if (!Number.isInteger(value)) return [];
+      return [
+        { name: canonical, offset: 0, length: 4, flag: 1, float: value, int: value, hex: "" },
+      ];
+    }),
+  );
+
   // The XML header's own children as the same uniform key/value table a binary read builds
   // from its descriptor dictionary (see `PlateRead.fields`); no `binary` provenance, since
   // these values are typed text rather than an untyped byte range. `DrkCrnt` is the nested
@@ -201,6 +228,7 @@ function decodePcrdPlateRead(el: XmlElement, index: number): PlateRead {
     fileName,
     blockTempC: temps.find((t) => t.key === "BLOCKTEMP")?.celsius,
     temps,
+    leds,
     timestamp,
     fields,
     wells,
@@ -539,6 +567,7 @@ function buildZpcr(root: XmlElement[]): Zpcr {
           channelMask: 0,
           fileName: `plateRead[${index}]`,
           temps: [],
+          leds: [],
           fields: [],
           wells: buildWellTable(missingReading),
           dark: Array.from({ length: CHANNELS }, missingReading),
@@ -591,6 +620,7 @@ function buildZpcr(root: XmlElement[]): Zpcr {
     curves: (options?: CurveOptions) => toCurves(reads, options),
     darkCurves: (step?: number) => toDarkCurves(reads, step),
     temperatureCurves: (step?: number) => toTemperatureCurves(reads, step),
+    ledCurves: (step?: number) => toLedCurves(reads, step),
     steps: () => toSteps(reads),
     channels: () => toChannels(reads),
     plates,

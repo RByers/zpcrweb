@@ -7,6 +7,7 @@ import type {
 } from "./types.js";
 import { icffFieldMap, parseIcff, type IcffEntry } from "./icff.js";
 import { extractTemps } from "./temps.js";
+import { extractLeds } from "./leds.js";
 
 /**
  * Binary decoder for Bio-Rad CFX `.Plateread` files. See `plateread.md` for the full
@@ -116,6 +117,9 @@ export function decodePlateRead(
   const temps = extractTemps(descriptors);
   const blockTempC = temps.find((t) => t.key === "BLOCKTEMP")?.celsius;
 
+  // Likewise every `LEDCURRENT*` field — one excitation-LED DAC setting per optical channel.
+  const leds = extractLeds(descriptors);
+
   // The whole dictionary as a uniform key/value table (see `PlateRead.fields`) — the same
   // shape a `.pcrd`-origin read builds from its XML header, so consumers render one table.
   const tempsByKey = new Map(temps.map((t) => [t.key, t]));
@@ -144,6 +148,7 @@ export function decodePlateRead(
     fileName,
     blockTempC,
     temps,
+    leds,
     timestamp,
     fields: headerFields,
     binaryFile: { size: bytes.length, versionWords: versionWords(bytes) },

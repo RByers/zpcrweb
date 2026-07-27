@@ -183,6 +183,67 @@ async function loadChecks(chrome, origin) {
   cdp.close();
 }
 
+/**
+ * The chart's right axis holds temperatures *or* LED currents, never both (see
+ * `apps/web/src/lib/rightAxis.ts`). Enforced in the store, so no control can break it — but only
+ * a browser can show that enabling one really does clear the other, and that each chip previews
+ * its own field's value in its own unit.
+ */
+async function rightAxisChecks(chrome, origin) {
+  console.log("\nright axis (temperatures vs LED currents)");
+  const cdp = await openPage(chrome.base, origin);
+  await sleep(600);
+  await loadFile(cdp, ZPCR);
+  await waitFor(() => cdp.eval(`!!document.querySelector(".chanbar")`), { what: "curves rail" });
+
+  // Both sections exist for a run whose platereads carry both kinds of field.
+  const section = (title) => `[...document.querySelectorAll("details.rail__details")]
+      .find((d) => (d.querySelector(".rail__title")?.textContent || "").includes(${JSON.stringify(title)}))`;
+  const clickAll = (title) =>
+    cdp.eval(`(() => { const s = ${section(title)}; if (!s) return "missing";
+        s.open = true; s.querySelector(".rail__link").click(); return "ok"; })()`);
+  const chips = (title) =>
+    cdp.eval(`(() => { const s = ${section(title)}; if (!s) return null;
+        return [...s.querySelectorAll(".chanchip")].map((b) => ({
+          label: b.querySelector(".chanchip__ch").textContent,
+          value: b.querySelector(".chanchip__dye").textContent,
+          on: b.getAttribute("aria-pressed") === "true",
+        })); })()`);
+
+  check("LED currents get their own rail section", (await clickAll("LED current")) === "ok");
+  await sleep(300);
+  const leds = (await chips("LED current")) ?? [];
+  check(
+    "every channel's LED drive current is plotted, previewed in DAC counts",
+    leds.length === 6 && leds.every((c) => c.on) && /^\d+ DAC$/.test(leds[0].value),
+    leds.map((c) => `${c.label} ${c.value}`).join(", "),
+  );
+
+  // Enabling temperatures must take the axis over, not share it.
+  check("temperatures get their own rail section", (await clickAll("Temperature")) === "ok");
+  await sleep(300);
+  const temps = (await chips("Temperature")) ?? [];
+  const ledsAfter = (await chips("LED current")) ?? [];
+  check(
+    "enabling temperatures clears the LED currents — one right axis, one unit",
+    temps.some((c) => c.on) && ledsAfter.every((c) => !c.on),
+    `${temps.filter((c) => c.on).length} temps on, ${ledsAfter.filter((c) => c.on).length} LEDs on`,
+  );
+
+  // And back the other way, so neither direction is the special case.
+  await clickAll("LED current");
+  await sleep(300);
+  const tempsAfter = (await chips("Temperature")) ?? [];
+  const ledsBack = (await chips("LED current")) ?? [];
+  check(
+    "enabling LED currents clears the temperatures",
+    ledsBack.every((c) => c.on) && tempsAfter.every((c) => !c.on),
+    `${tempsAfter.filter((c) => c.on).length} temps on, ${ledsBack.filter((c) => c.on).length} LEDs on`,
+  );
+
+  cdp.close();
+}
+
 async function passwordChecks(chrome, origin, pw) {
   console.log("\npassword handling");
 
@@ -370,6 +431,7 @@ async function main() {
     makeDupe();
     await loadChecks(chrome, origin);
     await routingChecks(chrome, origin, pw);
+    await rightAxisChecks(chrome, origin);
     await passwordChecks(chrome, origin, pw);
     await xmlViewChecks(chrome, origin, pw);
   } finally {

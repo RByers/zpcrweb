@@ -146,6 +146,11 @@ cycle 1 of the sample:
 `BlockTmp = 59.99` confirms `plateread.md`'s big-endian correction — the read happens at the
 60 °C step. `NumRows = 9` is the 8 plate rows plus the reference row.
 
+The temperatures and the six `LedCur*` drive currents are mapped back onto the canonical
+`*TEMP*`/`LEDCURRENT*` field names the binary header uses and run through the same
+`temps.ts`/`leds.ts` extraction, so both formats produce identical `PlateRead.temps` /
+`PlateRead.leds` (asserted read-for-read against the matching `.zpcr` in `pcrd.test.ts`).
+
 ### 2.3 `plateSetup2` — the plate definition
 
 Same schema as the `.pltd` payload ([`pltd.md`](./pltd.md) §2): `geneNameList`,

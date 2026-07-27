@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { wellLabel, type Zpcr, type TemperatureCurve } from "@zpcrweb/core";
+import { wellLabel, type LedCurve, type Zpcr, type TemperatureCurve } from "@zpcrweb/core";
 import { computeWellTypes } from "../../lib/wellTypes";
 import { NO_TARGET } from "../../lib/plateTargets";
 import { SAMPLE_TYPE_META } from "../../lib/sampleType";
@@ -36,7 +36,8 @@ import {
   type ThresholdCurveRow,
   type ThresholdGroupRow,
 } from "../curves/ThresholdSection";
-import { TempBar } from "../curves/TempBar";
+import { AuxBar } from "../curves/AuxBar";
+import { ledAxis, noRightAxis, selectAux, temperatureAxis } from "../../lib/rightAxis";
 import { PasswordPrompt } from "../PasswordPrompt";
 import { Toggle } from "../Toggle";
 import { Switch } from "../Switch";
@@ -99,16 +100,24 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
     plainBaselines,
   } = run;
 
-  // Every temperature the platereads carry, for this step. Which of them are plotted is a
-  // per-file setting; the right-hand axis appears only when at least one is selected.
+  // Everything the platereads carry that can ride the chart's right axis, for this step:
+  // instrument temperatures and the excitation LEDs' drive currents. Which are plotted is a
+  // per-file setting, and the two are mutually exclusive — one axis, and °C and DAC counts share
+  // no scale (see `rightAxis.ts`), enforced in the store rather than here.
   const allTemps = useMemo<TemperatureCurve[]>(
     () => zpcr.temperatureCurves(activeStep),
     [zpcr, activeStep],
   );
-  const visibleTemps = useMemo(
-    () => allTemps.filter((t) => settings.temps.has(t.key)),
-    [allTemps, settings.temps],
-  );
+  const allLeds = useMemo<LedCurve[]>(() => zpcr.ledCurves(activeStep), [zpcr, activeStep]);
+  // Built from the *full* series list so a chip's color and its line's color are the same one,
+  // then filtered to what's enabled — the axis the chart gets carries only the plotted series.
+  const tempAxis = useMemo(() => temperatureAxis(allTemps), [allTemps]);
+  const ledAxisAll = useMemo(() => ledAxis(allLeds), [allLeds]);
+  const rightAxis = useMemo(() => {
+    if (settings.leds.size > 0) return selectAux(ledAxisAll, settings.leds);
+    if (settings.temps.size > 0) return selectAux(tempAxis, settings.temps);
+    return noRightAxis();
+  }, [ledAxisAll, tempAxis, settings.leds, settings.temps]);
 
   // Dark lines/subtraction only concern the enabled, available channels. Each carries its
   // display baseline from the run's analysis, like every other plotted series — the "Relative"
@@ -604,6 +613,12 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
     onChange({ temps: next });
   };
 
+  const toggleLed = (key: string) => {
+    const next = new Set(settings.leds);
+    next.has(key) ? next.delete(key) : next.add(key);
+    onChange({ leds: next });
+  };
+
   const toggleChannel = (ch: number) => {
     const next = new Set(settings.enabledChannels);
     next.has(ch) ? next.delete(ch) : next.add(ch);
@@ -1012,7 +1027,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
                   e.stopPropagation();
                   onChange({
                     temps:
-                      visibleTemps.length > 0
+                      settings.temps.size > 0
                         ? new Set<string>()
                         : new Set(
                             allTemps.filter((t) => t.kind === "measured").map((t) => t.key),
@@ -1020,10 +1035,50 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
                   });
                 }}
               >
-                {visibleTemps.length > 0 ? "none" : "all"}
+                {settings.temps.size > 0 ? "none" : "all"}
               </button>
             </summary>
-            <TempBar temps={allTemps} enabled={settings.temps} onToggle={toggleTemp} />
+            <AuxBar
+              curves={tempAxis.curves}
+              unit={tempAxis.unit}
+              decimals={tempAxis.decimals}
+              enabled={settings.temps}
+              onToggle={toggleTemp}
+            />
+          </details>
+        )}
+
+        {allLeds.length > 0 && (
+          <details className="rail__section rail__details">
+            <summary className="rail__title">
+              <span>
+                <span className="rail__chevron" aria-hidden="true">
+                  ▸
+                </span>
+                LED current (right axis)
+              </span>
+              <button
+                className="rail__link"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onChange({
+                    leds:
+                      settings.leds.size > 0
+                        ? new Set<string>()
+                        : new Set(allLeds.map((l) => l.key)),
+                  });
+                }}
+              >
+                {settings.leds.size > 0 ? "none" : "all"}
+              </button>
+            </summary>
+            <AuxBar
+              curves={ledAxisAll.curves}
+              unit={ledAxisAll.unit}
+              decimals={ledAxisAll.decimals}
+              enabled={settings.leds}
+              onToggle={toggleLed}
+            />
           </details>
         )}
 
@@ -1161,7 +1216,8 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
               {plotCurves.length} / {calibrationOn ? allFluorCurves.length : allCurves.length}{" "}
               curves
               {!calibrationOn && settings.showDark && " + dark"}
-              {visibleTemps.length > 0 && ` + ${visibleTemps.length} temp`}
+              {settings.temps.size > 0 && ` + ${rightAxis.curves.length} temp`}
+              {settings.leds.size > 0 && ` + ${rightAxis.curves.length} LED`}
             </>
           )}
         </div>
@@ -1181,7 +1237,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
           <CurveChart
             curves={plotCurves}
             darkCurves={!calibrationOn && settings.showDark ? enabledDark : []}
-            tempCurves={visibleTemps}
+            aux={rightAxis}
             baseline="raw"
             curveView={settings.curveView}
             drawBaseline={settings.drawBaseline}

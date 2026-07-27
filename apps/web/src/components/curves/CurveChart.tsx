@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import uPlot from "uplot";
-import type { TemperatureCurve } from "@zpcrweb/core";
 import type { Baseline, CurveView, Scale } from "../../state/useZpcrStore";
 import {
   applyHighlight,
   buildChart,
   setThresholdLine,
+  type AuxAxis,
   type FactoryCurve,
   type HighlightMatch,
   type PlotCurve,
@@ -26,8 +26,9 @@ interface Props {
   darkCurves: PlotDarkCurve[];
   /** Factory-calibration reference overlay (Reference view); empty draws none. */
   factoryCurves?: FactoryCurve[];
-  /** Temperature series for the right-hand °C axis; empty hides that axis. */
-  tempCurves: TemperatureCurve[];
+  /** What occupies the right-hand axis — temperatures or LED currents, never both (see
+   * `rightAxis.ts`). An axis with no curves is hidden. */
+  aux: AuxAxis;
   baseline: Baseline;
   /** Curves-view display mode (`threshold.md` §4); pass `"absolute"` from the Reference view,
    * whose baselining is entirely factory-relative (`baseline` above). */
@@ -54,7 +55,7 @@ export function CurveChart({
   curves,
   darkCurves,
   factoryCurves = NO_FACTORY_CURVES,
-  tempCurves,
+  aux,
   baseline,
   curveView,
   drawBaseline,
@@ -91,7 +92,7 @@ export function CurveChart({
       wellCurves: curves,
       darkCurves,
       factoryCurves,
-      tempCurves,
+      aux,
       baseline,
       curveView,
       drawBaseline,
@@ -122,7 +123,7 @@ export function CurveChart({
     curves,
     darkCurves,
     factoryCurves,
-    tempCurves,
+    aux,
     baseline,
     curveView,
     drawBaseline,
@@ -177,7 +178,7 @@ export function CurveChart({
           <div className="chart__tip-head">
             <span className="chart__tip-swatch" style={{ background: tip.color }} />
             <strong>{tip.kind === "dark" || tip.kind === "factory" ? tip.kind : tip.label}</strong>
-            {tip.kind !== "temp" && (
+            {tip.kind !== "aux" && (
               <span className="chart__tip-dye">
                 {channelLabel(tip.channel)} · {tip.dye}
                 {tip.kind === "factory" && ` · R${tip.col + 1}`}
@@ -190,10 +191,12 @@ export function CurveChart({
                 <td>cycle</td>
                 <td>{tip.cycle}</td>
               </tr>
-              {tip.kind === "temp" ? (
+              {tip.kind === "aux" ? (
                 <tr>
-                  <td>temp</td>
-                  <td>{tip.mean.toFixed(2)} °C</td>
+                  <td>{tip.rowLabel}</td>
+                  <td>
+                    {tip.mean.toFixed(tip.decimals ?? 1)} {tip.unit}
+                  </td>
                 </tr>
               ) : (
                 <>

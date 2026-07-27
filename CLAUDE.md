@@ -120,11 +120,12 @@ Cost control, when you do run it:
 npm run test:ui
 ```
 
-26 browser assertions covering what nothing else can catch: the two URL contracts — hash
+31 browser assertions covering what nothing else can catch: the two URL contracts — hash
 routing (deep links, back/forward, unknown-file and invalid-view fallbacks) and password
 handling (stripped from both URL forms, never leaked into the routing hash, an encrypted
-`.pcrd` still decrypting) — plus `#load=` and the rule that every XML view uses the shared
-collapsible tree rather than a flat dump. A screenshot can't show that the back button works or
+`.pcrd` still decrypting) — plus `#load=`, the rule that every XML view uses the shared
+collapsible tree rather than a flat dump, and the chart's one-right-axis invariant
+(temperatures and LED currents can never both be on). A screenshot can't show that the back button works or
 that a secret reached the address bar, and the core Vitest suite has no DOM.
 
 Takes ~20s and needs Chrome, so it is **not** part of `npm test` — that stays fast and

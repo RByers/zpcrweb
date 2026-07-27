@@ -686,14 +686,29 @@ only pieces the two views share.
   it used to be a three-way `off`/`auto`/`on` mode whose `auto` drew the bands only when a
   single well was selected, which made one control's effect depend on another's state;
   `fromStored` migrates a stored `"on"` to `true` and everything else to `false`.
-- **Temperatures (right axis):** `zpcr.temperatureCurves(step)` gives one series per
-  temperature field in the platereads. Chips in the rail toggle each one (all off by
-  default, since they are instrument context rather than the measurement) and preview its
-  latest value. Selected series are drawn **dashed** on a second uPlot scale with its own
-  right-hand °C axis, which appears only when something is selected — so the RFU scale is
-  never distorted by a 105 °C lid. Set points (fan on/off thresholds) are dimmed and
-  labelled as such. Colors come from `lib/tempColors.ts`, a cool ramp deliberately outside
-  the dye palette.
+- **Right axis — temperatures *or* LED currents:** the chart has one auxiliary axis, and two
+  things can occupy it: `zpcr.temperatureCurves(step)` (one series per temperature field) or
+  `zpcr.ledCurves(step)` (one per optical channel's excitation-LED drive setting, in DAC counts).
+  Both are mapped by `lib/rightAxis.ts` onto the format-agnostic `AuxCurve`/`AuxAxis` pair
+  `lib/uplot/chart.ts` draws, so the chart knows only that some series ride the right scale — it
+  names neither temperatures nor LEDs. Chips in two collapsible rail sections toggle each series
+  (all off by default — instrument context, not the measurement) and preview its latest value via
+  the shared `AuxBar`.
+  - **Mutually exclusive, enforced in the store.** °C and DAC counts share no scale, and a second
+    right axis would eat plot width and make the reader check which axis a dashed line belongs to.
+    So filling either key set empties the other, in `useZpcrStore`'s `updateSettings` rather than
+    at each call site — no control can leave both on, and a persisted record can't either.
+  - Selected series are drawn **dashed** on a second uPlot scale whose axis appears only when
+    something is selected — so the RFU scale is never distorted by a 105 °C lid. Set points (fan
+    on/off thresholds) are dimmed, finer-dashed and labelled as such.
+  - **Colors:** temperatures use `lib/tempColors.ts`, a cool ramp deliberately outside the dye
+    palette. LED currents instead borrow their own channel's hue (`channelColor`) — an LED current
+    *is* a property of one optical channel, so `Ch3`'s dashed LED line matching `Ch3`'s solid well
+    curves is the point; the axis is labelled in DAC counts and every series is named in the rail
+    and the hovercard, so the shared hue can't be read as a fluorescence value.
+  - The axis' `AuxAxis` is built from the *full* series list and then filtered to what's enabled
+    (`selectAux`), so a series' color doesn't shift as its neighbours are toggled — the positional
+    temperature ramp would otherwise recolor lines behind the user's back.
 - **Samples:** a collapsible rail section (collapsed by default, like Temperatures) listing every
   distinct `WellDefinition.sample` name actually assigned to a well on the plate (`pltd.md`'s
   `conditionName` — despite the XML attribute name, this is the sample name CFX Manager's UI
