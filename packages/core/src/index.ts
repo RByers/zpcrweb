@@ -26,7 +26,7 @@ export {
   REFERENCE_ROW,
 } from "./pivot.js";
 export { parseFactoryRefRowCal, compareRefToCal } from "./refcal.js";
-export { extractTemps, tempLabel, tempRow } from "./temps.js";
+export { extractTemps, tempLabel } from "./temps.js";
 export { parseIcff, icffFieldMap } from "./icff.js";
 export {
   parseRunInfo,

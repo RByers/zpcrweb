@@ -154,7 +154,6 @@ export function toTemperatureCurves(
     return {
       key,
       label: meta.label,
-      row: meta.row,
       kind: meta.kind,
       cycles,
       celsius,

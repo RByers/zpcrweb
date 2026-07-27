@@ -26,6 +26,22 @@ export function readMultistepBytes(): Uint8Array {
 }
 
 /**
+ * A committed run whose protocol contains a real `GradientStep` (55–65 °C across the block's
+ * rows). The one sample that could plausibly carry per-row block temperatures — it doesn't; see
+ * `plateread.md` §3.
+ */
+export const GRADIENT_SAMPLE_PATH = resolve(
+  here,
+  "../../../samples/20260725_GRADIENTTEST.zpcr",
+);
+
+/** Raw bytes of the gradient-protocol sample. */
+export function readGradientBytes(): Uint8Array {
+  const buf = readFileSync(GRADIENT_SAMPLE_PATH);
+  return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
+}
+
+/**
  * A committed **standalone** `.pltd` — a plate definition saved on its own, not inside a
  * `.zpcr`. Method-9 (DEFLATE64) and 5 dyes, so it also covers the compression variant and the
  * multi-dye layout the in-archive samples don't. Its decrypted plaintext sits beside it as

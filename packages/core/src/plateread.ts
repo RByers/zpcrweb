@@ -68,8 +68,8 @@ export function decodePlateRead(
   const step = fields.get("STEP")?.int ?? 0;
   const channelMask = fields.get("CHANNELMASK")?.int ?? 0;
 
-  // Every `*TEMP*` field in the dictionary, so per-row block temperatures (if a firmware
-  // version ever emits them) need no code change here.
+  // Every `*TEMP*` field in the dictionary, so a temperature a future firmware adds needs no
+  // code change here.
   const temps = extractTemps(descriptors);
   const blockTempC = temps.find((t) => t.key === "BLOCKTEMP")?.celsius;
 

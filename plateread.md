@@ -167,13 +167,20 @@ The two kinds share a type tag (1) and are distinguished only by plausibility: a
 point like `35` reinterpreted as float32 is a denormal (~4.9e-44), and a measured `59.99`
 reinterpreted as int32 is in the billions, so at most one reading ever lands in a sane
 temperature range. `temps.ts` extracts **any** field whose name contains `TEMP`, so a
-firmware emitting more (see §6) needs no decoder change.
+firmware emitting more needs no decoder change.
 
-**There are no per-row or per-zone block temperatures.** The CFX96 reports one block
-temperature for the whole block; every byte of the file is accounted for by the dictionary
-(§4), and neither the `.alf` run log, `runlog.xml`, nor `RunInfo.xml` carries per-row values
-either. Both sample archives — a 2019 qualification run and a 2026 amplification run, both
-`PLATEREADVERSION 2` — have exactly the same 42 dictionary fields.
+**There are no per-row or per-zone block temperatures**, and the decoder has no notion of them.
+The CFX96 reports one block temperature for the whole block; every byte of the file is accounted
+for by the dictionary (§4), and neither the `.alf` run log, `runlog.xml`, nor `RunInfo.xml`
+carries per-row values either. Every sample archive — a 2019 qualification run, a 2026
+amplification run, and a **gradient** run holding rows A–H at 55–65 °C
+(`samples/20260725_GRADIENTTEST.zpcr` and the matching `gradient-test-empty.pcrd`), all
+`PLATEREADVERSION 2` — has exactly the same 42 dictionary fields with the same seven
+whole-block temperatures. The gradient's span survives only as the protocol's `GRAD
+55.0,65.0,30` step (`GradientStep`, `prcl.md` §5), never as measured per-row data; the `.pcrd`'s
+XML likewise has no per-row temperature element. A gradient run is the strongest possible test
+case for such a field, so this is treated as settled rather than merely unobserved —
+`temps.test.ts` guards it.
 
 ---
 
@@ -233,10 +240,9 @@ print(rec(2, 0, 2))   # -> ~6852
 
 ## 6. Open items / caveats
 
-- **Per-row temperatures** were looked for and are not present in any file of either sample
-  archive (see §3). If a different block type or firmware emits them, the name-based
-  extraction picks them up automatically; `ROWTEMPA`-style names are already labelled and
-  tagged with their row letter.
+- **Per-row temperatures do not exist** in any sample, including a gradient run — see §3. This is
+  closed, not open: nothing in the library models them. Should a different block type ever emit
+  one, the name-based extraction still surfaces it as an ordinary temperature series.
 - **Channel → dye mapping** is not in the `.Plateread` payload; channels are stored in scan order
   0–5. The run's calibration (`.Dcal`) files list the dye set. In this data the amplifying dye is
   channel index 2 (Texas Red in the CFX 5-dye layout). Channel index 5 is a real sixth optical

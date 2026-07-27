@@ -5,10 +5,11 @@ import type { IcffEntry } from "./icff.js";
  * Temperature extraction from a `.Plateread` descriptor dictionary.
  *
  * Nothing here is hardcoded to a known field list: **every** dictionary field whose name
- * contains `TEMP` is extracted, so a firmware that emits per-row block temperatures
- * (`ROWTEMPA`…`ROWTEMPH`, `BLOCKTEMP01`…, …) surfaces automatically without a code change.
- * The observed CFX96 firmware (`PLATEREADVERSION 2`) emits only five measured temperatures —
- * block, ambient, shuttle, sample, lid — plus the two fan set points; see `plateread.md` §3.
+ * contains `TEMP` is extracted, so a firmware emitting a temperature this code has never seen
+ * surfaces automatically without a code change. The observed CFX96 firmware
+ * (`PLATEREADVERSION 2`) emits only five measured temperatures — block, ambient, shuttle,
+ * sample, lid — plus the two fan set points; see `plateread.md` §3. There are no per-row or
+ * per-zone block temperatures, not even in a gradient run (`plateread.md` §3).
  */
 
 /** Plausible instrument temperature range in °C — used to tell floats from set-point ints. */
@@ -35,40 +36,21 @@ const KNOWN_LABELS: Record<string, string> = {
 /** Field names that are configured thresholds rather than measurements. */
 const SETPOINT_NAMES = new Set(["FANOFFTEMP", "FANONTEMP"]);
 
-/**
- * An indexed temperature variant: a common stem plus a trailing row letter or number, e.g.
- * `ROWTEMPA` → stem `ROWTEMP`, index `A`. Per-row block temperatures, if a firmware version
- * emits them, take this shape.
- */
-const INDEXED_RE = /^(.*TEMP)([A-H]|\d{1,2})$/;
-
-/** Title-case a bare field stem, e.g. `SHUTTLE` → `Shuttle`, `ROW` → `Row`. */
+/** Title-case a bare field stem, e.g. `SHUTTLE` → `Shuttle`. */
 function titleCase(s: string): string {
   return s.charAt(0) + s.slice(1).toLowerCase();
 }
 
 /**
  * Human label for an arbitrary `*TEMP*` field name. Known names get their curated label;
- * anything else is derived (`ROWTEMPA` → `Row A`, `HEATSINKTEMP` → `Heatsink`) so unknown
- * fields are still readable in the UI.
+ * anything else is derived (`HEATSINKTEMP` → `Heatsink`) so unknown fields are still readable
+ * in the UI.
  */
 export function tempLabel(name: string): string {
   const known = KNOWN_LABELS[name];
   if (known) return known;
-  const indexed = INDEXED_RE.exec(name);
-  if (indexed) {
-    const stem = indexed[1] as string;
-    return `${tempLabel(stem)} ${indexed[2]}`;
-  }
   const stem = name.replace(/TEMPERATURE$/, "").replace(/TEMP$/, "");
   return stem ? titleCase(stem) : "Temp";
-}
-
-/** The row letter (`A`–`H`) of a per-row temperature field, or undefined if not per-row. */
-export function tempRow(name: string): string | undefined {
-  const m = INDEXED_RE.exec(name);
-  const idx = m?.[2];
-  return idx && /^[A-H]$/.test(idx) ? idx : undefined;
 }
 
 /**
@@ -115,7 +97,6 @@ export function extractTemps(fields: IcffEntry[]): PlateReadTemp[] {
     temps.push({
       key: field.name,
       label: tempLabel(field.name),
-      row: tempRow(field.name),
       celsius: decoded.celsius,
       kind: decoded.kind,
     });

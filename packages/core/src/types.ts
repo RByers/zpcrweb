@@ -26,10 +26,8 @@ export type TempKind = "measured" | "setpoint";
 export interface PlateReadTemp {
   /** Raw field name, e.g. `BLOCKTEMP`. Stable identity across reads. */
   key: string;
-  /** Human label, e.g. `Block`; derived for unknown fields (`ROWTEMPA` → `Row A`). */
+  /** Human label, e.g. `Block`; derived for unknown fields (`HEATSINKTEMP` → `Heatsink`). */
   label: string;
-  /** Plate row letter (`A`–`H`) for per-row block temperatures, else undefined. */
-  row?: string;
   /** Temperature in °C. */
   celsius: number;
   /** Measured value vs a configured set point (the fan on/off thresholds). */
@@ -42,8 +40,6 @@ export interface TemperatureCurve {
   key: string;
   /** Human label, e.g. `Block`. */
   label: string;
-  /** Plate row letter (`A`–`H`) for per-row block temperatures, else undefined. */
-  row?: string;
   /** Measured value vs a configured set point. */
   kind: TempKind;
   /** Cycle numbers, ascending — aligned index-for-index with {@link celsius}. */
@@ -74,7 +70,7 @@ export interface PlateRead {
   blockTempC?: number;
   /**
    * Every temperature in the file's descriptor dictionary, in file order — any field whose
-   * name contains `TEMP`, so per-row block temperatures would appear here automatically.
+   * name contains `TEMP`, so a temperature this code has never seen appears here anyway.
    * Observed CFX96 firmware emits block/ambient/shuttle/sample/lid plus the fan set points.
    */
   temps: PlateReadTemp[];

@@ -307,7 +307,8 @@ raw bytes ─▶ fflate.unzipSync ─▶ { name: Uint8Array }
   dependency: the structure is regular and self-closing `<Value />` maps to `""`.
 - **`temps.ts`** — pulls temperatures out of the `.Plateread` ICFF index. It matches on the
   field *name* (anything containing `TEMP`) rather than a hardcoded list, so a firmware that
-  emits, say, per-row block temperatures surfaces them with no code change. Measured floats
+  emits a temperature this code has never seen surfaces it with no code change (there are no
+  per-row block temperatures, gradient runs included — `plateread.md` §3). Measured floats
   and int set points are told apart by plausibility (see the module comment).
 - **`pivot.ts`** — transforms run-centric reads into well-centric curves, per-channel dark
   curves, and per-field temperature series.

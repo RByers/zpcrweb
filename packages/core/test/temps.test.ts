@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { extractTemps, parseZpcr, tempLabel, tempRow } from "../src/index.js";
+import { extractTemps, parseZpcr, tempLabel } from "../src/index.js";
 import type { IcffEntry } from "../src/index.js";
-import { readMultistepBytes, readSampleBytes } from "./sample.js";
+import { readGradientBytes, readMultistepBytes, readSampleBytes } from "./sample.js";
 
 /** Build a minimal ICFF entry for the label/decoding unit tests. */
 function field(name: string, extra: Partial<IcffEntry> = {}): IcffEntry {
@@ -59,6 +59,33 @@ describe("plateread temperatures", () => {
       const block = read.temps.find((t) => t.key === "BLOCKTEMP");
       expect(read.blockTempC).toBe(block?.celsius);
     }
+  });
+});
+
+describe("a gradient run's temperatures", () => {
+  // A gradient step holds each plate row at a different temperature, so if any run reported
+  // per-row block temperatures it would be this one. It reports the same seven whole-block
+  // fields as every other run — the gradient's span lives only in the protocol.
+  const zpcr = parseZpcr(readGradientBytes());
+
+  it("reports the same whole-block fields, none of them per-row", () => {
+    expect(zpcr.reads.length).toBeGreaterThan(0);
+    for (const read of zpcr.reads) {
+      expect(read.temps.map((t) => t.key)).toEqual([
+        "BLOCKTEMP",
+        "AMBIENTTEMP",
+        "SHUTTLETEMP",
+        "SAMPLETEMP",
+        "LIDTEMP",
+        "FANOFFTEMP",
+        "FANONTEMP",
+      ]);
+    }
+  });
+
+  it("carries the gradient's span in the protocol instead", () => {
+    // `GRAD <low>,<high>,<hold>` — the only place the 55–65 °C spread is recorded.
+    expect(zpcr.protocol()!.runDefinition).toContain("GRAD 55.0,65.0,30");
   });
 });
 
@@ -124,26 +151,23 @@ describe("temperature field naming", () => {
 
   it("derives labels for fields no CFX firmware here emits", () => {
     expect(tempLabel("HEATSINKTEMP")).toBe("Heatsink");
-    expect(tempLabel("ROWTEMPA")).toBe("Row A");
-    expect(tempLabel("BLOCKTEMP03")).toBe("Block 03");
     expect(tempLabel("TEMP")).toBe("Temp");
   });
 
-  it("recognises per-row temperatures by their trailing row letter", () => {
-    expect(tempRow("ROWTEMPA")).toBe("A");
-    expect(tempRow("BLOCKTEMPH")).toBe("H");
-    expect(tempRow("BLOCKTEMP")).toBeUndefined();
-    expect(tempRow("BLOCKTEMP03")).toBeUndefined();
-  });
-
-  it("picks up hypothetical per-row block temperatures with no code change", () => {
-    // Guards the generic path: any *TEMP* field is extracted, so a firmware emitting one
-    // temperature per plate row (A–H) would plot without touching the decoder.
-    const rows = "ABCDEFGH".split("").map((r, i) => field(`ROWTEMP${r}`, { float: 60 + i }));
-    const temps = extractTemps([field("BLOCKTEMP", { float: 59.99 }), ...rows]);
-    expect(temps).toHaveLength(9);
-    expect(temps[1]).toMatchObject({ key: "ROWTEMPA", label: "Row A", row: "A", celsius: 60 });
-    expect(temps.at(-1)).toMatchObject({ key: "ROWTEMPH", row: "H", celsius: 67 });
+  it("extracts a temperature field it has never seen before", () => {
+    // Guards the generic path: any *TEMP* field is extracted and labelled, so a firmware
+    // reporting a temperature this decoder doesn't know about still plots.
+    const temps = extractTemps([
+      field("BLOCKTEMP", { float: 59.99 }),
+      field("HEATSINKTEMP", { float: 41.5 }),
+    ]);
+    expect(temps).toHaveLength(2);
+    expect(temps[1]).toMatchObject({
+      key: "HEATSINKTEMP",
+      label: "Heatsink",
+      celsius: 41.5,
+      kind: "measured",
+    });
   });
 
   it("ignores non-temperature and implausible fields", () => {
