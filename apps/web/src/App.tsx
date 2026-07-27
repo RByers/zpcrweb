@@ -26,11 +26,19 @@ const STANDALONE_VIEWS = ["plates", "raw"] as const;
  */
 const EXAMPLE_FILE = "examples/20260726_S183-S185_RVP.zpcr";
 
-/** The wordmark, doubling as the link to the About page. */
+/** The wordmark, doubling as the link to the About page. Split so a narrow header can drop
+ * everything but the cyan "z" (see `.app__logo-rest` in `app.css`) — the full mark plus five
+ * view tabs plus the load button don't fit across a phone in portrait. */
 function Logo({ onClick }: { onClick: () => void }) {
   return (
-    <button className="app__logo mono" onClick={onClick} title="About zpcrweb">
-      zpcr//web
+    <button
+      className="app__logo mono"
+      onClick={onClick}
+      title="About zpcrweb"
+      aria-label="About zpcrweb"
+    >
+      <span className="app__logo-z">z</span>
+      <span className="app__logo-rest">pcr//web</span>
     </button>
   );
 }

@@ -72,15 +72,30 @@
   background: transparent;
   text-shadow: 0 0 16px var(--neon-cyan);
 }
-.app__logo::first-letter {
+.app__logo-z {
   color: var(--neon-cyan);
 }
 .app__tag {
   color: var(--ink-muted);
 }
+/* Narrow (portrait phone) header: the wordmark, the five tab labels and "load file" together
+   overflow the viewport, so the header goes iconographic — the logo keeps only its "z", and the
+   tabs and the load button keep only their icons. Every one of them still carries the word in a
+   `title`/`aria-label` (see `ViewSelector`, `DropZone`, `Logo`), so nothing is lost to a screen
+   reader or a hover. `.app__brand` (the welcome screen, which has no tabs) is deliberately not
+   included — there's room for the full mark there. */
 @media (max-width: 599px) {
   .app__tag {
     display: none;
+  }
+  .app__header .app__logo-rest,
+  .app__header .segmented__label,
+  .app__header .dropzone__compact-label {
+    display: none;
+  }
+  /* Without the label the padding is all that gives the tab its tap target; keep it square. */
+  .app__header .segmented__item {
+    padding: 5px 9px;
   }
 }
 .app__header-spacer {
@@ -225,6 +240,9 @@
   color: var(--neon-cyan);
 }
 .dropzone__compact {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   color: var(--neon-cyan);
   font-size: 13px;
 }
@@ -239,11 +257,20 @@
   border-radius: var(--radius-sm);
 }
 .segmented__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   border: 0;
   background: transparent;
   padding: 5px 12px;
   border-radius: 4px;
   color: var(--ink-2);
+}
+/* Icons (see `ViewIcons.tsx`) inherit the control's color, including the active tab's brighter
+   ink, and never shrink when the strip is tight. */
+.icon {
+  flex: 0 0 auto;
+  display: block;
 }
 .segmented__item:hover {
   background: var(--raised-2);

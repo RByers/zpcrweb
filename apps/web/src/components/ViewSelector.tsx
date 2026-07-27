@@ -1,11 +1,18 @@
 import type { ViewId } from "../state/useZpcrStore";
+import {
+  CurvesIcon,
+  OverviewIcon,
+  PlatesIcon,
+  RawIcon,
+  ReferenceIcon,
+} from "./ViewIcons";
 
-const ALL_VIEWS: { id: ViewId; label: string }[] = [
-  { id: "overview", label: "Overview" },
-  { id: "curves", label: "Curves" },
-  { id: "plates", label: "Plates" },
-  { id: "reference", label: "Reference" },
-  { id: "raw", label: "Raw files" },
+const ALL_VIEWS: { id: ViewId; label: string; Icon: () => React.ReactElement }[] = [
+  { id: "overview", label: "Overview", Icon: OverviewIcon },
+  { id: "curves", label: "Curves", Icon: CurvesIcon },
+  { id: "plates", label: "Plates", Icon: PlatesIcon },
+  { id: "reference", label: "Reference", Icon: ReferenceIcon },
+  { id: "raw", label: "Raw files", Icon: RawIcon },
 ];
 
 interface Props {
@@ -25,10 +32,16 @@ export function ViewSelector({ value, onChange, views }: Props) {
           key={v.id}
           role="tab"
           aria-selected={value === v.id}
+          // The label is hidden on a narrow viewport (`app.css`), so name the tab explicitly:
+          // `aria-label` keeps it readable to a screen reader either way, and `title` gives a
+          // pointer user the word back on hover.
+          aria-label={v.label}
+          title={v.label}
           className={"segmented__item" + (value === v.id ? " is-active" : "")}
           onClick={() => onChange(v.id)}
         >
-          {v.label}
+          <v.Icon />
+          <span className="segmented__label">{v.label}</span>
         </button>
       ))}
     </div>

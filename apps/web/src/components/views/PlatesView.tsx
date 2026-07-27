@@ -39,7 +39,7 @@ export function PlatesView({
         if (file) void attachPlate(fileId, file);
       }}
       accept=".pltd,.csv,.plt.csv"
-      compactLabel={entries.length === 0 ? "+ attach plate" : "+ replace plate"}
+      compactLabel={entries.length === 0 ? "attach plate" : "replace plate"}
       disabled={fileKind !== "zpcr"}
       disabledTitle="Attaching a plate is only supported for .zpcr files"
     />

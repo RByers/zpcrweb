@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState } from "react";
+import { UploadIcon } from "./ViewIcons";
 
 interface Props {
   onFiles: (files: FileList | File[]) => void | Promise<void>;
@@ -30,6 +31,7 @@ export function DropZone({
 }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
+  const label = compactLabel ?? "load file";
 
   const onDrop = useCallback(
     (e: React.DragEvent) => {
@@ -49,7 +51,8 @@ export function DropZone({
         (dragging ? " dropzone--active" : "") +
         (disabled ? " dropzone--disabled" : "")
       }
-      title={disabled ? disabledTitle : undefined}
+      title={disabled ? disabledTitle : large ? undefined : label}
+      aria-label={large ? undefined : label}
       onDragOver={(e) => {
         if (disabled) return;
         e.preventDefault();
@@ -87,7 +90,12 @@ export function DropZone({
           </div>
         </>
       ) : (
-        <span className="dropzone__compact mono">{compactLabel ?? "+ load file"}</span>
+        <span className="dropzone__compact mono">
+          <UploadIcon />
+          {/* Hidden on a narrow header, where the icon carries it alone — hence the `title`
+              on the zone itself below. */}
+          <span className="dropzone__compact-label">{label}</span>
+        </span>
       )}
     </div>
   );

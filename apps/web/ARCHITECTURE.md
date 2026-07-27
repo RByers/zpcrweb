@@ -1059,6 +1059,15 @@ response curves, not channel numbers.
   intrinsic width used to stretch the whole `.app` grid past a phone viewport and push every
   view into horizontal overflow. The tabs therefore live in their own `.app__views` scroller
   (`min-width: 0; overflow-x: auto`) and the logo/drop button are `flex: 0 0 auto`.
+- The header **goes iconographic under 600px** rather than scrolling: every tab and the compact
+  DropZone carry a line icon from `components/ViewIcons.tsx` beside their word, and a
+  `@media (max-width: 599px)` block hides `.segmented__label`, `.dropzone__compact-label` and
+  `.app__logo-rest` — leaving five icon tabs, an upload icon and the wordmark's cyan `z`, which
+  fit a 390px portrait viewport with room to spare. Nothing is lost: each control keeps the word
+  in `title` + `aria-label` (hence `Logo`'s split spans and `ViewSelector`'s explicit labels), so
+  hover and screen readers still name it, and `tools/uitest.mjs`'s name-based tab lookups still
+  work. The rule is scoped to `.app__header`, so the welcome screen's `.app__brand` — which has
+  no tabs and plenty of room — keeps the full `zpcr//web` mark.
 - **Phone support is two shapes, not one.** *Portrait* is the stacked container-query layout
   above — settings on top, chart/table below, the page scrolling vertically as one column, which
   means the stacked `.curves__rail` needs `overflow: visible; height: auto` (its own
