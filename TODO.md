@@ -69,3 +69,41 @@ Additional typed parsers for the archive files currently reachable only via the 
 - [ ] **Hash state is view + file only.** Selected wells/channels/fluorophores stay per-file in
       IndexedDB. `state/urlHash.ts` was built to extend (more keys in the same query string) if
       sharing a specific chart view becomes useful.
+
+## Cleanups
+
+Simplification / dead-code removal, from a whole-project review (2026-07-27). Items marked
+**needs input** are judgment calls left for the repo owner rather than mechanical wins.
+
+### `@zpcrweb/core`
+
+- [ ] **Un-export four module-private symbols.** `symmetricEigenDecomposition` (`linalg.ts`),
+      `byChannel` (`pltd.ts`), `parseAttrs` (`xmlLite.ts`) and `ZIPCRYPTO_HEADER_LEN`
+      (`zipcrypto.ts`) are each used only inside their own file and are not re-exported from
+      `index.ts`. Dropping `export` narrows the module surface with no behavior change.
+- [ ] **`pltd.ts`: a doc comment sits on the wrong function.** The block describing
+      `parsePlatesetup2` is attached to `byChannel`, which was inserted between the function
+      and its comment; `parsePlatesetup2` is left undocumented.
+- [ ] **`refCalComparison()` recomputes `parseFactoryRefRowCal`.** Both `zpcr.ts` and `pcrd.ts`
+      call it with the arguments `factoryRefCal()` already used. Reuse the existing result
+      (preserving laziness).
+- [ ] **needs input — the ZipCrypto test-encryption helper exists three times.**
+      `test/pcrd.test.ts`, `test/pcrd-synthetic.test.ts` and `test/prcl.test.ts` each carry an
+      identical ~120-line copy of `CRC_TABLE`/`crc32`/`EncryptKeys`/`zipCryptoEncrypt` and the
+      synthetic-archive builders — ~240 lines of duplication. A shared `test/zipCrypto.ts`
+      (alongside the existing `test/sample.ts`, `test/secrets.ts`) would collapse it. A comment
+      in `pcrd.test.ts` records that self-contained duplication was a deliberate earlier call,
+      so this is a revisit-the-decision question, not an oversight.
+
+### Repo hygiene
+
+- [ ] **Stale worktrees.** `.claude/worktrees/` holds four locked worktrees, two of which
+      (`bridge-cse_012…`, `bridge-cse_014…`) have no commits beyond `main` and are pure
+      leftovers. Prune once no job is using them.
+
+### Knip false positives — do not "clean up"
+
+Recorded so a future pass doesn't remove them: `ProtocolStep` (`prcl.ts` → `types.ts` →
+`index.ts`) is public API consumed by `apps/web`; `Cdp` and `drainProblems`
+(`tools/harness.mjs`) are imported by `tools/uishot.mjs`. Knip misses both cross-package and
+`.mjs` script-to-script imports.
