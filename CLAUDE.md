@@ -73,7 +73,8 @@ Local-only secrets (the CFX file decryption password) live in `secrets.json`, wh
 gitignored and never committed — `{ "cfxPassword": "…" }`. Tests load it via
 `packages/core/test/secrets.ts`; only tests that explicitly exercise the decryption pipeline
 need it (`describe.skipIf(!PW)` blocks) — everything else runs against the plaintext samples
-committed in `samples/` and `packages/core/test/fixtures/`.
+committed in `samples/` — each encrypted sample's decrypted payload sits beside it as
+`<name>.xml`, so the structural tests never touch the crypto.
 
 ## UI testing
 

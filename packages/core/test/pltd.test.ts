@@ -1,19 +1,12 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { dirname, resolve } from "node:path";
+import { dirname, resolve, basename } from "node:path";
 import { describe, it, expect } from "vitest";
-import { parsePlatesetup2, parsePltd, parseZpcr } from "../src/index.js";
-import { readMultistepBytes } from "./sample.js";
+import { parsePlatesetup2, parsePltd, parseZpcr, isPltdName } from "../src/index.js";
+import { readMultistepBytes, readStandalonePltdBytes, STANDALONE_PLTD_PATH } from "./sample.js";
 import { readCfxPassword } from "./secrets.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
-function fixture(name: string): Uint8Array {
-  const buf = readFileSync(resolve(here, "fixtures", name));
-  return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
-}
-function fixtureText(name: string): string {
-  return readFileSync(resolve(here, "fixtures", name), "utf-8");
-}
 function sampleText(name: string): string {
   return readFileSync(resolve(here, "../../../samples", name), "utf-8");
 }
@@ -41,11 +34,62 @@ describe("pltd — container + password handling (no secret needed)", () => {
   });
 
   it("reports an error (not needsPassword) on a wrong password", () => {
-    const pltd = parsePltd(fixture("quickplate_allchannels.pltd"), { password: "wrong" });
+    const pltd = parsePltd(readStandalonePltdBytes(), { password: "wrong" });
     expect(pltd.container.compressionMethod).toBe(9);
     expect(pltd.needsPassword).toBeUndefined();
     expect(pltd.plate).toBeUndefined();
     expect(pltd.error).toBeDefined();
+  });
+});
+
+// A `.pltd` opened *on its own* — the app's "load a plate file directly" path, where the whole
+// file is the container and there is no surrounding `.zpcr` to supply an archive entry. This is
+// what backs the Plates tab for a standalone plate file, so it asserts the whole chain the tab
+// needs: the name is recognized as a plate file, the container decodes without a password, and
+// (given the password) a complete PlateDefinition comes out.
+describe("pltd — standalone file (not inside a .zpcr)", () => {
+  const name = basename(STANDALONE_PLTD_PATH);
+  const bytes = readStandalonePltdBytes();
+
+  it("recognizes the file name, spaces and all", () => {
+    expect(name).toBe("QuickPlate_96 wells_All Channels.pltd");
+    expect(isPltdName(name)).toBe(true);
+  });
+
+  it("decodes the container of the raw file bytes, and gates on the password", () => {
+    const pltd = parsePltd(bytes);
+    // The outer file *is* the single-entry ZIP; its inner name differs from the file's own.
+    expect(pltd.container.innerName).toBe("QuickPlate_All Channels.pltd");
+    expect(pltd.container.encrypted).toBe(true);
+    expect(pltd.container.compressionMethod).toBe(9);
+    expect(pltd.container.uncompressedSize).toBeGreaterThan(0);
+    // Locked, not broken: the viewer shows a password prompt rather than an error.
+    expect(pltd.needsPassword).toBe(true);
+    expect(pltd.plate).toBeUndefined();
+    expect(pltd.error).toBeUndefined();
+  });
+
+  it.skipIf(!PW)("decodes a full plate the viewer can render (requires secrets.json)", () => {
+    const pltd = parsePltd(bytes, { password: PW });
+    expect(pltd.error).toBeUndefined();
+    expect(pltd.needsPassword).toBeUndefined();
+    const plate = pltd.plate!;
+    expect(plate.plateName).toBe("BR Clear");
+    expect(plate.rows).toBe(8);
+    expect(plate.columns).toBe(12);
+    expect(plate.wells).toHaveLength(96);
+    // Every dye layer resolves to an optical channel — the viewer colors wells by it.
+    expect(plate.fluors.map((f) => f.fluor)).toEqual([
+      "FAM",
+      "HEX",
+      "Texas Red",
+      "Cy5",
+      "Quasar 705",
+    ]);
+    expect(plate.fluors.map((f) => f.channel)).toEqual([0, 1, 2, 3, 4]);
+    expect(plate.wells.every((w) => w.loaded)).toBe(true);
+    expect(plate.wells[0]!.label).toBe("A1");
+    expect(plate.wells[95]!.label).toBe("H12");
   });
 });
 
@@ -68,8 +112,8 @@ describe("pltd — decoded plate structure (plaintext samples, no secret needed)
     expect(a1.fluors).toEqual([{ fluor: "SYBR", channel: 0, target: undefined }]);
   });
 
-  it("decodes the method-9 (DEFLATE64) multi-dye fixture (quickplate_allchannels.pltd)", () => {
-    const plate = parsePlatesetup2(fixtureText("quickplate_allchannels.pltd.xml"));
+  it("decodes the method-9 (DEFLATE64) multi-dye sample (QuickPlate_96 wells_All Channels.pltd)", () => {
+    const plate = parsePlatesetup2(sampleText("QuickPlate_96 wells_All Channels.pltd.xml"));
     expect(plate.plateName).toBe("BR Clear");
     expect(plate.scanMode).toBe("AllChannelsScan");
     expect(plate.dyeCount).toBe(5);
@@ -141,8 +185,8 @@ describe.skipIf(!PW)("pltd — decryption pipeline (requires secrets.json)", () 
     expect(pltd.xml).toBe(sampleText("Qualification_Plate_96.pltd.xml"));
   });
 
-  it("decrypts the method-9 (DEFLATE64) entry to the same plaintext committed fixture", () => {
-    const pltd = parsePltd(fixture("quickplate_allchannels.pltd"), { password: PW });
-    expect(pltd.xml).toBe(fixtureText("quickplate_allchannels.pltd.xml"));
+  it("decrypts the method-9 (DEFLATE64) entry to the same plaintext committed sample", () => {
+    const pltd = parsePltd(readStandalonePltdBytes(), { password: PW });
+    expect(pltd.xml).toBe(sampleText("QuickPlate_96 wells_All Channels.pltd.xml"));
   });
 });

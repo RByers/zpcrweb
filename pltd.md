@@ -10,7 +10,10 @@ sample type, replicate number and — for standards — a quantity.
 > against a reference `unzip`. See [`packages/core/src/pltd.ts`](./packages/core/src/pltd.ts).
 
 The library entry point is `parsePltd(bytes)` → `Pltd`, and `zpcr.plates()` decodes every
-`.pltd` entry in an archive. The closely related `.prcl` protocol files use the **same
+`.pltd` entry in an archive. A `.pltd` is also a file in its own right — CFX Manager saves plate
+setups standalone, outside any run — and `parsePltd` takes those same bytes directly, which is
+what backs the app's plate viewer for a `.pltd` opened on its own
+(`samples/QuickPlate_96 wells_All Channels.pltd` is one, and the format is identical either way). The closely related `.prcl` protocol files use the **same
 container** ([`zipcrypto.md`](./zipcrypto.md)) but carry a protocol payload instead of
 `<platesetup2>`.
 

@@ -24,3 +24,20 @@ export function readMultistepBytes(): Uint8Array {
   const buf = readFileSync(MULTISTEP_SAMPLE_PATH);
   return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
 }
+
+/**
+ * A committed **standalone** `.pltd` — a plate definition saved on its own, not inside a
+ * `.zpcr`. Method-9 (DEFLATE64) and 5 dyes, so it also covers the compression variant and the
+ * multi-dye layout the in-archive samples don't. Its decrypted plaintext sits beside it as
+ * `…​.pltd.xml`, so the structural tests need no password.
+ */
+export const STANDALONE_PLTD_PATH = resolve(
+  here,
+  "../../../samples/QuickPlate_96 wells_All Channels.pltd",
+);
+
+/** Raw bytes of the standalone `.pltd` sample. */
+export function readStandalonePltdBytes(): Uint8Array {
+  const buf = readFileSync(STANDALONE_PLTD_PATH);
+  return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
+}
