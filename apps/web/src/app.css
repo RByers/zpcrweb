@@ -104,7 +104,10 @@
   margin: 14px 0 0;
   padding: clamp(20px, 5cqi, 40px);
 }
+/* An <a href="#load=…"> rather than a button, so "Copy link address" works — styled as a
+   button, hence the display/text-decoration resets an anchor needs. */
 .about__example {
+  display: inline-block;
   margin-block-end: 6px;
   padding: 8px 16px;
   background: transparent;
@@ -112,6 +115,7 @@
   border-radius: var(--radius-sm);
   color: var(--neon-cyan);
   font-size: 13px;
+  text-decoration: none;
   cursor: pointer;
   transition: border-color 120ms, background 120ms, box-shadow 120ms;
 }

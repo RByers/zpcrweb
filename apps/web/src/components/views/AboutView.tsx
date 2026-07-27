@@ -2,7 +2,10 @@ import { DropZone } from "../DropZone";
 
 interface Props {
   onFiles: (files: FileList | File[]) => void | Promise<void>;
-  onLoadExample: () => void;
+  /** `#load=…` hash for the example run. A real href, so the browser offers "Copy link
+   * address" on it — see `App`'s `exampleHref`. */
+  exampleHref: string;
+  onLoadExample: (e: { preventDefault: () => void }) => void;
   /** Return to the previous view. Omitted on the welcome screen, where there's nothing to go
    * back to — with no file loaded this page *is* the empty state. */
   onBack?: () => void;
@@ -12,7 +15,7 @@ interface Props {
  * welcome screen itself. One view serves both: the credits sit above the drop target, so the
  * first thing a new user sees says what this is and that their data stays put. Needs no file to
  * render. */
-export function AboutView({ onFiles, onLoadExample, onBack }: Props) {
+export function AboutView({ onFiles, exampleHref, onLoadExample, onBack }: Props) {
   return (
     <div className="about">
       <div className="about__card">
@@ -23,9 +26,9 @@ export function AboutView({ onFiles, onLoadExample, onBack }: Props) {
         </p>
 
         <DropZone onFiles={onFiles} large />
-        <button type="button" className="about__example mono" onClick={onLoadExample}>
+        <a className="about__example mono" href={exampleHref} onClick={onLoadExample}>
           Load an example file
-        </button>
+        </a>
 
         <p className="about__line">
           Copyright{" "}

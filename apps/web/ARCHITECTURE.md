@@ -112,8 +112,11 @@ copied afterwards is a plain bookmark. Like the view, it is captured in a `useSt
 (first render, before any effect) so the state → URL sync can't strip it first; the fetch itself
 waits for hydration, since replacing a same-named copy needs to know what's already stored.
 
-The About/welcome card's **"Load an example file"** button is just a link to one of these: it assigns
-`formatLoadHash(EXAMPLE_FILE)` to `location.hash` rather than calling `addUrl`, so the button and
+The About/welcome card's **"Load an example file"** control is literally a link to one of these —
+an `<a href="#load=…">`, not a button, so the browser's own affordances ("Copy link address",
+middle-click, the status-bar target) work on it. Navigating to it is the whole mechanism; `App`'s
+`loadExample` handler covers only the case where the hash already *is* that value (a repeat click
+after a failed fetch), which fires no `hashchange`, and calls `addUrl` directly. So the link and
 an external deep link are one code path and the resulting URL is shareable. The example is
 `apps/web/public/examples/`, a symlink to the repo's `samples/` — Vite dereferences it into
 `dist/` at build time, so the file is served for real without a second copy in git.
@@ -345,7 +348,7 @@ so every call site keeps writing one `onChange({ … })` regardless of where the
 - **Raw** — `RawFilesView` for `.zpcr`, `PcrdRawView` for `.pcrd` (see "Raw views" below).
 - **About** — `AboutView` (`components/views/AboutView.tsx`): one card carrying both the credits
   (name, the "nothing leaves your device" line, author and GitHub links) *and* the large
-  `DropZone` plus the "Load an example file" button. About and the welcome screen used to be two
+  `DropZone` plus the "Load an example file" link. About and the welcome screen used to be two
   separate screens; they're one now, so a first-time visitor sees what the app is and where their
   data goes on the same screen that asks for a file, and there's a single place to keep current.
   It's the one view with no tab in `ViewSelector` — the header wordmark is a `<button>` that

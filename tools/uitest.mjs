@@ -124,7 +124,7 @@ async function routingChecks(chrome, origin, pw) {
 }
 
 /**
- * `#load=<url>` and the welcome screen's example button — the one hash key that reaches the
+ * `#load=<url>` and the welcome screen's example link — the one hash key that reaches the
  * network, plus the "same name replaces" rule. All three are invisible to Vitest (no DOM, no
  * fetch) and to a screenshot (which can't show that a second copy *didn't* appear).
  */
@@ -133,16 +133,25 @@ async function loadChecks(chrome, origin) {
   const cdp = await openPage(chrome.base, origin);
   await sleep(600);
 
-  // 1. The welcome screen offers the example, and clicking it loads it.
+  // 1. The welcome screen offers the example as a real link (so "Copy link address" works),
+  //    and clicking it loads it.
   const clicked = await cdp.eval(
-    `(() => { const b = [...document.querySelectorAll("button")]
-        .find(x => /load an example/i.test(x.textContent || "")); b && b.click(); return !!b; })()`,
+    `(() => { const a = [...document.querySelectorAll("a")]
+        .find(x => /load an example/i.test(x.textContent || ""));
+      if (!a) return "missing";
+      const href = a.getAttribute("href") || "";
+      a.click();
+      return /^#load=/.test(href) ? "ok" : "bad href: " + href; })()`,
   );
-  check("welcome screen offers an example file", clicked === true);
+  check(
+    "welcome screen offers an example file as a #load= link",
+    clicked === "ok",
+    clicked === "ok" ? "" : clicked,
+  );
   await waitFor(() => cdp.eval(`/file=/.test(window.location.hash)`), { what: "example loaded" });
   const exampleHash = await cdp.eval("window.location.hash");
   check(
-    "example button loads the served sample",
+    "example link loads the served sample",
     /file=20260726_S183-S185_RVP\.zpcr/.test(exampleHash),
     exampleHash,
   );

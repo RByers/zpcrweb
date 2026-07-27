@@ -46,13 +46,17 @@ export function App() {
   const leaveAbout = () => store.setView(lastView.current);
 
   // The example goes through the `#load=` hash key rather than calling `addUrl` directly, so
-  // the button and an external deep link are the same code path — and so the URL it produces
-  // is one you can copy and send. Assigning an unchanged hash fires no `hashchange`, so a
-  // repeat click (after a failed fetch, say) falls back to loading it directly.
-  const loadExample = () => {
-    const hash = formatLoadHash(EXAMPLE_FILE);
-    if (window.location.hash.replace(/^#/, "") === hash) void store.addUrl(EXAMPLE_FILE);
-    else window.location.hash = hash;
+  // the in-app affordance and an external deep link are the same code path. `AboutView` renders
+  // it as a real <a href={exampleHref}> — not a button — so the browser's own affordances work
+  // on it: "Copy link address", middle-click, a visible target in the status bar. Navigating to
+  // it is all it takes; `loadExample` covers only the case where the hash *already* is that
+  // value (a repeat click after a failed fetch), which fires no `hashchange`, so nothing would
+  // otherwise happen.
+  const exampleHref = `#${formatLoadHash(EXAMPLE_FILE)}`;
+  const loadExample = (e: { preventDefault: () => void }) => {
+    if (window.location.hash !== exampleHref) return; // let the navigation do the work
+    e.preventDefault();
+    void store.addUrl(EXAMPLE_FILE);
   };
 
   if (store.loading) {
@@ -68,7 +72,7 @@ export function App() {
           <Logo onClick={showAbout} />
           <span className="app__tag">Bio-Rad CFX qPCR viewer</span>
         </header>
-        <AboutView onFiles={store.addFiles} onLoadExample={loadExample} />
+        <AboutView onFiles={store.addFiles} exampleHref={exampleHref} onLoadExample={loadExample} />
         {store.error && <div className="app__error mono">{store.error}</div>}
       </div>
     );
@@ -114,6 +118,7 @@ export function App() {
         {view === "about" ? (
           <AboutView
             onFiles={store.addFiles}
+            exampleHref={exampleHref}
             onLoadExample={loadExample}
             onBack={leaveAbout}
           />
