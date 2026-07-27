@@ -53,7 +53,7 @@ function pltdFromPlateCsv(name: string, bytes: Uint8Array): Pltd {
     uncompressedSize: bytes.length,
   };
   try {
-    return { container, plate: parsePlateCsv(textDecoder.decode(bytes)) };
+    return { container, plate: parsePlateCsv(textDecoder.decode(bytes), name) };
   } catch (e) {
     return { container, error: e instanceof Error ? e.message : String(e) };
   }

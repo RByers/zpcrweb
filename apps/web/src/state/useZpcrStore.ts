@@ -178,7 +178,12 @@ export interface PlateFileResult {
   container?: PltdContainer;
 }
 
-function parsePlateBytes(kind: PlateFileKind, bytes: Uint8Array, password: string): PlateFileResult {
+function parsePlateBytes(
+  kind: PlateFileKind,
+  bytes: Uint8Array,
+  password: string,
+  name: string,
+): PlateFileResult {
   if (kind === "pltd") {
     const pltd = parsePltd(bytes, password ? { password } : undefined);
     return {
@@ -189,7 +194,12 @@ function parsePlateBytes(kind: PlateFileKind, bytes: Uint8Array, password: strin
     };
   }
   try {
-    return { plate: parsePlateCsv(new TextDecoder().decode(bytes)), needsPassword: false, error: null };
+    // The file name is the plate's identity — a `.plt.csv` carries no identityKey of its own.
+    return {
+      plate: parsePlateCsv(new TextDecoder().decode(bytes), name),
+      needsPassword: false,
+      error: null,
+    };
   } catch (e) {
     return { plate: null, needsPassword: false, error: e instanceof Error ? e.message : String(e) };
   }
@@ -682,7 +692,7 @@ export function useZpcrStore(): ZpcrStore {
   const plateFiles = useMemo(() => {
     const map = new Map<string, PlateFileResult>();
     for (const f of files) {
-      if (f.kind === "pltd" || f.kind === "csv") map.set(f.id, parsePlateBytes(f.kind, f.bytes, password));
+      if (f.kind === "pltd" || f.kind === "csv") map.set(f.id, parsePlateBytes(f.kind, f.bytes, password, f.name));
     }
     return map;
   }, [files, password]);

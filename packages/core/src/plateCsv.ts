@@ -17,7 +17,9 @@
  *
  * Only `plateName` is always written: `rows`/`columns` fall back to the extent implied by the
  * well labels, and `plateType`/`scanMode`/`standardUnits` are display-only passengers from a
- * `.pltd`, omitted when empty. Header values are read up to the first comma, so a file
+ * `.pltd`, omitted when empty. The plate's `identityKey` isn't written at all — the file or
+ * archive-entry name *is* the plate's identity, and {@link parsePlateCsv}'s `sourceName` puts
+ * it back. Header values are read up to the first comma, so a file
  * round-tripped through a spreadsheet — which pads every comment line out to the table's
  * column count with trailing commas — still parses.
  */
@@ -149,7 +151,8 @@ function isBlankWell(w: WellDefinition): boolean {
 export function plateToCsv(plate: PlateDefinition): string {
   let out = "";
   out += `# zpcrweb plate definition\r\n`;
-  if (plate.identityKey) out += `# identityKey: ${plate.identityKey}\r\n`;
+  // No `identityKey` line: the file/archive-entry name is the plate's identity, and
+  // `parsePlateCsv`'s `sourceName` puts it back.
   out += `# plateName: ${plate.plateName}\r\n`;
   // Optional, and omitted when empty: nothing computes with these three, they're just carried
   // through from a `.pltd` for display.
@@ -184,8 +187,21 @@ export function isPlateCsvName(name: string): boolean {
   return /\.plt\.csv$/i.test(name);
 }
 
-/** Parse zpcrweb's plate CSV format (see {@link plateToCsv}) back into a {@link PlateDefinition}. */
-export function parsePlateCsv(text: string): PlateDefinition {
+/** The plate's identity from the file/entry name it was read from: strip the `.plt.csv` (or
+ * bare `.csv`) this module writes, and any directory part. `"S183-S185-RVP.plt.csv"` →
+ * `"S183-S185-RVP.plt"`, which is exactly the `identityKey` a `.pltd`-sourced plate carries. */
+function identityFromName(name: string): string | undefined {
+  const base = name.split(/[/\\]/).pop() ?? name;
+  return base.replace(/\.(plt\.)?csv$/i, "") || undefined;
+}
+
+/**
+ * Parse zpcrweb's plate CSV format (see {@link plateToCsv}) back into a
+ * {@link PlateDefinition}. `sourceName` is the file or archive-entry name the text came from —
+ * the plate's `identityKey` (its user-facing name), since the format doesn't duplicate it in a
+ * header line. Omit it and the plate simply has no identity.
+ */
+export function parsePlateCsv(text: string, sourceName?: string): PlateDefinition {
   const lines = text.split(/\r?\n/);
   const meta: Record<string, string> = {};
   let i = 0;
@@ -305,7 +321,7 @@ export function parsePlateCsv(text: string): PlateDefinition {
 
   return {
     plateName: meta.plateName ?? "",
-    identityKey: meta.identityKey || undefined,
+    identityKey: sourceName ? identityFromName(sourceName) : undefined,
     rows: rowsCount,
     columns,
     dyeCount: fluors.length,

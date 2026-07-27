@@ -161,11 +161,20 @@ describe("plate CSV round-trip", () => {
     expect(parsePlateCsv(csv)).toEqual(parsePlateCsv(plateToCsv(syntheticPlate())));
   });
 
+  it("takes identityKey from the source name, and writes no identityKey line", () => {
+    const csv = plateToCsv({ ...syntheticPlate(), identityKey: "Ignored.plt" });
+    expect(csv).not.toMatch(/# identityKey:/);
+    expect(parsePlateCsv(csv, "runs/S183-S185-RVP.plt.csv").identityKey).toBe("S183-S185-RVP");
+    expect(parsePlateCsv(csv, "MyPlate.csv").identityKey).toBe("MyPlate");
+    expect(parsePlateCsv(csv).identityKey).toBeUndefined();
+  });
+
   it.skipIf(!PW)("round-trips a real decoded plate from a sample .zpcr", () => {
     const zpcr = parseZpcr(readMultistepBytes());
     const { pltd } = zpcr.plates(PW)[0]!;
     const plate = pltd.plate!;
-    const back = parsePlateCsv(plateToCsv(plate));
+    // identityKey comes from the file name, not the text — pass the one the plate came from.
+    const back = parsePlateCsv(plateToCsv(plate), `${plate.identityKey}.csv`);
     // The CSV format intentionally drops the raw `.pltd` header metadata (`meta`, per-fluor
     // `fluorId`) — it's a plain plate-editing format, not a lossless `.pltd` mirror.
     expect(back).toEqual({

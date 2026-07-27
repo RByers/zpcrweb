@@ -72,7 +72,7 @@ export function DecodedPlate({ zpcr, name }: { zpcr: Zpcr; name: string }) {
 function DecodedPlateCsv({ zpcr, name }: { zpcr: Zpcr; name: string }) {
   const plate = useMemo(() => {
     try {
-      return parsePlateCsv(zpcr.archive.text(name));
+      return parsePlateCsv(zpcr.archive.text(name), name);
     } catch {
       return null;
     }

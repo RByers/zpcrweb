@@ -151,7 +151,9 @@ channel can't be inferred from the dye name and isn't the column position either
 skips channels), so it rides in the label rather than in a separate header line. Wells with
 nothing on them aren't written at all, and a well missing from the table parses back as empty,
 so only `plateName` and the `rows`/`columns` extent really matter in the header — everything
-else is an optional display-only passenger. Header values are read up to the first comma, since
+else is an optional display-only passenger. The plate's `identityKey` (its user-facing name)
+isn't in the file at all: the file/archive-entry name *is* that identity, so
+`parsePlateCsv(text, sourceName)` derives it from the name its caller read the text under. Header values are read up to the first comma, since
 a spreadsheet round-trip pads comment lines with trailing commas. It's deliberately not a CFX format
 (no `meta`/`fluorId` fidelity), so it isn't a decoder doc in the table above.
 
