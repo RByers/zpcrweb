@@ -1,14 +1,19 @@
-import type { PlateDefinition } from "@zpcrweb/core";
+import { isBlankWell, type PlateDefinition } from "@zpcrweb/core";
 import { channelColor } from "../../lib/channelColors";
 import { SAMPLE_TYPE_META } from "../../lib/sampleType";
 
 /**
- * Raw plate data as a table: one row per well, in plate order, with its sample type, sample
- * identity, and loaded fluorophores → targets. This is the "Raw files" Decoded view for a
- * `.pltd` entry — for the color-coded visual plate map, see the "Plates" tab
+ * Raw plate data as a table: one row per well that carries anything, in plate order, with its
+ * sample type, sample identity, and loaded fluorophores → targets. Wells with nothing at all in
+ * them are skipped — the same {@link isBlankWell} test that leaves them out of a `.plt.csv`, so
+ * the table shows exactly what a round-trip through that format would keep, rather than pages of
+ * empty rows. This is the "Raw files" Decoded view for a `.pltd` entry — for the color-coded
+ * visual plate map, see the "Plates" tab
  * ({@link import("../plate/PlateViewer").PlateViewer}).
  */
 export function PlateTable({ plate, sourceHint }: { plate: PlateDefinition; sourceHint?: string }) {
+  const wells = plate.wells.filter((w) => !isBlankWell(w));
+  const hidden = plate.wells.length - wells.length;
   return (
     <div className="decoded">
       <section className="decoded__block">
@@ -47,7 +52,7 @@ export function PlateTable({ plate, sourceHint }: { plate: PlateDefinition; sour
               </tr>
             </thead>
             <tbody>
-              {plate.wells.map((w) => {
+              {wells.map((w) => {
                 const meta = SAMPLE_TYPE_META[w.sampleType];
                 return (
                   <tr key={w.index} className={w.loaded ? "" : "decoded__refrow"}>
@@ -83,6 +88,11 @@ export function PlateTable({ plate, sourceHint }: { plate: PlateDefinition; sour
             </tbody>
           </table>
         </div>
+        {hidden > 0 && (
+          <span className="decoded__hint mono">
+            {hidden} empty {hidden === 1 ? "well" : "wells"} not shown
+          </span>
+        )}
       </section>
     </div>
   );

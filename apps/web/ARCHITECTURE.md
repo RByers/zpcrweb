@@ -320,7 +320,10 @@ so every call site keeps writing one `onChange({ … })` regardless of where the
   `.pltd` entry (password-gated) or parses a `.plt.csv` entry (`parsePlateCsv`, no password
   needed), either way rendering the same `PlateTable` (`components/raw/PlateTable.tsx`) from
   the same `PlateDefinition` object model: one row per well, in plate order, with sample
-  type/name/replicate/quantity and fluor→target columns. Plain tabular data,
+  type/name/replicate/quantity and fluor→target columns. Wells carrying nothing at all are
+  skipped (core's `isBlankWell`, the same test that leaves them out of a `.plt.csv`), with a
+  count of the hidden ones under the table, so a mostly-empty plate reads as its handful of
+  loaded wells rather than 96 rows. Plain tabular data,
   deliberately not the color-coded grid — see the **Plates** tab for that.
 - **`RunInfo.xml`** → `RunInfoTable`, a two-column key/value table (it is just a flat
   `KeyValuePairs` blob; parsed with `parseRunInfoRaw`). Takes plain `text`, so `PcrdRawView`

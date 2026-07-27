@@ -133,8 +133,9 @@ const FLUOR_COLUMN_RE = /^(.*?)\s+Ch(\d+)$/;
 
 /** A well carrying nothing at all — the row is left out of the table, since a well missing from
  * the table parses back to exactly this (the `# rows`/`# columns` header keeps the extent). On
- * a typical plate that's most of the file. */
-function isBlankWell(w: WellDefinition): boolean {
+ * a typical plate that's most of the file. Exported so displays of a plate's wells can hide the
+ * same nothing-to-say wells this format omits. */
+export function isBlankWell(w: WellDefinition): boolean {
   return (
     !w.loaded &&
     w.fluors.length === 0 &&

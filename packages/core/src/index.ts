@@ -45,7 +45,7 @@ export {
   ROWS,
 } from "./plateread.js";
 export { parsePltd, parsePlatesetup2, isPltdName } from "./pltd.js";
-export { plateToCsv, parsePlateCsv, isPlateCsvName } from "./plateCsv.js";
+export { plateToCsv, parsePlateCsv, isPlateCsvName, isBlankWell } from "./plateCsv.js";
 export { attachPlateToZpcr } from "./attachPlate.js";
 export {
   parseZpcrwebSettings,
