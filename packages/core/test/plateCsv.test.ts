@@ -68,23 +68,89 @@ describe("plate CSV round-trip", () => {
 
   it("writes one column per fluor, holding just the target", () => {
     const lines = plateToCsv(syntheticPlate()).split("\r\n");
-    expect(lines).toContain("# fluors: FAM:0;HEX:1");
+    expect(lines.some((l) => l.startsWith("# fluors:"))).toBe(false);
     const header = lines.find((l) => l.startsWith("Well,"))!;
-    expect(header).toBe("Well,SampleType,Sample,Replicate,Quantity,FAM,HEX");
-    // A1 is loaded: FAM has a target, HEX doesn't. A3 is unloaded.
+    expect(header).toBe("Well,SampleType,Sample,Replicate,Quantity,FAM Ch1,HEX Ch2");
+    // A1 is loaded: FAM has a target, HEX doesn't.
     expect(lines.find((l) => l.startsWith("A1,"))!.endsWith(",GeneA,+")).toBe(true);
-    expect(lines.find((l) => l.startsWith("A3,"))!.endsWith(",,")).toBe(true);
   });
 
-  it("rejects a fluor column that isn't in the fluors header", () => {
+  it("leaves blank wells out of the table entirely", () => {
+    const plate = syntheticPlate(); // only columns 1-2 of each row are loaded
+    const lines = plateToCsv(plate).split("\r\n").filter(Boolean);
+    expect(lines.some((l) => l.startsWith("A3,"))).toBe(false);
+    expect(lines.filter((l) => /^[A-H]\d/.test(l))).toHaveLength(16);
+    // …and they come back as empty wells, so the plate is unchanged.
+    expect(parsePlateCsv(plateToCsv(plate))).toEqual(plate);
+  });
+
+  it("writes and re-reads a plate with no non-blank wells", () => {
+    const plate = syntheticPlate();
+    const blank = {
+      ...plate,
+      targets: [],
+      samples: [],
+      wells: plate.wells.map((w) => ({
+        ...w,
+        loaded: false,
+        fluors: [],
+        sampleType: "empty" as const,
+        sampleTypeRaw: "wcEmpty",
+        sample: undefined,
+        replicate: undefined,
+        quantity: undefined,
+      })),
+    };
+    expect(parsePlateCsv(plateToCsv(blank))).toEqual(blank);
+  });
+
+  it("takes the channel from the column label, not the column order", () => {
     const csv = [
-      "# fluors: FAM:0",
       "# rows: 1",
       "# columns: 1",
-      "Well,SampleType,Sample,Replicate,Quantity,HEX",
-      "A1,unknown,,,,GeneA",
+      "Well,SampleType,Sample,Replicate,Quantity,FAM Ch1,Texas Red Ch3,Cy5 Ch4",
+      "A1,unknown,,,,GeneA,GeneB,GeneC",
     ].join("\r\n");
-    expect(() => parsePlateCsv(csv)).toThrow(/unknown fluor/);
+    expect(parsePlateCsv(csv).fluors).toEqual([
+      { fluor: "FAM", channel: 0 },
+      { fluor: "Texas Red", channel: 2 },
+      { fluor: "Cy5", channel: 3 },
+    ]);
+  });
+
+  it("falls back to column order for a fluor column with no Ch<n> suffix", () => {
+    const csv = [
+      "Well,SampleType,Sample,Replicate,Quantity,FAM,HEX",
+      "A1,unknown,,,,GeneA,GeneB",
+    ].join("\r\n");
+    expect(parsePlateCsv(csv).fluors).toEqual([
+      { fluor: "FAM", channel: 0 },
+      { fluor: "HEX", channel: 1 },
+    ]);
+  });
+
+  it("treats wells left out of the table as empty", () => {
+    const csv = [
+      "# rows: 8",
+      "# columns: 12",
+      "Well,SampleType,Sample,Replicate,Quantity,FAM Ch1",
+      "B2,unknown,S1,,,GeneA",
+    ].join("\r\n");
+    const plate = parsePlateCsv(csv);
+    expect(plate.wells).toHaveLength(96);
+    const listed = plate.wells[1 * 12 + 1]!;
+    expect(listed).toMatchObject({ label: "B2", loaded: true, sample: "S1" });
+    for (const w of plate.wells) {
+      if (w.label === "B2") continue;
+      expect(w).toMatchObject({ loaded: false, fluors: [], sampleType: "empty" });
+    }
+  });
+
+  it("omits plateType/scanMode/standardUnits when empty, and parses a file without them", () => {
+    const plate = { ...syntheticPlate(), plateType: "", scanMode: "", standardUnits: "" };
+    const csv = plateToCsv(plate);
+    expect(csv).not.toMatch(/# (plateType|scanMode|standardUnits):/);
+    expect(parsePlateCsv(csv)).toEqual(plate);
   });
 
   it("ignores trailing commas a spreadsheet adds to the header lines", () => {

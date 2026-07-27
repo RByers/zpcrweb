@@ -143,11 +143,16 @@ ever needs to read. Instead, `plateCsv.ts` defines a small zpcrweb-only plain-te
 format — CSV, canonical extension **`.plt.csv`** (`plateToCsv`/`parsePlateCsv`,
 `isPlateCsvName`) — as the thing the app can actually produce: one `# key: value` header block
 of plate-level metadata, then one CSV row per well. The fixed columns (`Well`, `SampleType`,
-`Sample`, `Replicate`, `Quantity`) are followed by one column per fluorophore, named for the
-fluor, whose cells hold only that well's target for it (empty = fluor absent, `+` = present
-with no target) — so a plate reads as a target-per-fluor grid in a spreadsheet. Header values
-are read up to the first comma (a spreadsheet pads comment lines with trailing commas), which
-is why the `# fluors:` fluor→channel list is `;`-separated. It's deliberately not a CFX format
+`Sample`, `Replicate`, `Quantity`) are followed by one column per fluorophore, labelled
+`<fluor> Ch<n>` (the same "FAM Ch1" the app shows), whose cells hold only that well's target
+for it (empty = fluor absent, `+` = present with no target) — so a plate reads as a
+target-per-fluor grid in a spreadsheet. Those columns are the plate's whole fluor list: the
+channel can't be inferred from the dye name and isn't the column position either (a real plate
+skips channels), so it rides in the label rather than in a separate header line. Wells with
+nothing on them aren't written at all, and a well missing from the table parses back as empty,
+so only `plateName` and the `rows`/`columns` extent really matter in the header — everything
+else is an optional display-only passenger. Header values are read up to the first comma, since
+a spreadsheet round-trip pads comment lines with trailing commas. It's deliberately not a CFX format
 (no `meta`/`fluorId` fidelity), so it isn't a decoder doc in the table above.
 
 `zpcr.ts`'s `plates()` treats a `.plt.csv` archive entry exactly like a `.pltd` one — wrapped in

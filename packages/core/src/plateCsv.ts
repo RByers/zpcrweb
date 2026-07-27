@@ -8,16 +8,18 @@
  *
  * Layout: a handful of `# key: value` header comment lines (plate-level metadata), then a
  * standard CSV table with one row per well in row-major order. The fixed columns
- * (`Well`…`Quantity`) are followed by **one column per fluorophore**, labelled with the fluor
- * name; each cell holds only that well's target for that fluor (empty = the fluor isn't in the
- * well, {@link PRESENT_NO_TARGET} = in the well but with no target). A well with no fluor cell
- * filled in is unloaded (`loaded: false`). The header's `fluors` line stays the authoritative
- * fluor→channel mapping (`PlateDefinition.fluors`) and fixes the column order; it is
- * `;`-separated so no header line ever contains a comma.
+ * (`Well`…`Quantity`) are followed by **one column per fluorophore**, labelled `<fluor> Ch<n>`
+ * (see {@link FLUOR_COLUMN_RE}); each cell holds only that well's target for that fluor (empty
+ * = the fluor isn't in the well, {@link PRESENT_NO_TARGET} = in the well but with no target).
+ * Those columns *are* the plate's fluor list (`PlateDefinition.fluors`) — there's no separate
+ * header line to keep in sync. A well with no fluor cell filled in is unloaded
+ * (`loaded: false`), and a well left out of the table entirely is empty.
  *
- * Header values are read up to the first comma, so a file round-tripped through a spreadsheet
- * — which pads every comment line out to the table's column count with trailing commas — still
- * parses.
+ * Only `plateName` is always written: `rows`/`columns` fall back to the extent implied by the
+ * well labels, and `plateType`/`scanMode`/`standardUnits` are display-only passengers from a
+ * `.pltd`, omitted when empty. Header values are read up to the first comma, so a file
+ * round-tripped through a spreadsheet — which pads every comment line out to the table's
+ * column count with trailing commas — still parses.
  */
 
 import type { PlateDefinition, PlateFluor, SampleType, WellDefinition, WellFluor } from "./pltd.js";
@@ -115,33 +117,50 @@ function parseCsvTable(text: string): string[][] {
 /** Fluor cell contents meaning "this fluor is in the well, but has no target". */
 const PRESENT_NO_TARGET = "+";
 
-/** The `# fluors:` header line is `;`-separated (a comma would end the header value) and uses
- * `:` before the channel, so both are percent-escaped inside a fluor name. */
-function escapeFluorName(s: string): string {
-  return s.replace(/%/g, "%25").replace(/:/g, "%3A").replace(/;/g, "%3B");
-}
-
-function unescapeFluorName(s: string): string {
-  return s.replace(/%3B/gi, ";").replace(/%3A/gi, ":").replace(/%25/g, "%");
-}
-
 const FIXED_COLUMNS = ["Well", "SampleType", "Sample", "Replicate", "Quantity"];
+
+/** A fluor column is labelled `<fluor> Ch<n>` — the same "FAM Ch1" the app shows, with `n`
+ * 1-based. The channel can't be inferred from the dye name (nothing here knows the
+ * instrument's dye→channel mapping) and it isn't the column position either — a real plate
+ * skips channels, e.g. FAM/Texas Red/Cy5 on channels 0/2/3 — so it rides in the label. A
+ * hand-written column with no ` Ch<n>` suffix falls back to its position among the fluor
+ * columns. */
+const FLUOR_COLUMN_RE = /^(.*?)\s+Ch(\d+)$/;
+
+function fluorColumnLabel(fluor: string, channel: number): string {
+  return `${fluor} Ch${channel + 1}`;
+}
+
+/** A well carrying nothing at all — the row is left out of the table, since a well missing from
+ * the table parses back to exactly this (the `# rows`/`# columns` header keeps the extent). On
+ * a typical plate that's most of the file. */
+function isBlankWell(w: WellDefinition): boolean {
+  return (
+    !w.loaded &&
+    w.fluors.length === 0 &&
+    w.sampleType === "empty" &&
+    !w.sample &&
+    w.replicate === undefined &&
+    w.quantity === undefined
+  );
+}
 
 /** Serialize a {@link PlateDefinition} to zpcrweb's plate CSV format. */
 export function plateToCsv(plate: PlateDefinition): string {
-  const fluorsHeader = plate.fluors.map((f) => `${escapeFluorName(f.fluor)}:${f.channel}`).join(";");
   let out = "";
   out += `# zpcrweb plate definition\r\n`;
   if (plate.identityKey) out += `# identityKey: ${plate.identityKey}\r\n`;
   out += `# plateName: ${plate.plateName}\r\n`;
-  out += `# plateType: ${plate.plateType}\r\n`;
-  out += `# scanMode: ${plate.scanMode}\r\n`;
-  out += `# standardUnits: ${plate.standardUnits}\r\n`;
+  // Optional, and omitted when empty: nothing computes with these three, they're just carried
+  // through from a `.pltd` for display.
+  if (plate.plateType) out += `# plateType: ${plate.plateType}\r\n`;
+  if (plate.scanMode) out += `# scanMode: ${plate.scanMode}\r\n`;
+  if (plate.standardUnits) out += `# standardUnits: ${plate.standardUnits}\r\n`;
   out += `# rows: ${plate.rows}\r\n`;
   out += `# columns: ${plate.columns}\r\n`;
-  out += `# fluors: ${fluorsHeader}\r\n`;
-  out += csvRow([...FIXED_COLUMNS, ...plate.fluors.map((f) => f.fluor)]);
+  out += csvRow([...FIXED_COLUMNS, ...plate.fluors.map((f) => fluorColumnLabel(f.fluor, f.channel))]);
   for (const w of plate.wells) {
+    if (isBlankWell(w)) continue;
     const byFluor = new Map(w.fluors.map((f) => [f.fluor, f]));
     out += csvRow([
       w.label,
@@ -192,34 +211,25 @@ export function parsePlateCsv(text: string): PlateDefinition {
   const declaredRows = Number(meta.rows);
   const declaredCols = Number(meta.columns);
   const dataRows = rows.slice(1);
-  if (dataRows.length === 0) throw new Error("Plate CSV: no well rows");
+  // A table with no rows at all is only meaningful if the extent is declared — every well is
+  // then simply empty (an all-empty plate writes no rows).
+  if (dataRows.length === 0 && !(declaredRows > 0 && declaredCols > 0)) {
+    throw new Error("Plate CSV: no well rows, and no rows/columns header to size the plate");
+  }
 
-  const fluors: PlateFluor[] = (meta.fluors ?? "")
-    .split(";")
-    .map((s) => s.trim())
-    .filter(Boolean)
-    .map((entry) => {
-      const [nameRaw, chRaw] = entry.split(":");
-      const fluor = unescapeFluorName((nameRaw ?? "").trim());
-      const channel = Number((chRaw ?? "").trim());
-      if (!fluor || !Number.isFinite(channel)) {
-        throw new Error(`Plate CSV: malformed "fluors" header entry "${entry}"`);
-      }
-      return { fluor, channel };
-    });
-  const channelByFluor = new Map(fluors.map((f) => [f.fluor, f.channel]));
-
-  // Every column that isn't one of the fixed ones is a fluor column, named for its fluor.
+  // Every column that isn't one of the fixed ones is a fluor column, and those columns are the
+  // only declaration of the plate's fluors — see {@link FLUOR_COLUMN_RE}.
   const fluorColumns = header
     .map((name, column) => ({ name, column }))
     .filter(({ name }) => name !== "" && !FIXED_COLUMNS.includes(name))
-    .map(({ name, column }) => {
-      const channel = channelByFluor.get(name);
-      if (channel === undefined) {
-        throw new Error(`Plate CSV: column "${name}" is an unknown fluor (not in the "fluors" header)`);
-      }
-      return { fluor: name, channel, column };
+    .map(({ name, column }, ordinal) => {
+      const m = FLUOR_COLUMN_RE.exec(name);
+      const fluor = m ? m[1]!.trim() : name;
+      const channel = m ? Number(m[2]) - 1 : ordinal;
+      if (!fluor) throw new Error(`Plate CSV: malformed fluor column "${name}"`);
+      return { fluor, channel, column };
     });
+  const fluors: PlateFluor[] = fluorColumns.map(({ fluor, channel }) => ({ fluor, channel }));
 
   // Row/column extent: prefer the declared header, else infer from the max well label seen.
   let maxRow = 0;
