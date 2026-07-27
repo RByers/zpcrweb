@@ -55,12 +55,15 @@ export function matchFluorCalibrations(
   const wantedTube = tube.trim().toLowerCase();
   const byDye = new Map<string, Dcal>();
   for (const { dcal } of calibrations) {
-    if (dcal.plate.trim().toLowerCase() === wantedTube) byDye.set(dcal.dye, dcal);
+    // Dye names are matched case-insensitively too: a hand-edited `.plt.csv` plate won't
+    // reproduce Bio-Rad's own casing ("Tex 615", "Cal Gold 540") exactly, and a case slip
+    // shouldn't silently cost that fluor its calibration.
+    if (dcal.plate.trim().toLowerCase() === wantedTube) byDye.set(dcal.dye.trim().toLowerCase(), dcal);
   }
   const seen = new Map<string, FluorCalibration>();
   for (const f of plateFluors) {
     if (seen.has(f.fluor)) continue; // a plate lists each fluor once per dye layer already
-    const dcal = byDye.get(f.fluor);
+    const dcal = byDye.get(f.fluor.trim().toLowerCase());
     seen.set(f.fluor, {
       fluor: f.fluor,
       channel: f.channel,

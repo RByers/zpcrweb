@@ -25,7 +25,7 @@ import {
   waitFor,
 } from "./harness.mjs";
 
-const ZPCR = join(REPO, "samples/20260720.zpcr");
+const ZPCR = join(REPO, "samples/20260720_FirstQualification.zpcr");
 const PCRD = join(REPO, "samples/20260720_Luna_noRT.pcrd");
 
 const results = [];
@@ -55,7 +55,7 @@ async function routingChecks(chrome, origin, pw) {
   check("hash carries file+view once a file is active", /file=/.test(h1) && /view=/.test(h1), h1);
   check(
     "file param round-trips the real name",
-    new URLSearchParams(h1.replace(/^#/, "")).get("file") === "20260720.zpcr",
+    new URLSearchParams(h1.replace(/^#/, "")).get("file") === "20260720_FirstQualification.zpcr",
   );
 
   // Clicking a tab must write the hash — this is what makes any view linkable.
@@ -75,7 +75,7 @@ async function routingChecks(chrome, origin, pw) {
   check("forward() re-applies the view", fwd === "Plates", `tab "${fwd}"`);
 
   // A cold load must honor the hash without flashing the default view first.
-  await cdp.send("Page.navigate", { url: `${origin}#file=20260720.zpcr&view=reference` });
+  await cdp.send("Page.navigate", { url: `${origin}#file=20260720_FirstQualification.zpcr&view=reference` });
   await waitFor(() => cdp.eval("document.readyState==='complete'"), { what: "reload" });
   const cold = await tabBecomes(cdp, "Reference");
   check("cold deep link opens the named view", cold === "Reference", `tab "${cold}"`);

@@ -10,10 +10,10 @@ import { readCfxPassword } from "./secrets.js";
 const here = dirname(fileURLToPath(import.meta.url));
 
 // Same fixture the .md docs cross-validate against: the CFX Manager saved-experiment document
-// for the run also committed as samples/20260720.zpcr.
+// for the run also committed as samples/20260720_FirstQualification.zpcr.
 const PCRD_PATH = resolve(here, "../../../samples/20260720_Luna_noRT.pcrd");
 const PCRD_XML_PATH = resolve(here, "../../../samples/20260720_Luna_noRT.pcrd.xml");
-const ZPCR_PATH = resolve(here, "../../../samples/20260720.zpcr");
+const ZPCR_PATH = resolve(here, "../../../samples/20260720_FirstQualification.zpcr");
 
 function readBytes(path: string): Uint8Array {
   const buf = readFileSync(path);

@@ -72,7 +72,7 @@ box.
 ## Hash routing
 
 The active file and selected view live in the URL hash as a **query string**, not a path —
-`#file=20260720.zpcr&view=curves` (`state/urlHash.ts`). A query string rather than
+`#file=20260720_FirstQualification.zpcr&view=curves` (`state/urlHash.ts`). A query string rather than
 `#/<file>/<view>` because file names contain spaces and `/`-unsafe characters, both keys are
 optional and order-independent (an old link degrades instead of failing to parse), and more
 shareable state can be added later without inventing path segments.
@@ -438,8 +438,9 @@ color-separated `allFluorCurves` — and, on top of those, the run's **Cq table*
   `thresholdGroupOf` is the **threshold** group and is always the **fluorophore**. Baseline noise is
   a property of the dye and the optics; a target is a biological label on the same measurement, so
   grouping thresholds by target split one dye's wells into cohorts differing only in what they were
-  called: on `20260720.zpcr` the three Texas Red wells carry two targets and got thresholds 162 and
-  49 RFU for near-identical curves, with one cohort a single well. It also matches the format — CFX
+  called: on `20260720_FirstQualification.zpcr` the three Tex 615 wells carry two targets and got
+  thresholds 162 and 49 RFU for near-identical curves, with one cohort a single well. It also
+  matches the format — CFX
   persists `thresholdOverrideValue` per `fluorId`, never per target. `thresholdOverrides` is
   therefore keyed by fluorophore name; `curveThresholdOverrides` goes one level finer (see
   "Threshold section" below) and is keyed by `curveKey`. Both are independent of the Curves view's

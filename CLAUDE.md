@@ -186,7 +186,8 @@ Rejected alternatives, so they don't get re-proposed:
 - *Synthesizing drag-and-drop `Input` events* — fiddly and flaky for no gain over the file
   input.
 
-Default to `samples/20260720.zpcr` (~400 KB): it has real amplification curves, targets,
+Default to `samples/20260720_FirstQualification.zpcr` (~400 KB): it has real amplification
+curves, targets,
 samples and calibration data, so every view renders something meaningful. The ~70 KB samples
 load marginally faster but leave views sparse, which makes them poor screenshot subjects. Each
 run starts from a clean Chrome profile — otherwise a previous run's sample lingers in

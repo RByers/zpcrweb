@@ -106,8 +106,9 @@ export interface RunAnalysis {
    * the well — the target is a biological label attached to the same physical measurement. Keying
    * the threshold on the target therefore splits one dye's wells into cohorts that differ only in
    * what the experimenter called them, which is exactly the "Cq incomparable across a plate"
-   * failure §5.1 exists to prevent: on `20260720.zpcr` the three loaded Texas Red wells carry two
-   * targets (HMPV Ma in A3/B3, PIV3 Bo in D3) and used to come out with thresholds 3.3× apart —
+   * failure §5.1 exists to prevent: on `20260720_FirstQualification.zpcr` the three loaded Tex 615
+   * wells carry two targets (HMPV Ma in A3/B3, PIV3 Bo in D3) and used to come out with
+   * thresholds 3.3× apart —
    * 162 vs 49 RFU — for near-identical curves. It also made cohorts tiny: PIV3 Bo's was a single
    * well, so its "median noise" was that one well's noise, with no robustness at all.
    *

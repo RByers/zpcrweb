@@ -194,7 +194,8 @@ then flattens — a decaying transient on top of the usual linear drift. A strai
 the whole region cannot follow that shape, so the fit tilts, and everything built on it (the noise
 estimate, and through it the group's threshold and every Cq in the group) inherits the error.
 
-The size of the effect is per-well, which is what makes it damaging: on `20260720.zpcr`, wells A3
+The size of the effect is per-well, which is what makes it damaging: on
+`20260720_FirstQualification.zpcr`, wells A3
 and D3 carry the same dye and near-identical curves, but A3's transient is ~55 RFU on the first
 cycle step against D3's ~12, giving residual spreads of 11.1 and 2.5 about their fitted baselines.
 
@@ -207,7 +208,8 @@ start looking like noise, judged by the von Neumann ratio of §5.2:
 - Never trim below ~**8** cycles, and never walk more than ~**15** cycles forward. The second bound
   matters more than it looks: a settling transient is over within a handful of cycles, and without a
   bound the walk will "succeed" at the far end of a region, because the tail of a flat curve is
-  white noise and passes trivially. Observed on well A3/FAM of `20260720.zpcr` — a well that never
+  white noise and passes trivially. Observed on well A3/FAM of
+  `20260720_FirstQualification.zpcr` — a well that never
   amplifies, so onset detection returns the whole run — where an unbounded walk returned cycles
   **34–45**, a perfectly white dozen cycles describing nothing about the well's baseline.
 - If **no** start reaches the target, leave the region alone. The premise of the search is that the
@@ -348,7 +350,8 @@ The `/2` is what makes the two agree there: successive differences of independen
 the variance of the values themselves.
 
 Measured over the loaded curves of the committed samples, `std-dev ÷ successive-difference` runs to
-**4.2×** on `20260720.zpcr` and **8.7×** on `20230829_135443_CT019138_SINGLE_STEP_.zpcr` (median
+**4.2×** on `20260720_FirstQualification.zpcr` and **8.7×** on
+`20230829_135443_CT019138_SINGLE_STEP_.zpcr` (median
 5.5× there, where 67 of 72 curves carry a visibly non-white baseline). On the latter the old
 estimator put the group threshold at **≈1063 RFU** and only 3 of 72 wells reported a Cq at all;
 this one puts it at **≈178**, and 5 report.
@@ -412,8 +415,9 @@ Two refinements that matter in practice:
   is no per-target threshold anywhere in the format. That matches the physics — baseline noise is a
   property of the dye, the optics and the well, while the target is a biological label attached to
   the same physical measurement — and grouping by target instead splits one dye's wells into
-  cohorts differing only in what the experimenter called them. Observed on `20260720.zpcr`, whose
-  three loaded Texas Red wells carry two targets (HMPV Ma in A3/B3, PIV3 Bo in D3): grouping by
+  cohorts differing only in what the experimenter called them. Observed on
+  `20260720_FirstQualification.zpcr`, whose three loaded Tex 615 wells carry two targets (HMPV Ma
+  in A3/B3, PIV3 Bo in D3): grouping by
   target gave them thresholds of **162 and 49 RFU** for near-identical curves, and left PIV3 Bo's
   cohort a single well, so its "median noise" was that one well with no robustness at all.
 - **Floor the threshold.** If a plate contains only flat wells, the noise estimate collapses and

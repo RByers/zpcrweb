@@ -196,7 +196,7 @@ function parsePlateBytes(
   try {
     // The file name is the plate's identity — a `.plt.csv` carries no identityKey of its own.
     return {
-      plate: parsePlateCsv(new TextDecoder().decode(bytes), name),
+      plate: parsePlateCsv(new TextDecoder().decode(bytes), { sourceName: name }),
       needsPassword: false,
       error: null,
     };
@@ -692,7 +692,9 @@ export function useZpcrStore(): ZpcrStore {
   const plateFiles = useMemo(() => {
     const map = new Map<string, PlateFileResult>();
     for (const f of files) {
-      if (f.kind === "pltd" || f.kind === "csv") map.set(f.id, parsePlateBytes(f.kind, f.bytes, password, f.name));
+      if (f.kind === "pltd" || f.kind === "csv") {
+        map.set(f.id, parsePlateBytes(f.kind, f.bytes, password, f.name));
+      }
     }
     return map;
   }, [files, password]);

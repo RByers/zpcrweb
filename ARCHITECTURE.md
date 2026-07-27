@@ -37,7 +37,8 @@ npm workspaces:
 - `apps/web` — the web app, which depends on `@zpcrweb/core`. Scaffolded now, built later
   (see [`TODO.md`](./TODO.md)).
 - `samples/` — committed real `.zpcr` files and a matching `.pcrd` (~350 KB) for the same run,
-  used by tests as ground truth (see `pcrd.test.ts`'s cross-validation against `20260720.zpcr`).
+  used by tests as ground truth (see `pcrd.test.ts`'s cross-validation against
+  `20260720_FirstQualification.zpcr`).
 
 ## Why the web app imports core's source
 
@@ -143,19 +144,22 @@ ever needs to read. Instead, `plateCsv.ts` defines a small zpcrweb-only plain-te
 format — CSV, canonical extension **`.plt.csv`** (`plateToCsv`/`parsePlateCsv`,
 `isPlateCsvName`) — as the thing the app can actually produce: one `# key: value` header block
 of plate-level metadata, then one CSV row per well. The fixed columns (`Well`, `SampleType`,
-`Sample`, `Replicate`, `Quantity`) are followed by one column per fluorophore, labelled
-`<fluor> Ch<n>` (the same "FAM Ch1" the app shows), whose cells hold only that well's target
-for it (empty = fluor absent, `+` = present with no target) — so a plate reads as a
-target-per-fluor grid in a spreadsheet. Those columns are the plate's whole fluor list: the
-channel can't be inferred from the dye name and isn't the column position either (a real plate
-skips channels), so it rides in the label rather than in a separate header line. Wells with
-nothing on them aren't written at all, and a well missing from the table parses back as empty,
-so only `plateName` and the `rows`/`columns` extent really matter in the header — everything
-else is an optional display-only passenger. The plate's `identityKey` (its user-facing name)
-isn't in the file at all: the file/archive-entry name *is* that identity, so
-`parsePlateCsv(text, sourceName)` derives it from the name its caller read the text under. Header values are read up to the first comma, since
-a spreadsheet round-trip pads comment lines with trailing commas. It's deliberately not a CFX format
-(no `meta`/`fluorId` fidelity), so it isn't a decoder doc in the table above.
+`Sample`, `Replicate`, `Quantity`) are followed by one column per fluorophore, labelled with
+the dye name, whose cells hold only that well's target for it (empty = fluor absent, `+` =
+present with no target) — so a plate reads as a target-per-fluor grid in a spreadsheet. Those
+columns are the plate's whole fluor list; the channel isn't written, since a dye is read on
+exactly one channel and the run's own `.Dcal` set says which (`Dcal.primaryChannel`).
+`parseZpcr` builds that dye→channel map lazily and hands it to `parsePlateCsv` as
+`channelForFluor`; an explicit `FAM Ch1`-style suffix still wins if a file carries one, and a
+dye in neither falls back to its column position. Wells with nothing on them aren't written at
+all, and a well missing from the table parses back as empty, so only `plateName` and the
+`rows`/`columns` extent really matter in the header — everything else is an optional
+display-only passenger. The plate's `identityKey` (its user-facing name) isn't in the file
+either: the file/archive-entry name *is* that identity, so `parsePlateCsv`'s `sourceName`
+derives it from the name its caller read the text under. Header values are read up to the
+first comma, since a spreadsheet round-trip pads comment lines with trailing commas. It's
+deliberately not a CFX format (no `meta`/`fluorId` fidelity), so it isn't a decoder doc in the
+table above.
 
 `zpcr.ts`'s `plates()` treats a `.plt.csv` archive entry exactly like a `.pltd` one — wrapped in
 a synthetic `Pltd`-shaped result (`pltdFromPlateCsv`) with a dummy `PltdContainer` and

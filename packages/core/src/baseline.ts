@@ -411,7 +411,8 @@ export interface BaselineStartRefinementOptions {
    * nothing physical justifies trimming 30 cycles off the front. Without the bound the walk will
    * happily run to the far end of a region and "succeed" there, because the tail of a flat,
    * non-amplifying curve is white noise and passes the test trivially. Observed on well A3/FAM of
-   * `20260720.zpcr`, whose curve never amplifies: onset detection finds nothing and hands back the
+   * `20260720_FirstQualification.zpcr`, whose curve never amplifies: onset detection finds
+   * nothing and hands back the
    * whole run (cycles 2–45), and the unbounded walk trimmed that to **34–45** — a perfectly white
    * dozen cycles at the end of the run that describe nothing about the well's baseline. With the
    * bound the region comes back as found, and §7's validation gate rejects it, which is the honest

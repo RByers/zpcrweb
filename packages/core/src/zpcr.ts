@@ -43,7 +43,11 @@ function toBytes(data: Uint8Array | ArrayBuffer): Uint8Array {
  * entries with no type or call-site changes — a `.plt.csv` never needs a password, so
  * `needsPassword` is simply never set.
  */
-function pltdFromPlateCsv(name: string, bytes: Uint8Array): Pltd {
+function pltdFromPlateCsv(
+  name: string,
+  bytes: Uint8Array,
+  channelForFluor: (fluor: string) => number | undefined,
+): Pltd {
   const container: PltdContainer = {
     innerName: name,
     compressionMethod: 0,
@@ -53,7 +57,10 @@ function pltdFromPlateCsv(name: string, bytes: Uint8Array): Pltd {
     uncompressedSize: bytes.length,
   };
   try {
-    return { container, plate: parsePlateCsv(textDecoder.decode(bytes), name) };
+    return {
+      container,
+      plate: parsePlateCsv(textDecoder.decode(bytes), { sourceName: name, channelForFluor }),
+    };
   } catch (e) {
     return { container, error: e instanceof Error ? e.message : String(e) };
   }
@@ -74,6 +81,27 @@ export function parseZpcr(data: Uint8Array | ArrayBuffer): Zpcr {
     throw new Error(`Not a valid .zpcr archive: missing ${RUNINFO_NAME}`);
   }
   const metadata = parseRunInfo(textDecoder.decode(runInfoBytes));
+
+  // Dye → optical channel, from the archive's own `.Dcal` set: the only in-archive statement of
+  // which channel a dye is read on, and what lets a `.plt.csv` name its fluor columns by dye
+  // alone. Built on first use and cached — a plate CSV is the only thing that asks, and decoding
+  // every `.Dcal` (typically 28 of them) isn't free. Matched case-insensitively, since a
+  // hand-edited plate won't reproduce Bio-Rad's casing ("Tex 615") exactly.
+  let dyeChannels: Map<string, number> | undefined;
+  const channelForDye = (dye: string): number | undefined => {
+    if (!dyeChannels) {
+      dyeChannels = new Map();
+      for (const name of archive.entries.filter(isDcalName)) {
+        try {
+          const dcal = parseDcal(files[name] as Uint8Array);
+          if (dcal.dye) dyeChannels.set(dcal.dye.trim().toLowerCase(), dcal.primaryChannel);
+        } catch {
+          // A single unreadable calibration file shouldn't cost the plate its channels.
+        }
+      }
+    }
+    return dyeChannels.get(dye.trim().toLowerCase());
+  };
 
   const reads: PlateRead[] = Object.keys(files)
     .filter(isPlateReadName)
@@ -106,7 +134,7 @@ export function parseZpcr(data: Uint8Array | ArrayBuffer): Zpcr {
         .map((name) => ({
           name,
           pltd: isPlateCsvName(name)
-            ? pltdFromPlateCsv(name, files[name] as Uint8Array)
+            ? pltdFromPlateCsv(name, files[name] as Uint8Array, channelForDye)
             : parsePltd(files[name] as Uint8Array, password ? { password } : undefined),
         })),
     protocols: (password?: string): PrclEntry[] =>

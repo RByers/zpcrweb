@@ -8,20 +8,20 @@
  *
  * Layout: a handful of `# key: value` header comment lines (plate-level metadata), then a
  * standard CSV table with one row per well in row-major order. The fixed columns
- * (`Well`…`Quantity`) are followed by **one column per fluorophore**, labelled `<fluor> Ch<n>`
- * (see {@link FLUOR_COLUMN_RE}); each cell holds only that well's target for that fluor (empty
- * = the fluor isn't in the well, {@link PRESENT_NO_TARGET} = in the well but with no target).
- * Those columns *are* the plate's fluor list (`PlateDefinition.fluors`) — there's no separate
- * header line to keep in sync. A well with no fluor cell filled in is unloaded
+ * (`Well`…`Quantity`) are followed by **one column per fluorophore**, labelled with the dye
+ * name (see {@link FLUOR_COLUMN_RE}); each cell holds only that well's target for that fluor
+ * (empty = the fluor isn't in the well, {@link PRESENT_NO_TARGET} = in the well but with no
+ * target). Those columns *are* the plate's fluor list (`PlateDefinition.fluors`) — there's no
+ * separate header line to keep in sync. A well with no fluor cell filled in is unloaded
  * (`loaded: false`), and a well left out of the table entirely is empty.
  *
  * Only `plateName` is always written: `rows`/`columns` fall back to the extent implied by the
  * well labels, and `plateType`/`scanMode`/`standardUnits` are display-only passengers from a
  * `.pltd`, omitted when empty. The plate's `identityKey` isn't written at all — the file or
  * archive-entry name *is* the plate's identity, and {@link parsePlateCsv}'s `sourceName` puts
- * it back. Header values are read up to the first comma, so a file
- * round-tripped through a spreadsheet — which pads every comment line out to the table's
- * column count with trailing commas — still parses.
+ * it back. Header values are read up to the first comma, so a file round-tripped through a
+ * spreadsheet — which pads every comment line out to the table's column count with trailing
+ * commas — still parses.
  */
 
 import type { PlateDefinition, PlateFluor, SampleType, WellDefinition, WellFluor } from "./pltd.js";
@@ -121,17 +121,15 @@ const PRESENT_NO_TARGET = "+";
 
 const FIXED_COLUMNS = ["Well", "SampleType", "Sample", "Replicate", "Quantity"];
 
-/** A fluor column is labelled `<fluor> Ch<n>` — the same "FAM Ch1" the app shows, with `n`
- * 1-based. The channel can't be inferred from the dye name (nothing here knows the
- * instrument's dye→channel mapping) and it isn't the column position either — a real plate
- * skips channels, e.g. FAM/Texas Red/Cy5 on channels 0/2/3 — so it rides in the label. A
- * hand-written column with no ` Ch<n>` suffix falls back to its position among the fluor
- * columns. */
+/**
+ * A fluor column is labelled with the dye name alone (`FAM`, `Tex 615`). The channel isn't
+ * written, because a dye is only ever read on one channel and the run's own `.Dcal`
+ * calibration says which (`Dcal.primaryChannel`) — see {@link ParsePlateCsvOptions.channelForFluor},
+ * which `zpcr.plates()` wires up. An explicit ` Ch<n>` suffix (1-based, the "FAM Ch1" form the
+ * app displays) is still honoured if a file carries one, and wins over the lookup; with
+ * neither, a column falls back to its position among the fluor columns.
+ */
 const FLUOR_COLUMN_RE = /^(.*?)\s+Ch(\d+)$/;
-
-function fluorColumnLabel(fluor: string, channel: number): string {
-  return `${fluor} Ch${channel + 1}`;
-}
 
 /** A well carrying nothing at all — the row is left out of the table, since a well missing from
  * the table parses back to exactly this (the `# rows`/`# columns` header keeps the extent). On
@@ -161,7 +159,7 @@ export function plateToCsv(plate: PlateDefinition): string {
   if (plate.standardUnits) out += `# standardUnits: ${plate.standardUnits}\r\n`;
   out += `# rows: ${plate.rows}\r\n`;
   out += `# columns: ${plate.columns}\r\n`;
-  out += csvRow([...FIXED_COLUMNS, ...plate.fluors.map((f) => fluorColumnLabel(f.fluor, f.channel))]);
+  out += csvRow([...FIXED_COLUMNS, ...plate.fluors.map((f) => f.fluor)]);
   for (const w of plate.wells) {
     if (isBlankWell(w)) continue;
     const byFluor = new Map(w.fluors.map((f) => [f.fluor, f]));
@@ -195,13 +193,26 @@ function identityFromName(name: string): string | undefined {
   return base.replace(/\.(plt\.)?csv$/i, "") || undefined;
 }
 
+export interface ParsePlateCsvOptions {
+  /** The file or archive-entry name the text came from — the plate's `identityKey` (its
+   * user-facing name), since the format doesn't duplicate it in a header line. Omit it and the
+   * plate simply has no identity. */
+  sourceName?: string;
+  /** Which optical channel a dye is read on, normally from the run's `.Dcal` calibration
+   * (`Dcal.primaryChannel` — `zpcr.plates()` supplies this). Called for every fluor column that
+   * doesn't spell its channel out; returning `undefined` (an unknown dye) falls back to the
+   * column's position. Channels are only ever used for coloring and grouping, never for the
+   * color-separation solve itself, so a fallback is a display wart rather than a wrong number. */
+  channelForFluor?: (fluor: string) => number | undefined;
+}
+
 /**
  * Parse zpcrweb's plate CSV format (see {@link plateToCsv}) back into a
- * {@link PlateDefinition}. `sourceName` is the file or archive-entry name the text came from —
- * the plate's `identityKey` (its user-facing name), since the format doesn't duplicate it in a
- * header line. Omit it and the plate simply has no identity.
+ * {@link PlateDefinition}. See {@link ParsePlateCsvOptions} for the two things the text itself
+ * doesn't carry — the plate's identity and its fluors' channels.
  */
-export function parsePlateCsv(text: string, sourceName?: string): PlateDefinition {
+export function parsePlateCsv(text: string, options: ParsePlateCsvOptions = {}): PlateDefinition {
+  const { sourceName, channelForFluor } = options;
   const lines = text.split(/\r?\n/);
   const meta: Record<string, string> = {};
   let i = 0;
@@ -241,8 +252,8 @@ export function parsePlateCsv(text: string, sourceName?: string): PlateDefinitio
     .map(({ name, column }, ordinal) => {
       const m = FLUOR_COLUMN_RE.exec(name);
       const fluor = m ? m[1]!.trim() : name;
-      const channel = m ? Number(m[2]) - 1 : ordinal;
       if (!fluor) throw new Error(`Plate CSV: malformed fluor column "${name}"`);
+      const channel = m ? Number(m[2]) - 1 : channelForFluor?.(fluor) ?? ordinal;
       return { fluor, channel, column };
     });
   const fluors: PlateFluor[] = fluorColumns.map(({ fluor, channel }) => ({ fluor, channel }));

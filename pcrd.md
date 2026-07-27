@@ -1,7 +1,7 @@
 # Bio-Rad CFX `.pcrd` Data-File Format
 
 Reverse-engineered from `samples/20260720_Luna_noRT.pcrd`, the CFX Manager **data file** for the
-same run as `samples/20260720.zpcr` (`20260720_211747_CT019138_Luna_noRT`, a CFX96 `CT019138`).
+same run as `samples/20260720_FirstQualification.zpcr` (`20260720_211747_CT019138_Luna_noRT`, a CFX96 `CT019138`).
 Where a `.zpcr` is the *instrument's* raw output — a directory of files zipped up as the run
 proceeds — a `.pcrd` is the *application's* saved document: the whole experiment, plus its
 analysis state, collapsed into a single XML file.

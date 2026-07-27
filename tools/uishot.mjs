@@ -43,7 +43,7 @@ const VIEW_LABELS = {
 function parseArgs(argv) {
   const out = {
     views: ["overview", "curves"],
-    file: "samples/20260720.zpcr",
+    file: "samples/20260720_FirstQualification.zpcr",
     out: "tools/.uishot/shot.png",
     width: 1000,
     height: 760,

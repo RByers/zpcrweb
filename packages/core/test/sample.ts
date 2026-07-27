@@ -5,7 +5,7 @@ import { dirname, resolve } from "node:path";
 const here = dirname(fileURLToPath(import.meta.url));
 
 /** Absolute path to the committed sample `.zpcr` at the repo root `samples/` dir. */
-export const SAMPLE_PATH = resolve(here, "../../../samples/20260720.zpcr");
+export const SAMPLE_PATH = resolve(here, "../../../samples/20260720_FirstQualification.zpcr");
 
 /** Raw bytes of the committed sample `.zpcr`. */
 export function readSampleBytes(): Uint8Array {

@@ -70,7 +70,7 @@ describe("plate CSV round-trip", () => {
     const lines = plateToCsv(syntheticPlate()).split("\r\n");
     expect(lines.some((l) => l.startsWith("# fluors:"))).toBe(false);
     const header = lines.find((l) => l.startsWith("Well,"))!;
-    expect(header).toBe("Well,SampleType,Sample,Replicate,Quantity,FAM Ch1,HEX Ch2");
+    expect(header).toBe("Well,SampleType,Sample,Replicate,Quantity,FAM,HEX");
     // A1 is loaded: FAM has a target, HEX doesn't.
     expect(lines.find((l) => l.startsWith("A1,"))!.endsWith(",GeneA,+")).toBe(true);
   });
@@ -104,21 +104,43 @@ describe("plate CSV round-trip", () => {
     expect(parsePlateCsv(plateToCsv(blank))).toEqual(blank);
   });
 
-  it("takes the channel from the column label, not the column order", () => {
+  it("resolves channels from calibration, not from the column order", () => {
     const csv = [
       "# rows: 1",
       "# columns: 1",
-      "Well,SampleType,Sample,Replicate,Quantity,FAM Ch1,Texas Red Ch3,Cy5 Ch4",
+      "Well,SampleType,Sample,Replicate,Quantity,FAM,Tex 615,Cy5",
       "A1,unknown,,,,GeneA,GeneB,GeneC",
     ].join("\r\n");
-    expect(parsePlateCsv(csv).fluors).toEqual([
+    // What `zpcr.plates()` passes in, from the archive's `.Dcal` primaryChannel fields.
+    const channels = new Map([["fam", 0], ["tex 615", 2], ["cy5", 3]]);
+    const plate = parsePlateCsv(csv, {
+      channelForFluor: (f) => channels.get(f.toLowerCase()),
+    });
+    expect(plate.fluors).toEqual([
       { fluor: "FAM", channel: 0 },
-      { fluor: "Texas Red", channel: 2 },
+      { fluor: "Tex 615", channel: 2 },
+      { fluor: "Cy5", channel: 3 },
+    ]);
+    // An unknown dye still gets a column position rather than being dropped.
+    expect(parsePlateCsv(csv, { channelForFluor: () => undefined }).fluors.map((f) => f.channel))
+      .toEqual([0, 1, 2]);
+  });
+
+  it("honours an explicit Ch<n> suffix over the calibration lookup", () => {
+    const csv = [
+      "# rows: 1",
+      "# columns: 1",
+      "Well,SampleType,Sample,Replicate,Quantity,FAM Ch1,Tex 615 Ch3,Cy5 Ch4",
+      "A1,unknown,,,,GeneA,GeneB,GeneC",
+    ].join("\r\n");
+    expect(parsePlateCsv(csv, { channelForFluor: () => 5 }).fluors).toEqual([
+      { fluor: "FAM", channel: 0 },
+      { fluor: "Tex 615", channel: 2 },
       { fluor: "Cy5", channel: 3 },
     ]);
   });
 
-  it("falls back to column order for a fluor column with no Ch<n> suffix", () => {
+  it("falls back to column order with neither a suffix nor a calibration lookup", () => {
     const csv = [
       "Well,SampleType,Sample,Replicate,Quantity,FAM,HEX",
       "A1,unknown,,,,GeneA,GeneB",
@@ -164,8 +186,10 @@ describe("plate CSV round-trip", () => {
   it("takes identityKey from the source name, and writes no identityKey line", () => {
     const csv = plateToCsv({ ...syntheticPlate(), identityKey: "Ignored.plt" });
     expect(csv).not.toMatch(/# identityKey:/);
-    expect(parsePlateCsv(csv, "runs/S183-S185-RVP.plt.csv").identityKey).toBe("S183-S185-RVP");
-    expect(parsePlateCsv(csv, "MyPlate.csv").identityKey).toBe("MyPlate");
+    expect(parsePlateCsv(csv, { sourceName: "runs/S183-S185-RVP.plt.csv" }).identityKey).toBe(
+      "S183-S185-RVP",
+    );
+    expect(parsePlateCsv(csv, { sourceName: "MyPlate.csv" }).identityKey).toBe("MyPlate");
     expect(parsePlateCsv(csv).identityKey).toBeUndefined();
   });
 
@@ -173,8 +197,15 @@ describe("plate CSV round-trip", () => {
     const zpcr = parseZpcr(readMultistepBytes());
     const { pltd } = zpcr.plates(PW)[0]!;
     const plate = pltd.plate!;
-    // identityKey comes from the file name, not the text — pass the one the plate came from.
-    const back = parsePlateCsv(plateToCsv(plate), `${plate.identityKey}.csv`);
+    // identityKey comes from the file name and the channels from the archive's `.Dcal` set —
+    // neither is in the text. This is what `zpcr.plates()` does for a `.plt.csv` entry.
+    const channels = new Map(
+      zpcr.calibrations().map(({ dcal }) => [dcal.dye.toLowerCase(), dcal.primaryChannel]),
+    );
+    const back = parsePlateCsv(plateToCsv(plate), {
+      sourceName: `${plate.identityKey}.csv`,
+      channelForFluor: (f) => channels.get(f.toLowerCase()),
+    });
     // The CSV format intentionally drops the raw `.pltd` header metadata (`meta`, per-fluor
     // `fluorId`) — it's a plain plate-editing format, not a lossless `.pltd` mirror.
     expect(back).toEqual({

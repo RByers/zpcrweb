@@ -32,7 +32,8 @@ import { meanSquaredSuccessiveDifference, median, stdDev, whiteness } from "./st
  * plate.
  *
  * Measured over the committed samples' loaded curves, `residualStdDev / successiveDifference` runs
- * to **4.2×** on `20260720.zpcr` and **8.7×** on `20230829_135443_CT019138_SINGLE_STEP_.zpcr`
+ * to **4.2×** on `20260720_FirstQualification.zpcr` and **8.7×** on
+ * `20230829_135443_CT019138_SINGLE_STEP_.zpcr`
  * (median 5.5× there, where 67 of 72 curves carry a clearly non-white baseline). On the latter the
  * old estimator put the group threshold at ≈1063 RFU and only 3 of 72 wells reported a Cq at all;
  * the successive-difference estimator puts it at ≈178. On the former it closes the specific defect

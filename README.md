@@ -56,7 +56,7 @@ This is an npm-workspaces monorepo:
 ```ts
 import { zpcrFromFile } from "@zpcrweb/core";
 
-const zpcr = await zpcrFromFile("20260720.zpcr");
+const zpcr = await zpcrFromFile("20260720_FirstQualification.zpcr");
 console.log(zpcr.metadata.baseSerialNumber);   // "CT019138"
 console.log(zpcr.reads.length);                // 45
 

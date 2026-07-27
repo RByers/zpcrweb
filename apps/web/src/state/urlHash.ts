@@ -2,7 +2,7 @@
  * URL hash ↔ app state (active file + selected view).
  *
  * The app is a hash-routed SPA with no router library. The hash carries a **query string**,
- * not a path — `#file=20260720.zpcr&view=curves`:
+ * not a path — `#file=20260720_FirstQualification.zpcr&view=curves`:
  *
  * - File names contain spaces, dots and `/`-unsafe characters, so a path-style `#/<file>/<view>`
  *   would need escaping anyway and would be ambiguous to split.
