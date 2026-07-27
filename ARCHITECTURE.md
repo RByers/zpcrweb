@@ -171,11 +171,18 @@ parses a plate CSV must supply that lookup** — without it the fallback quietly
 dye past the first onto a neighbouring channel, which looks plausible rather than missing. Go
 through `zpcr.plates()` where an archive is in hand, and build a lookup from `calibrations()`
 where one isn't. Wells with nothing on them aren't written at
-all, and a well missing from the table parses back as empty, so only `plateName` and the
+all, and a well missing from the table parses back as empty, so only `vessel` and the
 `rows`/`columns` extent really matter in the header — everything else is an optional
 display-only passenger. The plate's `identityKey` (its user-facing name) isn't in the file
 either: the file/archive-entry name *is* that identity, so `parsePlateCsv`'s `sourceName`
-derives it from the name its caller read the text under. Header values are read up to the
+derives it from the name its caller read the text under.
+
+The `vessel` header carries `PlateDefinition.plateName`, and is deliberately *not* spelled
+`plateName`: that field is the consumable type (`BR Clear`/`BR White` — see pltd.md "Vessel
+type"), which is what picks the tube type the dye response curve is built for, and the similar
+name invited reading it as the plate's own name when the file name is that. It also sits next
+to a real `plateType` header, CFX's unrelated template category. Files written before the
+rename spell it `plateName` and are still read; `vessel` wins if both appear. Header values are read up to the
 first comma, since a spreadsheet round-trip pads comment lines with trailing commas. It's
 deliberately not a CFX format (no `meta`/`fluorId` fidelity), so it isn't a decoder doc in the
 table above.

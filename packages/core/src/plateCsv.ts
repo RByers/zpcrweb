@@ -18,9 +18,13 @@
  * `SampleType` holds a normalized {@link SampleType} name; a raw CFX `wellSampleType` code is
  * accepted there too and normalized on read (see {@link SAMPLE_TYPE_TO_RAW}).
  *
- * Only `plateName` is always written: `rows`/`columns` fall back to the extent implied by the
+ * Only `vessel` is always written: `rows`/`columns` fall back to the extent implied by the
  * well labels, and `plateType`/`scanMode`/`standardUnits` are display-only passengers from a
- * `.pltd`, omitted when empty. The plate's `identityKey` isn't written at all — the file or
+ * `.pltd`, omitted when empty. `vessel` holds `PlateDefinition.plateName` — the consumable type
+ * (`BR Clear`, `BR White`), which is all that field ever means despite CFX's attribute name —
+ * and is spelled `vessel` here so it can't be mistaken for the plate's own name, which is the
+ * file name (see `identityKey` below). Files written before that rename spell it `plateName`,
+ * and are still read. The plate's `identityKey` isn't written at all — the file or
  * archive-entry name *is* the plate's identity, and {@link parsePlateCsv}'s `sourceName` puts
  * it back. Header values are read up to the first comma, so a file round-tripped through a
  * spreadsheet — which pads every comment line out to the table's column count with trailing
@@ -162,9 +166,13 @@ export function plateToCsv(plate: PlateDefinition): string {
   out += `# zpcrweb plate definition\r\n`;
   // No `identityKey` line: the file/archive-entry name is the plate's identity, and
   // `parsePlateCsv`'s `sourceName` puts it back.
-  out += `# plateName: ${plate.plateName}\r\n`;
+  // `vessel`, not `plateName`: the value is a plastic/consumable type (`BR Clear`, `BR White`),
+  // which is what the field means in a `.pltd` too — CFX just gave it a misleading attribute
+  // name. See `parsePlateCsv`, which still reads the old `plateName` spelling.
+  out += `# vessel: ${plate.plateName}\r\n`;
   // Optional, and omitted when empty: nothing computes with these three, they're just carried
-  // through from a `.pltd` for display.
+  // through from a `.pltd` for display. `plateType` is CFX's template category
+  // (`OtherStdTemplate` in every file inspected) and is unrelated to the vessel above.
   if (plate.plateType) out += `# plateType: ${plate.plateType}\r\n`;
   if (plate.scanMode) out += `# scanMode: ${plate.scanMode}\r\n`;
   if (plate.standardUnits) out += `# standardUnits: ${plate.standardUnits}\r\n`;
@@ -352,7 +360,10 @@ export function parsePlateCsv(text: string, options: ParsePlateCsvOptions = {}):
   });
 
   return {
-    plateName: meta.plateName ?? "",
+    // `plateName` is the pre-rename spelling of `vessel`, still read so plate CSVs already
+    // written into a `.zpcr` keep their vessel (and so the dye response curve keeps resolving
+    // to the right tube type) instead of silently reading as an empty string.
+    plateName: meta.vessel ?? meta.plateName ?? "",
     identityKey: sourceName ? identityFromName(sourceName) : undefined,
     rows: rowsCount,
     columns,

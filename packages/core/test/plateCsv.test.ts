@@ -188,6 +188,27 @@ describe("plate CSV round-trip", () => {
     }
   });
 
+  it("writes the vessel as `# vessel:`, not `# plateName:`", () => {
+    const csv = plateToCsv(syntheticPlate());
+    expect(csv).toContain("# vessel: BR White\r\n");
+    expect(csv).not.toMatch(/# plateName:/);
+  });
+
+  it("still reads the pre-rename `# plateName:` spelling", () => {
+    // Plate CSVs already written into a `.zpcr` use it; losing the vessel would silently change
+    // which half of the calibration data the run's dye response curve is built from.
+    const csv = [
+      "# plateName: BR White",
+      "# rows: 1",
+      "# columns: 1",
+      "Well,SampleType,Sample,Replicate,Quantity,FAM",
+      "A1,unknown,,,,GeneA",
+    ].join("\r\n");
+    expect(parsePlateCsv(csv).plateName).toBe("BR White");
+    // …and `vessel` wins if a file somehow carries both.
+    expect(parsePlateCsv(`# vessel: BR Clear\r\n${csv}`).plateName).toBe("BR Clear");
+  });
+
   it("writes the raw code for an `other` well, and round-trips it without inventing wcOther", () => {
     const plate = syntheticPlate();
     plate.wells[0]!.sampleType = "other";
