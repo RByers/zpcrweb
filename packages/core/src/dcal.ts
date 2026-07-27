@@ -212,3 +212,27 @@ export function findDcalBlock(
 export function isDcalName(name: string): boolean {
   return /\.dcal$/i.test(name);
 }
+
+/**
+ * Build a dye name → 0-based optical channel lookup from a set of calibrations — the only
+ * in-archive statement of which channel a dye is read on ({@link Dcal.primaryChannel}), and
+ * what lets a `.plt.csv` name its fluor columns by dye alone (see `plateCsv.ts`).
+ *
+ * Matching is case- and whitespace-insensitive, since a hand-edited plate won't reproduce
+ * Bio-Rad's casing ("Tex 615") exactly. A run ships one `.Dcal` per dye *per plate type*, so
+ * the same dye appears several times; they agree on `primaryChannel` (it is a property of the
+ * instrument's optics, not of the plate), so the duplicates simply overwrite each other.
+ *
+ * Use this rather than reaching into `primaryChannel` at each call site: a lookup that skips
+ * the normalization silently misses, and a missed dye falls back to column position — which
+ * is wrong, not absent.
+ */
+export function dyeChannelLookup(
+  dcals: Iterable<Pick<Dcal, "dye" | "primaryChannel">>,
+): (dye: string) => number | undefined {
+  const byDye = new Map<string, number>();
+  for (const dcal of dcals) {
+    if (dcal.dye) byDye.set(dcal.dye.trim().toLowerCase(), dcal.primaryChannel);
+  }
+  return (dye: string) => byDye.get(dye.trim().toLowerCase());
+}

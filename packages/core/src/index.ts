@@ -57,7 +57,7 @@ export {
   ZPCRWEB_SETTINGS_VERSION,
 } from "./zpcrwebSettings.js";
 export { parsePrcl, parseProtocol2, isPrclName } from "./prcl.js";
-export { parseDcal, findDcalBlock, isDcalName } from "./dcal.js";
+export { parseDcal, findDcalBlock, isDcalName, dyeChannelLookup } from "./dcal.js";
 export { parsePcrd, isPcrdName, pcrdFromBlob } from "./pcrd.js";
 export {
   buildDyeResponseCurve,

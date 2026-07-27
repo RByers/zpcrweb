@@ -11,7 +11,7 @@ import { createArchiveAccess, unzipArchive } from "./archive.js";
 import { isPltdName, parsePltd, type Pltd, type PltdContainer } from "./pltd.js";
 import { isPlateCsvName, parsePlateCsv } from "./plateCsv.js";
 import { isPrclName, parsePrcl, protocolDocumentFromRunDefinition } from "./prcl.js";
-import { isDcalName, parseDcal } from "./dcal.js";
+import { dyeChannelLookup, isDcalName, parseDcal, type Dcal } from "./dcal.js";
 import {
   decodePlateRead,
   isPlateReadName,
@@ -82,25 +82,23 @@ export function parseZpcr(data: Uint8Array | ArrayBuffer): Zpcr {
   }
   const metadata = parseRunInfo(textDecoder.decode(runInfoBytes));
 
-  // Dye → optical channel, from the archive's own `.Dcal` set: the only in-archive statement of
-  // which channel a dye is read on, and what lets a `.plt.csv` name its fluor columns by dye
-  // alone. Built on first use and cached — a plate CSV is the only thing that asks, and decoding
-  // every `.Dcal` (typically 28 of them) isn't free. Matched case-insensitively, since a
-  // hand-edited plate won't reproduce Bio-Rad's casing ("Tex 615") exactly.
-  let dyeChannels: Map<string, number> | undefined;
+  // Dye → optical channel, from the archive's own `.Dcal` set — see `dyeChannelLookup`. Built on
+  // first use and cached: a plate CSV is the only thing that asks, and decoding every `.Dcal`
+  // (typically 28 of them) isn't free.
+  let lookup: ((dye: string) => number | undefined) | undefined;
   const channelForDye = (dye: string): number | undefined => {
-    if (!dyeChannels) {
-      dyeChannels = new Map();
+    if (!lookup) {
+      const dcals: Dcal[] = [];
       for (const name of archive.entries.filter(isDcalName)) {
         try {
-          const dcal = parseDcal(files[name] as Uint8Array);
-          if (dcal.dye) dyeChannels.set(dcal.dye.trim().toLowerCase(), dcal.primaryChannel);
+          dcals.push(parseDcal(files[name] as Uint8Array));
         } catch {
           // A single unreadable calibration file shouldn't cost the plate its channels.
         }
       }
+      lookup = dyeChannelLookup(dcals);
     }
-    return dyeChannels.get(dye.trim().toLowerCase());
+    return lookup(dye);
   };
 
   const reads: PlateRead[] = Object.keys(files)

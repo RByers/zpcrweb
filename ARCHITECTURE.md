@@ -160,9 +160,13 @@ the dye name, whose cells hold only that well's target for it (empty = fluor abs
 present with no target) — so a plate reads as a target-per-fluor grid in a spreadsheet. Those
 columns are the plate's whole fluor list; the channel isn't written, since a dye is read on
 exactly one channel and the run's own `.Dcal` set says which (`Dcal.primaryChannel`).
-`parseZpcr` builds that dye→channel map lazily and hands it to `parsePlateCsv` as
-`channelForFluor`; an explicit `FAM Ch1`-style suffix still wins if a file carries one, and a
-dye in neither falls back to its column position. Wells with nothing on them aren't written at
+`parseZpcr` builds that dye→channel map lazily (via `dcal.ts`'s `dyeChannelLookup`) and hands
+it to `parsePlateCsv` as `channelForFluor`; an explicit `FAM Ch1`-style suffix still wins if a
+file carries one, and a dye in neither falls back to its column position. **Anything that
+parses a plate CSV must supply that lookup** — without it the fallback quietly shifts every
+dye past the first onto a neighbouring channel, which looks plausible rather than missing. Go
+through `zpcr.plates()` where an archive is in hand, and build a lookup from `calibrations()`
+where one isn't. Wells with nothing on them aren't written at
 all, and a well missing from the table parses back as empty, so only `plateName` and the
 `rows`/`columns` extent really matter in the header — everything else is an optional
 display-only passenger. The plate's `identityKey` (its user-facing name) isn't in the file
@@ -219,7 +223,9 @@ raw bytes ─▶ fflate.unzipSync ─▶ { name: Uint8Array }
   arrays). Scalars are guarded (returned only when they validate).
 - **`dcal.ts`** — decodes `.Dcal` pure-dye calibration entries (`zpcr.calibrations()`): one
   dye's fluorescence response across all 6 channels at 4 block temperatures, plus a matching
-  empty-plate baseline, also on top of the ICFF index. See [`dcal.md`](./dcal.md).
+  empty-plate baseline, also on top of the ICFF index. Also exports `dyeChannelLookup`, the
+  one place dye→channel matching (`PRIMARYCHANNEL`, case- and whitespace-insensitive) is
+  implemented — see the plate CSV format above. See [`dcal.md`](./dcal.md).
 - **`calibration.ts`** — channel→dye color separation built on top of `.Dcal` data: per-dye
   response curves, a channel×dye calibration matrix, and a solve via `linalg.ts`'s
   pseudo-inverse. The matrix's normalization mode is a conditioning choice only — the solve

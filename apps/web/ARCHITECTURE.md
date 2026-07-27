@@ -169,7 +169,11 @@ alongside `"zpcr"`/`"pcrd"`:
   "csv"` and renders a restricted `ViewSelector` (`views={["plates","raw"]}`) routing to
   `StandalonePlateView`/`StandaloneRawView` instead of the normal five-view `Zpcr`-gated branch
   — both are thin, `Zpcr`-free versions of `PlatesView`/`RawFilesView` operating directly on the
-  file's own bytes.
+  file's own bytes. A standalone `.plt.csv` names its fluor columns by dye with no channel, and
+  carries no calibration of its own to resolve them against, so `plateCsvChannels` pools a
+  `dyeChannelLookup` across every loaded run — which channel a dye is read on is a property of
+  the instrument's optics, not of the plate, so any run in the session answers it. With no run
+  loaded, channels fall back to column position.
 - **Attach (replace a run's plate)** — `PlatesView`'s upload control (`.zpcr` runs only; a
   `.pcrd` shows an explanatory note instead, since it has no real archive to add an entry to)
   calls `store.attachPlate(fileId, file)`, which rewrites the run's own bytes via
@@ -317,8 +321,10 @@ so every call site keeps writing one `onChange({ … })` regardless of where the
   WELLDATA fluorescence table as a per-channel plate grid with a stat selector
   (mean/std/min/max). Reads straight from the decoded `PlateRead` (found by `fileName`).
 - **`.pltd`/`.plt.csv`** → `DecodedPlate` (`components/raw/DecodedPlate.tsx`) — decrypts a
-  `.pltd` entry (password-gated) or parses a `.plt.csv` entry (`parsePlateCsv`, no password
-  needed), either way rendering the same `PlateTable` (`components/raw/PlateTable.tsx`) from
+  `.pltd` entry (password-gated) or picks the `.plt.csv` entry out of `zpcr.plates()` (no
+  password needed; taken from `plates()` rather than re-parsed, because only that path wires up
+  the archive's `.Dcal` dye→channel lookup — see root `ARCHITECTURE.md`), either way rendering
+  the same `PlateTable` (`components/raw/PlateTable.tsx`) from
   the same `PlateDefinition` object model: one row per well, in plate order, with sample
   type/name/replicate/quantity and fluor→target columns. Wells carrying nothing at all are
   skipped (core's `isBlankWell`, the same test that leaves them out of a `.plt.csv`), with a

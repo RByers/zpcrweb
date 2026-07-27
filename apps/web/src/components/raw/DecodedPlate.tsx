@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { isPlateCsvName, parsePlateCsv, parsePltd, type Pltd, type Zpcr } from "@zpcrweb/core";
+import { isPlateCsvName, parsePltd, type Pltd, type Zpcr } from "@zpcrweb/core";
 import { PlateTable } from "./PlateTable";
 import { XmlTreeFromString } from "../../lib/xmlTree";
 import { usePltdPassword } from "../../state/pltdPassword";
@@ -67,17 +67,24 @@ export function DecodedPlate({ zpcr, name }: { zpcr: Zpcr; name: string }) {
   );
 }
 
-/** A `.plt.csv` entry decoded via {@link parsePlateCsv} — plain UTF-8 text, no password/
- * decryption step needed, unlike `.pltd`. */
+/**
+ * A `.plt.csv` entry — plain UTF-8 text, no password/decryption step needed, unlike `.pltd`.
+ *
+ * Taken from `zpcr.plates()` rather than parsed here: a plate CSV names its fluor columns by
+ * dye alone, and only the archive's own `.Dcal` set says which channel each dye is read on
+ * (see `plateCsv.ts`). `plates()` wires that lookup up; re-parsing the text on its own silently
+ * falls back to column position, which mislabels every dye past the first.
+ */
 function DecodedPlateCsv({ zpcr, name }: { zpcr: Zpcr; name: string }) {
-  const plate = useMemo(() => {
-    try {
-      return parsePlateCsv(zpcr.archive.text(name), { sourceName: name });
-    } catch {
-      return null;
-    }
-  }, [zpcr, name]);
-  if (!plate) return <div className="decoded__na mono">Could not parse {name} as a plate CSV.</div>;
+  const entry = useMemo(() => zpcr.plates().find((e) => e.name === name), [zpcr, name]);
+  const plate = entry?.pltd.plate;
+  if (!plate) {
+    return (
+      <div className="decoded__na mono">
+        {entry?.pltd.error ?? `Could not parse ${name} as a plate CSV.`}
+      </div>
+    );
+  }
   return <PlateTable plate={plate} sourceHint={`${name} · zpcrweb plate CSV`} />;
 }
 

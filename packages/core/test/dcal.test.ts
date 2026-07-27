@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { findDcalBlock, isDcalName, parseDcal, parseZpcr } from "../src/index.js";
+import { dyeChannelLookup, findDcalBlock, isDcalName, parseDcal, parseZpcr } from "../src/index.js";
 import { readSampleBytes } from "./sample.js";
 
 function famClear() {
@@ -120,5 +120,31 @@ describe("parseDcal — raw field access", () => {
     const dcal = famClear();
     expect(dcal.fields.length).toBeGreaterThanOrEqual(33);
     expect(dcal.fields.some((f) => f.name === "WELLS")).toBe(true);
+  });
+});
+
+describe("dyeChannelLookup", () => {
+  it("maps every dye in a real archive to its primary channel", () => {
+    const zpcr = parseZpcr(readSampleBytes());
+    const lookup = dyeChannelLookup(zpcr.calibrations().map((c) => c.dcal));
+    expect(lookup("FAM")).toBe(0);
+    expect(lookup("HEX")).toBe(1);
+    expect(lookup("Tex 615")).toBe(2);
+    expect(lookup("Cy5")).toBe(3);
+    expect(lookup("Cy5-5")).toBe(4);
+  });
+
+  it("matches case- and whitespace-insensitively, and misses unknown dyes", () => {
+    // A hand-edited plate CSV won't reproduce Bio-Rad's casing exactly, and a lookup that
+    // missed would silently fall back to column position rather than reporting nothing.
+    const lookup = dyeChannelLookup([{ dye: "Tex 615", primaryChannel: 2 }]);
+    expect(lookup("TEX 615")).toBe(2);
+    expect(lookup("  tex 615 ")).toBe(2);
+    expect(lookup("Texas Red")).toBeUndefined();
+  });
+
+  it("ignores a dye-less calibration rather than mapping the empty name", () => {
+    const lookup = dyeChannelLookup([{ dye: "", primaryChannel: 5 }]);
+    expect(lookup("")).toBeUndefined();
   });
 });

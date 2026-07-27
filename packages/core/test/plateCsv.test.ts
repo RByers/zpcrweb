@@ -1,6 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { parseZpcr, parsePlateCsv, plateToCsv, type PlateDefinition } from "../src/index.js";
-import { readMultistepBytes } from "./sample.js";
+import {
+  isPlateCsvName,
+  parseZpcr,
+  parsePlateCsv,
+  plateToCsv,
+  type PlateDefinition,
+} from "../src/index.js";
+import { readMultistepBytes, readSampleBytes } from "./sample.js";
 import { readCfxPassword } from "./secrets.js";
 
 const PW = readCfxPassword();
@@ -124,6 +130,20 @@ describe("plate CSV round-trip", () => {
     // An unknown dye still gets a column position rather than being dropped.
     expect(parsePlateCsv(csv, { channelForFluor: () => undefined }).fluors.map((f) => f.channel))
       .toEqual([0, 1, 2]);
+  });
+
+  it("wires the calibration lookup up for a real archive's .plt.csv entry", () => {
+    // The end-to-end version of the test above: the sample's plate CSV labels its columns
+    // FAM,Tex 615,Cy5 in that order, but Cy5 is read on channel 3, not the 2 its position
+    // implies — so a `plates()` that forgot to pass `channelForFluor` would still look
+    // plausible while shifting every dye past the first onto the wrong channel.
+    const zpcr = parseZpcr(readSampleBytes());
+    const plate = zpcr.plates().find((e) => isPlateCsvName(e.name))!.pltd.plate!;
+    expect(plate.fluors).toEqual([
+      { fluor: "FAM", channel: 0 },
+      { fluor: "Tex 615", channel: 2 },
+      { fluor: "Cy5", channel: 3 },
+    ]);
   });
 
   it("honours an explicit Ch<n> suffix over the calibration lookup", () => {
