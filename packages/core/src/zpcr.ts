@@ -107,6 +107,13 @@ export function parseZpcr(data: Uint8Array | ArrayBuffer): Zpcr {
     .sort((a, b) => (plateReadNumber(a) ?? 0) - (plateReadNumber(b) ?? 0))
     .map((name, i) => decodePlateRead(files[name] as Uint8Array, i + 1, name));
 
+  const factoryRefCal = () =>
+    parseFactoryRefRowCal(
+      metadata.raw["FactoryRefRowCal"] ?? "",
+      metadata.channelCount,
+      metadata.numberPlateColumns,
+    );
+
   return {
     metadata,
     reads,
@@ -148,21 +155,8 @@ export function parseZpcr(data: Uint8Array | ArrayBuffer): Zpcr {
       archive.entries
         .filter(isDcalName)
         .map((name) => ({ name, dcal: parseDcal(files[name] as Uint8Array) })),
-    factoryRefCal: () =>
-      parseFactoryRefRowCal(
-        metadata.raw["FactoryRefRowCal"] ?? "",
-        metadata.channelCount,
-        metadata.numberPlateColumns,
-      ),
-    refCalComparison: () =>
-      compareRefToCal(
-        reads,
-        parseFactoryRefRowCal(
-          metadata.raw["FactoryRefRowCal"] ?? "",
-          metadata.channelCount,
-          metadata.numberPlateColumns,
-        ),
-      ),
+    factoryRefCal,
+    refCalComparison: () => compareRefToCal(reads, factoryRefCal()),
   };
 }
 

@@ -55,7 +55,7 @@ class Keys {
 }
 
 /** Length of the ZipCrypto encryption header prepended to every encrypted entry. */
-export const ZIPCRYPTO_HEADER_LEN = 12;
+const ZIPCRYPTO_HEADER_LEN = 12;
 
 /**
  * Decrypt a ZipCrypto entry: seed the keys from `password`, consume the 12-byte encryption

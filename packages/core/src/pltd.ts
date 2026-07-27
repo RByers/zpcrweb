@@ -208,20 +208,21 @@ export function toSampleType(raw: string): SampleType {
 }
 
 /**
- * Parse a `<platesetup2>`/`<plateSetup2>` XML fragment into a typed {@link PlateDefinition}.
- * Exported so `pcrd.ts` can reuse it for the `plateSetup2` subtree embedded in a `.pcrd`
- * document (same schema, different root-tag case — tag matching here is case-insensitive).
- */
-/**
  * Order fluors by optical channel, with unknown-channel ones last (in their existing relative
- * order). Exported because every surface that lists a plate's fluors wants the same ordering.
+ * order). Every surface that lists a plate's fluors wants the same ordering, so it lives here
+ * once instead of being duplicated.
  */
-export function byChannel(a: { channel?: number }, b: { channel?: number }): number {
+function byChannel(a: { channel?: number }, b: { channel?: number }): number {
   if (a.channel === undefined) return b.channel === undefined ? 0 : 1;
   if (b.channel === undefined) return -1;
   return a.channel - b.channel;
 }
 
+/**
+ * Parse a `<platesetup2>`/`<plateSetup2>` XML fragment into a typed {@link PlateDefinition}.
+ * Exported so `pcrd.ts` can reuse it for the `plateSetup2` subtree embedded in a `.pcrd`
+ * document (same schema, different root-tag case — tag matching here is case-insensitive).
+ */
 export function parsePlatesetup2(xml: string): PlateDefinition {
   const root = firstTagAttrs(xml, "platesetup2");
   const rows = Number(root.rows ?? 8) || 8;

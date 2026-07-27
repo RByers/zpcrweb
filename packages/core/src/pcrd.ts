@@ -605,6 +605,13 @@ function buildZpcr(root: XmlElement[]): Zpcr {
   const wellFactorsEl = byLower.get("wellfactorscollection");
   const wellFactors = wellFactorsEl ? decodeWellFactors(wellFactorsEl, plate?.scanMode) : undefined;
 
+  const factoryRefCal = () =>
+    parseFactoryRefRowCal(
+      metadata.raw["FactoryRefRowCal"] ?? "",
+      metadata.channelCount,
+      metadata.numberPlateColumns,
+    );
+
   return {
     metadata,
     reads,
@@ -632,21 +639,8 @@ function buildZpcr(root: XmlElement[]): Zpcr {
     calibrations: (): DcalEntry[] =>
       runData ? decodeCalibrationCollection(runData.inner) : [],
     wellFactors,
-    factoryRefCal: () =>
-      parseFactoryRefRowCal(
-        metadata.raw["FactoryRefRowCal"] ?? "",
-        metadata.channelCount,
-        metadata.numberPlateColumns,
-      ),
-    refCalComparison: () =>
-      compareRefToCal(
-        reads,
-        parseFactoryRefRowCal(
-          metadata.raw["FactoryRefRowCal"] ?? "",
-          metadata.channelCount,
-          metadata.numberPlateColumns,
-        ),
-      ),
+    factoryRefCal,
+    refCalComparison: () => compareRefToCal(reads, factoryRefCal()),
   };
 }
 

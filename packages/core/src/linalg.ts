@@ -59,7 +59,7 @@ function identity(n: number): Matrix {
  * by `s²`. A small-magnitude matrix would then satisfy an absolute test before a single rotation
  * ran and come back with its untouched diagonal as the "eigenvalues" instead of the real ones.
  */
-export function symmetricEigenDecomposition(
+function symmetricEigenDecomposition(
   input: Matrix,
   maxSweeps = 100,
   tolerance = 1e-14,

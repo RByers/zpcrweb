@@ -16,7 +16,7 @@ export function unescapeXml(s: string): string {
 }
 
 /** Parse `key="value"` attributes from a tag's interior, XML-unescaping values. */
-export function parseAttrs(tag: string): Record<string, string> {
+function parseAttrs(tag: string): Record<string, string> {
   const attrs: Record<string, string> = {};
   const re = /([\w:.-]+)\s*=\s*"([^"]*)"/g;
   let m: RegExpExecArray | null;
