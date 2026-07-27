@@ -35,6 +35,22 @@ export function parseXmlFragment(xml: string): Element | null {
   return doc.documentElement;
 }
 
+/**
+ * True when `text` is an XML document — i.e. once a BOM and any XML declaration are out of the
+ * way, the first non-space character opens a tag.
+ *
+ * This is what every raw text view uses to decide between `<XmlTreeFromString>` and a plain
+ * `<pre>`, deliberately sniffing the content rather than trusting the file name. Extensions
+ * lie in both directions here: a `.zpcr`'s `.alf` and `ProtocolRunDefinition.txt` are
+ * line-oriented plain text, while the payload decrypted out of a `.pltd`/`.prcl` is XML that
+ * never had a `.xml` name to begin with.
+ */
+export function looksLikeXml(text: string): boolean {
+  return /^\s*</.test(
+    text.replace(/^﻿/, "").replace(/^\s*<\?xml[^>]*\?>/i, ""),
+  );
+}
+
 function pad(depth: number): string {
   return "  ".repeat(depth);
 }

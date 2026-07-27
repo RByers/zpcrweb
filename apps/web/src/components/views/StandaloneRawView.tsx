@@ -4,6 +4,7 @@ import { PasswordPrompt } from "../PasswordPrompt";
 import { DownloadIcon } from "../DownloadIcon";
 import { usePltdPassword } from "../../state/pltdPassword";
 import { downloadBytes } from "../../lib/download";
+import { looksLikeXml, XmlTreeFromString } from "../../lib/xmlTree";
 import type { LoadedFile } from "../../state/useZpcrStore";
 
 type Mode = "text" | "hex";
@@ -60,6 +61,12 @@ export function StandaloneRawView({ file }: { file: LoadedFile }) {
         {mode === "text" && isPltd && (pltd?.needsPassword || pltd?.error) ? (
           <div className="raw__decoded">
             <PasswordPrompt wrong={!!pltd.error} onSubmit={setPassword} />
+          </div>
+        ) : mode === "text" && text && looksLikeXml(text) ? (
+          // A `.pltd`'s decrypted payload: the same collapsible tree the in-archive `.pltd`
+          // viewer uses. A `.plt.csv` isn't XML and falls through to the plain dump below.
+          <div className="raw__decoded">
+            <XmlTreeFromString xml={text} />
           </div>
         ) : mode === "text" ? (
           <pre className="raw__dump mono">{text}</pre>

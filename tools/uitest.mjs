@@ -28,6 +28,7 @@ import {
 
 const ZPCR = join(REPO, "samples/20260720_FirstQualification.zpcr");
 const PCRD = join(REPO, "samples/20260720_Luna_noRT.pcrd");
+const PLTD = join(REPO, "samples/QuickPlate_96 wells_All Channels.pltd");
 const EXAMPLE = "20260726_S183-S185_RVP.zpcr";
 /** Written by {@link makeDupe}: the example under its own name but a different size. */
 const DUPE = join(REPO, "tools/.uishot/dupe", EXAMPLE);
@@ -221,6 +222,121 @@ async function passwordChecks(chrome, origin, pw) {
   b.close();
 }
 
+/**
+ * Every XML the app shows goes through the one collapsible `<XmlTree>` widget — never the flat
+ * `<pre class="raw__dump">` used for hex and plain text. The distinction is invisible to the
+ * core suite (no DOM) and easy to regress silently, since a flat dump of XML still "works":
+ * it's readable, just unformatted. So assert the widget by its markup (`.decoded__xml`, plus
+ * the `<details>` elements that make subtrees collapsible), and assert the converse too —
+ * non-XML text must *not* be dressed up as a tree.
+ */
+async function xmlViewChecks(chrome, origin, pw) {
+  console.log("\nXML rendering");
+
+  /** What the raw viewer is currently rendering: the tree, the flat dump, or neither (yet). */
+  const shape = (page) =>
+    page
+      .eval(
+        `JSON.stringify({
+           tree: !!document.querySelector('.decoded__xml'),
+           dump: !!document.querySelector('.raw__dump'),
+           collapsed: document.querySelectorAll('.decoded__xml details:not([open])').length,
+         })`,
+      )
+      .then(JSON.parse);
+
+  /** Wait until *something* has rendered, so the assertion never races an empty viewer — the
+   * failure mode this is guarding against ("XML rendered flat") is itself a `.raw__dump`, so
+   * settling on "either one is present" is what makes the check meaningful rather than timing. */
+  const rendered = async (page, what) => {
+    let seen = {};
+    await waitFor(async () => ((seen = await shape(page)), seen.tree || seen.dump), {
+      what: `${what} to render`,
+    });
+    return seen;
+  };
+
+  // Both pages below start from an empty IndexedDB (see the note at the standalone `.pltd`):
+  // whichever file hydration restores would otherwise decide what the raw viewer is showing.
+  const url = `${origin}#cfxPassword=${encodeURIComponent(pw)}`;
+  const cdp = await openPage(chrome.base, url);
+  await emptyReload(cdp, url);
+
+  /** Select a raw-file entry, switch to its text/XML mode, and describe what rendered. */
+  const show = async (entry) => {
+    await waitFor(
+      () =>
+        cdp.eval(
+          `!!([...document.querySelectorAll('.raw__item')]
+             .find(b => b.textContent.trim() === ${JSON.stringify(entry)}))`,
+        ),
+      { what: `${entry} in the file list` },
+    );
+    await cdp.eval(
+      `[...document.querySelectorAll('.raw__item')]
+         .find(b => b.textContent.trim() === ${JSON.stringify(entry)}).click()`,
+    );
+    await waitFor(
+      () =>
+        cdp.eval(
+          `(() => { const b = [...document.querySelectorAll('.segmented__item')]
+              .find(x => /^(Text|XML)$/.test(x.textContent.trim()));
+            if (!b || b.disabled) return false;
+            if (!b.classList.contains("is-active")) b.click();
+            return b.classList.contains("is-active"); })()`,
+        ),
+      { what: `${entry} text mode` },
+    );
+    return rendered(cdp, entry);
+  };
+
+  // A .zpcr's own XML entries — previously a flat dump, since only .pltd/.prcl were routed to
+  // the widget.
+  await loadFile(cdp, ZPCR);
+  await cdp.eval(`window.location.hash = "view=raw", undefined`);
+
+  const runInfo = await show("RunInfo.xml");
+  check("RunInfo.xml renders as the XML tree", runInfo.tree && !runInfo.dump, JSON.stringify(runInfo));
+  check("a node with too many children starts collapsed", runInfo.collapsed > 0, `${runInfo.collapsed} collapsed`);
+
+  const runLog = await show("runlog.xml");
+  check("runlog.xml renders as the XML tree", runLog.tree && !runLog.dump, JSON.stringify(runLog));
+
+  // The converse: plain text must stay a plain dump, so the sniffing isn't just "always tree".
+  const txt = await show("ProtocolRunDefinition.txt");
+  check("non-XML text stays a plain dump", txt.dump && !txt.tree, JSON.stringify(txt));
+  cdp.close();
+
+  // A standalone .pltd opened on its own: its decrypted payload is XML with no .xml in sight,
+  // which is why the sniffing is by content rather than by file name.
+  // Start from an empty IndexedDB: this profile already holds the runs loaded above, and a
+  // hydrated run winning the race would leave a *different* file active — whose raw view is
+  // neither tree nor dump (it opens on a Decoded table), so the check would time out rather
+  // than fail honestly.
+  const solo = await openPage(chrome.base, url);
+  await emptyReload(solo, url);
+  await loadFile(solo, PLTD);
+  await solo.eval(`window.location.hash = "view=raw", undefined`);
+  await tabBecomes(solo, "Raw files");
+  // Anchor on the viewer actually showing this file before reading its shape.
+  await waitFor(
+    () =>
+      solo.eval(
+        `document.querySelector('.raw__fname')?.textContent.trim() === ${JSON.stringify(
+          PLTD.split("/").pop(),
+        )}`,
+      ),
+    { what: "the standalone .pltd in the raw viewer" },
+  );
+  const soloShape = await rendered(solo, "the standalone .pltd");
+  check(
+    "a standalone .pltd's XML tab renders as the XML tree",
+    soloShape.tree && !soloShape.dump,
+    JSON.stringify(soloShape),
+  );
+  solo.close();
+}
+
 async function main() {
   const pw = cfxPassword();
   if (!pw) {
@@ -240,6 +356,7 @@ async function main() {
     await loadChecks(chrome, origin);
     await routingChecks(chrome, origin, pw);
     await passwordChecks(chrome, origin, pw);
+    await xmlViewChecks(chrome, origin, pw);
   } finally {
     chrome.stop();
     dev.stop();

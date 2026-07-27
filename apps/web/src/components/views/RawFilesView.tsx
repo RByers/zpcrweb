@@ -10,6 +10,7 @@ import {
 import { DecodedView, decodedKind } from "../raw/DecodedView";
 import { PlateXml } from "../raw/DecodedPlate";
 import { ProtocolXml } from "../raw/DecodedProtocol";
+import { looksLikeXml, XmlTreeFromString } from "../../lib/xmlTree";
 import { usePltdPassword } from "../../state/pltdPassword";
 import { zpcrwebFromAnalysis } from "../../state/analysisSettings";
 import type { FileSettings } from "../../state/useZpcrStore";
@@ -250,6 +251,13 @@ export function RawFilesView({ zpcr, settings }: { zpcr: Zpcr; settings: FileSet
         ) : mode === "text" && isPrcl ? (
           <div className="raw__decoded">
             <ProtocolXml zpcr={zpcr} name={selected} />
+          </div>
+        ) : mode === "text" && looksLikeXml(rawBody) ? (
+          // Any other XML entry — `RunInfo.xml`, `runlog.xml`, `GlobData.xml` — gets the same
+          // collapsible tree as the decrypted `.pltd`/`.prcl` payloads above, rather than the
+          // flat dump `<pre>` that the remaining (genuinely plain-text) entries use.
+          <div className="raw__decoded">
+            <XmlTreeFromString xml={rawBody} />
           </div>
         ) : (
           <>

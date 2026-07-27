@@ -230,6 +230,14 @@ export async function openPage(chromeBase, url, { domains = ["Page", "Runtime", 
  * and so could "pass" on a file the app cannot actually open.
  */
 export async function loadFile(cdp, absPath, { timeout = 60000 } = {}) {
+  // The input only exists once the app has rendered — during the boot splash (and briefly
+  // after a reload, e.g. `uitest`'s `emptyReload`) there is nothing to set files on. Wait for
+  // it rather than racing the first paint, and only then take a document snapshot, so the
+  // nodeIds below refer to the DOM that actually has the input in it.
+  await waitFor(() => cdp.eval(`!!document.querySelector('input[type="file"]')`), {
+    timeout,
+    what: "the app's file input",
+  });
   const { root } = await cdp.send("DOM.getDocument");
   const { nodeId } = await cdp.send("DOM.querySelector", {
     nodeId: root.nodeId,

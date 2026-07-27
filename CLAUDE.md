@@ -120,11 +120,12 @@ Cost control, when you do run it:
 npm run test:ui
 ```
 
-15 browser assertions covering the two URL contracts nothing else can catch: hash routing
-(deep links, back/forward, unknown-file and invalid-view fallbacks) and password handling
-(stripped from both URL forms, never leaked into the routing hash, an encrypted `.pcrd` still
-decrypting). A screenshot can't show that the back button works or that a secret reached the
-address bar, and the core Vitest suite has no DOM.
+26 browser assertions covering what nothing else can catch: the two URL contracts — hash
+routing (deep links, back/forward, unknown-file and invalid-view fallbacks) and password
+handling (stripped from both URL forms, never leaked into the routing hash, an encrypted
+`.pcrd` still decrypting) — plus `#load=` and the rule that every XML view uses the shared
+collapsible tree rather than a flat dump. A screenshot can't show that the back button works or
+that a secret reached the address bar, and the core Vitest suite has no DOM.
 
 Takes ~20s and needs Chrome, so it is **not** part of `npm test` — that stays fast and
 dependency-free. Run it when you touch `state/urlHash.ts`, `state/pltdPassword.ts`, or view

@@ -407,15 +407,26 @@ formats get separate raw-browsing components that share one XML rendering primit
 ### The shared XML tree (`lib/xmlTree.tsx`)
 
 Every place the app shows XML — the generic `.zpcr` archive-entry fallback, a decrypted
-`.pltd`'s payload (`PlateXml`), `runlog.xml`'s per-entry hover tooltip, and `.pcrd`'s whole
-document — goes through one component, `XmlTree` (plus `XmlTreeFromString` for callers that
-start from a raw string rather than parsed `Element`s). Built on the native `DOMParser` (same
-BOM/declaration-stripping trick as before), each element is its own React component with its
-own open/closed `<details>` state; children are only turned into React elements when their
-parent is open, so a closed subtree costs ~O(1) regardless of size — a `.pcrd`'s
-`calibrationCollection` (~1.4 MB of deeply nested elements in the real sample) collapses by
-default and costs nothing until opened. The default-open heuristic (child count, then a
-text-length fallback) is generic, not tuned to any one format's tag names.
+`.pltd`'s payload (`PlateXml`), `runlog.xml`'s per-entry hover tooltip, `.pcrd`'s whole
+document, and the **Text/XML mode of any raw entry whose content is XML** — goes through one
+component, `XmlTree` (plus `XmlTreeFromString` for callers that start from a raw string rather
+than parsed `Element`s). Built on the native `DOMParser` (same BOM/declaration-stripping trick
+as before), each element is its own React component with its own open/closed `<details>` state;
+children are only turned into React elements when their parent is open, so a closed subtree
+costs ~O(1) regardless of size — a `.pcrd`'s `calibrationCollection` (~1.4 MB of deeply nested
+elements in the real sample) collapses by default and costs nothing until opened. A node starts
+open only when it has at most `DEFAULT_OPEN_MAX_CHILDREN` (4) element children, so anything
+wide lands collapsed behind an "N children" count; the rule is generic, not tuned to any one
+format's tag names.
+
+**The flat `<pre class="raw__dump">` is for hex dumps and genuinely plain text only** — never
+for XML. Which one a raw text view uses is decided by `looksLikeXml(text)` sniffing the
+*content*, not the file name, because extensions lie in both directions here: a `.zpcr`'s
+`.alf` and `ProtocolRunDefinition.txt` are line-oriented plain text, while the payload
+decrypted out of a `.pltd`/`.prcl` is XML that never had a `.xml` name. `uitest.mjs`'s "XML
+rendering" group pins this down from both sides (XML entries render `.decoded__xml` with
+collapsed nodes; `.txt` stays a dump) — a flat dump of XML is readable enough to regress
+unnoticed otherwise.
 
 ### `RawFilesView` (`.zpcr`)
 
@@ -423,7 +434,10 @@ Unchanged in spirit from before `.pcrd` support: groups `zpcr.archive.entries` (
 Analysis / Plate setup / Plate reads / Calibration / Other). Each file opens in its **best
 default mode** (`RawFilesView.defaultMode`) with Decoded / Text / Hex always switchable: a typed
 **Decoded** view where one exists (`DecodedView.tsx`, above), else **Text** for textual files
-(`.xml`/`.txt`/`.alf`/`.json`/`.plt.csv`), else **Hex** (`archive.hexDump`, paginated).
+(`.xml`/`.txt`/`.alf`/`.json`/`.plt.csv`), else **Hex** (`archive.hexDump`, paginated). Text
+mode renders the collapsible XML tree whenever the content is XML (`RunInfo.xml`, `runlog.xml`,
+`GlobData.xml`, and the decrypted `.pltd`/`.prcl` payloads, which label the mode "XML") and the
+plain dump otherwise.
 
 **`zpcrweb.json` is the one synthesized entry** (its own "Analysis" group, sorted just above
 Plate setup). It is listed whether or not the loaded archive contains it, and its Text/Hex
