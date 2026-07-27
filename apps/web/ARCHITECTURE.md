@@ -461,7 +461,12 @@ only pieces the two views share.
   Once the plate definition is available (password permitting), each cell is tinted by
   `SAMPLE_TYPE_META` (see **Plates** below) so selection state reads alongside sample type; a
   reset button next to the "Wells" label restores the selection to exactly the plate's
-  non-empty wells. `CurvesView` applies that same non-empty-wells set as the one-time default
+  non-empty wells. The matrix sits directly under the View toggle, above the channel/target bar:
+  besides being the selection reached for first, it doubles as a positives map — a well holding
+  any curve the run's Cq table gave a Cq is marked with a `+` in its own sample-type color
+  (`WellMatrix`'s `positiveWells`), so a positive NTC reads red. The set comes from `cqTable`,
+  not from the plotted subset, so rail filters don't make the marks come and go.
+  `CurvesView` applies that same non-empty-wells set as the one-time default
   the first time a file's plate loads (only while the selection still looks like the untouched
   "all wells" default, so a previously customized selection is left alone). Channel mode mirrors
   this: the default `enabledChannels` (and its reset button, next to "Channels"/"Targets"/

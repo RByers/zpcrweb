@@ -109,6 +109,20 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
   // `computeWellTypes`; shared with AnalysisView's well matrix.
   const wellTypes = useMemo(() => computeWellTypes(plate), [plate]);
 
+  // Wells holding at least one positive curve — one the run's Cq table gave a Cq, i.e. it crossed
+  // its threshold. Read from that same table rather than from the plotted subset, so the mark
+  // doesn't come and go as the rail's filters change: a well is positive or it isn't.
+  const positiveWells = useMemo(() => {
+    const s = new Set<string>();
+    for (const [key, e] of cqTable) {
+      if (e.cq == null) continue;
+      // `curveKey` is `row,col,fluor` — the well key is its first two fields.
+      const [row, col] = key.split(",");
+      s.add(wellKey(Number(row), Number(col)));
+    }
+    return s;
+  }, [cqTable]);
+
   const fullWellSet = useMemo(() => {
     const s = new Set<string>();
     for (let r = 0; r < 8; r++) for (let c = 0; c < 12; c++) s.add(wellKey(r, c));
@@ -839,6 +853,30 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
           </div>
         )}
 
+        {/* Wells sits directly under View: it's the selection the eye reaches for first, and the
+            plate grid doubles as a map of which wells came out positive. */}
+        <div className="rail__section">
+          <div className="rail__title">
+            Wells
+            <button
+              className="rail__link rail__icon-btn"
+              onClick={resetWells}
+              title="Reset to the wells present in the plate definition"
+            >
+              <ResetIcon />
+            </button>
+          </div>
+          <WellMatrix
+            enabled={settings.enabledWells}
+            onChange={(next) => onChange({ enabledWells: next })}
+            wellTypes={wellTypes}
+            positiveWells={positiveWells}
+            onHoverWell={(label) => setHoverHighlight(label ? { kind: "well", label } : null)}
+            onSoloWell={soloWell}
+            cardData={cardForWell}
+          />
+        </div>
+
         <div className="rail__section">
           <div className="rail__title">
             {!calibrationOn
@@ -887,27 +925,6 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
               cardData={cardForChannel}
             />
           )}
-        </div>
-
-        <div className="rail__section">
-          <div className="rail__title">
-            Wells
-            <button
-              className="rail__link rail__icon-btn"
-              onClick={resetWells}
-              title="Reset to the wells present in the plate definition"
-            >
-              <ResetIcon />
-            </button>
-          </div>
-          <WellMatrix
-            enabled={settings.enabledWells}
-            onChange={(next) => onChange({ enabledWells: next })}
-            wellTypes={wellTypes}
-            onHoverWell={(label) => setHoverHighlight(label ? { kind: "well", label } : null)}
-            onSoloWell={soloWell}
-            cardData={cardForWell}
-          />
         </div>
 
         {sampleList.length > 0 && (

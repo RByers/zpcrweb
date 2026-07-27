@@ -840,6 +840,21 @@
   border-radius: 3px;
   background: var(--raised);
   padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* The cell is only ~14px across at rail width, so the glyph has to be sized off the cell
+     rather than off the root font size to stay a mark and not a character. */
+  container-type: inline-size;
+}
+/* "This well has a curve that crossed its threshold." Colored inline, from the cell's own
+   sample-type border color. */
+.wm-cell__plus {
+  font-size: 90cqw;
+  line-height: 1;
+  font-weight: 700;
+  color: var(--ink-muted);
+  pointer-events: none;
 }
 .wm-cell:hover {
   border-color: var(--border-strong);
