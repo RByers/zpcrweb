@@ -1,7 +1,7 @@
 import type { ProtocolStep } from "@zpcrweb/core";
 
 /** Human-readable text for one step, GOTO-target-friendly (`Step N` matches `stepNumber`). */
-export function stepSummary(step: ProtocolStep): string {
+function stepSummary(step: ProtocolStep): string {
   switch (step.kind) {
     case "temperature":
       return `Hold ${step.tempC}°C for ${step.holdSeconds}s`;

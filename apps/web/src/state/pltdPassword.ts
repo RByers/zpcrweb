@@ -79,7 +79,7 @@ function read(): string {
 }
 
 /** Persist the password (empty string clears it) and notify subscribers. */
-export function setStoredPltdPassword(value: string): void {
+function setStoredPltdPassword(value: string): void {
   memoryPassword = value;
   try {
     if (value) localStorage.setItem(KEY, value);

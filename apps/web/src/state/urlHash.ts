@@ -65,7 +65,7 @@ export function readHash(): HashState {
  * describes a fetch to perform, not a state to restore, and the file it produces is already
  * described by `file`.
  */
-export function formatHash(state: HashState): string {
+function formatHash(state: HashState): string {
   const q = new URLSearchParams();
   if (state.file) q.set("file", state.file);
   if (state.view) q.set("view", state.view);

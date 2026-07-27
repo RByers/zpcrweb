@@ -1,11 +1,5 @@
 import type { LinearBaselineFit } from "@zpcrweb/core";
 
-/** Cq/Analysis always baseline-correct with the library's linear mode (`threshold.md` §4's
- * `LinearBaseLineNormalized`, auto-detected region) — baselining is no longer a user choice; see
- * `useZpcrStore.ts`'s `CurveView`, which only controls what the Curves-view chart *displays*.
- * Re-exported from the library, which applies it inside `computeCqTable`. */
-export { ANALYSIS_BASELINE_MODE } from "@zpcrweb/core";
-
 /**
  * An RFU level, as a whole number. Fluorescence readings run to thousands and carry nothing
  * meaningful below the ones place, so decimals here are noise dressed as precision — they make

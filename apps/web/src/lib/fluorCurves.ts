@@ -7,7 +7,6 @@ import {
   type Dcal,
   type DcalEntry,
   type DyeResponseCurve,
-  type NormalizationMode,
   type WellCurve,
 } from "@zpcrweb/core";
 
@@ -185,5 +184,3 @@ export function computeFluorCurves(
   }
   return out;
 }
-
-export type { CalibrationMatrix, NormalizationMode };

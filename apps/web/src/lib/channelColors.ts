@@ -38,7 +38,7 @@ export const CHANNEL_INFO: readonly ChannelInfo[] = [
 /** Neutral blue-grey (`--ink-2`) for anything that isn't one single channel — e.g. a target chip
  * whose wells load several fluorophores, where borrowing one of their channel hues would
  * misrepresent the group. */
-export const NEUTRAL_COLOR = "#8aa0c0";
+const NEUTRAL_COLOR = "#8aa0c0";
 
 /** Color for a channel index, or {@link NEUTRAL_COLOR} for `null`/`undefined`/out-of-range —
  * no single channel, including a plate fluor whose channel isn't known (see `UNKNOWN_CHANNEL_LABEL`).

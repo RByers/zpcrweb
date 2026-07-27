@@ -44,7 +44,7 @@ const OPACITY_FAINT = 0.12;
  * at a glance rather than reading every positive alike. Full strength at Cq ≤ 20, faded to
  * {@link OPACITY_DIM} by 30 and to {@link OPACITY_FAINT} at 35 and beyond, linear in between.
  */
-export function plusOpacity(cq: number): number {
+function plusOpacity(cq: number): number {
   if (!Number.isFinite(cq) || cq <= CQ_BRIGHT) return 1;
   if (cq >= CQ_FAINT) return OPACITY_FAINT;
   if (cq <= CQ_DIM) {

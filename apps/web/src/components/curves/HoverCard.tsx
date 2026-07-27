@@ -30,7 +30,7 @@ export interface HoverCardData {
 /** Fixed-position portal card, positioned from the hovered chip/cell's own bounding rect — see
  * `FileBar.tsx`'s `HoverCard`, which this mirrors: the rail (`.curves__rail`) scrolls, so a plain
  * absolutely-positioned child would get clipped rather than floating over the chart. */
-export function HoverCard({
+function HoverCard({
   anchor,
   data,
 }: {

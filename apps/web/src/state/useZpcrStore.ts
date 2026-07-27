@@ -37,11 +37,10 @@ import { usePltdPassword } from "./pltdPassword";
 import { onHashChange, readHash, writeHash } from "./urlHash";
 
 export { DEFAULT_THRESHOLD_MULTIPLIER } from "./analysisSettings";
-export type { AnalysisSettings } from "./analysisSettings";
 
 export type FileKind = "zpcr" | "pcrd" | "pltd" | "csv";
 /** The two kinds a plate — standalone or attached to a run — can be uploaded as. */
-export type PlateFileKind = "pltd" | "csv";
+type PlateFileKind = "pltd" | "csv";
 
 /** `"about"` is not a tab in {@link ViewSelector} — it's reached by clicking the logo — but it
  * is a view like any other, so it's linkable (`#view=about`) and works with back/forward. */

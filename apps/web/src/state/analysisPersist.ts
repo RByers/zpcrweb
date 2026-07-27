@@ -32,12 +32,12 @@ import { putFile, type StoredFile } from "./db";
 import { zpcrwebFromAnalysis, type AnalysisSettings } from "./analysisSettings";
 
 /** At most one archive rewrite per file per minute. */
-export const MIN_INTERVAL_MS = 60_000;
+const MIN_INTERVAL_MS = 60_000;
 
 /** What the persister needs to know about a file at flush time. Resolved lazily, per flush, so
  * a rewrite always uses the newest bytes (e.g. after a plate was attached) and the newest
  * settings, never a value captured when the edit happened. */
-export interface AnalysisFlushTarget {
+interface AnalysisFlushTarget {
   file: StoredFile;
   settings: AnalysisSettings;
 }
