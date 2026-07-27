@@ -52,6 +52,19 @@ interface Props {
 
 export function CurvesView({ zpcr, settings, onChange }: Props) {
   const [pltdPassword, setPltdPassword] = usePltdPassword();
+
+  // Landscape-phone drawer state (see `.curves__rail`'s media query in app.css). Irrelevant
+  // outside that viewport shape — the toggle button and scrim that drive it are `display: none`
+  // everywhere else, so the rail just renders as the permanent column it always was.
+  const [railOpen, setRailOpen] = useState(false);
+  useEffect(() => {
+    if (!railOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setRailOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [railOpen]);
   const steps = useMemo(() => zpcr.steps(), [zpcr]);
   // Selected step: the stored one if still valid, else the first step.
   const activeStep =
@@ -781,8 +794,20 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
   const logBaselined = settings.scale === "log" && settings.curveView === "relative";
 
   return (
-    <div className="curves">
-      <aside className="curves__rail">
+    <div className={"curves" + (railOpen ? " is-railopen" : "")}>
+      <button
+        type="button"
+        className="curves__railtoggle"
+        aria-expanded={railOpen}
+        aria-controls="curves-rail"
+        onClick={() => setRailOpen((open) => !open)}
+      >
+        ☰ Settings
+      </button>
+      {railOpen && (
+        <div className="curves__scrim" onClick={() => setRailOpen(false)} />
+      )}
+      <aside className="curves__rail" id="curves-rail">
         {steps.length > 1 && (
           <div className="rail__section">
             <div className="rail__title">Plate-read step</div>

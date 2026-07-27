@@ -95,11 +95,13 @@ export function App() {
       <header className="app__header">
         <Logo onClick={showAbout} />
         {(zpcr || isStandalonePlate) && (
-          <ViewSelector
-            value={view}
-            onChange={store.setView}
-            views={isStandalonePlate ? [...STANDALONE_VIEWS] : undefined}
-          />
+          <div className="app__views">
+            <ViewSelector
+              value={view}
+              onChange={store.setView}
+              views={isStandalonePlate ? [...STANDALONE_VIEWS] : undefined}
+            />
+          </div>
         )}
         <div className="app__header-spacer" />
         <DropZone onFiles={store.addFiles} />

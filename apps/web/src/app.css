@@ -27,12 +27,16 @@
   align-items: center;
   gap: 14px;
   padding: 0 14px;
+  padding-inline: max(14px, env(safe-area-inset-left)) max(14px, env(safe-area-inset-right));
   height: var(--header-h);
+  min-width: 0;
   border-bottom: 1px solid var(--border);
   background: linear-gradient(180deg, var(--panel), transparent);
 }
 /* Also a <button> (it opens the About view), so it opts out of the global button chrome. */
 .app__logo {
+  flex: 0 0 auto;
+  white-space: nowrap;
   font-weight: 700;
   letter-spacing: 0.06em;
   color: var(--ink);
@@ -40,6 +44,29 @@
   border: 0;
   background: transparent;
   padding: 0;
+}
+/* Scroller around the view-tab strip: the strip's intrinsic width (~430px of tabs) is wider
+   than a phone viewport, so on narrow screens it scrolls horizontally inside the header rather
+   than stretching `.app__header` (and the whole `.app` grid) past the viewport. `flex: 0 1 auto`
+   + `min-width: 0` let it shrink down to whatever room the logo/drop-button leave; the `.segmented`
+   inside keeps its own intrinsic width so tabs clip-and-scroll instead of squashing. */
+.app__views {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.app__views::-webkit-scrollbar {
+  display: none;
+}
+.app__views .segmented {
+  min-width: max-content;
+  flex: 0 0 auto;
+}
+/* The header's DropZone (compact variant): never let its label shrink to nothing. */
+.app__header > .dropzone {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 .app__logo:hover {
   background: transparent;
@@ -50,6 +77,11 @@
 }
 .app__tag {
   color: var(--ink-muted);
+}
+@media (max-width: 599px) {
+  .app__tag {
+    display: none;
+  }
 }
 .app__header-spacer {
   flex: 1;
@@ -239,7 +271,9 @@
   display: flex;
   gap: 6px;
   padding: 6px 12px;
+  padding-inline: max(12px, env(safe-area-inset-left)) max(12px, env(safe-area-inset-right));
   overflow-x: auto;
+  min-width: 0;
   border-bottom: 1px solid var(--border);
   background: var(--plane);
 }
@@ -264,6 +298,11 @@
   border-radius: 0;
   background: transparent;
   max-width: 40ch;
+}
+@media (max-width: 599px) {
+  .filechip__main {
+    max-width: 22ch;
+  }
 }
 .filechip__dot {
   width: 7px;
@@ -483,6 +522,25 @@
   color: var(--danger);
 }
 
+/* Larger tap targets for touch input. `pointer: coarse` never matches a mouse, so this never
+   applies on desktop regardless of viewport width. */
+@media (pointer: coarse) {
+  .segmented__item {
+    min-height: 34px;
+    padding: 8px 14px;
+  }
+  .filechip__main {
+    padding: 6px 4px;
+  }
+  .filechip__del {
+    min-width: 34px;
+    padding: 0 12px;
+  }
+  .rail__link {
+    padding: 6px 0;
+  }
+}
+
 /* ---- Overview ----------------------------------------------------------- */
 .overview {
   height: 100%;
@@ -547,6 +605,27 @@
   margin: 0;
   color: var(--ink-2);
   word-break: break-all;
+}
+/* Phone: tiles shrink to a narrower minimum, the head wraps instead of squeezing the tiles
+   against the download button, and the definition list drops to one column so long values get
+   their own line instead of being crushed into a sliver next to the label column. */
+@container appmain (inline-size < 560px) {
+  .overview__head {
+    flex-wrap: wrap;
+  }
+  .overview__tiles {
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  }
+  .overview__dl {
+    grid-template-columns: 1fr;
+    gap: 2px 0;
+  }
+  .overview__dl dt {
+    margin-top: 6px;
+  }
+  .overview__dl dt:first-child {
+    margin-top: 0;
+  }
 }
 .overview__enc {
   font-size: 15px;
@@ -666,6 +745,9 @@
   grid-template-columns: minmax(260px, 320px) 1fr;
   height: 100%;
   min-height: 0;
+  /* Anchor for the landscape-phone drawer below: the rail and its toggle/scrim are positioned
+     against this box. Harmless on desktop/portrait — they're `display: none` there. */
+  position: relative;
 }
 .curves__rail {
   overflow-y: auto;
@@ -680,6 +762,17 @@
   min-width: 0;
   min-height: 0;
   padding: 10px;
+}
+/* Landscape-phone drawer controls for `.curves__rail` (see the media query further below).
+   `display: none` here so desktop and portrait never show a toggle button or scrim — the rail
+   stays a permanent column there. Scoped to `.curves` only: `.reference__chart` reuses
+   `.curves__rail` but is a scrolling page, not a viewport-filling grid, and must not pick up
+   the drawer. */
+.curves__railtoggle {
+  display: none;
+}
+.curves__scrim {
+  display: none;
 }
 .rail__title {
   font-size: 11px;
@@ -786,24 +879,153 @@
   line-height: 1.4;
 }
 
-/* Narrow: stack the rail above the plot. */
+/* Narrow: stack the rail above the plot. `.curves` itself becomes the scroll container (one
+   column, page-style vertical scroll) — the rail no longer clips itself to a short internal
+   box, so the well matrix and every other rail section lay out at full height instead of being
+   cut off mid-grid. The Table view mode's `.analysis__table-wrap` keeps its own `overflow: auto`
+   (see below), which still lets it scroll horizontally without widening the page. */
 @container appmain (inline-size < 720px) {
   .curves {
     grid-template-columns: 1fr;
-    grid-template-rows: auto 1fr;
+    grid-template-rows: auto auto;
     overflow-y: auto;
   }
   .curves__rail {
+    overflow: visible;
+    height: auto;
     border-right: 0;
     border-bottom: 1px solid var(--border);
   }
   .curves__plot {
-    min-height: 60cqb;
+    min-height: clamp(300px, 55cqb, 480px);
   }
+  /* `.reference__chart` is itself a flex child of `.reference` on this view (the desktop rule
+     below gives it a fixed 520px height + `overflow: hidden` for the bordered two-pane box).
+     Left at `min-height: 0` here, the flex-shrink algorithm's automatic minimum size collapses
+     it to whatever's left over, so the rail and chart silently overflow underneath
+     `RefCalPanel` instead of showing — `min-height: auto` (content-based) plus `overflow:
+     visible` (no clipping) is what actually lets it take the height its content needs. */
   .reference__chart {
     grid-template-columns: 1fr;
     grid-template-rows: auto 1fr;
     height: auto;
+    min-height: auto;
+    overflow: visible;
+  }
+}
+
+/* Tighter phone step: reduce the rail's own padding/gaps and let its rows wrap instead of
+   overflowing, on top of the narrow stacking above. */
+@container appmain (inline-size < 560px) {
+  .curves__rail {
+    padding: 10px;
+    gap: 12px;
+  }
+  .rail__row {
+    flex-wrap: wrap;
+  }
+  .overview,
+  .reference {
+    padding: 10px;
+  }
+}
+
+/* ---- Landscape phone: compact chrome + rail-as-drawer --------------------
+   Deliberately keyed on `orientation`/`max-height`, not `pointer: coarse` (untestable in
+   headless Chrome) and not a container query (this needs the *viewport's* short-side height,
+   which a container query can't see). A desktop window shorter than 560px gets the same
+   treatment, which is fine — it's rare and benefits too.
+
+   In a landscape phone (e.g. 844×390 or 740×360) the 320px rail column and the 86px of
+   header+filebar chrome leave a cramped chart; below, the header shrinks, the rail becomes an
+   overlay drawer, and the chart takes nearly the whole viewport.
+
+   This block is deliberately the last thing in the file that touches `.curves`/`.app__views`/
+   `.filebar`, so it wins ties against the `@container appmain (inline-size < 720px)` rule above
+   by source order: that container query can also match a landscape phone's `.app__main` width at
+   some sizes (e.g. 740px wide), but the rules here are the more specific intent for this
+   viewport shape and must not have to fight it. */
+@media (orientation: landscape) and (max-height: 560px) {
+  :root {
+    --header-h: 40px;
+  }
+  .app__logo {
+    font-size: 13px;
+  }
+  .app__views .segmented__item {
+    padding: 3px 8px;
+    font-size: 11px;
+  }
+  .filebar {
+    padding: 3px 12px;
+    padding-inline: max(12px, env(safe-area-inset-left)) max(12px, env(safe-area-inset-right));
+    gap: 4px;
+  }
+  .filechip__main {
+    padding: 3px 6px;
+    gap: 5px;
+  }
+  .filechip__del {
+    padding: 0 6px;
+  }
+
+  /* The rail becomes a togglable overlay drawer instead of a permanent column — see
+     `CurvesView.tsx`'s `railOpen` state, which puts `is-railopen` on this root element. Both the
+     chart mode and Table mode use the same rail, so both get the drawer.
+
+     Two rows, not one: the drawer handle is a grid child in normal flow, so it gets its own short
+     row rather than floating over the chart's first y-axis label (or, in Table mode, over the
+     sticky header). The rail and scrim are out of flow, so they claim no row. */
+  .curves {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr;
+  }
+  .curves__plot {
+    height: 100%;
+    min-height: 0;
+    padding: 0 6px 6px;
+  }
+  /* Table mode's own height/padding override lives next to `.analysis__table-wrap`'s base rule
+     further down the file (it must come after that rule to win the padding tie). */
+  .curves__railtoggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    justify-self: start;
+    margin: 5px 0 4px 8px;
+    /* Positioned only so `z-index` applies: the handle stays above the open drawer (which the
+       rail's own `padding-top` keeps clear of it), so it can also close what it opened. */
+    position: relative;
+    z-index: 16;
+    font-size: 12px;
+    padding: 4px 10px;
+  }
+  .curves__scrim {
+    display: block;
+    position: absolute;
+    inset: 0;
+    z-index: 14;
+    background: rgba(0, 0, 0, 0.5);
+  }
+  .curves__rail {
+    position: absolute;
+    inset-block: 0;
+    inset-inline-start: 0;
+    z-index: 15;
+    width: min(340px, 80vw);
+    height: auto;
+    overflow-y: auto;
+    /* Clears the drawer handle, which paints above the rail (see `.curves__railtoggle`). */
+    padding-top: 38px;
+    background: var(--panel);
+    border-right: 1px solid var(--border-strong);
+    border-bottom: 0;
+    box-shadow: 8px 0 24px rgba(0, 0, 0, 0.5);
+    transform: translateX(-100%);
+    transition: transform 200ms ease;
+  }
+  .curves.is-railopen .curves__rail {
+    transform: translateX(0);
   }
 }
 
@@ -1205,15 +1427,21 @@
   cursor: default;
 }
 
-/* Narrow: stack raw list above viewer. */
+/* Narrow: stack raw list above viewer. The list is capped to a fraction of the viewport (not
+   left at 30% of a possibly-tall grid row) so the viewer below always keeps real room, and the
+   toolbar wraps instead of squeezing the filename/mode buttons together. */
 @container appmain (inline-size < 640px) {
   .raw {
     grid-template-columns: 1fr;
-    grid-template-rows: minmax(120px, 30%) 1fr;
+    grid-template-rows: auto 1fr;
   }
   .raw__list {
+    max-height: 30vh;
     border-right: 0;
     border-bottom: 1px solid var(--border);
+  }
+  .raw__toolbar {
+    flex-wrap: wrap;
   }
 }
 
@@ -1264,6 +1492,12 @@
     max-height: 30%;
     border-right: 0;
     border-bottom: 1px solid var(--border);
+  }
+}
+
+@container appmain (inline-size < 560px) {
+  .plateview__main {
+    padding: 10px;
   }
 }
 
@@ -1838,6 +2072,15 @@
      any top padding leaves an uncovered strip that scrolled-away rows show through. The header's
      own cell padding provides the spacing instead. */
   padding: 0 10px 10px;
+}
+/* Landscape-phone drawer (see the `.curves`/`.curves__rail` media query above): Table mode fills
+   the same viewport-height box the chart does once the rail is an overlay rather than a column.
+   Placed after the base rule above so it wins the `padding` tie at equal specificity. */
+@media (orientation: landscape) and (max-height: 560px) {
+  .analysis__table-wrap {
+    height: 100%;
+    padding: 6px;
+  }
 }
 .analysis__tbl {
   width: 100%;

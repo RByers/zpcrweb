@@ -1050,7 +1050,37 @@ response curves, not channel numbers.
 - `theme.css` holds the dark-only design tokens (surfaces, ink, neon accents, channel
   palette, fonts). `app.css` holds layout + component styles.
 - Layout is **container-query driven** (`app__main` is the query container): the Curves rail
-  sits beside the chart on wide screens and stacks above it under ~720px; the Raw list
-  collapses similarly. Fluid type/padding via `clamp()`/`cqi`; chart cells use
+  sits beside the chart on wide screens and stacks above it under ~720px (a tighter step at
+  ~560px trims padding and drops Overview's tiles and definition lists to one column); the Raw
+  list collapses similarly. Fluid type/padding via `clamp()`/`cqi`; chart cells use
   `min-inline-size: 0` and overflow guards so the page never scrolls horizontally.
-- `prefers-reduced-motion` is respected.
+- The **app shell** is the one place that can't rely on container queries, because it *is* what
+  sizes the container: `.app__header` is a non-wrapping flex row, so the view-tab strip's
+  intrinsic width used to stretch the whole `.app` grid past a phone viewport and push every
+  view into horizontal overflow. The tabs therefore live in their own `.app__views` scroller
+  (`min-width: 0; overflow-x: auto`) and the logo/drop button are `flex: 0 0 auto`.
+- **Phone support is two shapes, not one.** *Portrait* is the stacked container-query layout
+  above — settings on top, chart/table below, the page scrolling vertically as one column, which
+  means the stacked `.curves__rail` needs `overflow: visible; height: auto` (its own
+  `overflow-y: auto` applies only when it's a column). *Landscape* is a separate
+  `@media (orientation: landscape) and (max-height: 560px)` block: the chrome shrinks
+  (`--header-h: 40px`, compact file chips) and `.curves__rail` becomes an off-canvas drawer —
+  absolutely positioned, `translateX(-100%)` until `CurvesView`'s `railOpen` state puts
+  `is-railopen` on `.curves` — so the chart nearly fills the viewport. `.curves__railtoggle` and
+  `.curves__scrim` are `display: none` everywhere else. The query is deliberately height/
+  orientation based rather than `pointer: coarse`, which no headless browser reports, so
+  `tools/uishot.mjs --width 844 --height 390` can actually check it.
+- The two systems overlap (a landscape phone's main area is also a narrow *container*), so the
+  landscape rules sit **after** the container queries they must beat — several ties are at equal
+  specificity and are resolved by source order alone. `.analysis__table-wrap`'s landscape
+  override consequently lives next to its own base rule far down the file rather than in the
+  main landscape block.
+- Touch targets are enlarged under `@media (pointer: coarse)` only, and safe-area insets
+  (`env(safe-area-inset-*)`, with `viewport-fit=cover` in `index.html`) pad the header and file
+  bar. Both are no-ops for a desktop mouse on a notchless screen.
+- **Desktop is the regression baseline.** Every mobile rule lives inside a narrow-only
+  container/media query, so `node tools/uishot.mjs --views overview,curves,plates,raw --width
+  1400 --height 900` renders byte-identically before and after — worth diffing the PNG hash when
+  touching anything here.
+- `prefers-reduced-motion` is respected (the drawer animates with a `transition`, which
+  `theme.css`'s global reduced-motion rule already disables).
