@@ -246,7 +246,16 @@ so every call site keeps writing one `onChange({ … })` regardless of where the
   value on each save. `size` is deliberately left at the loaded file's size so `fileId()` still
   dedupes a re-add of the same file.
 - **Downloads** go through `ZpcrStore.exportBytes`, which re-zips on demand, so a copy saved from
-  the Overview view carries the thresholds it was read with.
+  the Overview view carries the thresholds it was read with. A download deliberately changes
+  *nothing* about the session: it does not re-seed, does not swap the in-memory bytes, and does
+  not reset the persister. React state stays the single source of truth from seeding until the
+  file is closed, and the flush cycle above converges IndexedDB onto it on its own schedule.
+  There is nothing to "reconcile" precisely because the pre-edit document is never read a second
+  time — `parseZpcrwebSettings` is called only from the seeding effect, guarded by `seeded`.
+- **Displaying** the entry (the Raw view's `zpcrweb.json` row) therefore renders live state
+  rather than the archive's copy — see "`RawFilesView`" below. The archive's copy is the one
+  thing that is *legitimately* stale, so showing it would be showing settings nothing is being
+  analyzed with.
 - **`.pcrd` and standalone plate files can't hold it.** A `.pcrd` is one encrypted XML document,
   not an archive (`pcrd.md` §1) — it has its own `dataAnalysisParameters` we decode but don't yet
   write back, so analysis edits to a `.pcrd` are live for the session and then gone.
@@ -355,10 +364,21 @@ text-length fallback) is generic, not tuned to any one format's tag names.
 ### `RawFilesView` (`.zpcr`)
 
 Unchanged in spirit from before `.pcrd` support: groups `zpcr.archive.entries` (Metadata /
-Plate setup / Plate reads / Calibration / Other). Each file opens in its **best default mode**
-(`RawFilesView.defaultMode`) with Decoded / Text / Hex always switchable: a typed **Decoded**
-view where one exists (`DecodedView.tsx`, above), else **Text** for textual files, else **Hex**
-(`archive.hexDump`, paginated).
+Analysis / Plate setup / Plate reads / Calibration / Other). Each file opens in its **best
+default mode** (`RawFilesView.defaultMode`) with Decoded / Text / Hex always switchable: a typed
+**Decoded** view where one exists (`DecodedView.tsx`, above), else **Text** for textual files
+(`.xml`/`.txt`/`.alf`/`.json`/`.plt.csv`), else **Hex** (`archive.hexDump`, paginated).
+
+**`zpcrweb.json` is the one synthesized entry** (its own "Analysis" group, sorted just above
+Plate setup). It is listed whether or not the loaded archive contains it, and its Text/Hex
+content is generated from *live* analysis state — `formatZpcrwebSettings(zpcrwebFromAnalysis(
+settings))`, the same serializer `writeZpcrwebSettings` uses — rather than read from
+`zpcr.archive`. That is the only way the row can be honest: analysis settings live in React
+state and are written back into the archive bytes in IndexedDB by `analysisPersist.ts` at most
+once a minute, so the copy embedded in the bytes this view parsed is routinely absent or stale
+(see "File-backed analysis settings" and `zpcrweb-json.md`). What's shown is byte-identical to
+what `exportBytes` writes into a downloaded copy, modulo the write-time `updatedAt` stamp.
+`RawFilesView` therefore takes `settings` alongside `zpcr`.
 
 ### `PcrdRawView` (`.pcrd`)
 

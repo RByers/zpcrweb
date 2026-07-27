@@ -112,3 +112,26 @@ The rewritten bytes go to IndexedDB only — never back into React state, where 
 the run and rebuild every derived value on each save. The Overview view's download button calls
 `ZpcrStore.exportBytes`, which re-zips on demand, so a downloaded copy always carries current
 settings.
+
+## 6. One reader, one writer
+
+The consequence of §5 is that at any moment there are up to three versions of the document: the
+one embedded in the bytes the session parsed, the one in the IndexedDB record (up to a minute
+behind live state), and live React state. **Live state is authoritative for the whole lifetime of
+a loaded file**, and the embedded copy is read exactly once:
+`parseZpcrwebSettings` is called only from `useZpcrStore`'s seeding effect, guarded by a `seeded`
+set, so a re-parse (password change, plate attach) can never resurrect the pre-edit document over
+an edit made since.
+
+That single-read rule is what makes the divergence harmless, and it is why a download does not
+try to reconcile anything: it does not re-seed, swap the in-memory bytes, or reset the persister.
+Making the export "commit" would mean re-parsing the run and rebuilding every derived value at
+exactly the moment the user asked for a file — cost and risk in exchange for converging state
+that the flush cycle converges anyway.
+
+The remaining hazard is a *reader* — anything showing the user the embedded copy would show
+settings nothing is being analyzed with. The Raw view's `zpcrweb.json` row therefore synthesizes
+its content from live state via `formatZpcrwebSettings(zpcrwebFromAnalysis(settings))`, the same
+serializer the writer uses, and lists the entry even for a file whose archive has none. It is
+byte-identical to what a download would contain except for `updatedAt`, which is stamped at write
+time.

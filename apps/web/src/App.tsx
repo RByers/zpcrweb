@@ -128,7 +128,9 @@ export function App() {
                 fileName={active.name}
               />
             )}
-            {view === "raw" && active.kind === "zpcr" && <RawFilesView key={active.id} zpcr={zpcr} />}
+            {view === "raw" && active.kind === "zpcr" && (
+              <RawFilesView key={active.id} zpcr={zpcr} settings={settings} />
+            )}
           </>
         )}
       </main>

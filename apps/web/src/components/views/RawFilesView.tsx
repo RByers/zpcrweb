@@ -1,9 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { parsePltd, parsePrcl, type Zpcr } from "@zpcrweb/core";
+import {
+  ZPCRWEB_SETTINGS_NAME,
+  formatZpcrwebSettings,
+  hexDump,
+  parsePltd,
+  parsePrcl,
+  type Zpcr,
+} from "@zpcrweb/core";
 import { DecodedView, decodedKind } from "../raw/DecodedView";
 import { PlateXml } from "../raw/DecodedPlate";
 import { ProtocolXml } from "../raw/DecodedProtocol";
 import { usePltdPassword } from "../../state/pltdPassword";
+import { zpcrwebFromAnalysis } from "../../state/analysisSettings";
+import type { FileSettings } from "../../state/useZpcrStore";
 import { decodedToCsv, downloadText, plateReadCsvFilename, plateReadToCsv } from "../../lib/download";
 import { DownloadIcon } from "../DownloadIcon";
 
@@ -15,6 +24,7 @@ function baseName(name: string): string {
 type Mode = "decoded" | "text" | "hex";
 
 function group(name: string): string {
+  if (name === ZPCRWEB_SETTINGS_NAME) return "Analysis";
   if (/\.Plateread$/i.test(name)) return "Plate reads";
   if (/\.pltd$/i.test(name) || /\.plt\.csv$/i.test(name)) return "Plate setup";
   if (/\.prcl$/i.test(name)) return "Protocol";
@@ -23,10 +33,19 @@ function group(name: string): string {
   return "Other";
 }
 
-const GROUP_ORDER = ["Metadata", "Plate setup", "Protocol", "Plate reads", "Calibration", "Other"];
+const GROUP_ORDER = [
+  "Metadata",
+  "Analysis",
+  "Plate setup",
+  "Protocol",
+  "Plate reads",
+  "Calibration",
+  "Other",
+];
 // `.plt.csv` is zpcrweb's own plate CSV format (see `plateCsv.ts`) — plain UTF-8 text, no
-// decryption needed, unlike `.pltd`/`.prcl`.
-const TEXTUAL = /\.(xml|txt|alf|plt\.csv)$/i;
+// decryption needed, unlike `.pltd`/`.prcl`. `zpcrweb.json` is likewise our own (see
+// `zpcrweb-json.md`).
+const TEXTUAL = /\.(xml|txt|alf|json|plt\.csv)$/i;
 
 /** Best default mode for a file: decoded if a decoder exists, else text for text, else hex. */
 function defaultMode(name: string): Mode {
@@ -35,10 +54,45 @@ function defaultMode(name: string): Mode {
   return "hex";
 }
 
-export function RawFilesView({ zpcr }: { zpcr: Zpcr }) {
+/**
+ * `zpcrweb.json` as it stands *right now*, which is deliberately not what the loaded archive
+ * holds.
+ *
+ * Analysis settings live in React state for the session and are written back into the archive
+ * bytes in IndexedDB by `analysisPersist.ts` at most once a minute — so the entry inside the
+ * bytes this view parsed is, in general, either absent (a file straight off the instrument, or
+ * one whose first edit hasn't flushed yet) or a minute stale. Showing that would show the user
+ * settings nothing is actually being analyzed with. So the entry is synthesized from live state
+ * with the same serializer the writer uses (`formatZpcrwebSettings`), which makes it byte-identical
+ * to what `exportBytes` puts in a downloaded copy.
+ *
+ * The one field that legitimately differs is `updatedAt`, stamped at write time — this renders
+ * "now" rather than the timestamp of the last flush.
+ */
+function liveSettingsText(settings: FileSettings): string {
+  return formatZpcrwebSettings(zpcrwebFromAnalysis(settings));
+}
+
+export function RawFilesView({ zpcr, settings }: { zpcr: Zpcr; settings: FileSettings }) {
+  // The live document, not the archive's copy — see `liveSettingsText`. Recomputed whenever an
+  // analysis setting changes, so the view tracks a threshold drag as it happens.
+  const settingsText = useMemo(() => liveSettingsText(settings), [settings]);
+  const settingsBytes = useMemo(() => new TextEncoder().encode(settingsText), [settingsText]);
+
+  const entries = useMemo(
+    () =>
+      zpcr.archive.entries.includes(ZPCRWEB_SETTINGS_NAME)
+        ? zpcr.archive.entries
+        : // A file that has never been saved with settings still gets the row: the settings
+          // exist (as defaults), they are what the run is being analyzed with, and they are what
+          // a download would carry.
+          [...zpcr.archive.entries, ZPCRWEB_SETTINGS_NAME],
+    [zpcr],
+  );
+
   const groups = useMemo(() => {
     const map = new Map<string, string[]>();
-    for (const name of zpcr.archive.entries) {
+    for (const name of entries) {
       const g = group(name);
       (map.get(g) ?? map.set(g, []).get(g)!).push(name);
     }
@@ -46,7 +100,7 @@ export function RawFilesView({ zpcr }: { zpcr: Zpcr }) {
       group: g,
       names: map.get(g)!,
     }));
-  }, [zpcr]);
+  }, [entries]);
 
   const [selected, setSelected] = useState<string>(
     () => zpcr.archive.entries.find((n) => /RunInfo\.xml$/i.test(n)) ?? zpcr.archive.entries[0] ?? "",
@@ -65,16 +119,20 @@ export function RawFilesView({ zpcr }: { zpcr: Zpcr }) {
   // §1.1, handled inside <ProtocolXml> itself).
   const isPltd = /\.pltd$/i.test(selected);
   const isPrcl = /\.prcl$/i.test(selected);
+  const isSettings = selected === ZPCRWEB_SETTINGS_NAME;
   const isTextual = TEXTUAL.test(selected) || isPltd || isPrcl;
   const hasDecoded = decodedKind(selected) !== null;
-  const size = selected ? zpcr.archive.bytes(selected).length : 0;
+  const size = !selected ? 0 : isSettings ? settingsBytes.length : zpcr.archive.bytes(selected).length;
 
   const rawBody = useMemo(() => {
     if (!selected || mode === "decoded") return "";
     if (mode === "text" && (isPltd || isPrcl)) return ""; // rendered via <PlateXml>/<ProtocolXml>
+    if (isSettings) {
+      return mode === "text" ? settingsText : hexDump(settingsBytes, { maxBytes: limit });
+    }
     if (mode === "text" && isTextual) return zpcr.archive.text(selected);
     return zpcr.archive.hexDump(selected, { maxBytes: limit });
-  }, [zpcr, selected, mode, limit, isTextual, isPltd, isPrcl]);
+  }, [zpcr, selected, mode, limit, isTextual, isPltd, isPrcl, isSettings, settingsText, settingsBytes]);
 
   // What "Text"/"XML" mode is currently showing, for the download button — re-derives the
   // decrypted payload independently of <PlateXml>/<ProtocolXml> (same pattern those components
@@ -82,6 +140,7 @@ export function RawFilesView({ zpcr }: { zpcr: Zpcr }) {
   const [password] = usePltdPassword();
   const textDownload = useMemo(() => {
     if (mode !== "text" || !selected) return null;
+    if (isSettings) return { content: settingsText, ext: "json" };
     if (isPltd) {
       const pltd = parsePltd(zpcr.archive.bytes(selected), password ? { password } : undefined);
       return pltd.xml ? { content: pltd.xml, ext: "xml" } : null;
@@ -95,7 +154,7 @@ export function RawFilesView({ zpcr }: { zpcr: Zpcr }) {
     }
     if (isTextual) return { content: rawBody, ext: "txt" };
     return null;
-  }, [mode, selected, isPltd, isPrcl, isTextual, zpcr, password, rawBody]);
+  }, [mode, selected, isPltd, isPrcl, isSettings, isTextual, zpcr, password, rawBody, settingsText]);
 
   const decodedRef = useRef<HTMLDivElement>(null);
   const canDownload = mode === "decoded" ? hasDecoded : textDownload !== null;
@@ -111,7 +170,13 @@ export function RawFilesView({ zpcr }: { zpcr: Zpcr }) {
       downloadText(`${baseName(selected)}.csv`, decodedToCsv(decodedRef.current), "text/csv");
     } else if (textDownload) {
       const name = isPltd || isPrcl ? `${baseName(selected)}.${textDownload.ext}` : selected;
-      downloadText(name, textDownload.content, textDownload.ext === "xml" ? "application/xml" : "text/plain");
+      const mime =
+        textDownload.ext === "xml"
+          ? "application/xml"
+          : textDownload.ext === "json"
+            ? "application/json"
+            : "text/plain";
+      downloadText(name, textDownload.content, mime);
     }
   };
 
