@@ -1,4 +1,4 @@
-# zpcrweb
+# zpcrweb (pronounced Zed-PCR web 🇨🇦)
 
 Tools for reading **Bio-Rad CFX** qPCR `.zpcr` files — an isomorphic TypeScript library plus
 a cyberpunk-dark web app built on top of it, serving from [https://zpcr.rbyers.ca](https://zpcr.rbyers.ca/).
