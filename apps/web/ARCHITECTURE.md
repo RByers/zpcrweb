@@ -1059,15 +1059,35 @@ response curves, not channel numbers.
   intrinsic width used to stretch the whole `.app` grid past a phone viewport and push every
   view into horizontal overflow. The tabs therefore live in their own `.app__views` scroller
   (`min-width: 0; overflow-x: auto`) and the logo/drop button are `flex: 0 0 auto`.
-- The header **goes iconographic under 600px** rather than scrolling: every tab and the compact
-  DropZone carry a line icon from `components/ViewIcons.tsx` beside their word, and a
-  `@media (max-width: 599px)` block hides `.segmented__label`, `.dropzone__compact-label` and
-  `.app__logo-rest` — leaving five icon tabs, an upload icon and the wordmark's cyan `z`, which
-  fit a 390px portrait viewport with room to spare. Nothing is lost: each control keeps the word
+- The header **goes iconographic when it stops fitting** rather than scrolling, in four steps
+  driven by a `data-fit` attribute that `state/useHeaderFit.ts` sets by measurement: 0 is the
+  full `zpcr//web` + five labelled tabs (each with its line icon from `components/ViewIcons.tsx`)
+  + "load file"; 1 drops the wordmark's `//web` tail and the load button's word; 2 drops every
+  tab label *but the selected one's*, so the current view still reads as a word for as long as
+  there's room for it; 3 is all icons. Nothing is lost at any level — each control keeps its word
   in `title` + `aria-label` (hence `Logo`'s split spans and `ViewSelector`'s explicit labels), so
-  hover and screen readers still name it, and `tools/uitest.mjs`'s name-based tab lookups still
-  work. The rule is scoped to `.app__header`, so the welcome screen's `.app__brand` — which has
-  no tabs and plenty of room — keeps the full `zpcr//web` mark.
+  hover, screen readers and `tools/uitest.mjs`'s name-based tab lookups all still work. Only
+  `.app__header` carries `data-fit`, so the welcome screen's `.app__brand` — no tabs, plenty of
+  room — keeps the full mark unconditionally.
+- **Why measurement and not a media query.** The header's natural width depends on what it
+  currently holds: a standalone `.pltd` shows two tabs and a run shows five, and level 2's width
+  depends on which label happens to be selected. Any single breakpoint therefore either collapses
+  a header that still fits or lets one truncate — the old `@media (max-width: 599px)` rule let
+  the tab strip scroll away about a third of its width before it fired. `useHeaderFit` instead
+  probes a **hidden clone** of the header pinned to the real one's width, writing each candidate
+  `data-fit` onto the clone and reading the resulting flex layout back, and takes the first level
+  whose content fits the real header's content box (re-run on a `ResizeObserver`, on view/file
+  change, and on `document.fonts.ready`). Probing a copy is what makes the transitions work: an
+  in-place probe has to suppress transitions to avoid measuring a half-finished animation, and
+  doing that right after React commits the new state computes the destination widths with no
+  transition, so the labels snap. Level 0 is also where each label's natural width is read off
+  and written to the real element's `--w`, since `max-width` can only animate between two lengths.
+- Level changes **animate** (140ms `max-width`/`opacity` on the labels, plus `gap`/`padding` on a
+  tab whose label has gone, so its icon re-centres in a square tap target). Two suppressions:
+  `[data-measuring]` kills transitions on the clone, and holds them on the real header across the
+  first pass only — that flag lives in a `useRef`, because a flag local to the effect would be
+  re-armed by every dep change and silently kill the animation on exactly the tab switches that
+  want it. `prefers-reduced-motion` turns the whole thing off.
 - **Phone support is two shapes, not one.** *Portrait* is the stacked container-query layout
   above — settings on top, chart/table below, the page scrolling vertically as one column, which
   means the stacked `.curves__rail` needs `overflow: visible; height: auto` (its own

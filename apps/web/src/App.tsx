@@ -2,6 +2,7 @@ import { useRef } from "react";
 import { useZpcrStore } from "./state/useZpcrStore";
 import { usePltdPassword } from "./state/pltdPassword";
 import { formatLoadHash } from "./state/urlHash";
+import { useHeaderFit } from "./state/useHeaderFit";
 import { DropZone } from "./components/DropZone";
 import { FileBar } from "./components/FileBar";
 import { ViewSelector } from "./components/ViewSelector";
@@ -26,9 +27,9 @@ const STANDALONE_VIEWS = ["plates", "raw"] as const;
  */
 const EXAMPLE_FILE = "examples/20260726_S183-S185_RVP.zpcr";
 
-/** The wordmark, doubling as the link to the About page. Split so a narrow header can drop
- * everything but the cyan "z" (see `.app__logo-rest` in `app.css`) — the full mark plus five
- * view tabs plus the load button don't fit across a phone in portrait. */
+/** The wordmark, doubling as the link to the About page. Split so a narrow header can drop the
+ * "//web" tail (see `.app__logo-rest` in `app.css` and `useHeaderFit`) and keep "zpcr" — the
+ * full mark plus five view tabs plus the load button don't fit across a phone in portrait. */
 function Logo({ onClick }: { onClick: () => void }) {
   return (
     <button
@@ -38,7 +39,8 @@ function Logo({ onClick }: { onClick: () => void }) {
       aria-label="About zpcrweb"
     >
       <span className="app__logo-z">z</span>
-      <span className="app__logo-rest">pcr//web</span>
+      pcr
+      <span className="app__logo-rest">//web</span>
     </button>
   );
 }
@@ -47,6 +49,10 @@ export function App() {
   const store = useZpcrStore();
   const { active, activeRun, settings } = store;
   const [, setPassword] = usePltdPassword();
+  // Called before the early returns below, as hook order demands. The deps are what changes the
+  // header's natural width other than a resize: the selected tab (level 2 keeps its label) and
+  // the active file (a standalone plate shows two tabs, a run five).
+  const { ref: headerRef, fit } = useHeaderFit([store.view, store.activeId]);
   // Where "← back" on the About page returns to, so opening About and leaving again is a no-op.
   const lastView = useRef<ViewId>("curves");
   if (store.view !== "about") lastView.current = store.view;
@@ -100,7 +106,7 @@ export function App() {
 
   return (
     <div className="app">
-      <header className="app__header">
+      <header className="app__header" ref={headerRef} data-fit={fit}>
         <Logo onClick={showAbout} />
         {(zpcr || isStandalonePlate) && (
           <div className="app__views">

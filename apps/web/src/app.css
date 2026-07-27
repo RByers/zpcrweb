@@ -36,6 +36,10 @@
 /* Also a <button> (it opens the About view), so it opts out of the global button chrome. */
 .app__logo {
   flex: 0 0 auto;
+  /* Flex, not inline text: the collapsing "//web" is an `overflow: hidden` inline-block, whose
+     baseline is its bottom edge — as inline text it would drag the whole wordmark off-baseline. */
+  display: inline-flex;
+  align-items: center;
   white-space: nowrap;
   font-weight: 700;
   letter-spacing: 0.06em;
@@ -78,24 +82,61 @@
 .app__tag {
   color: var(--ink-muted);
 }
-/* Narrow (portrait phone) header: the wordmark, the five tab labels and "load file" together
-   overflow the viewport, so the header goes iconographic — the logo keeps only its "z", and the
-   tabs and the load button keep only their icons. Every one of them still carries the word in a
+/* Narrow header: the wordmark, the five tab labels and "load file" together overflow the
+   viewport, so the header goes iconographic — in four steps, driven by `data-fit`, which
+   `useHeaderFit` sets by measuring what actually fits (see that file for the level meanings and
+   for why this isn't a media query). Every label that goes still carries its word in a
    `title`/`aria-label` (see `ViewSelector`, `DropZone`, `Logo`), so nothing is lost to a screen
-   reader or a hover. `.app__brand` (the welcome screen, which has no tabs) is deliberately not
-   included — there's room for the full mark there. */
+   reader or a hover. `.app__brand` (the welcome screen, which has no tabs) has no `data-fit` and
+   so keeps the full mark — there's room for it there. */
 @media (max-width: 599px) {
   .app__tag {
     display: none;
   }
-  .app__header .app__logo-rest,
-  .app__header .segmented__label,
-  .app__header .dropzone__compact-label {
-    display: none;
-  }
-  /* Without the label the padding is all that gives the tab its tap target; keep it square. */
-  .app__header .segmented__item {
-    padding: 5px 9px;
+}
+/* Collapsing text shrinks to nothing rather than vanishing, so the tabs slide into place instead
+   of jumping. `--w` is the label's natural width, written by `useHeaderFit` — `max-width` has to
+   animate between two lengths, and `auto` isn't one. */
+.app__header .app__logo-rest,
+.app__header .segmented__label,
+.app__header .dropzone__compact-label {
+  display: inline-block;
+  max-width: var(--w, 12rem);
+  overflow: hidden;
+  white-space: nowrap;
+  transition:
+    max-width 140ms ease,
+    opacity 110ms ease;
+}
+.app__header:not([data-fit="0"]) :is(.app__logo-rest, .dropzone__compact-label),
+.app__header:is([data-fit="2"], [data-fit="3"]) .segmented__item:not(.is-active) .segmented__label,
+.app__header[data-fit="3"] .segmented__label {
+  max-width: 0;
+  opacity: 0;
+}
+/* A tab whose label has gone keeps square padding — without the label that padding is the whole
+   tap target — and drops the icon/label gap, which would otherwise pad the empty label. */
+.app__header .segmented__item {
+  transition:
+    gap 140ms ease,
+    padding 140ms ease;
+}
+.app__header:is([data-fit="2"], [data-fit="3"]) .segmented__item:not(.is-active),
+.app__header[data-fit="3"] .segmented__item {
+  gap: 0;
+  padding-inline: 9px;
+}
+/* `useHeaderFit` probes each level by writing `data-fit` and reading the layout back; a
+   transition mid-probe would be measured half-finished. It also holds this through the first
+   commit so the header doesn't animate in from level 0 on load. */
+.app__header[data-measuring],
+.app__header[data-measuring] * {
+  transition: none !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  .app__header,
+  .app__header * {
+    transition: none;
   }
 }
 .app__header-spacer {
