@@ -208,8 +208,16 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
   // its RFU, plus — for a single curve's row — that curve's baseline region and σ (see CurveChart's
   // `thresholdLine`/`thresholdRegions` props). Set alongside `hoverHighlight` so isolating the
   // curves and marking their threshold always appear together.
+  //
+  // What's stored is *which* row is hovered, not the RFU it had when the pointer arrived: the
+  // threshold's own input sits inside the hovered row, so typing or arrow-stepping it changes the
+  // number without any pointer event to refresh a snapshot, and a captured value would leave the
+  // line behind at the old level. Resolved against `thresholdRows` on every render below, the line
+  // tracks the edit — and the auto-multiplier slider — live.
   const [hoverThreshold, setHoverThreshold] = useState<{
-    value: number | null;
+    fluor: string;
+    /** Set when a single curve's row is hovered; absent for the fluorophore's own row. */
+    curveKey?: string;
     regions: boolean;
   } | null>(null);
 
@@ -719,7 +727,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
           ? { kind: "channel", channel: g.channel }
           : null,
     );
-    setHoverThreshold(calibrationOn ? { value: g.threshold ?? null, regions: false } : null);
+    setHoverThreshold(calibrationOn ? { fluor: g.fluor, regions: false } : null);
   };
 
   /** Hovering one curve's row: isolate that single curve, mark the threshold *it* is measured
@@ -731,8 +739,20 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
         ? { kind: "curve", label: c.wellLabel, fluor: g.fluor }
         : { kind: "well", label: c.wellLabel },
     );
-    setHoverThreshold(calibrationOn ? { value: c.threshold, regions: true } : null);
+    setHoverThreshold(calibrationOn ? { fluor: g.fluor, curveKey: c.key, regions: true } : null);
   };
+
+  /** The RFU the hovered Threshold row currently stands at, read fresh out of `thresholdRows` so
+   * an edit to that row's own input (or to the auto-threshold multiplier feeding it) moves the
+   * chart's dotted line with it. `null` when nothing is hovered, or when the hovered row has no
+   * threshold — a group whose curves all failed to produce one. */
+  const hoverThresholdValue = useMemo(() => {
+    if (!hoverThreshold) return null;
+    const group = thresholdRows.find((g) => g.fluor === hoverThreshold.fluor);
+    if (!group) return null;
+    if (hoverThreshold.curveKey == null) return group.threshold ?? null;
+    return group.curves.find((c) => c.key === hoverThreshold.curveKey)?.threshold ?? null;
+  }, [hoverThreshold, thresholdRows]);
 
   const logBaselined = settings.scale === "log" && settings.curveView === "relative";
 
@@ -1117,7 +1137,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
             bands={!calibrationOn && settings.bands}
             highlight={hoverHighlight}
             thresholdLine={
-              settings.curveView === "relative" ? (hoverThreshold?.value ?? null) : null
+              settings.curveView === "relative" ? hoverThresholdValue : null
             }
             thresholdRegions={settings.curveView === "relative" && !!hoverThreshold?.regions}
           />

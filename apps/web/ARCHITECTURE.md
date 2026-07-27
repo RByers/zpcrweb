@@ -773,7 +773,12 @@ is: a per-target curve needs channel→dye color separation (`calibration.md`).
   `u.redraw`, the same pattern `applyHighlight` uses, so hovering doesn't rebuild the whole uPlot
   instance). Only meaningful in `curveView: "relative"` — the threshold/noise/Cq math
   (`threshold.md` §5–§6) is computed against the baseline-subtracted curve, not the raw one — so
-  `CurvesView` passes `null` under "absolute".
+  `CurvesView` passes `null` under "absolute". The `hoverThreshold` state stores *which* row is
+  hovered (fluorophore, plus a `curveKey` for a curve row), not the RFU it held at mouse-enter, and
+  the value is resolved out of `thresholdRows` on each render: the row's threshold input sits inside
+  the hovered row, so typing or arrow-stepping it — like dragging the auto-threshold multiplier —
+  changes the number with no pointer event to refresh a snapshot, and the line would otherwise stay
+  at the old level while the numbers and Cq markers moved.
 
   Hovering an individual **curve** row adds the per-curve diagnostic, for debugging a surprising
   auto threshold: the isolated curve gets its exact `CurveBaselineResult.baselineRegion` —
