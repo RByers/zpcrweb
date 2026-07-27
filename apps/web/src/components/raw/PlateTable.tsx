@@ -4,6 +4,7 @@ import {
   UnknownChannelNote,
   hasUnknownChannel,
 } from "../plate/FluorChannelChip";
+import { Pair } from "./Pair";
 import { SAMPLE_TYPE_META } from "../../lib/sampleType";
 import { plateDisplayName } from "../../lib/plateNames";
 
@@ -27,22 +28,10 @@ export function PlateTable({ plate, sourceHint }: { plate: PlateDefinition; sour
           {plate.dyeCount === 1 ? "dye" : "dyes"}
         </h3>
         <dl className="decoded__dl mono">
-          <div className="decoded__pair">
-            <dt>Vessel</dt>
-            <dd>{plate.plateName || "—"}</dd>
-          </div>
-          <div className="decoded__pair">
-            <dt>Scan mode</dt>
-            <dd>{plate.scanMode || "—"}</dd>
-          </div>
-          <div className="decoded__pair">
-            <dt>Plate type</dt>
-            <dd>{plate.plateType || "—"}</dd>
-          </div>
-          <div className="decoded__pair">
-            <dt>Std units</dt>
-            <dd>{plate.standardUnits || "—"}</dd>
-          </div>
+          <Pair k="Vessel" v={plate.plateName || "—"} />
+          <Pair k="Scan mode" v={plate.scanMode || "—"} />
+          <Pair k="Plate type" v={plate.plateType || "—"} />
+          <Pair k="Std units" v={plate.standardUnits || "—"} />
         </dl>
         {hasUnknownChannel(plate.fluors) && <UnknownChannelNote />}
         {sourceHint && <span className="decoded__hint mono">{sourceHint}</span>}
