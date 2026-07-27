@@ -11,7 +11,7 @@ export const SAMPLE_TYPE_META: Record<SampleType, { abbr: string; label: string;
   empty: { abbr: "·", label: "Empty / not loaded", color: "#5a6b86" },
   passiveRef: { abbr: "Ref", label: "Passive reference", color: "#3b82f6" },
   custom: { abbr: "Cus", label: "Custom", color: "#eab308" },
-  other: { abbr: "?", label: "Other", color: "#8aa0c0" },
+  other: { abbr: "?", label: "Other", color: "#a855f7" },
 };
 
 export const ROW_LABELS = ["A", "B", "C", "D", "E", "F", "G", "H"];

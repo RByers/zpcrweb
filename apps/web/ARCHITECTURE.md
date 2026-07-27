@@ -277,8 +277,8 @@ so every call site keeps writing one `onChange({ … })` regardless of where the
   map (`components/plate/PlateViewer.tsx`) for every plate attached to the run, via
   `zpcr.plates()`, plus an upload control to attach/replace the run's plate (`.zpcr` only —
   see "Standalone plate entries and attach" below) and a `PlateDownloadButton`. Per-sample-type color/label/abbreviation lives in one place,
-  `lib/sampleType.ts`'s `SAMPLE_TYPE_META` — grey for empty, green for positive control, red for
-  negative control, blue for unknown — shared with the Curves view's well-selection matrix (see
+  `lib/sampleType.ts`'s `SAMPLE_TYPE_META` — grey for empty, purple for other, green for positive
+  control, red for negative control, blue for unknown — shared with the Curves view's well-selection matrix (see
   below) so the two grids read the same way. A sidebar lists plates when there's more than one
   (multiple `.pltd` entries in a `.zpcr`); a `.pcrd`'s single embedded plate setup shows
   directly. This is the same grid
