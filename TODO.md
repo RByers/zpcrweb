@@ -95,6 +95,35 @@ Simplification / dead-code removal, from a whole-project review (2026-07-27). It
       in `pcrd.test.ts` records that self-contained duplication was a deliberate earlier call,
       so this is a revisit-the-decision question, not an oversight.
 
+### `apps/web`
+
+- [ ] **Dead CSS: the `.baseline-range*` block.** `app.css` still carries ~75 lines styling the
+      `BaselineRangeSlider` deleted in `523ecb3` ("Replace baseline configuration with always-on
+      auto linear baselining"). No `.ts`/`.tsx` references any `baseline-range*` class.
+- [ ] **Dead CSS selector `.refcal__tbl td.refcal__drift-big`.** `refcal__tbl` survives nowhere —
+      `RefCalPanel.tsx` uses `refcal__grid`. Drop the stale half of the compound selector.
+- [ ] **Triplicated `Pair` component.** A byte-identical private `Pair({ k, v })` is defined in
+      `raw/DecodedDcal.tsx`, `raw/DecodedProtocol.tsx` and `raw/DecodedPlate.tsx`. Extract one
+      shared copy.
+- [ ] **Narrow ~12 unused exports.** Re-exports nothing imports (`ANALYSIS_BASELINE_MODE` in
+      `lib/cq.ts`, `AnalysisSettings` in `state/useZpcrStore.ts`, `NormalizationMode` in
+      `lib/fluorCurves.ts` — every consumer imports these straight from `@zpcrweb/core`), plus
+      symbols used only inside their own file: `PlateFileKind`, `NEUTRAL_COLOR`,
+      `MIN_INTERVAL_MS`, `AnalysisFlushTarget`, `setStoredPltdPassword`, `formatHash`,
+      `plusOpacity`, `stepSummary`, and the `HoverCard` component itself (reached only through
+      the `useHoverCard` hook that renders it).
+- [ ] **needs input — `CurvesView.tsx`'s four `cardFor*` hover-card builders.** `cardForWell`,
+      `cardForDyeLabel`, `cardForChannel` and `cardForSample` share one shape (filter
+      `allPlotCurves`, bail if empty, map through `selectedFirst`, return `{title, subtitle?,
+      rows}`) and differ only in predicate, field mapping and labels — ~70 lines that could be
+      ~35. But `cardForWell` carries extra per-card behavior (the
+      `well.loaded ? well.sampleType : "empty"` fallback, `meta` lookup) that a naive collapse
+      would blur, so this trades repetition for indirection.
+- [ ] **needs input — `baseline` is Reference-view-only plumbing.** `CurvesView` always passes
+      `baseline="raw"`; only `ReferenceView` varies it. The prop is load-bearing, not dead, but
+      the two chart use-cases could split into a thinner shared core plus two wrappers. The
+      existing doc comments already flag the asymmetry deliberately, so possibly leave alone.
+
 ### Repo hygiene
 
 - [ ] **Stale worktrees.** `.claude/worktrees/` holds four locked worktrees, two of which
@@ -106,4 +135,6 @@ Simplification / dead-code removal, from a whole-project review (2026-07-27). It
 Recorded so a future pass doesn't remove them: `ProtocolStep` (`prcl.ts` → `types.ts` →
 `index.ts`) is public API consumed by `apps/web`; `Cdp` and `drainProblems`
 (`tools/harness.mjs`) are imported by `tools/uishot.mjs`. Knip misses both cross-package and
-`.mjs` script-to-script imports.
+`.mjs` script-to-script imports. Likewise `react`/`react-dom` are flagged "unlisted" in
+`apps/web` only because `vite.config.ts` aliases them onto `preact/compat` — the `preact`
+dependency entry is correct and no React runtime ships.
