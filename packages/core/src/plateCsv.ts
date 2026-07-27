@@ -22,7 +22,7 @@
  * is most plates — rather than written as a column of empty cells. They're read whenever
  * present, in any column position.
  *
- * Only `vessel` is always written, as `# vessel: <name>, <rows>x<columns>`: the extent rides
+ * Only `vessel` is always written, as `# vessel: <name> <rows>x<columns>`: the extent rides
  * along on that line, and falls back to the extent implied by the well labels when absent.
  * `plateType`/`scanMode`/`standardUnits` are display-only passengers from a `.pltd`, omitted
  * when empty. `vessel` holds `PlateDefinition.plateName` — the consumable type (`BR Clear`,
@@ -30,10 +30,9 @@
  * `vessel` here so it can't be mistaken for the plate's own name, which is the file name (see
  * `identityKey` below). The plate's `identityKey` isn't written at all — the file or
  * archive-entry name *is* the plate's identity, and {@link parsePlateCsv}'s `sourceName` puts
- * it back. Header values are split on commas with trailing empty fields dropped, so a file
- * round-tripped through a spreadsheet — which pads every comment line out to the table's column
- * count with trailing commas — still parses; a header value therefore can't itself contain a
- * comma (the vessel line's second field is the extent).
+ * it back. Header values are read up to the first comma, so a file round-tripped through a
+ * spreadsheet — which pads every comment line out to the table's column count with trailing
+ * commas — still parses.
  */
 
 import { toSampleType } from "./pltd.js";
@@ -182,9 +181,9 @@ export function plateToCsv(plate: PlateDefinition): string {
   // `parsePlateCsv`'s `sourceName` puts it back.
   // `vessel`, not `plateName`: the value is a plastic/consumable type (`BR Clear`, `BR White`),
   // which is what the field means in a `.pltd` too — CFX just gave it a misleading attribute
-  // name. The plate's extent rides on the same line (`BR Clear, 8x12`) — it's one fact about
+  // name. The plate's extent rides on the same line (`BR Clear 8x12`) — it's one fact about
   // the physical plate, and two more header lines to say `8` and `12` was noise.
-  out += `# vessel: ${plate.plateName}, ${plate.rows}x${plate.columns}\r\n`;
+  out += `# vessel: ${plate.plateName} ${plate.rows}x${plate.columns}\r\n`;
   // Optional, and omitted when empty: nothing computes with these three, they're just carried
   // through from a `.pltd` for display. `plateType` is CFX's template category
   // (`OtherStdTemplate` in every file inspected) and is unrelated to the vessel above.
@@ -260,21 +259,19 @@ export interface ParsePlateCsvOptions {
 export function parsePlateCsv(text: string, options: ParsePlateCsvOptions = {}): PlateDefinition {
   const { sourceName, channelForFluor } = options;
   const lines = text.split(/\r?\n/);
-  /** Each header line's value, split on commas — the vessel line carries two fields
-   * (`BR Clear, 8x12`). Trailing empty fields are dropped, because a spreadsheet round-trip pads
-   * every comment line out to the table's column count with commas. */
-  const meta: Record<string, string[]> = {};
+  const meta: Record<string, string> = {};
   let i = 0;
   while (i < lines.length && lines[i]!.trim().startsWith("#")) {
-    const m = /^#\s*([^:,]+):\s*(.*)$/.exec(lines[i]!.trim());
-    if (m) {
-      const fields = m[2]!.split(",").map((f) => f.trim());
-      while (fields.length && fields[fields.length - 1] === "") fields.pop();
-      meta[m[1]!.trim()] = fields;
-    }
+    // The value stops at the first comma: a spreadsheet round-trip pads every comment line out
+    // to the table's column count with trailing commas, which would otherwise end up in the
+    // value. Header values therefore can't contain a comma.
+    const m = /^#\s*([^:,]+):\s*([^,]*)/.exec(lines[i]!.trim());
+    if (m) meta[m[1]!.trim()] = m[2]!.trim();
     i++;
   }
-  const field = (key: string, n = 0): string | undefined => meta[key]?.[n];
+  // The vessel line ends with the plate's extent (`BR Clear 8x12`); what precedes it is the
+  // vessel name. Absent, the whole value is the name and the well labels give the extent.
+  const vessel = /^(.*?)\s+(\d+)\s*x\s*(\d+)$/i.exec(meta.vessel ?? "");
 
   const rows = parseCsvTable(lines.slice(i).join("\n")).filter(
     (r) => !(r.length === 1 && r[0] === ""),
@@ -286,11 +283,8 @@ export function parsePlateCsv(text: string, options: ParsePlateCsvOptions = {}):
     if (idx[c] === -1) throw new Error(`Plate CSV: missing "${c}" column`);
   }
 
-  // Extent from the vessel line's second field (`# vessel: BR Clear, 8x12`); absent, it's
-  // inferred from the well labels below.
-  const extent = /^(\d+)\s*x\s*(\d+)$/i.exec(field("vessel", 1) ?? "");
-  const declaredRows = extent ? Number(extent[1]) : NaN;
-  const declaredCols = extent ? Number(extent[2]) : NaN;
+  const declaredRows = vessel ? Number(vessel[2]) : NaN;
+  const declaredCols = vessel ? Number(vessel[3]) : NaN;
   const dataRows = rows.slice(1);
   // A table with no rows at all is only meaningful if the extent is declared — every well is
   // then simply empty (an all-empty plate writes no rows).
@@ -394,14 +388,14 @@ export function parsePlateCsv(text: string, options: ParsePlateCsvOptions = {}):
   });
 
   return {
-    plateName: field("vessel") ?? "",
+    plateName: vessel ? vessel[1]!.trim() : (meta.vessel ?? ""),
     identityKey: sourceName ? identityFromName(sourceName) : undefined,
     rows: rowsCount,
     columns,
     dyeCount: fluors.length,
-    scanMode: field("scanMode") ?? "",
-    plateType: field("plateType") ?? "",
-    standardUnits: field("standardUnits") ?? "",
+    scanMode: meta.scanMode ?? "",
+    plateType: meta.plateType ?? "",
+    standardUnits: meta.standardUnits ?? "",
     fluors,
     targets: [...targets],
     samples: [...samples],

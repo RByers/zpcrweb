@@ -189,10 +189,9 @@ The `vessel` header carries `PlateDefinition.plateName`, and is deliberately *no
 type"), which is what picks the tube type the dye response curve is built for, and the similar
 name invited reading it as the plate's own name when the file name is that. It also sits next
 to a real `plateType` header, CFX's unrelated template category. The plate's extent rides on
-the same line as a second field — `# vessel: BR Clear, 8x12` — since it's one more fact about
-the physical plate; absent, it's inferred from the well labels. Header values are split on
-commas with trailing empty fields dropped, since a spreadsheet round-trip pads comment lines
-with trailing commas — so a header value can't itself contain one. It's
+the same line — `# vessel: BR Clear 8x12` — since it's one more fact about the physical plate;
+absent, it's inferred from the well labels. Header values are read up to the first comma, since
+a spreadsheet round-trip pads comment lines with trailing commas. It's
 deliberately not a CFX format (no `meta`/`fluorId` fidelity), so it isn't a decoder doc in the
 table above.
 

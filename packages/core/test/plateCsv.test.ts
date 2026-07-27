@@ -120,7 +120,7 @@ describe("plate CSV round-trip", () => {
 
   it("resolves channels from calibration, not from the column order", () => {
     const csv = [
-      "# vessel: BR Clear, 1x1",
+      "# vessel: BR Clear 1x1",
       "Well,SampleType,Sample,FAM,Tex 615,Cy5",
       "A1,unknown,,GeneA,GeneB,GeneC",
     ].join("\r\n");
@@ -159,7 +159,7 @@ describe("plate CSV round-trip", () => {
 
   it("honours an explicit Ch<n> suffix over the calibration lookup", () => {
     const csv = [
-      "# vessel: BR Clear, 1x1",
+      "# vessel: BR Clear 1x1",
       "Well,SampleType,Sample,FAM Ch1,Tex 615 Ch3,Cy5 Ch4",
       "A1,unknown,,GeneA,GeneB,GeneC",
     ].join("\r\n");
@@ -189,7 +189,7 @@ describe("plate CSV round-trip", () => {
 
   it("treats wells left out of the table as empty", () => {
     const csv = [
-      "# vessel: BR Clear, 8x12",
+      "# vessel: BR Clear 8x12",
       "Well,SampleType,Sample,FAM Ch1",
       "B2,unknown,S1,GeneA",
     ].join("\r\n");
@@ -205,13 +205,13 @@ describe("plate CSV round-trip", () => {
 
   it("writes the vessel and the plate extent on one `# vessel:` line", () => {
     const csv = plateToCsv(syntheticPlate());
-    expect(csv).toContain("# vessel: BR White, 8x12\r\n");
+    expect(csv).toContain("# vessel: BR White 8x12\r\n");
     expect(csv).not.toMatch(/# (plateName|rows|columns):/);
   });
 
   it("sizes the plate from the vessel line's extent, past the last labelled well", () => {
     const csv = [
-      "# vessel: BR White, 8x12",
+      "# vessel: BR White 8x12",
       "Well,SampleType,Sample,FAM",
       "A1,unknown,,GeneA",
     ].join("\r\n");
@@ -220,7 +220,7 @@ describe("plate CSV round-trip", () => {
     expect([plate.rows, plate.columns]).toEqual([8, 12]);
     expect(plate.wells).toHaveLength(96);
     // Without the extent it falls back to the well labels — a 1x1 plate here.
-    const noExtent = parsePlateCsv(csv.replace(", 8x12", ""));
+    const noExtent = parsePlateCsv(csv.replace(" 8x12", ""));
     expect([noExtent.rows, noExtent.columns, noExtent.plateName]).toEqual([1, 1, "BR White"]);
   });
 
@@ -262,7 +262,7 @@ describe("plate CSV round-trip", () => {
 
   it("accepts a raw wc* code in the SampleType cell and normalizes it", () => {
     const csv = [
-      "# vessel: BR Clear, 1x3",
+      "# vessel: BR Clear 1x3",
       "Well,SampleType,Sample,FAM Ch1",
       "A1,wcNTC,,GeneA",
       "A2,ntc,,GeneA",
