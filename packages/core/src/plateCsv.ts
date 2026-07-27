@@ -7,10 +7,17 @@
  * exports (decoded tables, plate-read dumps) inside a `.zpcr` archive or the file system.
  *
  * Layout: a handful of `# key: value` header comment lines (plate-level metadata), then a
- * standard CSV table with one row per well in row-major order. A well with an empty `Fluors`
- * cell is unloaded (`loaded: false`); the header's `fluors` line is the authoritative
- * fluor→channel mapping (`PlateDefinition.fluors`), since a well can omit its fluors even
- * when loaded is inferred from the presence of any.
+ * standard CSV table with one row per well in row-major order. The fixed columns
+ * (`Well`…`Quantity`) are followed by **one column per fluorophore**, labelled with the fluor
+ * name; each cell holds only that well's target for that fluor (empty = the fluor isn't in the
+ * well, {@link PRESENT_NO_TARGET} = in the well but with no target). A well with no fluor cell
+ * filled in is unloaded (`loaded: false`). The header's `fluors` line stays the authoritative
+ * fluor→channel mapping (`PlateDefinition.fluors`) and fixes the column order; it is
+ * `;`-separated so no header line ever contains a comma.
+ *
+ * Header values are read up to the first comma, so a file round-tripped through a spreadsheet
+ * — which pads every comment line out to the table's column count with trailing commas — still
+ * parses.
  */
 
 import type { PlateDefinition, PlateFluor, SampleType, WellDefinition, WellFluor } from "./pltd.js";
@@ -100,57 +107,29 @@ function parseCsvTable(text: string): string[][] {
 }
 
 // ---------------------------------------------------------------------------
-// Fluors cell: "FAM=TargetA;HEX=TargetB" (bare "FAM" when no target). "=" and ";" inside a
-// fluor/target name are percent-escaped so they can't be confused with the delimiters.
+// Fluor columns: one per plate fluor, cell = that well's target for the fluor. A well can carry
+// a fluor with no target, which an empty cell can't express (empty means "fluor absent"), so
+// that case is written as a lone marker.
 // ---------------------------------------------------------------------------
 
-function escapeFluorPart(s: string): string {
-  return s.replace(/%/g, "%25").replace(/=/g, "%3D").replace(/;/g, "%3B");
+/** Fluor cell contents meaning "this fluor is in the well, but has no target". */
+const PRESENT_NO_TARGET = "+";
+
+/** The `# fluors:` header line is `;`-separated (a comma would end the header value) and uses
+ * `:` before the channel, so both are percent-escaped inside a fluor name. */
+function escapeFluorName(s: string): string {
+  return s.replace(/%/g, "%25").replace(/:/g, "%3A").replace(/;/g, "%3B");
 }
 
-function unescapeFluorPart(s: string): string {
-  return s.replace(/%3B/gi, ";").replace(/%3D/gi, "=").replace(/%25/g, "%");
+function unescapeFluorName(s: string): string {
+  return s.replace(/%3B/gi, ";").replace(/%3A/gi, ":").replace(/%25/g, "%");
 }
 
-function fluorsToCell(fluors: WellFluor[]): string {
-  return fluors
-    .map((f) =>
-      f.target
-        ? `${escapeFluorPart(f.fluor)}=${escapeFluorPart(f.target)}`
-        : escapeFluorPart(f.fluor),
-    )
-    .join(";");
-}
-
-function cellToFluors(cell: string, channelByFluor: Map<string, number>): WellFluor[] {
-  const trimmed = cell.trim();
-  if (!trimmed) return [];
-  return trimmed.split(";").map((part) => {
-    const eq = part.indexOf("=");
-    const fluorRaw = eq === -1 ? part : part.slice(0, eq);
-    const targetRaw = eq === -1 ? "" : part.slice(eq + 1);
-    const fluor = unescapeFluorPart(fluorRaw.trim());
-    const channel = channelByFluor.get(fluor);
-    if (channel === undefined) {
-      throw new Error(`Plate CSV: well references unknown fluor "${fluor}" (not in the "fluors" header)`);
-    }
-    const target = unescapeFluorPart(targetRaw.trim());
-    return target ? { fluor, channel, target } : { fluor, channel };
-  });
-}
-
-const HEADER_COLUMNS = [
-  "Well",
-  "SampleType",
-  "Sample",
-  "Replicate",
-  "Quantity",
-  "Fluors",
-];
+const FIXED_COLUMNS = ["Well", "SampleType", "Sample", "Replicate", "Quantity"];
 
 /** Serialize a {@link PlateDefinition} to zpcrweb's plate CSV format. */
 export function plateToCsv(plate: PlateDefinition): string {
-  const fluorsHeader = plate.fluors.map((f) => `${escapeFluorPart(f.fluor)}:${f.channel}`).join(",");
+  const fluorsHeader = plate.fluors.map((f) => `${escapeFluorName(f.fluor)}:${f.channel}`).join(";");
   let out = "";
   out += `# zpcrweb plate definition\r\n`;
   if (plate.identityKey) out += `# identityKey: ${plate.identityKey}\r\n`;
@@ -161,15 +140,20 @@ export function plateToCsv(plate: PlateDefinition): string {
   out += `# rows: ${plate.rows}\r\n`;
   out += `# columns: ${plate.columns}\r\n`;
   out += `# fluors: ${fluorsHeader}\r\n`;
-  out += csvRow(HEADER_COLUMNS);
+  out += csvRow([...FIXED_COLUMNS, ...plate.fluors.map((f) => f.fluor)]);
   for (const w of plate.wells) {
+    const byFluor = new Map(w.fluors.map((f) => [f.fluor, f]));
     out += csvRow([
       w.label,
       w.sampleType,
       w.sample ?? "",
       w.replicate !== undefined ? String(w.replicate) : "",
       w.quantity !== undefined ? String(w.quantity) : "",
-      fluorsToCell(w.fluors),
+      ...plate.fluors.map((pf) => {
+        const f = byFluor.get(pf.fluor);
+        if (!f) return "";
+        return f.target ? f.target : PRESENT_NO_TARGET;
+      }),
     ]);
   }
   return out;
@@ -187,7 +171,10 @@ export function parsePlateCsv(text: string): PlateDefinition {
   const meta: Record<string, string> = {};
   let i = 0;
   while (i < lines.length && lines[i]!.trim().startsWith("#")) {
-    const m = /^#\s*([^:]+):\s*(.*)$/.exec(lines[i]!.trim());
+    // The value stops at the first comma: a spreadsheet round-trip pads every comment line out
+    // to the table's column count with trailing commas, which would otherwise end up in the
+    // value. Header values therefore can't contain a comma (the `fluors` list uses `;`).
+    const m = /^#\s*([^:,]+):\s*([^,]*)/.exec(lines[i]!.trim());
     if (m) meta[m[1]!.trim()] = m[2]!.trim();
     i++;
   }
@@ -196,9 +183,9 @@ export function parsePlateCsv(text: string): PlateDefinition {
     (r) => !(r.length === 1 && r[0] === ""),
   );
   if (rows.length === 0) throw new Error("Plate CSV: empty file (no header row)");
-  const header = rows[0]!;
-  const idx = Object.fromEntries(HEADER_COLUMNS.map((c) => [c, header.indexOf(c)]));
-  for (const c of HEADER_COLUMNS) {
+  const header = rows[0]!.map((c) => c.trim());
+  const idx = Object.fromEntries(FIXED_COLUMNS.map((c) => [c, header.indexOf(c)]));
+  for (const c of FIXED_COLUMNS) {
     if (idx[c] === -1) throw new Error(`Plate CSV: missing "${c}" column`);
   }
 
@@ -208,12 +195,12 @@ export function parsePlateCsv(text: string): PlateDefinition {
   if (dataRows.length === 0) throw new Error("Plate CSV: no well rows");
 
   const fluors: PlateFluor[] = (meta.fluors ?? "")
-    .split(",")
+    .split(";")
     .map((s) => s.trim())
     .filter(Boolean)
     .map((entry) => {
       const [nameRaw, chRaw] = entry.split(":");
-      const fluor = unescapeFluorPart((nameRaw ?? "").trim());
+      const fluor = unescapeFluorName((nameRaw ?? "").trim());
       const channel = Number((chRaw ?? "").trim());
       if (!fluor || !Number.isFinite(channel)) {
         throw new Error(`Plate CSV: malformed "fluors" header entry "${entry}"`);
@@ -221,6 +208,18 @@ export function parsePlateCsv(text: string): PlateDefinition {
       return { fluor, channel };
     });
   const channelByFluor = new Map(fluors.map((f) => [f.fluor, f.channel]));
+
+  // Every column that isn't one of the fixed ones is a fluor column, named for its fluor.
+  const fluorColumns = header
+    .map((name, column) => ({ name, column }))
+    .filter(({ name }) => name !== "" && !FIXED_COLUMNS.includes(name))
+    .map(({ name, column }) => {
+      const channel = channelByFluor.get(name);
+      if (channel === undefined) {
+        throw new Error(`Plate CSV: column "${name}" is an unknown fluor (not in the "fluors" header)`);
+      }
+      return { fluor: name, channel, column };
+    });
 
   // Row/column extent: prefer the declared header, else infer from the max well label seen.
   let maxRow = 0;
@@ -265,8 +264,12 @@ export function parsePlateCsv(text: string): PlateDefinition {
     const sampleType: SampleType = SAMPLE_TYPES.includes(sampleTypeCell as SampleType)
       ? (sampleTypeCell as SampleType)
       : "empty";
-    const fluorCell = r[idx.Fluors!] ?? "";
-    const wellFluors = cellToFluors(fluorCell, channelByFluor);
+    const wellFluors: WellFluor[] = [];
+    for (const { fluor, channel, column } of fluorColumns) {
+      const cell = (r[column] ?? "").trim();
+      if (!cell) continue;
+      wellFluors.push(cell === PRESENT_NO_TARGET ? { fluor, channel } : { fluor, channel, target: cell });
+    }
     const sample = (r[idx.Sample!] ?? "").trim() || undefined;
     const replicateRaw = (r[idx.Replicate!] ?? "").trim();
     const replicate = replicateRaw === "" ? undefined : Number(replicateRaw);

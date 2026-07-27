@@ -59,22 +59,40 @@ describe("plate CSV round-trip", () => {
     expect(back).toEqual(plate);
   });
 
-  it("marks a well with an empty Fluors cell as unloaded", () => {
+  it("marks a well with no fluor cell filled in as unloaded", () => {
     const plate = syntheticPlate();
     const back = parsePlateCsv(plateToCsv(plate));
     expect(back.wells[2]!.loaded).toBe(false);
     expect(back.wells[0]!.loaded).toBe(true);
   });
 
-  it("rejects a well referencing an undeclared fluor", () => {
+  it("writes one column per fluor, holding just the target", () => {
+    const lines = plateToCsv(syntheticPlate()).split("\r\n");
+    expect(lines).toContain("# fluors: FAM:0;HEX:1");
+    const header = lines.find((l) => l.startsWith("Well,"))!;
+    expect(header).toBe("Well,SampleType,Sample,Replicate,Quantity,FAM,HEX");
+    // A1 is loaded: FAM has a target, HEX doesn't. A3 is unloaded.
+    expect(lines.find((l) => l.startsWith("A1,"))!.endsWith(",GeneA,+")).toBe(true);
+    expect(lines.find((l) => l.startsWith("A3,"))!.endsWith(",,")).toBe(true);
+  });
+
+  it("rejects a fluor column that isn't in the fluors header", () => {
     const csv = [
       "# fluors: FAM:0",
       "# rows: 1",
       "# columns: 1",
-      "Well,SampleType,Sample,Replicate,Quantity,Fluors",
-      "A1,unknown,,,,HEX",
+      "Well,SampleType,Sample,Replicate,Quantity,HEX",
+      "A1,unknown,,,,GeneA",
     ].join("\r\n");
     expect(() => parsePlateCsv(csv)).toThrow(/unknown fluor/);
+  });
+
+  it("ignores trailing commas a spreadsheet adds to the header lines", () => {
+    const csv = plateToCsv(syntheticPlate())
+      .split("\r\n")
+      .map((l) => (l.startsWith("#") ? `${l},,,,,,` : l))
+      .join("\r\n");
+    expect(parsePlateCsv(csv)).toEqual(parsePlateCsv(plateToCsv(syntheticPlate())));
   });
 
   it.skipIf(!PW)("round-trips a real decoded plate from a sample .zpcr", () => {
