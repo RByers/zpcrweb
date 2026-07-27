@@ -87,13 +87,30 @@ function closeTag(el: Element): ReactNode {
 // A node opens by default when it has few enough children that expanding it stays readable.
 const DEFAULT_OPEN_MAX_CHILDREN = 4;
 
-function defaultOpen(el: Element): boolean {
-  return el.children.length <= DEFAULT_OPEN_MAX_CHILDREN;
+/**
+ * `forceOpen` overrides the child-count rule for a document's own root element: landing on a
+ * lone collapsed `<RunInfo> 66 children` line shows nothing about the file you just opened, and
+ * the first thing anyone does is click it. So the root always starts open, however wide.
+ *
+ * It applies only to a *single* root. A fragment with many top-level siblings (`runlog.xml` is
+ * 92 `<Log>` records, `.pcrd`'s `logEls` likewise) has no root element to speak of, and opening
+ * every sibling would defeat the collapsing entirely — those keep the child-count rule.
+ */
+function defaultOpen(el: Element, forceOpen: boolean): boolean {
+  return forceOpen || el.children.length <= DEFAULT_OPEN_MAX_CHILDREN;
 }
 
-function TreeNode({ el, depth }: { el: Element; depth: number }) {
+function TreeNode({
+  el,
+  depth,
+  forceOpen = false,
+}: {
+  el: Element;
+  depth: number;
+  forceOpen?: boolean;
+}) {
   const elementChildren = Array.from(el.children);
-  const initialOpen = useMemo(() => defaultOpen(el), [el]);
+  const initialOpen = useMemo(() => defaultOpen(el, forceOpen), [el, forceOpen]);
   const [open, setOpen] = useState(initialOpen);
 
   if (elementChildren.length === 0) {
@@ -143,12 +160,13 @@ function TreeNode({ el, depth }: { el: Element; depth: number }) {
   );
 }
 
-/** Render a set of top-level XML elements as a collapsible tree. */
+/** Render a set of top-level XML elements as a collapsible tree. A lone root is always
+ * expanded (see {@link defaultOpen}); a multi-root fragment is left to the child-count rule. */
 export function XmlTree({ roots }: { roots: Element[] }) {
   return (
     <div className="decoded__xml mono">
       {roots.map((r, i) => (
-        <TreeNode key={i} el={r} depth={0} />
+        <TreeNode key={i} el={r} depth={0} forceOpen={roots.length === 1} />
       ))}
     </div>
   );

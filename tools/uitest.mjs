@@ -241,6 +241,8 @@ async function xmlViewChecks(chrome, origin, pw) {
            tree: !!document.querySelector('.decoded__xml'),
            dump: !!document.querySelector('.raw__dump'),
            collapsed: document.querySelectorAll('.decoded__xml details:not([open])').length,
+           roots: document.querySelectorAll('.decoded__xml > details').length,
+           rootsOpen: document.querySelectorAll('.decoded__xml > details[open]').length,
          })`,
       )
       .then(JSON.parse);
@@ -297,10 +299,23 @@ async function xmlViewChecks(chrome, origin, pw) {
 
   const runInfo = await show("RunInfo.xml");
   check("RunInfo.xml renders as the XML tree", runInfo.tree && !runInfo.dump, JSON.stringify(runInfo));
-  check("a node with too many children starts collapsed", runInfo.collapsed > 0, `${runInfo.collapsed} collapsed`);
+  // `<RunInfo>` has 66 children — far past the collapse threshold — so this is only true because
+  // a document's own root is exempt from it. Landing on one collapsed line shows nothing.
+  check(
+    "a document's single root starts open however wide",
+    runInfo.roots === 1 && runInfo.rootsOpen === 1,
+    JSON.stringify(runInfo),
+  );
 
   const runLog = await show("runlog.xml");
   check("runlog.xml renders as the XML tree", runLog.tree && !runLog.dump, JSON.stringify(runLog));
+  // The exemption is for *a* root: this fragment's 92 sibling records aren't one, and opening
+  // them all would defeat the collapsing entirely.
+  check(
+    "a multi-root fragment still collapses by child count",
+    runLog.roots > 1 && runLog.collapsed > 0,
+    JSON.stringify(runLog),
+  );
 
   // The converse: plain text must stay a plain dump, so the sniffing isn't just "always tree".
   const txt = await show("ProtocolRunDefinition.txt");

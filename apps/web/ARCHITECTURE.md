@@ -415,9 +415,17 @@ as before), each element is its own React component with its own open/closed `<d
 children are only turned into React elements when their parent is open, so a closed subtree
 costs ~O(1) regardless of size — a `.pcrd`'s `calibrationCollection` (~1.4 MB of deeply nested
 elements in the real sample) collapses by default and costs nothing until opened. A node starts
-open only when it has at most `DEFAULT_OPEN_MAX_CHILDREN` (4) element children, so anything
-wide lands collapsed behind an "N children" count; the rule is generic, not tuned to any one
+open when it has at most `DEFAULT_OPEN_MAX_CHILDREN` (4) element children, so anything wide
+lands collapsed behind an "N children" count; the rule is generic, not tuned to any one
 format's tag names.
+
+**A document's own root is exempt and always starts open**, however wide — otherwise opening
+`RunInfo.xml` (66 children) lands on a single collapsed line that says nothing about the file,
+and the first click is always the same one. The exemption applies only when there *is* one
+root: `parseXmlFragment` wraps the payload in a synthetic root and hands back its children, so
+a fragment of many top-level siblings (`runlog.xml`'s 92 `<Log>` records, `.pcrd`'s `logEls`)
+arrives as many roots, none of which is *the* root — those keep the child-count rule, since
+expanding all 92 would defeat the collapsing entirely.
 
 **The flat `<pre class="raw__dump">` is for hex dumps and genuinely plain text only** — never
 for XML. Which one a raw text view uses is decided by `looksLikeXml(text)` sniffing the
