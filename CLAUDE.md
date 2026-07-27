@@ -187,8 +187,7 @@ Rejected alternatives, so they don't get re-proposed:
   input.
 
 Default to `samples/20260720_FirstQualification.zpcr` (~400 KB): it has real amplification
-curves, targets,
-samples and calibration data, so every view renders something meaningful. The ~70 KB samples
+curves, targets, samples and calibration data, so every view renders something meaningful. The ~70 KB samples
 load marginally faster but leave views sparse, which makes them poor screenshot subjects. Each
 run starts from a clean Chrome profile — otherwise a previous run's sample lingers in
 IndexedDB and shows up as an extra file chip.
