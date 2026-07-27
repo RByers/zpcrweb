@@ -843,17 +843,15 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  /* The cell is only ~14px across at rail width, so the glyph has to be sized off the cell
-     rather than off the root font size to stay a mark and not a character. */
-  container-type: inline-size;
 }
-/* "This well has a curve that crossed its threshold." Colored inline, from the cell's own
-   sample-type border color. */
+/* "This well has a curve that crossed its threshold." A square SVG cross sized off the cell —
+   the cell is only ~14px across at rail width — so it centers on the cell's own box rather than
+   on a text baseline. Color and opacity are set inline: the cell's sample-type border color, and
+   `plusOpacity()` of the well's lowest Cq. */
 .wm-cell__plus {
-  font-size: 90cqw;
-  line-height: 1;
-  font-weight: 700;
-  color: var(--ink-muted);
+  width: 72%;
+  height: 72%;
+  display: block;
   pointer-events: none;
 }
 .wm-cell:hover {

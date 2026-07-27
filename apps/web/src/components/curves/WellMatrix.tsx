@@ -14,10 +14,12 @@ interface Props {
    * Plates view (grey/empty, green/positive control, red/negative control, blue/unknown, …).
    * Omitted when no plate is loaded yet, in which case cells fall back to the plain on/off look. */
   wellTypes?: Map<string, SampleType>;
-  /** Well keys holding at least one positive curve — one that crossed its threshold and so got a
-   * Cq. Marked with a `+` in the cell, drawn in the well's own sample-type color (red for an NTC,
-   * and so on) so the mark reads as part of the cell rather than as a separate legend. */
-  positiveWells?: Set<string>;
+  /** Lowest Cq per well, over the well's positive curves — the ones that crossed their threshold.
+   * A well listed here is marked with a `+` in its own sample-type color (red for an NTC, and so
+   * on) so the mark reads as part of the cell rather than as a separate legend, and faded by
+   * {@link plusOpacity} so an early, strongly-positive well stands out from a late marginal one.
+   * Wells with no positive curve are simply absent. */
+  positiveWells?: Map<string, number>;
   /** Hovering a well cell (by its `"A1"`-style label, or `null` on leave) — drives the
    * curve-chart highlight. */
   onHoverWell?: (label: string | null) => void;
@@ -25,6 +27,32 @@ interface Props {
   onSoloWell?: (row: number, col: number) => void;
   /** Hover-card content for a well's `"A1"`-style label, or `null`/undefined to show none. */
   cardData?: (label: string) => HoverCardData | null | undefined;
+}
+
+/** Cq at or below which a well's `+` is drawn at full strength. */
+const CQ_BRIGHT = 20;
+/** Cq by which it has faded to {@link OPACITY_DIM} — past here a positive is late and weak. */
+const CQ_DIM = 30;
+/** Cq at and beyond which it sits at {@link OPACITY_FAINT}, barely above the cell background. */
+const CQ_FAINT = 35;
+const OPACITY_DIM = 0.35;
+const OPACITY_FAINT = 0.12;
+
+/**
+ * How strongly to draw a well's `+`, from its lowest Cq: a well that crossed its threshold early
+ * carries far more signal than one that scraped across at cycle 38, and the grid should show that
+ * at a glance rather than reading every positive alike. Full strength at Cq ≤ 20, faded to
+ * {@link OPACITY_DIM} by 30 and to {@link OPACITY_FAINT} at 35 and beyond, linear in between.
+ */
+export function plusOpacity(cq: number): number {
+  if (!Number.isFinite(cq) || cq <= CQ_BRIGHT) return 1;
+  if (cq >= CQ_FAINT) return OPACITY_FAINT;
+  if (cq <= CQ_DIM) {
+    const t = (cq - CQ_BRIGHT) / (CQ_DIM - CQ_BRIGHT);
+    return 1 + t * (OPACITY_DIM - 1);
+  }
+  const t = (cq - CQ_DIM) / (CQ_FAINT - CQ_DIM);
+  return OPACITY_DIM + t * (OPACITY_FAINT - OPACITY_DIM);
 }
 
 /**
@@ -87,7 +115,7 @@ export function WellMatrix({
         const on = enabled.has(key);
         const type = wellTypes?.get(key);
         const meta = type ? SAMPLE_TYPE_META[type] : undefined;
-        const positive = positiveWells?.has(key) ?? false;
+        const minCq = positiveWells?.get(key);
         // The `+` takes the cell's border color, dimmed alongside it when the well is off, so a
         // positive NTC reads red and a positive unknown blue without needing a legend.
         const borderColor = meta ? meta.color + (on ? "" : "66") : undefined;
@@ -117,7 +145,11 @@ export function WellMatrix({
             }}
             aria-pressed={on}
             aria-label={
-              [`Well ${label}${c + 1}`, meta?.label, positive ? "positive" : null]
+              [
+                `Well ${label}${c + 1}`,
+                meta?.label,
+                minCq != null ? `positive, Cq ${minCq.toFixed(1)}` : null,
+              ]
                 .filter(Boolean)
                 .join(" — ")
             }
@@ -125,10 +157,23 @@ export function WellMatrix({
             // the well and its sample type, and the two floating boxes fight each other.
             title={!cardData && meta ? `${label}${c + 1} — ${meta.label}` : undefined}
           >
-            {positive && (
-              <span className="wm-cell__plus" style={borderColor ? { color: borderColor } : undefined}>
-                +
-              </span>
+            {/* Drawn rather than typed: a "+" glyph sits on the text baseline with its own
+                side/vertical bearings, so it never centers in a cell this small however the line
+                box is aligned. Two strokes on a square viewBox center exactly. */}
+            {minCq != null && (
+              <svg
+                className="wm-cell__plus"
+                viewBox="0 0 12 12"
+                aria-hidden="true"
+                style={{ color: borderColor, opacity: plusOpacity(minCq) }}
+              >
+                <path
+                  d="M6 2v8M2 6h8"
+                  stroke="currentColor"
+                  strokeWidth="2.2"
+                  strokeLinecap="round"
+                />
+              </svg>
             )}
           </button>
         );

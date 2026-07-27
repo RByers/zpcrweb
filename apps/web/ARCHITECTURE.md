@@ -464,8 +464,12 @@ only pieces the two views share.
   non-empty wells. The matrix sits directly under the View toggle, above the channel/target bar:
   besides being the selection reached for first, it doubles as a positives map — a well holding
   any curve the run's Cq table gave a Cq is marked with a `+` in its own sample-type color
-  (`WellMatrix`'s `positiveWells`), so a positive NTC reads red. The set comes from `cqTable`,
-  not from the plotted subset, so rail filters don't make the marks come and go.
+  (`WellMatrix`'s `positiveWells`), so a positive NTC reads red. The mark is a drawn SVG cross,
+  not a glyph, so it centers on the cell rather than on a text baseline, and it is faded by
+  `plusOpacity()` of the well's *lowest* Cq: full strength at Cq ≤ 20, down to 0.35 by 30 and
+  0.12 at 35 and beyond, so an early strong positive reads at a glance against a late marginal
+  one. `positiveWells` maps well key → min Cq and comes from `cqTable`, not from the plotted
+  subset, so rail filters don't make the marks come and go.
   `CurvesView` applies that same non-empty-wells set as the one-time default
   the first time a file's plate loads (only while the selection still looks like the untouched
   "all wells" default, so a previously customized selection is left alone). Channel mode mirrors

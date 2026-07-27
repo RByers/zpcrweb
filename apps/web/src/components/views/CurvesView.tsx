@@ -110,17 +110,20 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
   const wellTypes = useMemo(() => computeWellTypes(plate), [plate]);
 
   // Wells holding at least one positive curve — one the run's Cq table gave a Cq, i.e. it crossed
-  // its threshold. Read from that same table rather than from the plotted subset, so the mark
-  // doesn't come and go as the rail's filters change: a well is positive or it isn't.
+  // its threshold — mapped to the *lowest* such Cq, which is what fades the grid's `+` (see
+  // `plusOpacity`). Read from that table rather than from the plotted subset, so the mark doesn't
+  // come and go as the rail's filters change: a well is positive or it isn't.
   const positiveWells = useMemo(() => {
-    const s = new Set<string>();
+    const m = new Map<string, number>();
     for (const [key, e] of cqTable) {
       if (e.cq == null) continue;
       // `curveKey` is `row,col,fluor` — the well key is its first two fields.
       const [row, col] = key.split(",");
-      s.add(wellKey(Number(row), Number(col)));
+      const k = wellKey(Number(row), Number(col));
+      const prev = m.get(k);
+      if (prev == null || e.cq < prev) m.set(k, e.cq);
     }
-    return s;
+    return m;
   }, [cqTable]);
 
   const fullWellSet = useMemo(() => {
