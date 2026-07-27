@@ -36,7 +36,7 @@ export {
 export {
   decodePlateRead,
   decodePlateReadDetail,
-  wellIndex,
+  buildWellTable,
   isPlateReadName,
   plateReadNumber,
   CHANNELS,
@@ -99,6 +99,7 @@ export type {
   RunMetadata,
   PlateRead,
   WellReading,
+  WellTable,
   WellCurve,
   WellFactors,
   DarkCurve,

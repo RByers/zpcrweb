@@ -79,6 +79,10 @@ record_index = channel * 108 + row * 12 + col
 data_offset  = 0x1A8 + 16 * record_index
 ```
 
+The decoder reshapes this flat, channel-major array into the nested
+`PlateRead.wells[channel][row][col]` table (`buildWellTable` in `plateread.ts`); the flat
+indexing above describes the bytes on disk, not the API.
+
 - **6 channels**, index 0–5 (the run's `ScanMask = 63` = `0b111111` = all 6 optical channels).
 - **108 wells per channel**, laid out **row-major**: `well = row*12 + col`.
   - `col` = 0–11  → plate columns 1–12

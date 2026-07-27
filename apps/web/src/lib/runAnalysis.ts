@@ -301,7 +301,7 @@ export function useRunAnalysis(
   const corrections = useMemo<FluorCorrections>(() => {
     const reads = zpcr.reads.filter((r) => r.step === activeStep);
     // §4.1: one position of the reference row — the first — per channel, LED on.
-    const referenceLevel = available.map((ch) => reads.map((r) => r.get(ch, REFERENCE_ROW, 0).mean));
+    const referenceLevel = available.map((ch) => reads.map((r) => r.wells[ch]![REFERENCE_ROW]![0]!.mean));
     // §4.2: the optional dark-current subtraction, as a per-cycle table — DARKDATA is re-read
     // every scan, so the level varies cycle to cycle. Off by default, in which case nothing is
     // subtracted and the stage is skipped entirely.

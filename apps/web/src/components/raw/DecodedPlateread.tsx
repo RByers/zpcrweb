@@ -206,7 +206,7 @@ export function DecodedPlateread({ zpcr, read }: { zpcr: Zpcr; read: PlateRead }
                 <tr key={label} className={row === 8 ? "decoded__refrow" : ""}>
                   <th>{label}</th>
                   {Array.from({ length: COLS }, (_, col) => (
-                    <td key={col}>{fmt(read.get(channel, row, col)[stat])}</td>
+                    <td key={col}>{fmt(read.wells[channel]![row]![col]![stat])}</td>
                   ))}
                 </tr>
               ))}

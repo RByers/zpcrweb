@@ -5,10 +5,14 @@ import { readSampleBytes } from "./sample.js";
 describe("plateread decoding", () => {
   const zpcr = parseZpcr(readSampleBytes());
 
-  it("decodes 45 reads, each with 648 wells and 6 dark records", () => {
+  it("decodes 45 reads, each a 6 x 9 x 12 well table plus 6 dark records", () => {
     expect(zpcr.reads).toHaveLength(45);
     for (const read of zpcr.reads) {
-      expect(read.wells).toHaveLength(648);
+      expect(read.wells).toHaveLength(6);
+      for (const channel of read.wells) {
+        expect(channel).toHaveLength(9);
+        for (const row of channel) expect(row).toHaveLength(12);
+      }
       expect(read.dark).toHaveLength(6);
     }
   });
@@ -37,19 +41,19 @@ describe("plateread decoding", () => {
     const first = zpcr.reads[0]!;
     const last = zpcr.reads[44]!;
     // well 3A = row A (0), col 3 (index 2)
-    expect(first.get(2, 0, 2).mean).toBeCloseTo(4288.7, 0);
-    expect(last.get(2, 0, 2).mean).toBeCloseTo(6852.1, 0);
+    expect(first.wells[2]![0]![2]!.mean).toBeCloseTo(4288.7, 0);
+    expect(last.wells[2]![0]![2]!.mean).toBeCloseTo(6852.1, 0);
   });
 
   it("keeps a non-amplifying channel/well flat across the run", () => {
-    const first = zpcr.reads[0]!.get(0, 0, 2).mean;
-    const last = zpcr.reads[44]!.get(0, 0, 2).mean;
+    const first = zpcr.reads[0]!.wells[0]![0]![2]!.mean;
+    const last = zpcr.reads[44]!.wells[0]![0]![2]!.mean;
     // channel 0 negative on 3A barely moves (~3212 -> ~3290 per the doc)
     expect(Math.abs(last - first)).toBeLessThan(150);
   });
 
   it("populates the reference row (row 8) with real readings", () => {
-    const ref = zpcr.reads[0]!.get(0, 8, 0);
+    const ref = zpcr.reads[0]!.wells[0]![8]![0]!;
     expect(ref.mean).toBeGreaterThan(0);
   });
 
@@ -61,12 +65,6 @@ describe("plateread decoding", () => {
     expect(last.timestamp).toBe("Tue, 21 Jul 2026 06:22:23 GMT");
   });
 
-  it("rejects out-of-range coordinates", () => {
-    const read = zpcr.reads[0]!;
-    expect(() => read.get(6, 0, 0)).toThrow(/channel/);
-    expect(() => read.get(0, 9, 0)).toThrow(/row/);
-    expect(() => read.get(0, 0, 12)).toThrow(/col/);
-  });
 });
 
 describe("decodePlateReadDetail", () => {

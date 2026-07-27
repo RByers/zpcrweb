@@ -61,7 +61,7 @@ console.log(zpcr.metadata.baseSerialNumber);   // "CT019138"
 console.log(zpcr.reads.length);                // 45
 
 // well 3A (row A=0, col 3→index 2) on channel 2, last cycle
-console.log(zpcr.reads.at(-1)!.get(2, 0, 2).mean); // ~6852
+console.log(zpcr.reads.at(-1)!.wells[2]![0]![2]!.mean); // ~6852
 
 // amplification curve for that well
 const [curve] = zpcr.curves({ channel: 2 }).filter((c) => c.wellLabel === "A3");
@@ -86,7 +86,7 @@ const zpcr = await zpcrFromBlob(file);
 | `zpcrFromFile(path)` | Node convenience: read + parse a file from disk |
 | `zpcrFromBlob(blob)` | Browser convenience: read + parse a `Blob`/`File` |
 | `Zpcr.metadata` | Typed `RunMetadata` from `RunInfo.xml` |
-| `Zpcr.reads` | Ordered `PlateRead[]` (one per cycle) with `.get(channel,row,col)` |
+| `Zpcr.reads` | Ordered `PlateRead[]` (one per cycle) with `.wells[channel][row][col]` |
 | `Zpcr.curves(opts)` | Well-centric `WellCurve[]` amplification curves |
 | `Zpcr.darkCurves(step)` | Per-channel dark (LED-off) background across cycles |
 | `Zpcr.temperatureCurves(step)` | Per-field `TemperatureCurve[]` (°C per cycle) |

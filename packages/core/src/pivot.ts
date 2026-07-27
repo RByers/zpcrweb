@@ -75,7 +75,7 @@ export function toCurves(
         const min: number[] = [];
         const max: number[] = [];
         for (const read of reads) {
-          const reading = read.get(channel, row, col);
+          const reading = read.wells[channel]![row]![col]!;
           mean.push(reading.mean);
           std.push(reading.std);
           min.push(reading.min);

@@ -1,4 +1,4 @@
-import type { PlateRead, WellReading } from "./types.js";
+import type { PlateRead, WellReading, WellTable } from "./types.js";
 import { icffFieldMap, parseIcff, type IcffEntry } from "./icff.js";
 import { extractTemps } from "./temps.js";
 
@@ -20,8 +20,6 @@ export const ROWS = 9;
 /** Each WELLDATA/DARKDATA record is four float32 values: mean, std, min, max. */
 const RECORD_SIZE = 16;
 
-const WELL_COUNT = CHANNELS * WELLS_PER_CHANNEL; // 648
-
 function readRecord(view: DataView, offset: number): WellReading {
   // The fluorescence arrays are little-endian (unlike the big-endian metadata).
   return {
@@ -32,9 +30,21 @@ function readRecord(view: DataView, offset: number): WellReading {
   };
 }
 
-/** Compute the flat WELLDATA record index for a channel/row/col coordinate. */
-export function wellIndex(channel: number, row: number, col: number): number {
-  return channel * WELLS_PER_CHANNEL + row * COLUMNS + col;
+/**
+ * Build a `[channel][row][col]` well table from a source that is flat and channel-major
+ * (`channel * 108 + row * 12 + col`), which is how both the binary WELLDATA array and the
+ * `.pcrd` `PAr` list store the table.
+ *
+ * @param record returns the reading at a flat index, or a filler for missing data
+ */
+export function buildWellTable(record: (index: number) => WellReading): WellTable {
+  return Array.from({ length: CHANNELS }, (_, channel) =>
+    Array.from({ length: ROWS }, (_, row) =>
+      Array.from({ length: COLUMNS }, (_, col) =>
+        record(channel * WELLS_PER_CHANNEL + row * COLUMNS + col),
+      ),
+    ),
+  );
 }
 
 /**
@@ -77,10 +87,7 @@ export function decodePlateRead(
   const timestamp =
     dateTime && !Number.isNaN(Date.parse(dateTime)) ? dateTime : undefined;
 
-  const wells: WellReading[] = new Array(WELL_COUNT);
-  for (let i = 0; i < WELL_COUNT; i++) {
-    wells[i] = readRecord(view, wellStart + i * RECORD_SIZE);
-  }
+  const wells = buildWellTable((i) => readRecord(view, wellStart + i * RECORD_SIZE));
 
   const dark: WellReading[] = new Array(CHANNELS);
   for (let i = 0; i < CHANNELS; i++) {
@@ -98,18 +105,6 @@ export function decodePlateRead(
     timestamp,
     wells,
     dark,
-    get(channel, row, col) {
-      if (channel < 0 || channel >= CHANNELS) {
-        throw new RangeError(`channel out of range 0–${CHANNELS - 1}: ${channel}`);
-      }
-      if (row < 0 || row >= ROWS) {
-        throw new RangeError(`row out of range 0–${ROWS - 1}: ${row}`);
-      }
-      if (col < 0 || col >= COLUMNS) {
-        throw new RangeError(`col out of range 0–${COLUMNS - 1}: ${col}`);
-      }
-      return wells[wellIndex(channel, row, col)] as WellReading;
-    },
   };
 }
 

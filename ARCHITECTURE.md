@@ -106,7 +106,7 @@ than let that difference leak into every consumer, `parsePcrd` decodes straight 
   `pivot.ts`, the web app's views, and any future consumer are format-agnostic. A `.pcrd`'s
   plate reads are decoded from `<PlateRead>` XML elements (`decodePcrdPlateRead` in `pcrd.ts`)
   into the identical `PlateRead` interface `decodePlateRead` produces from the binary
-  `.Plateread` layout — same `wells`/`dark`/`temps`/`get()`, different source bytes.
+  `.Plateread` layout — same `wells`/`dark`/`temps`, different source bytes.
 - **`Zpcr.archive`** — a `.pcrd` has no inner files at all (it's one XML document, not an
   archive), so for a `.pcrd`-derived `Zpcr` this is an honestly empty `ArchiveAccess`:
   `entries` is `[]` and the accessors throw. This library does **not** pretend a `.pcrd` has

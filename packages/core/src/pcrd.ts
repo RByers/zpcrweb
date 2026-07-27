@@ -49,7 +49,7 @@ import {
 } from "./xmlLite.js";
 import { parseRunInfo } from "./runinfo.js";
 import { extractTemps } from "./temps.js";
-import { CHANNELS, COLUMNS, WELLS_PER_CHANNEL, wellIndex } from "./plateread.js";
+import { buildWellTable, CHANNELS, COLUMNS, WELLS_PER_CHANNEL } from "./plateread.js";
 import {
   toChannels,
   toCurves,
@@ -117,6 +117,11 @@ const TEMP_FIELD_MAP: Record<string, string> = {
   FanOnTmp: "FANONTEMP",
 };
 
+/** Placeholder for a reading the XML didn't supply — a `.pcrd` may hold a short `PAr` list. */
+function missingReading(): WellReading {
+  return { mean: NaN, std: NaN, min: NaN, max: NaN };
+}
+
 /** Parse a `;`-separated `PAr` float list into `WellReading` records of four floats each. */
 function parsePAr(text: string): WellReading[] {
   if (!text) return [];
@@ -149,10 +154,7 @@ function decodePcrdPlateRead(el: XmlElement, index: number): PlateRead {
   const drkPAr = drkEl ? (findElement(drkEl.inner, "PAr")?.inner ?? "") : "";
 
   const wellsFlat = parsePAr(dataPAr);
-  const wells: WellReading[] = new Array(CHANNELS * WELLS_PER_CHANNEL);
-  for (let i = 0; i < wells.length; i++) {
-    wells[i] = wellsFlat[i] ?? { mean: NaN, std: NaN, min: NaN, max: NaN };
-  }
+  const wells = buildWellTable((i) => wellsFlat[i] ?? missingReading());
   const dark = parsePAr(drkPAr);
 
   const scalar = (name: string): string | undefined => firstTagText(hdr, name);
@@ -198,12 +200,6 @@ function decodePcrdPlateRead(el: XmlElement, index: number): PlateRead {
     headerFields,
     wells,
     dark,
-    get(channel, row, col) {
-      if (channel < 0 || channel >= CHANNELS) {
-        throw new RangeError(`channel out of range 0–${CHANNELS - 1}: ${channel}`);
-      }
-      return wells[wellIndex(channel, row, col)] as WellReading;
-    },
   };
 }
 
@@ -538,9 +534,8 @@ function buildZpcr(root: XmlElement[]): Zpcr {
           channelMask: 0,
           fileName: `plateRead[${index}]`,
           temps: [],
-          wells: new Array(CHANNELS * WELLS_PER_CHANNEL).fill({ mean: NaN, std: NaN, min: NaN, max: NaN }) as WellReading[],
-          dark: new Array(CHANNELS).fill({ mean: NaN, std: NaN, min: NaN, max: NaN }) as WellReading[],
-          get: () => ({ mean: NaN, std: NaN, min: NaN, max: NaN }),
+          wells: buildWellTable(missingReading),
+          dark: Array.from({ length: CHANNELS }, missingReading),
         };
   });
 

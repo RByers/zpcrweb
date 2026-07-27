@@ -84,20 +84,20 @@ export interface PlateRead {
    */
   headerFields?: { name: string; value: string }[];
   /**
-   * The full WELLDATA fluorescence table, channel-major: 6 channels × 108 wells = 648
-   * records. Index with `record = channel * 108 + row * 12 + col`, or use {@link get}.
+   * The full WELLDATA fluorescence table as `wells[channel][row][col]` — 6 optical
+   * channels × 9 rows × 12 columns = 648 records. Rows 0–7 are plate rows A–H; row 8
+   * is the reference row. Columns 0–11 are plate columns 1–12.
    */
-  wells: WellReading[];
+  wells: WellTable;
   /** DARKDATA: the LED-off background reading, one record per channel (6 total). */
   dark: WellReading[];
-  /**
-   * Convenience accessor for a single well reading.
-   * @param channel optical channel 0–5
-   * @param row 0–7 = plate rows A–H, 8 = the reference row
-   * @param col 0–11 = plate columns 1–12
-   */
-  get(channel: number, row: number, col: number): WellReading;
 }
+
+/**
+ * The WELLDATA table of a single plate read, indexed `[channel][row][col]`. Dimensions are
+ * the `CHANNELS` × `ROWS` × `COLUMNS` constants; every slot is populated.
+ */
+export type WellTable = WellReading[][][];
 
 /** Run-level metadata, primarily sourced from `RunInfo.xml`. */
 export interface RunMetadata {

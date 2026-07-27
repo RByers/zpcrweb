@@ -230,9 +230,9 @@ describe("pcrd — synthetic round trip (no real password needed)", () => {
     expect(zpcr.reads[0]!.cycle).toBe(1);
     expect(zpcr.reads[0]!.blockTempC).toBeCloseTo(59.99, 2);
     expect(zpcr.reads[1]!.blockTempC).toBeCloseTo(60.01, 2);
-    expect(zpcr.reads[0]!.wells).toHaveLength(648);
+    expect(zpcr.reads[0]!.wells).toHaveLength(6);
     expect(zpcr.reads[0]!.dark).toHaveLength(6);
-    expect(zpcr.reads[0]!.get(0, 0, 0).mean).toBeCloseTo(1000, 2);
+    expect(zpcr.reads[0]!.wells[0]![0]![0]!.mean).toBeCloseTo(1000, 2);
   });
 
   it("pivots into curves/darkCurves/steps like a .zpcr", () => {

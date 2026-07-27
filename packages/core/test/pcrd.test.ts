@@ -193,10 +193,16 @@ describe("pcrd — decoded structure (real document, re-wrapped, no secret neede
       expect(a.step).toBe(b.step);
       expect(a.channelMask).toBe(b.channelMask);
       expect(a.blockTempC).toBeCloseTo(b.blockTempC!, 2);
-      for (let w = 0; w < a.wells.length; w++) {
-        expect(a.wells[w]!.mean).toBeCloseTo(b.wells[w]!.mean, 2);
-        expect(a.wells[w]!.min).toBeCloseTo(b.wells[w]!.min, 2);
-        expect(a.wells[w]!.max).toBeCloseTo(b.wells[w]!.max, 2);
+      for (let ch = 0; ch < a.wells.length; ch++) {
+        for (let row = 0; row < a.wells[ch]!.length; row++) {
+          for (let col = 0; col < a.wells[ch]![row]!.length; col++) {
+            const x = a.wells[ch]![row]![col]!;
+            const y = b.wells[ch]![row]![col]!;
+            expect(x.mean).toBeCloseTo(y.mean, 2);
+            expect(x.min).toBeCloseTo(y.min, 2);
+            expect(x.max).toBeCloseTo(y.max, 2);
+          }
+        }
       }
       for (let d = 0; d < a.dark.length; d++) {
         expect(a.dark[d]!.mean).toBeCloseTo(b.dark[d]!.mean, 2);

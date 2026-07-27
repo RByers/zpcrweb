@@ -120,7 +120,7 @@ export function plateReadToCsv(read: PlateRead): string {
     for (let col = 0; col < PLATE_COLS; col++) {
       const well = wellLabel(row, col);
       for (let ch = 0; ch < channelCount; ch++) {
-        const r = read.get(ch, row, col);
+        const r = read.wells[ch]![row]![col]!;
         out += csvRow([well, channelLabel(ch), String(r.mean), String(r.min), String(r.max), String(r.std)]);
       }
     }

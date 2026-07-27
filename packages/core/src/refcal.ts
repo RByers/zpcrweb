@@ -78,7 +78,7 @@ export function compareRefToCal(
 ): RefCalComparison[] {
   return cal.map((c) => {
     let sum = 0;
-    for (const read of reads) sum += read.get(c.channel, REFERENCE_ROW, c.col).mean;
+    for (const read of reads) sum += read.wells[c.channel]![REFERENCE_ROW]![c.col]!.mean;
     const liveMean = reads.length > 0 ? sum / reads.length : 0;
     return {
       channel: c.channel,
