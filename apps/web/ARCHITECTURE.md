@@ -1040,12 +1040,20 @@ neighbours' channels.
   `lib/calibrationCurves.ts` marks each file `inUse` on exactly the terms
   `matchFluorCalibrations` matches on (this plate's fluorophores, this plate's tube type, both
   compared case-insensitively), and those are what's shown; everything else is one chip-click
-  away and drawn **dashed**, the same "context, not the measurement" convention the dark/factory
-  overlays use elsewhere. With no plate (missing, or still behind the password prompt) nothing is
-  in use, so the fallback is every calibration for the default tube type, with a rail note saying
-  so. The dye's own channel (`Dcal.primaryChannel`) is drawn at double width — its signal, as
-  against its crosstalk. Chips are ordered by that channel (then by name) within each tube-type
-  group, so the dye list runs along the spectrum in step with the channel bar below it.
+  away. `inUse` decides the default selection and **nothing else** — in particular it doesn't
+  affect how a line is drawn. A `.Dcal` set characterizes the instrument's optics, not the run:
+  across the committed samples the four `.zpcr` files carry bit-identical calibration values from
+  2019 to 2026 (same instrument, alpha `SG16130`), and the two `.pcrd` files agree with them to
+  ~5e-3 RFU — text round-trip noise, not a difference. So "does this run read this file" is not
+  information about the data, and the dash is spent on something that is. With no plate (missing,
+  or still behind the password prompt) nothing is in use, so the fallback is every calibration for
+  the default tube type, with a rail note saying so.
+- **Solid = signal, dashed = crosstalk.** A dye on its own channel (`Dcal.primaryChannel`) is
+  drawn solid at double width; the same dye's response on every other channel is dashed and thin.
+  That is the distinction the plot exists to show — how far each dye bleeds into its neighbours —
+  and it reads directly off the line style instead of having to be traced back through the legend.
+  Chips are ordered by that same channel (then by name) within each tube-type group, so the dye
+  list runs along the spectrum in step with the channel bar below it.
 - **Relative vs. absolute** (`calView`, the rail's Values switch). Relative — the default — is
   the response the algorithm consumes, `max(0, dye − empty)`. Absolute splits it back into the two
   raw reads that difference is taken between, plotting the pure-dye plate and, dotted below it,

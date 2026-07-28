@@ -130,6 +130,17 @@ const emptyAt60 = findDcalBlock(dcal, "empty", 60)!;
 - `fields`: every ICFF index entry, raw, for anything not surfaced above (e.g. `CRC`,
   `REFSPOTS`).
 
+### A property of the instrument, not the run
+
+A `.Dcal` set characterizes the optics, so the same 28 files ride along in every run the
+instrument writes, unchanged until it is recalibrated. Measured across the committed samples:
+the four `.zpcr` files — 2019, 2023 and two from 2026, all from alpha `SG16130` / base
+`CC001101` / head `785BR13647` — carry **bit-identical** values across all 145,152 calibration
+readings, and the two `.pcrd` files agree with them to 5e-3 RFU absolute (4e-7 relative), which
+is the `.pcrd`'s text round-trip, not a difference. So a run's calibration data tells you about
+the machine; treat it as constant between runs and be suspicious of anything that reads it as
+per-run information.
+
 This library only **decodes** the file — it does not attempt color separation or any other
 downstream calibration math. Building that on top (e.g. combining the dye and empty readings
 across channels and temperatures into a color-separation matrix) is a natural next step but is

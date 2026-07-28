@@ -38,8 +38,12 @@ interface Props {
  *
  * Shown by default: only the files the run's analysis actually reads (this plate's fluorophores,
  * on the tube type the plate resolves to). The rest of the archive's calibrations — every other
- * dye, and the other tube type — are one chip-click away, drawn dashed so the ones the analysis
- * uses stay identifiable.
+ * dye, and the other tube type — are one chip-click away. That's `inUse`'s whole remit: it picks
+ * the *default selection*, and nothing about how a line is drawn. A `.Dcal` set characterizes the
+ * instrument's optics, not the run — the committed samples carry identical calibration data from
+ * 2019 to 2026 — so which of them a given run happens to read says nothing about the numbers, and
+ * the line style is spent on something that does: solid for a dye on its own channel, dashed for
+ * its crosstalk into the others.
  *
  * The rail is deliberately the Curves view's: the same `FluorBar` chips (dye chips here rather
  * than target chips), the same `ChannelBar` reading the same `enabledChannels` setting, the same
@@ -148,7 +152,6 @@ export function CalibrationView({ zpcr, settings, onChange }: Props) {
             plateType: f.plateType,
             channel: ch,
             primary: ch === f.primaryChannel,
-            inUse: f.inUse,
           };
           if (settings.calView === "relative") {
             return [
@@ -353,9 +356,10 @@ export function CalibrationView({ zpcr, settings, onChange }: Props) {
               empty-plate baseline dotted below it. Only their difference reaches the algorithm.
             </>
           )}{" "}
-          Lines are straight because the algorithm interpolates linearly between these four
-          measured temperatures; the marker sits at this step's block temperature, where the
-          calibration matrix is sampled. Dashed lines aren't used by this run's analysis.
+          Solid lines are each dye on its own channel; dashed ones are its crosstalk into the
+          others. Lines are straight because the algorithm interpolates linearly between these
+          four measured temperatures; the marker sits at this step's block temperature, where the
+          calibration matrix is sampled.
         </div>
       </aside>
 

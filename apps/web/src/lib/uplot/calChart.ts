@@ -24,9 +24,16 @@ import type { Scale } from "../../state/useZpcrStore";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
-/** Files the run's analysis doesn't use are drawn dashed — the same "this is context, not the
- * measurement" convention the reference/dark overlays use on the Curves chart. */
-const EXTRA_DASH = [5, 4];
+/**
+ * A dye's **crosstalk** — its response on a channel that isn't its own — is drawn dashed, against
+ * a solid line on its primary channel. That's the one distinction worth carrying in the line
+ * style here: a `.Dcal` set is a property of the instrument's optics, identical in every run it
+ * ships with (verified across every committed sample: the four `.zpcr` files, 2019 to 2026, carry
+ * bit-identical calibration values, and the two `.pcrd` files agree to ~5e-3 RFU, i.e. text
+ * round-trip noise), so "does this run use it" is not information about the data — whereas signal
+ * vs. bleed-through is what the plot is for.
+ */
+const CROSSTALK_DASH = [5, 4];
 /** The empty-plate baseline in absolute mode — dotted, so it reads as the level the dye reading
  * above it is measured against rather than as a curve in its own right. */
 const EMPTY_DASH = [1, 3];
@@ -59,10 +66,9 @@ export interface CalPlotSeries {
   dye: string;
   plateType: string;
   channel: number;
-  /** True on the dye's own channel: its signal, as opposed to its crosstalk into the others. */
+  /** True on the dye's own channel: its signal, as opposed to its crosstalk into the others.
+   * Drawn solid and double width; everything else is dashed. */
   primary: boolean;
-  /** True when the run's analysis reads this file — drawn solid rather than dashed. */
-  inUse: boolean;
   /** The line's knots, sorted by temperature. `response` carries whichever level {@link kind}
    * names — for a raw reading it is the reading itself, not a difference. */
   knots: ResponseKnot[];
@@ -155,9 +161,9 @@ export function buildCalChart(cfg: BuildCalChartConfig): {
       // smaller and worth de-emphasising. The empty-plate baseline is context for the reading
       // above it, so it stays thin whichever channel it's on.
       width: s.primary && s.kind !== "empty" ? 2 : 1,
-      // Dotted wins over dashed on an empty-plate line: which level it is matters more than
-      // whether the analysis reads that file, and the dye line beside it still says the latter.
-      dash: s.kind === "empty" ? EMPTY_DASH : s.inUse ? undefined : EXTRA_DASH,
+      // Dotted wins over dashed on an empty-plate line: which level it is outranks signal vs.
+      // crosstalk, and the dye line directly above it already carries the latter.
+      dash: s.kind === "empty" ? EMPTY_DASH : s.primary ? undefined : CROSSTALK_DASH,
       points: { show: true, size: 5 },
     });
   }
