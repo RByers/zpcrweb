@@ -38,6 +38,23 @@ import {
  * (`threshold.md` §5.1), so those three runs legitimately disagreed — the same well showing a Cq in
  * one view and "—" in another. There is now exactly one Cq per well/fluor pair per run, computed
  * over the whole plate; callers filter the table for display and never recompute from a subset.
+ *
+ * ## The analysis pipeline is format-independent, by rule
+ *
+ * **Nothing from here down may read a field that only one source format carries.** Calibration and
+ * thresholding consume `Zpcr` — reads, plate, `.Dcal` calibrations, protocol — and every one of
+ * those is populated identically by `parseZpcr` and `parsePcrd`. A `.zpcr` and the `.pcrd` saved
+ * from the same run must produce the same curves, the same thresholds and the same Cq, because
+ * they are the same measurement; a number that changes with the container it was saved in is not a
+ * measurement result, it's an artifact.
+ *
+ * This is checked, not just asserted: `.zpcr`/`.pcrd` pairs of one run agree to ~4e-5 cycles in Cq,
+ * the residual being nothing but storage precision (a `.pcrd` writes well readings as text rounded
+ * to two decimals, a `.zpcr` as binary float32).
+ *
+ * The one field that violated this was `Zpcr.wellFactors` — see the `corrections` memo below.
+ * `Zpcr.archive`, `RunResult.documentXml` and `RunResult.selfEncrypted` are the other
+ * format-asymmetric surfaces; they belong to the raw views alone (see `apps/web/ARCHITECTURE.md`).
  */
 
 /** Cq is always `threshold.md` §6.1's threshold crossing — the instrument's own default, and the
@@ -319,20 +336,13 @@ export function useRunAnalysis(
     const backgroundLevel = settings.subtractDark
       ? available.map((ch) => darkByChannel.get(ch)?.mean ?? [])
       : undefined;
-    // §4.1: per-well gain factors, only ever present in a `.pcrd` (a `.zpcr` stores none), and only
-    // when that run actually saved a set — otherwise the gain correction stays inactive and the
-    // reference level correctly has no effect of its own.
-    const factors = zpcr.wellFactors;
-    return {
-      referenceLevel,
-      backgroundLevel,
-      wellFactor: factors
-        ? (row, col) => {
-            const perChannel = factors.get(row, col);
-            return perChannel && available.map((ch) => perChannel[ch] ?? 1);
-          }
-        : undefined,
-    };
+    // §4.1's per-well gain factors are deliberately *not* passed. `Zpcr.wellFactors` is decoded
+    // only from a `.pcrd`'s `wellFactorsCollection`; a `.zpcr` stores no equivalent, so feeding it
+    // in would make the same run quantify differently depending on which file you opened — exactly
+    // what the format-independence rule above forbids. See the TODO in `calibration.md` §4.1 if a
+    // `.zpcr`-side source for these is ever found. (`referenceLevel` is the pivot for that
+    // correction and has no effect on its own, so it stays and costs nothing.)
+    return { referenceLevel, backgroundLevel };
   }, [
     zpcr,
     activeStep,

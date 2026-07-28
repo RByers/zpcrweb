@@ -1663,9 +1663,43 @@
   color: var(--neon-cyan);
 }
 .decoded__ftext {
+  display: inline-block;
   max-width: 44ch;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
+/* Only the values long enough to be truncated are hoverable — see `raw/LongValue.tsx`. */
+.decoded__ftext--long {
+  cursor: help;
+  text-decoration: underline dotted var(--ink-muted);
+  text-underline-offset: 3px;
+}
+.decoded__ftext--long:focus-visible {
+  outline: 1px solid var(--neon-cyan);
+  outline-offset: 2px;
+}
+
+/* The full, line-wrapped value behind a truncated cell. */
+.valuecard {
+  pointer-events: none;
+  max-width: min(72ch, calc(100vw - 32px));
+  max-height: 260px;
+  overflow-y: auto;
+  padding: 10px 12px;
+  background: rgba(10, 14, 22, 0.96);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(4px);
+  color: var(--ink);
+  font-size: 11px;
+  line-height: 1.5;
+  /* The whole point of the card: wrap rather than truncate, and break a long unbroken token
+     (a hex blob, a serial list with no spaces) rather than overflow the box. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 /* WELLDATA grid */

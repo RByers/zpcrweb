@@ -71,13 +71,15 @@ describe("PlateRead.fields — the format-neutral header table", () => {
   const zpcr = parseZpcr(readSampleBytes());
   const read = zpcr.reads[0]!;
 
-  it("exposes the whole descriptor dictionary as key/value pairs, with ICFF provenance", () => {
+  it("exposes the whole descriptor dictionary as key/value pairs, and nothing else", () => {
     const detail = decodePlateReadDetail(zpcr.archive.bytes(read.fileName));
     expect(read.fields.map((f) => f.name)).toEqual(detail.fields.map((f) => f.name));
-    expect(read.fields.every((f) => f.binary !== undefined)).toBe(true);
     const cycle = read.fields.find((f) => f.name === "CYCLE")!;
     expect(cycle.value).toBe(String(read.cycle));
-    expect(cycle.binary!.offset).toBeGreaterThan(0);
+    // Strictly two keys, whatever the source format: the library types each value once, and a
+    // consumer wanting offsets/lengths/flags goes to `decodePlateReadDetail` instead. Asserted
+    // so the raw ICFF entry can't quietly reappear on the format-neutral shape.
+    expect(read.fields.every((f) => Object.keys(f).sort().join() === "name,value")).toBe(true);
   });
 
   it("renders untyped values by their decoded meaning: °C, text, byte counts", () => {
@@ -87,7 +89,8 @@ describe("PlateRead.fields — the format-neutral header table", () => {
     expect(value("BLOCKTEMP")).toBe(`${Number(read.blockTempC!.toFixed(2))} °C`);
     expect(value("BLOCKTEMP")).toMatch(/^\d+(\.\d{1,2})? °C$/);
     expect(value("DATETIME")).toBe(read.timestamp);
-    // The bulk float arrays have no scalar value — their offsets, in `binary`, are the point.
+    // The bulk float arrays have no scalar value — a byte count is all the key/value shape can
+    // honestly say; their offsets live in `decodePlateReadDetail`.
     expect(value("WELLDATA")).toMatch(/^«\d+ B»$/);
   });
 

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { PlateRead } from "@zpcrweb/core";
 import { channelColor, channelLabel } from "../../lib/channelColors";
+import { LongValue } from "./LongValue";
 
 type Stat = "mean" | "std" | "min" | "max";
 const STATS: Stat[] = ["mean", "std", "min", "max"];
@@ -12,15 +13,21 @@ const COLS = 12;
  * off the already-decoded `PlateRead`: its header fields as one key/value table (the binary
  * file's own descriptor dictionary or the `.pcrd` XML header's children — `PlateRead.fields`
  * unifies them, so nothing here re-parses a file or branches on format), the DARKDATA table,
- * and the WELLDATA fluorescence grid. The extra ICFF columns and the file-structure numbers
- * appear only when the read has a binary file behind it, since only then do they exist.
+ * and the WELLDATA fluorescence grid.
+ *
+ * The fields table is exactly two columns, for both formats. It used to widen to eight for a
+ * binary read — offset, length, flag, int (BE), float (BE), text/hex — which meant this
+ * component knew about ICFF layout and endianness, and had to re-guess a field's type after
+ * the library had already guessed it. The library now types each value once
+ * (`PlateReadField.value`); the raw byte view lives behind `decodePlateReadDetail`, where
+ * binary-format work belongs. Only the file-structure numbers still branch, because a
+ * `.pcrd`-origin read genuinely has no file behind it.
  */
 export function DecodedPlateread({ read }: { read: PlateRead }) {
   const [channel, setChannel] = useState(2);
   const [stat, setStat] = useState<Stat>("mean");
 
   const binaryFile = read.binaryFile;
-  const hasIcff = read.fields.some((f) => f.binary);
   const channelCount = read.dark.length;
 
   const fmt = (v: number) => (stat === "std" ? v.toFixed(2) : v.toFixed(1));
@@ -56,15 +63,14 @@ export function DecodedPlateread({ read }: { read: PlateRead }) {
       {read.fields.length > 0 && (
         <section className="decoded__block">
           <h3 className="decoded__h">
-            {hasIcff
+            {binaryFile
               ? "Header fields — the file's own descriptor dictionary, every entry"
               : "Header fields — every element of the read's XML header"}
           </h3>
-          {hasIcff && (
+          {binaryFile && (
             <p className="decoded__hint mono">
-              Scalars are big-endian; the WELLDATA/DARKDATA float arrays are little-endian.
-              The dictionary carries no types, so Value is a best-effort reading — the raw
-              columns beside it show every decoding of the same bytes.
+              The dictionary carries no types, so each value is the library's own reading of an
+              untyped byte range (see <code>PlateReadField.value</code>).
             </p>
           )}
           <div className="decoded__gridwrap">
@@ -73,48 +79,17 @@ export function DecodedPlateread({ read }: { read: PlateRead }) {
                 <tr>
                   <th>Field</th>
                   <th>Value</th>
-                  {hasIcff && (
-                    <>
-                      <th>Offset</th>
-                      <th>Len</th>
-                      <th>Flag</th>
-                      <th>int (BE)</th>
-                      <th>float (BE)</th>
-                      <th>text / hex</th>
-                    </>
-                  )}
                 </tr>
               </thead>
               <tbody>
-                {read.fields.map((f) => {
-                  const b = f.binary;
-                  return (
-                    <tr key={f.name}>
-                      <td className="decoded__fname">{f.name}</td>
-                      <td className="decoded__ftext">{f.value}</td>
-                      {hasIcff && (
-                        <>
-                          <td>{b ? `0x${b.offset.toString(16)}` : ""}</td>
-                          <td>{b?.length ?? ""}</td>
-                          <td>{b?.flag ?? ""}</td>
-                          <td>{b && b.length === 4 ? b.int : ""}</td>
-                          <td>
-                            {b && b.length === 4 && b.float !== undefined
-                              ? b.float.toFixed(Math.abs(b.float) < 1000 ? 3 : 0)
-                              : ""}
-                          </td>
-                          <td className="decoded__ftext">
-                            {b?.text !== undefined
-                              ? b.text
-                              : b && b.length > 4
-                                ? `«${b.length} B» 0x${b.hex}`
-                                : ""}
-                          </td>
-                        </>
-                      )}
-                    </tr>
-                  );
-                })}
+                {read.fields.map((f) => (
+                  <tr key={f.name}>
+                    <td className="decoded__fname">{f.name}</td>
+                    <td>
+                      <LongValue value={f.value} />
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>

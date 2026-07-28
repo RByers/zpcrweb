@@ -14,17 +14,15 @@ export type EncryptionStatus =
   | { kind: "locked" };
 
 /**
- * Encryption status for a `.zpcr`/`.pcrd` run. A `.pcrd` is itself one encrypted document (its
- * own `container.encrypted`); a `.zpcr`'s outer archive is never encrypted, so its status
- * instead comes from whichever embedded `.pltd`/`.prcl` entries are ZipCrypto-encrypted.
+ * Encryption status for a run. Asked and answered without naming a format: a run that is *itself*
+ * an encrypted container ({@link RunResult.selfEncrypted} — in practice a `.pcrd`) is decrypted
+ * exactly when it produced a `Zpcr`; any other run's status comes from whichever embedded
+ * `.pltd`/`.prcl` entries are ZipCrypto-encrypted, of which an unencrypted run simply has none.
  */
 export function runEncryptionStatus(run: RunResult | undefined, password: string): EncryptionStatus {
   if (!run) return { kind: "none" };
 
-  if (run.container) {
-    if (!run.container.encrypted) return { kind: "none" };
-    return run.zpcr ? { kind: "decrypted", password } : { kind: "locked" };
-  }
+  if (run.selfEncrypted) return run.zpcr ? { kind: "decrypted", password } : { kind: "locked" };
 
   if (!run.zpcr) return run.needsPassword || run.error ? { kind: "locked" } : { kind: "none" };
 

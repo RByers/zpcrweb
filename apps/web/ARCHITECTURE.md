@@ -6,6 +6,34 @@ loads one or more files — `.zpcr`, `.pcrd`, or a standalone plate file (`.pltd
 explores each through up to six views: Overview, Curves, Plates, Reference, Calibration, and Raw
 (a standalone plate file only gets Plates + Raw — see below).
 
+## Format independence
+
+**Except for the Raw views, the app is entirely format-agnostic. This is an invariant, not an
+observation.**
+
+Concretely, outside `RawFilesView`/`PcrdRawView` and the `App.tsx` line that chooses between
+them, no component may:
+
+- branch on `LoadedFile.kind` (or otherwise ask which format a run came from);
+- read `Zpcr.archive`, which a `.pcrd`-derived `Zpcr` has none of;
+- read `RunResult.documentXml`, which only a `.pcrd` populates;
+- read any `Zpcr` field only one decoder fills — `Zpcr.wellFactors` is the live example.
+
+The reason is not tidiness. `.zpcr` and `.pcrd` are two containers around *the same physical
+run*, so anything the app reports off one must match what it reports off the other; a number
+that changes with the container is an artifact, not a measurement. This binds the analysis
+pipeline especially hard — see the header comment in `lib/runAnalysis.ts`, and the `wellFactors`
+note in [`calibration.md`](../../calibration.md) §4.1 for the one correction dropped to keep it
+true. Verified: a `.zpcr`/`.pcrd` pair of one run agrees to ~4e-5 cycles in Cq, the residual
+being only that a `.pcrd` stores well readings as text rounded to two decimals where a `.zpcr`
+stores binary float32.
+
+Where a format difference genuinely has to be *known*, it is collapsed to a format-neutral fact
+at the single boundary where runs are parsed (`parseRun` in `state/useZpcrStore.ts`). The
+"Encrypted" block is the model: `RunResult.selfEncrypted` is a boolean meaning "the run file is
+itself an encrypted container", not the `PcrdContainer` it used to be, so `OverviewView` and
+`FileBar` ask about encryption without learning that a container exists.
+
 ## Two formats, mostly one UI
 
 `@zpcrweb/core`'s `parseZpcr`/`parsePcrd` both produce the same `Zpcr` shape (see the root
@@ -19,27 +47,40 @@ app is format-agnostic:
   table work identically either way; when there's no step list it falls back to
   `zpcr.protocolText` rendered through the same `ProtocolDecoded` line-numbering the Raw view
   uses (see below). `OverviewView` additionally takes the raw `RunResult` (not derivable from
-  `Zpcr` alone) for its "Encrypted" block: a `.pcrd`'s own `container.encrypted` for a `.pcrd`,
-  or any embedded `.pltd`/`.prcl` entry's `container.encrypted` (via `zpcr.plates()`/
-  `zpcr.protocols()`) for a `.zpcr` — see `lib/encryptionStatus.ts`.
+  `Zpcr` alone) for its "Encrypted" block, but only for the format-neutral
+  `RunResult.selfEncrypted` flag: set for an encrypted `.pcrd`, clear otherwise, in which case
+  the status comes from any embedded `.pltd`/`.prcl` entry's `container.encrypted` (via
+  `zpcr.plates()`/`zpcr.protocols()`) — see `lib/encryptionStatus.ts`. Its "Run identity" block
+  omits the "Archive entries" row entirely when the archive is empty, rather than reporting a
+  `.pcrd`'s `EMPTY_ARCHIVE` as a misleading "0 files".
 - `DecodedPlateread` (the plate-read typed view) takes just a `PlateRead` and reads everything
   off it — WELLDATA/DARKDATA tables and one "Header fields" key/value table built from
   `PlateRead.fields`, which the core decodes from a binary read's descriptor dictionary or a
   `.pcrd` read's XML header alike (see the root
   [`ARCHITECTURE.md`](../../ARCHITECTURE.md#two-input-formats-one-output-shape)). It doesn't
-  touch `Zpcr.archive`, so it never has to ask whether `read.fileName` names a real file. Two
-  things are still shown conditionally, because they exist only for a binary read: the
-  file-structure numbers (`read.binaryFile` — size and version words) and the extra ICFF
-  columns beside each value (offset/length/flag and every scalar decoding, from
-  `PlateReadField.binary`).
+  touch `Zpcr.archive`, so it never has to ask whether `read.fileName` names a real file. The
+  fields table is exactly two columns for both formats: the library types each untyped ICFF byte
+  range once, and this view renders the result. It used to widen to eight columns for a binary
+  read (offset/length/flag/int/float/text-hex, off the old `PlateReadField.binary`), which put
+  ICFF layout and endianness knowledge into a component meant to be format-neutral; that raw
+  view now lives behind the core's `decodePlateReadDetail()`. Only the file-structure numbers
+  still branch (`read.binaryFile` — size and version words), because a `.pcrd`-origin read
+  genuinely has no file behind it.
+- Long values in those decoded tables stay on one ellipsized line and open a line-wrapping hover
+  card (`components/raw/LongValue.tsx`, a `position: fixed` portal like the Curves view's hover
+  cards, since `.decoded__gridwrap` scrolls and would clip an in-flow child). Instrument header
+  values range from `12` to a few hundred characters of serial list or provenance note; sizing
+  the column to the longest ruins the table, and plain CSS truncation left no way to read the
+  rest at all. Values at or under 40 characters render as plain text with no hover target.
 - `RunInfoTable` and `ProtocolDecoded` (`components/raw/DecodedView.tsx`) take plain
   `text: string` rather than `(zpcr, name)`, so both `RawFilesView` (`.zpcr`'s real files, by
   name) and `PcrdRawView` (a `.pcrd`'s real XML nodes, by direct reference) can feed them
   without either pretending to be the other.
 - `PlatesView` takes a plain `Zpcr` too, via `zpcr.plates(password)` — a `.zpcr`'s embedded
   `.pltd`/`.plt.csv` entries and a `.pcrd`'s single embedded plate setup both come back as the
-  same `PltdEntry[]` shape, so the view never branches on `kind` to *read* plate data (it does
-  branch to decide whether to offer the attach control — see below, `.zpcr`-only).
+  same `PltdEntry[]` shape, so the view never branches on `kind` at all. Attaching a plate and
+  downloading its `.pltd` bytes do need an archive to write into / read from, but that is asked
+  as a capability (`zpcr.archive.entries.length > 0`), not as a format — see below.
 
 **The Raw view is the one place formats genuinely diverge**, because a `.zpcr` is a real
 multi-file archive and a `.pcrd` is a single XML document with no inner files — see "Raw
@@ -60,7 +101,9 @@ click through the prompt. `App.tsx` renders the shared `PasswordPrompt`
 has `needsPassword`/`error` instead of a `zpcr`; `FileBar` shows a lock/warning glyph for
 locked/errored files in the list without blocking selection of other files. `RunResult` also
 carries `documentXml` for a successfully-decoded `.pcrd` — the full raw document
-(`Pcrd.xml`), which `PcrdRawView` renders (see "Raw views" below).
+(`Pcrd.xml`), which `PcrdRawView` renders and nothing else may read (see "Raw views" below and
+"Format independence" above). It is the app's only genuinely format-specific payload; the rest
+of `RunResult` is neutral by construction.
 
 Each chip's hover card (protocol name, cycle count, and the plate's target/sample lists — the
 same lists `OverviewView` shows in its "Plate" section, via the shared `lib/plateTargets.ts`
@@ -210,8 +253,9 @@ alongside `"zpcr"`/`"pcrd"`:
   mapping isn't borrowed from some other run that happens to be loaded, since that would be a
   guess about a different instrument's optics. The UI says so explicitly instead (see
   `FluorChannelChip`, below).
-- **Attach (replace a run's plate)** — `PlatesView`'s upload control (`.zpcr` runs only; a
-  `.pcrd` shows an explanatory note instead, since it has no real archive to add an entry to)
+- **Attach (replace a run's plate)** — `PlatesView`'s upload control, enabled only for a run
+  that has a file archive to add an entry to (so: a `.zpcr`; a `.pcrd` gets the control disabled
+  with an explanatory title, since it has no archive) —
   calls `store.attachPlate(fileId, file)`, which rewrites the run's own bytes via
   `attachPlateToZpcr` (see root `ARCHITECTURE.md`) and re-persists them under the same file id.
   There is **no separate override state** — once attached, the plate is just part of the run's

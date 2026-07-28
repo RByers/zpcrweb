@@ -199,6 +199,15 @@ is `AllChannelsScan` (so `SnrWF`, had it been saved, is the set that would have 
 `.zpcr` archive has no equivalent file**, so a run read from one never has a gain correction to
 apply, and its reference level correspondingly has no effect.
 
+> **TODO — the app deliberately does not apply this.** Because only a `.pcrd` carries well
+> factors, applying them would make the same physical run quantify differently depending on which
+> file you happened to open, which breaks the app's format-independence rule (see
+> `apps/web/src/lib/runAnalysis.ts` and `apps/web/ARCHITECTURE.md`). `separateDyes`/`preprocessChannelReadings`
+> still accept a `wellFactor` — the algorithm is documented in full and a non-app caller may
+> supply one — but `useRunAnalysis` passes none. Revisit if a `.zpcr`-side source for the factors
+> is ever found, or if a `.pcrd` with a genuinely non-identity table turns up (none of the samples
+> committed here has one, so this correction has never been exercised on real data).
+
 **It would be reasonable to expect more: that the instrument compares all 12 live reference
 columns against a factory-measured baseline, every cycle, to derive a per-channel correction
 factor that tracks optical drift in real time. It does not.** The reference-level read described

@@ -5,7 +5,6 @@ import { PlateDownloadButton } from "../plate/PlateDownloadButton";
 import { PasswordPrompt } from "../PasswordPrompt";
 import { DropZone } from "../DropZone";
 import { usePltdPassword } from "../../state/pltdPassword";
-import type { FileKind } from "../../state/useZpcrStore";
 
 /**
  * Visual plate viewer for every plate file attached to the run — one per `.pltd`/`.plt.csv`
@@ -20,15 +19,19 @@ import type { FileKind } from "../../state/useZpcrStore";
 export function PlatesView({
   zpcr,
   fileId,
-  fileKind,
   attachPlate,
 }: {
   zpcr: Zpcr;
   fileId: string;
-  fileKind: FileKind;
   attachPlate: (fileId: string, file: File) => Promise<void>;
 }) {
   const [password, setPassword] = usePltdPassword();
+  // Asked as a capability, not as a format: attaching a plate means writing an entry into the
+  // run's archive, and downloading one means reading the `.pltd` bytes back out — both need an
+  // archive to exist. A `.pcrd` has none (`EMPTY_ARCHIVE`), and so would any future format
+  // without inner files. Phrasing it this way keeps the format-independence rule intact — see
+  // `apps/web/ARCHITECTURE.md`, "Format independence".
+  const hasArchive = zpcr.archive.entries.length > 0;
   const entries = useMemo(() => zpcr.plates(password || undefined), [zpcr, password]);
   const [selected, setSelected] = useState(0);
 
@@ -40,8 +43,8 @@ export function PlatesView({
       }}
       accept=".pltd,.csv,.plt.csv"
       compactLabel={entries.length === 0 ? "attach plate" : "replace plate"}
-      disabled={fileKind !== "zpcr"}
-      disabledTitle="Attaching a plate is only supported for .zpcr files"
+      disabled={!hasArchive}
+      disabledTitle="This run has no file archive to attach a plate to"
     />
   );
 
@@ -57,7 +60,9 @@ export function PlatesView({
   const entry = entries[Math.min(selected, entries.length - 1)]!;
   const { pltd } = entry;
   const pltdBytes =
-    fileKind === "zpcr" && isPltdName(entry.name) ? { name: entry.name, bytes: zpcr.archive.bytes(entry.name) } : undefined;
+    hasArchive && isPltdName(entry.name)
+      ? { name: entry.name, bytes: zpcr.archive.bytes(entry.name) }
+      : undefined;
 
   return (
     <div className="plateview">

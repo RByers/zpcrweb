@@ -216,9 +216,9 @@ describe("pcrd — decoded structure (real document, re-wrapped, no secret neede
   it("exposes its XML header as PlateRead.fields, the same key/value table a .zpcr read has", () => {
     const read = pcrd.zpcr!.reads[0]!;
     expect(read.fields.length).toBeGreaterThan(0);
-    // Same shape as a binary read's, minus the ICFF provenance — there are no byte offsets
-    // behind an XML element — and minus the file, since a .pcrd read isn't one.
-    expect(read.fields.every((f) => f.binary === undefined)).toBe(true);
+    // Literally the same shape as a binary read's — name plus value, nothing format-specific —
+    // minus the file, since a .pcrd read is an element of a document rather than a file.
+    expect(read.fields.every((f) => Object.keys(f).sort().join() === "name,value")).toBe(true);
     expect(read.binaryFile).toBeUndefined();
     expect(read.fields.map((f) => f.name)).toContain("BlockTmp");
     expect(Number(read.fields.find((f) => f.name === "BlockTmp")!.value)).toBeCloseTo(

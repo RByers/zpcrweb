@@ -8,7 +8,6 @@ import {
   parseZpcrwebSettings,
   writeZpcrwebSettings,
   type NormalizationMode,
-  type PcrdContainer,
   type PlateDefinition,
   type PltdContainer,
   type Zpcr,
@@ -168,7 +167,14 @@ export interface LoadedFile {
   bytes: Uint8Array;
 }
 
-/** The outcome of parsing one {@link LoadedFile} against the current password. */
+/**
+ * The outcome of parsing one {@link LoadedFile} against the current password.
+ *
+ * Everything here except {@link RunResult.documentXml} is format-neutral, and that is the point:
+ * once a run has parsed, the app works off `zpcr` alone and cannot tell which format it came from
+ * (see `apps/web/ARCHITECTURE.md`, "Format independence"). This type is the boundary where that
+ * becomes true, so it is where the last format branches live.
+ */
 export interface RunResult {
   /** The decoded run, once available (immediately for `.zpcr`; after a correct password for
    * `.pcrd`). */
@@ -177,20 +183,44 @@ export interface RunResult {
    * — distinct from `error`, which means a password was tried and failed. */
   needsPassword: boolean;
   error: string | null;
-  /** `.pcrd` container metadata, available even before/without a working password. */
-  container?: PcrdContainer;
-  /** A `.pcrd`'s full raw decrypted document — there's no inner-file archive to browse (see
+  /**
+   * Whether the run file is *itself* one encrypted container — true only for an encrypted
+   * `.pcrd`. A `.zpcr`'s outer archive is never encrypted (whatever its embedded `.pltd`/`.prcl`
+   * entries are), so this is false for one, and {@link runEncryptionStatus} then answers from
+   * those entries instead.
+   *
+   * Deliberately a boolean rather than the `PcrdContainer` this used to be. The container object
+   * is `.pcrd`-only detail, and the only thing any view outside the raw view ever asked it was
+   * "encrypted?" — so the store answers that question here, once, and no view has to know a
+   * container exists.
+   */
+  selfEncrypted: boolean;
+  /**
+   * A `.pcrd`'s full raw decrypted document — there's no inner-file archive to browse (see
    * `Zpcr.archive`'s doc comment), so the app's `.pcrd` raw view renders this directly as a
-   * real XML tree. Undefined for `.zpcr` (and for a `.pcrd` before/without a working password). */
+   * real XML tree. Undefined for `.zpcr` (and for a `.pcrd` before/without a working password).
+   *
+   * **Raw view only.** This is the one genuinely format-specific payload the app carries, and
+   * `App.tsx` hands it to `PcrdRawView` and nowhere else.
+   */
   documentXml?: string;
 }
 
+/**
+ * The app's format boundary: both source formats go in, one {@link RunResult} comes out. Every
+ * `kind === "pcrd"` test in the app that isn't about the raw view should be here instead.
+ */
 function parseRun(bytes: Uint8Array, kind: "zpcr" | "pcrd", password: string): RunResult {
   if (kind === "zpcr") {
     try {
-      return { zpcr: parseZpcr(bytes), needsPassword: false, error: null };
+      return { zpcr: parseZpcr(bytes), needsPassword: false, error: null, selfEncrypted: false };
     } catch (e) {
-      return { zpcr: null, needsPassword: false, error: e instanceof Error ? e.message : String(e) };
+      return {
+        zpcr: null,
+        needsPassword: false,
+        error: e instanceof Error ? e.message : String(e),
+        selfEncrypted: false,
+      };
     }
   }
   const pcrd = parsePcrd(bytes, password ? { password } : undefined);
@@ -198,7 +228,9 @@ function parseRun(bytes: Uint8Array, kind: "zpcr" | "pcrd", password: string): R
     zpcr: pcrd.zpcr ?? null,
     needsPassword: !!pcrd.needsPassword,
     error: pcrd.error ?? null,
-    container: pcrd.container,
+    // Collapse the `.pcrd` container to the one fact anything outside the raw view needs. The
+    // container itself is available even before a working password, and so is this.
+    selfEncrypted: !!pcrd.container?.encrypted,
     documentXml: pcrd.xml,
   };
 }

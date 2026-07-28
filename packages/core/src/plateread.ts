@@ -62,12 +62,16 @@ function versionWords(bytes: Uint8Array): number[] {
 }
 
 /**
- * Best-effort human value for one descriptor-dictionary entry. ICFF carries no type tag (see
- * `icff.md`), so this is a heuristic: a temperature where `extractTemps` recognized one (which
- * is also what decides int-vs-float for those fields), the field's text when it looks like a
- * string, the big-endian int for any other 4-byte scalar, and a byte count for the bulk float
- * arrays. Every raw decoding travels alongside in `PlateReadField.binary`, so nothing is lost
- * to a caller that wants to second-guess this.
+ * The library's reading of one descriptor-dictionary entry. ICFF carries no type tag (see
+ * `icff.md`), so the type has to be guessed — and this is the one place that guess is made:
+ * a temperature where `extractTemps` recognized one (which is also what decides int-vs-float
+ * for those fields), the field's text when it looks like a string, the big-endian int for any
+ * other 4-byte scalar, and a byte count for the bulk float arrays.
+ *
+ * Consumers get this single value and nothing else (see {@link PlateReadField.value}). They used
+ * to get the raw `IcffEntry` alongside it and re-guess for themselves, which put format knowledge
+ * — ICFF offsets, endianness, int-vs-float — into a UI that renders both formats. A caller that
+ * really wants the bytes uses {@link decodePlateReadDetail}, which is honestly labelled low-level.
  */
 function fieldValue(entry: IcffEntry, temps: Map<string, PlateReadTemp>): string {
   const temp = temps.get(entry.name);
@@ -126,7 +130,6 @@ export function decodePlateRead(
   const headerFields: PlateReadField[] = descriptors.map((entry) => ({
     name: entry.name,
     value: fieldValue(entry, tempsByKey),
-    binary: entry,
   }));
 
   const dateTime = fields.get("DATETIME")?.text;
@@ -183,9 +186,13 @@ export interface PlatereadDetail {
 
 /**
  * Decode a `.Plateread` file's structure alone (version words + ICFF index entries), without
- * the fluorescence tables — for inspecting a file's raw layout. A decoded {@link PlateRead}
- * already carries the same information as `binaryFile` + `fields`, so prefer those when you
- * have one.
+ * the fluorescence tables — for inspecting a file's raw layout.
+ *
+ * This is the **only** route to the raw index entries. A decoded {@link PlateRead} deliberately
+ * carries just `binaryFile` plus a key/value `fields` table whose values the library has already
+ * typed for you ({@link PlateReadField.value}); anything wanting offsets, lengths, flags or a
+ * competing scalar decoding is doing binary-format work and comes here to do it, so that the
+ * format-neutral shape stays neutral.
  *
  * Tolerant of a buffer too short to be a real `.Plateread`: `versionWords` is empty and
  * `fields` is `[]` rather than throwing, matching `parseIcff`'s own graceful degradation.

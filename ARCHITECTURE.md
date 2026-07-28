@@ -109,16 +109,24 @@ than let that difference leak into every consumer, `parsePcrd` decodes straight 
   `.Plateread` layout — same `wells`/`dark`/`temps`, different source bytes.
 - **`PlateRead.fields`** — a read's header as one key/value table whatever it was decoded
   from: the binary file's ICFF descriptor dictionary, or the `.pcrd` header element's
-  children. The formats disagree on *names* (`BLOCKTEMP` vs `BlockTmp`) and on whether a value
-  is typed — an ICFF field is an untyped byte range, so each entry also carries the raw index
-  entry as `PlateReadField.binary` for a consumer that wants every possible decoding, and
-  `value` is a best-effort reading (`temps.ts`'s own int-vs-float rule for temperatures, text
-  where the field is a string, a byte count for the bulk arrays). What the interface unifies
-  is the shape, not the instrument's vocabulary; `temps` remains where the two vocabularies
-  are actually reconciled to common keys. The binary file itself — size and version words —
-  hangs off the optional `PlateRead.binaryFile`, absent for a `.pcrd` read, which is an
-  element of a larger document rather than a file. The net effect is that a consumer renders
-  one table and never reaches back into `Zpcr.archive` to re-parse the file a read came from.
+  children. Strictly two fields, `name` and `value`, for both formats.
+
+  The formats disagree on *names* (`BLOCKTEMP` vs `BlockTmp`) and on whether a value is typed
+  at all — an ICFF field is an untyped byte range — so **the library makes the type guess, once,
+  and hands out only the result**: `temps.ts`'s own int-vs-float rule for temperatures, text
+  where the field is a string, a byte count for the bulk arrays. This entry used to also carry
+  the raw `IcffEntry` (offset, length, flag, every competing scalar decoding) so a consumer
+  could second-guess it, and the web app duly did — six extra columns of ICFF layout and
+  endianness rendered by a component that is supposed to be format-neutral. The raw index
+  entries now live behind `decodePlateReadDetail()` alone, which is honestly labelled as the
+  low-level binary view; nothing is lost, it just isn't in the shape both formats share.
+
+  What the interface unifies is the shape, not the instrument's vocabulary; `temps` remains
+  where the two vocabularies are actually reconciled to common keys. The binary file itself —
+  size and version words — hangs off the optional `PlateRead.binaryFile`, absent for a `.pcrd`
+  read, which is an element of a larger document rather than a file. The net effect is that a
+  consumer renders one table and never reaches back into `Zpcr.archive` to re-parse the file a
+  read came from.
 - **`Zpcr.archive`** — a `.pcrd` has no inner files at all (it's one XML document, not an
   archive), so for a `.pcrd`-derived `Zpcr` this is an honestly empty `ArchiveAccess`:
   `entries` is `[]` and the accessors throw. This library does **not** pretend a `.pcrd` has

@@ -192,7 +192,6 @@ export function App() {
                 key={active.id}
                 zpcr={zpcr}
                 fileId={active.id}
-                fileKind={active.kind}
                 attachPlate={store.attachPlate}
               />
             )}

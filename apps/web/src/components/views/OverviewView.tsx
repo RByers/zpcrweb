@@ -37,8 +37,8 @@ export function OverviewView({
    * as its `zpcrweb.json` entry (`ZpcrStore.exportBytes`), so the copy that leaves the browser
    * carries the thresholds it was read with. Falls back to `file.bytes` when absent. */
   onDownload?: () => Uint8Array | null;
-  /** The same run result the app resolved `zpcr` from — carries `.pcrd` container metadata
-   * (`encrypted`) that `zpcr` alone doesn't expose; see {@link runEncryptionStatus}. */
+  /** The same run result the app resolved `zpcr` from — carries the `selfEncrypted` flag that
+   * `zpcr` alone doesn't expose. Format-neutral: see {@link runEncryptionStatus}. */
   run: RunResult;
   /** Only used to feed {@link useRunAnalysis} — the plate chips' Cq tallies must be the same
    * numbers the Curves view shows, which means the same thresholds and calibration settings. */
@@ -182,8 +182,16 @@ export function OverviewView({
           <dd>{m.identifier || "—"}</dd>
           <dt>Data file</dt>
           <dd>{m.dataFile || "—"}</dd>
-          <dt>Archive entries</dt>
-          <dd>{zpcr.archive.entries.length} files</dd>
+          {/* Only a `.zpcr` has inner files to count. A `.pcrd` is one XML document and gets
+              `EMPTY_ARCHIVE`, which rendered as a flatly misleading "0 files" — so the row is
+              dropped rather than answered wrongly. This is the one place Overview notices the
+              archive at all; everything else it shows is decoded run data. */}
+          {zpcr.archive.entries.length > 0 && (
+            <>
+              <dt>Archive entries</dt>
+              <dd>{zpcr.archive.entries.length} files</dd>
+            </>
+          )}
         </dl>
       </section>
     </div>

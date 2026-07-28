@@ -42,6 +42,22 @@ Additional typed parsers for the archive files currently reachable only via the 
 
 ## Testing / infra
 
+- [ ] **Regenerate `samples/20260720_Luna_noRT.pcrd` with the correct `Tex 615` fluor.** The
+      plate in that `.pcrd` was set up with **`Texas Red`**, which was a mistake at acquisition
+      time — the matching `.zpcr` for the same run
+      (`samples/20260720_FirstQualification.zpcr`, run `20260720_211747_CT019138_Luna_noRT`)
+      correctly says `Tex 615`. The two are aliases for one physical dye and Bio-Rad ships a
+      `.Dcal` under each name whose response blocks are byte-identical, so **no number is
+      affected** — curves, thresholds and Cq all come out the same either way. What differs is
+      the *label*, and the label is the key for threshold-override grouping and for the
+      per-fluor settings persisted in `zpcrweb.json`, so opening the same run from the two
+      files gives two different override namespaces.
+
+      Worth knowing before touching this: a naive cross-format comparison silently drops the
+      96 well/dye pairs whose keys don't match, and looks like it passed. Do not "fix" this by
+      adding a dye-alias table to the library — the `.pcrd` is simply wrong and should be
+      re-saved from CFX Manager with the right fluor; regenerate `…​.pcrd.xml` alongside it, and
+      re-check the `Tex 615` assertions in `pcrd.test.ts`.
 - [ ] Add a browser-mode Vitest run to prove isomorphism in a real browser environment.
 - [ ] Add more sample `.zpcr` files (different block types, channel counts, cycle counts)
       as they become available.

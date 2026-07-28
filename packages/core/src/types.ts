@@ -7,8 +7,6 @@
  * the reverse-engineered `.Plateread` binary format.
  */
 
-import type { IcffEntry } from "./icff.js";
-
 /** A single well/channel optical reading: four floats from the WELLDATA table. */
 export interface WellReading {
   /** Mean fluorescence — the primary value that forms the amplification curve. */
@@ -58,17 +56,17 @@ export interface PlateReadField {
   /** Field name as the source spells it: `BLOCKTEMP` from a binary read, `BlockTmp` from XML. */
   name: string;
   /**
-   * Human-readable value. For an XML-sourced read this is the element's text verbatim; for a
-   * binary one it is a best-effort decoding of an untyped ICFF field (see
-   * {@link PlateReadField.binary}).
+   * Human-readable value, and the only reading of the field this type offers. For an XML-sourced
+   * read it is the element's text verbatim; for a binary one it is the library's own decoding of
+   * an untyped ICFF byte range — **the guess is made here, once, rather than pushed onto every
+   * consumer**. See `decodePlateRead`'s `fieldValue` for the rule.
+   *
+   * A caller that genuinely needs the raw index entry — offset, length, flag, and every
+   * competing scalar decoding of the same bytes — should reach for {@link decodePlateReadDetail},
+   * which is the low-level view and says so. Nothing is lost; it just isn't in the key/value
+   * shape both formats share.
    */
   value: string;
-  /**
-   * The raw ICFF index entry behind a binary-sourced field — offset, length, flag and every
-   * possible scalar decoding. Absent for an XML-sourced read, which has typed text instead of
-   * an untyped byte range. Consumers that just want a key/value table can ignore this.
-   */
-  binary?: IcffEntry;
 }
 
 /** The binary `.Plateread` file a read was decoded from, when there was one. */
