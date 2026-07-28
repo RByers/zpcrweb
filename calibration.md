@@ -28,6 +28,20 @@ The algorithm takes:
 - **Calibration data**: for each dye of interest, a pure-dye measurement and a matching
   empty-plate measurement across all 6 channels, at four reference block temperatures (20/40/60/
   80 °C) — exactly what a `.Dcal` file holds. See [`dcal.md`](./dcal.md).
+
+  This half of the input is a property of **the instrument, not the run**. The same set rides
+  along in every run the machine writes and doesn't change until it's recalibrated: across the
+  committed samples, the four `.zpcr` files (2019, 2023 and two from 2026, all alpha `SG16130`)
+  carry bit-identical values across all 145,152 calibration readings, and the two `.pcrd` files
+  agree with them to 5e-3 RFU absolute — the `.pcrd`'s text round-trip, not a difference. See
+  [`dcal.md` §4](./dcal.md#a-property-of-the-instrument-not-the-run) for the measurement.
+
+  Two consequences worth keeping in view. Everything §§2–3 derive — response curves, and the
+  calibration matrix at a given block temperature — is therefore constant per instrument too, so
+  it can be built once and reused across runs, and a difference in results between two runs on
+  one machine is never the calibration. And a matrix carried into a run from *another*
+  instrument is simply the wrong matrix: these are that machine's optics, measured on its own
+  detector at its own gain.
 - **A raw reading**: the 6 per-channel fluorescence values for one well at one cycle, plus the
   block temperature that reading was taken at.
 
