@@ -1314,6 +1314,20 @@
   text-align: right;
   color: var(--ink);
 }
+/* The row for the line actually under the cursor, among the levels the Calibration tooltip
+   lists: the others are context, so they stay muted and this one comes forward. */
+.chart__tip-tbl tr.is-active td {
+  color: var(--ink);
+  font-weight: 600;
+}
+.chart__tip-mark {
+  margin-left: -9px;
+  padding-right: 2px;
+  font-weight: 400;
+}
+.chart__tip-note {
+  color: var(--ink-muted);
+}
 
 /* ---- Raw files view ----------------------------------------------------- */
 .raw {

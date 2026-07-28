@@ -146,39 +146,31 @@ export function CalibrationView({ zpcr, settings, onChange }: Props) {
     () =>
       plotFiles.flatMap((f) =>
         plotChannels.flatMap((ch): CalPlotSeries[] => {
+          // Both raw levels reuse the response-knot shape, so the chart interpolates and reports
+          // them exactly as it does a response curve; `kind` is what says which level it is.
+          // Every line carries all three, whichever one it draws — that's what lets the tooltip
+          // show a response against its two source readings, and vice versa.
+          const readings = f.readings[ch] ?? [];
           const base = {
             fileKey: f.key,
             dye: f.dye,
             plateType: f.plateType,
             channel: ch,
             primaryChannel: f.primaryChannel,
+            levels: {
+              response: f.channels[ch] ?? [],
+              dye: readings.map((k) => ({ temperatureC: k.temperatureC, response: k.dye })),
+              empty: readings.map((k) => ({ temperatureC: k.temperatureC, response: k.empty })),
+            },
           };
           if (settings.calView === "relative") {
             return [
-              {
-                ...base,
-                key: `${f.key}|${ch}`,
-                kind: "response" as const,
-                knots: f.channels[ch] ?? [],
-              },
+              { ...base, key: `${f.key}|${ch}`, kind: "response", knots: base.levels.response },
             ];
           }
-          // Both raw levels reuse the response-knot shape, so the chart interpolates and draws
-          // them exactly as it does a response curve; `kind` is what says which level it is.
-          const readings = f.readings[ch] ?? [];
           return [
-            {
-              ...base,
-              key: `${f.key}|${ch}|dye`,
-              kind: "dye" as const,
-              knots: readings.map((k) => ({ temperatureC: k.temperatureC, response: k.dye })),
-            },
-            {
-              ...base,
-              key: `${f.key}|${ch}|empty`,
-              kind: "empty" as const,
-              knots: readings.map((k) => ({ temperatureC: k.temperatureC, response: k.empty })),
-            },
+            { ...base, key: `${f.key}|${ch}|dye`, kind: "dye", knots: base.levels.dye },
+            { ...base, key: `${f.key}|${ch}|empty`, kind: "empty", knots: base.levels.empty },
           ];
         }),
       ),

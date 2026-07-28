@@ -75,6 +75,16 @@ export interface CalPlotSeries {
   /** The line's knots, sorted by temperature. `response` carries whichever level {@link kind}
    * names — for a raw reading it is the reading itself, not a difference. */
   knots: ResponseKnot[];
+  /**
+   * All three levels this (file × channel) has, whichever one is plotted — the raw dye-plate and
+   * empty-plate readings and the response derived from them, each as its own knot array.
+   *
+   * The tooltip reports the full set in both modes, so the number on screen is never missing its
+   * context: in relative mode the response is shown against the two raw readings it's the
+   * difference of, and in absolute mode the hovered raw reading is shown against its counterpart
+   * and the response they produce. `knots` above is whichever of these the line draws.
+   */
+  levels: Record<CalSeriesKind, ResponseKnot[]>;
 }
 
 /** Which lines a rail hover isolates; every other line dims. */
@@ -94,10 +104,13 @@ export interface CalTooltipData {
   plateType: string;
   channel: number;
   primary: boolean;
+  /** Which level the hovered line plots — the row {@link levels} marks as the active one. */
   kind: CalSeriesKind;
   color: string;
   temperatureC: number;
-  response: number;
+  /** All three levels at this temperature, in display order; `null` where this file's curve
+   * doesn't reach (outside its measured range). See {@link CalPlotSeries.levels}. */
+  levels: { kind: CalSeriesKind; value: number | null }[];
   /** True when this x is one of the file's own measured temperatures rather than a point
    * interpolated onto another file's temperature grid. */
   measured: boolean;
@@ -142,6 +155,22 @@ function sample(knots: ResponseKnot[], grid: number[], scale: Scale): (number | 
     return scale === "log" && v <= 0 ? null : v;
   });
 }
+
+/**
+ * One level's value at one temperature, for the tooltip: the same in-range-only rule
+ * {@link sample} draws by, minus the log-axis gap — a zero response is a real number to report
+ * even where it can't be plotted.
+ */
+function levelAt(knots: ResponseKnot[], temperatureC: number): number | null {
+  if (knots.length === 0) return null;
+  if (temperatureC < knots[0]!.temperatureC) return null;
+  if (temperatureC > knots[knots.length - 1]!.temperatureC) return null;
+  return interpolateResponse(knots, temperatureC);
+}
+
+/** Tooltip row order: the two raw readings, then the response they produce — which is the
+ * subtraction `calibration.md` §2 does, read top to bottom. */
+const LEVEL_ORDER: CalSeriesKind[] = ["dye", "empty", "response"];
 
 export function buildCalChart(cfg: BuildCalChartConfig): {
   data: uPlot.AlignedData;
@@ -341,7 +370,12 @@ function calOverlayPlugin(
           // thing the pointer is on, or it names one line and colors another.
           color: crosstalkColor(m.series.primaryChannel, m.series.channel),
           temperatureC,
-          response: value,
+          levels: LEVEL_ORDER.map((kind) => ({
+            kind,
+            // The plotted value verbatim for the hovered line, so the tooltip can't disagree
+            // with the pixel under the cursor; the others evaluated the same way.
+            value: kind === m.series.kind ? value : levelAt(m.series.levels[kind], temperatureC),
+          })),
           measured: m.series.knots.some((k) => k.temperatureC === temperatureC),
           left,
           top,

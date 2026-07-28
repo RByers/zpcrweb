@@ -102,15 +102,26 @@ export function CalChart({ series, runTemperatureC, scale, highlight = null }: P
             <tbody>
               <tr>
                 <td>temp</td>
-                <td>{tip.temperatureC.toFixed(1)} °C</td>
+                <td>
+                  {tip.temperatureC.toFixed(1)} °C
+                  {/* "interp" where this point sits on another file's temperature grid rather
+                      than on one this file was measured at — every value below is then the
+                      algorithm's own linear interpolation (calibration.md §3), not a reading. */}
+                  {!tip.measured && <span className="chart__tip-note"> interp</span>}
+                </td>
               </tr>
-              <tr>
-                {/* "interp" where this point sits on another file's temperature grid rather than
-                    on one this file was measured at — the value is the algorithm's own linear
-                    interpolation (calibration.md §3), not a reading. */}
-                <td>{tip.measured ? CAL_KIND_LABEL[tip.kind] : "interp"}</td>
-                <td>{formatRfu(tip.response)}</td>
-              </tr>
+              {/* All three levels, always — the hovered one marked. A response means little
+                  without the two readings it's the difference of, and a raw reading means little
+                  without its counterpart; showing the set costs two rows and answers both. */}
+              {tip.levels.map((l) => (
+                <tr key={l.kind} className={l.kind === tip.kind ? "is-active" : undefined}>
+                  <td>
+                    {l.kind === tip.kind && <span className="chart__tip-mark">▸</span>}
+                    {CAL_KIND_LABEL[l.kind]}
+                  </td>
+                  <td>{l.value == null ? "—" : formatRfu(l.value)}</td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>

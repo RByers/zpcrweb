@@ -1077,8 +1077,17 @@ neighbours' channels.
   agree on 20/40/60/80 in practice, but nothing in the format requires it), the gap is filled by
   calling the library's own `interpolateResponse` — never a second interpolation written here.
   Outside a file's measured range the line stops: the algorithm does extrapolate from the end
-  segment's slope, but drawing that would read as data. The tooltip labels an interpolated point
-  `interp` rather than `response`, so a measured value is never mistaken for a derived one.
+  segment's slope, but drawing that would read as data. The tooltip marks an interpolated point
+  `interp` beside the temperature, so a measured value is never mistaken for a derived one.
+- **The hover card shows all three levels**, in both modes: the dye-plate reading, the empty-plate
+  reading, and the response — `calibration.md` §2's subtraction read top to bottom — with the row
+  for the line actually under the cursor marked and brought forward. A response means little
+  without the two readings it's the difference of, and a raw reading means little without its
+  counterpart, so each mode was previously answering only half the question it raised. Every line
+  therefore carries all three level arrays (`CalPlotSeries.levels`) regardless of which one it
+  draws; the hovered level is reported from the plotted array verbatim so the card can't disagree
+  with the pixel under the cursor, and the other two are evaluated through the same
+  `interpolateResponse`. A level whose curve doesn't reach that temperature shows `—`.
 - **Default selection = what the analysis uses.** A run ships a `.Dcal` for every dye Bio-Rad
   sells on both tube types (28 files in the committed samples), which is unreadable all at once.
   `lib/calibrationCurves.ts` marks each file `inUse` on exactly the terms
