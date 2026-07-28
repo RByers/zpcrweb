@@ -3,6 +3,7 @@ import uPlot from "uplot";
 import {
   applyCalHighlight,
   buildCalChart,
+  CAL_KIND_LABEL,
   type CalHighlight,
   type CalPlotSeries,
   type CalSeriesMeta,
@@ -107,7 +108,7 @@ export function CalChart({ series, runTemperatureC, scale, highlight = null }: P
                 {/* "interp" where this point sits on another file's temperature grid rather than
                     on one this file was measured at — the value is the algorithm's own linear
                     interpolation (calibration.md §3), not a reading. */}
-                <td>{tip.measured ? "response" : "interp"}</td>
+                <td>{tip.measured ? CAL_KIND_LABEL[tip.kind] : "interp"}</td>
                 <td>{formatRfu(tip.response)}</td>
               </tr>
             </tbody>

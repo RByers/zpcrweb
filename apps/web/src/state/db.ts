@@ -74,6 +74,9 @@ export interface StoredSettings {
   /** Calibration view: `${dye}|${plateType}` keys of the `.Dcal` files plotted. Opt-in, so an
    * absent/empty list means "unseeded" rather than "none" — see `FileSettings.calFiles`. */
   calFiles?: string[];
+  /** Calibration view: response curves (`"relative"`) or the raw dye/empty readings behind them
+   * (`"absolute"`). Absent on older records, which then default to `"relative"`. */
+  calView?: "relative" | "absolute";
   /** Retired: the standalone Analysis view's own target opt-out set. That view is now the Curves
    * view's table mode and shares the rail's {@link disabledFluors}, so these are ignored. */
   analysisDisabledTargets?: string[];

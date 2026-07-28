@@ -438,6 +438,11 @@ call is wasted work.
 - This library always derives the calibration matrix from `.Dcal` files. Some systems also
   support a user-edited override matrix that takes precedence over the calibration-derived one;
   that override mechanism isn't modeled here.
+- The empty-plate blocks enter the algorithm **only** through this subtraction — nothing
+  downstream reads them again. `buildDyeReadingCurves` returns the dye and empty readings
+  separately for callers that want to show the two levels a response is the difference of (the
+  web app's Calibration view does); `buildDyeResponseCurve` is defined as the clamped difference
+  of its output, so there is one place the blocks are paired up.
 - `buildDyeResponseCurve` reads well `0` (A1) of each calibration block by default. Every file
   this library has decoded carries a uniform value across all wells in a channel (see
   [`dcal.md`](./dcal.md) §3), so this is representative in practice, but the parameter exists so

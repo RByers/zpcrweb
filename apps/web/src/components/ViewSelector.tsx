@@ -11,9 +11,9 @@ import {
 const ALL_VIEWS: { id: ViewId; label: string; Icon: () => React.ReactElement }[] = [
   { id: "overview", label: "Overview", Icon: OverviewIcon },
   { id: "curves", label: "Curves", Icon: CurvesIcon },
-  { id: "calibration", label: "Calibration", Icon: CalibrationIcon },
   { id: "plates", label: "Plates", Icon: PlatesIcon },
   { id: "reference", label: "Reference", Icon: ReferenceIcon },
+  { id: "calibration", label: "Calibration", Icon: CalibrationIcon },
   { id: "raw", label: "Raw files", Icon: RawIcon },
 ];
 

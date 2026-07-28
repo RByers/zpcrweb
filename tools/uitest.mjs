@@ -130,6 +130,33 @@ async function calibrationChecks(chrome, origin) {
     afterOn.map((c) => `${c.dye} (${c.group})`).join(", "),
   );
 
+  // Absolute mode splits each response curve back into the two raw reads it's the difference of
+  // (dye plate + empty plate), so the plotted line count has to double for the same selection.
+  // The count is derived state three layers down (settings → series → uPlot), and the empty-plate
+  // half exists nowhere else in the app — a broken switch would just look like a busier chart.
+  const curveCount = () =>
+    cdp.eval(`+(document.querySelector(".rail__stat").textContent.match(/· (\\d+) curves/) || [])[1]`);
+  const clickToggle = (text) =>
+    cdp.eval(`(() => { const t = [...document.querySelectorAll(".toggle")]
+        .find((x) => x.querySelector(".toggle__label").textContent === "Values");
+      [...t.querySelectorAll(".segmented__item")]
+        .find((b) => b.textContent === ${JSON.stringify(text)}).click(); })()`);
+
+  const relativeCurves = await curveCount();
+  await clickToggle("Absolute");
+  await sleep(300);
+  const absoluteCurves = await curveCount();
+  await clickToggle("Relative");
+  await sleep(300);
+  const backToRelative = await curveCount();
+  check(
+    "absolute mode plots both raw reads, relative mode just their difference",
+    relativeCurves > 0 &&
+      absoluteCurves === relativeCurves * 2 &&
+      backToRelative === relativeCurves,
+    `${relativeCurves} → ${absoluteCurves} → ${backToRelative} curves`,
+  );
+
   cdp.close();
 }
 

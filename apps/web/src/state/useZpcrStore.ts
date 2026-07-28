@@ -47,9 +47,9 @@ type PlateFileKind = "pltd" | "csv";
 export type ViewId =
   | "overview"
   | "curves"
-  | "calibration"
   | "plates"
   | "reference"
+  | "calibration"
   | "raw"
   | "about";
 /** Reference view only — drift relative to the factory calibration value; see `ReferenceView`. */
@@ -62,6 +62,14 @@ export type Baseline = "raw" | "delta" | "percent";
  * the baseline-corrected values regardless of which is shown.
  */
 export type CurveView = "relative" | "absolute";
+/**
+ * Calibration view only — which of the two levels a `.Dcal` carries the chart plots.
+ * `"relative"` is the response the algorithm actually consumes, `max(0, dye − empty)`
+ * (`calibration.md` §2); `"absolute"` plots the two raw readings that difference is taken
+ * between, the pure-dye plate and the empty-plate baseline. The algorithm is unaffected either
+ * way — this only changes what is drawn.
+ */
+export type CalView = "relative" | "absolute";
 export type Scale = "linear" | "log";
 /**
  * What the Curves view's main pane shows once color separation is on: dye-space curves grouped
@@ -144,6 +152,9 @@ export interface FileSettings extends AnalysisSettings {
    * analysis actually uses) the first time it has the calibration data to do so.
    */
   calFiles: Set<string>;
+  /** Calibration view: response curves, or the raw dye/empty readings behind them; see
+   * {@link CalView}. */
+  calView: CalView;
 }
 
 /** A file loaded into memory — bytes only. Parsing is derived (see {@link ZpcrStore.runs}),
@@ -273,6 +284,8 @@ function defaultSettings(): FileSettings {
     showUnloadedFluors: false,
     // Empty = unseeded; the Calibration view fills it from the run's own calibration set.
     calFiles: new Set<string>(),
+    // The response curve is what the algorithm consumes, so it's what the view leads with.
+    calView: "relative",
     ...defaultAnalysisSettings(),
   };
 }
@@ -300,6 +313,7 @@ function toStored(id: string, s: FileSettings): StoredSettings {
     disabledSamples: [...s.disabledSamples],
     showUnloadedFluors: s.showUnloadedFluors,
     calFiles: [...s.calFiles],
+    calView: s.calView,
   };
 }
 
@@ -356,6 +370,7 @@ function fromStored(s: StoredSettings): FileSettings {
     // Absent on a record written before the Calibration view existed; empty simply means the
     // view will seed it from the run the first time it's opened.
     calFiles: new Set(s.calFiles ?? []),
+    calView: s.calView ?? "relative",
     temps: new Set(s.temps ?? []),
     // A record written before the LED series existed has no `leds`; both being non-empty is
     // impossible by construction (see `updateSettings`), so nothing needs reconciling here.

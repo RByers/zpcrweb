@@ -3,7 +3,7 @@
 The web app (`@zpcrweb/web`) is a browser UI over [`@zpcrweb/core`](../../packages/core). It
 loads one or more files — `.zpcr`, `.pcrd`, or a standalone plate file (`.pltd` or zpcrweb's own
 `.plt.csv`, see "Standalone plate entries and attach" below) — switches between them, and
-explores each through up to six views: Overview, Curves, Calibration, Plates, Reference, and Raw
+explores each through up to six views: Overview, Curves, Plates, Reference, Calibration, and Raw
 (a standalone plate file only gets Plates + Raw — see below).
 
 ## Two formats, mostly one UI
@@ -321,8 +321,10 @@ so every call site keeps writing one `onChange({ … })` regardless of where the
   chips render bare (name only) whenever the Cq table is empty: an uncalibrated run, or a plate
   still behind the password prompt.
 - **Curves** — the centerpiece (see below).
-- **Calibration** — the run's `.Dcal` pure-dye response curves (see below).
 - **Reference** — reference row vs factory calibration (see below).
+- **Calibration** — the run's `.Dcal` pure-dye response curves (see below). Last of the analysis
+  tabs: it's the instrument's factory characterization, context for the run rather than the run
+  itself, so it sits after the tabs that show what was actually measured.
 - **Plates** — `PlatesView` (`components/views/PlatesView.tsx`): the visual, color-coded plate
   map (`components/plate/PlateViewer.tsx`) for every plate attached to the run, via
   `zpcr.plates()`, plus an upload control to attach/replace the run's plate (`.zpcr` only —
@@ -1027,7 +1029,26 @@ neighbours' channels.
   overlays use elsewhere. With no plate (missing, or still behind the password prompt) nothing is
   in use, so the fallback is every calibration for the default tube type, with a rail note saying
   so. The dye's own channel (`Dcal.primaryChannel`) is drawn at double width — its signal, as
-  against its crosstalk.
+  against its crosstalk. Chips are ordered by that channel (then by name) within each tube-type
+  group, so the dye list runs along the spectrum in step with the channel bar below it.
+- **Relative vs. absolute** (`calView`, the rail's Values switch). Relative — the default — is
+  the response the algorithm consumes, `max(0, dye − empty)`. Absolute splits it back into the two
+  raw reads that difference is taken between, plotting the pure-dye plate and, dotted below it,
+  the empty-plate baseline; the y axis relabels to *Reading (RFU)*. This is the only place the
+  `.Dcal` empty blocks are visible at all — the pipeline reads them for that one subtraction and
+  nowhere else — so "how much of this response is baseline?" has an answer in the UI. Core grew
+  `buildDyeReadingCurves` for it (`packages/core/src/calibration.ts`), and
+  `buildDyeResponseCurve` is now defined as the clamped difference of its output, so the two can't
+  drift apart. Both raw levels are carried in the response-knot shape, so the chart interpolates
+  and draws them exactly as it does a response curve; a `kind` field (`response`/`dye`/`empty`) is
+  what picks the dash, the width and the tooltip's value label.
+- **Hovering an off chip previews it.** The rail highlight otherwise dims every line and reveals
+  nothing when the hovered dye or channel isn't plotted, so a *deselected* chip's lines join the
+  plot for as long as the pointer is on it — and the highlight then isolates exactly them.
+  Comparing against something unselected is a hover, not a click, a look and a click back. The
+  previewed file keeps its sorted position so the lines around it can't reorder, and the rail's
+  curve count deliberately counts the *selection* rather than what's plotted, so it doesn't
+  flicker as the pointer crosses the rail.
 - **The run's own temperature is marked** with a vertical dotted line, from
   `runAnalysis.ts`'s exported `stepTemperature` — the same function `useRunAnalysis` builds its
   matrix at, not a second derivation — so the point on the x axis the analysis actually samples
@@ -1043,10 +1064,11 @@ neighbours' channels.
   Cq rings, min/max whiskers), none of which means anything for a four-point curve against
   temperature that has no baseline, threshold or Cq. What the two share is the channel palette,
   the SVG-overlay/tooltip pattern and the alpha-only `applyCalHighlight` redraw on rail hover.
-- **State:** one new per-file display setting, `calFiles` (`${dye}|${plateType}` keys). Empty
-  means *unseeded* rather than *none*: the view seeds it from the run the first time it has the
-  calibration data, apply-once-per-source like the Curves view's well/channel defaults, so a
-  restored selection is never overwritten.
+- **State:** two per-file display settings of its own. `calFiles` (`${dye}|${plateType}` keys) —
+  empty means *unseeded* rather than *none*: the view seeds it from the run the first time it has
+  the calibration data, apply-once-per-source like the Curves view's well/channel defaults, so a
+  restored selection is never overwritten. And `calView`, the relative/absolute switch above,
+  defaulting to `"relative"` and absent from older stored records.
 
 ## Reference view
 

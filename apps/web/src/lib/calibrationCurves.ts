@@ -9,7 +9,13 @@
  * so what the chart shows is literally the input the color separation solves against.
  */
 
-import { buildDyeResponseCurve, type DcalEntry, type ResponseKnot } from "@zpcrweb/core";
+import {
+  buildDyeReadingCurves,
+  buildDyeResponseCurve,
+  type DcalEntry,
+  type ReadingKnot,
+  type ResponseKnot,
+} from "@zpcrweb/core";
 import type { TubeType } from "./fluorCurves";
 
 /** Identity of one calibration file: a dye measured on one plate/tube type. Both halves are
@@ -31,6 +37,10 @@ export interface CalibrationFile {
   primaryChannel: number;
   /** Response knots per channel: `channels[channel]`, sorted by temperature. */
   channels: ResponseKnot[][];
+  /** The raw dye-plate and empty-plate readings {@link channels} is the difference of, per
+   * channel — what the view's absolute mode plots. The empty-plate half is used nowhere else:
+   * subtracting it here is the algorithm's only use of it. */
+  readings: ReadingKnot[][];
   /**
    * True when the run's own analysis reads this file: its plate type is the one the plate
    * resolves to, and its dye is a fluorophore the plate actually carries. Exactly the match
@@ -49,7 +59,9 @@ function norm(s: string): string {
 
 /**
  * Every calibration file in the run, with its response curves and whether the analysis uses it.
- * Sorted by plate type then dye, so the view's two chip groups come out in a stable order.
+ * Sorted by plate type, then by the dye's own optical channel, then by name — so the view's two
+ * chip groups come out in a stable order that runs along the spectrum, matching the channel bar
+ * below them rather than cutting across it alphabetically.
  *
  * `plateFluors` is the plate's fluorophore list (empty when there's no plate, e.g. before a
  * password unlocks one) and `tube` the tube type it resolves to; together they decide `inUse`.
@@ -64,16 +76,23 @@ export function calibrationFiles(
   return entries
     .map(({ dcal }) => {
       const curve = buildDyeResponseCurve(dcal);
+      const readings = buildDyeReadingCurves(dcal);
       return {
         key: calKey(dcal.dye, dcal.plate),
         dye: dcal.dye,
         plateType: dcal.plate,
         primaryChannel: dcal.primaryChannel,
         channels: curve.channels,
+        readings: readings.channels,
         inUse: norm(dcal.plate) === wantedTube && wantedDyes.has(norm(dcal.dye)),
       };
     })
-    .sort((a, b) => a.plateType.localeCompare(b.plateType) || a.dye.localeCompare(b.dye));
+    .sort(
+      (a, b) =>
+        a.plateType.localeCompare(b.plateType) ||
+        a.primaryChannel - b.primaryChannel ||
+        a.dye.localeCompare(b.dye),
+    );
 }
 
 /**

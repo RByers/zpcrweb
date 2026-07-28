@@ -30,6 +30,54 @@ export interface DyeResponseCurve {
   channels: ResponseKnot[][];
 }
 
+/** The two raw readings a response knot is the difference of, at one temperature on one channel. */
+export interface ReadingKnot {
+  temperatureC: number;
+  /** Reading from the pure-dye plate. */
+  dye: number;
+  /** Reading from the matching empty-plate block — the baseline the dye reading is measured
+   * against, and the *only* use this algorithm makes of the empty blocks. */
+  empty: number;
+}
+
+/** A dye's raw `.Dcal` readings, per channel — what {@link DyeResponseCurve} is derived from. */
+export interface DyeReadingCurves {
+  /** Dye name, e.g. `FAM` (see {@link Dcal.dye}). */
+  dye: string;
+  /** Knots per channel: `channels[channel]`, sorted by temperature. */
+  channels: ReadingKnot[][];
+}
+
+/**
+ * The raw dye-plate and empty-plate readings behind a dye's response curve, per channel: at each
+ * block temperature that has both a dye-filled and an empty-plate block, both values as measured.
+ * Uses well `well` (default `0`, i.e. A1) from each block — calibration readings are uniform
+ * across wells in every file this library has decoded, see `dcal.md`.
+ *
+ * The algorithm itself only ever wants the difference ({@link buildDyeResponseCurve}); this exists
+ * so a caller can *show* the two measurements the difference is taken between.
+ */
+export function buildDyeReadingCurves(dcal: Dcal, well = 0): DyeReadingCurves {
+  const temperatures = [...new Set(dcal.blocks.map((b) => b.temperatureC))].sort((a, b) => a - b);
+  const channels: ReadingKnot[][] = Array.from({ length: dcal.channelCount }, () => []);
+
+  for (const temperatureC of temperatures) {
+    const dyeBlock = findDcalBlock(dcal, "dye", temperatureC);
+    const emptyBlock = findDcalBlock(dcal, "empty", temperatureC);
+    if (!dyeBlock || !emptyBlock) continue;
+
+    for (let channel = 0; channel < dcal.channelCount; channel++) {
+      channels[channel]!.push({
+        temperatureC,
+        dye: dyeBlock.values[channel * dyeBlock.wellCount + well] ?? 0,
+        empty: emptyBlock.values[channel * emptyBlock.wellCount + well] ?? 0,
+      });
+    }
+  }
+
+  return { dye: dcal.dye, channels };
+}
+
 /**
  * Build a dye's per-channel response curve from its `.Dcal` calibration: at each block
  * temperature that has both a dye-filled and an empty-plate block, the response is
@@ -38,22 +86,16 @@ export interface DyeResponseCurve {
  * `dcal.md`.
  */
 export function buildDyeResponseCurve(dcal: Dcal, well = 0): DyeResponseCurve {
-  const temperatures = [...new Set(dcal.blocks.map((b) => b.temperatureC))].sort((a, b) => a - b);
-  const channels: ResponseKnot[][] = Array.from({ length: dcal.channelCount }, () => []);
-
-  for (const temperatureC of temperatures) {
-    const dyeBlock = findDcalBlock(dcal, "dye", temperatureC);
-    const emptyBlock = findDcalBlock(dcal, "empty", temperatureC);
-    if (!dyeBlock || !emptyBlock) continue;
-
-    for (let channel = 0; channel < dcal.channelCount; channel++) {
-      const dyeValue = dyeBlock.values[channel * dyeBlock.wellCount + well] ?? 0;
-      const emptyValue = emptyBlock.values[channel * emptyBlock.wellCount + well] ?? 0;
-      channels[channel]!.push({ temperatureC, response: Math.max(0, dyeValue - emptyValue) });
-    }
-  }
-
-  return { dye: dcal.dye, channels };
+  const readings = buildDyeReadingCurves(dcal, well);
+  return {
+    dye: readings.dye,
+    channels: readings.channels.map((knots) =>
+      knots.map(({ temperatureC, dye, empty }) => ({
+        temperatureC,
+        response: Math.max(0, dye - empty),
+      })),
+    ),
+  };
 }
 
 /**

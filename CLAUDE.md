@@ -160,7 +160,7 @@ holds stdout open and the run looks like a hang long after the page is done.
 - `#cfxPassword=<value>` seeds the decryption password so samples decrypt instead of sitting
   behind the prompt. Pull it from `secrets.json` (see Secrets, above) and URL-escape it — the
   password can contain characters like `#`.
-- `#file=<name>&view=<overview|curves|calibration|plates|reference|raw|about>` selects the active file and
+- `#file=<name>&view=<overview|curves|plates|reference|calibration|raw|about>` selects the active file and
   view. `about` is the credits page behind the logo; it has no tab and needs no file.
 - `#load=<url>` fetches a file and loads it — the only key that can put a file the browser
   doesn't already have into the app. It's consumed on load and replaced by the `#file=` the

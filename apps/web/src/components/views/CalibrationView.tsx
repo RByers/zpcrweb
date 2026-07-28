@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Zpcr } from "@zpcrweb/core";
-import type { FileSettings, Scale } from "../../state/useZpcrStore";
+import type { CalView, FileSettings, Scale } from "../../state/useZpcrStore";
 import { usePltdPassword } from "../../state/pltdPassword";
 import { channelLabel } from "../../lib/channelColors";
 import { resolveTubeType } from "../../lib/fluorCurves";
@@ -31,6 +31,11 @@ interface Props {
  * directly what the matrix at any given block temperature is built from, and how much each dye
  * bleeds into its neighbours' channels.
  *
+ * The Values switch chooses which level is drawn. "Relative" is that response, i.e. the number
+ * the algorithm consumes. "Absolute" splits it back into the two raw reads it's the difference
+ * of — the dye plate and the empty plate — which is the only place the empty-plate blocks are
+ * visible at all: nothing else in the pipeline reads them except this one subtraction.
+ *
  * Shown by default: only the files the run's analysis actually reads (this plate's fluorophores,
  * on the tube type the plate resolves to). The rest of the archive's calibrations — every other
  * dye, and the other tube type — are one chip-click away, drawn dashed so the ones the analysis
@@ -38,7 +43,9 @@ interface Props {
  *
  * The rail is deliberately the Curves view's: the same `FluorBar` chips (dye chips here rather
  * than target chips), the same `ChannelBar` reading the same `enabledChannels` setting, the same
- * `.curves__rail` layout and reset/solo/hover behavior.
+ * `.curves__rail` layout and reset/solo/hover behavior — with one addition, `preview`: hovering a
+ * chip that's *off* draws it temporarily, so comparing against a dye or channel you haven't
+ * selected costs a hover instead of two clicks.
  */
 export function CalibrationView({ zpcr, settings, onChange }: Props) {
   const [pltdPassword] = usePltdPassword();
@@ -89,25 +96,99 @@ export function CalibrationView({ zpcr, settings, onChange }: Props) {
 
   const [highlight, setHighlight] = useState<CalHighlight | null>(null);
 
-  /** One line per enabled (file × enabled channel). Order follows the file list, so a rebuild
-   * can't reshuffle colors under the cursor. */
+  /**
+   * Hovering an *off* chip previews it: the highlight it sets would otherwise dim every line and
+   * reveal nothing, since the thing being hovered isn't plotted. So while the pointer is on it,
+   * its lines join the plot — and the highlight then isolates exactly them, which is what makes
+   * "how does this dye compare?" a hover rather than a click, a look and a click back.
+   *
+   * Null while the hovered chip is already on (the ordinary dim-the-others highlight) or while
+   * nothing is hovered, so the plotted set only changes for the off-chip case.
+   */
+  const preview = useMemo<CalHighlight | null>(() => {
+    if (!highlight) return null;
+    if (highlight.kind === "file") {
+      return settings.calFiles.has(highlight.fileKey) ? null : highlight;
+    }
+    return settings.enabledChannels.has(highlight.channel) ? null : highlight;
+  }, [highlight, settings.calFiles, settings.enabledChannels]);
+
+  /** Files to plot: the enabled ones, plus a previewed file in its own sorted position — so the
+   * preview appearing and disappearing can't reorder the lines around it. */
+  const plotFiles = useMemo(
+    () =>
+      preview?.kind === "file"
+        ? files.filter((f) => settings.calFiles.has(f.key) || f.key === preview.fileKey)
+        : enabledFiles,
+    [preview, files, settings.calFiles, enabledFiles],
+  );
+  /** Channels to plot, on the same terms as {@link plotFiles}. */
+  const plotChannels = useMemo(
+    () =>
+      available.filter(
+        (ch) =>
+          settings.enabledChannels.has(ch) ||
+          (preview?.kind === "channel" && ch === preview.channel),
+      ),
+    [available, settings.enabledChannels, preview],
+  );
+
+  /**
+   * One line per plotted (file × channel) in relative mode; two in absolute mode, the dye-plate
+   * reading and the empty-plate reading it's measured against. Order follows the file list, so a
+   * rebuild can't reshuffle colors under the cursor.
+   */
   const series = useMemo<CalPlotSeries[]>(
     () =>
-      enabledFiles.flatMap((f) =>
-        available
-          .filter((ch) => settings.enabledChannels.has(ch))
-          .map((ch) => ({
-            key: `${f.key}|${ch}`,
+      plotFiles.flatMap((f) =>
+        plotChannels.flatMap((ch): CalPlotSeries[] => {
+          const base = {
             fileKey: f.key,
             dye: f.dye,
             plateType: f.plateType,
             channel: ch,
             primary: ch === f.primaryChannel,
             inUse: f.inUse,
-            knots: f.channels[ch] ?? [],
-          })),
+          };
+          if (settings.calView === "relative") {
+            return [
+              {
+                ...base,
+                key: `${f.key}|${ch}`,
+                kind: "response" as const,
+                knots: f.channels[ch] ?? [],
+              },
+            ];
+          }
+          // Both raw levels reuse the response-knot shape, so the chart interpolates and draws
+          // them exactly as it does a response curve; `kind` is what says which level it is.
+          const readings = f.readings[ch] ?? [];
+          return [
+            {
+              ...base,
+              key: `${f.key}|${ch}|dye`,
+              kind: "dye" as const,
+              knots: readings.map((k) => ({ temperatureC: k.temperatureC, response: k.dye })),
+            },
+            {
+              ...base,
+              key: `${f.key}|${ch}|empty`,
+              kind: "empty" as const,
+              knots: readings.map((k) => ({ temperatureC: k.temperatureC, response: k.empty })),
+            },
+          ];
+        }),
       ),
-    [enabledFiles, available, settings.enabledChannels],
+    [plotFiles, plotChannels, settings.calView],
+  );
+
+  /** How many lines the current selection alone accounts for — see the rail's stat line. */
+  const selectedCurves = useMemo(
+    () =>
+      series.filter(
+        (s) => settings.calFiles.has(s.fileKey) && settings.enabledChannels.has(s.channel),
+      ).length,
+    [series, settings.calFiles, settings.enabledChannels],
   );
 
   const toggleCal = (key: string) => {
@@ -231,6 +312,17 @@ export function CalibrationView({ zpcr, settings, onChange }: Props) {
         </div>
 
         <div className="rail__section rail__row">
+          {/* "Values", like the Curves rail's own relative/absolute switch, and for the same
+              reason: it answers what the y axis reads, not which curves are drawn. */}
+          <Toggle
+            label="Values"
+            options={[
+              ["relative", "Relative"],
+              ["absolute", "Absolute"],
+            ]}
+            value={settings.calView}
+            onChange={(v) => onChange({ calView: v as CalView })}
+          />
           <Toggle
             label="Scale"
             options={[
@@ -243,12 +335,25 @@ export function CalibrationView({ zpcr, settings, onChange }: Props) {
         </div>
 
         <div className="rail__stat mono">
-          {enabledFiles.length} / {files.length} calibrations · {series.length} curves
+          {/* Counts the *selected* lines, not the plotted ones: a hover preview is transient, and
+              a number that flickered as the pointer crossed the rail would be unreadable. */}
+          {enabledFiles.length} / {files.length} calibrations · {selectedCurves} curves
+          {settings.calView === "absolute" && " (dye + empty)"}
         </div>
 
         <div className="rail__note mono">
-          Response is the pure-dye read minus the empty-plate read, per channel (calibration.md
-          §2). Lines are straight because the algorithm interpolates linearly between these four
+          {settings.calView === "relative" ? (
+            <>
+              Response is the pure-dye read minus the empty-plate read, per channel
+              (calibration.md §2) — the value the color separation actually consumes.
+            </>
+          ) : (
+            <>
+              The two raw reads that response is the difference of: the pure-dye plate solid, the
+              empty-plate baseline dotted below it. Only their difference reaches the algorithm.
+            </>
+          )}{" "}
+          Lines are straight because the algorithm interpolates linearly between these four
           measured temperatures; the marker sits at this step's block temperature, where the
           calibration matrix is sampled. Dashed lines aren't used by this run's analysis.
         </div>

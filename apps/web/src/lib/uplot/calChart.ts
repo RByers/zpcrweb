@@ -27,14 +27,33 @@ const SVG_NS = "http://www.w3.org/2000/svg";
 /** Files the run's analysis doesn't use are drawn dashed — the same "this is context, not the
  * measurement" convention the reference/dark overlays use on the Curves chart. */
 const EXTRA_DASH = [5, 4];
+/** The empty-plate baseline in absolute mode — dotted, so it reads as the level the dye reading
+ * above it is measured against rather than as a curve in its own right. */
+const EMPTY_DASH = [1, 3];
 /** The vertical marker at the run's own block temperature. */
 const RUN_TEMP_DASH = "3,3";
 const RUN_TEMP_COLOR = "#e6e6e6";
 
-/** One plotted line: one calibration file's response on one optical channel. */
+/**
+ * What one line's y values are. `"response"` is the algorithm's own `max(0, dye − empty)`
+ * (relative mode); `"dye"` and `"empty"` are the two raw readings that difference is taken
+ * between (absolute mode), plotted as a pair per file × channel.
+ */
+export type CalSeriesKind = "response" | "dye" | "empty";
+
+/** Human label for a {@link CalSeriesKind}, used in the legend and the tooltip's value row. */
+export const CAL_KIND_LABEL: Record<CalSeriesKind, string> = {
+  response: "response",
+  dye: "dye plate",
+  empty: "empty plate",
+};
+
+/** One plotted line: one calibration file's readings on one optical channel. */
 export interface CalPlotSeries {
-  /** Unique per line — `${fileKey}|${channel}`. */
+  /** Unique per line — `${fileKey}|${channel}` in relative mode, plus the kind in absolute. */
   key: string;
+  /** Which level this line plots; see {@link CalSeriesKind}. */
+  kind: CalSeriesKind;
   /** The calibration file this line belongs to (`calKey`), for the rail's chip highlight. */
   fileKey: string;
   dye: string;
@@ -44,7 +63,8 @@ export interface CalPlotSeries {
   primary: boolean;
   /** True when the run's analysis reads this file — drawn solid rather than dashed. */
   inUse: boolean;
-  /** The response curve's knots, sorted by temperature (`calibration.md` §2). */
+  /** The line's knots, sorted by temperature. `response` carries whichever level {@link kind}
+   * names — for a raw reading it is the reading itself, not a difference. */
   knots: ResponseKnot[];
 }
 
@@ -65,6 +85,7 @@ export interface CalTooltipData {
   plateType: string;
   channel: number;
   primary: boolean;
+  kind: CalSeriesKind;
   color: string;
   temperatureC: number;
   response: number;
@@ -128,12 +149,15 @@ export function buildCalChart(cfg: BuildCalChartConfig): {
     rows.push(values);
     meta.push({ series: s, values });
     series.push({
-      label: `${s.dye} · ${s.plateType} · ${channelLabel(s.channel)}`,
+      label: `${s.dye} · ${s.plateType} · ${channelLabel(s.channel)} · ${CAL_KIND_LABEL[s.kind]}`,
       stroke: channelColor(s.channel),
       // The dye's own channel carries its signal; the rest is crosstalk, an order of magnitude
-      // smaller and worth de-emphasising.
-      width: s.primary ? 2 : 1,
-      dash: s.inUse ? undefined : EXTRA_DASH,
+      // smaller and worth de-emphasising. The empty-plate baseline is context for the reading
+      // above it, so it stays thin whichever channel it's on.
+      width: s.primary && s.kind !== "empty" ? 2 : 1,
+      // Dotted wins over dashed on an empty-plate line: which level it is matters more than
+      // whether the analysis reads that file, and the dye line beside it still says the latter.
+      dash: s.kind === "empty" ? EMPTY_DASH : s.inUse ? undefined : EXTRA_DASH,
       points: { show: true, size: 5 },
     });
   }
@@ -161,7 +185,7 @@ export function buildCalChart(cfg: BuildCalChartConfig): {
         stroke: "#8aa0c0",
         grid: { stroke: "rgba(120,200,255,0.06)", width: 1 },
         ticks: { stroke: "rgba(120,200,255,0.12)", width: 1 },
-        label: "Response (RFU)",
+        label: cfg.series.some((s) => s.kind !== "response") ? "Reading (RFU)" : "Response (RFU)",
         labelSize: 30,
         labelFont: "12px system-ui",
         font: "11px ui-monospace, monospace",
@@ -302,6 +326,7 @@ function calOverlayPlugin(
           plateType: m.series.plateType,
           channel: m.series.channel,
           primary: m.series.primary,
+          kind: m.series.kind,
           color: channelColor(m.series.channel),
           temperatureC,
           response: value,

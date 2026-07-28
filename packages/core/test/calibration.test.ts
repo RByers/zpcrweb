@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   buildCalibrationMatrix,
+  buildDyeReadingCurves,
   buildDyeResponseCurve,
   interpolateResponse,
   parseZpcr,
@@ -80,6 +81,45 @@ describe("buildDyeResponseCurve", () => {
   it("shows a strong signal on FAM's primary channel and near-zero on the unused sixth", () => {
     expect(curve.channels[dcal.primaryChannel]!.every((k) => k.response > 1000)).toBe(true);
     expect(curve.channels[5]!.every((k) => k.response === 0)).toBe(true);
+  });
+});
+
+describe("buildDyeReadingCurves", () => {
+  const dcal = calibrations().get("FAM_BR Clear.Dcal")!;
+  const readings = buildDyeReadingCurves(dcal);
+
+  it("returns both source blocks' readings, on the response curve's own knot grid", () => {
+    expect(readings.dye).toBe("FAM");
+    expect(readings.channels).toHaveLength(dcal.channelCount);
+    for (const knots of readings.channels) {
+      expect(knots.map((k) => k.temperatureC)).toEqual([20, 40, 60, 80]);
+    }
+    for (const temperatureC of [20, 40, 60, 80]) {
+      const dyeBlock = findDcalBlock(dcal, "dye", temperatureC)!;
+      const emptyBlock = findDcalBlock(dcal, "empty", temperatureC)!;
+      for (let channel = 0; channel < dcal.channelCount; channel++) {
+        const knot = readings.channels[channel]!.find((k) => k.temperatureC === temperatureC)!;
+        expect(knot.dye).toBeCloseTo(dyeBlock.values[channel * dyeBlock.wellCount]!, 6);
+        expect(knot.empty).toBeCloseTo(emptyBlock.values[channel * emptyBlock.wellCount]!, 6);
+      }
+    }
+  });
+
+  it("is exactly what buildDyeResponseCurve clamps the difference of", () => {
+    const curve = buildDyeResponseCurve(dcal);
+    readings.channels.forEach((knots, channel) => {
+      knots.forEach((k, i) => {
+        const response = curve.channels[channel]![i]!;
+        expect(response.temperatureC).toBe(k.temperatureC);
+        expect(response.response).toBeCloseTo(Math.max(0, k.dye - k.empty), 6);
+      });
+    });
+  });
+
+  it("records a real empty-plate level — the readings are not just the response repeated", () => {
+    const primary = readings.channels[dcal.primaryChannel]!;
+    expect(primary.every((k) => k.empty > 0)).toBe(true);
+    expect(primary.every((k) => k.dye > k.empty)).toBe(true);
   });
 });
 
