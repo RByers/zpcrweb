@@ -120,7 +120,7 @@ Cost control, when you do run it:
 npm run test:ui
 ```
 
-43 browser assertions covering what nothing else can catch: the two URL contracts — hash
+49 browser assertions covering what nothing else can catch: the two URL contracts — hash
 routing (deep links, back/forward, unknown-file and invalid-view fallbacks) and password
 handling (stripped from both URL forms, never leaked into the routing hash, an encrypted
 `.pcrd` still decrypting) — plus `#load=`, the rule that every XML view uses the shared
@@ -128,7 +128,9 @@ collapsible tree rather than a flat dump, the chart's one-right-axis invariant
 (temperatures and LED currents can never both be on), the Calibration view's default
 selection (only the run's in-use `.Dcal` files of the 28 it ships, the rest a click away),
 and the rail chips' shared interaction contract (double-click solos, hovering a disabled chip
-peeks at it only while hovered) plus the Reference view's Raw-only dark overlay. A screenshot
+peeks at it only while hovered) plus the Reference view's overlay toggles and x-axis modes —
+including that hiding the factory line doesn't break the ΔRFU baseline computed from the same
+values. A screenshot
 can't show that the back button works, that a secret reached the address bar, or that a hover
 put a curve back — and the core Vitest suite has no DOM.
 

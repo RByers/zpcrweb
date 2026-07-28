@@ -362,6 +362,12 @@ export interface TooltipData {
   dye: string;
   color: string;
   cycle: number;
+  /** How to name the x value in the tooltip — "cycle" normally, or the {@link
+   * BuildChartConfig.xAxis} label's own term (e.g. "column") when the axis isn't time. */
+  xName: string;
+  /** The x value already rendered for display (e.g. `"R4"`), when `xAxis.tickLabel` supplies
+   * one; otherwise the tooltip prints {@link cycle} as-is. */
+  xText?: string;
   mean: number;
   /** See {@link PlotCurve.std}; all three absent together when this series has no real spread,
    * and the tooltip then omits the rows entirely. */
@@ -391,6 +397,28 @@ export interface BuildChartConfig {
   /** Factory-calibration reference values to overlay as dotted flat lines, matched to
    * `wellCurves` by (channel, col); empty draws none. See the Reference view. */
   factoryCurves: FactoryCurve[];
+  /**
+   * Whether to *draw* the factory lines (default true). Separate from `factoryCurves` being
+   * empty, because these values do double duty: they are also the reference the ΔRFU and
+   * Drift % baselines are computed against (`wellAdjust`). Clearing the array to hide the lines
+   * would silently break those two modes, so the Reference view's "Show factory" toggle gates
+   * the drawing and leaves the data in place.
+   */
+  drawFactory?: boolean;
+  /**
+   * Overrides the x axis' presentation. Omitted, it's the cycle axis every view uses: labelled
+   * "Cycle", ticked every 5. The Reference view's column mode supplies its own, where x is a
+   * plate column rather than a cycle and every one of the ≤12 positions needs its own `R{n}`
+   * tick — nothing else about `buildChart` changes, since a series is just (x[], y[]) and
+   * column mode only alters what x *means*.
+   */
+  xAxis?: {
+    label: string;
+    /** Renders one tick value; when given, every split is labelled rather than every fifth. */
+    tickLabel?: (v: number) => string;
+    /** The exact tick positions, when the axis is categorical rather than continuous. */
+    splits?: number[];
+  };
   /** What rides the right-hand axis — temperatures or LED currents, never both (see
    * `rightAxis.ts`); an axis with no curves hides itself. */
   aux: AuxAxis;
@@ -410,7 +438,11 @@ export interface BuildChartConfig {
 }
 
 const REF_DASH = [3, 3];
-const DARK_DOT = [1, 3];
+/** Dark and factory are both flat, same-colored overlays on the same chart (the Reference view
+ * can show both at once), so they must not share a pattern — they were both `[1, 3]` until the
+ * Reference view gained its dark overlay and made them indistinguishable. Dark is the dash-dot;
+ * the factory line keeps the fine dot it has always had on this view. */
+const DARK_DOT = [5, 3, 1, 3];
 const FACTORY_DOT = [1, 3];
 const AUX_DASH = [5, 4];
 /** Set points are configured thresholds, not readings — a finer dash than a measured series. */
@@ -453,6 +485,10 @@ export function buildChart(cfg: BuildChartConfig): {
   thresholdLineState: ThresholdLineState;
 } {
   const { wellCurves, darkCurves, factoryCurves, aux, baseline, curveView, scale } = cfg;
+  const xTick = cfg.xAxis?.tickLabel;
+  /** What the tooltip calls the x value. Derived from the axis label so the two always agree
+   * ("Reference column" → "column"); "cycle" when the axis is the default time series. */
+  const xName = cfg.xAxis ? cfg.xAxis.label.split(" ").pop()!.toLowerCase() : "cycle";
   const auxCurves = aux.curves;
   const cycles =
     wellCurves[0]?.cycles ?? darkCurves[0]?.cycles ?? auxCurves[0]?.cycles ?? [];
@@ -577,7 +613,7 @@ export function buildChart(cfg: BuildChartConfig): {
   // would show it as a flat 0, and "%" as a flat 100 — both constant and uninformative — so
   // it's only drawn against the raw baseline, where it's the only way to see the factory
   // reference at all.
-  if (baseline === "raw") {
+  if (baseline === "raw" && cfg.drawFactory !== false) {
     const presentPairs = new Set(wellCurves.map((c) => `${c.channel},${c.col}`));
     for (const key of presentPairs) {
       const factory = factoryByKey.get(key);
@@ -600,7 +636,12 @@ export function buildChart(cfg: BuildChartConfig): {
         adjust,
       });
       series.push({
-        label: `factory · ${channelLabel(factory.channel)} col ${factory.col + 1}`,
+        // `col < 0` means the series spans every column rather than pinning one (the Reference
+        // view's column mode), so there is no column to name.
+        label:
+          factory.col >= 0
+            ? `factory · ${channelLabel(factory.channel)} col ${factory.col + 1}`
+            : `factory · ${channelLabel(factory.channel)}`,
         stroke: channelColor(factory.channel),
         width: 2,
         dash: FACTORY_DOT,
@@ -711,19 +752,24 @@ export function buildChart(cfg: BuildChartConfig): {
     axes: [
       {
         stroke: "#8aa0c0",
-        splits: (_u, _i, min, max) => {
-          const out: number[] = [];
-          for (let v = Math.max(1, Math.ceil(min)); v <= Math.floor(max); v++) out.push(v);
-          return out;
-        },
-        values: (_u, splits) => splits.map((v) => (v % 5 === 0 ? String(v) : "")),
+        splits: xTick
+          ? () => cfg.xAxis?.splits ?? cycles
+          : (_u, _i, min, max) => {
+              const out: number[] = [];
+              for (let v = Math.max(1, Math.ceil(min)); v <= Math.floor(max); v++) out.push(v);
+              return out;
+            },
+        // A categorical axis labels every position; the cycle axis would be unreadable that way,
+        // so it keeps its every-fifth thinning.
+        values: (_u, splits) =>
+          splits.map((v) => (xTick ? xTick(v) : v % 5 === 0 ? String(v) : "")),
         grid: {
           stroke: "rgba(120,200,255,0.06)",
           width: 1,
-          filter: (_u, splits) => splits.map((v) => (v % 5 === 0 ? v : null)),
+          filter: (_u, splits) => splits.map((v) => (xTick || v % 5 === 0 ? v : null)),
         },
         ticks: { stroke: "rgba(120,200,255,0.12)", width: 1, size: 5 },
-        label: "Cycle",
+        label: cfg.xAxis?.label ?? "Cycle",
         labelSize: 24,
         labelFont: "12px system-ui",
         font: "11px ui-monospace, monospace",
@@ -757,7 +803,9 @@ export function buildChart(cfg: BuildChartConfig): {
     cursor: { focus: { prox: 24 }, points: { size: 6 } },
     focus: { alpha: 0.12 },
     legend: { show: false },
-    plugins: [overlayPlugin(meta, bands, cqMarkers, thresholdLineState, aux, cfg.onHover)],
+    plugins: [
+      overlayPlugin(meta, bands, cqMarkers, thresholdLineState, aux, xName, xTick, cfg.onHover),
+    ],
   };
 
   return { data: rows as uPlot.AlignedData, options, meta, thresholdLineState };
@@ -825,6 +873,10 @@ function overlayPlugin(
   thresholdLineState: ThresholdLineState,
   /** How to present a right-axis value in the hovercard (see {@link AuxAxis}). */
   aux: AuxAxis,
+  /** How the tooltip names and renders the x value — "cycle" and raw numbers by default; the
+   * Reference view's column mode passes "column" and an `R{n}` renderer (see `xAxis`). */
+  xName: string,
+  xTick: ((v: number) => string) | undefined,
   onHover: (t: TooltipData | null) => void,
 ): uPlot.Plugin {
   let svg: SVGSVGElement;
@@ -1140,6 +1192,8 @@ function overlayPlugin(
                   dye: "",
                   color: (u.series[best]!.stroke as string) ?? "#8aa0c0",
                   cycle: m.cycles[idx] ?? 0,
+                  xName,
+                  xText: xTick ? xTick(m.cycles[idx] ?? 0) : undefined,
                   mean: plotted,
                   rowLabel: aux.rowLabel,
                   unit: aux.unit,
@@ -1197,6 +1251,8 @@ function overlayPlugin(
                 dye: m.dyeLabel,
                 color,
                 cycle: m.cycles[idx] ?? 0,
+                xName,
+                xText: xTick ? xTick(m.cycles[idx] ?? 0) : undefined,
                 mean: m.mean[idx] ?? 0,
                 ...(spread ?? {}),
                 left,

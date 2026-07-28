@@ -433,6 +433,53 @@ async function referenceChecks(chrome, origin) {
     withDark.trim(),
   );
 
+  // The factory overlay is a *drawing* toggle: the values behind it also drive the ΔRFU and
+  // Drift % baselines, so hiding the line must not empty them (that would silently break both
+  // modes). Turning it back on has to restore the line, not just the count.
+  check("the Reference rail offers a factory overlay switch", (await clickSwitch("Show factory")) === "ok");
+  await sleep(300);
+  const factoryOff = await stat();
+  await clickSwitch("Show factory");
+  await sleep(300);
+  const factoryOn = await stat();
+  check(
+    "Show factory hides and restores the factory line",
+    /factory hidden/.test(factoryOff) && /\d+ factory/.test(factoryOn),
+    `off: ${factoryOff.trim()} | on: ${factoryOn.trim()}`,
+  );
+
+  // X-axis mode: one line per (channel, column) over cycles, vs. one line per channel across
+  // the columns, each point a mean over all cycles.
+  // Restore every column first, so the two modes have visibly different series counts: cycle
+  // mode draws one line per (channel, column), column mode one line per channel. (uPlot paints
+  // its axis label onto the canvas, so the axis itself can't be read from the DOM.)
+  await cdp.eval(`(document.querySelectorAll(".reference .rail__icon-btn")[1].click(), undefined)`);
+  await sleep(300);
+  const cycleAll = await curveCount();
+  check("the Reference rail offers the Column x axis", (await clickBaseline("Column")) === "ok");
+  await sleep(400);
+  const colStat = await stat();
+  const colCount = await curveCount();
+  check(
+    "Column mode collapses each column's curve into one line per channel",
+    /reference columns/.test(colStat) && colCount < cycleAll && colCount > 0,
+    `${cycleAll} curves over cycles → ${colCount} lines over columns`,
+  );
+  // ΔRFU still works in column mode — which it would not if hiding the factory line had
+  // emptied the array the baseline reads.
+  await clickBaseline("ΔRFU");
+  await sleep(400);
+  const colDelta = await stat();
+  check(
+    "column mode still baselines against the factory values",
+    /ΔRFU from factory/.test(colDelta),
+    colDelta.trim(),
+  );
+  await clickBaseline("Raw");
+  await sleep(300);
+  check("the Reference rail returns to the Cycle x axis", (await clickBaseline("Cycle")) === "ok");
+  await sleep(400);
+
   check("the Reference rail offers the ΔRFU baseline", (await clickBaseline("ΔRFU")) === "ok");
   await sleep(300);
   const deltaStat = await stat();

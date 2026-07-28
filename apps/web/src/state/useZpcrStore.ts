@@ -71,6 +71,15 @@ export type CurveView = "relative" | "absolute";
 export type CalView = "relative" | "absolute";
 export type Scale = "linear" | "log";
 /**
+ * Reference view only — what the chart's x axis runs over. `"cycle"` is the normal time series,
+ * one line per (channel, reference column). `"column"` collapses each of those lines to its
+ * mean over all cycles and plots it against the plate column instead, giving one line per
+ * channel across R1-R12: the shape of the reference row itself, rather than its stability over
+ * a run. The dark overlay, having no column dependence, becomes a flat line there — like the
+ * factory line already is in cycle mode.
+ */
+export type RefXAxis = "cycle" | "column";
+/**
  * What the Curves view's main pane shows once color separation is on: dye-space curves grouped
  * by fluorophore or by target/gene, or — `"table"` — the run's Cq/ΔRFU table in place of the
  * chart (the former standalone Analysis view). Table mode groups by target, like `"target"`.
@@ -104,6 +113,13 @@ export interface FileSettings extends AnalysisSettings {
   /** Overlay each channel's dark (LED-off) background as a dotted line. Channel-space only —
    * see the "What actually gets plotted" note in CurvesView. */
   showDark: boolean;
+  /** Reference view: overlay each reference well's `FactoryRefRowCal` value as a flat dotted
+   * line. On by default — comparing live against factory is what that view is for — and, like
+   * {@link showDark}, only drawn under the Raw baseline, since ΔRFU/Drift % already plot the
+   * live curve relative to it. */
+  showFactory: boolean;
+  /** Reference view: what the x axis runs over; see {@link RefXAxis}. */
+  refXAxis: RefXAxis;
   /** Draw each channel's min/max envelope band. Channel-space only, like {@link showDark}, and
    * off by default — with more than a well or two selected the envelopes overlap into noise. */
   bands: boolean;
@@ -302,6 +318,9 @@ function defaultSettings(): FileSettings {
     drawBaseline: false,
     scale: "linear",
     showDark: false,
+    // On by default: the live-vs-factory comparison is the Reference view's whole purpose.
+    showFactory: true,
+    refXAxis: "cycle",
     bands: false,
     step: null,
     // Temperatures and LED currents are off by default — instrument context, not the
@@ -335,6 +354,8 @@ function toStored(id: string, s: FileSettings): StoredSettings {
     drawBaseline: s.drawBaseline,
     scale: s.scale,
     showDark: s.showDark,
+    showFactory: s.showFactory,
+    refXAxis: s.refXAxis,
     bands: s.bands,
     step: s.step ?? null,
     temps: [...s.temps],
@@ -388,6 +409,9 @@ function fromStored(s: StoredSettings): FileSettings {
     drawBaseline: s.drawBaseline ?? false,
     scale: s.scale ?? "linear",
     showDark: s.showDark ?? false,
+    // Absent from records written before the toggle existed, when the line was always drawn.
+    showFactory: s.showFactory ?? true,
+    refXAxis: s.refXAxis === "column" ? "column" : "cycle",
     // Records written while `bands` was a three-way mode ("off"/"auto"/"on") migrate to the
     // boolean switch: only an explicit "on" survives as on. "auto" (draw the bands only when a
     // single well is selected) is gone — a switch can't express it, and it made the control's

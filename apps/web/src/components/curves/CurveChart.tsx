@@ -6,6 +6,7 @@ import {
   buildChart,
   setThresholdLine,
   type AuxAxis,
+  type BuildChartConfig,
   type FactoryCurve,
   type HighlightMatch,
   type PlotCurve,
@@ -26,6 +27,11 @@ interface Props {
   darkCurves: PlotDarkCurve[];
   /** Factory-calibration reference overlay (Reference view); empty draws none. */
   factoryCurves?: FactoryCurve[];
+  /** Draw the factory lines; see `buildChart`'s `drawFactory`. Default true — the values stay
+   * in `factoryCurves` either way, since the ΔRFU/Drift % baselines are computed from them. */
+  drawFactory?: boolean;
+  /** Overrides the x-axis presentation; see `buildChart`'s `xAxis`. */
+  xAxis?: BuildChartConfig["xAxis"];
   /** What occupies the right-hand axis — temperatures or LED currents, never both (see
    * `rightAxis.ts`). An axis with no curves is hidden. */
   aux: AuxAxis;
@@ -55,6 +61,8 @@ export function CurveChart({
   curves,
   darkCurves,
   factoryCurves = NO_FACTORY_CURVES,
+  drawFactory = true,
+  xAxis,
   aux,
   baseline,
   curveView,
@@ -92,6 +100,8 @@ export function CurveChart({
       wellCurves: curves,
       darkCurves,
       factoryCurves,
+      drawFactory,
+      xAxis,
       aux,
       baseline,
       curveView,
@@ -123,6 +133,8 @@ export function CurveChart({
     curves,
     darkCurves,
     factoryCurves,
+    drawFactory,
+    xAxis,
     aux,
     baseline,
     curveView,
@@ -181,15 +193,15 @@ export function CurveChart({
             {tip.kind !== "aux" && (
               <span className="chart__tip-dye">
                 {channelLabel(tip.channel)} · {tip.dye}
-                {tip.kind === "factory" && ` · R${tip.col + 1}`}
+                {tip.kind === "factory" && tip.col >= 0 && ` · R${tip.col + 1}`}
               </span>
             )}
           </div>
           <table className="chart__tip-tbl mono">
             <tbody>
               <tr>
-                <td>cycle</td>
-                <td>{tip.cycle}</td>
+                <td>{tip.xName}</td>
+                <td>{tip.xText ?? tip.cycle}</td>
               </tr>
               {tip.kind === "aux" ? (
                 <tr>

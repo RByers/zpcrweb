@@ -50,6 +50,11 @@ export interface StoredSettings {
   curveBaseline?: "raw" | "constant" | "linear";
   scale: "linear" | "log";
   showDark: boolean;
+  /** Reference view's factory-calibration overlay. Absent in records written before the
+   * toggle existed; `fromStored` defaults those to on, which is what they rendered. */
+  showFactory?: boolean;
+  /** Reference view's x-axis mode. Absent in older records, which default to `"cycle"`. */
+  refXAxis?: "cycle" | "column";
   /** Min/max envelope bands. Older records carry the retired three-way mode; `fromStored`
    * migrates it (only `"on"` becomes `true`). */
   bands: boolean | "off" | "auto" | "on";

@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import type { Zpcr, WellCurve, DarkCurve } from "@zpcrweb/core";
-import type { Baseline, FileSettings, Scale } from "../../state/useZpcrStore";
+import type { Baseline, FileSettings, RefXAxis, Scale } from "../../state/useZpcrStore";
 import { channelLabel } from "../../lib/channelColors";
 import { ChannelBar } from "../curves/ChannelBar";
 import { RefColBar } from "../curves/RefColBar";
@@ -34,6 +34,19 @@ interface Props {
  * column by a stable per-channel offset (see `plateread.md` §DARKDATA vs. the reference row).
  * Raw-baseline only: a dark curve has no factory value to be relative to, so ΔRFU/Drift% have
  * nothing to plot it against and would put a ~2000 RFU line on an axis spanning tens of RFU.
+ *
+ * All three line kinds are the same channel color and sit within tens of RFU of each other, so
+ * the dash pattern is what tells them apart: live solid, factory a fine dot, dark a dash-dot
+ * (see `chart.ts`'s `DARK_DOT`/`FACTORY_DOT`).
+ *
+ * "Show factory" gates `drawFactory` rather than emptying `factoryCurves` — those values are
+ * also what the ΔRFU/Drift % baselines are computed against, so clearing them to hide the line
+ * would silently break both modes.
+ *
+ * "X axis" switches between cycles (the reference row's stability over the run, one line per
+ * channel *and* column) and columns (its shape across the plate, one line per channel, each
+ * point a mean over all cycles — where the dark overlay flattens out, since it has no column
+ * dependence). Both go through the same chart: a series is just (x[], y[]).
  */
 export function ReferenceView({ zpcr, settings, onChange }: Props) {
   const steps = useMemo(() => zpcr.steps(), [zpcr]);
@@ -74,51 +87,123 @@ export function ReferenceView({ zpcr, settings, onChange }: Props) {
     [refCurves, available, settings.enabledChannels, settings.enabledRefCols, hover],
   );
 
-  const plotCurves: PlotCurve[] = visibleRef.map((c) => ({
-    channel: c.channel,
-    dyeLabel: channelLabel(c.channel),
-    row: c.row,
-    col: c.col,
-    wellLabel: c.wellLabel,
-    // Every curve here is a reference well, so the solid line is reserved for the live
-    // reading and the dotted line for the factory overlay below — not for distinguishing
-    // reference from sample wells, as it does on the main Curves view.
-    isReference: false,
-    cycles: c.cycles,
-    mean: c.mean,
-    std: c.std,
-    min: c.min,
-    max: c.max,
-  }));
-
   const factoryByKey = useMemo(() => {
     const m = new Map<string, number>();
     for (const f of factoryCal) m.set(`${f.channel},${f.col}`, f.mean);
     return m;
   }, [factoryCal]);
 
-  const factoryCurves: FactoryCurve[] = visibleRef.flatMap((c) => {
-    const mean = factoryByKey.get(`${c.channel},${c.col}`);
-    if (mean == null) return [];
-    return [{ channel: c.channel, col: c.col, mean: c.cycles.map(() => mean) }];
-  });
-
-  /** The dark overlay only exists in the Raw baseline (see the class comment). The chart draws a
-   * dark curve only for channels its well curves already cover, so filtering to the enabled
-   * channels here is belt-and-braces — but it keeps the rail's count honest. */
+  /** The dark overlay only exists in the Raw baseline (see the class comment). */
   const showDark = settings.baseline === "raw" && settings.showDark;
-  const darkCurves = useMemo(
-    () =>
-      showDark
-        ? darkAll.filter(
-            (d) =>
-              available.includes(d.channel) &&
-              (settings.enabledChannels.has(d.channel) || isHoveredChannel(d.channel)),
-          )
-        : [],
+  const byColumn = settings.refXAxis === "column";
+  /** Column mode's x positions — one per reference column, whatever the run's plate width. */
+  const colAxis = useMemo(() => Array.from({ length: columns }, (_, c) => c), [columns]);
+  const mean = (xs: number[]) => (xs.length ? xs.reduce((s, x) => s + x, 0) / xs.length : NaN);
+
+  /**
+   * Cycle mode: one line per (channel, column) over the run, the reference row's *stability*.
+   * Column mode: each of those lines collapses to its mean over all cycles, replotted against
+   * the plate column — one line per channel across R1–R12, the reference row's *shape*. Both go
+   * through the same `PlotCurve`/`buildChart` path; a series is just (x[], y[]), and column mode
+   * only changes what x means (`xAxis` below relabels the axis to match). `col: -1` marks a
+   * series that spans every column rather than pinning one — which is also how the factory
+   * overlay is keyed to it below.
+   */
+  const plotCurves: PlotCurve[] = useMemo(() => {
+    if (!byColumn) {
+      return visibleRef.map((c) => ({
+        channel: c.channel,
+        dyeLabel: channelLabel(c.channel),
+        row: c.row,
+        col: c.col,
+        wellLabel: c.wellLabel,
+        // Every curve here is a reference well, so the solid line is reserved for the live
+        // reading and the dotted line for the factory overlay below — not for distinguishing
+        // reference from sample wells, as it does on the main Curves view.
+        isReference: false,
+        cycles: c.cycles,
+        mean: c.mean,
+        std: c.std,
+        min: c.min,
+        max: c.max,
+      }));
+    }
+    const channels = available.filter(
+      (ch) => settings.enabledChannels.has(ch) || isHoveredChannel(ch),
+    );
+    return channels.flatMap((ch) => {
+      // A column the rail has turned off leaves a gap in the line rather than shifting the rest
+      // of the points along — NaN is what `buildChart` already treats as "no reading here".
+      const values = colAxis.map((col) => {
+        if (!(settings.enabledRefCols.has(col) || isHoveredCol(col))) return NaN;
+        const c = refCurves.find((r) => r.channel === ch && r.col === col);
+        return c ? mean(c.mean) : NaN;
+      });
+      if (values.every((v) => Number.isNaN(v))) return [];
+      return [
+        {
+          channel: ch,
+          dyeLabel: channelLabel(ch),
+          row: -1,
+          col: -1,
+          wellLabel: channelLabel(ch),
+          isReference: false,
+          cycles: colAxis,
+          mean: values,
+        },
+      ];
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [showDark, darkAll, available, settings.enabledChannels, hover],
-  );
+  }, [byColumn, visibleRef, available, refCurves, colAxis, settings.enabledChannels, settings.enabledRefCols, hover]);
+
+  /** Matched to the plotted lines by `channel,col`, so column mode's whole-row series (`col: -1`)
+   * picks up a factory line of the same shape — the factory value per column. This array is also
+   * what the ΔRFU/Drift % baselines are computed against, which is why the "Show factory" toggle
+   * gates `drawFactory` rather than emptying it. */
+  const factoryCurves: FactoryCurve[] = useMemo(() => {
+    if (!byColumn) {
+      return visibleRef.flatMap((c) => {
+        const m = factoryByKey.get(`${c.channel},${c.col}`);
+        if (m == null) return [];
+        return [{ channel: c.channel, col: c.col, mean: c.cycles.map(() => m) }];
+      });
+    }
+    return plotCurves.flatMap((c) => {
+      // Column mode always builds its series from a known channel, so this never falls through.
+      if (c.channel == null) return [];
+      const ch = c.channel;
+      const values = colAxis.map((col) => factoryByKey.get(`${ch},${col}`) ?? NaN);
+      if (values.every((v) => Number.isNaN(v))) return [];
+      return [{ channel: ch, col: -1, mean: values }];
+    });
+  }, [byColumn, visibleRef, plotCurves, colAxis, factoryByKey]);
+
+  /** The chart draws a dark curve only for channels its well curves already cover, so filtering
+   * to the enabled channels here is belt-and-braces — but it keeps the rail's count honest. In
+   * column mode the dark reading has no column dependence, so its single per-run value repeats
+   * across every column: a flat line, exactly like the factory line is in cycle mode. */
+  const darkCurves = useMemo(() => {
+    if (!showDark) return [];
+    const live = darkAll.filter(
+      (d) =>
+        available.includes(d.channel) &&
+        (settings.enabledChannels.has(d.channel) || isHoveredChannel(d.channel)),
+    );
+    if (!byColumn) return live;
+    return live.map((d) => {
+      const flat = mean(d.mean.filter((v) => Number.isFinite(v)));
+      return {
+        ...d,
+        cycles: colAxis,
+        mean: colAxis.map(() => flat),
+        // A run-averaged constant has no per-column spread to report.
+        std: [],
+        min: [],
+        max: [],
+      };
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showDark, byColumn, darkAll, available, colAxis, settings.enabledChannels, hover]);
 
   const toggleChannel = (ch: number) => {
     const next = new Set(settings.enabledChannels);
@@ -229,6 +314,36 @@ export function ReferenceView({ zpcr, settings, onChange }: Props) {
             />
           </div>
 
+          <div className="rail__section rail__row">
+            {/* Cycle = the reference row's stability over the run; Column = its shape across the
+                plate, each line collapsed to its mean over all cycles. */}
+            <Toggle
+              label="X axis"
+              options={[
+                ["cycle", "Cycle"],
+                ["column", "Column"],
+              ]}
+              value={settings.refXAxis}
+              onChange={(v) => onChange({ refXAxis: v as RefXAxis })}
+            />
+          </div>
+
+          {/* Both overlays are Raw-baseline only, for the same reason from opposite directions:
+              ΔRFU/Drift % already plot the live curve relative to the factory value, so the
+              factory line would be a flat zero and the dark line has nothing to be relative to. */}
+          <div className="rail__section rail__row">
+            <Switch
+              label="Show factory"
+              checked={settings.showFactory}
+              onChange={(v) => onChange({ showFactory: v })}
+              title={
+                settings.baseline === "raw"
+                  ? "Overlay each reference well's factory calibration value (FactoryRefRowCal) as a flat dotted line"
+                  : "ΔRFU and Drift % already plot each curve relative to its factory value — the line would be a flat zero"
+              }
+            />
+          </div>
+
           {/* Same switch (and same setting) as the Curves view's channel-space "Show dark" —
               one toggle meaning "overlay the LED-off background", wherever raw channel readings
               are on screen. */}
@@ -245,13 +360,18 @@ export function ReferenceView({ zpcr, settings, onChange }: Props) {
             />
           </div>
 
+          {/* Counts what is actually drawn, so the factory switch is reflected here too —
+              `factoryCurves` stays populated when the switch is off, since it's also the
+              ΔRFU/Drift % reference. */}
           <div className="rail__stat mono">
-            {plotCurves.length} reference curves
+            {plotCurves.length} reference {byColumn ? "columns" : "curves"}
             {settings.baseline === "delta"
               ? " · ΔRFU from factory"
               : settings.baseline === "percent"
                 ? " · % drift from factory"
-                : ` · ${factoryCurves.length} factory`}
+                : settings.showFactory
+                  ? ` · ${factoryCurves.length} factory`
+                  : " · factory hidden"}
             {darkCurves.length > 0 && ` + ${darkCurves.length} dark`}
           </div>
           {settings.showDark && settings.baseline !== "raw" && (
@@ -273,7 +393,19 @@ export function ReferenceView({ zpcr, settings, onChange }: Props) {
             drawBaseline={false}
             scale={settings.scale}
             bands={false}
-            highlight={hover}
+            drawFactory={settings.showFactory}
+            xAxis={
+              byColumn
+                ? {
+                    label: "Reference column",
+                    tickLabel: (v) => (Number.isInteger(v) ? `R${v + 1}` : ""),
+                    splits: colAxis,
+                  }
+                : undefined
+            }
+            // See the RefColBar `onHover` above: in column mode a `refcol` match would find no
+            // series to keep lit, so the peek stays and the dimming drops out.
+            highlight={byColumn && hover?.kind === "refcol" ? null : hover}
           />
         </section>
       </div>

@@ -1178,6 +1178,11 @@ read on every channel whatever the plate holds).
   alone. The tooltip shows
   the matched column (`R{n}`) alongside the channel/dye for a factory series, since a factory
   line's identity isn't otherwise visible the way a well curve's label is.
+- **Three overlapping flat lines, three dash patterns.** Live reads are solid, the factory
+  reference is a fine dot (`[1, 3]`), the dark overlay is a dash-dot (`[5, 3, 1, 3]`). Dark and
+  factory were *both* `[1, 3]` until this view gained a dark overlay and put them on the same
+  chart in the same channel color, where they were indistinguishable — they sit within tens of
+  RFU of each other, so the pattern is the only thing telling them apart.
 - **Dark overlay ("Show dark"):** the same `showDark` setting and the same `CurveChart`
   `darkCurves` prop the Curves view's channel space uses — one switch meaning "overlay the
   LED-off background", wherever raw channel readings are on screen. It answers the question the
@@ -1191,6 +1196,33 @@ read on every channel whatever the plate holds).
   have nothing to plot it against and would drop a ~2000 RFU line onto an axis spanning tens of
   RFU. The switch stays visible but inert there, with a `rail__note` saying why, rather than
   disappearing — the same choice the factory line makes in those modes.
+- **Factory overlay ("Show factory"):** on by default — the live-vs-factory comparison is what
+  this view is for — and Raw-baseline only, for the mirror-image reason the dark overlay is:
+  under ΔRFU/Drift % the live curve is *already* plotted relative to the factory value, so the
+  line would be a flat zero. The toggle gates `buildChart`'s **`drawFactory`**, not the
+  `factoryCurves` array, and that distinction is load-bearing: those same values are what
+  `wellAdjust` computes the ΔRFU and Drift % baselines from, so emptying the array to hide the
+  line would silently break both modes. `uitest` asserts ΔRFU still works after the line is
+  hidden.
+- **X axis ("Cycle" / "Column"):** cycle mode is the time series — one line per (channel,
+  reference column), showing the reference row's *stability* over the run. Column mode collapses
+  each of those lines to its mean over all cycles and replots it against the plate column, giving
+  one line per channel across R1–R12: the reference row's *shape*. Nothing about `buildChart`
+  changes for it — a series is just (x[], y[]), so column mode only alters what x means, plus a
+  `xAxis` config that relabels the axis and ticks every one of the ≤12 categorical positions
+  (the cycle axis keeps its every-fifth thinning, which would be unreadable here). Consequences
+  worth knowing:
+  - A series spans every column, so it carries **`col: -1`** — the same "not one specific column"
+    sentinel the dark/baseline series already use. The factory overlay is keyed to it by the same
+    `channel,col` match, so it too becomes one per-column line rather than twelve flat ones.
+  - The **dark overlay becomes a flat line** there: the dark reading has no column dependence, so
+    its run-averaged value simply repeats across the columns — the mirror of the factory line
+    being flat in cycle mode.
+  - A column the rail turns off leaves a **gap** (NaN) rather than shifting the remaining points
+    along, so position on the axis always means the same column.
+  - The rail's column **peek still works** (it fills the point back in), but the column *dimming*
+    does not: a `refcol` highlight has no per-column series to keep lit, so `ReferenceView`
+    suppresses it in column mode rather than dimming the entire chart.
 - **Two baseline concepts, one `{scale, shift}` model:** `buildChart()` maps each raw value to
   plotted space as `raw * scale + shift`, computed per cycle by `wellAdjust()`. "Raw" is the
   identity (`scale:1, shift:0`). Here (Reference view), "ΔRFU" and "Drift %" are both
