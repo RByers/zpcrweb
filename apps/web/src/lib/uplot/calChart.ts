@@ -19,7 +19,7 @@
 
 import uPlot from "uplot";
 import { interpolateResponse, type ResponseKnot } from "@zpcrweb/core";
-import { channelColor, channelLabel } from "../channelColors";
+import { channelLabel, crosstalkColor } from "../channelColors";
 import type { Scale } from "../../state/useZpcrStore";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -65,10 +65,13 @@ export interface CalPlotSeries {
   fileKey: string;
   dye: string;
   plateType: string;
+  /** Optical channel this line was measured on. */
   channel: number;
-  /** True on the dye's own channel: its signal, as opposed to its crosstalk into the others.
-   * Drawn solid and double width; everything else is dashed. */
-  primary: boolean;
+  /** The dye's own channel (`Dcal.primaryChannel`) — what the line is coloured from, so a dye's
+   * six channels read as one family rather than as six unrelated series (see
+   * {@link crosstalkColor}). The line where the two are equal is the dye's signal: drawn solid
+   * and double width, everything else dashed as crosstalk. */
+  primaryChannel: number;
   /** The line's knots, sorted by temperature. `response` carries whichever level {@link kind}
    * names — for a raw reading it is the reading itself, not a difference. */
   knots: ResponseKnot[];
@@ -152,18 +155,19 @@ export function buildCalChart(cfg: BuildCalChartConfig): {
 
   for (const s of cfg.series) {
     const values = sample(s.knots, grid, cfg.scale);
+    const primary = s.channel === s.primaryChannel;
     rows.push(values);
     meta.push({ series: s, values });
     series.push({
       label: `${s.dye} · ${s.plateType} · ${channelLabel(s.channel)} · ${CAL_KIND_LABEL[s.kind]}`,
-      stroke: channelColor(s.channel),
+      stroke: crosstalkColor(s.primaryChannel, s.channel),
       // The dye's own channel carries its signal; the rest is crosstalk, an order of magnitude
       // smaller and worth de-emphasising. The empty-plate baseline is context for the reading
       // above it, so it stays thin whichever channel it's on.
-      width: s.primary && s.kind !== "empty" ? 2 : 1,
+      width: primary && s.kind !== "empty" ? 2 : 1,
       // Dotted wins over dashed on an empty-plate line: which level it is outranks signal vs.
       // crosstalk, and the dye line directly above it already carries the latter.
-      dash: s.kind === "empty" ? EMPTY_DASH : s.primary ? undefined : CROSSTALK_DASH,
+      dash: s.kind === "empty" ? EMPTY_DASH : primary ? undefined : CROSSTALK_DASH,
       points: { show: true, size: 5 },
     });
   }
@@ -331,9 +335,11 @@ function calOverlayPlugin(
           dye: m.series.dye,
           plateType: m.series.plateType,
           channel: m.series.channel,
-          primary: m.series.primary,
+          primary: m.series.channel === m.series.primaryChannel,
           kind: m.series.kind,
-          color: channelColor(m.series.channel),
+          // The line's own blended color, not the channel's — the tooltip swatch has to be the
+          // thing the pointer is on, or it names one line and colors another.
+          color: crosstalkColor(m.series.primaryChannel, m.series.channel),
           temperatureC,
           response: value,
           measured: m.series.knots.some((k) => k.temperatureC === temperatureC),

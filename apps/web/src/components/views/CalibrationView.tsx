@@ -151,7 +151,7 @@ export function CalibrationView({ zpcr, settings, onChange }: Props) {
             dye: f.dye,
             plateType: f.plateType,
             channel: ch,
-            primary: ch === f.primaryChannel,
+            primaryChannel: f.primaryChannel,
           };
           if (settings.calView === "relative") {
             return [
@@ -357,7 +357,7 @@ export function CalibrationView({ zpcr, settings, onChange }: Props) {
             </>
           )}{" "}
           Solid lines are each dye on its own channel; dashed ones are its crosstalk into the
-          others. Lines are straight because the algorithm interpolates linearly between these
+          others, coloured from the dye's own channel and tinged toward the one that read it. Lines are straight because the algorithm interpolates linearly between these
           four measured temperatures; the marker sits at this step's block temperature, where the
           calibration matrix is sampled.
         </div>

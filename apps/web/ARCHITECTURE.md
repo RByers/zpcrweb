@@ -1096,6 +1096,16 @@ neighbours' channels.
   drawn solid at double width; the same dye's response on every other channel is dashed and thin.
   That is the distinction the plot exists to show — how far each dye bleeds into its neighbours —
   and it reads directly off the line style instead of having to be traced back through the legend.
+- **Colored by the dye, tinged by the channel** (`crosstalkColor` in `lib/channelColors.ts`, the
+  one deliberate exception to that module's color-encodes-the-channel rule). Every other view
+  plots one series per channel, so the channel's hue *is* the series' identity; this view plots
+  one dye across all six at once, where colouring purely by read channel scatters a single dye's
+  lines across the whole palette and makes a rainbow of one measurement. So the line takes the
+  dye's own channel hue with 35% of the read channel's mixed in: FAM's bleed into Ch2 is still
+  green, but yellow-tinged. The dye's lines cluster, and the tint still separates FAM-on-Ch2 from
+  FAM-on-Ch4 within the cluster. On its own channel the two hues coincide, so a primary line is
+  exactly its channel color and matches its rail chip. The tooltip swatch uses the blended color
+  too — it has to be the line the pointer is on, not the channel it was read on.
   Chips are ordered by that same channel (then by name) within each tube-type group, so the dye
   list runs along the spectrum in step with the channel bar below it.
 - **Relative vs. absolute** (`calView`, the rail's Values switch). Relative — the default — is

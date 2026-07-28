@@ -5,6 +5,11 @@
  * ~648 lines on screen, wells within a channel share a hue and are distinguished by
  * hover/selection emphasis instead.
  *
+ * The one departure is {@link crosstalkColor}, for the Calibration view: there a single dye is
+ * plotted across all six channels at once, so the lines are coloured from the *dye's* channel and
+ * only tinged toward the channel each was read on. Same palette, different question — see its
+ * doc comment.
+ *
  * This palette is deliberately NOT colorblind-safe: a couple of hues sit close together and
  * cannot pass the CVD gate without losing the intuitive spectral ordering. That trade is
  * acceptable here only because identity never rests on color alone — the channel bar and the
@@ -45,6 +50,44 @@ const NEUTRAL_COLOR = "#8aa0c0";
  * Neutral is deliberately not one of the six hues: an unknown channel must not read as a real one. */
 export function channelColor(index: number | null | undefined): string {
   return (index != null && CHANNEL_INFO[index]?.color) || NEUTRAL_COLOR;
+}
+
+/** How much of the read channel's hue is mixed into a crosstalk line — see
+ * {@link crosstalkColor}. Enough to separate one dye's six channels from each other, small
+ * enough that they still read as one dye's family of lines. */
+const CROSSTALK_TINT = 0.35;
+
+/** Blend two `#rrggbb` colors in sRGB: `t` of `b` mixed into `a`. */
+function mixHex(a: string, b: string, t: number): string {
+  const parse = (hex: string) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+  const [ar, ag, ab] = parse(a) as [number, number, number];
+  const [br, bg, bb] = parse(b) as [number, number, number];
+  const chan = (x: number, y: number) =>
+    Math.round(x + (y - x) * t)
+      .toString(16)
+      .padStart(2, "0");
+  return `#${chan(ar, br)}${chan(ag, bg)}${chan(ab, bb)}`;
+}
+
+/**
+ * Color for one dye's response measured on one channel: mostly the hue of the dye's **own**
+ * channel, tinged with the hue of the channel it was read on.
+ *
+ * The Calibration view plots one dye across all six channels at once, so the question the color
+ * has to answer is "whose signal is this?" before "which filter saw it?" — colouring purely by
+ * read channel (what every channel-space view does, and what this view used to do) scatters one
+ * dye's lines across the whole palette and makes a rainbow of a single measurement. Keeping the
+ * dye's hue dominant clusters its lines together; the tint is what still tells FAM-on-Ch2 from
+ * FAM-on-Ch4 within that cluster. On its own channel the two hues coincide, so a primary line is
+ * exactly its channel color and matches the rail chip.
+ */
+export function crosstalkColor(
+  primaryChannel: number | null | undefined,
+  channel: number | null | undefined,
+): string {
+  const base = channelColor(primaryChannel);
+  const read = channelColor(channel);
+  return base === read ? base : mixHex(base, read, CROSSTALK_TINT);
 }
 
 /**
