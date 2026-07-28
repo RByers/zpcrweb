@@ -71,6 +71,9 @@ export interface StoredSettings {
   /** When true, dye-space curves are drawn for every enabled well/fluor pair, even ones the
    * plate definition doesn't actually load into that well. Off by default. */
   showUnloadedFluors?: boolean;
+  /** Calibration view: `${dye}|${plateType}` keys of the `.Dcal` files plotted. Opt-in, so an
+   * absent/empty list means "unseeded" rather than "none" — see `FileSettings.calFiles`. */
+  calFiles?: string[];
   /** Retired: the standalone Analysis view's own target opt-out set. That view is now the Curves
    * view's table mode and shares the rail's {@link disabledFluors}, so these are ignored. */
   analysisDisabledTargets?: string[];

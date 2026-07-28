@@ -74,6 +74,65 @@ async function tabBecomes(cdp, label, timeout = 8000) {
   return seen;
 }
 
+/**
+ * The Calibration view's default selection. A run ships a `.Dcal` for every dye Bio-Rad sells on
+ * both tube types (28 files in the samples here), and the view is only useful because it starts
+ * with the handful the analysis actually reads — this plate's fluorophores on this plate's tube
+ * type. That seeding runs once per run against IndexedDB-backed state, so it silently degrades
+ * into "all 28" or "none" in ways no unit test sees.
+ */
+async function calibrationChecks(chrome, origin) {
+  console.log("\ncalibration view");
+  const cdp = await openPage(chrome.base, origin);
+  await sleep(600);
+  await loadFile(cdp, ZPCR);
+  await waitFor(() => cdp.eval(`!!document.querySelector(".chanbar")`), { what: "curves rail" });
+  await cdp.eval(`window.location.hash = "view=calibration", undefined`);
+  await waitFor(() => cdp.eval(`!!document.querySelector(".calgroup")`), { what: "calibration rail" });
+  await sleep(400);
+
+  /** Every calibration chip, with the plate-type group it sits in. */
+  const chips = () =>
+    cdp.eval(`[...document.querySelectorAll(".calgroup")].flatMap((g) => {
+      const group = g.querySelector(".calgroup__title").textContent.replace("plate", "").trim();
+      return [...g.querySelectorAll(".chanchip")].map((b) => ({
+        group,
+        dye: b.querySelector(".chanchip__ch").textContent,
+        on: b.getAttribute("aria-pressed") === "true",
+      }));
+    })`);
+
+  const initial = await chips();
+  const on = initial.filter((c) => c.on);
+  check(
+    "every calibration in the archive gets a chip, grouped by tube type",
+    initial.length === 28 && new Set(initial.map((c) => c.group)).size === 2,
+    `${initial.length} chips, groups ${[...new Set(initial.map((c) => c.group))].join("/")}`,
+  );
+  check(
+    "only the calibrations this run's analysis uses are on by default",
+    on.length === 3 &&
+      on.every((c) => c.group === "BR Clear") &&
+      ["Cy5", "FAM", "Tex 615"].every((d) => on.some((c) => c.dye === d)),
+    on.map((c) => `${c.dye} (${c.group})`).join(", ") || "none on",
+  );
+
+  // The rest are one click away — the whole point of the view over the raw per-file table.
+  await cdp.eval(`(() => { const g = [...document.querySelectorAll(".calgroup")]
+      .find((x) => x.querySelector(".calgroup__title").textContent.includes("BR White"));
+      [...g.querySelectorAll(".chanchip")].find((b) =>
+        b.querySelector(".chanchip__ch").textContent === "FAM").click(); })()`);
+  await sleep(300);
+  const afterOn = (await chips()).filter((c) => c.on);
+  check(
+    "clicking an unused calibration's chip adds it",
+    afterOn.length === 4 && afterOn.some((c) => c.dye === "FAM" && c.group === "BR White"),
+    afterOn.map((c) => `${c.dye} (${c.group})`).join(", "),
+  );
+
+  cdp.close();
+}
+
 async function routingChecks(chrome, origin, pw) {
   console.log("\nhash routing");
   const cdp = await openPage(chrome.base, `${origin}#cfxPassword=${encodeURIComponent(pw)}`);
@@ -432,6 +491,7 @@ async function main() {
     await loadChecks(chrome, origin);
     await routingChecks(chrome, origin, pw);
     await rightAxisChecks(chrome, origin);
+    await calibrationChecks(chrome, origin);
     await passwordChecks(chrome, origin, pw);
     await xmlViewChecks(chrome, origin, pw);
   } finally {

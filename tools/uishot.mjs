@@ -35,6 +35,7 @@ import {
 const VIEW_LABELS = {
   overview: "Overview",
   curves: "Curves",
+  calibration: "Calibration",
   plates: "Plates",
   reference: "Reference",
   raw: "Raw files",

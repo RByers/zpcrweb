@@ -9,6 +9,7 @@ import { ViewSelector } from "./components/ViewSelector";
 import { PasswordPrompt } from "./components/PasswordPrompt";
 import { OverviewView } from "./components/views/OverviewView";
 import { CurvesView } from "./components/views/CurvesView";
+import { CalibrationView } from "./components/views/CalibrationView";
 import { ReferenceView } from "./components/views/ReferenceView";
 import { PlatesView } from "./components/views/PlatesView";
 import { RawFilesView } from "./components/views/RawFilesView";
@@ -167,6 +168,13 @@ export function App() {
             )}
             {view === "curves" && (
               <CurvesView
+                zpcr={zpcr}
+                settings={settings}
+                onChange={store.updateSettings}
+              />
+            )}
+            {view === "calibration" && (
+              <CalibrationView
                 zpcr={zpcr}
                 settings={settings}
                 onChange={store.updateSettings}

@@ -3,8 +3,8 @@
 The web app (`@zpcrweb/web`) is a browser UI over [`@zpcrweb/core`](../../packages/core). It
 loads one or more files — `.zpcr`, `.pcrd`, or a standalone plate file (`.pltd` or zpcrweb's own
 `.plt.csv`, see "Standalone plate entries and attach" below) — switches between them, and
-explores each through up to five views: Overview, Curves, Plates, Reference, and Raw (a
-standalone plate file only gets Plates + Raw — see below).
+explores each through up to six views: Overview, Curves, Calibration, Plates, Reference, and Raw
+(a standalone plate file only gets Plates + Raw — see below).
 
 ## Two formats, mostly one UI
 
@@ -321,6 +321,7 @@ so every call site keeps writing one `onChange({ … })` regardless of where the
   chips render bare (name only) whenever the Cq table is empty: an uncalibrated run, or a plate
   still behind the password prompt.
 - **Curves** — the centerpiece (see below).
+- **Calibration** — the run's `.Dcal` pure-dye response curves (see below).
 - **Reference** — reference row vs factory calibration (see below).
 - **Plates** — `PlatesView` (`components/views/PlatesView.tsx`): the visual, color-coded plate
   map (`components/plate/PlateViewer.tsx`) for every plate attached to the run, via
@@ -998,6 +999,54 @@ is: a per-target curve needs channel→dye color separation (`calibration.md`).
   export is the same target-based table whichever space the chart happens to be showing — and is
   disabled rather than hidden when there are no rows (no usable calibration, or the rail filtered
   everything out), so exporting never requires switching modes first.
+
+## Calibration view
+
+`CalibrationView` (`components/views/CalibrationView.tsx`) plots the archive's `.Dcal` pure-dye
+calibrations as response curves: **block temperature on x, RFU on y**, one line per (calibration
+file × optical channel). This is the *input* to color separation — `calibration.md` §2's
+`max(0, dyeReading − emptyReading)` per channel — so the view shows exactly what the calibration
+matrix is assembled from at any block temperature, and how far each dye bleeds into its
+neighbours' channels.
+
+- **Nothing is interpolated for drawing.** §3 samples a response curve at an arbitrary block
+  temperature by straight-line interpolation between the bracketing knots, so the segments uPlot
+  draws between the four measured points *are* the algorithm; adding intermediate vertices would
+  redraw the same lines. Where a plotted file has no knot at another file's temperature (they all
+  agree on 20/40/60/80 in practice, but nothing in the format requires it), the gap is filled by
+  calling the library's own `interpolateResponse` — never a second interpolation written here.
+  Outside a file's measured range the line stops: the algorithm does extrapolate from the end
+  segment's slope, but drawing that would read as data. The tooltip labels an interpolated point
+  `interp` rather than `response`, so a measured value is never mistaken for a derived one.
+- **Default selection = what the analysis uses.** A run ships a `.Dcal` for every dye Bio-Rad
+  sells on both tube types (28 files in the committed samples), which is unreadable all at once.
+  `lib/calibrationCurves.ts` marks each file `inUse` on exactly the terms
+  `matchFluorCalibrations` matches on (this plate's fluorophores, this plate's tube type, both
+  compared case-insensitively), and those are what's shown; everything else is one chip-click
+  away and drawn **dashed**, the same "context, not the measurement" convention the dark/factory
+  overlays use elsewhere. With no plate (missing, or still behind the password prompt) nothing is
+  in use, so the fallback is every calibration for the default tube type, with a rail note saying
+  so. The dye's own channel (`Dcal.primaryChannel`) is drawn at double width — its signal, as
+  against its crosstalk.
+- **The run's own temperature is marked** with a vertical dotted line, from
+  `runAnalysis.ts`'s exported `stepTemperature` — the same function `useRunAnalysis` builds its
+  matrix at, not a second derivation — so the point on the x axis the analysis actually samples
+  is visible rather than implied. It follows the plate-read step selector.
+- **Shared with the Curves view:** the `.curves` rail+plot layout, `FluorBar` for the dye chips
+  (passed the *complement* of the selection, since `FluorBar` is opt-out and a calibration
+  selection is opt-in — that inversion is the price of not forking the component) and `ChannelBar`
+  reading the very same `enabledChannels` setting, so a channel turned off in one view is off in
+  the other. Chips are grouped by tube type under a `.calgroup` sub-heading, since the archive
+  ships each dye twice and the pair are different measurements.
+- **Its own chart builder** (`lib/uplot/calChart.ts`), deliberately not a mode of
+  `lib/uplot/chart.ts`: that chart's x axis *is* the cycle (integer splits, per-cycle baselines,
+  Cq rings, min/max whiskers), none of which means anything for a four-point curve against
+  temperature that has no baseline, threshold or Cq. What the two share is the channel palette,
+  the SVG-overlay/tooltip pattern and the alpha-only `applyCalHighlight` redraw on rail hover.
+- **State:** one new per-file display setting, `calFiles` (`${dye}|${plateType}` keys). Empty
+  means *unseeded* rather than *none*: the view seeds it from the run the first time it has the
+  calibration data, apply-once-per-source like the Curves view's well/channel defaults, so a
+  restored selection is never overwritten.
 
 ## Reference view
 

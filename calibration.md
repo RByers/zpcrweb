@@ -13,6 +13,11 @@ the plate, estimate how much each dye actually contributed.
 > committed sample archives. The open item is the *absolute* RFU scale: which additive
 > background belongs in §4.2, and a residual gap against CFX Manager's own reported RFU that
 > no §§2–5 choice explains — both worked through in §8.
+>
+> The web app's **Calibration** view plots the §2 response curves this is all built on (block
+> temperature on x, RFU on y, one line per dye × channel), marked at the block temperature the
+> run's own analysis samples them at — see
+> [`apps/web/ARCHITECTURE.md`](./apps/web/ARCHITECTURE.md#calibration-view).
 
 ---
 

@@ -44,7 +44,14 @@ type PlateFileKind = "pltd" | "csv";
 
 /** `"about"` is not a tab in {@link ViewSelector} — it's reached by clicking the logo — but it
  * is a view like any other, so it's linkable (`#view=about`) and works with back/forward. */
-export type ViewId = "overview" | "curves" | "plates" | "reference" | "raw" | "about";
+export type ViewId =
+  | "overview"
+  | "curves"
+  | "calibration"
+  | "plates"
+  | "reference"
+  | "raw"
+  | "about";
 /** Reference view only — drift relative to the factory calibration value; see `ReferenceView`. */
 export type Baseline = "raw" | "delta" | "percent";
 /**
@@ -129,6 +136,14 @@ export interface FileSettings extends AnalysisSettings {
    * the plate definition actually loads that fluor into that well. Off by default — the normal
    * behavior only draws curves pltd.md's per-well dye layers actually cover. */
   showUnloadedFluors: boolean;
+  /**
+   * Calibration view: which `.Dcal` files are plotted, as `${dye}|${plateType}` keys (see
+   * `calibrationCurves.ts`'s `calKey`). An opt-**in** set, unlike {@link disabledFluors}: a run
+   * ships a calibration for every dye Bio-Rad sells on both tube types, and all 28 at once is
+   * unreadable. Empty means "not chosen yet" — the view seeds it from the run (the files the
+   * analysis actually uses) the first time it has the calibration data to do so.
+   */
+  calFiles: Set<string>;
 }
 
 /** A file loaded into memory — bytes only. Parsing is derived (see {@link ZpcrStore.runs}),
@@ -256,6 +271,8 @@ function defaultSettings(): FileSettings {
     disabledFluors: new Set<string>(),
     disabledSamples: new Set<string>(),
     showUnloadedFluors: false,
+    // Empty = unseeded; the Calibration view fills it from the run's own calibration set.
+    calFiles: new Set<string>(),
     ...defaultAnalysisSettings(),
   };
 }
@@ -282,6 +299,7 @@ function toStored(id: string, s: FileSettings): StoredSettings {
     disabledFluors: [...s.disabledFluors],
     disabledSamples: [...s.disabledSamples],
     showUnloadedFluors: s.showUnloadedFluors,
+    calFiles: [...s.calFiles],
   };
 }
 
@@ -335,6 +353,9 @@ function fromStored(s: StoredSettings): FileSettings {
     disabledFluors: new Set(s.disabledFluors ?? []),
     disabledSamples: new Set(s.disabledSamples ?? []),
     showUnloadedFluors: s.showUnloadedFluors ?? false,
+    // Absent on a record written before the Calibration view existed; empty simply means the
+    // view will seed it from the run the first time it's opened.
+    calFiles: new Set(s.calFiles ?? []),
     temps: new Set(s.temps ?? []),
     // A record written before the LED series existed has no `leds`; both being non-empty is
     // impossible by construction (see `updateSettings`), so nothing needs reconciling here.

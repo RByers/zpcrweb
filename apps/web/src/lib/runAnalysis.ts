@@ -46,6 +46,23 @@ import {
  * though `computeCqTable` still accepts either. */
 const CQ_ALGORITHM = "Threshold" as const;
 
+/**
+ * The block temperature a step's calibration matrix is built at: the mean across that step's
+ * plate reads, defaulting to 60 °C for a run that reports none. Block temperature is essentially
+ * constant across a single PLATEREAD step's cycles (see `plateread.md` §3), so one representative
+ * temperature per step is accurate.
+ *
+ * Shared with the Calibration view, which marks it on the response curves — the point on the x
+ * axis the analysis actually samples them at.
+ */
+export function stepTemperature(zpcr: Zpcr, step: number | undefined): number {
+  const temps = zpcr.reads
+    .filter((r) => r.step === step)
+    .map((r) => r.blockTempC)
+    .filter((t): t is number => t != null);
+  return temps.length ? temps.reduce((a, b) => a + b, 0) / temps.length : 60;
+}
+
 /** Identity of a single curve — one well, one fluorophore. See {@link CqTableCurve.key}. */
 export function curveKey(row: number, col: number, fluor: string): string {
   return `${row},${col},${fluor}`;
@@ -275,15 +292,8 @@ export function useRunAnalysis(
   // Thresholds group by fluorophore regardless of targets — see `RunAnalysis.thresholdGroupOf`.
   const thresholdGroupOf = useMemo(() => (_row: number, _col: number, fluor: string) => fluor, []);
 
-  // Block temperature is essentially constant across a single PLATEREAD step's cycles (see
-  // plateread.md §3), so one representative matrix per step is accurate.
-  const stepTemperatureC = useMemo(() => {
-    const temps = zpcr.reads
-      .filter((r) => r.step === activeStep)
-      .map((r) => r.blockTempC)
-      .filter((t): t is number => t != null);
-    return temps.length ? temps.reduce((a, b) => a + b, 0) / temps.length : 60;
-  }, [zpcr, activeStep]);
+  // One representative matrix per step — see `stepTemperature`.
+  const stepTemperatureC = useMemo(() => stepTemperature(zpcr, activeStep), [zpcr, activeStep]);
 
   const matrix = useMemo(() => {
     if (calibratedFluors.length === 0) return null;

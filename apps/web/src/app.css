@@ -1145,6 +1145,39 @@
   color: var(--ink-muted);
 }
 
+/* Calibration view: the rail's chip bars are grouped by plate/tube type, since the archive ships
+   every dye twice (once per tube type) and the pair are different measurements of the same dye.
+   A sub-heading inside one `.rail__section`, so the group reads as part of "Calibrations" rather
+   than as two sections. */
+.calgroup + .calgroup {
+  margin-top: 10px;
+}
+/* Dye names here are full product names ("Cal Orange 560", "Quasar 705"), not the short
+   fluorophore labels the Curves rail carries, so the shared chip grid gets wider columns rather
+   than ellipsing most of the list. */
+.calgroup .chanbar {
+  grid-template-columns: repeat(auto-fill, minmax(122px, 1fr));
+}
+.calgroup__title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--ink-muted);
+  margin-bottom: 6px;
+}
+/* Marks the tube type this run's own plate resolves to — the group holding the calibrations the
+   analysis actually reads. */
+.calgroup__tag {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 1px 5px;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  color: var(--ink-2);
+}
+
 /* A `.refchip` is a `<div>` (not a `<button>`), so it needs its own border/radius — the base
    `button` rule that `.chanchip` normally rides on doesn't apply. */
 .refchip {

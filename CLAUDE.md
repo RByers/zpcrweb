@@ -120,12 +120,13 @@ Cost control, when you do run it:
 npm run test:ui
 ```
 
-31 browser assertions covering what nothing else can catch: the two URL contracts — hash
+35 browser assertions covering what nothing else can catch: the two URL contracts — hash
 routing (deep links, back/forward, unknown-file and invalid-view fallbacks) and password
 handling (stripped from both URL forms, never leaked into the routing hash, an encrypted
 `.pcrd` still decrypting) — plus `#load=`, the rule that every XML view uses the shared
-collapsible tree rather than a flat dump, and the chart's one-right-axis invariant
-(temperatures and LED currents can never both be on). A screenshot can't show that the back button works or
+collapsible tree rather than a flat dump, the chart's one-right-axis invariant
+(temperatures and LED currents can never both be on), and the Calibration view's default
+selection (only the run's in-use `.Dcal` files of the 28 it ships, the rest a click away). A screenshot can't show that the back button works or
 that a secret reached the address bar, and the core Vitest suite has no DOM.
 
 Takes ~20s and needs Chrome, so it is **not** part of `npm test` — that stays fast and
@@ -159,7 +160,7 @@ holds stdout open and the run looks like a hang long after the page is done.
 - `#cfxPassword=<value>` seeds the decryption password so samples decrypt instead of sitting
   behind the prompt. Pull it from `secrets.json` (see Secrets, above) and URL-escape it — the
   password can contain characters like `#`.
-- `#file=<name>&view=<overview|curves|plates|reference|raw|about>` selects the active file and
+- `#file=<name>&view=<overview|curves|calibration|plates|reference|raw|about>` selects the active file and
   view. `about` is the credits page behind the logo; it has no tab and needs no file.
 - `#load=<url>` fetches a file and loads it — the only key that can put a file the browser
   doesn't already have into the app. It's consumed on load and replaced by the `#file=` the

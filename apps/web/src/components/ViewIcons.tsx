@@ -45,6 +45,19 @@ export function CurvesIcon() {
   );
 }
 
+/** Calibration: a pure-dye response rising with temperature, sampled at four measured points. */
+export function CalibrationIcon() {
+  return (
+    <Svg>
+      <path d="M2.5 2v11.5H14" />
+      <path d="M4.5 11.5 7 9l2.5 1.2L13 4.5" />
+      <circle cx="4.5" cy="11.5" r="0.9" />
+      <circle cx="9.5" cy="10.7" r="0.9" />
+      <circle cx="13" cy="4.5" r="0.9" />
+    </Svg>
+  );
+}
+
 /** Plates: the well grid of a plate map. */
 export function PlatesIcon() {
   return (

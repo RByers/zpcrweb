@@ -26,7 +26,15 @@
  */
 import type { ViewId } from "./useZpcrStore";
 
-const VIEW_IDS: ViewId[] = ["overview", "curves", "plates", "reference", "raw", "about"];
+const VIEW_IDS: ViewId[] = [
+  "overview",
+  "curves",
+  "calibration",
+  "plates",
+  "reference",
+  "raw",
+  "about",
+];
 
 export interface HashState {
   /** Active file's `name` (not its id — ids hash name+size and aren't portable). */
