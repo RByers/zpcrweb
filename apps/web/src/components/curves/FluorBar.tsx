@@ -1,5 +1,6 @@
 import { channelColor } from "../../lib/channelColors";
-import { useHoverCard, type HoverCardData } from "./HoverCard";
+import { ChipBar } from "./ChipBar";
+import type { HoverCardData } from "./HoverCard";
 
 /** One chip's worth of data — a fluorophore or, in target view mode, a target/gene. */
 export interface FluorChip {
@@ -35,43 +36,27 @@ interface Props {
 
 /**
  * One chip per fluorophore or target (see {@link FluorChip}) present on the plate — colored by
- * its primary channel. Multiple items sharing a channel simply share a color, distinguished by
- * their label.
+ * its primary channel, over the shared {@link ChipBar}. Multiple items sharing a channel simply
+ * share a color, distinguished by their label.
  */
 export function FluorBar({ items, disabled, onToggle, onHover, onSolo, cardData }: Props) {
-  const { show, hide, node } = useHoverCard(cardData ?? (() => null));
   return (
-    <div className="chanbar">
-      {items.map((f) => {
-        const on = f.calibrated && !disabled.has(f.key);
-        return (
-          <button
-            key={f.key}
-            className={"chanchip" + (on ? " is-on" : "") + (!f.calibrated ? " is-disabled" : "")}
-            onClick={() => f.calibrated && onToggle(f.key)}
-            onDoubleClick={() => f.calibrated && onSolo?.(f.key)}
-            onMouseEnter={(e) => {
-              onHover?.(f.key);
-              show(f.key, e.currentTarget);
-            }}
-            onMouseLeave={() => {
-              onHover?.(null);
-              hide();
-            }}
-            disabled={!f.calibrated}
-            aria-pressed={on}
-            title={!f.calibrated ? `${f.label}: no calibration data for this tube type` : f.label}
-            style={{ ["--chan" as string]: channelColor(f.channel) }}
-          >
-            <span className="chanchip__swatch" />
-            <span className="chanchip__label">
-              <span className="chanchip__ch mono">{f.label}</span>
-              <span className="chanchip__dye">{f.sublabel}</span>
-            </span>
-          </button>
-        );
-      })}
-      {node}
-    </div>
+    <ChipBar
+      chips={items.map((f) => ({
+        key: f.key,
+        label: f.label,
+        sublabel: f.sublabel,
+        color: channelColor(f.channel),
+        on: f.calibrated && !disabled.has(f.key),
+        selectable: f.calibrated,
+        title: f.calibrated
+          ? f.label
+          : `${f.label}: no calibration data for this tube type`,
+      }))}
+      onToggle={onToggle}
+      onHover={onHover}
+      onSolo={onSolo}
+      cardData={cardData}
+    />
   );
 }

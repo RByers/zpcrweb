@@ -1,5 +1,6 @@
 import { CHANNEL_INFO, channelLabel } from "../../lib/channelColors";
-import { useHoverCard, type HoverCardData } from "./HoverCard";
+import { ChipBar } from "./ChipBar";
+import type { HoverCardData } from "./HoverCard";
 
 interface Props {
   enabled: Set<number>;
@@ -13,37 +14,21 @@ interface Props {
   cardData?: (channel: number) => HoverCardData | null | undefined;
 }
 
+/** One chip per optical channel, over the shared {@link ChipBar} — so channels toggle, solo and
+ * peek exactly like every other rail selection. */
 export function ChannelBar({ enabled, available, onToggle, onHover, onSolo, cardData }: Props) {
-  const { show, hide, node } = useHoverCard(cardData ?? (() => null));
   return (
-    <div className="chanbar">
-      {CHANNEL_INFO.filter((c) => available.includes(c.index)).map((c) => {
-        const on = enabled.has(c.index);
-        return (
-          <button
-            key={c.index}
-            className={"chanchip" + (on ? " is-on" : "")}
-            onClick={() => onToggle(c.index)}
-            onDoubleClick={() => onSolo?.(c.index)}
-            onMouseEnter={(e) => {
-              onHover?.(c.index);
-              show(c.index, e.currentTarget);
-            }}
-            onMouseLeave={() => {
-              onHover?.(null);
-              hide();
-            }}
-            aria-pressed={on}
-            style={{ ["--chan" as string]: c.color }}
-          >
-            <span className="chanchip__swatch" />
-            <span className="chanchip__label">
-              <span className="chanchip__ch mono">{channelLabel(c.index)}</span>
-            </span>
-          </button>
-        );
-      })}
-      {node}
-    </div>
+    <ChipBar
+      chips={CHANNEL_INFO.filter((c) => available.includes(c.index)).map((c) => ({
+        key: String(c.index),
+        label: channelLabel(c.index),
+        color: c.color,
+        on: enabled.has(c.index),
+      }))}
+      onToggle={(key) => onToggle(Number(key))}
+      onHover={onHover && ((key) => onHover(key == null ? null : Number(key)))}
+      onSolo={onSolo && ((key) => onSolo(Number(key)))}
+      cardData={cardData && ((key) => cardData(Number(key)))}
+    />
   );
 }

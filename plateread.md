@@ -272,3 +272,51 @@ print(rec(2, 0, 2))   # -> ~6852
 - `DARKDATA` (6 records, one per channel) is the LED-off/background reading used for baseline
   subtraction; same 4-float record layout as `WELLDATA`. **Both arrays are little-endian**, unlike
   the big-endian metadata.
+
+## DARKDATA vs. the reference row
+
+The reference row (row 8; see `pivot.ts`'s `REFERENCE_ROW`) and `DARKDATA` are easy to confuse,
+since both look like "background". Measured against each other across every committed sample —
+6 archives, 2 instruments, 2019–2026, 9 plate-read steps — the relationship is consistent, and
+it is what the web app's Reference view "Show dark" overlay puts on screen:
+
+- **Dark sits below *every* reference column, always.** Without exception: in each of the 9
+  steps, for each of the 6 channels, `mean(dark) < mean(R1…R12)`. Dark never crosses into the
+  reference row's range.
+- **R1 is at or within a few RFU of the reference row's floor.** 7–8 of the 12 columns cluster
+  within 50 RFU of each other at the bottom (the rest hold progressively brighter reference
+  material, up to ~44,000 RFU), so which of them is nominally lowest is often decided by ~1 RFU.
+  R1 is the exact minimum in most channels; the exceptions are ch 1 and ch 5 on the 2026
+  instrument, where R1 runs 1–13 RFU above the darkest column (R4/R5/R9). **Ch 4 is the one
+  channel where R1 is genuinely distinguished:** there the floor cluster is R1 *alone*, with the
+  next column ~120 RFU above it.
+- **The dark→floor offset is per-channel, and stable to a few RFU across runs years apart** on
+  the same instrument — it is a fixed optical property, not noise. It does differ between
+  instruments, so it is not a constant of the format.
+
+  | Channel | R1 − dark, CT019138 (2019, 2023) | R1 − dark, 2026 instrument (3 runs) |
+  |---|---|---|
+  | 0 | 96–100 | 127–133 |
+  | 1 | 6.6–7.0 | 9.4–11.8 |
+  | 2 | 29.6–30.0 | 32.7–36.7 |
+  | 3 | 28.8–29.4 | 31.7–32.2 |
+  | 4 | 199–204 | 212–215 |
+  | 5 | 27.2–28.4 | 47.7–51.2 |
+
+  As a fraction that is 0.3 % (ch 1) to 10 % (ch 4) of R1 — so dark accounts for **90–99.7 % of
+  R1's reading**, but the remainder is a real, channel-specific optical signal, not a rounding
+  difference. Ch 4 is the outlier at both ends: the largest offset, and the noisiest dark trace
+  (σ ≈ 4–6 RFU per cycle, vs. ≈ 2 for every other channel).
+- **They do not track each other cycle to cycle.** Pearson correlation between the dark and R1
+  series over a run is ≈ 0 (|r| < 0.35 in every channel of every multi-cycle sample, sign
+  varying). Both are flat to ~2 RFU σ over 40–61 cycles, so there is no shared drift to correlate
+  — they are independent measurements at a nearly constant level, and neither can substitute for
+  the other as a per-cycle background estimate.
+- **Caveat:** the oldest sample (`20190516_…SHORT_QUALIF.zpcr`) records the reference row for
+  channel 0 only — every other channel's reference wells read exactly 0, so it contributes one
+  channel to the above. Its ch-0 offset (96 RFU) does line up with the 2023 run on the same
+  instrument.
+
+The upshot: `DARKDATA` is the instrument's floor with the LEDs off, and the dim end of the
+reference row is that floor *plus* a small fixed per-channel optical contribution. Neither is
+derived from the other in the file, and R1 is not a stored copy of the dark reading.

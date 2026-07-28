@@ -1178,43 +1178,10 @@
   color: var(--ink-2);
 }
 
-/* A `.refchip` is a `<div>` (not a `<button>`), so it needs its own border/radius — the base
-   `button` rule that `.chanchip` normally rides on doesn't apply. */
-.refchip {
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 4px 4px 4px 8px;
-  transition: border-color 120ms, background 120ms, box-shadow 120ms, opacity 120ms;
-}
-.refchip__toggle {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  min-width: 0;
-  flex: 1;
-  border: 0;
-  background: transparent;
-  padding: 0;
-}
-.refchip__toggle:hover {
-  background: transparent;
-}
-.refchip__only {
-  flex: 0 0 auto;
-  border: 0;
-  background: transparent;
-  padding: 2px 4px;
-  font-size: 9px;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--ink-muted);
-  opacity: 0.7;
-}
-.refchip__only:hover {
-  background: transparent;
-  color: var(--neon-cyan);
-  opacity: 1;
-}
+/* The Reference view's column chips used to need their own `.refchip*` rules: the chip was a
+   `<div>` wrapping a toggle button and a second "only" button, so it couldn't ride the base
+   `button` styling `.chanchip` gets. They now go through the shared `ChipBar` like every other
+   rail bar (double-click solos, no "only" button), so `.chanchip` alone covers them. */
 
 /* ---- Well matrix -------------------------------------------------------- */
 .wellmatrix {

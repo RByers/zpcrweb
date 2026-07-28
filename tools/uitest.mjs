@@ -330,6 +330,124 @@ async function rightAxisChecks(chrome, origin) {
   cdp.close();
 }
 
+/**
+ * The Reference view's rail: that its chips really are the shared `ChipBar` (one interaction
+ * contract everywhere — click toggles, double-click solos, hovering a disabled chip peeks at it)
+ * rather than the bespoke per-chip "only" button they used to carry, and that the DARKDATA
+ * overlay is offered exactly where it means something. None of it is visible to a screenshot:
+ * peeking and soloing are both transient states of the plotted set.
+ */
+async function referenceChecks(chrome, origin) {
+  console.log("\nreference view rail (shared chips + dark overlay)");
+  const cdp = await openPage(chrome.base, origin);
+  await sleep(600);
+  await loadFile(cdp, ZPCR);
+  await cdp.eval(`window.location.hash = "view=reference", undefined`);
+  await tabBecomes(cdp, "Reference");
+  await waitFor(() => cdp.eval(`!!document.querySelector(".reference .chanbar")`), {
+    what: "reference rail",
+  });
+
+  /** The rail's own count line — the app's statement of what it plotted. */
+  const stat = () => cdp.eval(`document.querySelector(".reference .rail__stat").textContent`);
+  const curveCount = async () => Number(/^(\d+)/.exec((await stat()).trim())?.[1] ?? -1);
+  /** The R1–R12 bar is the second `.chanbar` in the rail (Channels is the first). */
+  const refChip = (n) =>
+    `document.querySelectorAll(".reference .chanbar")[1].querySelectorAll(".chanchip")[${n}]`;
+  const refOn = () =>
+    cdp.eval(`[...document.querySelectorAll(".reference .chanbar")[1]
+        .querySelectorAll(".chanchip")].filter((b) => b.getAttribute("aria-pressed") === "true").length`);
+  /**
+   * Move the real pointer over an element (or, with no selector, well away from the rail).
+   * A synthesized `mouseover` is not enough here: React derives `onMouseEnter`/`onMouseLeave`
+   * from the *pair* of over/out events plus `relatedTarget`, so only a genuine
+   * `Input.dispatchMouseEvent` produces the enter/leave sequence the peek is built on.
+   */
+  const hover = async (sel) => {
+    let x = 5;
+    let y = 5;
+    if (sel) {
+      const box = await cdp.eval(`(() => { ${sel}.scrollIntoView({ block: "center" });
+          const r = ${sel}.getBoundingClientRect();
+          return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
+      ({ x, y } = box);
+    }
+    await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y, buttons: 0 });
+  };
+
+  // The unification itself: the old markup was a <div> chip wrapping a toggle plus an "only"
+  // button. Every chip in the app is now the one `ChipBar` button.
+  const onlyButtons = await cdp.eval(`document.querySelectorAll(".refchip__only").length`);
+  const allButtons = await cdp.eval(`[...document.querySelectorAll(".reference .chanchip")]
+      .every((c) => c.tagName === "BUTTON")`);
+  check(
+    "reference chips are plain ChipBar buttons, with no per-chip “only” button left",
+    onlyButtons === 0 && allButtons,
+    `${onlyButtons} only-buttons`,
+  );
+
+  const allCols = await refOn();
+  const allCurves = await curveCount();
+
+  // Double-click solos, the same gesture every other bar uses.
+  await cdp.eval(`(${refChip(1)}.dispatchEvent(new MouseEvent("dblclick", { bubbles: true })), undefined)`);
+  await sleep(250);
+  const soloCols = await refOn();
+  const soloCurves = await curveCount();
+  check(
+    "double-clicking a reference column isolates it",
+    soloCols === 1 && soloCurves < allCurves,
+    `${allCols}→${soloCols} columns on, ${allCurves}→${soloCurves} curves`,
+  );
+
+  // Hovering one of the columns just turned off shows it again — but only while hovered.
+  await hover(refChip(3));
+  await sleep(250);
+  const peeked = await curveCount();
+  await hover(null);
+  await sleep(250);
+  const unpeeked = await curveCount();
+  check(
+    "hovering a disabled reference column peeks at it, and only while hovered",
+    peeked > soloCurves && unpeeked === soloCurves,
+    `${soloCurves} → ${peeked} (hovered) → ${unpeeked}`,
+  );
+
+  // The DARKDATA overlay: on in the Raw baseline, and inert in the factory-relative modes,
+  // which have no factory value to plot a dark curve against.
+  const clickSwitch = (label) =>
+    cdp.eval(`(() => { const b = [...document.querySelectorAll(".reference .switch")]
+        .find((s) => s.textContent.includes(${JSON.stringify(label)}));
+        if (!b) return "missing"; b.click(); return "ok"; })()`);
+  const clickBaseline = (label) =>
+    cdp.eval(`(() => { const b = [...document.querySelectorAll(".reference .segmented__item")]
+        .find((s) => s.textContent.trim() === ${JSON.stringify(label)});
+        if (!b) return "missing"; b.click(); return "ok"; })()`);
+
+  check("the Reference rail offers a dark overlay switch", (await clickSwitch("Show dark")) === "ok");
+  await sleep(300);
+  const withDark = await stat();
+  check(
+    "Show dark overlays the run's DARKDATA channels in the Raw baseline",
+    /\+ \d+ dark/.test(withDark),
+    withDark.trim(),
+  );
+
+  check("the Reference rail offers the ΔRFU baseline", (await clickBaseline("ΔRFU")) === "ok");
+  await sleep(300);
+  const deltaStat = await stat();
+  const note = await cdp.eval(
+    `document.querySelector(".reference .rail__note")?.textContent ?? ""`,
+  );
+  check(
+    "dark drops out of the factory-relative baselines, and says why",
+    !/dark/.test(deltaStat) && /Raw-baseline only/.test(note),
+    `${deltaStat.trim()} | note: ${note.trim() ? "shown" : "missing"}`,
+  );
+
+  cdp.close();
+}
+
 async function passwordChecks(chrome, origin, pw) {
   console.log("\npassword handling");
 
@@ -518,6 +636,7 @@ async function main() {
     await loadChecks(chrome, origin);
     await routingChecks(chrome, origin, pw);
     await rightAxisChecks(chrome, origin);
+    await referenceChecks(chrome, origin);
     await calibrationChecks(chrome, origin);
     await passwordChecks(chrome, origin, pw);
     await xmlViewChecks(chrome, origin, pw);

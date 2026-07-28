@@ -1,4 +1,5 @@
-import { useHoverCard, type HoverCardData } from "./HoverCard";
+import { ChipBar } from "./ChipBar";
+import type { HoverCardData } from "./HoverCard";
 
 interface Props {
   /** Distinct sample names present on the plate. */
@@ -15,41 +16,22 @@ interface Props {
   cardData?: (name: string) => HoverCardData | null | undefined;
 }
 
-/** One chip per distinct sample name (`PlateDefinition.samples`) — toggles curves for wells
- * carrying that sample on/off, mirroring {@link import("./FluorBar").FluorBar}'s chips but
- * without a channel color, since a sample has no optical channel of its own. */
+/** One chip per distinct sample name (`PlateDefinition.samples`) over the shared
+ * {@link ChipBar} — toggles curves for wells carrying that sample on/off, without a channel
+ * color, since a sample has no optical channel of its own. */
 export function SampleBar({ items, disabled, onToggle, onHover, onSolo, cardData }: Props) {
-  const { show, hide, node } = useHoverCard(cardData ?? (() => null));
   return (
-    <div className="chanbar">
-      {items.map((name) => {
-        const on = !disabled.has(name);
-        return (
-          <button
-            key={name}
-            className={"chanchip" + (on ? " is-on" : "")}
-            onClick={() => onToggle(name)}
-            onDoubleClick={() => onSolo?.(name)}
-            onMouseEnter={(e) => {
-              onHover?.(name);
-              show(name, e.currentTarget);
-            }}
-            onMouseLeave={() => {
-              onHover?.(null);
-              hide();
-            }}
-            aria-pressed={on}
-            title={name}
-            style={{ ["--chan" as string]: "var(--neon-cyan)" }}
-          >
-            <span className="chanchip__swatch" />
-            <span className="chanchip__label">
-              <span className="chanchip__ch mono">{name}</span>
-            </span>
-          </button>
-        );
-      })}
-      {node}
-    </div>
+    <ChipBar
+      chips={items.map((name) => ({
+        key: name,
+        label: name,
+        color: "var(--neon-cyan)",
+        on: !disabled.has(name),
+      }))}
+      onToggle={onToggle}
+      onHover={onHover}
+      onSolo={onSolo}
+      cardData={cardData}
+    />
   );
 }

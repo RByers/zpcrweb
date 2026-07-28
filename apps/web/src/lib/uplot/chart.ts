@@ -252,7 +252,10 @@ export type HighlightMatch =
   | { kind: "curve"; label: string; fluor: string }
   | { kind: "well"; label: string }
   | { kind: "channel"; channel: number }
-  | { kind: "sample"; sample: string };
+  | { kind: "sample"; sample: string }
+  /** One plate column — the Reference view's R1–R12 chips, which select columns rather than
+   * wells (every reference curve sits in the same row). */
+  | { kind: "refcol"; col: number };
 
 /** Per-series metadata, index-aligned with uPlot series (offset by the x row). */
 export interface SeriesMeta {
@@ -781,7 +784,8 @@ export function applyHighlight(u: uPlot, meta: SeriesMeta[], match: HighlightMat
           (match.kind === "fluor" && m.fluor === match.fluor) ||
           (match.kind === "curve" && m.label === match.label && m.fluor === match.fluor) ||
           (match.kind === "channel" && m.channel === match.channel) ||
-          (match.kind === "sample" && m.sample === match.sample)));
+          (match.kind === "sample" && m.sample === match.sample) ||
+          (match.kind === "refcol" && m.col === match.col)));
     u.series[i + 1]!.alpha = isMatch ? 1 : 0.12;
   });
   meta.forEach((m, i) => {

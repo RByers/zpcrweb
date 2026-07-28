@@ -120,19 +120,25 @@ Cost control, when you do run it:
 npm run test:ui
 ```
 
-35 browser assertions covering what nothing else can catch: the two URL contracts — hash
+43 browser assertions covering what nothing else can catch: the two URL contracts — hash
 routing (deep links, back/forward, unknown-file and invalid-view fallbacks) and password
 handling (stripped from both URL forms, never leaked into the routing hash, an encrypted
 `.pcrd` still decrypting) — plus `#load=`, the rule that every XML view uses the shared
 collapsible tree rather than a flat dump, the chart's one-right-axis invariant
-(temperatures and LED currents can never both be on), and the Calibration view's default
-selection (only the run's in-use `.Dcal` files of the 28 it ships, the rest a click away). A screenshot can't show that the back button works or
-that a secret reached the address bar, and the core Vitest suite has no DOM.
+(temperatures and LED currents can never both be on), the Calibration view's default
+selection (only the run's in-use `.Dcal` files of the 28 it ships, the rest a click away),
+and the rail chips' shared interaction contract (double-click solos, hovering a disabled chip
+peeks at it only while hovered) plus the Reference view's Raw-only dark overlay. A screenshot
+can't show that the back button works, that a secret reached the address bar, or that a hover
+put a curve back — and the core Vitest suite has no DOM.
 
-Takes ~20s and needs Chrome, so it is **not** part of `npm test` — that stays fast and
-dependency-free. Run it when you touch `state/urlHash.ts`, `state/pltdPassword.ts`, or view
-selection. Both tools share `tools/harness.mjs` (the CDP client and dev-server/Chrome
-plumbing); add new checks there rather than starting a third script.
+Takes ~25s and needs Chrome, so it is **not** part of `npm test` — that stays fast and
+dependency-free. Run it when you touch `state/urlHash.ts`, `state/pltdPassword.ts`,
+`components/curves/ChipBar.tsx`, or view selection. Both tools share `tools/harness.mjs` (the
+CDP client and dev-server/Chrome plumbing); add new checks there rather than starting a third
+script. Note that rail hover ("peek") needs a real `Input.dispatchMouseEvent` — React derives
+`onMouseEnter`/`onMouseLeave` from an over/out pair plus `relatedTarget`, so a synthesized
+`mouseover` silently does nothing.
 
 ### When to use the MCP instead
 

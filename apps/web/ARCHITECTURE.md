@@ -722,10 +722,25 @@ only pieces the two views share.
   meaning "back to the default" throughout the rail, and a label that doesn't change under the
   cursor. Applies to both channel- and dye-space curves alike (`sampleVisible()`,
   consulted by both `visibleChannel` and `visibleFluor`).
+- **Rail chip bars — one component, four adapters.** `ChannelBar`, `FluorBar`, `SampleBar` and
+  the Reference view's `RefColBar` are thin mappings from their own domain onto a `Chip`
+  (`key`/`label`/`sublabel`/`color`/`on`/`selectable`), rendered by the shared
+  `components/curves/ChipBar.tsx`. They were four near-identical copies of the same markup and
+  handlers, which is how `RefColBar` drifted into a bespoke per-chip "only" button while the
+  other three grew double-click solo, hover peek and hover cards. The interaction contract now
+  lives in one place and is therefore identical everywhere: **click** toggles, **double-click**
+  solos (`onSolo`), **hover** both dims the rest of the chart and *peeks* — every view lets the
+  hovered chip's curves bypass its own disabled check, so hovering a turned-off chip shows it
+  temporarily (only its own check: peeking a disabled target doesn't also reveal wells the user
+  turned off). What stays in each view is the **reset** button beside the section title, since
+  the default selection is a property of the view's data (plate-derived on the Curves rail,
+  not on the Reference rail), not of the chips. `uitest.mjs`'s `referenceChecks` covers the
+  peek and solo — both are transient states of the plotted set, invisible to a screenshot.
 - **Rail hover highlight and hover cards:** hovering a chip/cell in any rail section (channel,
-  fluorophore/target, well, or sample) dims every plotted curve that doesn't match, via
-  `HighlightMatch`/`applyHighlight` (`lib/uplot/chart.ts`) — a `"sample"` match variant joins the
-  pre-existing `"target"`/`"well"`/`"channel"` ones, keyed by the well's `PlotCurve.sample` (which
+  fluorophore/target, well, sample, or reference column) dims every plotted curve that doesn't
+  match, via `HighlightMatch`/`applyHighlight` (`lib/uplot/chart.ts`) — `"sample"` and
+  `"refcol"` match variants join the pre-existing `"target"`/`"well"`/`"channel"` ones, the
+  former keyed by the well's `PlotCurve.sample` (which
   `CurvesView` fills in from the `wellSample` map alongside every other per-curve field). Each of
   `ChannelBar`/`FluorBar`/`WellMatrix`/`SampleBar` also renders a small floating hover card (see
   `components/curves/HoverCard.tsx`'s `useHoverCard` hook — a fixed-position portal to
@@ -1075,10 +1090,15 @@ neighbours' channels.
 `ReferenceView` (`components/views/ReferenceView.tsx`) is the reference row's own chart,
 plus the reference-vs-factory-calibration table (`RefCalPanel`) below it. It reuses the same
 rail+chart layout and `CurveChart` component as the Curves view, but with its own selection
-state (`enabledRefCols`, a `RefColBar` chip bar mirroring `ChannelBar`) rather than a well
-matrix, since every plotted curve here is a reference well. Each `RefColBar` chip also has a
-small **only** button (`onOnly`) that sets `enabledRefCols` to just that one column, for
-quickly isolating a single reference well's drift.
+state (`enabledRefCols`, a `RefColBar` chip bar) rather than a well matrix, since every plotted
+curve here is a reference well. `RefColBar` is one of the four `ChipBar` adapters (see "Rail chip
+bars" under Curves view), so its columns behave exactly like the Curves rail's chips: click
+toggles, double-click solos, hovering a turned-off column peeks at it. It used to carry a
+per-chip **only** button instead of the shared double-click solo; that one-off is gone, along
+with its `.refchip*` CSS. Both chip sections carry the rail's standard `<ResetIcon />` button —
+restoring, respectively, every channel the run reads and every reference column, neither of which
+is plate-derived the way the Curves rail's defaults are (the reference row is instrument optics,
+read on every channel whatever the plate holds).
 
 - **Live curves:** `zpcr.curves({ includeReference:true })`, filtered to `isReference` wells,
   by enabled channel and reference column. Plotted **solid** — `isReference` is forced to
@@ -1096,6 +1116,19 @@ quickly isolating a single reference well's drift.
   alone. The tooltip shows
   the matched column (`R{n}`) alongside the channel/dye for a factory series, since a factory
   line's identity isn't otherwise visible the way a well curve's label is.
+- **Dark overlay ("Show dark"):** the same `showDark` setting and the same `CurveChart`
+  `darkCurves` prop the Curves view's channel space uses — one switch meaning "overlay the
+  LED-off background", wherever raw channel readings are on screen. It answers the question the
+  reference row's *absolute* level raises: how much of a reference well's reading is optical
+  background rather than the reference material? Across every committed sample the dark level
+  lands below **every** reference column, a per-channel offset (7–215 RFU, i.e. 0.3–10 % of R1)
+  below the dim end of the row that is stable to a few RFU across years and runs — and the two
+  don't track each other cycle to cycle, so neither substitutes for the other as a background
+  estimate (see `plateread.md` §DARKDATA vs. the reference row).
+  **Raw-baseline only:** a dark curve has no factory value to be relative to, so ΔRFU/Drift %
+  have nothing to plot it against and would drop a ~2000 RFU line onto an axis spanning tens of
+  RFU. The switch stays visible but inert there, with a `rail__note` saying why, rather than
+  disappearing — the same choice the factory line makes in those modes.
 - **Two baseline concepts, one `{scale, shift}` model:** `buildChart()` maps each raw value to
   plotted space as `raw * scale + shift`, computed per cycle by `wellAdjust()`. "Raw" is the
   identity (`scale:1, shift:0`). Here (Reference view), "ΔRFU" and "Drift %" are both
