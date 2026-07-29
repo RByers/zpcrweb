@@ -1,11 +1,10 @@
-import { deflateRawSync } from "node:zlib";
-import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { describe, it, expect } from "vitest";
 import { parsePcrd, parseZpcr } from "../src/index.js";
 import { readCfxPassword } from "./secrets.js";
+import { TEST_PASSWORD, buildEncryptedZip } from "./zipCrypto.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -40,138 +39,19 @@ describe("pcrd — container + password handling (no secret needed)", () => {
   });
 });
 
-// --- Minimal ZipCrypto encryption + single-entry ZIP builder, mirroring zipcrypto.ts's
-// decrypt algorithm in reverse. Test-only: the library never needs to *write* CFX files.
-// (Duplicated from pcrd-synthetic.test.ts/prcl.test.ts — kept self-contained per file.) Used
-// here to re-wrap the committed plaintext sample (extracted once, for real, using the real
-// password — see the pipeline test below) under a throwaway test password, so the decode
-// assertions exercise the exact real-world document without needing the real secret.
-
-const CRC_TABLE = (() => {
-  const table = new Uint32Array(256);
-  for (let n = 0; n < 256; n++) {
-    let c = n;
-    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
-    table[n] = c >>> 0;
-  }
-  return table;
-})();
-function crc32Byte(crc: number, byte: number): number {
-  return (CRC_TABLE[(crc ^ byte) & 0xff]! ^ (crc >>> 8)) >>> 0;
-}
-function crc32(bytes: Uint8Array): number {
-  let c = 0xffffffff;
-  for (const b of bytes) c = crc32Byte(c, b);
-  return (c ^ 0xffffffff) >>> 0;
-}
-
-class EncryptKeys {
-  k0 = 0x12345678;
-  k1 = 0x23456789;
-  k2 = 0x34567890;
-  constructor(password: string) {
-    for (let i = 0; i < password.length; i++) this.update(password.charCodeAt(i) & 0xff);
-  }
-  update(byte: number): void {
-    this.k0 = crc32Byte(this.k0, byte);
-    this.k1 = (Math.imul((this.k1 + (this.k0 & 0xff)) >>> 0, 134775813) + 1) >>> 0;
-    this.k2 = crc32Byte(this.k2, this.k1 >>> 24);
-  }
-  encryptByte(plain: number): number {
-    const temp = (this.k2 | 2) & 0xffff;
-    const keystream = (Math.imul(temp, temp ^ 1) >>> 8) & 0xff;
-    const cipher = (plain ^ keystream) & 0xff;
-    this.update(plain);
-    return cipher;
-  }
-}
-
-function zipCryptoEncrypt(data: Uint8Array, password: string, entryCrc: number): Uint8Array {
-  const keys = new EncryptKeys(password);
-  const header = randomBytes(12);
-  header[11] = (entryCrc >>> 24) & 0xff;
-  const out = new Uint8Array(12 + data.length);
-  for (let i = 0; i < 12; i++) out[i] = keys.encryptByte(header[i]!);
-  for (let i = 0; i < data.length; i++) out[12 + i] = keys.encryptByte(data[i]!);
-  return out;
-}
-
-function u16(n: number): Uint8Array {
-  return new Uint8Array([n & 0xff, (n >> 8) & 0xff]);
-}
-function u32(n: number): Uint8Array {
-  return new Uint8Array([n & 0xff, (n >> 8) & 0xff, (n >> 16) & 0xff, (n >>> 24) & 0xff]);
-}
-function concat(...parts: Uint8Array[]): Uint8Array {
-  const total = parts.reduce((n, p) => n + p.length, 0);
-  const out = new Uint8Array(total);
-  let o = 0;
-  for (const p of parts) {
-    out.set(p, o);
-    o += p.length;
-  }
-  return out;
-}
-
-/** Re-wrap `plaintext` as a single-entry encrypted `.pcrd`-shaped ZIP, for test use only. */
-function buildSyntheticPcrd(plaintext: Uint8Array, password: string): Uint8Array {
-  const entryCrc = crc32(plaintext);
-  const compressed = deflateRawSync(plaintext, { level: 6 });
-  const encrypted = zipCryptoEncrypt(compressed, password, entryCrc);
-  const name = new TextEncoder().encode("20260720_211747_CT019138_Luna_noRT.pcrd");
-
-  const localHeader = concat(
-    new Uint8Array([0x50, 0x4b, 0x03, 0x04]),
-    u16(20),
-    u16(0x0001),
-    u16(8),
-    u16(0),
-    u16(0),
-    u32(entryCrc),
-    u32(encrypted.length),
-    u32(plaintext.length),
-    u16(name.length),
-    u16(0),
-    name,
-  );
-  const cdEntry = concat(
-    new Uint8Array([0x50, 0x4b, 0x01, 0x02]),
-    u16(45),
-    u16(20),
-    u16(0x0001),
-    u16(8),
-    u16(0),
-    u16(0),
-    u32(entryCrc),
-    u32(encrypted.length),
-    u32(plaintext.length),
-    u16(name.length),
-    u16(0),
-    u16(0),
-    u16(0),
-    u16(0),
-    u32(0),
-    u32(0),
-    name,
-  );
-  const cdOffset = localHeader.length + encrypted.length;
-  const eocd = concat(
-    new Uint8Array([0x50, 0x4b, 0x05, 0x06]),
-    u16(0),
-    u16(0),
-    u16(1),
-    u16(1),
-    u32(cdEntry.length),
-    u32(cdOffset),
-    u16(0),
-  );
-  return concat(localHeader, encrypted, cdEntry, eocd);
-}
+// The decode assertions below run against the committed plaintext sample (extracted once, for
+// real, using the real password — see the pipeline test at the end), re-wrapped by
+// `buildEncryptedZip` under a throwaway test password. That way they exercise the exact
+// real-world document, and the container pipeline with it, without needing the real secret.
 
 describe("pcrd — decoded structure (real document, re-wrapped, no secret needed)", () => {
-  const password = "synthetic-test-password";
+  const password = TEST_PASSWORD;
   const plaintext = readBytes(PCRD_XML_PATH);
-  const zipBytes = buildSyntheticPcrd(plaintext, password);
+  const zipBytes = buildEncryptedZip(
+    plaintext,
+    password,
+    "20260720_211747_CT019138_Luna_noRT.pcrd",
+  );
   const pcrd = parsePcrd(zipBytes, { password });
 
   it("decodes into the same Zpcr shape as the matching .zpcr, cross-validated field for field", () => {

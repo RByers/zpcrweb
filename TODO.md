@@ -144,13 +144,13 @@ Simplification / dead-code removal, from a whole-project review (2026-07-27). It
 - [x] **`refCalComparison()` recomputes `parseFactoryRefRowCal`.** Both `zpcr.ts` and `pcrd.ts`
       call it with the arguments `factoryRefCal()` already used. Reuse the existing result
       (preserving laziness).
-- [ ] **needs input — the ZipCrypto test-encryption helper exists three times.**
-      `test/pcrd.test.ts`, `test/pcrd-synthetic.test.ts` and `test/prcl.test.ts` each carry an
+- [x] **The ZipCrypto test-encryption helper exists three times.**
+      `test/pcrd.test.ts`, `test/pcrd-synthetic.test.ts` and `test/prcl.test.ts` each carried an
       identical ~120-line copy of `CRC_TABLE`/`crc32`/`EncryptKeys`/`zipCryptoEncrypt` and the
-      synthetic-archive builders — ~240 lines of duplication. A shared `test/zipCrypto.ts`
-      (alongside the existing `test/sample.ts`, `test/secrets.ts`) would collapse it. A comment
-      in `pcrd.test.ts` records that self-contained duplication was a deliberate earlier call,
-      so this is a revisit-the-decision question, not an oversight.
+      synthetic-archive builders — ~240 lines of duplication. Collapsed into a shared
+      `test/zipCrypto.ts` (alongside `test/sample.ts`, `test/secrets.ts`) exporting
+      `buildEncryptedZip(plaintext, password, entryName)` plus `TEST_PASSWORD`; the three copies
+      differed only in the ZIP entry name, now a parameter.
 
 ### `apps/web`
 
