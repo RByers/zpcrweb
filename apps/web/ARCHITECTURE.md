@@ -933,6 +933,19 @@ is: a per-target curve needs channel→dye color separation (`calibration.md`).
   to the largest endpoint in the whole table (not the sorted page), so amplitudes compare down the
   column. All of it is `lib/` colour data reused through one `--c`/`--rowc` custom property per
   chip/row (see `.atbl*` in `app.css`) — no palette lives in the table.
+- **Cq is a position, not just a number:** each Cq sits on a track spanning cycle 1 → the last
+  cycle the active step read (`cycleCount`, derived from the curves rather than the protocol, so a
+  run stopped early gets the axis its data actually has), with a marker where that well crossed.
+  It's the chart's own x domain, so the cue reads as "when did it cross"; sorting by Cq lines the
+  markers into a diagonal. The number beside it carries the same signal redundantly as brightness
+  along `--ink` → `--ink-muted`, which puts "late but real" and "never crossed" on one continuum.
+  A well with no Cq keeps an empty track — the axis with nothing on it *is* the statement.
+
+  Deliberately position rather than a colour ramp: hue is already spent on channel and sample
+  type, and a green→red Cq scale would assert a verdict the app has no basis for — whether "late"
+  is bad depends on the assay and on a user-set threshold, and a Cq only compares within a target,
+  so any table-relative scale would mislead across targets. An absolute cycle axis is a
+  measurement, not a judgement.
 - **Sample type travels with the row:** `AnalysisRow.sampleType` comes straight from
   `WellDefinition.sampleType`, and is exported in the CSV as its own column.
 - **The same filters as the chart:** wells, sample names and the chip opt-out set are applied through

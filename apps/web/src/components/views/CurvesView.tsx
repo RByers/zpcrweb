@@ -670,6 +670,15 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
     ],
   );
 
+  /** How many cycles the active step actually read — the domain the table's Cq axis spans, and
+   * the same one the chart's x axis uses. Taken from a curve rather than from the protocol: a run
+   * stopped early has fewer plate reads than its `.prcl` asked for, and the axis has to match the
+   * data that exists. */
+  const cycleCount = useMemo(
+    () => allCurves.reduce((m, c) => Math.max(m, c.cycles.at(-1) ?? 0), 0),
+    [allCurves],
+  );
+
   /** The live threshold per group (an override, or §5.1's auto value), read straight from the
    * run's Cq table rather than from `tableRows`: a group's threshold is a property of the run and
    * its noise cohort, not of which of its wells the rail happens to have selected, so the
@@ -1230,7 +1239,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
 
       {tableMode ? (
         <section className="analysis__table-wrap">
-          <CurveTable rows={tableRows} usingTargets={usingTargets} />
+          <CurveTable rows={tableRows} usingTargets={usingTargets} cycleCount={cycleCount} />
         </section>
       ) : (
         <section className="curves__plot">

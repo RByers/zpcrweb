@@ -6,6 +6,9 @@ import { SAMPLE_TYPE_META } from "../../lib/sampleType";
 
 interface Props {
   rows: AnalysisRow[];
+  /** Cycles read in the active step — the domain the Cq axis spans. 0 when unknown, which drops
+   * the axis and leaves the number alone. */
+  cycleCount: number;
   /** Whether the plate assigns targets at all — when it doesn't, the group *is* the fluorophore
    * and the Target column would just repeat the Fluor one. */
   usingTargets: boolean;
@@ -144,6 +147,56 @@ function ValueChip({
 }
 
 /**
+ * Cq as a position on the run's cycle axis, not just a number: a track spanning cycle 1 → the
+ * last cycle read, with a marker where this well crossed its threshold.
+ *
+ * This is the axis the chart's x already uses, so the cue reads as "when did it cross" rather
+ * than as an abstract score — early crossers cluster left, and sorting by Cq lines the markers up
+ * into a diagonal. It's position rather than hue on purpose: the table already spends colour on
+ * the optical channel and on the sample type, and a green→red Cq ramp would assert a verdict the
+ * app has no basis for (whether "late" is bad depends on the assay and on a threshold the user
+ * sets, and a Cq only compares within a target anyway). The axis is absolute — a measurement, not
+ * a judgement — so it stays honest across targets.
+ *
+ * The number itself carries the same signal redundantly, as brightness: earlier is brighter,
+ * along the existing `--ink` → `--ink-muted` ramp, which puts "late but real" and "never crossed"
+ * on one continuum instead of a cliff. A well with no Cq keeps its empty track — the axis showing
+ * nothing on it is the point.
+ */
+function CqCell({ cq, cycleCount, color }: { cq: number | null; cycleCount: number; color: string }) {
+  const t = cq != null && cycleCount > 1 ? clamp01((cq - 1) / (cycleCount - 1)) : null;
+  return (
+    <span className="atbl__cqcell">
+      <span
+        className={"atbl__cq mono" + (cq == null ? " is-none" : "")}
+        // Brightness falls off with the cycle at which it crossed. Computed here rather than in
+        // CSS: the ramp is over the run's own cycle count, which only this component knows.
+        style={t == null ? undefined : { color: `color-mix(in srgb, var(--ink) ${cqInk(t)}%, var(--ink-muted))` }}
+      >
+        {formatCq(cq)}
+      </span>
+      {cycleCount > 1 && (
+        <span
+          className="atbl__cqaxis"
+          title={cq == null ? `No Cq in ${cycleCount} cycles` : `Cq ${formatCq(cq)} of ${cycleCount} cycles`}
+        >
+          {t != null && (
+            <span className="atbl__cqmark" style={{ left: `${t * 100}%`, background: color }} />
+          )}
+        </span>
+      )}
+    </span>
+  );
+}
+
+const clamp01 = (n: number) => Math.min(1, Math.max(0, n));
+
+/** How much `--ink` (vs. `--ink-muted`) a Cq's text keeps, from a crossing at cycle 1 to one at
+ * the last cycle. Stops well short of 0 so the latest Cq is still dimmer-but-legible rather than
+ * lost — it's a real measurement, only a weaker one. */
+const cqInk = (t: number) => Math.round(100 - t * 65);
+
+/**
  * The Curves view's table mode: the run's Cq/ΔRFU table, in place of the chart. Every value is
  * looked up in the run's one Cq table upstream (see `lib/analysisRows.ts`) — this component only
  * orders and paints them.
@@ -155,12 +208,14 @@ function ValueChip({
  * Colour is borrowed rather than invented: Fluor and Target chips take the optical-channel hue
  * their curve is drawn in, and each row is washed with its well's sample-type colour — the same
  * one the plate map paints that well — so the controls stand out from the unknowns at a glance.
+ * Magnitude is spent on position instead: Cq sits on the run's cycle axis (see {@link CqCell})
+ * and ΔRFU on a bar scaled to the whole table.
  *
  * A row with no Cq renders greyed out (`.is-unamplified`) rather than being hidden, so a well
  * disqualified by the §7 baseline gate or the amplification squelch stays visible instead of
  * silently vanishing from the table.
  */
-export function CurveTable({ rows, usingTargets }: Props) {
+export function CurveTable({ rows, usingTargets, cycleCount }: Props) {
   const [sortKey, setSortKey] = useState<SortKey>("target");
   const [dir, setDir] = useState<1 | -1>(1);
 
@@ -251,9 +306,7 @@ export function CurveTable({ rows, usingTargets }: Props) {
               <td className="mono atbl__baseline">{r.baselineFormula}</td>
               <td className="mono atbl__num">{formatRfu(r.threshold)}</td>
               <td className="atbl__num">
-                <span className={"atbl__cq mono" + (r.cq == null ? " is-none" : "")}>
-                  {formatCq(r.cq)}
-                </span>
+                <CqCell cq={r.cq} cycleCount={cycleCount} color={color} />
               </td>
               <td className="atbl__num">
                 <span className="atbl__delta">

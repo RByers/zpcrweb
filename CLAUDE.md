@@ -120,7 +120,7 @@ Cost control, when you do run it:
 npm run test:ui
 ```
 
-60 browser assertions covering what nothing else can catch: the two URL contracts — hash
+63 browser assertions covering what nothing else can catch: the two URL contracts — hash
 routing (deep links, back/forward, unknown-file and invalid-view fallbacks) and password
 handling (stripped from both URL forms, never leaked into the routing hash, an encrypted
 `.pcrd` still decrypting) — plus `#load=`, the rule that every XML view uses the shared
@@ -132,7 +132,8 @@ peeks at it only while hovered) plus the Reference view's overlay toggles and x-
 including that hiding the factory line doesn't break the ΔRFU baseline computed from the same
 values — and the Curves table's sort contract (a header click re-orders, a second reverses,
 Well sorts by plate position rather than label text, wells with no Cq stay at the bottom in
-both directions). A screenshot
+both directions) and its Cq axis (every marker at its own cycle, an empty axis where there is
+no Cq). A screenshot
 can't show that the back button works, that a secret reached the address bar, that a hover
 put a curve back, or that eight rows are in the right order — and the core Vitest suite has no
 DOM.

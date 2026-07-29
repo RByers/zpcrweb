@@ -422,6 +422,31 @@ async function tableSortChecks(chrome, origin) {
   );
   check("wells with no Cq stay last when Cq is reversed", noCqLast(cqDesc), cqDesc.join(" "));
 
+  // The Cq axis: a marker's position is the *only* thing that carries "early vs late" (the
+  // number beside it is exact but not comparable at a glance), and an axis mis-scaled by one
+  // cycle still looks entirely plausible in a screenshot.
+  const axis = await cdp.eval(`(() => {
+    const rows = [...document.querySelectorAll(".atbl tbody tr")].map((r) => ({
+      cq: r.querySelector(".atbl__cq").textContent.trim(),
+      left: r.querySelector(".atbl__cqmark")?.style.left ?? null,
+    }));
+    return { rows, title: document.querySelector(".atbl__cqaxis")?.title ?? "" };
+  })()`);
+  const cycles = Number(/of (\d+) cycles/.exec(axis.title)?.[1]);
+  check("the Cq axis spans the run's cycle count", cycles > 0, axis.title);
+  check(
+    "every Cq is marked at its own cycle on that axis",
+    axis.rows
+      .filter((r) => r.cq !== "—")
+      .every((r) => Math.abs(parseFloat(r.left) - ((Number(r.cq) - 1) / (cycles - 1)) * 100) < 0.5),
+    axis.rows.map((r) => `${r.cq}@${r.left}`).join(" "),
+  );
+  check(
+    "a well with no Cq gets an empty axis, not a marker at zero",
+    axis.rows.filter((r) => r.cq === "—").every((r) => r.left === null),
+    axis.rows.filter((r) => r.cq === "—").map((r) => String(r.left)).join(" "),
+  );
+
   cdp.close();
 }
 
