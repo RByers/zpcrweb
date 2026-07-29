@@ -22,15 +22,6 @@ import {
   type AutoThresholdOptions,
 } from "./threshold.js";
 
-/**
- * Element-wise subtraction of one series from another, `a[i] - b[i]`. Used to subtract a
- * per-cycle background (e.g. a channel's dark reading) from a well's curve. Missing entries
- * in `b` are treated as 0; the result matches the length of `a`.
- */
-export function subtractSeries(a: number[], b: number[]): number[] {
-  return a.map((v, i) => v - (b[i] ?? 0));
-}
-
 export interface CurveBaselineResult {
   baselineRegion: BaselineRegion;
   correctedValues: number[];
@@ -44,10 +35,6 @@ export interface CurveBaselineResult {
    * mode too, which does no subtraction). Distinct from `CqTableEntry.endRfu`, which averages the
    * last five cycles and is what the instrument reports. */
   deltaRfu: number;
-  /** Mean of the *raw* (uncorrected) `values` over `baselineRegion` — the actual RFU level a
-   * curve's baseline was anchored to, so a user can see what the analysis actually used rather
-   * than inferring it from a possibly-surprising Cq. */
-  baselineRfu: number;
   /** The line actually fitted over `baselineRegion` — `rfu = intercept + slope × cycle` — so
    * callers can plot the baseline itself. Always the linear fit, whatever `mode` is. */
   baselineFit: LinearBaselineFit;
@@ -72,7 +59,7 @@ const MAX_BASELINE_PASSES = 6;
  * {@link computeCqTable} does before any threshold exists.
  *
  * Nothing here is smoothed. CFX's exported corrected curves are unsmoothed white noise about their
- * baselines even though the run persists `pCRDigitalFilter="WeightedMean"` (`threshold.md` §0.6),
+ * baselines even though the run persists `pCRDigitalFilter="WeightedMean"` (`threshold.md` §1.6),
  * so the filter named in the file is not applied to the curve that gets analysed.
  */
 export function baselineCorrectCurve(
@@ -94,12 +81,15 @@ export function baselineCorrectCurve(
   }
 
   const noise = baselineNoise(cycles, correctedValues, region);
-  const idx: number[] = [];
+  let regionSum = 0;
+  let regionCount = 0;
   for (let i = 0; i < cycles.length; i++) {
-    if (cycles[i]! >= region.beginCycle && cycles[i]! <= region.endCycle) idx.push(i);
+    if (cycles[i]! >= region.beginCycle && cycles[i]! <= region.endCycle) {
+      regionSum += correctedValues[i]!;
+      regionCount++;
+    }
   }
-  const baselineMean =
-    idx.length > 0 ? idx.reduce((s, i) => s + correctedValues[i]!, 0) / idx.length : 0;
+  const baselineMean = regionCount > 0 ? regionSum / regionCount : 0;
 
   return {
     baselineRegion: region,
@@ -107,7 +97,6 @@ export function baselineCorrectCurve(
     noise,
     amplified: isAmplified(correctedValues, noise),
     deltaRfu: (correctedValues.at(-1) ?? 0) - baselineMean,
-    baselineRfu: idx.length > 0 ? idx.reduce((s, i) => s + values[i]!, 0) / idx.length : 0,
     baselineFit: fitLinearBaseline(cycles, values, region),
   };
 }
@@ -291,7 +280,7 @@ export function computeCqTable(
           ? "group"
           : "auto";
     const cq = computeCq(c.cycles, b.correctedValues, threshold);
-    // The plateau filter runs after the Cq, which it cannot change (`threshold.md` §0.9), and
+    // The plateau filter runs after the Cq, which it cannot change (`threshold.md` §1.7), and
     // feeds only the end-point RFU.
     const endRfu = endPointRfu(smoothPlateauTail(b.correctedValues, cq));
     table.set(c.key, { ...b, group: c.group, threshold, groupThreshold, thresholdSource, cq, endRfu });

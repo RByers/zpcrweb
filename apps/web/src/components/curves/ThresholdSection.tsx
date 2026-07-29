@@ -8,7 +8,7 @@ export interface ThresholdCurveRow {
   key: string;
   wellLabel: string;
   /** The cycle range this curve's own baseline-region auto-detection settled on (`threshold.md`
-   * §3.4) — per-curve, so two wells of one dye routinely differ. */
+   * §3) — per-curve, so two wells of one dye routinely differ. */
   beginCycle: number;
   endCycle: number;
   /** §5.2's successive-difference noise estimate: this curve's contribution to the group median. */

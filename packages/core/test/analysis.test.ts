@@ -1,30 +1,11 @@
 import { describe, it, expect } from "vitest";
 import {
   parseZpcr,
-  subtractSeries,
   baselineCorrectCurve,
   computeCq,
   computeCqTable,
 } from "../src/index.js";
 import { readSampleBytes } from "./sample.js";
-
-describe("subtractSeries", () => {
-  it("subtracts element-wise", () => {
-    expect(subtractSeries([10, 20, 30], [1, 2, 3])).toEqual([9, 18, 27]);
-  });
-
-  it("treats missing baseline entries as 0 and matches the length of a", () => {
-    expect(subtractSeries([10, 20, 30], [1, 2])).toEqual([9, 18, 30]);
-  });
-
-  it("does not mutate inputs", () => {
-    const a = [5, 6];
-    const b = [1, 1];
-    subtractSeries(a, b);
-    expect(a).toEqual([5, 6]);
-    expect(b).toEqual([1, 1]);
-  });
-});
 
 describe("baselineCorrectCurve", () => {
   // A clean sigmoid: flat ~100 well before onset, plateauing ~5100 by the end.
@@ -55,18 +36,6 @@ describe("baselineCorrectCurve", () => {
     expect(result.deltaRfu).toBeGreaterThan(4800);
   });
 
-  it("reports baselineRfu as the mean raw value over the baseline region", () => {
-    const result = baselineCorrectCurve(cycles, values, "RawBaseLineSubtracted", 200);
-    const { beginCycle, endCycle } = result.baselineRegion;
-    const inRegion = values.filter((_, i) => cycles[i]! >= beginCycle && cycles[i]! <= endCycle);
-    expect(result.baselineRfu).toBeCloseTo(
-      inRegion.reduce((a, b) => a + b, 0) / inRegion.length,
-      6,
-    );
-    // The flat part of this sigmoid, not halfway up its rise.
-    expect(result.baselineRfu).toBeLessThan(300);
-  });
-
   it("exposes the fitted linear baseline (slope, intercept) for display", () => {
     const result = baselineCorrectCurve(cycles, values, "LinearBaseLineNormalized", 200);
     // Loose bounds: this checks the fit is exposed and plausible (well below the curve's ~5100
@@ -85,10 +54,9 @@ describe("baselineCorrectCurve", () => {
     const refined = baselineCorrectCurve(cycles, values, "LinearBaseLineNormalized", 200);
     expect(refined.baselineRegion.endCycle).toBeLessThan(22);
     expect(refined.amplified).toBe(true);
-    // The baseline now describes the pre-amplification part rather than the whole sigmoid, so it
-    // sits near the curve's flat level instead of halfway up the rise.
-    expect(refined.baselineRfu).toBeLessThan(300);
-    expect(wholeRun.baselineRfu).toBeGreaterThan(1000);
+    // The baseline now describes the pre-amplification part rather than the whole sigmoid, so the
+    // line it fits is far flatter than one dragged across the rise.
+    expect(refined.baselineFit.slope).toBeLessThan(wholeRun.baselineFit.slope / 10);
   });
 
   // Recorded from a real NTC (no-template control) well: a pure two-segment decay (steep for the

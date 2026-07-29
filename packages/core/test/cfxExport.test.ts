@@ -27,7 +27,7 @@ const EXPORT_PATH = resolve(__dirname, "../../../samples/20260726_S183-S185_RVP-
  * `fluorId="5"`). Tex 615's is on `autoCalculateThreshold="True"`, so nothing is persisted — this
  * value was *recovered* from the reported Cq values by solving the interpolation back for the
  * threshold, which lands on the same number to 8e-13 across all three wells that have a Cq
- * (`threshold.md` §0.3). Cy5 has no well with a Cq, so its threshold is unrecoverable and it is
+ * (`threshold.md` §1.3). Cy5 has no well with a Cq, so its threshold is unrecoverable and it is
  * not exercised here.
  */
 const CFX_THRESHOLD: Record<string, number> = {
@@ -153,7 +153,7 @@ describe("CFX's own exported results", () => {
 
   it("reports a Cq for a noise well that touches the threshold once, and none for a well that never crosses", () => {
     // Two wells worth naming, because they are what settles "should a quality gate suppress a Cq?"
-    // — the reference has no such gate, in either direction (`threshold.md` §0.5).
+    // — the reference has no such gate, in either direction (`threshold.md` §1.4).
     const tex = cfx.curves.get("Tex 615")!;
     const T = CFX_THRESHOLD["Tex 615"]!;
 

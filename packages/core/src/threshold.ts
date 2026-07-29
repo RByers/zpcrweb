@@ -5,14 +5,28 @@
  *
  * **The crossing rule is measured, not inferred.** Fed CFX's own corrected curves and its own
  * threshold, {@link computeCq} reproduces all 14 Cq values and all 10 no-Cq wells of
- * `20260726_S183-S185_RVP` to ~1e-10 cycles — see `threshold.md` §0.2 and the regression test in
+ * `20260726_S183-S185_RVP` to ~1e-10 cycles — see `threshold.md` §1.2 and the regression test in
  * `test/cfxExport.test.ts`. The *threshold* is the opposite case: CFX's automatic rule is not
  * documented, not observable, and the one auto value ever recovered from it rules out the obvious
  * models — see {@link AutoThresholdOptions.multiplier}.
  */
 
-import { median, stdDev } from "./stats.js";
-import type { BaselineRegion } from "./baseline.js";
+import { BASELINE_BEGIN_CYCLE, type BaselineRegion } from "./baseline.js";
+
+/** Median of a series. Returns 0 for an empty series; averages the middle pair when even. */
+export function median(values: number[]): number {
+  if (values.length === 0) return 0;
+  const sorted = values.slice().sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0 ? (sorted[mid - 1]! + sorted[mid]!) / 2 : sorted[mid]!;
+}
+
+/** Population standard deviation. Returns 0 for an empty series. */
+export function stdDev(values: number[]): number {
+  if (values.length === 0) return 0;
+  const mean = values.reduce((a, b) => a + b, 0) / values.length;
+  return Math.sqrt(values.reduce((s, v) => s + (v - mean) ** 2, 0) / values.length);
+}
 
 /**
  * Converts a median absolute second difference into an estimate of σ. **0.6053**, and it is
@@ -23,7 +37,7 @@ import type { BaselineRegion } from "./baseline.js";
 const SECOND_DIFFERENCE_SIGMA = 1 / (0.674489750196082 * Math.sqrt(6));
 
 /**
- * §5.2: the baseline noise of one well — how much its corrected curve jitters from cycle to
+ * §5.1: the baseline noise of one well — how much its corrected curve jitters from cycle to
  * cycle, over the baseline region. Pass an already-corrected curve: inside the region its values
  * *are* the residuals about the fitted line.
  *
@@ -77,7 +91,7 @@ export interface AutoThresholdOptions {
    *
    * **This is the one number in the pipeline that is neither measured nor derivable**, and the
    * evidence says the *form* of the rule is wrong, not just the constant. The RVP run pins two of
-   * its three dyes' thresholds and bounds the third (`threshold.md` §0.4, §5.3):
+   * its three dyes' thresholds and bounds the third (`threshold.md` §5.2):
    *
    * | Fluor | Threshold CFX used | Baseline noise | Implied multiplier |
    * |---|---|---|---|
@@ -89,7 +103,7 @@ export interface AutoThresholdOptions {
    * thresholds spanning 35×. No multiple of any noise statistic fits that, and neither does any
    * curve-shape quantity: Cy5's threshold must exceed 278 RFU while every Cy5 curve on the plate
    * is flat noise, so nothing read off those curves' shapes can produce it. (That last point
-   * retires the "per-curve shape threshold" this document used to propose; see `threshold.md` §5.3.)
+   * retires the "per-curve shape threshold" this document used to propose; see `threshold.md` §5.2.)
    *
    * So the shipped rule is a *defensible default*, not a reproduction of the instrument's: a
    * threshold a few tens of multiples above the noise floor sits above the jitter of a flat well
@@ -102,7 +116,7 @@ export interface AutoThresholdOptions {
 }
 
 /**
- * §5.1: one threshold per fluorophore, from the median baseline noise across that dye's wells.
+ * §5.2: one threshold per fluorophore, from the median baseline noise across that dye's wells.
  *
  * The *median*, so one unusually noisy well can't move the group; per **fluorophore**, because
  * that is the grouping the file format itself uses (`fluorDataAnalysisParam fluorId=…`) and the
@@ -116,7 +130,7 @@ export function autoThreshold(noiseEstimates: number[], options: AutoThresholdOp
 
 export interface ThresholdOptions {
   /** `thresholdOverrideValue`, with `autoCalculateThreshold="False"` — authoritative when present,
-   * and the only way to reproduce a reference Cq exactly (§5.4). */
+   * and the only way to reproduce a reference Cq exactly (§5.3). */
   overrideValue?: number;
   auto?: AutoThresholdOptions;
 }
@@ -137,7 +151,7 @@ export const AMPLIFIED_RISE_MULTIPLIER = 10;
  * **A diagnostic, not a gate.** It used to suppress the Cq of a well that failed it, and the
  * reference does no such thing: CFX reports a Cq of 14.82 for a pure-noise well whose curve pokes
  * above the threshold at exactly one cycle, and withholds one from a well that rises cleanly by
- * 87 RFU (`threshold.md` §0.5). Its only test is {@link computeCq}'s `T ∈ [min, max]`. Keeping
+ * 87 RFU (`threshold.md` §1.4). Its only test is {@link computeCq}'s `T ∈ [min, max]`. Keeping
  * this as a label the UI can show and sort by — rather than as a veto — is both simpler and closer
  * to the instrument.
  */
@@ -164,7 +178,7 @@ const MIN_CROSSING_SLOPE = 1e-5;
  * take the crossing with the longest run; ties go to the later one
  * ```
  *
- * Every clause is measured against CFX's own output (`threshold.md` §0.2), and three of them
+ * Every clause is measured against CFX's own output (`threshold.md` §1.2), and three of them
  * replaced something this library used to do differently:
  *
  * - **Linear interpolation on the cycle number.** Not logarithmic (physically appealing, and
@@ -180,14 +194,31 @@ const MIN_CROSSING_SLOPE = 1e-5;
  *   corrected curve sits *above* the threshold gets no Cq — which is the real reason an obviously
  *   amplifying well can report nothing, and worth surfacing in a UI as "baseline above threshold"
  *   rather than "no amplification": they look identical in the output and mean opposite things.
+ *
+ * **One narrowing of the measured rule, and the only one: the search starts at
+ * {@link BASELINE_BEGIN_CYCLE}**, the first cycle the baseline was fitted to describe. `min`/`max`
+ * are taken over the same range. This is not a quality gate — it adds no test a curve can fail —
+ * it is the domain the model is defined on. §3 excludes the run's first reads from the fit
+ * *because* block and optics are still settling there, so the corrected values at those cycles are
+ * extrapolations of a line deliberately told not to model them; reading a Cq off them is
+ * incoherent. Observed on well F1 of `20230829_135443_CT019138_SINGLE_STEP_.zpcr`, a well that
+ * never amplifies: its raw trace decays steeply over the first cycles, leaving corrected values of
+ * 55.0 and 63.9 at cycles 1–2 that straddle a 57.9 threshold, and the resulting Cq of **1.32** was
+ * the only crossing on the curve. The reference cannot settle this one — no exported well has a
+ * transient like it — but every Cq CFX does report is far past cycle 3, so nothing measured is
+ * given up.
  */
 export function computeCq(cycles: number[], values: number[], threshold: number): number | null {
   const n = values.length;
   if (n === 0) return null;
-  if (threshold < Math.min(...values) || threshold > Math.max(...values)) return null;
+  // The analysed range: the cycles the baseline was fitted to describe. See the note below.
+  const from = cycles.findIndex((c) => c >= BASELINE_BEGIN_CYCLE);
+  if (from < 1) return null;
+  const analysed = values.slice(from - 1);
+  if (threshold < Math.min(...analysed) || threshold > Math.max(...analysed)) return null;
 
   let best: { run: number; cq: number } | null = null;
-  let i = 1;
+  let i = from;
   while (i < n) {
     if (values[i]! >= threshold && values[i - 1]! < threshold) {
       const slope = values[i]! - values[i - 1]!;

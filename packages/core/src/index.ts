@@ -11,7 +11,6 @@ export { zpcrFromFile, pcrdFromFile } from "./node.js";
 
 export { hexDump } from "./hex.js";
 export {
-  subtractSeries,
   baselineCorrectCurve,
   correctCurveForDisplay,
   computeCqTable,
@@ -83,8 +82,9 @@ export {
   BASELINE_END_MARGIN,
   END_POINT_CYCLES,
 } from "./baseline.js";
-export { stdDev, median } from "./stats.js";
 export {
+  stdDev,
+  median,
   baselineNoise,
   autoThreshold,
   resolveThreshold,

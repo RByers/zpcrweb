@@ -441,9 +441,10 @@ side effect of editing this one.
 
 ```
 cq(y, T):                          # y = corrected RFU per cycle, indexed by cycle 1..N
+  y = y[3..N]                      # the analysed range — see below
   if T < min(y) or T > max(y):   return no Cq
   crossings = []
-  for i in 2..N:
+  for i in 4..N:
     if y[i] >= T and y[i-1] < T:
       m = y[i] − y[i-1]                            # per cycle; x is the cycle number
       if |m| < 1e-5: continue                      # a curve lying flat along T has no crossing
@@ -462,6 +463,21 @@ Edge cases are consequences of the rule rather than separate handling:
   flat well: the two are indistinguishable in the output and mean opposite things.
 - **Ends below the threshold** is not a special case and not a reason to withhold a Cq (§1.4's B4).
 - **Crosses, falls back, crosses again** is handled by the longest-run rule.
+
+**One narrowing, and the only one: the search starts at cycle 3** — §3's
+`BASELINE_BEGIN_CYCLE`, the first cycle the baseline was fitted to describe — and `min`/`max` are
+taken over the same range. *This library's own; the reference cannot settle it, because no
+exported well has a transient like the one it exists for.*
+
+It is not a quality gate: it adds no test a curve can fail, it states the domain the model is
+defined on. §3 excludes the run's first reads from the fit **because** block and optics are still
+settling there, so the corrected values at those cycles are extrapolations of a line deliberately
+told not to model them, and reading a Cq off them is incoherent. Observed on well F1 of
+`20230829_135443_CT019138_SINGLE_STEP_.zpcr`, a well that never amplifies: its raw trace decays
+steeply over the first cycles (7590.7, 7593.2, 7576.0, 7544.3, 7525.2, …), leaving corrected
+values of 55.0 and 63.9 at cycles 1–2 that straddle a 57.9 threshold. That was the only crossing
+on the whole curve, and it produced a Cq of **1.32** for a flat well. Nothing measured is given
+up: every Cq CFX reports is far past cycle 3, and the §1.2 regression test is unchanged by it.
 
 `algorithmCtDetection` also names a `NoThreshold` mode, which takes Cq from the curve's shape (the
 second-derivative maximum) instead of from a threshold. This library used to implement it; it is

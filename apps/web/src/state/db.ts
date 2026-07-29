@@ -90,7 +90,7 @@ export interface StoredSettings {
   /** Retired: the standalone Analysis view's own target opt-out set. That view is now the Curves
    * view's table mode and shares the rail's {@link disabledFluors}, so these are ignored. */
   analysisDisabledTargets?: string[];
-  /** Retired: the Analysis view's Cq-algorithm selector. Cq is always `threshold.md` §6.1's
+  /** Retired: the Analysis view's Cq-algorithm selector. Cq is always `threshold.md` §6's
    * threshold crossing now, so this is ignored. */
   analysisCqAlgorithm?: "Threshold" | "NoThreshold";
 

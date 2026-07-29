@@ -406,7 +406,7 @@ function decodeCalibrationCollection(runDataEl: string): DcalEntry[] {
  * - **`baselineBeginRepeat`/`baselineEndRepeat` are deliberately not read.** Both fluorophores of
  *   the RVP sample persist `2`/`9` while also carrying `autoCalculateBaseline="True"`, and
  *   recovering CFX's real baseline windows from its exported curves puts several wells nowhere
- *   near 2–9 (`threshold.md` §0.9). They are the defaults the auto search starts from, not the
+ *   near 2–9 (`threshold.md` §1.7). They are the defaults the auto search starts from, not the
  *   region it used, so honouring them would make results *worse*.
  */
 function decodePersistedThresholds(

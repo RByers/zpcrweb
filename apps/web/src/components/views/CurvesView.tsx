@@ -745,7 +745,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
                 beginCycle: e.baselineRegion.beginCycle,
                 endCycle: e.baselineRegion.endCycle,
                 noise: e.noise,
-                // §0.5's "baseline above threshold" case: a curve whose corrected minimum already
+                // §1.4's "baseline above threshold" case: a curve whose corrected minimum already
                 // exceeds the threshold can never cross it, so it reports no Cq however obviously
                 // it amplifies. Worth flagging, because in the table it is indistinguishable from
                 // a flat well and means the opposite thing.
@@ -1199,7 +1199,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
           </div>
         )}
 
-        {/* Cq is always threshold.md §6.1's threshold crossing (there is no algorithm selector any
+        {/* Cq is always threshold.md §6's threshold crossing (there is no algorithm selector any
             more), so a per-group threshold is always meaningful. An override applies to the whole
             run's Cq table — chart markers, hover cards and table alike.
 

@@ -92,7 +92,7 @@ describe("computeCq", () => {
 
   it("interpolates linearly between the two bracketing cycles", () => {
     // Deliberately exponential data: a log interpolation would give log2(6) ≈ 2.585, and the
-    // measured rule gives the linear answer instead (`threshold.md` §0.2).
+    // measured rule gives the linear answer instead (`threshold.md` §1.2).
     const values = cycles.map((c) => 2 ** c);
     expect(computeCq(cycles, values, 6)).toBeCloseTo(2.5, 9);
   });
@@ -109,8 +109,27 @@ describe("computeCq", () => {
 
   it("still reports a crossing that falls back below the threshold", () => {
     // The reference does: a pure-noise well that pokes above the threshold once and then declines
-    // for 30 cycles is reported with a Cq (`threshold.md` §0.5).
-    expect(computeCq(cycles, [0, 50, 5, 2, 1], 10)).toBeCloseTo(1.2, 9);
+    // for 30 cycles is reported with a Cq (`threshold.md` §1.4's B4).
+    expect(computeCq(cycles, [0, 0, 0, 50, 1], 10)).toBeCloseTo(3.2, 9);
+  });
+
+  it("ignores a crossing inside the settling cycles the baseline excludes", () => {
+    // Recorded from well F1 of `20230829_135443_CT019138_SINGLE_STEP_.zpcr`: a well that never
+    // amplifies, whose raw trace decays steeply over the first cycles. The baseline is fitted from
+    // cycle 3 on, so cycles 1–2 are extrapolations of a line told not to model them — and here
+    // they straddle the threshold, which was the only crossing on the curve and gave it a Cq of
+    // 1.32.
+    const f1 = [55.0, 63.9, 53.2, 27.9, 15.3, 7.3, 11.4, 7.6, 1.6, 2.8];
+    const c = Array.from({ length: f1.length }, (_, i) => i + 1);
+    expect(computeCq(c, f1, 57.87)).toBeNull();
+    // The range test is taken over the same analysed cycles, so the excluded peak can't even make
+    // the threshold look reachable.
+    expect(Math.max(...f1)).toBeGreaterThan(57.87);
+  });
+
+  it("reports a crossing from cycle 3 onward normally", () => {
+    const c = [1, 2, 3, 4, 5, 6];
+    expect(computeCq(c, [0, 0, 0, 0, 10, 20], 5)).toBeCloseTo(4.5, 9);
   });
 
   it("prefers the crossing followed by the longest increasing run", () => {

@@ -1,5 +1,4 @@
 import { deflateRawSync } from "node:zlib";
-import { randomBytes } from "node:crypto";
 
 /**
  * Minimal ZipCrypto encryption + single-entry ZIP builder, mirroring `zipcrypto.ts`'s decrypt
@@ -54,9 +53,26 @@ class EncryptKeys {
   }
 }
 
+/**
+ * The 12-byte encryption header, filled from a fixed seed rather than `randomBytes`.
+ *
+ * ZipCrypto authenticates a password by one byte — the last header byte, checked against the
+ * entry's CRC — so a *wrong* password passes that check roughly once in 256. With a random header
+ * that made "reports an error on a wrong password" fail about 0.4% of runs, which is exactly often
+ * enough to be dismissed as noise. The bytes still vary (nothing here should depend on their
+ * values); they just vary the same way every run.
+ */
+function headerBytes(): Uint8Array {
+  let seed = 0x9e3779b9;
+  return Uint8Array.from({ length: 12 }, () => {
+    seed = (Math.imul(seed, 1103515245) + 12345) >>> 0;
+    return (seed >>> 16) & 0xff;
+  });
+}
+
 function zipCryptoEncrypt(data: Uint8Array, password: string, entryCrc: number): Uint8Array {
   const keys = new EncryptKeys(password);
-  const header = randomBytes(12);
+  const header = headerBytes();
   header[11] = (entryCrc >>> 24) & 0xff;
   const out = new Uint8Array(12 + data.length);
   for (let i = 0; i < 12; i++) out[i] = keys.encryptByte(header[i]!);

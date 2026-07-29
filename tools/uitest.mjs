@@ -376,6 +376,14 @@ async function persistedThresholdChecks(chrome, origin, pw) {
     auto?.override === false,
     JSON.stringify(auto),
   );
+
+  // Leave IndexedDB as we found it. Every check shares one browser profile, so a run left behind
+  // here is re-hydrated (and re-analysed) by every page opened afterwards — which is enough extra
+  // work to push a later check's fixed-delay reads past their deadline. Checks that load a file
+  // beyond the shared fixture clean it up.
+  await cdp.eval(`(() => { const b = [...document.querySelectorAll("button")]
+      .find((b) => /^Delete .*RVP/.test(b.getAttribute("aria-label") || "")); b && b.click(); })()`);
+  await sleep(300);
   cdp.close();
 }
 
@@ -573,7 +581,11 @@ async function cqFilterChecks(chrome, origin) {
 
   // Upper handle off the top stop: the no-Cq rows go with it, and nothing above the bound stays.
   check("the upper handle moves", (await drag("hi", lastCycle - 10)) === "ok");
-  await sleep(200);
+  // Wait for the filter to actually bite rather than for a fixed delay: how long the table takes
+  // to re-render depends on how much else the page is hydrating, which is not this check's
+  // business. (It used to be `sleep(200)`, and that made the check fail whenever an earlier check
+  // had left an extra run in IndexedDB.)
+  await waitFor(async () => (await cqs()).length < all.length, { what: "the Cq bound to apply" });
   const bounded = await cqs();
   check(
     "an upper bound keeps exactly the rows at or below it",
@@ -593,7 +605,7 @@ async function cqFilterChecks(chrome, origin) {
   );
 
   check("the reset link restores the full range", (await reset()) === "ok");
-  await sleep(200);
+  await waitFor(async () => (await cqs()).length === all.length, { what: "the reset to apply" });
   check("reset shows every row again", (await cqs()).length === all.length, await readout());
 
   // The top stop's other half: the lower handle parked there leaves only the no-Cq rows, which
