@@ -916,7 +916,25 @@ is: a per-target curve needs channel→dye color separation (`calibration.md`).
   Cq rows instead of being dropped, or — when no well on the plate has a target at all
   (`usingTargets` false) — the fluorophore itself, mirroring Fluorophore mode. In that last case the
   rail's "Targets" section relabels itself "Fluorophores" and the table drops the now-redundant
-  Fluor column.
+  Target column (the group *is* the fluorophore, already in the Fluor column).
+- **Every column sorts:** clicking a header sorts by it, clicking again reverses; the active column
+  draws ▲/▼ and carries `aria-sort`, the rest a faint ↕ that only appears on hover, so the headers
+  advertise sorting without eight arrows competing with the labels. Two rules sit on top of the
+  comparison: sorting by Cq parks the wells that have none at the bottom in *both* directions, and
+  plate position is the final tiebreak everywhere, so equal values keep a stable A1→H12 order.
+  Well sorts on that position number, not its label — `A10` after `A2`. The sort is component
+  state, not a settings/URL key: it's a way of reading the table, not a property of the run.
+  Covered by `tools/uitest.mjs` (`tableSortChecks`), since row order is exactly what a screenshot
+  can't check.
+- **Colour is borrowed, never invented.** Fluor and Target render as chips in the optical-channel
+  hue (`channelColor`) their curve is drawn in, so a row matches its line in the chart; the Type
+  chip and the row's background wash use `SAMPLE_TYPE_META`, the same palette the plate map paints
+  wells with, so controls separate from unknowns without reading a word. ΔRFU carries a bar scaled
+  to the largest endpoint in the whole table (not the sorted page), so amplitudes compare down the
+  column. All of it is `lib/` colour data reused through one `--c`/`--rowc` custom property per
+  chip/row (see `.atbl*` in `app.css`) — no palette lives in the table.
+- **Sample type travels with the row:** `AnalysisRow.sampleType` comes straight from
+  `WellDefinition.sampleType`, and is exported in the CSV as its own column.
 - **The same filters as the chart:** wells, sample names and the chip opt-out set are applied through
   one shared predicate (`CurvesView`'s `fluorCurveVisible`), so the table lists exactly the curves the
   chart would plot. The chips are the rail's normal `disabledFluors` set — table mode has no

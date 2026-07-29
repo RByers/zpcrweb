@@ -331,6 +331,112 @@ async function rightAxisChecks(chrome, origin) {
 }
 
 /**
+ * The Curves view's table mode: that clicking a header really re-orders the rows, that a second
+ * click reverses it, and that the two invariants `CurveTable.sortRows` promises hold in the
+ * rendered DOM — a well with no Cq stays at the bottom in *both* directions, and only the active
+ * column is marked (`aria-sort`). All of it is state a screenshot can't verify: the same eight
+ * rows in a different order look equally plausible either way.
+ */
+async function tableSortChecks(chrome, origin) {
+  console.log("\ncurves table mode (sortable headers)");
+  const cdp = await openPage(chrome.base, origin);
+  await sleep(600);
+  await loadFile(cdp, ZPCR);
+  await waitFor(() => cdp.eval(`!!document.querySelector(".chanbar")`), { what: "curves rail" });
+  const toTable = await cdp.eval(
+    `(() => { const b = [...document.querySelectorAll("button")]
+        .find((b) => b.textContent.trim() === "Table"); if (!b) return "missing"; b.click(); return "ok"; })()`,
+  );
+  check("the Curves rail offers Table mode", toTable === "ok");
+  await waitFor(() => cdp.eval(`!!document.querySelector(".atbl")`), { what: "the analysis table" });
+
+  /** The rendered rows' cells for one column, by header label. */
+  const column = (label) =>
+    cdp.eval(`(() => {
+      const heads = [...document.querySelectorAll(".atbl thead th")];
+      const i = heads.findIndex((h) => h.textContent.trim().startsWith(${JSON.stringify(label)}));
+      if (i < 0) return null;
+      return [...document.querySelectorAll(".atbl tbody tr")].map((r) => r.cells[i].textContent.trim());
+    })()`);
+  const clickHead = (label) =>
+    cdp.eval(`(() => {
+      const h = [...document.querySelectorAll(".atbl thead th")]
+        .find((h) => h.textContent.trim().startsWith(${JSON.stringify(label)}));
+      if (!h) return "missing"; h.querySelector("button").click(); return "ok"; })()`);
+  const sortedHeads = () =>
+    cdp.eval(`[...document.querySelectorAll(".atbl thead th")]
+        .filter((h) => h.getAttribute("aria-sort") !== "none")
+        .map((h) => h.textContent.trim().replace(/[▲▼↕]/g, ""))`);
+
+  const wellsBefore = await column("Well");
+  check("table mode renders the run's rows", (wellsBefore?.length ?? 0) > 1, `${wellsBefore?.length} rows`);
+
+  check("clicking a header sorts by that column", (await clickHead("Well")) === "ok");
+  await sleep(200);
+  const wellAsc = await column("Well");
+  check(
+    "the sorted column is the only one marked",
+    JSON.stringify(await sortedHeads()) === '["Well"]',
+    JSON.stringify(await sortedHeads()),
+  );
+  check(
+    "Well sorts by plate position, not label text",
+    JSON.stringify(wellAsc) === JSON.stringify([...wellAsc].sort(byWell)),
+    (wellAsc ?? []).join(" "),
+  );
+
+  await clickHead("Well");
+  await sleep(200);
+  const wellDesc = await column("Well");
+  check(
+    "clicking the same header again reverses it",
+    JSON.stringify(wellDesc) === JSON.stringify([...wellAsc].reverse()),
+    (wellDesc ?? []).join(" "),
+  );
+
+  await clickHead("Cq");
+  await sleep(200);
+  const cqAsc = await column("Cq");
+  const quantified = cqAsc.filter((v) => v !== "—");
+  check(
+    "Cq sorts numerically",
+    JSON.stringify(quantified) === JSON.stringify([...quantified].sort((a, b) => a - b)),
+    quantified.join(" "),
+  );
+  check("wells with no Cq sort last", noCqLast(cqAsc), cqAsc.join(" "));
+  check(
+    "sorting a new column moves the marker off the old one",
+    JSON.stringify(await sortedHeads()) === '["Cq"]',
+    JSON.stringify(await sortedHeads()),
+  );
+
+  // Reversing Cq must not float the unquantified wells to the top: they carry no number to be
+  // the largest, so they stay parked at the bottom in both directions.
+  await clickHead("Cq");
+  await sleep(200);
+  const cqDesc = await column("Cq");
+  check(
+    "reversing Cq reverses the quantified wells",
+    JSON.stringify(cqDesc.filter((v) => v !== "—")) === JSON.stringify([...quantified].reverse()),
+    cqDesc.join(" "),
+  );
+  check("wells with no Cq stay last when Cq is reversed", noCqLast(cqDesc), cqDesc.join(" "));
+
+  cdp.close();
+}
+
+/** Compare two well labels the way the table does: row letter, then column *number*. */
+function byWell(a, b) {
+  return a[0].localeCompare(b[0]) || Number(a.slice(1)) - Number(b.slice(1));
+}
+
+/** True when every "—" (no Cq) sits after every quantified row. */
+function noCqLast(cqs) {
+  const first = (cqs ?? []).findIndex((v) => v === "—");
+  return first < 0 || (cqs ?? []).slice(first).every((v) => v === "—");
+}
+
+/**
  * The Reference view's rail: that its chips really are the shared `ChipBar` (one interaction
  * contract everywhere — click toggles, double-click solos, hovering a disabled chip peeks at it)
  * rather than the bespoke per-chip "only" button they used to carry, and that the DARKDATA
@@ -683,6 +789,7 @@ async function main() {
     await loadChecks(chrome, origin);
     await routingChecks(chrome, origin, pw);
     await rightAxisChecks(chrome, origin);
+    await tableSortChecks(chrome, origin);
     await referenceChecks(chrome, origin);
     await calibrationChecks(chrome, origin);
     await passwordChecks(chrome, origin, pw);

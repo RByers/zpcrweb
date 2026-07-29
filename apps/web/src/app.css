@@ -2134,6 +2134,138 @@
 .analysis__row.is-unamplified:hover {
   opacity: 0.7;
 }
+
+/* Sortable headers. The whole cell is the button (padding lives on it, not the th) so the click
+   target is the header, not just its five characters of label. */
+.atbl thead th {
+  padding: 0;
+}
+.atbl__sort {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  padding: 10px 10px 6px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.atbl__num .atbl__sort {
+  /* Numeric columns are right-aligned, so their header reads from the right edge too — label
+     first, arrow outboard of it, mirroring the text columns. */
+  flex-direction: row-reverse;
+}
+.atbl__sort:hover {
+  color: var(--ink);
+  background: var(--raised-2);
+}
+.atbl__sort.is-sorted {
+  color: var(--neon-cyan);
+}
+/* The inactive ↕ is nearly invisible until the header is hovered or focused — it holds the
+   arrow's width so nothing shifts when the sort moves, without eight arrows shouting at once. */
+.atbl__arrow {
+  font-size: 9px;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.atbl__sort:hover .atbl__arrow,
+.atbl__sort:focus-visible .atbl__arrow {
+  opacity: 0.5;
+}
+.atbl__arrow.is-on {
+  opacity: 1;
+  color: var(--neon-cyan);
+}
+.atbl__num {
+  text-align: right;
+}
+
+/* Each row is washed with its well's sample-type colour (`--rowc`, from `SAMPLE_TYPE_META` —
+   the same hue the plate map paints that well), so a control reads as a control without
+   reaching for its label. Kept very dilute: eight columns of text sit on top of it. */
+.atbl tbody tr {
+  background: color-mix(in srgb, var(--rowc) 7%, transparent);
+}
+.atbl tbody tr:hover {
+  background: color-mix(in srgb, var(--rowc) 16%, transparent);
+}
+/* The well label carries the same colour as a solid left edge — the wash alone is too faint to
+   pick a type out of a scrolling table. */
+.atbl__well {
+  display: inline-block;
+  padding: 1px 6px 1px 5px;
+  border-left: 3px solid var(--rowc);
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--rowc) 14%, transparent);
+  color: var(--ink);
+  font-size: 11px;
+}
+.atbl__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 7px;
+  border: 1px solid color-mix(in srgb, var(--c) 45%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--c) 12%, transparent);
+  color: color-mix(in srgb, var(--c) 78%, var(--ink));
+  font-size: 11px;
+  white-space: nowrap;
+}
+.atbl__swatch {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--c);
+}
+.atbl__none {
+  color: var(--ink-muted);
+}
+.atbl__baseline {
+  color: var(--ink-muted);
+  font-size: 11px;
+}
+/* The headline number of the table: brighter and heavier than the columns explaining it. */
+.atbl__cq {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.atbl__cq.is-none {
+  font-weight: 400;
+  color: var(--ink-muted);
+}
+/* ΔRFU: the number, plus a bar giving it a scale — every bar is a fraction of the largest
+   endpoint in the table, so amplitudes compare down the column at a glance. */
+.atbl__delta {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.atbl__deltanum {
+  min-width: 44px;
+  text-align: right;
+}
+.atbl__deltabar {
+  width: 56px;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--raised-2);
+  overflow: hidden;
+}
+.atbl__deltafill {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  opacity: 0.85;
+}
 .analysis__download {
   display: inline-flex;
   align-items: center;

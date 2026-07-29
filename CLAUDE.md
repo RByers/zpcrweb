@@ -120,7 +120,7 @@ Cost control, when you do run it:
 npm run test:ui
 ```
 
-49 browser assertions covering what nothing else can catch: the two URL contracts — hash
+60 browser assertions covering what nothing else can catch: the two URL contracts — hash
 routing (deep links, back/forward, unknown-file and invalid-view fallbacks) and password
 handling (stripped from both URL forms, never leaked into the routing hash, an encrypted
 `.pcrd` still decrypting) — plus `#load=`, the rule that every XML view uses the shared
@@ -130,14 +130,17 @@ selection (only the run's in-use `.Dcal` files of the 28 it ships, the rest a cl
 and the rail chips' shared interaction contract (double-click solos, hovering a disabled chip
 peeks at it only while hovered) plus the Reference view's overlay toggles and x-axis modes —
 including that hiding the factory line doesn't break the ΔRFU baseline computed from the same
-values. A screenshot
-can't show that the back button works, that a secret reached the address bar, or that a hover
-put a curve back — and the core Vitest suite has no DOM.
+values — and the Curves table's sort contract (a header click re-orders, a second reverses,
+Well sorts by plate position rather than label text, wells with no Cq stay at the bottom in
+both directions). A screenshot
+can't show that the back button works, that a secret reached the address bar, that a hover
+put a curve back, or that eight rows are in the right order — and the core Vitest suite has no
+DOM.
 
 Takes ~25s and needs Chrome, so it is **not** part of `npm test` — that stays fast and
 dependency-free. Run it when you touch `state/urlHash.ts`, `state/pltdPassword.ts`,
-`components/curves/ChipBar.tsx`, or view selection. Both tools share `tools/harness.mjs` (the
-CDP client and dev-server/Chrome plumbing); add new checks there rather than starting a third
+`components/curves/ChipBar.tsx`, `components/curves/CurveTable.tsx`, or view selection. Both
+tools share `tools/harness.mjs` (the CDP client and dev-server/Chrome plumbing); add new checks there rather than starting a third
 script. Note that rail hover ("peek") needs a real `Input.dispatchMouseEvent` — React derives
 `onMouseEnter`/`onMouseLeave` from an over/out pair plus `relatedTarget`, so a synthesized
 `mouseover` silently does nothing.

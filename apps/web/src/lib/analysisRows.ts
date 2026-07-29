@@ -1,3 +1,5 @@
+import type { SampleType } from "@zpcrweb/core";
+
 import { channelLabel } from "./channelColors";
 import { formatBaselineFormula } from "./cq";
 import { csvRow } from "./download";
@@ -23,6 +25,10 @@ export interface AnalysisRow {
   col: number;
   wellLabel: string;
   sample: string;
+  /** The well's normalized sample type (unknown/standard/NTC/…). Display only — it tints the
+   * table row the same colour the plate map paints the well, so a control reads as a control
+   * without hunting for its label. */
+  sampleType: SampleType;
   /** Diagnostic: the linear baseline actually fitted for this curve (see
    * `CurveBaselineResult.baselineFit`), rendered as a formula (e.g. "2000 + 4c") — helps explain
    * a surprising threshold/Cq. */
@@ -65,6 +71,7 @@ export function buildAnalysisRows(run: RunAnalysis, visible: CurveVisible): Anal
         col: w.col,
         wellLabel: w.label,
         sample: w.sample ?? "",
+        sampleType: w.sampleType,
         baselineFormula: formatBaselineFormula(entry.baselineFit),
         threshold: entry.threshold,
         noise: entry.noise,
@@ -78,11 +85,13 @@ export function buildAnalysisRows(run: RunAnalysis, visible: CurveVisible): Anal
 }
 
 /** The same columns the table shows, in the same order, plus `channel` and `amplified` (harmless
- * in an export, redundant on screen). */
+ * in an export, redundant on screen — the table carries them as a chip colour and a greyed row
+ * rather than as text). */
 export function analysisCsv(rows: AnalysisRow[]): string {
   let csv = csvRow([
     "well",
     "sample",
+    "sampleType",
     "fluor",
     "target",
     "channel",
@@ -96,6 +105,7 @@ export function analysisCsv(rows: AnalysisRow[]): string {
     csv += csvRow([
       r.wellLabel,
       r.sample,
+      r.sampleType,
       r.fluor,
       r.target,
       channelLabel(r.channel),
