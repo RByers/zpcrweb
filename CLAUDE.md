@@ -120,7 +120,7 @@ Cost control, when you do run it:
 npm run test:ui
 ```
 
-79 browser assertions covering what nothing else can catch: the two URL contracts — hash
+82 browser assertions covering what nothing else can catch: the two URL contracts — hash
 routing (deep links, back/forward, unknown-file and invalid-view fallbacks) and password
 handling (stripped from both URL forms, never leaked into the routing hash, an encrypted
 `.pcrd` still decrypting) — plus `#load=`, the rule that every XML view uses the shared
@@ -130,7 +130,8 @@ selection (only the run's in-use `.Dcal` files of the 28 it ships, the rest a cl
 and the rail chips' shared interaction contract (double-click solos, hovering a disabled chip
 peeks at it only while hovered) plus the Reference view's overlay toggles and x-axis modes —
 including that hiding the factory line doesn't break the ΔRFU baseline computed from the same
-values — and the Curves table's sort contract (a header click re-orders, a second reverses,
+values, and that its min/max bands draw under that baseline but drop out (with a note) on the
+column axis, where a point is a run mean with no spread of its own — and the Curves table's sort contract (a header click re-orders, a second reverses,
 Well sorts by plate position rather than label text, wells with no Cq stay at the bottom in
 both directions) and its Cq axis (every marker at its own cycle, an empty axis where there is
 no Cq) and its End RFU column (sorts numerically, and is a number of its own rather than a copy

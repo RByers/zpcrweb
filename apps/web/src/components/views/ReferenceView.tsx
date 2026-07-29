@@ -43,6 +43,14 @@ interface Props {
  * also what the ΔRFU/Drift % baselines are computed against, so clearing them to hide the line
  * would silently break both modes.
  *
+ * "Min/max band" (the Curves view's switch and setting again) shades each drawn curve's
+ * per-cycle min/max envelope — the reference reads, and the dark overlay alongside them. Unlike
+ * the two overlays it is baseline-agnostic: the envelope maps through whatever transform the
+ * line did, so it stays right in ΔRFU and Drift % too. It is Cycle-axis only, because a
+ * column-mode point is a mean over the whole run and its spread would be drift over time rather
+ * than the per-read spread the band means everywhere else (which is also why column mode's
+ * `darkCurves` clear `min`/`max` rather than aggregating them).
+ *
  * "X axis" switches between cycles (the reference row's stability over the run, one line per
  * channel *and* column) and columns (its shape across the plate, one line per channel, each
  * point a mean over all cycles — where the dark overlay flattens out, since it has no column
@@ -360,6 +368,24 @@ export function ReferenceView({ zpcr, settings, onChange }: Props) {
             />
           </div>
 
+          {/* Third shared switch, same setting as the Curves view's: shade each drawn curve's
+              per-cycle min/max envelope — the reference reads and, when it is also on, the dark
+              overlay. Cycle mode only: a column-mode point is a mean over the whole run, so the
+              spread it would shade is drift over time rather than the per-read spread the band
+              means everywhere else. */}
+          <div className="rail__section rail__row">
+            <Switch
+              label="Min/max band"
+              checked={settings.bands}
+              onChange={(v) => onChange({ bands: v })}
+              title={
+                byColumn
+                  ? "A column point is a mean over the run — switch the x axis to Cycle to shade each read's min/max spread"
+                  : "Shade each curve's per-cycle min/max envelope"
+              }
+            />
+          </div>
+
           {/* Counts what is actually drawn, so the factory switch is reflected here too —
               `factoryCurves` stays populated when the switch is off, since it's also the
               ΔRFU/Drift % reference. */}
@@ -380,6 +406,12 @@ export function ReferenceView({ zpcr, settings, onChange }: Props) {
               against.
             </div>
           )}
+          {settings.bands && byColumn && (
+            <div className="rail__note mono">
+              Min/max band is Cycle-axis only: a column point is a mean over the run, not a
+              single read with a spread of its own.
+            </div>
+          )}
         </aside>
 
         <section className="curves__plot">
@@ -392,7 +424,7 @@ export function ReferenceView({ zpcr, settings, onChange }: Props) {
             curveView="absolute"
             drawBaseline={false}
             scale={settings.scale}
-            bands={false}
+            bands={settings.bands && !byColumn}
             drawFactory={settings.showFactory}
             xAxis={
               byColumn

@@ -750,8 +750,10 @@ only pieces the two views share.
   envelope — including each dark overlay's, when "Show dark" is also on: a DARKDATA record
   carries the same per-cycle min/max over the LED-off wells that WELLDATA does over the lit ones
   (a few tens of RFU wide in the committed samples), so a dark line drawn without its band would
-  be the one curve on the plot claiming a spread it hasn't got. Channel-space only, like the dark
-  overlay. A plain on/off `Switch` alongside it —
+  be the one curve on the plot claiming a spread it hasn't got. *On this view* channel-space
+  only, like the dark overlay; the Reference rail offers the same switch over the same setting
+  (see "Reference view" below), the way "Show dark" is shared. A plain on/off `Switch` alongside
+  it —
   it used to be a three-way `off`/`auto`/`on` mode whose `auto` drew the bands only when a
   single well was selected, which made one control's effect depend on another's state;
   `fromStored` migrates a stored `"on"` to `true` and everything else to `false`.
@@ -1290,6 +1292,12 @@ read on every channel whatever the plate holds).
   `wellAdjust` computes the ΔRFU and Drift % baselines from, so emptying the array to hide the
   line would silently break both modes. `uitest` asserts ΔRFU still works after the line is
   hidden.
+- **Min/max band ("Min/max band"):** the Curves rail's switch and the same `bands` setting,
+  shading each drawn curve's per-cycle min/max envelope — the reference reads and, alongside
+  them, the dark overlay. Unlike the two overlays it is *not* Raw-only: the envelope is mapped
+  through the same `{scale, shift}` its line was, so it stays correct under ΔRFU and Drift %
+  (where the axis spans tens of RFU and the band is at its most legible). It *is* Cycle-axis
+  only — see the column-mode bullet below.
 - **X axis ("Cycle" / "Column"):** cycle mode is the time series — one line per (channel,
   reference column), showing the reference row's *stability* over the run. Column mode collapses
   each of those lines to its mean over all cycles and replots it against the plate column, giving
@@ -1306,6 +1314,10 @@ read on every channel whatever the plate holds).
     being flat in cycle mode.
   - A column the rail turns off leaves a **gap** (NaN) rather than shifting the remaining points
     along, so position on the axis always means the same column.
+  - The **min/max band is suppressed** there, and a rail note says so: a column point is a mean
+    over the whole run, so the only spread available to shade would be drift over time — a
+    different quantity from the per-read spread the band means everywhere else. Column mode's
+    dark series clear `min`/`max` for the same reason.
   - The rail's column **peek still works** (it fills the point back in), but the column *dimming*
     does not: a `refcol` highlight has no per-column series to keep lit, so `ReferenceView`
     suppresses it in column mode rather than dimming the entire chart.

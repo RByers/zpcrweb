@@ -809,6 +809,35 @@ async function referenceChecks(chrome, origin) {
     `${deltaStat.trim()} | note: ${note.trim() ? "shown" : "missing"}`,
   );
 
+  // Min/max bands: unlike the two overlays these are baseline-agnostic (the envelope rides the
+  // same {scale, shift} the line does), so they must draw under ΔRFU — but only on the cycle
+  // axis, since a column point is a run mean with no per-read spread of its own. Counting the
+  // overlay's band paths is the only way to see them: uPlot draws the lines to a canvas, and
+  // the bands are the SVG layer on top of it.
+  const bandCount = () =>
+    cdp.eval(`(() => { const svg = document.querySelector(".reference .u-over svg");
+        return svg ? svg.firstElementChild.children.length : -1; })()`);
+  const noBands = await bandCount();
+  check("the Reference rail offers a min/max band switch", (await clickSwitch("Min/max band")) === "ok");
+  await sleep(400);
+  const deltaBands = await bandCount();
+  check(
+    "min/max bands draw under the factory-relative baseline too",
+    noBands === 0 && deltaBands > 0,
+    `${noBands} → ${deltaBands} band paths`,
+  );
+  await clickBaseline("Column");
+  await sleep(400);
+  const colBands = await bandCount();
+  const colNote = await cdp.eval(
+    `[...document.querySelectorAll(".reference .rail__note")].map((n) => n.textContent).join(" ")`,
+  );
+  check(
+    "column mode drops the bands, and says why",
+    colBands === 0 && /Cycle-axis only/.test(colNote),
+    `${deltaBands} → ${colBands} band paths | note: ${/Cycle-axis only/.test(colNote) ? "shown" : "missing"}`,
+  );
+
   cdp.close();
 }
 
