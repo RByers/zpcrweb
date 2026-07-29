@@ -306,7 +306,8 @@ export interface SeriesMeta {
   parentIndex?: number;
 }
 
-/** Min/max envelope for a single isolated well (drawn as a shaded band). */
+/** Min/max envelope for one plotted curve — a well's lit wells, or a dark overlay's LED-off
+ * ones (drawn as a shaded band). */
 interface BandData {
   color: string;
   cycles: number[];
@@ -581,10 +582,14 @@ export function buildChart(cfg: BuildChartConfig): {
   const presentChannels = new Set(
     wellCurves.map((c) => c.channel).filter((ch): ch is number => ch !== undefined),
   );
+  // Kept for the same reason as `wellAdjusts`: a dark curve's band has to be mapped with the
+  // exact adjust its line was plotted with.
+  const darkPlotted: { dark: PlotDarkCurve; adjust: Adjust[] }[] = [];
   for (const channel of presentChannels) {
     const dark = darkByChannel.get(channel);
     if (!dark) continue;
     const adjust = nonWellAdjust(dark.mean, dark.analysis);
+    darkPlotted.push({ dark, adjust });
     rows.push(applyAdjust(dark.mean, adjust));
     meta.push({
       kind: "dark",
@@ -708,9 +713,14 @@ export function buildChart(cfg: BuildChartConfig): {
     });
   });
 
-  // Min/max envelope bands — one per plotted well curve, so each channel of a well gets its own.
-  // Curves with no spread of their own (dye space) get no band at all rather than a flat one.
-  const computeBand = (c: PlotCurve, adjust: Adjust[]): BandData | null => {
+  // Min/max envelope bands — one per plotted well curve, so each channel of a well gets its own,
+  // plus one per plotted dark curve, whose DARKDATA record carries the same per-cycle spread over
+  // the LED-off wells that WELLDATA does over the lit ones. Curves with no spread of their own
+  // (dye space) get no band at all rather than a flat one.
+  const computeBand = (
+    c: { channel?: number; cycles: number[]; mean: number[]; min?: number[]; max?: number[] },
+    adjust: Adjust[],
+  ): BandData | null => {
     if (!c.min || !c.max) return null;
     const min: (number | null)[] = [];
     const max: (number | null)[] = [];
@@ -718,16 +728,20 @@ export function buildChart(cfg: BuildChartConfig): {
       const a = adjust[i] ?? IDENTITY_ADJUST;
       const mn = (c.min[i] ?? 0) * a.scale + a.shift;
       const mx = (c.max[i] ?? 0) * a.scale + a.shift;
-      min.push(scale === "log" && mn <= 0 ? null : mn);
-      max.push(scale === "log" && mx <= 0 ? null : mx);
+      // A read missing this channel's record pivots to NaN (`toDarkCurves`); plot a gap, not a
+      // path command SVG will choke on.
+      const gap = !Number.isFinite(mn) || !Number.isFinite(mx);
+      min.push(gap || (scale === "log" && mn <= 0) ? null : mn);
+      max.push(gap || (scale === "log" && mx <= 0) ? null : mx);
     }
     return { color: channelColor(c.channel), cycles: c.cycles, min, max };
   };
 
   const bands: BandData[] = cfg.bands
-    ? wellCurves
-        .map((c, i) => computeBand(c, wellAdjusts[i]!))
-        .filter((b): b is BandData => b != null)
+    ? [
+        ...wellCurves.map((c, i) => computeBand(c, wellAdjusts[i]!)),
+        ...darkPlotted.map(({ dark, adjust }) => computeBand(dark, adjust)),
+      ].filter((b): b is BandData => b != null)
     : [];
 
   const thresholdLineState: ThresholdLineState = { value: null, regions: false };

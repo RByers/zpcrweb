@@ -741,13 +741,17 @@ only pieces the two views share.
   in RFU/cycle, a per-cycle standard deviation), the raw-file inspectors under "Raw files", whose
   job is to show decoded values faithfully, and the CSV export, where full precision is the point.
 - **Dark (LED-off) background:** `zpcr.darkCurves()` gives one background series per channel.
-  A pure display overlay — it never alters the plotted well curves, min/max bands, or the
-  y-axis label. The "Show dark" `Switch`: off (default) draws nothing; on draws one **dotted**
+  A pure display overlay — it never alters the plotted well curves or the y-axis label. The
+  "Show dark" `Switch`: off (default) draws nothing; on draws one **dotted**
   dark line per present channel, transformed like the curves (so it still tracks the baseline
   mode/log). Channel-space only, like the min/max bands, so it only appears when color
   separation is off.
 - **Min/max band (`bands`, off by default):** shades each plotted curve's per-cycle min/max
-  envelope. Channel-space only, like the dark overlay. A plain on/off `Switch` alongside it —
+  envelope — including each dark overlay's, when "Show dark" is also on: a DARKDATA record
+  carries the same per-cycle min/max over the LED-off wells that WELLDATA does over the lit ones
+  (a few tens of RFU wide in the committed samples), so a dark line drawn without its band would
+  be the one curve on the plot claiming a spread it hasn't got. Channel-space only, like the dark
+  overlay. A plain on/off `Switch` alongside it —
   it used to be a three-way `off`/`auto`/`on` mode whose `auto` drew the bands only when a
   single well was selected, which made one control's effect depend on another's state;
   `fromStored` migrates a stored `"on"` to `true` and everything else to `false`.
