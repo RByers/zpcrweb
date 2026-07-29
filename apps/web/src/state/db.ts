@@ -76,6 +76,11 @@ export interface StoredSettings {
   /** When true, dye-space curves are drawn for every enabled well/fluor pair, even ones the
    * plate definition doesn't actually load into that well. Off by default. */
   showUnloadedFluors?: boolean;
+  /** Curves view: the Cq filter's bounds in cycles, `null`/absent for unbounded. An absent (or
+   * `null`) {@link cqMax} is also what keeps the curves with no Cq at all on screen — see
+   * `FileSettings.cqMin`. */
+  cqMin?: number | null;
+  cqMax?: number | null;
   /** Calibration view: `${dye}|${plateType}` keys of the `.Dcal` files plotted. Opt-in, so an
    * absent/empty list means "unseeded" rather than "none" — see `FileSettings.calFiles`. */
   calFiles?: string[];

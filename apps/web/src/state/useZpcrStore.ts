@@ -160,6 +160,24 @@ export interface FileSettings extends AnalysisSettings {
    * behavior only draws curves pltd.md's per-well dye layers actually cover. */
   showUnloadedFluors: boolean;
   /**
+   * Curves view, dye space only: hide every curve whose Cq falls outside `[cqMin, cqMax]`, in
+   * cycles. `null` on either side means unbounded there, and both `null` (the default) is no
+   * filtering at all.
+   *
+   * A curve the run gave **no** Cq — it never crossed its threshold — is shown iff
+   * {@link cqMax} is `null`, which is what makes the slider's top stop ("none") mean "and the
+   * ones that never amplified". Selecting only those is `cqMin` above the last cycle with
+   * `cqMax` still `null`: no real Cq can satisfy it, so what's left is exactly the no-Cq
+   * curves.
+   *
+   * A display filter like the well/chip/sample selections it sits with — it changes which
+   * curves are drawn, which rows the table lists and which rows the CSV exports, but never a
+   * number: thresholds and Cq are computed over the whole plate (`runAnalysis.ts`) and never
+   * over the plotted subset.
+   */
+  cqMin: number | null;
+  cqMax: number | null;
+  /**
    * Calibration view: which `.Dcal` files are plotted, as `${dye}|${plateType}` keys (see
    * `calibrationCurves.ts`'s `calKey`). An opt-**in** set, unlike {@link disabledFluors}: a run
    * ships a calibration for every dye Bio-Rad sells on both tube types, and all 28 at once is
@@ -333,6 +351,9 @@ function defaultSettings(): FileSettings {
     disabledFluors: new Set<string>(),
     disabledSamples: new Set<string>(),
     showUnloadedFluors: false,
+    // Unfiltered: every Cq, plus the curves that never crossed their threshold.
+    cqMin: null,
+    cqMax: null,
     // Empty = unseeded; the Calibration view fills it from the run's own calibration set.
     calFiles: new Set<string>(),
     // The response curve is what the algorithm consumes, so it's what the view leads with.
@@ -365,6 +386,8 @@ function toStored(id: string, s: FileSettings): StoredSettings {
     disabledFluors: [...s.disabledFluors],
     disabledSamples: [...s.disabledSamples],
     showUnloadedFluors: s.showUnloadedFluors,
+    cqMin: s.cqMin,
+    cqMax: s.cqMax,
     calFiles: [...s.calFiles],
     calView: s.calView,
   };
@@ -423,6 +446,8 @@ function fromStored(s: StoredSettings): FileSettings {
     disabledFluors: new Set(s.disabledFluors ?? []),
     disabledSamples: new Set(s.disabledSamples ?? []),
     showUnloadedFluors: s.showUnloadedFluors ?? false,
+    cqMin: s.cqMin ?? null,
+    cqMax: s.cqMax ?? null,
     // Absent on a record written before the Calibration view existed; empty simply means the
     // view will seed it from the run the first time it's opened.
     calFiles: new Set(s.calFiles ?? []),

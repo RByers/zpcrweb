@@ -2374,6 +2374,117 @@
   outline-offset: 3px;
 }
 
+/* ---- Cq range filter (double-ended) -------------------------------------
+   Two native range inputs stacked on one drawn track: the inputs' own tracks are transparent and
+   ignore the pointer, so only the two thumbs are grabbable and a click between them doesn't
+   teleport a handle. Everything visible — track, filled span, thumbs — is styled to match the
+   auto-threshold slider above. */
+.cq-range {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.cq-range__head,
+.cq-range__foot {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.cq-range__head {
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.cq-range__value {
+  font-size: 11px;
+  color: var(--neon-cyan);
+}
+.cq-range__hint {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--ink-muted);
+}
+.cq-range__foot .rail__link:disabled {
+  opacity: 0.3;
+}
+.cq-range__slider {
+  position: relative;
+  height: 13px;
+}
+.cq-range__track,
+.cq-range__fill {
+  position: absolute;
+  top: 50%;
+  height: 4px;
+  margin-top: -2px;
+  border-radius: 2px;
+  pointer-events: none;
+}
+.cq-range__track {
+  left: 0;
+  right: 0;
+  background: var(--border-strong);
+}
+.cq-range__fill {
+  background: var(--neon-cyan-dim);
+}
+.cq-range__input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 13px;
+  margin: 0;
+  background: transparent;
+  appearance: none;
+  -webkit-appearance: none;
+  pointer-events: none;
+}
+.cq-range__input--lo {
+  z-index: 2;
+}
+.cq-range__input--hi {
+  z-index: 3;
+}
+/* Coincident thumbs — the lower handle is the one with room to move, so it takes the pointer. */
+.cq-range__slider.is-lo-top .cq-range__input--lo {
+  z-index: 4;
+}
+.cq-range__input::-webkit-slider-runnable-track {
+  height: 4px;
+  background: transparent;
+}
+.cq-range__input::-moz-range-track {
+  height: 4px;
+  background: transparent;
+}
+.cq-range__input::-webkit-slider-thumb {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 13px;
+  height: 13px;
+  margin-top: -4.5px;
+  border-radius: 50%;
+  background: var(--neon-cyan);
+  border: 2px solid var(--panel);
+  box-shadow: 0 0 4px var(--neon-cyan-dim);
+  pointer-events: auto;
+  cursor: pointer;
+}
+.cq-range__input::-moz-range-thumb {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: var(--neon-cyan);
+  border: 2px solid var(--panel);
+  box-shadow: 0 0 4px var(--neon-cyan-dim);
+  pointer-events: auto;
+  cursor: pointer;
+}
+.cq-range__input:focus-visible {
+  outline: 1px solid var(--neon-cyan);
+  outline-offset: 3px;
+}
+
 .analysis__thresholds {
   display: flex;
   flex-direction: column;

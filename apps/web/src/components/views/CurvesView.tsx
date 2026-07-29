@@ -31,6 +31,7 @@ import { useHoverCard, type HoverCardData, type HoverCardRow } from "../curves/H
 import { WellMatrix } from "../curves/WellMatrix";
 import { CurveChart } from "../curves/CurveChart";
 import { CurveTable } from "../curves/CurveTable";
+import { CqRange } from "../curves/CqRange";
 import {
   ThresholdSection,
   type ThresholdCurveRow,
@@ -364,7 +365,25 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
     return (
       (settings.enabledWells.has(wellKey(row, col)) || isHoveredWell(row, col)) &&
       (!settings.disabledFluors.has(label) || isHoveredTarget(label)) &&
-      sampleVisible(row, col)
+      sampleVisible(row, col) &&
+      cqInRange(row, col, dye)
+    );
+  };
+
+  /** The rail's Cq filter (see `FileSettings.cqMin` and the `CqRange` slider). Read out of the
+   * run's Cq table like everything else about a curve's Cq — never recomputed here — so a curve
+   * is filtered on exactly the number the chart marker, hover card and table all show for it.
+   *
+   * Unlike the chip filters above it takes no hover override: there is no chip to hover, and a
+   * peeked well should still respect the range the user is looking at. A curve with no Cq
+   * survives only while the upper bound is unset, which is the slider's top stop. */
+  const cqInRange = (row: number, col: number, dye: string): boolean => {
+    if (settings.cqMin == null && settings.cqMax == null) return true;
+    const cq = cqTable.get(curveKey(row, col, dye))?.cq ?? null;
+    if (cq == null) return settings.cqMax == null;
+    return (
+      (settings.cqMin == null || cq >= settings.cqMin) &&
+      (settings.cqMax == null || cq <= settings.cqMax)
     );
   };
 
@@ -382,6 +401,9 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
       settings.disabledFluors,
       settings.showUnloadedFluors,
       settings.disabledSamples,
+      settings.cqMin,
+      settings.cqMax,
+      cqTable,
       wellFluors,
       wellSample,
       fluorViewMode,
@@ -663,6 +685,8 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
       settings.enabledWells,
       settings.disabledFluors,
       settings.disabledSamples,
+      settings.cqMin,
+      settings.cqMax,
       fluorViewMode,
       wellFluorTargets,
       hasNoTargetGroup,
@@ -1153,6 +1177,22 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
               </>
             )}
           </>
+        )}
+
+        {/* Filter by Cq — dye space only, for the same reason the Cq table itself is dye-space
+            only (see `channelAnalysis`): a raw channel curve has no Cq to filter on. Grouped with
+            "Subtract dark" below rather than with the chart-only display controls because, like
+            it, it applies in table mode too — it's a selection filter, the same kind as the wells
+            and chips above, and it feeds the table and the CSV export exactly as they do. */}
+        {calibrationOn && cycleCount > 0 && (
+          <div className="rail__section">
+            <CqRange
+              cycleCount={cycleCount}
+              cqMin={settings.cqMin}
+              cqMax={settings.cqMax}
+              onChange={onChange}
+            />
+          </div>
         )}
 
         {/* §4.2's optional dark-current stage. Only meaningful in dye space: with color separation

@@ -120,7 +120,7 @@ Cost control, when you do run it:
 npm run test:ui
 ```
 
-63 browser assertions covering what nothing else can catch: the two URL contracts — hash
+74 browser assertions covering what nothing else can catch: the two URL contracts — hash
 routing (deep links, back/forward, unknown-file and invalid-view fallbacks) and password
 handling (stripped from both URL forms, never leaked into the routing hash, an encrypted
 `.pcrd` still decrypting) — plus `#load=`, the rule that every XML view uses the shared
@@ -133,14 +133,17 @@ including that hiding the factory line doesn't break the ΔRFU baseline computed
 values — and the Curves table's sort contract (a header click re-orders, a second reverses,
 Well sorts by plate position rather than label text, wells with no Cq stay at the bottom in
 both directions) and its Cq axis (every marker at its own cycle, an empty axis where there is
-no Cq). A screenshot
+no Cq) — and the rail's Cq range filter, whose top stop is where the curves with no Cq live
+(an upper bound drops them, the *lower* handle parked there leaves only them, and the handles
+clamp instead of crossing). A screenshot
 can't show that the back button works, that a secret reached the address bar, that a hover
 put a curve back, or that eight rows are in the right order — and the core Vitest suite has no
 DOM.
 
 Takes ~25s and needs Chrome, so it is **not** part of `npm test` — that stays fast and
 dependency-free. Run it when you touch `state/urlHash.ts`, `state/pltdPassword.ts`,
-`components/curves/ChipBar.tsx`, `components/curves/CurveTable.tsx`, or view selection. Both
+`components/curves/ChipBar.tsx`, `components/curves/CurveTable.tsx`,
+`components/curves/CqRange.tsx`, or view selection. Both
 tools share `tools/harness.mjs` (the CDP client and dev-server/Chrome plumbing); add new checks there rather than starting a third
 script. Note that rail hover ("peek") needs a real `Input.dispatchMouseEvent` — React derives
 `onMouseEnter`/`onMouseLeave` from an over/out pair plus `relatedTarget`, so a synthesized

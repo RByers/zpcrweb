@@ -766,6 +766,25 @@ only pieces the two views share.
   meaning "back to the default" throughout the rail, and a label that doesn't change under the
   cursor. Applies to both channel- and dye-space curves alike (`sampleVisible()`,
   consulted by both `visibleChannel` and `visibleFluor`).
+- **Cq range (`components/curves/CqRange.tsx`, settings `cqMin`/`cqMax`, both `null` = off):** a
+  double-ended slider, dye space only, that hides every curve whose Cq falls outside the range —
+  the rail's one filter over a *derived* number rather than over plate metadata. It sits just
+  above "Subtract dark" and, like it, applies in table mode too: the bounds enter the shared
+  `fluorCurveVisible` predicate, so the chart, the table and the CSV export show the same set.
+  Purely a display filter even so — thresholds and Cq are computed over the whole plate
+  (`runAnalysis.ts`) and never over the plotted subset, so narrowing the range can't move a
+  number.
+  - The slider's stops are the run's cycles **plus one past the last**, which is where the curves
+    with no Cq at all live: an upper bound of `null` (that top stop, the default) keeps them, any
+    real bound drops them. That's also what makes "only the curves that never amplified" a
+    reachable state — park the *lower* handle on the top stop and no real Cq can satisfy it. A
+    plain pair of number fields could express neither, since "no Cq" isn't a number; on a Cq axis
+    it has an obvious place, past every real value.
+  - Bounds are stored as `null` rather than as the cycle count they were dropped at, so
+    "unbounded" survives a switch to a step with a different number of cycles; `CqRange` clamps
+    whatever it's given to the current track. Two overlaid native `<input type="range">`s, each
+    clamping against the other on change so the handles can't cross, with pointer events on the
+    thumbs only — see `.cq-range` in `app.css` and `uitest.mjs`'s `cqFilterChecks`.
 - **Rail chip bars — one component, four adapters.** `ChannelBar`, `FluorBar`, `SampleBar` and
   the Reference view's `RefColBar` are thin mappings from their own domain onto a `Chip`
   (`key`/`label`/`sublabel`/`color`/`on`/`selectable`), rendered by the shared

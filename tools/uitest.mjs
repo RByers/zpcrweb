@@ -450,6 +450,112 @@ async function tableSortChecks(chrome, origin) {
   cdp.close();
 }
 
+/**
+ * The Curves rail's Cq range filter: that its two handles really do bound the shown set, that
+ * they can't cross, and — the part that isn't a plain min/max — that the top stop is where the
+ * curves with *no* Cq live, so pulling the upper handle off it hides them and parking the lower
+ * handle on it leaves only them.
+ *
+ * Checked in table mode because the rows carry the numbers being filtered on, so the assertion
+ * is "exactly the rows whose Cq is in range" rather than a count. A screenshot can't show any of
+ * it: fewer curves on a chart look like fewer curves however they were chosen.
+ */
+async function cqFilterChecks(chrome, origin) {
+  console.log("\ncurves rail (Cq range filter)");
+  const cdp = await openPage(chrome.base, origin);
+  await sleep(600);
+  await loadFile(cdp, ZPCR);
+  await waitFor(() => cdp.eval(`!!document.querySelector(".chanbar")`), { what: "curves rail" });
+  await cdp.eval(
+    `(() => { const b = [...document.querySelectorAll("button")]
+        .find((b) => b.textContent.trim() === "Table"); b && b.click(); })()`,
+  );
+  await waitFor(() => cdp.eval(`!!document.querySelector(".atbl")`), { what: "the analysis table" });
+
+  /** The Cq column as rendered — numbers as strings, "—" for a well that never crossed. */
+  const cqs = () =>
+    cdp.eval(`(() => {
+      const heads = [...document.querySelectorAll(".atbl thead th")];
+      const i = heads.findIndex((h) => h.textContent.trim().startsWith("Cq"));
+      return [...document.querySelectorAll(".atbl tbody tr")].map((r) => r.cells[i].textContent.trim());
+    })()`);
+  /** Drive one handle the way a drag would: React reads the native value, so set it through the
+   * prototype's setter and fire the same `input` event the browser does. */
+  const drag = (which, v) =>
+    cdp.eval(`(() => {
+      const el = document.querySelector(".cq-range__input--" + ${JSON.stringify(which)});
+      if (!el) return "missing";
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(el, String(${v}));
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+      return "ok";
+    })()`);
+  const readout = () =>
+    cdp.eval(`(document.querySelector(".cq-range__value") || { textContent: "missing" }).textContent.trim()`);
+  const reset = () =>
+    cdp.eval(`(() => { const b = document.querySelector(".cq-range__foot .rail__link");
+      if (!b) return "missing"; b.click(); return "ok"; })()`);
+
+  const all = await cqs();
+  const noCq = all.filter((v) => v === "—").length;
+  check("the rail offers a Cq range filter", (await readout()) === "all");
+  check("the run has both quantified and unquantified rows", all.length > noCq && noCq > 0, `${all.length} rows, ${noCq} without Cq`);
+
+  const top = await cdp.eval(`Number(document.querySelector(".cq-range__input--hi").max)`);
+  const lastCycle = top - 1;
+
+  // Upper handle off the top stop: the no-Cq rows go with it, and nothing above the bound stays.
+  check("the upper handle moves", (await drag("hi", lastCycle - 10)) === "ok");
+  await sleep(200);
+  const bounded = await cqs();
+  check(
+    "an upper bound keeps exactly the rows at or below it",
+    bounded.every((v) => v !== "—" && Number(v) <= lastCycle - 10) &&
+      bounded.length === all.filter((v) => v !== "—" && Number(v) <= lastCycle - 10).length,
+    bounded.join(" "),
+  );
+  check("moving the upper handle off the top stop hides the no-Cq rows", !bounded.includes("—"));
+
+  // Handles can't cross: pushing the lower one past the upper clamps it to the upper.
+  await drag("lo", top);
+  await sleep(200);
+  check(
+    "the lower handle clamps at the upper instead of crossing it",
+    (await readout()) === `${lastCycle - 10}–${lastCycle - 10}`,
+    await readout(),
+  );
+
+  check("the reset link restores the full range", (await reset()) === "ok");
+  await sleep(200);
+  check("reset shows every row again", (await cqs()).length === all.length, await readout());
+
+  // The top stop's other half: the lower handle parked there leaves only the no-Cq rows, which
+  // is the "what never amplified?" question no other control in the rail can ask.
+  await drag("lo", top);
+  await sleep(200);
+  const only = await cqs();
+  check(
+    "the lower handle on the top stop leaves only the no-Cq rows",
+    only.length === noCq && only.every((v) => v === "—"),
+    only.join(" "),
+  );
+  check("that state reads as its own thing, not a range", (await readout()) === "no Cq only", await readout());
+
+  await reset();
+  // Channel space has no Cq table of its own (see `CurvesView`'s `channelAnalysis`), so the
+  // control is absent there rather than present and inert.
+  await cdp.eval(
+    `(() => { const b = [...document.querySelectorAll("button")]
+        .find((b) => b.textContent.trim() === "Channel"); b && b.click(); })()`,
+  );
+  await sleep(300);
+  check(
+    "channel mode has no Cq filter",
+    (await cdp.eval(`!!document.querySelector(".cq-range")`)) === false,
+  );
+
+  cdp.close();
+}
+
 /** Compare two well labels the way the table does: row letter, then column *number*. */
 function byWell(a, b) {
   return a[0].localeCompare(b[0]) || Number(a.slice(1)) - Number(b.slice(1));
@@ -815,6 +921,7 @@ async function main() {
     await routingChecks(chrome, origin, pw);
     await rightAxisChecks(chrome, origin);
     await tableSortChecks(chrome, origin);
+    await cqFilterChecks(chrome, origin);
     await referenceChecks(chrome, origin);
     await calibrationChecks(chrome, origin);
     await passwordChecks(chrome, origin, pw);
