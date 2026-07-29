@@ -64,7 +64,6 @@ several current choices to be wrong; **[`threshold.md`](./threshold.md) §0 is t
 ### Other
 
 - [ ] It seems common for a negative curve to grow in the first 5 cycles then level off flat. It seems like we should be picking the large later flat line as the baseline but we often pick the start instead. See 20230829's well F5 and 20260726 D4 FAM. Corroborated: on CFX's own corrected curves the best-fitting baseline window for every non-amplifying well is the *whole run* (`threshold.md` §0.9, §3.2).
-- [ ] Enable sorting on the table view. Click to sort by Cq or well.
 
 ## Library (`@zpcrweb/core`)
 
@@ -79,7 +78,6 @@ Additional typed parsers for the archive files currently reachable only via the 
 
 - [ ] Add a plate editor which allows setting the flourophores used per well, as well as the tube types for the plate (clear / white).  Used for calibration adjustments and fluorophore display. Allow saving/naming plate files and applying them to runs. Remember the plate setting applied to each loaded run. Have an easy mechanism to copy/paste settings from one well to another or to all wells on a column/row/plate, or to duplicate a column/row across multiple columns/rows (eg. using click drag to select a region simple to copy/paste operations in spreadsheets)
 - [ ] Optionally allow writing the target and sample names per well in the plate editor, again with easy copy paste of some form. Then use these in the curves visualization (eg. on hover).
-- [ ] Plate heatmap per cycle. 
 - [ ] Full visualizers replacing the raw viewers as typed parsers land above (`.alf` and the
       remaining plaintext status files). `.Dcal` now has the Calibration view.
 
