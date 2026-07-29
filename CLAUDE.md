@@ -120,7 +120,7 @@ Cost control, when you do run it:
 npm run test:ui
 ```
 
-74 browser assertions covering what nothing else can catch: the two URL contracts — hash
+79 browser assertions covering what nothing else can catch: the two URL contracts — hash
 routing (deep links, back/forward, unknown-file and invalid-view fallbacks) and password
 handling (stripped from both URL forms, never leaked into the routing hash, an encrypted
 `.pcrd` still decrypting) — plus `#load=`, the rule that every XML view uses the shared
@@ -133,17 +133,20 @@ including that hiding the factory line doesn't break the ΔRFU baseline computed
 values — and the Curves table's sort contract (a header click re-orders, a second reverses,
 Well sorts by plate position rather than label text, wells with no Cq stay at the bottom in
 both directions) and its Cq axis (every marker at its own cycle, an empty axis where there is
-no Cq) — and the rail's Cq range filter, whose top stop is where the curves with no Cq live
+no Cq) and its End RFU column (sorts numerically, and is a number of its own rather than a copy
+of ΔRFU) — and the rail's Cq range filter, whose top stop is where the curves with no Cq live
 (an upper bound drops them, the *lower* handle parked there leaves only them, and the handles
-clamp instead of crossing). A screenshot
+clamp instead of crossing) — and that a `.pcrd` carrying a hand-set threshold seeds it as a
+per-fluorophore override while a dye the file left on auto is left alone (`threshold.md` §5.3:
+that one value is what makes the app reproduce CFX's own Cq). A screenshot
 can't show that the back button works, that a secret reached the address bar, that a hover
 put a curve back, or that eight rows are in the right order — and the core Vitest suite has no
 DOM.
 
-Takes ~25s and needs Chrome, so it is **not** part of `npm test` — that stays fast and
+Takes ~35s and needs Chrome, so it is **not** part of `npm test` — that stays fast and
 dependency-free. Run it when you touch `state/urlHash.ts`, `state/pltdPassword.ts`,
 `components/curves/ChipBar.tsx`, `components/curves/CurveTable.tsx`,
-`components/curves/CqRange.tsx`, or view selection. Both
+`components/curves/CqRange.tsx`, `state/useZpcrStore.ts`'s settings seeding, or view selection. Both
 tools share `tools/harness.mjs` (the CDP client and dev-server/Chrome plumbing); add new checks there rather than starting a third
 script. Note that rail hover ("peek") needs a real `Input.dispatchMouseEvent` — React derives
 `onMouseEnter`/`onMouseLeave` from an over/out pair plus `relatedTarget`, so a synthesized
@@ -229,7 +232,7 @@ one algorithm doc, `calibration.md`, for the color-separation math built on top 
 | [`plateread.md`](./plateread.md) | The `.Plateread` files inside a `.zpcr` — one per plate read (PCR cycle), holding the 6-channel × 108-well raw fluorescence table plus cycle number, block temperature and timestamp. **Mixed endianness:** metadata (version words, ICFF index) is big-endian; the WELLDATA/DARKDATA float arrays are little-endian. Implemented by `packages/core/src/plateread.ts`. |
 | [`dcal.md`](./dcal.md) | The `.Dcal` pure-dye calibration files — per-dye, per-plate-type fluorescence response across all 6 channels at 4 block temperatures, plus a matching empty-plate baseline; the only in-archive source of the channel→dye mapping (`PRIMARYCHANNEL`). Unencrypted ICFF container. Implemented by `packages/core/src/dcal.ts`, entry point `parseDcal(bytes)`; `zpcr.calibrations()` decodes every `.Dcal` entry in an archive. |
 | [`calibration.md`](./calibration.md) | Channel→dye color separation — the algorithm that turns raw per-channel readings plus `.Dcal` calibration data into per-dye concentration estimates. Not a file format doc. Implemented by `packages/core/src/calibration.ts` (linear algebra in `linalg.ts`), entry points `separateDyes()` (one-shot) and the individual `buildDyeResponseCurve`/`buildCalibrationMatrix`/`preprocessChannelReadings`/`separateChannels` stages. |
-| [`threshold.md`](./threshold.md) | Baseline, threshold and Cq — how a per-dye amplification curve becomes a quantification cycle: smoothing, baseline region selection, baseline subtraction modes, threshold determination, and the two Cq algorithms (threshold crossing vs. curve-fit). Not a file format doc. Implemented by `packages/core/src/baseline.ts` (§2–§4), `packages/core/src/threshold.ts` (§5–§7, entry point `computeCq()`) and `packages/core/src/stats.ts` (the statistics both share); not yet validated against a reference instrument's own Cq. Grounded in the per-fluorophore analysis parameters a `.pcrd` persists. |
+| [`threshold.md`](./threshold.md) | Baseline, threshold and Cq — how a per-dye amplification curve becomes a quantification cycle: baseline region selection, subtraction, threshold determination, the crossing rule and end-point RFU. Not a file format doc. Implemented by `packages/core/src/baseline.ts` (§3–§4, §8), `packages/core/src/threshold.ts` (§5–§7, entry point `computeCq()`) and `packages/core/src/analysis.ts` (`computeCqTable()`, the per-run entry point). **§1 is measured against CFX Manager's own exported results** for a committed sample — the Cq stage exactly (`packages/core/test/cfxExport.test.ts`), the baseline stage to within a cycle of window. §9 separates what is deliberately unimplemented from what is still unknown. |
 | [`pltd.md`](./pltd.md) | The `.pltd` plate-definition files — per-well fluorophores, target/gene, sample name and type, replicate, standard quantity. Encrypted + compressed XML container. Implemented by `packages/core/src/pltd.ts`, entry point `parsePltd(bytes)`; `zpcr.plates()` decodes every plate in an archive. |
 | [`prcl.md`](./prcl.md) | The `.prcl` thermal-cycling protocol files — lid/volume settings plus the ordered step list (hold, gradient, melt, goto, plate read), in the same encrypted-ZIP container as `.pltd`/`.pcrd`. The same `protocol2` XML document `.pcrd` embeds. Implemented by `packages/core/src/prcl.ts`, entry point `parsePrcl(bytes)`; `parseProtocol2()` is reused by `pcrd.ts`; `zpcr.protocols()` decodes every `.prcl` entry in an archive. |
 | [`pcrd.md`](./pcrd.md) | The `.pcrd` CFX Manager saved-experiment file — the whole run (plate setup, protocol, every plate read, `RunInfo`/`runlog`, plus analysis/UI state) as one large XML document, in the same encrypted-ZIP container as `.pltd`/`.prcl`. Implemented by `packages/core/src/pcrd.ts`, entry point `parsePcrd(bytes)`, which decodes into the same `Zpcr` shape `parseZpcr` produces. |

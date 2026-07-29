@@ -230,7 +230,7 @@ so the plate travels with the file with no separate override state to keep in sy
 ## Analysis settings in the archive (`zpcrwebSettings.ts`)
 
 The library's second write path, and the same idea one level up: a run's **analysis** parameters
-— thresholds, §5.1's auto-threshold multiplier, dark subtraction, calibration normalization —
+— thresholds, §5.2's auto-threshold multiplier, calibration normalization —
 belong to the run, not to whichever browser opened it, because they are what decide the Cq it
 reports. `writeZpcrwebSettings` adds them to the archive as a `zpcrweb.json` entry;
 `parseZpcrwebSettings` reads them back through the already-decompressed `Zpcr.archive`, total and
@@ -274,61 +274,39 @@ raw bytes ─▶ fflate.unzipSync ─▶ { name: Uint8Array }
   pseudo-inverse via Jacobi eigen-decomposition of the Gram matrix. Both its convergence test
   and its singular-value floor are **relative**, which is what makes the color-separation
   pipeline scale-invariant.
-- **`baseline.ts`** — the baseline stages (§2–§4, plus the §7 validation gate) of a dye curve's Cq
-  analysis: smoothing, automatic/manual baseline-region selection, baseline subtraction, and
-  `validateBaselineRegion()`. Curvature-based selection reads onset at the *foot* of the
-  second-derivative peak rather than the peak itself, which otherwise sits inside the exponential
-  phase and hands back a "baseline" containing part of the rise — the flatness bounds are relative
-  to the curve's whole span and so don't catch it on a high-amplitude well. The gate is
-  `validateBaselineRegion()`, which re-checks whichever region was actually chosen (including
-  `findBaselineByRegression`'s fallback, whose local fit-and-extend can lock onto a region that's
-  a good line by itself but a poor description of the whole curve) against §3.2's
-  flatness/linearity bounds judged over the curve's full span — extending regions narrower than
-  `minValidationWidth` first, since a too-narrow window passes that check trivially regardless of
-  the curve. `refineBaselineStart()` then trims the region's *start*, walking it forward until the
-  residuals about a fitted line stop being serially correlated — the settling transient of the run's
-  first cycles is otherwise absorbed into the fit and inflates every downstream quantity. It is
-  bounded (never past ~15 cycles, never below 8 wide) and gives up rather than trimming when no
-  start makes the region white, since that means the mis-fit isn't confined to the front. Judged on
-  the *unsmoothed* curve: §2's filter is serial correlation by construction. See
-  [`threshold.md`](./threshold.md) §3.4.
-- **`threshold.ts`** — the threshold and Cq stages (§5–§7) that finish what `baseline.ts` starts:
-  per-fluorophore noise/threshold estimation (manual override or auto — the median of a well
-  subset times a multiplier whose scale comes from the thresholds CFX itself persisted in a
-  `.pcrd`, far above the textbook figure because the noise measured here is a post-smoothing,
-  post-baseline-subtraction residual, not raw well scatter; the estimate also skips the baseline
-  region's first cycle). The noise statistic is the **successive difference** of those residuals,
-  not their standard deviation: a spread about a fitted line measures how far the curve is from the
-  model, which is the wrong question when the model is wrong, and made the threshold inflate
-  per-well wherever the baseline curved. That change is what makes the two thresholds CFX persisted
-  imply a consistent multiplier (85× and 80×, against 90× and 42× before) — see
-  [`threshold.md`](./threshold.md) §5.2. Then the §6.1 threshold-crossing Cq (log-interpolated, with a linear
-  fallback and the §6.1 edge cases — anchored to the *final* above-threshold run, so baseline noise
-  flickering over a low group threshold can't be read as a cycle-1 Cq), the §6.2 curve-shape
-  (`NoThreshold`) Cq via
-  second-derivative maximum, and the §7 amplification squelch — now gated first by
-  `baseline.ts`'s baseline-validation result (`computeCq()`'s `baselineValid` option). `computeCq()`
-  ties both algorithms together. See [`threshold.md`](./threshold.md).
-
-  > **Much of the paragraph above is now known to be wrong, and no code has changed yet.**
-  > Measuring against CFX's own exported results (`threshold.md` §0) settled the Cq stage exactly:
-  > the interpolation is **linear**, not logarithmic; the crossing is chosen by the **longest
-  > following increasing run**, not the final above-threshold run; the only no-Cq gate is the
-  > threshold lying outside the corrected curve's range, so the squelch and the baseline-validity
-  > veto have no counterpart; and the auto threshold is not a multiple of baseline noise at all
-  > (two dyes on one plate want 92.02 and 8.06 with near-identical noise). The noise statistic
-  > survives — it is still what §3.4's start-trim runs on. See `threshold.md` §0 for the
-  > measurements, §9 and [`TODO.md`](./TODO.md) for the ordered work.
-- **`stats.ts`** — the statistics `baseline.ts` and `threshold.ts` both need, in their own module
-  so neither imports the other: standard deviation, mean squared successive difference, median, and
-  `whiteness()` (von Neumann's ratio — mean squared successive difference over variance, ≈2 for
-  white noise and →0 under serial correlation). The ratio drives baseline-region *selection* and is
-  exposed as a per-curve diagnostic; it is deliberately **not** a validation gate, being scale-free
-  and so unable to tell structure that matters from structure below the instrument's resolution.
+- **`baseline.ts`** — the baseline stage (`threshold.md` §3–§4) of a dye curve's Cq analysis, and
+  now three short functions: `baselineRegion()` (begin at cycle 3; end at the last cycle for a well
+  with no Cq, or `round(Cq) − 2` for one that has it — both recovered from CFX's own per-well
+  baselines), `subtractBaseline()` (ordinary least squares, no smoothing) and `smoothPlateauTail()`
+  (the width-3 tail average `LinearBaseLineNormalizedCurveFit` names, which changes the reported
+  plateau and nothing else). `endPointRfu()` — the mean of the last five corrected cycles — lives
+  here too. Every constant in the module is measured against the instrument's exported results;
+  this replaced two onset detectors, a whiteness start-trim, a validation gate and a smoothing
+  stage, all of them inferred. See [`threshold.md`](./threshold.md) §1.7 and §3.
+- **`threshold.ts`** — the threshold and Cq stages (§5–§7). `baselineNoise()` is the median
+  absolute second difference of the corrected curve over the baseline region, scaled to σ: unlike a
+  standard deviation or an RMS successive difference it survives being computed over a region the
+  baseline doesn't describe, which the first pass of the region search deliberately does.
+  `autoThreshold()` is `multiplier × median noise` per fluorophore — the one number in the pipeline
+  with no measurement behind it, and known to be the wrong *form* of rule (§5.2); `resolveThreshold()`
+  prefers a manual override, which is the only way to reproduce a reference Cq exactly. `computeCq()`
+  is measured exactly: two-point linear interpolation on the cycle index, the crossing followed by
+  the longest strictly-increasing run, and `T ∈ [min, max]` as the sole gate. `isAmplified()`
+  survives as a **diagnostic label only** — the reference applies no such gate, and letting one veto
+  a Cq is what kept this library's Cq population from ever matching. See
+  [`threshold.md`](./threshold.md) §5–§7, and `packages/core/test/cfxExport.test.ts`, which asserts
+  the Cq stage against CFX's own numbers to 1e-9 cycles.
+- **`stats.ts`** — the two statistics `threshold.ts` needs, in their own module so `baseline.ts`
+  and `threshold.ts` can share them without either importing the other: standard deviation and
+  median.
 - **`analysis.ts`** — the transforms that sit on top of those two: `baselineCorrectCurve()` (one
-  curve's baseline, noise, amplification verdict and ΔRFU) and `computeCqTable()`, **the** Cq
-  entry point. `computeCqTable()` takes every curve of a run at once, resolves one §5.1 threshold
-  per group from that group's own noise cohort, and returns one entry per well/fluorophore key.
+  curve's baseline, noise, amplification label and ΔRFU, iterating region against Cq to a fixed
+  point), `correctCurveForDisplay()` (the same for a series that will never be quantified — a raw
+  channel trace, a dark overlay) and `computeCqTable()`, **the** Cq entry point. `computeCqTable()`
+  takes every curve of a run at once in **two passes** — whole-run baselines to get each group's
+  threshold, then every curve re-baselined against it and the thresholds re-resolved — and returns
+  one entry per well/fluorophore key, carrying the Cq, the threshold it was taken against and the
+  end-point RFU.
   It's deliberately batch-shaped: a Cq isn't a property of a single curve — its threshold is the
   median noise of the curves it was computed *with* — so recomputing over a filtered subset yields
   a different, equally defensible answer for the same well. Consumers build the table once over the

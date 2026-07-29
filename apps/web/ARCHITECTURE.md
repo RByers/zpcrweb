@@ -220,9 +220,9 @@ dependence on tab label text, and `tools/uitest.mjs` asserts the whole contract 
 thin presentation + persistence shell. Concretely:
 
 - Curve derivation and the per-cycle stats (mean/std/min/max) come from `zpcr.curves()`.
-- Baselining (`threshold.md` §2–§4 — smoothing, auto baseline-region detection, and linear
-  subtraction) is `packages/core/src/baseline.ts` — the app never invents its own baseline math,
-  only calls `autoBaselineRegion`/`subtractBaseline`/`fitLinearBaseline` per curve. It is not a
+- Baselining (`threshold.md` §3–§4 — baseline-region selection and linear subtraction) is
+  `packages/core/src/baseline.ts`, reached through `analysis.ts`'s `computeCqTable` /
+  `correctCurveForDisplay`; the app never invents its own baseline math. It is not a
   user-configurable choice: every Cq/analysis computation always uses the auto-detected linear
   baseline (`LinearBaseLineNormalized`); the app's `CurveView` setting only picks what the Curves
   chart *displays* (the corrected curve, or the raw one), and a separate `drawBaseline` toggle
@@ -294,7 +294,7 @@ a minimal IndexedDB wrapper with two object stores:
   baseline concepts" under Reference view. Two settings of the retired standalone Analysis view
   are simply ignored when present: `analysisDisabledTargets[]` (its own target opt-out set, since
   folded into the shared `disabledFluors`) and `analysisCqAlgorithm` (its Cq-algorithm selector —
-  Cq is always §6.1's threshold crossing now). Writes are debounced by 300 ms. Older records may
+  Cq is always §6's threshold crossing now). Writes are debounced by 300 ms. Older records may
   still carry the retired `curveBaseline`/`curveBaselineRange` fields (`state/db.ts`);
   `useZpcrStore.ts`'s `fromStored()` migrates `curveBaseline: "raw"` to `curveView: "absolute"`
   (anything else to `"relative"`) and drops the region override entirely.
@@ -307,9 +307,18 @@ exposed as a clear affordance on each file chip.
 Anything that changes a **number** the app reports is stored in the run's own archive, as a
 `zpcrweb.json` entry (`zpcrweb-json.md`, `packages/core/src/zpcrwebSettings.ts`) — not in the
 `settings` store above. That is `thresholdOverrides` (manual per-fluorophore threshold RFU),
-`curveThresholdOverrides` (the same one curve at a time), `thresholdMultiplier` (§5.1's
-auto-threshold `k`), `subtractDark` (`calibration.md` §4.2) and `calibrationNormalization` (§3):
-the inputs `useRunAnalysis` uses to produce a different Cq for the same run. Keeping them per-browser made a run's interpretation invisible to whoever the
+`curveThresholdOverrides` (the same one curve at a time), `thresholdMultiplier` (§5.2's
+auto-threshold `k`) and `calibrationNormalization` (`calibration.md` §3): the inputs
+`useRunAnalysis` uses to produce a different Cq for the same run. (`subtractDark` was a fifth
+until the dark-current stage was retired — `calibration.md` §4.2a. The key is still *read* so
+files carrying it load, and is no longer written or acted on.)
+
+A run loaded from a `.pcrd` also seeds `thresholdOverrides` from the file's own
+`thresholdOverrideValue` per fluorophore (`threshold.md` §5.3) when it has no `zpcrweb.json` of
+its own — that one value is what makes this app reproduce CFX's Cq exactly for an overridden dye.
+It seeds *state* rather than feeding the pipeline: a `.pcrd` and the `.zpcr` of the same run must
+still quantify identically, and a persisted threshold is a saved decision, not a measurement, so
+it belongs somewhere the user can see and change it. Keeping them per-browser made a run's interpretation invisible to whoever the
 file was sent to, and made clearing site data silently change the numbers.
 
 The split is invisible to views. `state/analysisSettings.ts` defines `AnalysisSettings` and the
@@ -570,15 +579,12 @@ the very array the Cq was computed from — rather than a re-derivation that hap
 The rule exists because the two implementations that used to coexist drifted, silently and
 visibly:
 
-- The chart auto-detected its own baseline region with `autoBaselineRegion(cycles,
-  smoothCurve(values))`, omitting the `rawValues` argument that enables `refineBaselineStart`'s
-  start-trim. The analysis passed it. On `20260726`'s well A4 / Texas Red that was cycles 2–28
-  against 11–28, two different fitted lines, and a plotted curve sitting ~17 RFU below the one the
-  Cq had been taken on — so the rail's threshold line (48.6 RFU) passed well above a Cq ring drawn
-  at 31.7.
-- The Cq ring was then placed by interpolating the plotted curve *linearly* at the fractional Cq,
-  while `findThresholdCrossing` had located that Cq by interpolating in *log* space — a second,
-  independent disagreement worth another ~3% of the threshold on a steeply rising curve.
+- The chart ran its own copy of baseline-region selection, subtly different from the analysis's.
+  On `20260726`'s well A4 / Texas Red that was cycles 2–28 against 11–28: two different fitted
+  lines, and a plotted curve sitting ~17 RFU below the one the Cq had been taken on — so the
+  rail's threshold line (48.6 RFU) passed well above a Cq ring drawn at 31.7.
+- The Cq ring was then placed by interpolating the plotted curve at the fractional Cq rather than
+  by reading the threshold, a second, independent disagreement.
 - On a log scale, `logFloor` lifted **each curve** by its own offset while the threshold line was
   drawn at the bare threshold value, so the line was at the right height for no curve at all.
 
@@ -595,7 +601,7 @@ fluorophore/target groups
 color-separated `allFluorCurves` — and, on top of those, the run's **Cq table**.
 
 - **`cqTable`** — `packages/core/src/analysis.ts`'s `computeCqTable()` over *every* well/dye pair on
-  the plate, keyed by `curveKey(row, col, fluor)`. One entry per key: Cq, the §5.1 group threshold,
+  the plate, keyed by `curveKey(row, col, fluor)`. One entry per key: Cq, the §5.2 group threshold,
   noise, amplification verdict, ΔRFU and the fitted baseline. Views look values up in it and never
   recompute — that is the whole point. A group's threshold is the median baseline noise across the
   curves it's computed with, so the old arrangement (three independent computations over the plotted
@@ -680,18 +686,13 @@ only pieces the two views share.
   than a hardcoded 1–5. The same button resets dye-space mode by clearing `disabledFluors`
   instead, since there every fluor/target is enabled by default already.
 - **Baseline is always automatic — no mode or region is user-configurable.** Every curve is
-  baseline-corrected with `packages/core/src/baseline.ts`'s `LinearBaseLineNormalized`: find the
-  flat pre-amplification region with `autoBaselineRegion` on a smoothed copy of the curve
-  (falling back to cycles 2–9 if detection finds nothing confident — `threshold.md` §2–§3), fit
-  a line to it (`fitLinearBaseline`), and subtract it (`subtractBaseline`). There used to be a
-  three-way mode selector (Raw/Constant/Linear) plus a manual region-override slider; both were
-  removed — the manual-region override, in particular, made it easy to silently understate a
-  region's real noise and produce a spuriously early or missed Cq (see the git history around
-  the retired `BaselineRangeSlider`/`curveBaselineRange` for the worked example that motivated
-  dropping it). `findBaselineByRegression`'s "extend while within `k` std errors" loop still
-  needs an `initialWidth` of at least **5** points (3 degrees of freedom) and `kStdErrors: 5` for
-  the same low-sample-count instability reason — see the regression test in
-  `packages/core/test/baseline.test.ts` ("doesn't truncate a flat, realistically-noisy curve …").
+  baseline-corrected with `packages/core/src/baseline.ts`'s `LinearBaseLineNormalized` over the
+  region `threshold.md` §3 derives: cycle 3 to the last cycle for a well with no Cq, or to
+  `round(Cq) − 2` for one that has it. There used to be a three-way mode selector
+  (Raw/Constant/Linear) plus a manual region-override slider; both were removed — the
+  manual-region override, in particular, made it easy to silently understate a region's real noise
+  and produce a spuriously early or missed Cq (see the git history around the retired
+  `BaselineRangeSlider`/`curveBaselineRange` for the worked example that motivated dropping it).
 - **`CurveView` setting (`"relative"` default / `"absolute"`, labelled "Values" in the rail —
   the mode toggle above already owns "View"):** what the chart *displays* —
   `"relative"` plots the baseline-corrected curve, `"absolute"` plots the curve's raw RFU
@@ -872,7 +873,8 @@ only pieces the two views share.
   the chart draws a small ring at that curve's `(cq, threshold)` — the crossing point *by
   definition*, projected into plotted space through `SeriesMeta.plotDelta`, so the ring sits on the
   curve and on the rail's threshold line without either being re-derived from the other
-  (`cqMarkers` in `buildChart()`). A curve with no Cq — unamplified, or squelched — gets no ring.
+  (`cqMarkers` in `buildChart()`). A curve with no Cq — one whose corrected trace never crosses its
+  threshold, in either direction — gets no ring.
 - **Color separation (dye space) and the channel/fluorophore/target selector** (also labelled
   "View" in the rail, distinct from the baseline `CurveView` toggle above): `lib/fluorCurves.ts`
   matches
@@ -880,16 +882,17 @@ only pieces the two views share.
   (restricted to the scanned channels, so its RFU scale factors are measured over the right
   rows), and solves every well/cycle — see [`calibration.md`](../../calibration.md). `CurvesView`
   assembles the §4 corrections that go in first: the per-scan reference level from the reference
-  row, the additive background, and the per-well gain factors when the run has them (a `.pcrd`
-  thing — a `.zpcr` carries none, so only the background subtraction bites there). The
-  **"Subtract dark" toggle** (`Off` by default) controls `calibration.md` §4.2's optional
-  dark-current stage: when on, the plate read's per-cycle `DARKDATA` is subtracted per channel;
-  when off, nothing is. `Off` is what matches the reported RFU scale of the run measured in §8.
-  It is **not** a display-only control: `DARKDATA` is re-read every cycle, so the level removed
-  varies slightly cycle to cycle, which perturbs the fitted baseline and raises the noise the
-  auto threshold derives from — on the committed sample it moves Cq by up to ≈0.6 cycles. It sits
-  directly below the Scale row but **outside** the chart-only `!tableMode` block, precisely
-  because it moves the numbers the table and CSV export report, not just the chart.
+  row: the per-scan reference level from the reference row, and nothing else.
+
+  There is deliberately **no dark-current control**. A "Subtract dark" toggle used to sit here,
+  off by default; it is gone, because the choice is now measured rather than open. Subtracting the
+  per-cycle `DARKDATA` makes the reconstruction of CFX's own exported curves **260× worse**
+  (median residual 7.3e-3 → 1.90 RFU): the dark level is re-read every scan and its scatter is
+  random noise no linear baseline can absorb (`calibration.md` §4.2a). A *constant* background,
+  meanwhile, is removed by baselining before any number is reported, so choosing one cannot change
+  a result. `DARKDATA` remains a plotted overlay and an instrument-health diagnostic. (Per-well
+  gain factors are likewise not passed: they are a `.pcrd`-only field, and feeding them in would
+  make the same run quantify differently depending on which file you opened.)
 
   There is deliberately **no normalization selector**: `calibration.md` §5.1 divides the column
   scaling back out, so every mode reports identical RFU for any full-column-rank matrix, and the
@@ -929,7 +932,7 @@ only pieces the two views share.
 
 The former standalone **Analysis** view, folded into the Curves view as the fourth option of the
 rail's "View" toggle (`fluorViewMode: "table"`). It replaces the chart with a table of one row per
-visible (target, well) pair — Cq and endpoint ΔRFU, per `threshold.md` §5–§7 — while the whole rail
+visible (target, well) pair — Cq, endpoint ΔRFU and §8's End RFU — while the whole rail
 (targets, wells, samples, background, thresholds) keeps driving it. It was a separate tab with a
 near-identical rail of its own; the two disagreed about Cq (see "One Cq per well/target" above) and
 about which targets were filtered, so the tab is gone and its two unique controls — the threshold
@@ -964,6 +967,10 @@ is: a per-target curve needs channel→dye color separation (`calibration.md`).
   to the largest endpoint in the whole table (not the sorted page), so amplitudes compare down the
   column. All of it is `lib/` colour data reused through one `--c`/`--rowc` custom property per
   chip/row (see `.atbl*` in `app.css`) — no palette lives in the table.
+- **ΔRFU and End RFU are different numbers, and both are shown.** ΔRFU is the last corrected
+  value's rise above the baseline; End RFU is the mean of the last five corrected cycles
+  (`threshold.md` §8), which is what the instrument's own End Point export reports. On a
+  still-climbing well the two differ by hundreds of RFU, so neither substitutes for the other.
 - **Cq is a position, not just a number:** each Cq sits on a track spanning cycle 1 → the last
   cycle the active step read (`cycleCount`, derived from the curves rather than the protocol, so a
   run stopped early gets the axis its data actually has), with a marker where that well crossed.
@@ -984,39 +991,41 @@ is: a per-target curve needs channel→dye color separation (`calibration.md`).
   chart would plot. The chips are the rail's normal `disabledFluors` set — table mode has no
   opt-out set of its own, unlike the old separate view.
 - **Baseline:** always the auto-detected linear fit — `baselineCorrectCurve()`
-  (`packages/core/src/analysis.ts`), which `computeCqTable()` applies internally with
-  the fixed `ANALYSIS_BASELINE_MODE` constant (`"LinearBaseLineNormalized"`, no region
-  argument — baselining isn't user-configurable at all, see "Baseline is always automatic"
-  under Curves view): auto-detected baseline region, `baselineValid` (§7's baseline-validation
-  gate — `validateBaselineRegion()` re-checked against the region actually used), corrected
-  values, `baselineNoise`, `isAmplified` (forced `false` when `baselineValid` is `false`), ΔRFU
-  (endpoint corrected value minus the baseline region's mean), and `baselineFit` (the fitted
-  `{ slope, intercept }`, rendered via `formatBaselineFormula()`) in one call. All of it reaches the
+  (`packages/core/src/analysis.ts`), which `computeCqTable()` applies internally with the fixed
+  `ANALYSIS_BASELINE_MODE` constant (`"LinearBaseLineNormalized"` — baselining isn't
+  user-configurable at all, see "Baseline is always automatic" under Curves view): the §3 baseline
+  region, the corrected values, `baselineNoise`, the `amplified` label (a diagnostic, never a
+  veto — `threshold.md` §7), ΔRFU (endpoint corrected value minus the baseline region's mean),
+  `endRfu` (§8's end-point RFU, the mean of the last five corrected cycles) and `baselineFit` (the
+  fitted `{ slope, intercept }`, rendered via `formatBaselineFormula()`). All of it reaches the
   table through the run's Cq table, so a row's ΔRFU/Cq is the same value the chart's marker and the
   hover cards show — the same object, not a matching recomputation.
-- **Cq is always §6.1's threshold crossing.** `lib/runAnalysis.ts`'s `CQ_ALGORITHM` constant is fixed
-  at `"Threshold"` — the observed instrument default, and §6's own. The Analysis view's
-  `"Threshold"`/`"NoThreshold"` selector is gone (§6.2's 2nd-derivative variant is still implemented
-  and still reachable through `computeCqTable`, just not selectable), which is what makes a per-group
-  threshold always meaningful and the override section always applicable.
+- **Cq is always §6's threshold crossing**, the observed instrument default and now the only
+  algorithm the library implements. The Analysis view's `"Threshold"`/`"NoThreshold"` selector is
+  gone and so is the second algorithm behind it (`threshold.md` §9), which is what makes a
+  per-group threshold always meaningful and the override section always applicable.
 - **Threshold (`thresholdMultiplier` + `thresholdOverrides` + `curveThresholdOverrides`
   settings — all stored in the run's own `zpcrweb.json`, not IndexedDB; see "Analysis state
-  lives in the file" above):** §5.1's `resolveThreshold` over the median `baselineNoise` across a fluorophore's own
+  lives in the file" above):** §5.2's `resolveThreshold` over the median `baselineNoise` across a fluorophore's own
   wells, in the rail's collapsible "Threshold" section (`<details className="rail__details">`,
   chevron rotates open, like the Temperature section), rendered by
-  `components/curves/ThresholdSection.tsx`. A **slider** at the top sets §5.1's multiplier `k` in
+  `components/curves/ThresholdSection.tsx`. A **slider** at the top sets §5.2's multiplier `k` in
   `threshold = k × median noise` (1–100, default 20, with a Reset link back to it): it is exposed
-  rather than buried because the scale behind it rests on two anchors from a single run and it is
+  rather than buried because it is the one number in the pipeline with no measurement behind it —
+  the instrument's own automatic rule is known *not* to be of this form (§5.2) — and it is
   the one number that shifts every Cq on the plate — the thresholds below it update live as it
   moves, so its effect is visible rather than inferred.
 
   Below that, **one row per fluorophore, expandable to the curves behind it** (its own chevron
   button, not a nested `<details>`, so the row stays hoverable as one unit). A fluorophore's
   threshold is a median over exactly the curves listed under it, and each curve's line shows the
-  two numbers that median is made of: its own auto-detected baseline region (`cycles a–b`, plus a
-  ⚠ when the fit was rejected) and its own `σ` noise. Both inputs are less self-evident than they
-  look — noise is a successive-difference statistic (`threshold.md` §5.2) and each region is
-  independently start-trimmed (§3.4) — so a surprising threshold is usually one curve's region,
+  two numbers that median is made of: its own baseline region (`cycles a–b`, plus a ⚠ when the
+  whole corrected curve sits *above* this threshold, so it can never cross it — `threshold.md`
+  §1.4's E4 case, which is indistinguishable from a flat well in the output and means the
+  opposite) and its own `σ` noise. Both inputs are less self-evident than they
+  look — noise is a median-absolute-second-difference statistic (`threshold.md` §5.1) and each
+  region is derived from that curve's own Cq (§3) — so a surprising threshold is usually one
+  curve's region,
   and the list says which. This replaced a hover card carrying the same breakdown: same
   information, but transient, read-only, and long enough to run off screen on a full plate.
 
@@ -1060,7 +1069,7 @@ is: a per-target curve needs channel→dye color separation (`calibration.md`).
   directly (`CurvesView`'s `groupThresholds`, reading `CqTableEntry.groupThreshold` rather than
   `threshold` so an overridden well can't rewrite its fluorophore's displayed number) rather than
   from the display-filtered `tableRows`, for the same reason the row list itself isn't filtered.
-  The per-curve list is the plate's *loaded* wells for that dye — exactly the §5.1 noise cohort.
+  The per-curve list is the plate's *loaded* wells for that dye — exactly the §5.2 noise cohort.
 
   Each row has a hover effect (`.analysis__threshold-row:hover` background tint, like the app's
   other hoverable rail rows) backing up what it actually does: hovering a fluorophore row sets the
@@ -1115,7 +1124,7 @@ is: a per-target curve needs channel→dye color separation (`calibration.md`).
   [channel — CSV only, not shown in the table], baseline (`CurveBaselineResult.baselineFit`,
   rendered as a formula via `formatBaselineFormula()` — the same value the Curves view's
   tooltip shows — placed just before threshold since threshold/noise are derived from the same
-  baseline region), threshold, Cq, ΔRFU, amplified. The CSV is built from the same rows via the
+  baseline region), threshold, Cq, ΔRFU, end RFU, amplified. The CSV is built from the same rows via the
   shared `csvRow()` quoting helper (`lib/download.ts`) and `downloadText()` — filename
   `<run name>_analysis.csv`, the same `dataFile`-derived naming `plateReadCsvFilename` uses for the
   Raw view's per-cycle export. Its rail button is always present — in Channel mode too, since the

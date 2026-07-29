@@ -57,7 +57,6 @@ write back. Analysis edits to a `.pcrd` are therefore live for the session and t
     "thresholdOverrides": { "FAM": 210, "Texas Red": 49 },
     "curveThresholdOverrides": { "3,2,Texas Red": 120 },
     "thresholdMultiplier": 20,
-    "subtractDark": false,
     "calibrationNormalization": "global"
   }
 }
@@ -69,14 +68,15 @@ write back. Analysis edits to a `.pcrd` are therefore live for the session and t
 | `generator` | string? | Free-form provenance for a human reading the raw entry. |
 | `updatedAt` | string? | ISO-8601 timestamp of the last write. |
 | `analysis` | object? | The parameters below. Absent means "this run has no opinion". |
-| `analysis.thresholdOverrides` | `{ [fluor]: RFU }`? | Manual thresholds, keyed by **fluorophore**. Never by target — a threshold derives from baseline noise, a property of the dye and the optics, not of the biological label (`RunAnalysis.thresholdGroupOf`, `threshold.md` §5.1). Values must be > 0. |
-| `analysis.curveThresholdOverrides` | `{ "row,col,fluor": RFU }`? | The same, one curve at a time — one well's one dye, keyed by the app's `curveKey` with 0-based row/column. Outranks `thresholdOverrides`, which outranks the automatic value (`threshold.md` §5.4). Values must be > 0. |
-| `analysis.thresholdMultiplier` | number? | §5.1's `k` in `threshold = k × median baseline noise`, for every group with no override. Must be > 0. |
-| `analysis.subtractDark` | boolean? | Subtract the LED-off `DARKDATA` before color separation (`calibration.md` §4.2). |
+| `analysis.thresholdOverrides` | `{ [fluor]: RFU }`? | Manual thresholds, keyed by **fluorophore**. Never by target — a threshold derives from baseline noise, a property of the dye and the optics, not of the biological label (`RunAnalysis.thresholdGroupOf`, `threshold.md` §5.2). Values must be > 0. |
+| `analysis.curveThresholdOverrides` | `{ "row,col,fluor": RFU }`? | The same, one curve at a time — one well's one dye, keyed by the app's `curveKey` with 0-based row/column. Outranks `thresholdOverrides`, which outranks the automatic value (`threshold.md` §5.3). Values must be > 0. |
+| `analysis.thresholdMultiplier` | number? | §5.2's `k` in `threshold = k × median baseline noise`, for every group with no override. Must be > 0. |
+| `analysis.subtractDark` | boolean? | **Retired.** Whether the LED-off `DARKDATA` was subtracted before colour separation. The stage is gone — subtracting it makes the reconstruction of the instrument's own curves 260× worse, and a constant background cannot change any reported number (`calibration.md` §4.2a). Still parsed so files carrying it load unchanged; no longer written, and nothing consumes it. |
 | `analysis.calibrationNormalization` | `"none" \| "column" \| "global"`? | Calibration matrix column normalization (`calibration.md` §3). Not exposed in the UI. |
 
-The app writes all five `analysis` fields whenever the user has touched any of them, including
-ones that equal the current default. The entry records *the parameters this run was analyzed
+The app writes every live `analysis` field whenever the user has touched any of them, including
+ones that equal the current default (retired fields such as `subtractDark` are read but not
+written back). The entry records *the parameters this run was analyzed
 with*; a default that shifts in a later build must not silently re-analyze an old run.
 
 ## 4. Compatibility rules

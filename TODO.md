@@ -9,63 +9,40 @@ visualizer for everything** inside a `.zpcr` archive.
 
 `samples/20260726_S183-S185_RVP-export.zip` holds CFX's own exported results for
 `samples/20260726_S183-S185_RVP.pcrd` — per-cycle corrected RFU, per-well Cq and end-point RFU.
-Measuring against it turned most of `threshold.md` §5–§7 from a guess into a fact and showed
-several current choices to be wrong; **[`threshold.md`](./threshold.md) §0 is the write-up** and
-§9 lists these in priority order. Nothing below is implemented yet.
+Measuring against it turned most of the analysis chain from a guess into a fact.
+**[`threshold.md`](./threshold.md) §1 is the write-up.**
 
-- [ ] **Adopt the measured crossing rule** (`threshold.md` §6.1). Two-point **linear**
-      interpolation (not log) on the **cycle index** (no ½-cycle offset); select the crossing
-      followed by the **longest strictly-increasing run**, last on ties; reject crossings with
-      local slope < 1e-5; and treat `T ∉ [min, max]` of the corrected curve as the **only**
-      no-Cq gate. Reproduces all 14 reported Cq values and all 10 no-Cq wells to ~1e-10.
-- [ ] **Add the regression test that proves it.** Parse the export CSVs, feed CFX's own corrected
-      curves and the per-fluor threshold into `computeCq()`, assert against CFX's Cq. This
-      isolates the Cq stage from colour separation and baselining, so it stays green regardless of
-      upstream work — the first test in this repo that checks a computed number against the
-      instrument's own answer.
-- [ ] **Honour `thresholdOverrideValue` from the `.pcrd`** per fluorophore
-      (`pcrd.md` §2.5, `threshold.md` §5.4). Exact for every dye on
-      `autoCalculateThreshold="False"`. Do **not** trust `baselineBeginRepeat`/`EndRepeat` unless
-      `autoCalculateBaseline="False"`.
-- [ ] **Demote the quality gates to diagnostics** (`threshold.md` §7). The reference has no
-      amplification squelch, no baseline-validity veto and no ends-below-threshold rule — it
-      reports a Cq of 14.82 for a pure-noise well that touches the threshold once. Keep
-      `amplified` / `baselineValid` on the result and in the UI; stop letting them suppress a Cq.
-      Land this after or with the threshold work, not before.
-- [ ] **Stop smoothing the analysed curve** (`threshold.md` §0.6, §2). CFX's corrected curves are
-      unsmoothed white noise despite the run persisting `pCRDigitalFilter="WeightedMean"`. Default
-      the analysis path to `Disable`; keep `smoothCurve()` for onset detection and the chart. A
-      deletion — it also removes the reason §3.4 has to re-read the unsmoothed curve.
-- [ ] **Add end-point RFU** = mean of the corrected curve's last 5 cycles (`threshold.md` §8a),
-      on `CqTableEntry`. Exact on all 14 wells. Distinct from the existing `deltaRfu`.
-- [ ] **Replace the auto-threshold rule** (`threshold.md` §5.5). The two dyes of the RVP run want
-      thresholds of 92.02 and 8.06 with near-identical baseline noise, so no noise multiplier
-      fits; the threshold is a per-curve *shape* quantity averaged over the plate. 8.06451415811512
-      is a real CFX-computed auto threshold to test against — the first this project has had.
-- [ ] **Implement the tail filter** for `LinearBaseLineNormalizedCurveFit` — the observed default
-      baseline mode, currently unimplemented. A width-3 centred mean over cycles `floor(Cq)+3` …
-      `N−1` (last cycle excluded), read from the unfiltered curve (`threshold.md` §0.9, §4). It
-      doesn't touch the baseline, threshold or Cq — only the reported plateau, and therefore the
-      end-point RFU.
-- [ ] **Fix baseline-region selection for the two cases now measured** (`threshold.md` §0.9): a
-      non-amplifying well is baselined over essentially the **whole run** (never 2–9), and an
-      amplifying well's region ends around `round(Cq) − 2`, beginning at cycle 3–4. The first is
-      the long-standing bug in "Other" below, now with reference data behind it.
+**Landed** (2026-07-28): the measured crossing rule (linear two-point interpolation on the cycle
+index, longest-following-increasing-run selection, `T ∉ [min, max]` as the only no-Cq gate), the
+quality gates demoted to diagnostics, no smoothing of the analysed curve, the
+`LinearBaseLineNormalizedCurveFit` plateau filter, end-point RFU, baseline regions that take the
+whole run for a non-amplifying well and stop at `round(Cq) − 2` for an amplifying one, the
+per-fluorophore `thresholdOverrideValue` seeding the app's own override, and the regression test
+that asserts the Cq stage against CFX's own numbers (`packages/core/test/cfxExport.test.ts`). End
+to end the pipeline now lands within 0.11 cycles of CFX on every well it quantifies
+(`threshold.md` §1.8).
+
+Still open:
+
+- [ ] **Find CFX's automatic threshold rule** (`threshold.md` §5.2). The largest remaining source
+      of systematic disagreement, and the only place a wrong answer moves every Cq on a plate at
+      once. Two anchors and one inequality — FAM 92.02, Tex 615 8.0645, Cy5 **> 278** — rule out
+      every noise-relative rule *and* the per-curve shape rule this project used to propose: Cy5's
+      threshold must exceed 278 RFU while every Cy5 curve on the plate is flat noise. More anchors
+      need more runs with `autoCalculateThreshold` left on **and** exported results.
+- [ ] **Ask for an export of `20260720_Luna_noRT.pcrd`.** The cheapest single addition to the
+      above: its Cy5 is on auto, so an export would yield a third auto anchor. It would also
+      settle `calibration.md` §8's per-dye scale factor, measured against two scalars of uncertain
+      definition from that run (one read off a chart) and contradicted by the RVP full-curve
+      comparison.
 - [ ] **Ask for an export of `20260726_S183-S185_RVP-drift-correction.pcrd`.** Same experiment,
       `pDriftCorrection="True"`, nothing else changed — a controlled A/B that would answer what
       drift correction actually does (`calibration.md` §6) per well and per cycle.
-- [ ] **Ask for an export of `20260720_Luna_noRT.pcrd` too.** `calibration.md` §8's per-dye scale
-      factor was measured against two scalars of uncertain definition from that run (one read off
-      a chart) and is contradicted by the RVP full-curve comparison. An export settles it.
-- [ ] **Retire the "Subtract dark" setting from the normal UI** (`calibration.md` §4.2a). Now
-      measured, not inferred: enabling it makes the reconstruction of CFX's own curves **260×
-      worse** (median residual 7.3e-3 → 1.90 RFU), because `DARKDATA`'s per-cycle scatter is
-      random noise a linear baseline cannot absorb. It is a footgun — a user toggling it silently
-      gets a worse answer, and per the repo's own rule that settings deciding a Cq belong to the
-      run, this one decides it wrongly. Keep `preprocessChannelReadings`' `backgroundLevel`
-      parameter (it documents the alternative and costs nothing), drop the checkbox, and drop
-      `subtractDark` from `zpcrweb.json`'s analysis settings — leaving the reader tolerant of the
-      key so existing files still load.
+- [ ] **Pin the exact baseline window rule** (`threshold.md` §1.7). The bracket is implemented and
+      the model is settled, but the best-matching ordinary least-squares fit still misses CFX's
+      recovered line by 0.02–0.5 RFU, and eight smoothing/edge variants plus a zero-slope variant
+      all did worse. A precision question now, not a correctness one: it is what the ≤0.11 cycles
+      of §1.8 is made of.
 - [ ] **Don't add a reference-row correction — and record why** (`calibration.md` §4.1a). Measured:
       every per-cycle reference normalization tried (divide by R1, divide by the bright columns,
       subtract R1's deviation) degrades agreement with CFX by **300–940×**, *and* makes baseline
@@ -80,19 +57,28 @@ several current choices to be wrong; **[`threshold.md`](./threshold.md) §0 is t
       run-quality indicator. Complements the existing whole-run factory comparison in `refcal.ts`
       (which answers "has the row drifted since service?") with "did the optics move during *this*
       run?". Diagnostic only — never into the analysis path.
-- [ ] **Surface `DARKDATA` as instrument QC instead** (`calibration.md` §4.2b). The per-channel
-      dark level reproduces to ~1 count in 2000 across runs six days apart, which makes it a
-      genuine health signal: flag a channel that moves between runs or drifts within one, and flag
-      a well reading at or below its channel's dark level. **Channel 4 of CT019138 is
-      reproducibly noisy** (2.5–3× the scatter of every other channel, in both committed runs) —
-      a good first test case for whatever the check looks like.
+- [ ] **Surface `DARKDATA` as instrument QC** (`calibration.md` §4.2b). The subtraction stage is
+      gone (measured to make results 260× worse); the *measurement* is a genuine health signal —
+      per-channel dark levels reproduce to ~1 count in 2000 across runs six days apart. Flag a
+      channel that moves between runs or drifts within one, and flag a well reading at or below
+      its channel's dark level. **Channel 4 of CT019138 is reproducibly noisy** (2.5–3× the
+      scatter of every other channel, in both committed runs) — a good first test case.
 - [ ] **Chase the last ~2 × 10⁻⁴ of colour separation** (`calibration.md` §8): six Cy5 wells and
       Tex 615 G4 reconstruct to 0.14–0.46 RFU rather than 5e-3. Dye- and well-specific, present on
       flat curves, not well factors. Small, but it is now the largest known separation error.
+- [ ] **The end-point call** (`threshold.md` §8) — `(+) Positive` / `Negative` / `NoCall` /
+      `Unassigned`, derived from the plate's negative control rather than a fixed RFU. Visible in
+      the export, but from one plate only.
+
+`threshold.md` §9 also lists the analysis options left deliberately unimplemented (reference
+normalization, drift correction, cycle skips, the data sub-window, the `NoThreshold` Cq
+algorithm, display smoothing) — each understood, none exercised by any sample in hand.
 
 ### Other
 
-- [ ] It seems common for a negative curve to grow in the first 5 cycles then level off flat. It seems like we should be picking the large later flat line as the baseline but we often pick the start instead. See 20230829's well F5 and 20260726 D4 FAM. Corroborated: on CFX's own corrected curves the best-fitting baseline window for every non-amplifying well is the *whole run* (`threshold.md` §0.9, §3.2).
+- [ ] Review all indexeddb storage beyond the data files. Consider whether we can remove
+      everything from indexeddb other than the files now — what would we lose, and is it just
+      transient state which could be stored in the URL (like the active view mode)?
 
 ## Library (`@zpcrweb/core`)
 

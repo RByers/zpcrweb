@@ -213,8 +213,12 @@ No `.zpcr` equivalent — this is what CFX Manager adds on top of the raw run:
   `samples/20260726_S183-S185_RVP.pcrd` the FAM entry (`fluorId="5"`) carries
   `autoCalculateThreshold="False"` and `thresholdOverrideValue="92.0212554931641"`. Solving each
   FAM well's exported Cq back through the threshold-crossing rule recovers **the same 15 digits**
-  — see [`threshold.md`](./threshold.md) §0.3. So this field is not a hint: feeding it to the Cq
-  stage reproduces CFX's own answers bit for bit. A dye left on `autoCalculateThreshold="True"`
+  — see [`threshold.md`](./threshold.md) §1.3. So this field is not a hint: feeding it to the Cq
+  stage reproduces CFX's own answers bit for bit. `parsePcrd` decodes it into
+  `Zpcr.persistedThresholds`, keyed by dye name (resolved from the plate's own
+  `<dyeLayer><fluor fluorId= fluorName=>` entries, since the document carries an entry for every
+  fluorophore CFX knows about, not just the plate's), and the web app seeds its own
+  per-fluorophore threshold override from it. A dye left on `autoCalculateThreshold="True"`
   persists `NaN` here and the threshold CFX used is *not* stored anywhere in the file — in that
   sample Cy5 (`fluorId="4"`) and Tex 615 (`fluorId="11"`) are both on auto.
 
@@ -222,7 +226,7 @@ No `.zpcr` equivalent — this is what CFX Manager adds on top of the raw run:
   while also carrying `autoCalculateBaseline="True"`, and the regions CFX actually used (inferred
   from its exported corrected curves) are frequently nowhere near cycles 2–9. Read these as the
   defaults the auto search starts from; trust them as an actual region only when
-  `autoCalculateBaseline="False"`.
+  `autoCalculateBaseline="False"`. This library deliberately does not read them at all.
 
   Note also that no *results* live in this tree, or anywhere else in a `.pcrd`: the file holds the
   raw plate reads and the analysis **settings**, and CFX recomputes the corrected curves, Cq values
@@ -266,7 +270,7 @@ the analysis pipeline:
 Format notes: every row starts with an empty leading field (so column 0 is blank), wells are
 zero-padded (`A04`), numbers carry ~15 significant digits, and a missing value is the literal
 `NaN`. The amplification CSV's `Cycle` column is the abscissa the reported Cq values are expressed
-in — [`threshold.md`](./threshold.md) §0.3 confirms this by solving Cq back for the threshold.
+in — [`threshold.md`](./threshold.md) §1.3 confirms this by solving Cq back for the threshold.
 
 Requesting an export alongside any newly captured `.pcrd` costs nothing and is the difference
 between a sample that can be *read* and one that can be *validated against*.

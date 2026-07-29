@@ -15,7 +15,7 @@ the plate, estimate how much each dye actually contributed.
 > 4–9 × 10⁻³ RFU up to the baseline both sides remove, the other 7 to ~2 × 10⁻⁴ relative. That
 > discharges the largest caveat this document used to carry — the suspected per-dye scale factor,
 > now bounded at ~10⁻⁶ — and leaves a much smaller open question. See §8, and
-> [`threshold.md`](./threshold.md) §0.9 for the measurement.
+> [`threshold.md`](./threshold.md) §1.7 for the measurement.
 >
 > The web app's **Calibration** view plots the §2 response curves this is all built on (block
 > temperature on x, RFU on y, one line per dye × channel), marked at the block temperature the
@@ -302,16 +302,17 @@ row has drifted since the instrument was serviced. Neither belongs in the analys
 
 ### 4.2 The additive background: dark-current subtraction
 
-> **Resolved 2026-07-28: do not subtract it.** This section used to leave open "which additive
-> background belongs here". The answer, measured against CFX's own exported per-cycle curves
-> ([`pcrd.md`](./pcrd.md) §2.5a), is **none** — see §4.2a. The default has always been *off*,
-> which turns out to be right; what changes is that this is now a measurement rather than a
-> modelling preference, and the option should be treated as a diagnostic rather than a choice.
+> **Resolved 2026-07-28: do not subtract it, and the stage is gone.** This section used to leave
+> open "which additive background belongs here". The answer, measured against CFX's own exported
+> per-cycle curves ([`pcrd.md`](./pcrd.md) §2.5a), is **none** — see §4.2a. The setting that
+> controlled it (`subtractDark`, off by default) has been removed from the app and from
+> `zpcrweb.json`; `preprocessChannelReadings` keeps its `backgroundLevel` parameter, which
+> documents the alternative and costs nothing, and nothing passes it. `DARKDATA` is now a plotted
+> overlay and an instrument diagnostic only (§4.2b).
 
 Distinct from the reference level, there is one genuinely additive background — the **dark
-current** — and subtracting it is an **optional stage** of the pipeline, disabled by default.
-When enabled, it is **subtracted outright** from every channel reading, after the gain
-correction; when disabled, nothing is subtracted and the stage is skipped entirely.
+current**. Subtracting it *was* an optional stage of the pipeline, disabled by default; the rest
+of this section describes what it would have done and why it is not done.
 
 **Dark data (LED off).** A reading taken with the **excitation source off**, capturing detector
 dark current and electronic offset — signal present regardless of illumination. Stored per plate
@@ -320,19 +321,20 @@ read as **one record per channel, not per well** (see [`plateread.md`](./platere
 position. Re-read every cycle, so the level varies cycle to cycle. Skipped when a plate read
 carries no dark record.
 
-**This is not a display-only setting.** Because `DARKDATA` is re-read every cycle, the level
-removed is *not* a constant: on the committed `20260720_Luna_noRT.pcrd` the amount taken off
+**It was never a display-only setting**, which is why removing it rather than defaulting it off
+matters. Because `DARKDATA` is re-read every cycle, the level removed is *not* a constant: on the committed `20260720_Luna_noRT.pcrd` the amount taken off
 B3/FAM ranges between ≈2099 and ≈2127 RFU over the run. So beyond moving reported RFU by ≈2100,
 it slightly perturbs the fitted baseline slope, and — because a dark reading carries its own
 measurement noise — it raises the median baseline noise the auto threshold is derived from
-(`threshold.md` §5.1). Measured on that run at the default threshold multiplier, enabling the
+(`threshold.md` §5.2). Measured on that run at the default threshold multiplier, enabling the
 stage moves the FAM threshold from 131 to 142 and B3/FAM's Cq from 32.1 to 32.2; the ENT rc / Cy5
 threshold moves proportionally more (32 → 49), carrying C3's Cq from 20.1 to 20.7 — the largest
-shift on the plate, ≈0.6 cycles. The two HMPV Ma / Texas Red wells do not move at all. Expect a
+shift on the plate, ≈0.6 cycles. (Measured before the analysis rework of `threshold.md` §3; the
+figures track the old baseline rule, the conclusion does not depend on it.) The two HMPV Ma / Texas Red wells do not move at all. Expect a
 modest Cq change, not none. (The absolute thresholds scale with the multiplier, so these figures
 track it; the RFU offset and the direction of the effect do not.)
 
-Leaving it off is what matches the reference — see §4.2a, which measures this directly and
+Not doing it at all is what matches the reference — see §4.2a, which measures this directly and
 supersedes the RFU-scale argument §8 used to make.
 
 ### 4.2a Measured: the reference does not subtract it
@@ -344,7 +346,7 @@ is not: it injects noise that no straight line can absorb. So the question split
 both halves have answers:
 
 - **The observable half.** Reconstructing CFX's exported corrected curve from this library's
-  separated curve (the method of [`threshold.md`](./threshold.md) §0.9) gives a median residual of
+  separated curve (the method of [`threshold.md`](./threshold.md) §1.7) gives a median residual of
   **7.3 × 10⁻³ RFU with the stage off, and 1.90 RFU with it on** — a **260× degradation**, rising
   to 280–540× on the cleanest wells. The 1.9 RFU is exactly the injected noise: `DARKDATA`'s
   per-cycle scatter is 1.5–5 counts, amplified by the solve. **The reference does not apply the
@@ -387,7 +389,8 @@ run. That makes three uses, all diagnostic:
    physically meaningless and should be flagged rather than separated.
 
 The web app already plots the dark curves as a Curves-view overlay; that is the right home for
-all three, and no analysis stage should consume them.
+all three, and no analysis stage consumes them. Surfacing 1–3 as actual checks is
+[`TODO.md`](./TODO.md) work; only the removal of the subtraction stage has landed.
 
 > The `.Dcal` `empty` blocks are **not** a second background candidate. They are consumed by §2
 > as the per-temperature baseline each matrix column is differenced against
@@ -538,7 +541,7 @@ call is wasted work.
   with CFX Manager's own exported per-cycle results (see [`pcrd.md`](./pcrd.md) §2.5a). Running
   this library's separation over that `.pcrd` and subtracting CFX's exported baseline-corrected
   curve leaves, for 17 of 24 curves, **a straight line in the cycle number with a residual RMS of
-  4–9 × 10⁻³ RFU** — see [`threshold.md`](./threshold.md) §0.9. Since baselining subtracts a
+  4–9 × 10⁻³ RFU** — see [`threshold.md`](./threshold.md) §1.7. Since baselining subtracts a
   straight line, that is the strongest agreement the comparison can show: this library's dye-space
   curve and CFX's differ by nothing except the baseline that both then remove.
 
@@ -558,7 +561,7 @@ call is wasted work.
 - **Why the older comparison probably misread.** The measurements below pair this library's *raw,
   un-baselined* cycle-45 value against CFX's **End RFU**, and those are not the same quantity:
   End RFU is the mean of the last five cycles of the **baseline-corrected** curve
-  ([`threshold.md`](./threshold.md) §0.7). Re-running the comparison like-for-like on the same
+  ([`threshold.md`](./threshold.md) §1.5). Re-running the comparison like-for-like on the same
   `20260720_Luna_noRT.pcrd` wells makes the disagreement *worse*, not better — this library's
   baselined end-point comes out at 0.29–0.61× the quoted figures, and C3/FAM at −46 RFU against a
   quoted 2115 — which says the quoted numbers are not baselined mean-of-five values either, and so
