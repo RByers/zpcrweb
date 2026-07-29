@@ -6,7 +6,7 @@ import { csvRow } from "./download";
 import { curveKey, type RunAnalysis } from "./runAnalysis";
 
 /**
- * The Curves view's table mode: one row per (target, well) pair — `threshold.md` §5–§7's Cq and
+ * The Curves view's table mode: one row per (target, well) pair — `threshold.md` §5–§6's Cq and
  * endpoint ΔRFU, laid out as a table instead of a chart.
  *
  * Every number here is *looked up* in the run's single Cq table (`runAnalysis.ts`), never
@@ -36,7 +36,7 @@ export interface AnalysisRow {
   threshold: number;
   noise: number;
   deltaRfu: number;
-  /** End-point RFU — the mean of the corrected curve's last five cycles (`threshold.md` §8).
+  /** End-point RFU — the mean of the corrected curve's last five cycles (`threshold.md` §7).
    * The number the instrument's own End Point export reports, and what an assay with no Cq at all
    * reads instead. Distinct from {@link deltaRfu}, which is the last single value's rise: on a
    * still-climbing well the two differ by hundreds of RFU. */

@@ -943,7 +943,7 @@ only pieces the two views share.
 
 The former standalone **Analysis** view, folded into the Curves view as the fourth option of the
 rail's "View" toggle (`fluorViewMode: "table"`). It replaces the chart with a table of one row per
-visible (target, well) pair — Cq, endpoint ΔRFU and §8's End RFU — while the whole rail
+visible (target, well) pair — Cq, endpoint ΔRFU and §7's End RFU — while the whole rail
 (targets, wells, samples, background, thresholds) keeps driving it. It was a separate tab with a
 near-identical rail of its own; the two disagreed about Cq (see "One Cq per well/target" above) and
 about which targets were filtered, so the tab is gone and its two unique controls — the threshold
@@ -980,7 +980,7 @@ is: a per-target curve needs channel→dye color separation (`calibration.md`).
   chip/row (see `.atbl*` in `app.css`) — no palette lives in the table.
 - **ΔRFU and End RFU are different numbers, and both are shown.** ΔRFU is the last corrected
   value's rise above the baseline; End RFU is the mean of the last five corrected cycles
-  (`threshold.md` §8), which is what the instrument's own End Point export reports. On a
+  (`threshold.md` §7), which is what the instrument's own End Point export reports. On a
   still-climbing well the two differ by hundreds of RFU, so neither substitutes for the other.
 - **Cq is a position, not just a number:** each Cq sits on a track spanning cycle 1 → the last
   cycle the active step read (`cycleCount`, derived from the curves rather than the protocol, so a
@@ -1006,13 +1006,13 @@ is: a per-target curve needs channel→dye color separation (`calibration.md`).
   `ANALYSIS_BASELINE_MODE` constant (`"LinearBaseLineNormalized"` — baselining isn't
   user-configurable at all, see "Baseline is always automatic" under Curves view): the §3 baseline
   region, the corrected values, `baselineNoise`, ΔRFU (endpoint corrected value minus the baseline region's mean),
-  `endRfu` (§8's end-point RFU, the mean of the last five corrected cycles) and `baselineFit` (the
+  `endRfu` (§7's end-point RFU, the mean of the last five corrected cycles) and `baselineFit` (the
   fitted `{ slope, intercept }`, rendered via `formatBaselineFormula()`). All of it reaches the
   table through the run's Cq table, so a row's ΔRFU/Cq is the same value the chart's marker and the
   hover cards show — the same object, not a matching recomputation.
 - **Cq is always §6's threshold crossing**, the observed instrument default and now the only
   algorithm the library implements. The Analysis view's `"Threshold"`/`"NoThreshold"` selector is
-  gone and so is the second algorithm behind it (`threshold.md` §9), which is what makes a
+  gone and so is the second algorithm behind it (`threshold.md` §10), which is what makes a
   per-group threshold always meaningful and the override section always applicable.
 - **Threshold (`thresholdMultiplier` + `thresholdOverrides` + `curveThresholdOverrides`
   settings — all stored in the run's own `zpcrweb.json`, not IndexedDB; see "Analysis state
@@ -1031,7 +1031,7 @@ is: a per-target curve needs channel→dye color separation (`calibration.md`).
   threshold is a median over exactly the curves listed under it, and each curve's line shows the
   two numbers that median is made of: its own baseline region (`cycles a–b`, plus a ⚠ when the
   whole corrected curve sits *above* this threshold, so it can never cross it — `threshold.md`
-  §1.4's E4 case, which is indistinguishable from a flat well in the output and means the
+  §A.4's E4 case, which is indistinguishable from a flat well in the output and means the
   opposite) and its own `σ` noise. Both inputs are less self-evident than they
   look — noise is a median-absolute-second-difference statistic (`threshold.md` §5.1) and each
   region is derived from that curve's own Cq (§3) — so a surprising threshold is usually one
@@ -1123,7 +1123,7 @@ is: a per-target curve needs channel→dye color separation (`calibration.md`).
   channel (or, for a curve row, its well) instead.
 - **Greying:** a row renders at reduced opacity (`.analysis__row.is-nocq`) whenever it has no Cq
   (`cq == null`) — which now has exactly one cause, the curve not crossing its threshold
-  (`threshold.md` §6/§7). Keying greying on the Cq result itself, rather than on a separately
+  (`threshold.md` §6). Keying greying on the Cq result itself, rather than on a separately
   cached verdict, is what makes it react live to editing a threshold override. A row is never hidden, so a well's disqualification is
   visible instead of silently dropped from the table.
 - **Table/CSV columns, same order in both:** well, sample (`WellDefinition.sampleName`, the

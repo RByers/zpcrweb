@@ -745,7 +745,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
                 beginCycle: e.baselineRegion.beginCycle,
                 endCycle: e.baselineRegion.endCycle,
                 noise: e.noise,
-                // §1.4's "baseline above threshold" case: a curve whose corrected minimum already
+                // §A.4's "baseline above threshold" case: a curve whose corrected minimum already
                 // exceeds the threshold can never cross it, so it reports no Cq however obviously
                 // it amplifies. Worth flagging, because in the table it is indistinguishable from
                 // a flat well and means the opposite thing.

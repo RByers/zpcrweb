@@ -41,10 +41,10 @@ export interface CurveBaselineResult {
  * How many times {@link baselineCorrectCurve} may re-fit. The region depends on the Cq and the Cq
  * depends on the region, so the pair is iterated to a fixed point.
  *
- * **6, measured** (`threshold.md` §3.1). Across the five committed runs most curves never move
+ * **6, measured** (`threshold.md` §B.4). Across the five committed runs most curves never move
  * their region at all, an amplifying one settles in 3–5 passes, and exactly one curve of the 1056
  * oscillates indefinitely between two adjacent regions — the cap is for that one, and raising it
- * to 200 changes no Cq anywhere. The loop itself is not removable: without it the run §1.8
+ * to 200 changes no Cq anywhere. The loop itself is not removable: without it the run §A.8
  * measures against lands 7.36 cycles off CFX rather than 0.107.
  */
 const MAX_BASELINE_PASSES = 6;
@@ -60,7 +60,7 @@ const MAX_BASELINE_PASSES = 6;
  * {@link computeCqTable} does before any threshold exists.
  *
  * Nothing here is smoothed. CFX's exported corrected curves are unsmoothed white noise about their
- * baselines even though the run persists `pCRDigitalFilter="WeightedMean"` (`threshold.md` §1.6),
+ * baselines even though the run persists `pCRDigitalFilter="WeightedMean"` (`threshold.md` §A.6),
  * so the filter named in the file is not applied to the curve that gets analysed.
  */
 export function baselineCorrectCurve(
@@ -159,7 +159,7 @@ export interface CqTableEntry extends CurveBaselineResult {
    * or one on this curve alone (which outranks both). */
   thresholdSource: "auto" | "group" | "curve";
   cq: number | null;
-  /** The end-point RFU (`threshold.md` §8): the mean of the last five cycles of the corrected
+  /** The end-point RFU (`threshold.md` §7): the mean of the last five cycles of the corrected
    * curve, after `LinearBaseLineNormalizedCurveFit`'s plateau filter. Reproduces CFX's own
    * `End RFU` exactly. Some assays report this instead of a Cq. */
   endRfu: number;
@@ -280,7 +280,7 @@ export function computeCqTable(
           ? "group"
           : "auto";
     const cq = computeCq(c.cycles, b.correctedValues, threshold);
-    // The plateau filter runs after the Cq, which it cannot change (`threshold.md` §1.7), and
+    // The plateau filter runs after the Cq, which it cannot change (`threshold.md` §A.7), and
     // feeds only the end-point RFU.
     const endRfu = endPointRfu(smoothPlateauTail(b.correctedValues, cq));
     table.set(c.key, { ...b, group: c.group, threshold, groupThreshold, thresholdSource, cq, endRfu });

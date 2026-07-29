@@ -215,9 +215,9 @@ const cqInk = (t: number) => Math.round(100 - t * 65);
  * Magnitude is spent on position instead: Cq sits on the run's cycle axis (see {@link CqCell})
  * and ΔRFU on a bar scaled to the whole table.
  *
- * A row with no Cq renders greyed out (`.is-nocq`) rather than being hidden, so a well
- * disqualified by the §7 baseline gate or the amplification squelch stays visible instead of
- * silently vanishing from the table.
+ * A row with no Cq renders greyed out (`.is-nocq`) rather than being hidden, so a well whose
+ * curve never crosses its threshold (`threshold.md` §6 — the only cause there is, now that the
+ * quality gates are gone) stays visible instead of silently vanishing from the table.
  */
 export function CurveTable({ rows, usingTargets, cycleCount }: Props) {
   const [sortKey, setSortKey] = useState<SortKey>("target");
@@ -327,7 +327,7 @@ export function CurveTable({ rows, usingTargets, cycleCount }: Props) {
                 </span>
               </td>
               {/* The instrument's own end-point number: the mean of the corrected curve's last
-                  five cycles (`threshold.md` §8). Sits beside ΔRFU rather than replacing it —
+                  five cycles (`threshold.md` §7). Sits beside ΔRFU rather than replacing it —
                   ΔRFU is a rise from the baseline, this is an absolute plateau level, and on a
                   still-climbing well they differ by hundreds of RFU. */}
               <td className="mono atbl__num" title="End-point RFU: mean of the last five cycles">

@@ -5,7 +5,7 @@
  *
  * **The crossing rule is measured, not inferred.** Fed CFX's own corrected curves and its own
  * threshold, {@link computeCq} reproduces all 14 Cq values and all 10 no-Cq wells of
- * `20260726_S183-S185_RVP` to ~1e-10 cycles — see `threshold.md` §1.2 and the regression test in
+ * `20260726_S183-S185_RVP` to ~1e-10 cycles — see `threshold.md` §A.2 and the regression test in
  * `test/cfxExport.test.ts`. The *threshold* is the opposite case: CFX's automatic rule is not
  * documented, not observable, and the one auto value ever recovered from it rules out the obvious
  * models — see {@link AutoThresholdOptions.multiplier}.
@@ -159,7 +159,7 @@ const MIN_CROSSING_SLOPE = 1e-5;
  * take the crossing with the longest run; ties go to the later one
  * ```
  *
- * Every clause is measured against CFX's own output (`threshold.md` §1.2), and three of them
+ * Every clause is measured against CFX's own output (`threshold.md` §A.2), and three of them
  * replaced something this library used to do differently:
  *
  * - **Linear interpolation on the cycle number.** Not logarithmic (physically appealing, and

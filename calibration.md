@@ -15,7 +15,7 @@ the plate, estimate how much each dye actually contributed.
 > 4–9 × 10⁻³ RFU up to the baseline both sides remove, the other 7 to ~2 × 10⁻⁴ relative. That
 > discharges the largest caveat this document used to carry — the suspected per-dye scale factor,
 > now bounded at ~10⁻⁶ — and leaves a much smaller open question. See §8, and
-> [`threshold.md`](./threshold.md) §1.7 for the measurement.
+> [`threshold.md`](./threshold.md) §A.7 for the measurement.
 >
 > The web app's **Calibration** view plots the §2 response curves this is all built on (block
 > temperature on x, RFU on y, one line per dye × channel), marked at the block temperature the
@@ -346,7 +346,7 @@ is not: it injects noise that no straight line can absorb. So the question split
 both halves have answers:
 
 - **The observable half.** Reconstructing CFX's exported corrected curve from this library's
-  separated curve (the method of [`threshold.md`](./threshold.md) §1.7) gives a median residual of
+  separated curve (the method of [`threshold.md`](./threshold.md) §A.7) gives a median residual of
   **7.3 × 10⁻³ RFU with the stage off, and 1.90 RFU with it on** — a **260× degradation**, rising
   to 280–540× on the cleanest wells. The 1.9 RFU is exactly the injected noise: `DARKDATA`'s
   per-cycle scatter is 1.5–5 counts, amplified by the solve. **The reference does not apply the
@@ -541,7 +541,7 @@ call is wasted work.
   with CFX Manager's own exported per-cycle results (see [`pcrd.md`](./pcrd.md) §2.5a). Running
   this library's separation over that `.pcrd` and subtracting CFX's exported baseline-corrected
   curve leaves, for 17 of 24 curves, **a straight line in the cycle number with a residual RMS of
-  4–9 × 10⁻³ RFU** — see [`threshold.md`](./threshold.md) §1.7. Since baselining subtracts a
+  4–9 × 10⁻³ RFU** — see [`threshold.md`](./threshold.md) §A.7. Since baselining subtracts a
   straight line, that is the strongest agreement the comparison can show: this library's dye-space
   curve and CFX's differ by nothing except the baseline that both then remove.
 
@@ -561,7 +561,7 @@ call is wasted work.
 - **Why the older comparison probably misread.** The measurements below pair this library's *raw,
   un-baselined* cycle-45 value against CFX's **End RFU**, and those are not the same quantity:
   End RFU is the mean of the last five cycles of the **baseline-corrected** curve
-  ([`threshold.md`](./threshold.md) §1.5). Re-running the comparison like-for-like on the same
+  ([`threshold.md`](./threshold.md) §A.5). Re-running the comparison like-for-like on the same
   `20260720_Luna_noRT.pcrd` wells makes the disagreement *worse*, not better — this library's
   baselined end-point comes out at 0.29–0.61× the quoted figures, and C3/FAM at −46 RFU against a
   quoted 2115 — which says the quoted numbers are not baselined mean-of-five values either, and so

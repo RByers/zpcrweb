@@ -504,7 +504,7 @@ async function tableSortChecks(chrome, origin) {
     axis.rows.filter((r) => r.cq === "—").map((r) => String(r.left)).join(" "),
   );
 
-    // End RFU is the instrument's own end-point number (`threshold.md` §8) and is deliberately
+    // End RFU is the instrument's own end-point number (`threshold.md` §7) and is deliberately
   // *not* ΔRFU: on a still-climbing well the two differ by hundreds of RFU, so a column that
   // silently mirrored the other one would look entirely reasonable on screen.
   await clickHead("End RFU");

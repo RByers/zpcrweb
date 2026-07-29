@@ -185,7 +185,7 @@ export interface RunAnalysis {
    * This also matches what the instrument does. CFX persists its analysis parameters —
    * `thresholdOverrideValue` and `autoCalculateThreshold` included — under
    * `fluorDataAnalysisParam fluorId=…`, one entry per **fluorophore** (`pcrd.md` §2.5,
-   * `threshold.md` §2). There is no per-target threshold anywhere in the format.
+   * `threshold.md` §9). There is no per-target threshold anywhere in the format.
    */
   thresholdGroupOf: (row: number, col: number, fluor: string) => string;
   /** The fluorophores thresholds are actually resolved per — the groups {@link thresholdGroupOf}

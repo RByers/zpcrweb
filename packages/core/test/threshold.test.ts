@@ -77,7 +77,7 @@ describe("computeCq", () => {
 
   it("interpolates linearly between the two bracketing cycles", () => {
     // Deliberately exponential data: a log interpolation would give log2(6) ≈ 2.585, and the
-    // measured rule gives the linear answer instead (`threshold.md` §1.2).
+    // measured rule gives the linear answer instead (`threshold.md` §A.2).
     const values = cycles.map((c) => 2 ** c);
     expect(computeCq(cycles, values, 6)).toBeCloseTo(2.5, 9);
   });
@@ -94,7 +94,7 @@ describe("computeCq", () => {
 
   it("still reports a crossing that falls back below the threshold", () => {
     // The reference does: a pure-noise well that pokes above the threshold once and then declines
-    // for 30 cycles is reported with a Cq (`threshold.md` §1.4's B4).
+    // for 30 cycles is reported with a Cq (`threshold.md` §A.4's B4).
     expect(computeCq(cycles, [0, 0, 0, 50, 1], 10)).toBeCloseTo(3.2, 9);
   });
 

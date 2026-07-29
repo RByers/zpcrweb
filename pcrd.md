@@ -213,7 +213,7 @@ No `.zpcr` equivalent — this is what CFX Manager adds on top of the raw run:
   `samples/20260726_S183-S185_RVP.pcrd` the FAM entry (`fluorId="5"`) carries
   `autoCalculateThreshold="False"` and `thresholdOverrideValue="92.0212554931641"`. Solving each
   FAM well's exported Cq back through the threshold-crossing rule recovers **the same 15 digits**
-  — see [`threshold.md`](./threshold.md) §1.3. So this field is not a hint: feeding it to the Cq
+  — see [`threshold.md`](./threshold.md) §A.3. So this field is not a hint: feeding it to the Cq
   stage reproduces CFX's own answers bit for bit. `parsePcrd` decodes it into
   `Zpcr.persistedThresholds`, keyed by dye name (resolved from the plate's own
   `<dyeLayer><fluor fluorId= fluorName=>` entries, since the document carries an entry for every
@@ -270,7 +270,7 @@ the analysis pipeline:
 Format notes: every row starts with an empty leading field (so column 0 is blank), wells are
 zero-padded (`A04`), numbers carry ~15 significant digits, and a missing value is the literal
 `NaN`. The amplification CSV's `Cycle` column is the abscissa the reported Cq values are expressed
-in — [`threshold.md`](./threshold.md) §1.3 confirms this by solving Cq back for the threshold.
+in — [`threshold.md`](./threshold.md) §A.3 confirms this by solving Cq back for the threshold.
 
 Requesting an export alongside any newly captured `.pcrd` costs nothing and is the difference
 between a sample that can be *read* and one that can be *validated against*.

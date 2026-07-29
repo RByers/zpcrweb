@@ -10,7 +10,7 @@ visualizer for everything** inside a `.zpcr` archive.
 `samples/20260726_S183-S185_RVP-export.zip` holds CFX's own exported results for
 `samples/20260726_S183-S185_RVP.pcrd` — per-cycle corrected RFU, per-well Cq and end-point RFU.
 Measuring against it turned most of the analysis chain from a guess into a fact.
-**[`threshold.md`](./threshold.md) §1 is the write-up.**
+**[`threshold.md`](./threshold.md) §A is the write-up.**
 
 **Landed** (2026-07-28): the measured crossing rule (linear two-point interpolation on the cycle
 index, longest-following-increasing-run selection, `T ∉ [min, max]` as the only no-Cq gate), the
@@ -20,7 +20,7 @@ whole run for a non-amplifying well and stop at `round(Cq) − 2` for an amplify
 per-fluorophore `thresholdOverrideValue` seeding the app's own override, and the regression test
 that asserts the Cq stage against CFX's own numbers (`packages/core/test/cfxExport.test.ts`). End
 to end the pipeline now lands within 0.11 cycles of CFX on every well it quantifies
-(`threshold.md` §1.8).
+(`threshold.md` §A.8).
 
 Still open:
 
@@ -38,11 +38,11 @@ Still open:
 - [ ] **Ask for an export of `20260726_S183-S185_RVP-drift-correction.pcrd`.** Same experiment,
       `pDriftCorrection="True"`, nothing else changed — a controlled A/B that would answer what
       drift correction actually does (`calibration.md` §6) per well and per cycle.
-- [ ] **Pin the exact baseline window rule** (`threshold.md` §1.7). The bracket is implemented and
+- [ ] **Pin the exact baseline window rule** (`threshold.md` §A.7). The bracket is implemented and
       the model is settled, but the best-matching ordinary least-squares fit still misses CFX's
       recovered line by 0.02–0.5 RFU, and eight smoothing/edge variants plus a zero-slope variant
       all did worse. A precision question now, not a correctness one: it is what the ≤0.11 cycles
-      of §1.8 is made of.
+      of §A.8 is made of.
 - [ ] **Don't add a reference-row correction — and record why** (`calibration.md` §4.1a). Measured:
       every per-cycle reference normalization tried (divide by R1, divide by the bright columns,
       subtract R1's deviation) degrades agreement with CFX by **300–940×**, *and* makes baseline
@@ -66,11 +66,11 @@ Still open:
 - [ ] **Chase the last ~2 × 10⁻⁴ of colour separation** (`calibration.md` §8): six Cy5 wells and
       Tex 615 G4 reconstruct to 0.14–0.46 RFU rather than 5e-3. Dye- and well-specific, present on
       flat curves, not well factors. Small, but it is now the largest known separation error.
-- [ ] **The end-point call** (`threshold.md` §8) — `(+) Positive` / `Negative` / `NoCall` /
+- [ ] **The end-point call** (`threshold.md` §7) — `(+) Positive` / `Negative` / `NoCall` /
       `Unassigned`, derived from the plate's negative control rather than a fixed RFU. Visible in
       the export, but from one plate only.
 
-`threshold.md` §9 also lists the analysis options left deliberately unimplemented (reference
+`threshold.md` §10 also lists the analysis options left deliberately unimplemented (reference
 normalization, drift correction, cycle skips, the data sub-window, the `NoThreshold` Cq
 algorithm, display smoothing) — each understood, none exercised by any sample in hand.
 

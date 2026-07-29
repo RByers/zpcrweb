@@ -282,8 +282,8 @@ raw bytes ─▶ fflate.unzipSync ─▶ { name: Uint8Array }
   plateau and nothing else). `endPointRfu()` — the mean of the last five corrected cycles — lives
   here too. Every constant in the module is measured against the instrument's exported results;
   this replaced two onset detectors, a whiteness start-trim, a validation gate and a smoothing
-  stage, all of them inferred. See [`threshold.md`](./threshold.md) §1.7 and §3.
-- **`threshold.ts`** — the threshold and Cq stages (§5–§7). `baselineNoise()` is the median
+  stage, all of them inferred. See [`threshold.md`](./threshold.md) §A.7 and §3.
+- **`threshold.ts`** — the threshold and Cq stages (§5–§6). `baselineNoise()` is the median
   absolute second difference of the corrected curve over the baseline region, scaled to σ: unlike a
   standard deviation or an RMS successive difference it survives being computed over a region the
   baseline doesn't describe, which the first pass of the region search deliberately does.
@@ -297,7 +297,7 @@ raw bytes ─▶ fflate.unzipSync ─▶ { name: Uint8Array }
   a Cq off one produced a Cq of 1.32 for a flat well. There are no quality
   gates at all: the reference applies none, and letting one veto a Cq is what kept this library's
   Cq population from ever matching. See
-  [`threshold.md`](./threshold.md) §5–§7, and `packages/core/test/cfxExport.test.ts`, which asserts
+  [`threshold.md`](./threshold.md) §5–§6, and `packages/core/test/cfxExport.test.ts`, which asserts
   the Cq stage against CFX's own numbers to 1e-9 cycles. `median()` and `stdDev()` live here too:
   they had their own `stats.ts` while `baseline.ts` also needed them, and it does not any more.
 - **`analysis.ts`** — the transforms that sit on top of those two: `baselineCorrectCurve()` (one

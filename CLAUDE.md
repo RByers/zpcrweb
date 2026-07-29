@@ -233,7 +233,7 @@ one algorithm doc, `calibration.md`, for the color-separation math built on top 
 | [`plateread.md`](./plateread.md) | The `.Plateread` files inside a `.zpcr` — one per plate read (PCR cycle), holding the 6-channel × 108-well raw fluorescence table plus cycle number, block temperature and timestamp. **Mixed endianness:** metadata (version words, ICFF index) is big-endian; the WELLDATA/DARKDATA float arrays are little-endian. Implemented by `packages/core/src/plateread.ts`. |
 | [`dcal.md`](./dcal.md) | The `.Dcal` pure-dye calibration files — per-dye, per-plate-type fluorescence response across all 6 channels at 4 block temperatures, plus a matching empty-plate baseline; the only in-archive source of the channel→dye mapping (`PRIMARYCHANNEL`). Unencrypted ICFF container. Implemented by `packages/core/src/dcal.ts`, entry point `parseDcal(bytes)`; `zpcr.calibrations()` decodes every `.Dcal` entry in an archive. |
 | [`calibration.md`](./calibration.md) | Channel→dye color separation — the algorithm that turns raw per-channel readings plus `.Dcal` calibration data into per-dye concentration estimates. Not a file format doc. Implemented by `packages/core/src/calibration.ts` (linear algebra in `linalg.ts`), entry points `separateDyes()` (one-shot) and the individual `buildDyeResponseCurve`/`buildCalibrationMatrix`/`preprocessChannelReadings`/`separateChannels` stages. |
-| [`threshold.md`](./threshold.md) | Baseline, threshold and Cq — how a per-dye amplification curve becomes a quantification cycle: baseline region selection, subtraction, threshold determination, the crossing rule and end-point RFU. Not a file format doc. Implemented by `packages/core/src/baseline.ts` (§3–§4, §8), `packages/core/src/threshold.ts` (§5–§7, entry point `computeCq()`) and `packages/core/src/analysis.ts` (`computeCqTable()`, the per-run entry point). **§1 is measured against CFX Manager's own exported results** for a committed sample — the Cq stage exactly (`packages/core/test/cfxExport.test.ts`), the baseline stage to within a cycle of window. §9 separates what is deliberately unimplemented from what is still unknown. |
+| [`threshold.md`](./threshold.md) | Baseline, threshold and Cq — how a per-dye amplification curve becomes a quantification cycle, or a reported non-amplification: baseline region selection, subtraction, threshold determination, the crossing rule, end-point RFU, and the app's controls over them. Not a file format doc. §1 states the problem; §3–§7 are the shipped algorithm, implemented by `packages/core/src/baseline.ts` (§3–§4, §7), `packages/core/src/threshold.ts` (§5–§6, entry point `computeCq()`) and `packages/core/src/analysis.ts` (`computeCqTable()`, the per-run entry point); §10 separates what is deliberately unimplemented from what is still unknown. **Appendix A is the measurement against CFX Manager's own exported results** for a committed sample — the Cq stage exactly (`packages/core/test/cfxExport.test.ts`), the baseline stage to within a cycle of window; Appendix B records the alternatives tried and how noisy curves broke them. |
 | [`pltd.md`](./pltd.md) | The `.pltd` plate-definition files — per-well fluorophores, target/gene, sample name and type, replicate, standard quantity. Encrypted + compressed XML container. Implemented by `packages/core/src/pltd.ts`, entry point `parsePltd(bytes)`; `zpcr.plates()` decodes every plate in an archive. |
 | [`prcl.md`](./prcl.md) | The `.prcl` thermal-cycling protocol files — lid/volume settings plus the ordered step list (hold, gradient, melt, goto, plate read), in the same encrypted-ZIP container as `.pltd`/`.pcrd`. The same `protocol2` XML document `.pcrd` embeds. Implemented by `packages/core/src/prcl.ts`, entry point `parsePrcl(bytes)`; `parseProtocol2()` is reused by `pcrd.ts`; `zpcr.protocols()` decodes every `.prcl` entry in an archive. |
 | [`pcrd.md`](./pcrd.md) | The `.pcrd` CFX Manager saved-experiment file — the whole run (plate setup, protocol, every plate read, `RunInfo`/`runlog`, plus analysis/UI state) as one large XML document, in the same encrypted-ZIP container as `.pltd`/`.prcl`. Implemented by `packages/core/src/pcrd.ts`, entry point `parsePcrd(bytes)`, which decodes into the same `Zpcr` shape `parseZpcr` produces. |
@@ -250,6 +250,33 @@ and cross-validated bit-for-bit against the matching `.zpcr`; `wellFactorsCollec
 too (it is the only source of the per-well gain factors `calibration.md` §4.1 needs), and the
 remaining analysis-state subtrees (`dataAnalysisParameters`, `PersistedData`, …) are mapped but
 not yet interpreted. If a decoder changes, update the corresponding doc in the same commit.
+
+## Writing documentation
+
+These docs are read by someone deciding whether to trust or change the code, so they are written
+for clarity first. What that means here, and what to preserve when editing one:
+
+- **Open with the problem, not the mechanism.** State what question the code answers and why the
+  answer isn't obvious from the inputs, before any formula. A reader who stops after §1 should
+  still know what the thing is for.
+- **Main text = what the code does today.** Present tense, plainly, in the order the pipeline
+  runs. One idea per section, with the entry point and the file that implements it named.
+- **Relegate provenance.** How a rule was derived — the measurements, the byte-level spelunking,
+  the comparisons against reference output — belongs in an appendix, referenced from the rule.
+  The rule itself gets one line saying *measured*, *read from the file*, or *this library's own*,
+  because that distinction is what tells a reader which numbers are safe to change.
+- **Keep the failures, out of the way.** Rejected alternatives and the pathological inputs that
+  killed them are valuable — they stop the same idea being re-proposed — but they are a separate
+  appendix, never an aside in the middle of the algorithm.
+- **Mark future work where it is relevant** with a short inline `> **Future:** …` callout, and
+  collect the full list in one section near the end. Distinguish *deliberately not implemented*
+  from *genuinely unknown*.
+- **Prefer a table or a short pseudocode block to a paragraph** when the content is a mapping or
+  a procedure. Quantify: "within 0.11 cycles", not "close enough".
+- **Number sections and reference them from the code** (`threshold.md` §5.2), which is how a
+  constant in a source file stays tied to its justification. Renumbering a doc therefore means
+  updating those references in the same commit — `grep -rn '<doc>.md'` finds them, and bare `§N`
+  references in nearby prose too.
 
 ## Commands
 

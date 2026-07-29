@@ -4,16 +4,16 @@
  * cycle.
  *
  * The whole stage is three short functions, and every constant in it is measured against CFX's
- * own exported curves rather than tuned (`threshold.md` §1.7): the region begins at cycle
+ * own exported curves rather than tuned (`threshold.md` §A.7): the region begins at cycle
  * {@link BASELINE_BEGIN_CYCLE}, ends {@link BASELINE_END_MARGIN} cycles before the well's own Cq
  * (or at the last cycle, when the well has none), and the line is ordinary least squares. There
- * is no smoothing, no onset detection and no validity gate — see `threshold.md` §9 for what was
+ * is no smoothing, no onset detection and no validity gate — see `threshold.md` §10 for what was
  * removed and why.
  *
  * The region depends on the Cq and the Cq depends on the region, so the loop is closed one level
  * up, in `analysis.ts` — see `baselineCorrectCurve`. That circularity is measured, not structural
- * convenience: `threshold.md` §3.1 prices every way out of it, and the cheapest one that keeps
- * §1.8's agreement with CFX is the fixed point.
+ * convenience: `threshold.md` §B.4 prices every way out of it, and the cheapest one that keeps
+ * §A.8's agreement with CFX is the fixed point.
  */
 
 /** A baseline region as a pair of inclusive, 1-based cycle numbers (`baselineBeginRepeat` /
@@ -28,7 +28,7 @@ export interface BaselineRegion {
  *
  * Recovering CFX's own baseline line for all 24 exported curves of `20260726_S183-S185_RVP` and
  * searching for the window that reproduces it puts every well's region at cycle 3 or 4 — never at
- * 1, and never at the `baselineBeginRepeat="2"` the same file persists (`threshold.md` §1.7). The
+ * 1, and never at the `baselineBeginRepeat="2"` the same file persists (`threshold.md` §A.7). The
  * physical reading is the familiar one: block and optics are still settling over the run's first
  * reads, so those points sit off the line the rest of the region describes and tilt the fit.
  */
@@ -38,7 +38,7 @@ export const BASELINE_BEGIN_CYCLE = 3;
  * How many cycles before its Cq an amplifying well's baseline region stops. **2**, measured.
  *
  * The three clean positive controls in the RVP run whose window could be recovered exactly all
- * give `round(Cq) − 2` (`threshold.md` §1.7). The margin exists because the exponential's foot
+ * give `round(Cq) − 2` (`threshold.md` §A.7). The margin exists because the exponential's foot
  * lifts the curve measurably a cycle or two before it reaches the threshold, and a baseline fitted
  * through that foot tilts upward and drags every later value down.
  */
@@ -54,7 +54,7 @@ export const MIN_BASELINE_WIDTH = 5;
  *
  * - **No Cq ⇒ the whole run.** A well that never amplifies has no onset to stop before, so the
  *   baseline is every cycle from {@link BASELINE_BEGIN_CYCLE} on. This is what CFX does — the
- *   window search of `threshold.md` §1.7 lands on 3–45 or 4–45 for every non-amplifying well in
+ *   window search of `threshold.md` §A.7 lands on 3–45 or 4–45 for every non-amplifying well in
  *   the RVP run — and it is the fix for the long-standing "negative curve that rises for five
  *   cycles then goes flat" bug, whose right baseline is the long flat tail, not the start.
  * - **A Cq ⇒ stop {@link BASELINE_END_MARGIN} cycles before it**, at `round(cq) − 2`.
@@ -149,7 +149,7 @@ export function subtractBaseline(
 }
 
 /**
- * The tail filter of `LinearBaseLineNormalizedCurveFit` (`threshold.md` §1.7): a width-3 centred
+ * The tail filter of `LinearBaseLineNormalizedCurveFit` (`threshold.md` §A.7): a width-3 centred
  * mean over the corrected curve's plateau, from `floor(cq) + 3` to the second-to-last cycle. Read
  * from the unfiltered curve — a plain FIR pass, not applied in place.
  *
@@ -178,7 +178,7 @@ export function smoothPlateauTail(values: number[], cq: number | null): number[]
 export const END_POINT_CYCLES = 5;
 
 /**
- * The end-point RFU (`threshold.md` §8): the mean of the corrected curve's last
+ * The end-point RFU (`threshold.md` §7): the mean of the corrected curve's last
  * {@link END_POINT_CYCLES} values. Some assays report no Cq at all and read this instead.
  *
  * Measured: it reproduces the `End Point Results` export's **End RFU** column exactly, to the
