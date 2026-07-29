@@ -7,7 +7,9 @@
  * exports (decoded tables, plate-read dumps) inside a `.zpcr` archive or the file system.
  *
  * Layout: a handful of `# key: value` header comment lines (plate-level metadata), then a
- * standard CSV table with one row per well in row-major order. The fixed columns
+ * standard CSV table with one row per well in column-major order (`A1, B1, C1, … A2, B2`), the
+ * order a plate is actually filled down. Row order is presentation only — {@link parsePlateCsv}
+ * places each row by its own well label, so a file in any order reads back the same. The fixed columns
  * (`Well`…`Quantity`) are followed by **one column per fluorophore**, labelled with the dye
  * name (see {@link FLUOR_COLUMN_RE}); each cell holds only that well's target for that fluor
  * (empty = the fluor isn't in the well, {@link PRESENT_NO_TARGET} = in the well but with no
@@ -192,7 +194,12 @@ export function plateToCsv(plate: PlateDefinition): string {
   if (plate.standardUnits) out += `# standardUnits: ${plate.standardUnits}\r\n`;
   // A column of empty cells says nothing; most plates use neither of these, so leave them out
   // unless some well actually fills one in.
-  const written = plate.wells.filter((w) => !isBlankWell(w));
+  // Column-major (A1, B1, C1, … A2, B2, …): a plate is filled and pipetted down a column, so
+  // that's the order a human reads the table in. `plate.wells` is row-major, and the parser
+  // places each row by its own well label, so the order here is presentation only.
+  const written = plate.wells
+    .filter((w) => !isBlankWell(w))
+    .sort((a, b) => a.col - b.col || a.row - b.row);
   const hasReplicate = written.some((w) => w.replicate !== undefined);
   const hasQuantity = written.some((w) => w.quantity !== undefined);
   out += csvRow([
@@ -383,9 +390,15 @@ export function parsePlateCsv(text: string, options: ParsePlateCsvOptions = {}):
       replicate,
       quantity,
     };
-    for (const f of wellFluors) if (f.target) targets.add(f.target);
-    if (sample) samples.add(sample);
   });
+
+  // Built by walking the wells rather than the file's rows, so the lists don't depend on the
+  // order the rows happen to be written in (`plateToCsv` writes column-major; a hand-authored
+  // or spreadsheet-sorted file may be in any order at all).
+  for (const w of wells) {
+    for (const f of w.fluors) if (f.target) targets.add(f.target);
+    if (w.sample) samples.add(w.sample);
+  }
 
   return {
     plateName: vessel ? vessel[1]!.trim() : (meta.vessel ?? ""),

@@ -98,6 +98,28 @@ describe("plate CSV round-trip", () => {
     expect(parsePlateCsv(plateToCsv(plate), { channelForFluor: SYNTHETIC_CHANNELS })).toEqual(plate);
   });
 
+  it("writes wells column-major (A1, B1, C1, …), the order a plate is filled", () => {
+    const labels = plateToCsv(syntheticPlate())
+      .split("\r\n")
+      .filter((l) => /^[A-H]\d/.test(l))
+      .map((l) => l.split(",")[0]);
+    expect(labels).toEqual([
+      "A1", "B1", "C1", "D1", "E1", "F1", "G1", "H1",
+      "A2", "B2", "C2", "D2", "E2", "F2", "G2", "H2",
+    ]);
+  });
+
+  it("reads a row-major file back identically, so order is presentation only", () => {
+    const plate = syntheticPlate();
+    const lines = plateToCsv(plate).split("\r\n").filter(Boolean);
+    const wellRows = lines.filter((l) => /^[A-H]\d/.test(l));
+    const rowMajor = [
+      ...lines.filter((l) => !/^[A-H]\d/.test(l)),
+      ...[...wellRows].sort(),
+    ].join("\r\n") + "\r\n";
+    expect(parsePlateCsv(rowMajor, { channelForFluor: SYNTHETIC_CHANNELS })).toEqual(plate);
+  });
+
   it("writes and re-reads a plate with no non-blank wells", () => {
     const plate = syntheticPlate();
     const blank = {

@@ -177,7 +177,10 @@ There's no real (encrypted) `.pltd` *writer* — not worth building for a format
 ever needs to read. Instead, `plateCsv.ts` defines a small zpcrweb-only plain-text plate
 format — CSV, canonical extension **`.plt.csv`** (`plateToCsv`/`parsePlateCsv`,
 `isPlateCsvName`) — as the thing the app can actually produce: one `# key: value` header block
-of plate-level metadata, then one CSV row per well. The fixed columns (`Well`, `SampleType`,
+of plate-level metadata, then one CSV row per well, column-major (`A1, B1, C1, … A2`), the
+order a plate is filled down. Row order is presentation only — `parsePlateCsv` places each row
+by its own well label and derives the plate's target/sample lists by walking the wells, so a
+file re-sorted in a spreadsheet reads back identically. The fixed columns (`Well`, `SampleType`,
 `Sample`, plus `Replicate`/`Quantity` when any well on the plate uses them — most don't, and a
 column of empty cells says nothing) are followed by one column per fluorophore, labelled with
 the dye name, whose cells hold only that well's target for it (empty = fluor absent, `+` =
