@@ -132,7 +132,7 @@ export interface CqTableCurve {
    * Duplicates are dropped (first wins) so a repeated pair can neither be double-counted in its
    * group's noise cohort nor end up with two different Cq values. */
   key: string;
-  /** Threshold group (`threshold.md` §5.1): one threshold per group, resolved from the median
+  /** Threshold group (`threshold.md` §5.2): one threshold per group, resolved from the median
    * baseline noise across that group's curves. Normally the fluorophore. */
   group: string;
   cycles: number[];

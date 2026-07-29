@@ -392,7 +392,7 @@ function decodeCalibrationCollection(runDataEl: string): DcalEntry[] {
 /**
  * The per-fluorophore threshold a saved run *pinned by hand* — `thresholdOverrideValue` on a
  * `fluorDataAnalysisParam` whose `autoCalculateThreshold` is `False` (`pcrd.md` §2.5,
- * `threshold.md` §5.4), keyed by the dye's display name.
+ * `threshold.md` §5.3), keyed by the dye's display name.
  *
  * Three details make this less obvious than it looks, each learned the hard way:
  *

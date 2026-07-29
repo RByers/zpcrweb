@@ -411,7 +411,7 @@ export interface Zpcr {
   wellFactors?: WellFactors;
   /**
    * Per-fluorophore thresholds the saved run pinned by hand, keyed by dye name — a `.pcrd`'s
-   * `thresholdOverrideValue` where `autoCalculateThreshold="False"` (`threshold.md` §5.4).
+   * `thresholdOverrideValue` where `autoCalculateThreshold="False"` (`threshold.md` §5.3).
    * Undefined for a `.zpcr`, which stores no analysis parameters at all.
    *
    * **This is a saved user decision, not a measurement**, which is why nothing in the analysis

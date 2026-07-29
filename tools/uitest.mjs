@@ -334,7 +334,7 @@ async function rightAxisChecks(chrome, origin) {
 
 /**
  * A `.pcrd` that CFX saved with a hand-pinned threshold carries that number per fluorophore
- * (`threshold.md` §5.4), and loading such a run must seed the app's own override with it —
+ * (`threshold.md` §5.3), and loading such a run must seed the app's own override with it —
  * that single value is what makes this app reproduce the instrument's Cq exactly. Nothing on
  * screen distinguishes a seeded override from a coincidentally-similar automatic threshold
  * except the field's state, so this is checked rather than looked at.

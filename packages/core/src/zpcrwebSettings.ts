@@ -42,7 +42,7 @@ export const ZPCRWEB_SETTINGS_VERSION = 1;
 export interface ZpcrwebAnalysisSettings {
   /**
    * Manual per-fluorophore threshold overrides in RFU, keyed by fluorophore name (`threshold.md`
-   * §5.1's group key — see `RunAnalysis.thresholdGroupOf` for why thresholds group by dye and
+   * §5.2's group key — see `RunAnalysis.thresholdGroupOf` for why thresholds group by dye and
    * never by target). An entry pins that group's threshold; a group with no entry keeps the
    * automatic one.
    */

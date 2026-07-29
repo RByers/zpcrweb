@@ -1037,7 +1037,7 @@ is: a per-target curve needs channel→dye color separation (`calibration.md`).
   **Both levels are editable, and the finer one wins.** A row's number input sets
   `thresholdOverrides[fluor]`; a curve's sets `curveThresholdOverrides[curveKey]`, which
   `computeCqTable` applies over the group's threshold whatever that resolved to (`threshold.md`
-  §5.4). The group median deliberately refuses to follow any single well, which is right for the
+  §5.3). The group median deliberately refuses to follow any single well, which is right for the
   default and leaves no other way to correct one well without moving every other well of that dye
   with it. An input holding a manual value is tinted green (`.is-override`, `--good-dim`) so a
   hand-set threshold never reads as something the run computed; an automatic one carries the live

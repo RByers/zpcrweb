@@ -1,5 +1,5 @@
 /**
- * The baseline stage of `threshold.md` (§2–§4): choose the flat, pre-amplification part of a
+ * The baseline stage of `threshold.md` (§3–§4): choose the flat, pre-amplification part of a
  * per-dye amplification curve, fit a straight line to it, and subtract that line from every
  * cycle.
  *

@@ -35,7 +35,7 @@ import {
  * different subsets of the plate (the Analysis table's enabled wells, the Curves chart's plotted
  * curves, and every curve for the Curves hover cards). A Cq is not a property of one curve: its
  * group's threshold is the median baseline noise across the curves it's computed *with*
- * (`threshold.md` §5.1), so those three runs legitimately disagreed — the same well showing a Cq in
+ * (`threshold.md` §5.2), so those three runs legitimately disagreed — the same well showing a Cq in
  * one view and "—" in another. There is now exactly one Cq per well/fluor pair per run, computed
  * over the whole plate; callers filter the table for display and never recompute from a subset.
  *
@@ -172,11 +172,11 @@ export interface RunAnalysis {
    * The **threshold** group a well/fluor pair belongs to: its **fluorophore**, always.
    *
    * Deliberately not the target. A threshold is `multiplier × median baseline noise`
-   * (`threshold.md` §5.1), and baseline noise is an optical property of the dye, the instrument and
+   * (`threshold.md` §5.2), and baseline noise is an optical property of the dye, the instrument and
    * the well — the target is a biological label attached to the same physical measurement. Keying
    * the threshold on the target therefore splits one dye's wells into cohorts that differ only in
    * what the experimenter called them, which is exactly the "Cq incomparable across a plate"
-   * failure §5.1 exists to prevent: on `20260720_FirstQualification.zpcr` the three loaded Tex 615
+   * failure §5.2 exists to prevent: on `20260720_FirstQualification.zpcr` the three loaded Tex 615
    * wells carry two targets (HMPV Ma in A3/B3, PIV3 Bo in D3) and used to come out with
    * thresholds 3.3× apart —
    * 162 vs 49 RFU — for near-identical curves. It also made cohorts tiny: PIV3 Bo's was a single
@@ -185,7 +185,7 @@ export interface RunAnalysis {
    * This also matches what the instrument does. CFX persists its analysis parameters —
    * `thresholdOverrideValue` and `autoCalculateThreshold` included — under
    * `fluorDataAnalysisParam fluorId=…`, one entry per **fluorophore** (`pcrd.md` §2.5,
-   * `threshold.md` §1). There is no per-target threshold anywhere in the format.
+   * `threshold.md` §2). There is no per-target threshold anywhere in the format.
    */
   thresholdGroupOf: (row: number, col: number, fluor: string) => string;
   /** The fluorophores thresholds are actually resolved per — the groups {@link thresholdGroupOf}

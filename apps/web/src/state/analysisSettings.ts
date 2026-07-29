@@ -30,7 +30,7 @@ import {
   type ZpcrwebSettings,
 } from "@zpcrweb/core";
 
-/** The library's default for `threshold.md` §5.1's auto-threshold multiplier, and the slider's
+/** The library's default for `threshold.md` §5.2's auto-threshold multiplier, and the slider's
  * starting point. Must track `AutoThresholdOptions.multiplier`'s own default in `@zpcrweb/core`,
  * which documents where the figure comes from (and why it sits below what the CFX anchors
  * imply). */
@@ -40,7 +40,7 @@ export const DEFAULT_THRESHOLD_MULTIPLIER = 20;
 export interface AnalysisSettings {
   /** Manual per-fluorophore threshold override (RFU), keyed by threshold group — the
    * fluorophore, always (see `RunAnalysis.thresholdGroupOf`). A group with no entry uses the
-   * automatic threshold (`threshold.md` §5.1). Edited in the Curves rail's "Threshold overrides"
+   * automatic threshold (`threshold.md` §5.2). Edited in the Curves rail's "Threshold overrides"
    * section; applies to the chart's Cq markers, the hover cards and the table alike, since all
    * three read the run's one Cq table. */
   thresholdOverrides: Map<string, number>;

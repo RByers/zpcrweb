@@ -331,7 +331,8 @@ function defaultSettings(): FileSettings {
     // All 12 reference columns on by default in the Reference view.
     enabledRefCols: new Set(Array.from({ length: 12 }, (_, c) => c)),
     baseline: "raw",
-    // Relative (baseline-corrected) is threshold.md §8's recommended default.
+    // Relative (baseline-corrected) shows the curve every Cq is actually taken against —
+    // threshold.md §4's `LinearBaseLineNormalized`.
     curveView: "relative",
     drawBaseline: false,
     scale: "linear",
@@ -932,7 +933,7 @@ export function useZpcrStore(): ZpcrStore {
         const fromFile = parseZpcrwebSettings(zpcr);
         next = analysisFromZpcrweb(fromFile);
         // A `.pcrd` that CFX saved with `autoCalculateThreshold="False"` carries the threshold the
-        // instrument's own analysis used, per fluorophore (`threshold.md` §5.4). Seed the app's
+        // instrument's own analysis used, per fluorophore (`threshold.md` §5.3). Seed the app's
         // override with it — that is what makes this app reproduce CFX's Cq exactly on such a run.
         //
         // It seeds *state*, and is never read by the analysis pipeline directly: a `.pcrd` and the

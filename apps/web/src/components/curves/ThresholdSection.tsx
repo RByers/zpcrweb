@@ -11,10 +11,9 @@ export interface ThresholdCurveRow {
    * §3) — per-curve, so two wells of one dye routinely differ. */
   beginCycle: number;
   endCycle: number;
-  /** §5.2's successive-difference noise estimate: this curve's contribution to the group median. */
+  /** §5.1's median-absolute-second-difference noise estimate: this curve's contribution to the
+   * group median. */
   noise: number;
-  /** False when the baseline fit was rejected (`threshold.md` §3.5) — flagged, since a threshold
-   * derived from it is the one most worth overriding. */
   /** The whole corrected curve sits above this curve's threshold, so no crossing exists — see
    * `threshold.md` §6. */
   aboveThreshold: boolean;

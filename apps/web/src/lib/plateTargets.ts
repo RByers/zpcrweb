@@ -45,7 +45,7 @@ export interface TargetGroup {
  *
  * That catch-all is only added alongside real targets: a plate with no `geneName` at all is
  * already de facto fluorophore mode, and lumping its dyes into one group would merge their
- * per-group Cq thresholds (`threshold.md` §5.1). Callers fall back to grouping by fluorophore in
+ * per-group Cq thresholds (`threshold.md` §5.2). Callers fall back to grouping by fluorophore in
  * that case — see `AnalysisView`'s `usingTargets`.
  */
 export function targetGroups(
