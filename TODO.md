@@ -5,7 +5,65 @@ visualizer for everything** inside a `.zpcr` archive.
 
 ## Immediately next
 
-- [ ] It seems common for a negative curve to grow in the first 5 cycles then level off flat. It seems like we should be picking the large later flat line as the baseline but we often pick the start instead. See 20230829's well F5 and 20260726 D4 FAM.
+### Match CFX Manager's Cq and end RFU
+
+`samples/20260726_S183-S185_RVP-export.zip` holds CFX's own exported results for
+`samples/20260726_S183-S185_RVP.pcrd` — per-cycle corrected RFU, per-well Cq and end-point RFU.
+Measuring against it turned most of `threshold.md` §5–§7 from a guess into a fact and showed
+several current choices to be wrong; **[`threshold.md`](./threshold.md) §0 is the write-up** and
+§9 lists these in priority order. Nothing below is implemented yet.
+
+- [ ] **Adopt the measured crossing rule** (`threshold.md` §6.1). Two-point **linear**
+      interpolation (not log) on the **cycle index** (no ½-cycle offset); select the crossing
+      followed by the **longest strictly-increasing run**, last on ties; reject crossings with
+      local slope < 1e-5; and treat `T ∉ [min, max]` of the corrected curve as the **only**
+      no-Cq gate. Reproduces all 14 reported Cq values and all 10 no-Cq wells to ~1e-10.
+- [ ] **Add the regression test that proves it.** Parse the export CSVs, feed CFX's own corrected
+      curves and the per-fluor threshold into `computeCq()`, assert against CFX's Cq. This
+      isolates the Cq stage from colour separation and baselining, so it stays green regardless of
+      upstream work — the first test in this repo that checks a computed number against the
+      instrument's own answer.
+- [ ] **Honour `thresholdOverrideValue` from the `.pcrd`** per fluorophore
+      (`pcrd.md` §2.5, `threshold.md` §5.4). Exact for every dye on
+      `autoCalculateThreshold="False"`. Do **not** trust `baselineBeginRepeat`/`EndRepeat` unless
+      `autoCalculateBaseline="False"`.
+- [ ] **Demote the quality gates to diagnostics** (`threshold.md` §7). The reference has no
+      amplification squelch, no baseline-validity veto and no ends-below-threshold rule — it
+      reports a Cq of 14.82 for a pure-noise well that touches the threshold once. Keep
+      `amplified` / `baselineValid` on the result and in the UI; stop letting them suppress a Cq.
+      Land this after or with the threshold work, not before.
+- [ ] **Stop smoothing the analysed curve** (`threshold.md` §0.6, §2). CFX's corrected curves are
+      unsmoothed white noise despite the run persisting `pCRDigitalFilter="WeightedMean"`. Default
+      the analysis path to `Disable`; keep `smoothCurve()` for onset detection and the chart. A
+      deletion — it also removes the reason §3.4 has to re-read the unsmoothed curve.
+- [ ] **Add end-point RFU** = mean of the corrected curve's last 5 cycles (`threshold.md` §8a),
+      on `CqTableEntry`. Exact on all 14 wells. Distinct from the existing `deltaRfu`.
+- [ ] **Replace the auto-threshold rule** (`threshold.md` §5.5). The two dyes of the RVP run want
+      thresholds of 92.02 and 8.06 with near-identical baseline noise, so no noise multiplier
+      fits; the threshold is a per-curve *shape* quantity averaged over the plate. 8.06451415811512
+      is a real CFX-computed auto threshold to test against — the first this project has had.
+- [ ] **Implement the tail filter** for `LinearBaseLineNormalizedCurveFit` — the observed default
+      baseline mode, currently unimplemented. A width-3 centred mean over cycles `floor(Cq)+3` …
+      `N−1` (last cycle excluded), read from the unfiltered curve (`threshold.md` §0.9, §4). It
+      doesn't touch the baseline, threshold or Cq — only the reported plateau, and therefore the
+      end-point RFU.
+- [ ] **Fix baseline-region selection for the two cases now measured** (`threshold.md` §0.9): a
+      non-amplifying well is baselined over essentially the **whole run** (never 2–9), and an
+      amplifying well's region ends around `round(Cq) − 2`, beginning at cycle 3–4. The first is
+      the long-standing bug in "Other" below, now with reference data behind it.
+- [ ] **Ask for an export of `20260726_S183-S185_RVP-drift-correction.pcrd`.** Same experiment,
+      `pDriftCorrection="True"`, nothing else changed — a controlled A/B that would answer what
+      drift correction actually does (`calibration.md` §6) per well and per cycle.
+- [ ] **Ask for an export of `20260720_Luna_noRT.pcrd` too.** `calibration.md` §8's per-dye scale
+      factor was measured against two scalars of uncertain definition from that run (one read off
+      a chart) and is contradicted by the RVP full-curve comparison. An export settles it.
+- [ ] **Chase the last ~2 × 10⁻⁴ of colour separation** (`calibration.md` §8): six Cy5 wells and
+      Tex 615 G4 reconstruct to 0.14–0.46 RFU rather than 5e-3. Dye- and well-specific, present on
+      flat curves, not well factors. Small, but it is now the largest known separation error.
+
+### Other
+
+- [ ] It seems common for a negative curve to grow in the first 5 cycles then level off flat. It seems like we should be picking the large later flat line as the baseline but we often pick the start instead. See 20230829's well F5 and 20260726 D4 FAM. Corroborated: on CFX's own corrected curves the best-fitting baseline window for every non-amplifying well is the *whole run* (`threshold.md` §0.9, §3.2).
 - [ ] Enable sorting on the table view. Click to sort by Cq or well.
 - [ ] Review all indexedb storage beyond the data files. Remove anything which effects the analysis (like threshold overrides) - that should come strictly from the file. Whenever such state exists, add a new entry to the zpcr file, call it "zpcrweb.json". In order to make storing this efficient, use a debounce system and pagehide handler - eg. only recreate the zip file in the indexeddb from the in-memory state at most once a minute and on pagehide. When a zpcr file is loaded, read these settings from it (if any) to initialize state. Consider whether we can remove everything from indexeddb other than the files now - what would we lose, and is it just transient state which could be stored in the URL (like the active view mode)?
 

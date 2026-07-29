@@ -208,6 +208,25 @@ No `.zpcr` equivalent — this is what CFX Manager adds on top of the raw run:
   specifies the baseline/threshold/Cq algorithms they configure. The remaining sub-elements
   (`adDataAnalysisParams`, `fsdDataAnalysisParams`, `OligoContentParams`, `geneExpressionData`)
   are still uninterpreted.
+
+  **`thresholdOverrideValue` is authoritative and exact.** In
+  `samples/20260726_S183-S185_RVP.pcrd` the FAM entry (`fluorId="5"`) carries
+  `autoCalculateThreshold="False"` and `thresholdOverrideValue="92.0212554931641"`. Solving each
+  FAM well's exported Cq back through the threshold-crossing rule recovers **the same 15 digits**
+  — see [`threshold.md`](./threshold.md) §0.3. So this field is not a hint: feeding it to the Cq
+  stage reproduces CFX's own answers bit for bit. A dye left on `autoCalculateThreshold="True"`
+  persists `NaN` here and the threshold CFX used is *not* stored anywhere in the file — in that
+  sample Cy5 (`fluorId="4"`) and Tex 615 (`fluorId="11"`) are both on auto.
+
+  **`baselineBeginRepeat` / `baselineEndRepeat` are not.** Both RVP fluorophores persist `2`/`9`
+  while also carrying `autoCalculateBaseline="True"`, and the regions CFX actually used (inferred
+  from its exported corrected curves) are frequently nowhere near cycles 2–9. Read these as the
+  defaults the auto search starts from; trust them as an actual region only when
+  `autoCalculateBaseline="False"`.
+
+  Note also that no *results* live in this tree, or anywhere else in a `.pcrd`: the file holds the
+  raw plate reads and the analysis **settings**, and CFX recomputes the corrected curves, Cq values
+  and end-point RFU on load. To get its answers you need its CSV exports — see §2.5a.
 - **`wellFactorsCollection`** (~3.7 KB) — **decoded** (unlike the rest of this section), since it
   is the only source of the per-well gain factors [`calibration.md`](./calibration.md) §4.1
   applies to a raw reading. `WFHeader` is a `WellFactorsHeader` giving `Channels`, `Wells`, the
@@ -223,6 +242,34 @@ No `.zpcr` equivalent — this is what CFX Manager adds on top of the raw run:
 
 These subtrees use a distinct serializer convention: a `V="1"` attribute on the wrapper, a
 `SerVersion` text child, and sometimes a `___TypeInfo` child naming the .NET type.
+
+### 2.5a The CSV exports — the reference answers a `.pcrd` doesn't contain
+
+Because a `.pcrd` stores settings and raw reads but no computed results (§2.5), CFX Manager's
+own numbers are only obtainable through its export function, which writes a ZIP of CSVs. One such
+export is committed beside its experiment as
+`samples/20260726_S183-S185_RVP-export.zip`, and it is the only ground truth this project has for
+the analysis pipeline:
+
+| CSV | Contents |
+|---|---|
+| `… Quantification Amplification Results_<fluor>.csv` | Baseline-corrected RFU: one row per cycle, one column per loaded well. **The output of the baseline stage.** |
+| `… Quantification Cq Results_0.csv` | One row per well/fluor: target, content, sample, **Cq**, Cq mean/SD, starting quantity, set point. |
+| `… End Point Results_<fluor>.csv` | **End RFU** (the mean of the corrected curve's last 5 cycles), plus `Call` / `Sample Type` / `CallType` / `Is Control`. |
+| `… Quantification Plate View Results_<fluor>.csv` | The same Cq values laid out as a plate grid. |
+| `… Quantification Summary_0.csv` | Well / fluor / target / content / sample / Cq / SQ. |
+| `… Melt Curve Plate View Results_<fluor>.csv` | Melt peaks per well. |
+| `… Gene Expression Results - Bar Chart_0.csv` | Relative-quantity table, keyed `<dataset>-<fluor>` × target × sample. |
+| `… Standard Curve Results_….csv` | Efficiency %, slope, y-intercept, R² per fluor (`N/A` with no standards). |
+| `…_Run Information.csv` | Run start/end, sample volume, lid temp, protocol and plate file names, base and optical-head serials, CFX Manager version. |
+
+Format notes: every row starts with an empty leading field (so column 0 is blank), wells are
+zero-padded (`A04`), numbers carry ~15 significant digits, and a missing value is the literal
+`NaN`. The amplification CSV's `Cycle` column is the abscissa the reported Cq values are expressed
+in — [`threshold.md`](./threshold.md) §0.3 confirms this by solving Cq back for the threshold.
+
+Requesting an export alongside any newly captured `.pcrd` costs nothing and is the difference
+between a sample that can be *read* and one that can be *validated against*.
 
 ### 2.6 `calibrationCollection` — the embedded `.Dcal` data
 

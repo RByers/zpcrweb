@@ -309,6 +309,16 @@ raw bytes ─▶ fflate.unzipSync ─▶ { name: Uint8Array }
   second-derivative maximum, and the §7 amplification squelch — now gated first by
   `baseline.ts`'s baseline-validation result (`computeCq()`'s `baselineValid` option). `computeCq()`
   ties both algorithms together. See [`threshold.md`](./threshold.md).
+
+  > **Much of the paragraph above is now known to be wrong, and no code has changed yet.**
+  > Measuring against CFX's own exported results (`threshold.md` §0) settled the Cq stage exactly:
+  > the interpolation is **linear**, not logarithmic; the crossing is chosen by the **longest
+  > following increasing run**, not the final above-threshold run; the only no-Cq gate is the
+  > threshold lying outside the corrected curve's range, so the squelch and the baseline-validity
+  > veto have no counterpart; and the auto threshold is not a multiple of baseline noise at all
+  > (two dyes on one plate want 92.02 and 8.06 with near-identical noise). The noise statistic
+  > survives — it is still what §3.4's start-trim runs on. See `threshold.md` §0 for the
+  > measurements, §9 and [`TODO.md`](./TODO.md) for the ordered work.
 - **`stats.ts`** — the statistics `baseline.ts` and `threshold.ts` both need, in their own module
   so neither imports the other: standard deviation, mean squared successive difference, median, and
   `whiteness()` (von Neumann's ratio — mean squared successive difference over variance, ≈2 for

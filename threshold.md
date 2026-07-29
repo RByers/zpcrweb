@@ -14,24 +14,309 @@ Cq (also written Ct) — takes four more stages:
 Cq is the (fractional) cycle number at which a well's signal becomes reliably distinguishable from
 its own noise. Everything below exists to make that judgement reproducible.
 
-> **Status: implemented (§2–§7), not yet validated against a reference instrument.**
-> `packages/core/src/baseline.ts` implements smoothing, baseline-region selection (both automatic
-> strategies plus the §3.4 start-trim) and baseline subtraction (the `Raw`/`RawBaseLineSubtracted`/
-> `LinearBaseLineNormalized` modes). `packages/core/src/threshold.ts` implements threshold
-> determination (manual override or auto, §5), both Cq algorithms (threshold crossing and
-> curve-shape inflection, §6) and the amplification squelch (§7).
-> `packages/core/src/stats.ts` holds the statistics both stages share. This document specifies
-> reasonable algorithms and the option space a faithful implementation needs, so that the numbers
-> can be compared against a reference instrument's own output rather than invented. The option
-> names and default values quoted are those a real CFX run persists — they are observable in the
-> committed sample `samples/20260720_Luna_noRT.pcrd`, whose analysis parameters are described in
-> [`pcrd.md`](./pcrd.md) §2.5.
+> **Status: implemented (§2–§7). The Cq stage is now validated exactly against CFX's own
+> output; the baseline stage is not.** `packages/core/src/baseline.ts` implements smoothing,
+> baseline-region selection (both automatic strategies plus the §3.4 start-trim) and baseline
+> subtraction (the `Raw`/`RawBaseLineSubtracted`/`LinearBaseLineNormalized` modes).
+> `packages/core/src/threshold.ts` implements threshold determination (manual override or auto,
+> §5), both Cq algorithms (threshold crossing and curve-shape inflection, §6) and the
+> amplification squelch (§7). `packages/core/src/stats.ts` holds the statistics both stages share.
 >
-> **On agreement with CFX.** Bio-Rad documents none of the algorithms below — only the *option
-> names and values* a saved run persists are observable. So each section flags whether a choice is
-> (a) **read from the file**, and therefore certain; (b) **inferred** from those values plus the two
-> thresholds CFX persisted; or (c) **this library's own**, with no evidence either way. Most of the
-> numeric core is (c). Nothing here should be read as "this is what CFX does".
+> **§0 is the part to read first.** As of 2026-07-28 a run exists in `samples/` with both the
+> saved experiment *and* CFX's own exported results for it — per-cycle baseline-corrected RFU,
+> per-well Cq, and end-point RFU. That turns most of §5–§7 from "a reasonable algorithm" into a
+> measurement, and several of this document's recommendations turn out to be **wrong**. §0 records
+> what was measured and flags every section it overturns; those sections carry inline
+> `**Superseded**` notes. Nothing has been changed in the code yet.
+>
+> **On agreement with CFX.** Away from what §0 pins down, Bio-Rad documents none of the algorithms
+> below — only the *option names and values* a saved run persists are observable. So each section
+> flags whether a choice is (a) **read from the file** or **measured against exported results**,
+> and therefore certain; (b) **inferred**; or (c) **this library's own**, with no evidence either
+> way. The option names and default values quoted are those a real CFX run persists — observable
+> in the committed samples `20260720_Luna_noRT.pcrd` and `20260726_S183-S185_RVP.pcrd`, whose
+> analysis parameters are described in [`pcrd.md`](./pcrd.md) §2.5.
+
+---
+
+## 0. Ground truth: what CFX's own exported results show
+
+*Everything in this section is **measured**, from data files only. Reproduce it with the scripts
+described at the end of the section.*
+
+### 0.1 The dataset
+
+`samples/20260726_S183-S185_RVP.pcrd` is a 45-cycle, 3-fluorophore (FAM, Cy5, Tex 615) run.
+Alongside it, `samples/20260726_S183-S185_RVP-export.zip` holds the CSVs CFX Manager exports for
+that same experiment:
+
+| Export | What it gives |
+|---|---|
+| `Quantification Amplification Results_<fluor>.csv` | **CFX's own baseline-corrected RFU, per cycle, per well.** The output of §2–§4. |
+| `Quantification Cq Results_0.csv` | CFX's Cq per well/fluor, to 15 significant digits. The output of §5–§6. |
+| `End Point Results_<fluor>.csv` | End RFU and the end-point call per well. |
+| `Quantification Plate View`, `Summary`, `Standard Curve`, `Melt Curve`, `Gene Expression` | Derived views over the same numbers. |
+
+So the *input* to §5–§6 (the corrected curve) and the *output* (the Cq) are both known exactly,
+independently of whether this library's §2–§4 reproduce the correction. That makes the threshold
+and Cq stages directly checkable, and they now check out to the last bit.
+
+A second file, `20260726_S183-S185_RVP-drift-correction.pcrd`, is the same experiment re-saved
+with `pDriftCorrection="True"` and nothing else changed — an A/B pair for the drift-correction
+question in [`calibration.md`](./calibration.md) §6, once a matching export exists for it.
+
+### 0.2 The Cq rule, reproduced exactly
+
+Feeding CFX's own corrected curves and its own persisted threshold into the rule below reproduces
+**all 14 reported Cq values, and all 10 reported no-Cq wells, to ~1e-10 cycles** — i.e. exactly,
+to the precision the CSV carries:
+
+```
+cq(y, T):                        # y = corrected RFU per cycle, indexed by cycle 1..N
+  if T < min(y) or T > max(y):   return no Cq
+  crossings = []
+  for i in 2..N:
+    if y[i] >= T and y[i-1] < T:
+      m = (y[i] - y[i-1]) / (x[i] - x[i-1])        # x[i] = the cycle number, see §0.3
+      if |m| < 1e-5: continue                      # reject a flat "crossing"
+      xc = x[i-1] + (T - y[i-1]) / m               # two-point LINEAR interpolation
+      run = number of further consecutive cycles with y strictly increasing
+      crossings.append((run, xc)); skip i past that run
+  if crossings empty: return no Cq
+  return the last crossing with the largest `run`
+```
+
+Four things in that are different from what §6 currently recommends, and each is now settled:
+
+1. **Linear interpolation, not logarithmic.** §6.1 recommends interpolating `log(corrected)`.
+   CFX interpolates the corrected RFU itself, between exactly two points. Log interpolation gives
+   a Cq a few hundredths of a cycle earlier and cannot match.
+2. **The abscissa is the cycle number as exported** — 1, 2, 3, … — with no half-cycle offset.
+   This was tested directly: solving each well's reported Cq back for the threshold that would
+   produce it gives, per fluorophore, *the same threshold to 1e-12* under `x = cycle`, and values
+   scattered over ±10% under `x = cycle + ½`. See §0.3.
+3. **The selection rule is "longest following monotone-increasing run", not "the final run above
+   threshold".** On clean curves they coincide. They differ on a curve that crosses, falls back
+   and crosses again — see the well in §0.5.
+4. **The only "no amplification" gate is `T ∉ [min(y), max(y)]`.** There is no amplification
+   squelch, no baseline-validity gate, and no "no Cq if the trace ends under the threshold" rule.
+   §7's gates and §6.1's `noCtIfEndsUnderThreshold` default have no counterpart in the reference.
+
+### 0.3 Solving the reported Cq back for the threshold
+
+The check that pins both the abscissa and the "one threshold per fluorophore" grouping. For each
+well with a Cq, take the bracketing cycle pair and solve the linear interpolation for `T`:
+
+| Fluor | Wells with a Cq | Implied `T`, `x = cycle` | Spread | Implied `T`, `x = cycle + ½` |
+|---|---|---|---|---|
+| FAM | 6 | **92.0212554931641** | 4e-12 | 60.9 … 68.2 |
+| Tex 615 | 3 | **8.06451415811512** | 8e-13 | 1.2 … 7.5 |
+
+Both readings are decisive, and the FAM value is independently confirmed: the `.pcrd` persists
+`thresholdOverrideValue="92.0212554931641"` for `fluorId="5"` (FAM) — **the same 15 digits**. That
+single equality validates the abscissa, the interpolation form, the per-fluorophore grouping and
+the file field all at once.
+
+### 0.4 The auto threshold is a curve-shape quantity, not a multiple of noise
+
+The Tex 615 value is the more interesting one, because Tex 615 (`fluorId="11"`) is on
+`autoCalculateThreshold="True"` with `thresholdOverrideValue="NaN"` — nothing is persisted, so
+**8.0645 is a threshold CFX computed itself**, recovered here from its own outputs. It is the
+first genuine auto-threshold anchor this project has had, and it does not fit §5.1's model:
+
+- The two dyes' thresholds differ by **11×** (92.02 vs 8.06) on the same plate, in the same
+  cycles, on the same wells. Their baseline noise does not: flat wells in both dyes jitter by
+  ~1–3 RFU cycle-to-cycle. A noise multiple would have to be ~35× for FAM and ~3× for Tex 615.
+- Nor does it track amplitude: FAM's amplifying wells rise to ~4800 RFU and Tex 615's to ~1700, a
+  ratio of 3, not 11.
+- 8.06 RFU is **0.5% of the rise** of the Tex 615 well that reaches 1574 RFU. No noise multiplier
+  in §5.1's range (3–80) lands there from a ~1.5 RFU noise floor.
+
+What does explain an 11× per-dye spread is a threshold read off **the shape of each curve** and
+then averaged over the plate — a per-well "where does this curve leave its baseline" quantity,
+which depends on how sharply each dye's curves turn, rather than on how noisy they are. §5.1
+should be replaced by such a rule; the proposal is in §5.5.
+
+### 0.5 Two wells that settle the quality-gate question
+
+Both are Tex 615, both from the run above, and both are worth reading in full:
+
+**B4 — pure noise, and CFX reports a Cq of 14.8211331477313.** Its corrected curve never
+amplifies; it drifts from −24 RFU up to about +6 and sits there, ending at −1.8. Exactly one
+cycle, cycle 15, pokes above the threshold at 8.5 RFU. CFX interpolates between cycle 14 (5.8) and
+cycle 15 (8.5) and reports the crossing. So the reference has **no** amplification squelch, **no**
+ends-below-threshold rule, and does **not** anchor to the final above-threshold run — this well's
+only crossing is a single-point excursion followed by 30 cycles of decline.
+
+**E4 — a clear monotone rise from 19.7 to 107 RFU, and CFX reports no Cq.** Not because it failed
+any amplification test: because after baseline correction its *minimum* is 19.7, which is above
+the 8.06 threshold, so `T < min(y)` and the curve is rejected as never having crossed. Its
+baseline region evidently sits at the very start of a curve that rises from cycle 1.
+
+Together they show the reference is far more permissive than §7 and far more literal than §6.1:
+it asks only "does this curve cross this line", and answers with interpolation. Everything that
+looks like quality control in CFX's output is a consequence of where the *threshold* landed, not
+of a gate applied to the curve. That is a genuine simplification available to this library — see
+§7.
+
+### 0.6 The analyzed curve is not smoothed
+
+§2's digital filter (`pCRDigitalFilter="WeightedMean"`, `smoothFilterWidthPref="5"`) does **not**
+appear in the exported corrected curves, and neither does any other smoothing.
+
+Test: for a flat well, take first differences of the corrected curve and measure their lag-1
+autocorrelation. White noise gives −0.5; a width-5 triangular weighted mean of white noise gives
++0.5 (simulated, 4000 points). Measured over cycles 5–45 of every non-amplifying well in the run:
+
+| Wells | lag-1 autocorrelation of first differences |
+|---|---|
+| 12 flat wells across Cy5, FAM, Tex 615 | **−0.26 … −0.60**, mean ≈ −0.42 |
+| simulated white noise | −0.50 |
+| simulated width-5 weighted mean | +0.50 |
+
+Independently confirmed by §0.9, which reproduces the corrected curve from the raw dye curve to
+**5e-3 RFU across all 45 cycles** on every non-amplifying well, with no filter of any kind in the
+model. A width-5 weighted mean would leave residuals of tens of RFU.
+
+So an implementation aiming to match CFX should **not smooth the curve that gets baselined,
+thresholded and reported.** Smoothing belongs, if anywhere, inside onset detection (§3.2), where
+it is a search heuristic over a curve nobody reports. This deletes a whole stage from the
+pipeline and removes §2's "smoothing shifts Cq slightly" caveat along with it.
+
+> **Correction — there *is* one filter, at the other end of the curve.** An earlier revision of
+> this section also claimed that `LinearBaseLineNormalizedCurveFit`'s post-Cq refinement was
+> absent, on the grounds that local roughness (RMS third difference) doesn't drop after the Cq.
+> That test was wrong: it is swamped by the curvature of the exponential rise, which is exactly
+> where the filter applies. §0.9 finds the filter, and it is exact — a width-3 centred mean over
+> the curve's **tail only**. It does not affect the baseline, the threshold or the Cq, all of
+> which are settled before it runs; it changes the reported RFU of the amplification plateau, and
+> therefore the end-point RFU of §0.7.
+
+### 0.7 End-point RFU: the mean of the last five cycles
+
+The `End Point Results` export's **End RFU** column equals the arithmetic mean of the last **5**
+values of the same well's corrected curve — exactly, to the CSV's full precision, for all 14 wells
+across FAM and Tex 615. It is not the last value (which differs by up to 320 RFU on a
+still-rising well), not the last 3, and not the last 10:
+
+| Well (FAM) | End RFU | last value | mean of last 3 | **mean of last 5** | mean of last 10 |
+|---|---|---|---|---|---|
+| A4 | 674.826 | 906.139 | 796.622 | **674.826** | 395.067 |
+| E9 | 4622.190 | 4653.062 | 4639.122 | **4622.190** | 4534.335 |
+| H9 | 1418.779 | 1739.195 | 1607.959 | **1418.779** | 866.369 |
+| C4 | −1.693 | 0.672 | −0.940 | **−1.693** | −0.793 |
+
+This library has no end-point stage at all; §8a proposes one, since it is three lines and is the
+only number some assays report.
+
+### 0.8 The end-point call needs a negative control
+
+Secondary, but observable. In the FAM export, wells at 2906/4622/4773/4059 RFU are called
+`(+) Positive`, the well at 1419 RFU is the `Neg Ctrl` and is called `Negative`, and the well at
+675 RFU — which *does* have a Cq of 38.14 — is `NoCall`. So the call threshold sits between 675
+and 1419 and is derived from the negative control, not from a fixed RFU. In the Tex 615 export,
+which has **no** negative control, every well is `Unassigned` regardless of its RFU (including one
+at 1574). Cq and the end-point call are independent verdicts and disagree freely.
+
+### 0.9 The baseline stage, solved
+
+Subtracting the exported corrected curve from this library's own colour-separated raw dye curve
+for the same well exposes CFX's baseline directly, and the answer is clean. Run the separation
+(`calibration.md`) over `20260726_S183-S185_RVP.pcrd`, take `d = raw − corrected`, and:
+
+**`d` is a straight line in the cycle number, to a residual RMS of 4–9 × 10⁻³ RFU** on 17 of the
+24 exported curves. For a non-amplifying well that holds across all 45 cycles; for an amplifying
+well it holds up to a break point identified below. So the correction really is
+
+```
+corrected[c] = raw[c] − (slope·c + intercept)
+```
+
+with `c` the cycle number — an ordinary linear baseline, subtracted from an unsmoothed curve,
+exactly as §4's `LinearBaseLineNormalized` describes. Fitting `d` gives CFX's own `slope` and
+`intercept` per well, to five significant figures.
+
+#### The tail filter — `LinearBaseLineNormalizedCurveFit`, exactly
+
+On a well with a Cq, `d` departs the straight line at one specific cycle and stays off it. On FAM
+E9 (Cq 23.0733) the residual is a textbook line from cycle 1 to 25 — 2.45, 2.25, 2.05, … −2.37,
+stepping by 0.205 a cycle — and then jumps to −43 at cycle 26. Modelling the departure as a
+**width-3 centred mean applied to the corrected curve's tail** reproduces it exactly:
+
+```
+for c = floor(Cq) + 3 … N−1:                       # N = last cycle; the last cycle is NOT filtered
+    out[c] = (corrected[c−1] + corrected[c] + corrected[c+1]) / 3
+```
+
+read from the *unfiltered* curve (a plain FIR pass, not applied in place — an in-place variant
+was tried and is 7× worse). With that one line added, the full reconstruction of CFX's corrected
+curve from the raw dye curve lands at **4–7 × 10⁻³ RFU RMS over all 45 cycles**, on curves
+spanning 4653 RFU. Three details, each measured rather than assumed:
+
+- **The start cycle is `floor(Cq) + 3`** — confirmed on all 9 wells with a Cq, across two dyes and
+  Cq values from 14.8 to 38.1, with no exceptions.
+- **The last cycle is left alone.** Duplicating the edge value instead leaves cycle 45 off by 4.4
+  RFU while every other cycle is exact.
+- **Everything before the start cycle is untouched**, so the baseline, the threshold and the Cq —
+  all settled earlier — are unaffected. This filter is cosmetic, and it changes only the reported
+  plateau RFU and hence the §0.7 end-point value.
+
+That closes the "exact form of the curve-fit refinement" question §9 has carried since this
+document was written: mode `LinearBaseLineNormalizedCurveFit` is mode `LinearBaseLineNormalized`
+plus this three-point tail average.
+
+#### The baseline window: recovered approximately, not exactly
+
+With `slope` and `intercept` known per well, the remaining question is which cycles were fitted.
+Searching every `(begin, end)` pair for the ordinary least-squares fit of the raw curve that
+reproduces the recovered line gives a consistent and sensible picture:
+
+| Well | Cq | Best-matching window |
+|---|---|---|
+| FAM B4, D4 | — | cycles 4–45 |
+| FAM C4, Cy5 A4, B4, D4, E4, F4 | — | cycles 3–45 |
+| Cy5 A9 | — | cycles 4–45 |
+| FAM E9 | 23.07 | cycles 3–21 |
+| FAM G9 | 23.00 | cycles 3–21 |
+| FAM F9 | 21.87 | cycles 3–20 |
+
+Two rules fall out. **A non-amplifying well is baselined over essentially the whole run** —
+never the 2–9 default — which is the §3.2 failure mode already logged as the first entry in
+[`TODO.md`](./TODO.md). **An amplifying well's baseline ends about two cycles before its Cq**:
+the three clean positive controls above all give `round(Cq) − 2` exactly. Both begin at cycle 3
+or 4, not the `baselineBeginRepeat="2"` the file persists.
+
+**But no window is exact.** The best fit is off by 0.02–0.5 RFU on curves of thousands, and that
+gap does not close under any variant tried: fitting the line to a smoothed copy of the curve
+(triangular-5, boxcar-5, boxcar-3, with shrinking, skipped and clamped edge handling — 8
+combinations), or forcing the slope to zero. Unsmoothed OLS remains the best of them and is still
+not exact. Note this residual **cannot** be explained away by an error in this library's colour
+separation: any affine difference between our raw curve and CFX's cancels out of the comparison
+identically, and a non-affine one is bounded at 5e-3 RFU by the straight-line result above.
+
+So the baseline *model* is settled and the window is known to within a cycle or two, but the exact
+window-selection rule — and whatever makes the fit differ slightly from plain OLS — is not. The
+practical consequence is small: reconstructing with the best-matching window instead of the exact
+line moves the corrected curve by well under 1 RFU. Against a FAM threshold of 92 RFU that is
+under 1% of a threshold crossing, so a Cq computed this way lands within a few thousandths of a
+cycle of CFX's — but it is not the bit-exact agreement §0.2 achieves downstream.
+
+#### A note on the wells that don't reach 5e-3
+
+Seven curves — six Cy5 wells and Tex 615 G4 — fit the straight line only to 0.14–0.46 RFU rather
+than 5e-3. That residual is *not* a baseline effect: it is present on flat, no-Cq curves where no
+filter runs, and it is dye- and well-specific (Cy5 C4 misses while FAM C4 in the same well is
+exact). It is a small colour-separation difference, ~2 × 10⁻⁴ relative, and it belongs to
+[`calibration.md`](./calibration.md) rather than here. Well factors are ruled out — this `.pcrd`'s
+`wellFactorsCollection` is the default identity table.
+
+### 0.10 Reproducing these measurements
+
+All of §0 comes from two inputs and no instrument: the export ZIP, and the `.pcrd`'s decrypted
+XML (`parsePcrd` with the password, then the `dataAnalysisParameters` subtree — see
+[`pcrd.md`](./pcrd.md) §2.5). The Cq check in §0.2 is ~40 lines: parse the amplification CSV into
+`(cycle, well) → RFU`, parse the Cq CSV, run the pseudocode above with the per-fluor threshold,
+and compare. It belongs in the test suite as a regression fixture — see §9.
 
 ---
 
@@ -71,6 +356,20 @@ Note `pDriftCorrection` sits in this group — it is a baseline setting, not an 
 ## 2. Smoothing (the digital filter)
 
 > Implemented by `smoothCurve()` in `packages/core/src/baseline.ts`.
+
+> **Superseded by §0.6 — proposed change: don't smooth the analysed curve.** CFX's exported
+> corrected curves are unsmoothed white noise about their baselines (lag-1 autocorrelation of
+> first differences ≈ −0.5, where a width-5 weighted mean would give +0.5), even though the same
+> run persists `pCRDigitalFilter="WeightedMean"` and `smoothFilterWidthPref="5"`. So the filter
+> named in the file is not applied to the curve that is baselined, thresholded, reported and
+> exported — it is presumably a display or internal-search setting.
+>
+> The proposed change is a deletion: default the analysis pipeline to `Disable`, keep
+> `smoothCurve()` for onset detection (§3.2), where it operates on a curve nobody reports, and
+> for the chart if a smoothed overlay is ever wanted. That removes the "smoothing shifts Cq
+> slightly" trap below, removes the end-handling ambiguity, and removes the serial correlation
+> that §3.4 currently has to work around by re-reading the unsmoothed curve. The rest of this
+> section stays as documentation of what the option *means*, not of what to do with it.
 
 Applied to the curve before baselining. Options:
 
@@ -159,6 +458,14 @@ Refinements worth having, with reasonable defaults:
   cycles above the threshold, which §6.1 reads as a failed baseline — so the well reported no Cq at
   all, silently, despite obvious amplification.
 
+**On a well that never amplifies, take the whole run.** §0.9's window search over CFX's own
+corrected curves lands on cycles 2–45 (or 3–45) for every non-amplifying well in the RVP sample —
+the entire trace, since there is no onset to stop before. That is a useful check on (a) and (b)
+alike: both are onset detectors, and an onset detector applied to a curve with no onset must
+return "no onset" rather than a plausible-looking early region. The first entry in
+[`TODO.md`](./TODO.md) is this failure mode — a negative curve that rises for five cycles and then
+goes flat, where the region should be the long flat tail and this library picks the start.
+
 **(b) Regression / iterative extension.** Fit a straight line to a short initial region, then
 extend it one cycle at a time while each new point stays within a confidence band of the fit
 (e.g. within *k* standard errors of the extrapolated line). Stop at the first point that departs
@@ -235,9 +542,15 @@ wants the raw one.
 | `Raw` | No correction — plot the separated curve as-is. |
 | `RawBaseLineSubtracted` | Subtract a **constant**: the mean of the baseline region. Simplest useful correction. |
 | `LinearBaseLineNormalized` | Fit a **straight line** to the baseline region and subtract it across all cycles. Removes a sloping (drifting) baseline, not just an offset. |
-| `LinearBaseLineNormalizedCurveFit` | As above, but the baseline region and the fit are refined against a model of the whole curve rather than taken as given. **The observed default.** |
+| `LinearBaseLineNormalizedCurveFit` | As above, **plus a width-3 centred mean over the curve's tail** (cycles `floor(Cq)+3` … `N−1`, last cycle excluded). Nothing about the baseline or the Cq is refined — see §0.9. **The observed default.** |
 | `ReferenceNormalized` | Normalize against a reference dye/well before baselining (e.g. a passive reference). |
 | `ReferenceLinearBaseLineNormalized` | Both: reference-normalize, then subtract a fitted line. |
+
+`LinearBaseLineNormalizedCurveFit` is now fully specified — it is `LinearBaseLineNormalized`
+followed by a single FIR pass over the tail, and §0.9 reproduces CFX's exported curve to 5e-3 RFU
+with exactly that model. Since it is the observed default, implementing it is worth the three
+lines: without it, every reported plateau RFU (and therefore every §8a end-point value) is off by
+several RFU on an amplifying well.
 
 For a first implementation, `RawBaseLineSubtracted` and `LinearBaseLineNormalized` cover almost
 everything:
@@ -255,7 +568,20 @@ the instrument shows any drift over the run, and reduces to the constant form wh
 > Implemented by `baselineNoise()`, `autoThreshold()` and `resolveThreshold()` in
 > `packages/core/src/threshold.ts`.
 
-### 5.1 Automatic
+### 5.1 Automatic — the noise-multiple rule (**superseded**, see §5.5)
+
+> **Superseded by §0.4.** A CFX-computed auto threshold is now known exactly for one dye
+> (Tex 615, **8.06451415811512**), alongside a persisted override for another on the same plate
+> (FAM, **92.0212554931641**). They differ by **11×** while the two dyes' baseline noise differs
+> by well under 2× and their amplitudes by 3×, so no single multiple of a noise statistic
+> reproduces both. That is not a case for re-tuning the multiplier — it rules out the *form* of
+> the rule. §5.5 proposes the replacement; the rest of §5.1 and all of §5.2 are kept because the
+> noise statistic itself remains needed (for §3.4's start-trim and for diagnostics), and because
+> the reasoning about estimator choice is still the best account of why a residual standard
+> deviation is the wrong quantity to build anything on.
+>
+> Note what this does *not* change: the **grouping**. One threshold per fluorophore, shared by
+> every well of that dye, is confirmed to 1e-12 by §0.3 — that part of §5.1 was right.
 
 Set `autoCalculateThreshold`. The principle: the threshold should sit just above the noise floor
 of the baseline, so that crossing it means "signal", not "noise".
@@ -462,6 +788,53 @@ its group's noise cohort: its noise is a real measurement, and dropping it would
 *other* curve's threshold as a side effect. `CqTableEntry.thresholdSource` reports which of the
 three levels a given entry's threshold came from.
 
+### 5.5 Proposed replacement: a per-curve shape threshold, averaged over the plate
+
+*Proposed, not implemented. Motivated by §0.4 and testable against the one auto anchor there.*
+
+The rule that fits the evidence is not "how noisy is the baseline" but "how far up its own rise
+has each curve got when it stops looking like a baseline" — a **per-curve** quantity in RFU,
+averaged into one plate-wide scalar per fluorophore. Sketch:
+
+**Per well**, on the *raw* (unsmoothed, pre-subtraction) curve:
+
+1. Find the amplification onset the way §3.2(a) already does — the rising limb, located from the
+   smoothed curve's derivatives. Reuse the existing peak machinery; this is search, so smoothing
+   is fine here (§0.6).
+2. Take `xT` = the cycle, to sub-cycle resolution, of **maximum positive curvature on the rising
+   limb** — the foot of the exponential, where the curve turns upward hardest. Not the
+   second-derivative *peak* proper; the foot, for the reason §3.2 already gives.
+3. Take `T_well_raw` = the curve's value at `xT`.
+4. Convert into corrected space using that well's own fitted baseline line:
+   `T_well = T_well_raw − (slope·xT + intercept)`. This is the step that makes per-well values
+   comparable, and it is why the threshold is a property of the *shape*, not of the offset.
+
+**Per fluorophore**: `T = mean(T_well)` over the wells that qualify — those whose baseline region
+did **not** run to the end of the trace (a well with no detectable onset has no meaningful `T_well`
+and must not drag the average), and whose `T_well` is finite. Restrict to `Unknown`, `Standard`
+and positive-control wells if any exist; if none do, take every well.
+
+Why this is the right shape of rule, on the evidence:
+
+- It is a mean of per-curve RFU values, so it scales with **how each dye's curves rise**, not with
+  their noise — which is what an 11× spread at constant noise demands.
+- It naturally produces a *small* threshold (8 RFU) for a dye whose amplifying wells turn upward
+  early and gently, and a large one (92 RFU) for a dye whose wells turn sharply — matching the two
+  anchors' direction as well as their ratio.
+- The mean, not the median: §5.1's median was chosen to stop one bad well moving the group. Under
+  this rule the qualifying test does that job instead, and a mean is what the one available anchor
+  should be checked against first.
+
+**The test.** Implement it, run it on `20260726_S183-S185_RVP.pcrd`'s Tex 615 wells, and compare
+against **8.06451415811512**. Then re-run FAM and compare against **92.0212554931641** — a value
+that run persists as an *override*, so agreement there is suggestive rather than conclusive (a
+user may have typed it), but disagreement by an order of magnitude would be conclusive the other
+way. Two anchors, from one plate, sharing neither a value nor a dye: a much stronger constraint
+than the two identical overrides §5.1 was built on.
+
+Until that lands, the shipped multiplier stays where it is, and the web app's slider stays the
+honest interface to a number that isn't yet known.
+
 ## 6. Cq — two algorithms
 
 > Implemented by `findThresholdCrossing()` (§6.1), `findInflectionCq()` (§6.2) and `computeCq()`
@@ -471,41 +844,58 @@ three levels a given entry's threshold came from.
 
 ### 6.1 `Threshold` — the crossing (observed default)
 
-Find where the curve crosses the threshold — the start of its **final** run above it, see the
-"ends below threshold" case below — then **interpolate between that cycle and the previous one** to
-get a fractional cycle. Interpolating in the
-log domain matches the underlying exponential and is the better default:
+> **Rewritten from §0.2, which reproduces CFX's reported Cq exactly (14/14 wells, 10/10 no-Cq
+> wells, agreement to ~1e-10 cycles) given CFX's own corrected curves and threshold.** This is now
+> the one stage of the pipeline that is *measured* rather than inferred, and it is also simpler
+> than what this library currently does. Adopt it verbatim.
 
 ```
-find first c with corrected[c] ≥ T
-solve for the fractional position between c−1 and c:
-
-  Cq = (c−1) + ( log(T) − log(corrected[c−1]) )
-             / ( log(corrected[c]) − log(corrected[c−1]) )
+cq(corrected, T):
+  if T < min(corrected) or T > max(corrected):   return no Cq
+  best = none
+  i = 2
+  while i <= N:
+    if corrected[i] >= T and corrected[i-1] < T:
+      m = corrected[i] - corrected[i-1]                  # per cycle; x is the cycle number
+      if |m| >= 1e-5:
+        xc  = (i-1) + (T - corrected[i-1]) / m           # two-point LINEAR interpolation
+        run = how many further consecutive cycles keep strictly increasing from i
+        if run >= best.run:  best = (run, xc)            # >=, so later ties win
+        i = i + run
+    i = i + 1
+  return best.xc, or no Cq if there was none
 ```
 
-Equivalently: fit a line to `log(corrected)` over the couple of cycles bracketing the crossing and
-solve it for `log(T)`. Fitting a short line rather than using exactly two points is more robust to
-a single noisy reading, and is what the slope/intercept pair a reference implementation carries
-alongside each crossing implies.
+Four points, each of which changes the current implementation:
 
-Edge cases, all of which must be handled explicitly:
+- **Interpolate linearly, between exactly two points.** Not in the log domain, and not by fitting a
+  short line across several cycles. The exponential-decay argument for a log interpolation is
+  physically appealing and is simply not what produces the reported numbers; it lands a few
+  hundredths of a cycle early. This also deletes the `corrected[c−1] ≤ 0` special case, which only
+  existed because the logarithm is undefined there.
+- **The abscissa is the cycle number**, 1-based as the curve is indexed, with no half-cycle offset
+  (§0.3 tests this directly and the two readings differ by ~10% in the implied threshold).
+- **Choose the crossing followed by the longest strictly-increasing run**, not the start of the
+  final above-threshold run. Ties go to the later crossing. The intent is the same — don't let an
+  early noise spike over a low threshold be read as a cycle-2 Cq — but the rule is different, and
+  on a single-point excursion followed by decline it *does* report a Cq where the "final run" rule
+  reports none. §0.5's Tex 615 B4 is exactly that case, and CFX reports **14.82** for it.
+- **Reject a crossing whose local slope is below `1e-5`**, then keep scanning. A curve that lies
+  flat along the threshold produces no crossing rather than an arbitrary one.
 
-- **`corrected[c−1] ≤ 0`.** Common — the point just below threshold may sit below the baseline.
-  The logarithm is undefined; fall back to linear interpolation for that well.
-- **Never crosses.** Report **no Cq** (not cycle 0, not the cycle count). An empty Cq is a
-  meaningful result: no amplification.
-- **Starts above threshold.** Usually indicates a failed baseline, not an extraordinarily early
-  Cq. Report no Cq and flag the well.
-- **Ends below threshold.** A curve that crosses and then falls back is suspect. Reference
-  implementations expose a "no Cq if the trace ends under the threshold" option; default it on.
-- **Crosses, falls back, then crosses again.** With that option on, only the last crossing can be
-  the amplification the trace ends in, so anchor Cq to the start of the *final* above-threshold
-  run rather than the first cycle that touches the threshold. On a clean single-crossing sigmoid
-  the two rules coincide. This matters whenever the threshold sits near a well's own baseline
-  noise — which happens by construction to a genuinely amplifying well grouped (per §5.1) with
-  mostly-flat ones, since the group's median noise sets the threshold: taking the first touch then
-  reports a Cq of 1–2 for a well that amplifies at cycle 30.
+Edge cases, now all consequences of the rule above rather than separate handling:
+
+- **Never crosses.** No Cq. An empty Cq is a meaningful result.
+- **Starts above threshold.** `T < min(corrected)` — no Cq, by the guard on the first line. This
+  is *the* reason a well with an obvious rise can report nothing: §0.5's Tex 615 E4 climbs
+  monotonically from 19.7 to 107 RFU and gets no Cq because its whole corrected curve sits above
+  an 8.06 threshold. Worth surfacing in the UI as "baseline above threshold" rather than as
+  "no amplification" — they look identical in the output and mean opposite things.
+- **Ends below threshold.** Not a special case, and **not** a reason to withhold a Cq. The
+  `noCtIfEndsUnderThreshold` option should default **off**: §0.5's B4 ends 10 RFU below the
+  threshold it crossed at cycle 15 and is still reported.
+- **Crosses, falls back, then crosses again.** Handled by the longest-run rule; no separate
+  treatment.
 
 ### 6.2 `NoThreshold` — curve fitting
 
@@ -524,6 +914,30 @@ falls slightly later than a threshold crossing set near the noise floor. Do not 
 comparison.
 
 ## 7. Quality gates
+
+> **Superseded in part by §0.5 — proposed change: stop letting these suppress a Cq.** The
+> reference applies none of the gates below. It reports a Cq for a well that is pure noise and
+> touches the threshold once (Tex 615 B4, Cq 14.82), and withholds one from a well that rises
+> cleanly by 87 RFU (Tex 615 E4) purely because the threshold fell below its corrected minimum.
+> Its only test is §6.1's `T ∈ [min, max]`.
+>
+> That is a real simplification available here, and it is also a *correctness* change: as long as
+> this library's gates can veto a crossing, its Cq population can never match CFX's, however well
+> §5 and §6 are tuned. The proposal is to keep every gate as a **diagnostic** — `amplified`,
+> `baselineValid` and the flatness/linearity verdicts stay on `CurveBaselineResult`, stay in the
+> hover card, and stay available for sorting and filtering in the UI — but remove their power to
+> turn a computed Cq into no Cq. `computeCq()` would lose its `baselineValid` option and its
+> automatic squelch; callers that want the strict behaviour ask for it explicitly.
+>
+> Two caveats worth weighing before doing it. First, the gates were each added in response to a
+> real, observed failure on a real well (§3.2's E9, §7's B5 and E5 below) — those failures don't
+> stop being failures, they stop being *hidden*, which is arguably the honest outcome given a
+> reference that also reports them. Second, a permissive Cq rule is only safe if the threshold is
+> right, and under §5.1's current noise-multiple threshold it is not; §5.5 should land first, or
+> at least alongside.
+>
+> The rest of this section describes the gates as they are, and stays accurate as a description of
+> the diagnostics.
 
 Two guards worth implementing, both of which change reported results:
 
@@ -564,25 +978,81 @@ Two guards worth implementing, both of which change reported results:
 
 ## 8. Recommended defaults
 
-For an implementation aiming to match a reference instrument:
+For an implementation aiming to match a reference instrument. **Proposed** column is what §0
+argues for; **current** is what ships today.
 
-| Setting | Default |
-|---|---|
-| Cycles skipped (begin/end) | 0 / 0 |
-| Smoothing | Weighted mean, width 5 |
-| Baseline region | Auto, never starting before cycle 2; else cycles 2–9 |
-| Baseline start-trim (§3.4) | On; target ratio 1.0, min width 8, max trim 15 cycles |
-| Noise statistic (§5.2) | Successive difference (MSSD), not standard deviation |
-| Cycles dropped from the noise estimate | 1 (the region's first) |
-| Minimum baseline width | 3 cycles |
-| Baseline mode | Linear (fitted line subtracted) |
-| Baseline region method | Data window over the full run |
-| Threshold group | The fluorophore (§5.1) — never the target |
-| Threshold | Manual override if present, else ≈20 × baseline noise (§5.1) |
-| Cq algorithm | Threshold crossing, log-interpolated |
-| No Cq if trace ends under threshold | On |
+| Setting | Current | Proposed | Basis |
+|---|---|---|---|
+| Cycles skipped (begin/end) | 0 / 0 | unchanged | read from file |
+| Smoothing of the analysed curve | Weighted mean, width 5 | **Disable** | §0.6, measured |
+| Smoothing inside onset detection | (same filter) | Weighted mean, width 5 | unchanged in effect |
+| Baseline region, non-amplifying well | Auto; often an early region | **Essentially the whole run** | §0.9, measured |
+| Baseline region, amplifying well | Auto, never before cycle 2 | Begin at cycle 3–4; end ≈ `round(Cq) − 2` | §0.9, measured |
+| Baseline start-trim (§3.4) | On; ratio 1.0, min 8, max 15 | unchanged | this library's own |
+| Tail filter for `…CurveFit` mode | not implemented | **Width-3 centred mean, cycles `floor(Cq)+3` … `N−1`** | **§0.9, measured** |
+| Noise statistic (§5.2) | Successive difference (MSSD) | unchanged | still needed for §3.4 |
+| Cycles dropped from the noise estimate | 1 | unchanged | this library's own |
+| Minimum baseline width | 3 cycles | unchanged | inferred |
+| Baseline mode | Linear (fitted line subtracted) | unchanged | read from file |
+| Baseline region method | Data window over the full run | unchanged | read from file |
+| Threshold group | The fluorophore | unchanged | **§0.3, measured to 1e-12** |
+| Threshold source | Override if present, else ≈20 × noise | Override from the `.pcrd` if present (§5.4), else §5.5's shape rule | §0.3 / §0.4 |
+| Cq abscissa | cycle index | unchanged — no ½-cycle offset | **§0.3, measured** |
+| Cq interpolation | Log, linear fallback | **Two-point linear** | **§0.2, measured** |
+| Crossing selection | Start of final above-threshold run | **Longest following increasing run, last on ties** | **§0.2, measured** |
+| No Cq if trace ends under threshold | On | **Off** | **§0.5, measured** |
+| Amplification squelch / baseline gate suppress Cq | On | **Off** (diagnostics only) | **§0.5, measured** |
+| No Cq when `T ∉ [min, max]` of the corrected curve | implicit | **Explicit, and the only gate** | **§0.2, measured** |
+| End-point RFU | not implemented | **Mean of the last 5 corrected cycles** | **§0.7, measured** |
+
+### 8a. End-point RFU
+
+*Proposed; §0.7 measures it exactly.* Some assays report no Cq at all and read the well's
+end-point fluorescence instead, so this is worth having even though it is three lines:
+
+```
+endRfu = mean(corrected[N-4 .. N])       # the last five cycles
+```
+
+It belongs on `CqTableEntry` next to the Cq, computed in the same batch pass over the run, since
+it is a function of the same corrected curve and the same baseline. Note it is deliberately *not*
+`deltaRfu`, which `CurveBaselineResult` already carries: `deltaRfu` is the last value minus the
+baseline mean, a rise; `endRfu` is a five-cycle average of the corrected curve, and on a
+still-rising well the two differ by hundreds of RFU (§0.7's table).
+
+The end-point **call** (`(+) Positive` / `Negative` / `NoCall` / `Unassigned`) is a separate
+verdict that needs the plate's negative control (§0.8) and is not proposed here — but note that
+CFX's call and its Cq disagree freely, so neither should be derived from the other.
 
 ## 9. Open items
+
+Ordered by value. The first four are the proposed work; the rest is what remains genuinely
+unknown.
+
+1. **Adopt §6.1's crossing rule, and drop §7's gates to diagnostics.** Smallest change, largest
+   effect, and the only one that is *measured* rather than argued: two-point linear interpolation
+   on the cycle index, longest-following-run selection, `T ∈ [min, max]` as the sole gate, no
+   ends-below-threshold rule. Land it with the §0.10 regression fixture — the export CSVs in
+   `samples/20260726_S183-S185_RVP-export.zip` let `computeCq()` be asserted against CFX's own
+   numbers to 1e-10, on a curve this library did not compute, so the test isolates §5–§6 from
+   every upstream stage. **This library has never had a test like that; it should.**
+2. **Honour the persisted per-fluorophore threshold** (§5.4, and the entry below). One line of
+   plumbing, and it makes a `.pcrd` reproduce CFX's Cq exactly for every overridden dye — FAM in
+   the RVP sample is such a dye, and §0.3 shows the whole chain then agrees.
+3. **Implement the tail filter** of §0.9 for `LinearBaseLineNormalizedCurveFit` — the observed
+   default mode, currently unimplemented. Three lines, exactly specified, and it is what makes the
+   reported plateau (and §8a's end-point RFU) match rather than run several RFU high.
+4. **Fix baseline-region selection for the two cases §0.9 pins down**: a non-amplifying well takes
+   essentially the whole run, and an amplifying well ends around `round(Cq) − 2`. The first of
+   these is the long-standing bug at the top of [`TODO.md`](./TODO.md), now with reference data
+   behind it.
+5. **Implement and test §5.5's shape threshold** against the 8.0645 anchor. This is the largest
+   remaining source of systematic error and the one place a wrong answer moves every Cq on the
+   plate.
+6. **Stop smoothing the analysed curve** (§0.6, §2). A deletion, and it simplifies §3.4.
+7. **Add end-point RFU** (§8a). Three lines, exactly known.
+
+Still genuinely open:
 
 - **Partially implemented.** `baseline.ts` covers §2–§4 (smoothing, baseline region including
   §3.4's start-trim, baseline subtraction, and the §7 validation gate via `validateBaselineRegion()`)
@@ -590,17 +1060,19 @@ For an implementation aiming to match a reference instrument:
   `threshold.ts` covers §5–§7 (threshold determination, both Cq algorithms, the amplification
   squelch). Not implemented: the `pDriftCorrection` reference-normalization baseline modes and
   `LinearBaseLineNormalizedCurveFit`'s refinement.
-- **The threshold multiplier rests on two data points.** §5.1's scale is fixed by the two
-  fluorophores of `20260720_Luna_noRT.pcrd` for which CFX persisted an explicit
-  `thresholdOverrideValue` (FAM and Texas Red, both 210.72; Cy5 is on auto and is not an anchor).
-  Under §5.2's estimator they imply 85.3× and 79.6× — agreeing within 7%, but from one run on one
-  instrument, sharing a single override value. The shipped default of **20** sits far below that,
-  on the strength of how the resulting Cq values read rather than any measurement, and closing that
-  4× gap is the largest open question in this document. More runs carrying
-  `autoCalculateThreshold="False"` would either confirm the constant or reveal that it tracks
-  something else (dye, chemistry, plate type). Since the multiplier sets how early every Cq lands,
-  this remains the single largest source of *systematic* error left in the chain — though it is now
-  a uniform one, where the old std-dev estimator made it vary per well.
+- **Drift correction is now A/B-testable but not tested.** `20260726_S183-S185_RVP.pcrd` and
+  `20260726_S183-S185_RVP-drift-correction.pcrd` differ only in `pDriftCorrection`. Exporting the
+  amplification results from the second one would show, per well and per cycle, exactly what the
+  option does — the cheapest possible answer to a question [`calibration.md`](./calibration.md) §6
+  and §4 of this document both leave open. **Worth asking for that export.**
+- **The threshold multiplier rests on two data points, and §0.4 has now falsified the rule it
+  belongs to.** §5.1's scale was fixed by the two fluorophores of `20260720_Luna_noRT.pcrd` for
+  which CFX persisted an explicit `thresholdOverrideValue` (FAM and Texas Red, both 210.72). Under
+  §5.2's estimator they implied 85.3× and 79.6×, against a shipped default of 20. That gap is no
+  longer the largest open question — the RVP run's 11× per-dye spread at near-constant noise says
+  no multiplier fits at all, and §5.5 replaces the rule rather than retuning it. The measurements
+  in §5.1 are kept because they remain the best evidence for §5.2's *estimator*, which is still
+  used elsewhere.
 - **The noise estimator is inferred, not observed.** §5.2's successive-difference statistic is
   argued from first principles and from the fact that it makes the two anchors above mutually
   consistent (2.2× disagreement → 7%). That is real evidence, but it is *indirect*: nothing in the
@@ -612,19 +1084,28 @@ For an implementation aiming to match a reference instrument:
   two differences). A median-of-absolute-differences form would be robust to both; it needs a
   consistency constant (≈1.048 for Gaussian residuals) that nothing here has been measured against,
   so it was not shipped.
-- **Persisted analysis parameters are not yet honoured.** A `.pcrd` carries the whole
-  `dataAnalysisParameters` tree — including the per-fluorophore `thresholdOverrideValue` /
-  `autoCalculateThreshold` pair that §5.4 says should be authoritative, and the
-  `baselineBeginRepeat` / `baselineEndRepeat` region. Reading them would make a `.pcrd` reproduce
-  CFX's own numbers exactly rather than approximately. A `.zpcr` stores none of this, so auto
-  selection remains the only path there.
-- **Not validated.** These algorithms are specified to be *reasonable and precise*, but no Cq —
-  and, for the baseline stages now implemented, no baseline region or corrected curve either —
-  has been compared against a reference instrument's own reported values for the same well. Until
-  that comparison exists, treat agreement as unproven — the same caveat
-  [`calibration.md`](./calibration.md) carries.
-- The exact form of the curve-fit refinement in `LinearBaseLineNormalizedCurveFit` (as against
-  plain linear baselining) is not pinned down.
+- **Persisted analysis parameters are not yet honoured** — see item 2 above, now with a
+  measurement behind it. A `.pcrd` carries the whole `dataAnalysisParameters` tree, including the
+  per-fluorophore `thresholdOverrideValue` / `autoCalculateThreshold` pair that §5.4 says should be
+  authoritative, and the `baselineBeginRepeat` / `baselineEndRepeat` region. §0.3 shows that
+  honouring the first of those reproduces CFX's Cq **exactly**, not approximately. A `.zpcr` stores
+  none of this, so auto selection remains the only path there.
+
+  Read `baselineBeginRepeat`/`baselineEndRepeat` with care, though: both RVP fluorophores persist
+  `2`/`9` while also carrying `autoCalculateBaseline="True"`, so those two numbers are the
+  *defaults the auto search starts from*, not the region CFX actually used — §0.9's window search
+  puts several wells' regions nowhere near 2–9. Only trust them when `autoCalculateBaseline` is
+  `False`.
+- **The baseline *window* rule.** §0.9 settles the baseline model, the fit and the tail filter, and
+  brackets the window (begin cycle 3–4; end at the last cycle for a non-amplifying well, or
+  `round(Cq) − 2` for a clean amplifying one). What it does not settle is the rule that produces
+  those windows in general, or why the best-matching ordinary least-squares fit still misses the
+  recovered line by 0.02–0.5 RFU when eight smoothing/edge variants and a zero-slope variant were
+  all tried. The residual is small enough that a Cq built on the best-matching window lands within
+  a few thousandths of a cycle, so this is now a precision question rather than a correctness one.
+- **Validated end-to-end except for that window.** §0.2 reproduces the Cq stage exactly and §0.9
+  reproduces the corrected curve from the raw dye curve to 5e-3 RFU *given CFX's own baseline
+  line*. What has not been demonstrated is this library choosing the same window unaided.
 - `dataWindowFractionFullCycle` / `dataWindowWidthFractionFullCycle` are interpreted here as a
   position and width; with the observed values (1 and 0.99) the two readings are
   indistinguishable, so this needs a run that uses a genuine sub-window to confirm.

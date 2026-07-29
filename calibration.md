@@ -10,9 +10,12 @@ the plate, estimate how much each dye actually contributed.
 > **Status:** implements the algorithm below in full (§§2–5), including preprocessing (§4) —
 > [`packages/core/src/calibration.ts`](./packages/core/src/calibration.ts) (linear algebra in
 > [`linalg.ts`](./packages/core/src/linalg.ts)), tested against the calibration data in the
-> committed sample archives. The open item is the *absolute* RFU scale: which additive
-> background belongs in §4.2, and a residual gap against CFX Manager's own reported RFU that
-> no §§2–5 choice explains — both worked through in §8.
+> committed sample archives — and, as of 2026-07-28, **cross-validated end-to-end against CFX
+> Manager's own per-cycle output** on `20260726_S183-S185_RVP.pcrd`: 17 of 24 curves agree to
+> 4–9 × 10⁻³ RFU up to the baseline both sides remove, the other 7 to ~2 × 10⁻⁴ relative. That
+> discharges the largest caveat this document used to carry — the suspected per-dye scale factor,
+> now bounded at ~10⁻⁶ — and leaves a much smaller open question. See §8, and
+> [`threshold.md`](./threshold.md) §0.9 for the measurement.
 >
 > The web app's **Calibration** view plots the §2 response curves this is all built on (block
 > temperature on x, RFU on y, one line per dye × channel), marked at the block temperature the
@@ -408,8 +411,44 @@ call is wasted work.
 
 ## 8. Limitations / open items
 
-- **The absolute RFU scale does not yet reproduce the instrument software's: a per-dye
-  multiplicative constant is missing.** Reference measurements from the committed
+> **The per-dye scale factor below is contradicted by a much stronger measurement, and should be
+> treated as withdrawn pending re-testing.** See the new first bullet.
+
+- **Cross-validated end-to-end on one run, and it matches.** `20260726_S183-S185_RVP.pcrd` ships
+  with CFX Manager's own exported per-cycle results (see [`pcrd.md`](./pcrd.md) §2.5a). Running
+  this library's separation over that `.pcrd` and subtracting CFX's exported baseline-corrected
+  curve leaves, for 17 of 24 curves, **a straight line in the cycle number with a residual RMS of
+  4–9 × 10⁻³ RFU** — see [`threshold.md`](./threshold.md) §0.9. Since baselining subtracts a
+  straight line, that is the strongest agreement the comparison can show: this library's dye-space
+  curve and CFX's differ by nothing except the baseline that both then remove.
+
+  It also **bounds any multiplicative term to ~10⁻⁶**. A scale error `k` would leave a residual
+  proportional to the curve's own amplification, and FAM well E9 rises 4653 RFU while
+  reconstructing to 4.5 × 10⁻³ RFU. A `k` of 1.0975 would leave ~450 RFU. Fitting `k` explicitly
+  over the pre-amplification range of the nine wells with a Cq gives 1 ± 2 × 10⁻⁵ for every FAM
+  well. The 8–10% per-dye constant reported below is excluded on this run by four orders of
+  magnitude.
+
+  The remaining 7 curves (six Cy5 wells and Tex 615 G4) fit the line only to 0.14–0.46 RFU —
+  ~2 × 10⁻⁴ relative. That is real but small, is present on flat curves where no analysis stage
+  runs, and is dye-and-well specific (Cy5 C4 misses while FAM in the same well is exact). Well
+  factors are ruled out: this `.pcrd` carries the default identity table. **This is the open
+  question that replaces the one below**, and it is two orders of magnitude smaller.
+
+- **Why the older comparison probably misread.** The measurements below pair this library's *raw,
+  un-baselined* cycle-45 value against CFX's **End RFU**, and those are not the same quantity:
+  End RFU is the mean of the last five cycles of the **baseline-corrected** curve
+  ([`threshold.md`](./threshold.md) §0.7). Re-running the comparison like-for-like on the same
+  `20260720_Luna_noRT.pcrd` wells makes the disagreement *worse*, not better — this library's
+  baselined end-point comes out at 0.29–0.61× the quoted figures, and C3/FAM at −46 RFU against a
+  quoted 2115 — which says the quoted numbers are not baselined mean-of-five values either, and so
+  cannot be interpreted without knowing what analysis mode produced them. Two scalars of uncertain
+  definition, one of them read off a chart, lose to a full-curve comparison on 24 curves.
+  **Getting a CSV export for that run would settle it**; until then the RVP result stands.
+
+- ~~**The absolute RFU scale does not yet reproduce the instrument software's: a per-dye
+  multiplicative constant is missing.**~~ *(Withdrawn — see above. Retained for the record and
+  because the ruled-out list is still useful.)* Reference measurements from the committed
   `20260720_Luna_noRT.pcrd` (block 59.99 °C, dark subtraction off — i.e. what this library
   reports by default) against CFX Manager's own figures for the same run. End RFU is from its endpoint
   table (exact); cycle-1 values were read off its chart (approximate):
