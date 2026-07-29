@@ -95,6 +95,15 @@ Additional typed parsers for the archive files currently reachable only via the 
 - [ ] Optionally allow writing the target and sample names per well in the plate editor, again with easy copy paste of some form. Then use these in the curves visualization (eg. on hover).
 - [ ] Full visualizers replacing the raw viewers as typed parsers land above (`.alf` and the
       remaining plaintext status files). `.Dcal` now has the Calibration view.
+- [ ] **Build a melt curve UI.** `zpcr.steps()`/`toSteps()` (`packages/core/src/pivot.ts`) groups
+      plate reads purely by the raw `STEP` field, with no notion of "amplification" vs. "melt" —
+      protocol-step *kind* is decoded separately in `prcl.ts` (`meltcurvestep`) but never joined
+      against it. So today a melt-curve step (temperature ramp, not real cycles) shows up as just
+      another chip in the Curves view's step selector (`CurvesView.tsx`), and selecting it feeds
+      temperature increments into `computeCqTable` as if they were cycles — producing meaningless
+      Cq values, more of them the lower the auto-threshold multiplier. Needs its own view (x axis
+      = temperature, no Cq) and the step selector should stop offering melt steps to the Cq-based
+      Curves view.
 
 ## Testing / infra
 
