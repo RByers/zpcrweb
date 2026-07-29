@@ -1469,9 +1469,6 @@
   min-height: 0;
   overflow: auto;
   padding: 14px 16px;
-  /* Own container context so the plateviewer's internal layout responds to the
-     space actually available to it, independent of whether the sidebar above is showing. */
-  container: platemain / inline-size;
 }
 .plateview--empty {
   flex-direction: column;
@@ -1557,24 +1554,15 @@
   cursor: default;
 }
 
-/* PlateViewer: grid + header on the left, selected-well detail on the right once there's
- * room — stacked below on narrow containers instead of pushing the page into a long scroll. */
+/* PlateViewer: header block above the grid, full width. There is no side panel — a well's extra
+ * fields live in its cell tooltip (see `PlateViewer`), which spares the layout a second column
+ * that narrow containers could only stack. */
 .plateviewer {
   display: flex;
   flex-direction: column;
   gap: 22px;
-  font-size: 12px;
-  align-items: flex-start;
-}
-.plateviewer__main {
-  display: flex;
-  flex-direction: column;
-  gap: 22px;
   min-width: 0;
-  width: 100%;
-}
-.plateviewer__detail {
-  width: 100%;
+  font-size: 12px;
 }
 /* The plate's title line shares a row with the view's attach/download controls (passed in as
    `PlateViewer`'s `toolbar`) rather than sitting below them, so the buttons don't cost a band of
@@ -1590,20 +1578,6 @@
 .plateviewer__head .decoded__h,
 .plateviewer__head .plateview__toolbar {
   margin-bottom: 0;
-}
-
-@container platemain (inline-size >= 720px) {
-  .plateviewer {
-    flex-direction: row;
-  }
-  .plateviewer__main {
-    flex: 1;
-  }
-  .plateviewer__detail {
-    flex: 0 0 320px;
-    position: sticky;
-    top: 0;
-  }
 }
 
 /* ---- Decoded view ------------------------------------------------------- */
@@ -2046,18 +2020,15 @@
   vertical-align: top;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  cursor: pointer;
   transition: outline-color 0.1s;
   outline: 2px solid transparent;
   outline-offset: -2px;
 }
 .plate__grid td.plate__well.is-empty {
   background: var(--plane);
-  cursor: default;
 }
-.plate__grid td.plate__well.is-sel {
-  outline-color: var(--neon-cyan);
-}
+/* Cells are not clickable — the hover outline is a reading aid, pairing with the cell's `title`
+   tooltip to say which well the tooltip is describing. */
 .plate__well:hover:not(.is-empty) {
   outline-color: var(--border-strong);
 }
@@ -2080,6 +2051,9 @@
 .plate__target {
   font-size: 9px;
   line-height: var(--plate-well-line);
+  /* A fluor this well doesn't carry renders as an empty span; it still has to hold its line so
+     the fluors below it stay on their own. */
+  min-height: var(--plate-well-line);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

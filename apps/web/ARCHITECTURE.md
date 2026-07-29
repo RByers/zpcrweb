@@ -395,20 +395,25 @@ so every call site keeps writing one `onChange({ … })` regardless of where the
   Layout: `PlatesView` uses its own `.plateview` flex layout rather than `.raw`'s CSS grid,
   because the plate-list sidebar is conditional (only multi-plate runs get one) — a grid's
   fixed column tracks would strand the lone content pane in the narrow first track when
-  there's no sidebar to occupy the other. `PlateViewer` itself declares its own container
-  context (`.plateview__main { container: platemain / inline-size }`, distinct from the
-  app-wide `appmain` container `.raw`/`.curves` key off) so its internal grid-vs-well-detail
-  layout responds to the space it's actually given rather than the whole app window: side by
-  side once there's room, stacked (well detail below the grid) on narrow containers.
+  there's no sidebar to occupy the other. `PlateViewer` itself is a single full-width column —
+  there is no side panel and no click-through well detail: everything the old panel showed
+  (replicate, quantity, the fluor→channel→target mapping) is in each cell's `title` tooltip, and
+  the 320px column it needed was one a narrow container could only stack below the grid. Wells
+  are therefore not clickable; the hover outline stays, as a reading aid pairing with the
+  tooltip.
   Cells: each well cell writes the well's `sample` and each loaded fluor's `target` directly
   into the cell, the target text colored by that fluor's channel (`channelColor`) — trading
-  grid density for being able to read sample identity and target without opening the
-  click-through well detail panel. Every cell reserves the same height — one line for the
-  sample name plus one per fluorophore of the plate's *busiest* well, published by `PlateViewer`
-  as the `--plate-fluor-rows` custom property on the table and spent by `.plate__grid
-  td.plate__well`'s `height` calc. Sizing each row to its own tallest well instead left the grid
-  visibly ragged, since a plate mixes 1-fluor and 3-fluor wells freely; the reservation is
-  applied to empty cells too, so a row of untouched wells is no shorter than a loaded one.
+  grid density for being able to read sample identity and target at a glance. Every cell is the
+  same fixed set of lines: one for the sample name, then **one per plate fluor**, in the optical-
+  channel order `PlateViewer.fluorOrder` computes (unknown channel last — the same order the
+  fluor chips above the grid use). A well that doesn't carry a given fluor renders that line
+  blank rather than pulling the ones below it up, so a target always sits on its own channel's
+  line and a column of cells can be read down. The line count is published as the
+  `--plate-fluor-rows` custom property on the table and spent by `.plate__grid td.plate__well`'s
+  `height` calc, which is also what makes every row of the grid the same height — applied to
+  empty cells too, so a row of untouched wells is no shorter than a loaded one. Letting cells
+  size to their own content instead left the grid ragged, since a plate mixes 1-fluor and
+  3-fluor wells freely.
   Header: the plate's title line, the attach/download controls, and a short `<dl>` of vessel /
   scan mode / plate type / std units. The controls are passed *into* `PlateViewer` as its
   `toolbar` prop and rendered on the title line (`.plateviewer__head`) rather than in a band of
