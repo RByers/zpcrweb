@@ -63,6 +63,13 @@ export function PlatesView({
     hasArchive && isPltdName(entry.name)
       ? { name: entry.name, bytes: zpcr.archive.bytes(entry.name) }
       : undefined;
+  const toolbar = (
+    <div className="plateview__toolbar">
+      {attachControl}
+      <PlateDownloadButton plate={pltd.plate} pltd={pltdBytes} />
+    </div>
+  );
+  const showsViewer = !pltd.error && !pltd.needsPassword && !!pltd.plate;
 
   return (
     <div className="plateview">
@@ -85,10 +92,9 @@ export function PlatesView({
       )}
 
       <section className="plateview__main">
-        <div className="plateview__toolbar">
-          {attachControl}
-          <PlateDownloadButton plate={pltd.plate} pltd={pltdBytes} />
-        </div>
+        {/* Handed to `PlateViewer` so it lands on the plate's heading line; the no-plate branches
+            below have no heading to share, so they render it above their own content. */}
+        {showsViewer ? null : toolbar}
         {pltd.container.encrypted && (pltd.needsPassword || pltd.error) ? (
           <div className="decoded">
             <PasswordPrompt wrong={!!pltd.error} onSubmit={setPassword} />
@@ -98,7 +104,7 @@ export function PlatesView({
         ) : !pltd.plate ? (
           <div className="decoded__na mono">No plate for {entry.name}.</div>
         ) : (
-          <PlateViewer plate={pltd.plate} sourceHint={entry.name} />
+          <PlateViewer plate={pltd.plate} sourceHint={entry.name} toolbar={toolbar} />
         )}
       </section>
     </div>

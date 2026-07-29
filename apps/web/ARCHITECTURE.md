@@ -394,7 +394,19 @@ so every call site keeps writing one `onChange({ … })` regardless of where the
   Cells: each well cell writes the well's `sample` and each loaded fluor's `target` directly
   into the cell, the target text colored by that fluor's channel (`channelColor`) — trading
   grid density for being able to read sample identity and target without opening the
-  click-through well detail panel.
+  click-through well detail panel. Every cell reserves the same height — one line for the
+  sample name plus one per fluorophore of the plate's *busiest* well, published by `PlateViewer`
+  as the `--plate-fluor-rows` custom property on the table and spent by `.plate__grid
+  td.plate__well`'s `height` calc. Sizing each row to its own tallest well instead left the grid
+  visibly ragged, since a plate mixes 1-fluor and 3-fluor wells freely; the reservation is
+  applied to empty cells too, so a row of untouched wells is no shorter than a loaded one.
+  Header: the plate's title line, the attach/download controls, and a short `<dl>` of vessel /
+  scan mode / plate type / std units. The controls are passed *into* `PlateViewer` as its
+  `toolbar` prop and rendered on the title line (`.plateviewer__head`) rather than in a band of
+  their own above it; the no-plate branches (password prompt, decode error) have no title line to
+  share, so they render the same node above their own content. The `<dl>` deliberately omits the
+  plate's target list — it is long enough to wrap to several lines, and every target it names is
+  already visible in the grid below.
 - **Raw** — `RawFilesView` for `.zpcr`, `PcrdRawView` for `.pcrd` (see "Raw views" below).
 - **About** — `AboutView` (`components/views/AboutView.tsx`): one card carrying both the credits
   (name, the "nothing leaves your device" line, author and GitHub links) *and* the large

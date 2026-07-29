@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type CSSProperties, type ReactNode } from "react";
 import type { PlateDefinition, WellDefinition } from "@zpcrweb/core";
 import { channelColor, channelLabel } from "../../lib/channelColors";
 import {
@@ -19,27 +19,42 @@ import { Pair } from "../raw/Pair";
  * `plateSetup2` subtree — same component either way, only the source of the
  * {@link PlateDefinition} differs.
  */
-export function PlateViewer({ plate, sourceHint }: { plate: PlateDefinition; sourceHint?: string }) {
+export function PlateViewer({
+  plate,
+  sourceHint,
+  toolbar,
+}: {
+  plate: PlateDefinition;
+  sourceHint?: string;
+  /** The view's attach/download controls, rendered on the heading line rather than above it —
+   * see `.plateviewer__head`. Parents keep their own copy for the no-plate branches. */
+  toolbar?: ReactNode;
+}) {
   const [selected, setSelected] = useState<number | null>(null);
   // Gated on `loaded` exactly as the cells are (see `WellCell`), so the legend lists the colors
   // actually on screen. Without the gate an unloaded well's configured sample type — often just
   // enum filler — added a swatch to the legend that no cell ever showed.
   const typesPresent = [...new Set(plate.wells.map((w) => (w.loaded ? w.sampleType : "empty")))];
+  // Every cell reserves room for the busiest well's fluor list, so all rows come out the same
+  // height instead of the grid going ragged wherever a well carries fewer targets.
+  const maxFluors = Math.max(1, ...plate.wells.map((w) => (w.loaded ? w.fluors.length : 0)));
 
   return (
     <div className="plateviewer">
       <div className="plateviewer__main">
         <section className="decoded__block">
-          <h3 className="decoded__h">
-            {plateDisplayName(plate)} — {plate.rows}×{plate.columns},{" "}
-            {plate.dyeCount} {plate.dyeCount === 1 ? "dye" : "dyes"}
-          </h3>
+          <div className="plateviewer__head">
+            <h3 className="decoded__h">
+              {plateDisplayName(plate)} — {plate.rows}×{plate.columns},{" "}
+              {plate.dyeCount} {plate.dyeCount === 1 ? "dye" : "dyes"}
+            </h3>
+            {toolbar}
+          </div>
           <dl className="decoded__dl mono">
             <Pair k="Vessel" v={plate.plateName || "—"} />
             <Pair k="Scan mode" v={plate.scanMode || "—"} />
             <Pair k="Plate type" v={plate.plateType || "—"} />
             <Pair k="Std units" v={plate.standardUnits || "—"} />
-            <Pair k="Targets" v={plate.targets.length ? plate.targets.join(", ") : "—"} />
           </dl>
           <div className="plate__fluors">
             {plate.fluors.map((f) => (
@@ -52,7 +67,10 @@ export function PlateViewer({ plate, sourceHint }: { plate: PlateDefinition; sou
 
         <section className="decoded__block">
           <div className="decoded__gridwrap">
-            <table className="decoded__grid plate__grid mono">
+            <table
+              className="decoded__grid plate__grid mono"
+              style={{ "--plate-fluor-rows": maxFluors } as CSSProperties}
+            >
               <thead>
                 <tr>
                   <th />
@@ -135,7 +153,9 @@ function WellCell({
     >
       {well.loaded && (
         <>
-          {well.sample && <span className="plate__wellsample">{well.sample}</span>}
+          {/* Always rendered, even unnamed: the empty line keeps the target list starting at the
+              same height in every well, which is the point of the fixed row height. */}
+          <span className="plate__wellsample">{well.sample}</span>
           <span className="plate__welltargets">
             {well.fluors.map((f) => (
               <span key={f.fluor} className="plate__target" style={{ color: channelColor(f.channel) }}>

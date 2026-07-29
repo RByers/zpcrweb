@@ -1576,6 +1576,21 @@
 .plateviewer__detail {
   width: 100%;
 }
+/* The plate's title line shares a row with the view's attach/download controls (passed in as
+   `PlateViewer`'s `toolbar`) rather than sitting below them, so the buttons don't cost a band of
+   vertical space of their own. */
+.plateviewer__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin-bottom: 8px;
+}
+.plateviewer__head .decoded__h,
+.plateviewer__head .plateview__toolbar {
+  margin-bottom: 0;
+}
 
 @container platemain (inline-size >= 720px) {
   .plateviewer {
@@ -2012,12 +2027,20 @@
 }
 .plate__grid {
   table-layout: auto;
+  /* One text line inside a well. Both the sample name and each target line are pinned to it so
+     the reserved cell height below is exact rather than an estimate of the font's metrics. */
+  --plate-well-line: 12px;
 }
 /* Each cell carries the sample name + per-fluor target text (colored by channel), so the
-   columns size to their content rather than to a fixed well-sized box. */
+   columns size to their content rather than to a fixed well-sized box.
+
+   The height is reserved from `--plate-fluor-rows` (set by `PlateViewer` to the busiest well's
+   fluor count): one line for the sample name plus one per fluorophore, plus padding and the
+   2px gap above the target list. Applied to every cell — including empty ones — so all rows
+   come out identical instead of each row sizing to its own tallest well. */
 .plate__grid td.plate__well {
   min-width: 84px;
-  min-height: 40px;
+  height: calc(8px + (var(--plate-fluor-rows, 1) + 1) * var(--plate-well-line));
   padding: 3px 5px;
   text-align: left;
   vertical-align: top;
@@ -2041,6 +2064,8 @@
 .plate__wellsample {
   display: block;
   font-size: 10px;
+  line-height: var(--plate-well-line);
+  min-height: var(--plate-well-line);
   font-weight: 700;
   color: var(--ink);
   white-space: nowrap;
@@ -2050,12 +2075,11 @@
 .plate__welltargets {
   display: flex;
   flex-direction: column;
-  gap: 1px;
   margin-top: 2px;
 }
 .plate__target {
   font-size: 9px;
-  line-height: 1.35;
+  line-height: var(--plate-well-line);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

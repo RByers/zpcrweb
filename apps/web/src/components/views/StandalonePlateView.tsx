@@ -10,13 +10,19 @@ import type { LoadedFile, PlateFileResult } from "../../state/useZpcrStore";
 export function StandalonePlateView({ file, result }: { file: LoadedFile; result: PlateFileResult }) {
   const [, setPassword] = usePltdPassword();
   const pltd = file.kind === "pltd" ? { name: file.name, bytes: file.bytes } : undefined;
+  // Rides the plate's heading line when there is one to share; the password/error branches
+  // below have no heading, so they keep it above their own content.
+  const toolbar = (
+    <div className="plateview__toolbar">
+      <PlateDownloadButton plate={result.plate ?? undefined} pltd={pltd} />
+    </div>
+  );
+  const showsViewer = !result.needsPassword && !result.error && !!result.plate;
 
   return (
     <div className="plateview">
       <section className="plateview__main">
-        <div className="plateview__toolbar">
-          <PlateDownloadButton plate={result.plate ?? undefined} pltd={pltd} />
-        </div>
+        {showsViewer ? null : toolbar}
         {result.needsPassword || result.error ? (
           <div className="decoded">
             <PasswordPrompt wrong={!!result.error} onSubmit={setPassword} />
@@ -24,7 +30,7 @@ export function StandalonePlateView({ file, result }: { file: LoadedFile; result
         ) : !result.plate ? (
           <div className="decoded__na mono">No plate decoded.</div>
         ) : (
-          <PlateViewer plate={result.plate} sourceHint={file.name} />
+          <PlateViewer plate={result.plate} sourceHint={file.name} toolbar={toolbar} />
         )}
       </section>
     </div>
