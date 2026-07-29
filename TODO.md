@@ -65,35 +65,20 @@ several current choices to be wrong; **[`threshold.md`](./threshold.md) §0 is t
 
 - [ ] It seems common for a negative curve to grow in the first 5 cycles then level off flat. It seems like we should be picking the large later flat line as the baseline but we often pick the start instead. See 20230829's well F5 and 20260726 D4 FAM. Corroborated: on CFX's own corrected curves the best-fitting baseline window for every non-amplifying well is the *whole run* (`threshold.md` §0.9, §3.2).
 - [ ] Enable sorting on the table view. Click to sort by Cq or well.
-- [ ] Review all indexedb storage beyond the data files. Remove anything which effects the analysis (like threshold overrides) - that should come strictly from the file. Whenever such state exists, add a new entry to the zpcr file, call it "zpcrweb.json". In order to make storing this efficient, use a debounce system and pagehide handler - eg. only recreate the zip file in the indexeddb from the in-memory state at most once a minute and on pagehide. When a zpcr file is loaded, read these settings from it (if any) to initialize state. Consider whether we can remove everything from indexeddb other than the files now - what would we lose, and is it just transient state which could be stored in the URL (like the active view mode)?
 
 ## Library (`@zpcrweb/core`)
 
 Additional typed parsers for the archive files currently reachable only via the low-level
 `archive` API (raw bytes / text / hex):
 
-- [ ] baseline subtraction / Cq (Ct) calculation helpers derived from the curves.
-      **Algorithms and the full option space are now specified in
-      [`threshold.md`](./threshold.md)** — smoothing, baseline region selection (auto and
-      manual), baseline subtraction modes, auto/override threshold, and the two Cq algorithms.
-      Implementation is the remaining work; §8 there lists the defaults to start from.
-- [ ] **Protocol** — `ProtocolName.txt`, `ProtocolRunDefinition.txt`
-      (e.g. `METHOD CALC;HOTLID 105,30;VOLUME 20;TEMP …;PLATEREAD;GOTO 2,44;END`). Parse
-      into structured steps + cycling program.
 - [ ] **`.alf` run log** — the `*_…_Luna_noRT.alf` tab/`*`-delimited step-by-step run log
       (per-step temperatures, timestamps, elapsed time, error state).
 - [ ] **`runlog.xml`** — full structured run event log.
-- [ ] **Plateread header** — fan/lid state is decoded via the descriptor dictionary but only
-      reachable through `decodePlateReadDetail`; promote it to the typed `PlateRead` surface like
-      the temperatures and LED currents now are.
-- [ ] **`FactoryRefRowCal`** — parse the factory reference-row calibration array in
-      `RunInfo.xml` into typed per-well records.
 
 ## Web app (`apps/web`)
 
 - [ ] Add a plate editor which allows setting the flourophores used per well, as well as the tube types for the plate (clear / white).  Used for calibration adjustments and fluorophore display. Allow saving/naming plate files and applying them to runs. Remember the plate setting applied to each loaded run. Have an easy mechanism to copy/paste settings from one well to another or to all wells on a column/row/plate, or to duplicate a column/row across multiple columns/rows (eg. using click drag to select a region simple to copy/paste operations in spreadsheets)
 - [ ] Optionally allow writing the target and sample names per well in the plate editor, again with easy copy paste of some form. Then use these in the curves visualization (eg. on hover).
-- [ ] Add an option to apply flourophore-specific calibration to the run based on the calibration file data.
 - [ ] Plate heatmap per cycle. 
 - [ ] Full visualizers replacing the raw viewers as typed parsers land above (`.alf` and the
       remaining plaintext status files). `.Dcal` now has the Calibration view.
@@ -119,7 +104,6 @@ Additional typed parsers for the archive files currently reachable only via the 
 - [ ] Add a browser-mode Vitest run to prove isomorphism in a real browser environment.
 - [ ] Add more sample `.zpcr` files (different block types, channel counts, cycle counts)
       as they become available.
-- [ ] CI workflow (install / typecheck / test / build).
 
 ### UI tooling follow-ups
 
