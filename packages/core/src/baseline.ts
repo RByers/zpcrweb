@@ -11,7 +11,9 @@
  * removed and why.
  *
  * The region depends on the Cq and the Cq depends on the region, so the loop is closed one level
- * up, in `analysis.ts` — see `baselineCorrectCurve`.
+ * up, in `analysis.ts` — see `baselineCorrectCurve`. That circularity is measured, not structural
+ * convenience: `threshold.md` §3.1 prices every way out of it, and the cheapest one that keeps
+ * §1.8's agreement with CFX is the fixed point.
  */
 
 /** A baseline region as a pair of inclusive, 1-based cycle numbers (`baselineBeginRepeat` /

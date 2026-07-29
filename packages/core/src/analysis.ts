@@ -39,9 +39,13 @@ export interface CurveBaselineResult {
 
 /**
  * How many times {@link baselineCorrectCurve} may re-fit. The region depends on the Cq and the Cq
- * depends on the region, so the pair is iterated to a fixed point; measured over the committed
- * samples it converges in two or three passes, and the cap only bounds the rare curve that
- * oscillates between two adjacent regions (which then keeps the last one).
+ * depends on the region, so the pair is iterated to a fixed point.
+ *
+ * **6, measured** (`threshold.md` §3.1). Across the five committed runs most curves never move
+ * their region at all, an amplifying one settles in 3–5 passes, and exactly one curve of the 1056
+ * oscillates indefinitely between two adjacent regions — the cap is for that one, and raising it
+ * to 200 changes no Cq anywhere. The loop itself is not removable: without it the run §1.8
+ * measures against lands 7.36 cycles off CFX rather than 0.107.
  */
 const MAX_BASELINE_PASSES = 6;
 

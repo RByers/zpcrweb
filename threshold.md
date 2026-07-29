@@ -294,13 +294,47 @@ recovered fact:
 
 **The region depends on the Cq, and the Cq depends on the region**, so the two are iterated to a
 fixed point: correct over the whole run, take a Cq, re-fit ending before it, repeat until the
-region stops moving (`baselineCorrectCurve`; two or three passes in practice). At the run level
-`computeCqTable` does this in two passes over the whole plate — whole-run baselines to get each
-group's threshold, then every curve re-baselined against that threshold, then the thresholds
-re-resolved from the improved noise. Regions are always placed with a group's **automatic**
-threshold, never an override of either kind: where a curve stops looking like a baseline is a
-property of the curve, and letting an override move baselines would make one well's edit change
-its plate-mates' noise, and through the group median their thresholds.
+region stops moving (`baselineCorrectCurve`). At the run level `computeCqTable` does this in two
+passes over the whole plate — whole-run baselines to get each group's threshold, then every curve
+re-baselined against that threshold, then the thresholds re-resolved from the improved noise.
+Regions are always placed with a group's **automatic** threshold, never an override of either
+kind: where a curve stops looking like a baseline is a property of the curve, and letting an
+override move baselines would make one well's edit change its plate-mates' noise, and through the
+group median their thresholds.
+
+### 3.1 Why the loop is not broken
+
+The circularity is the expensive part of this stage, so each way out of it was measured on the
+RVP run against CFX's own Cq values (the §1.8 comparison, whose converged result is ≤0.107 cycles):
+
+| Iteration | Worst Δ vs CFX |
+|---|---|
+| None — every well baselined over the whole run | **7.36 cycles** |
+| One re-fit | 2.84 |
+| Two | 0.63 |
+| To a fixed point (as shipped) | **0.107** |
+
+A whole-run baseline on an amplifying well is fitted straight through the exponential, which tilts
+the line up and drags the rise back down under the threshold — hence Cq values 7 cycles late, not
+merely imprecise. **Nothing cheaper than the fixed point buys the §1.8 agreement**, and no
+Cq-free substitute is available either: the onset detectors that used to place the region without
+one are exactly what §3 replaced, and their tuning constants were never measured.
+
+Two structural variants were tried and neither is an improvement:
+
+- **Collapsing the nested loops into one** global alternation of "place every region, re-resolve
+  every threshold" reproduces the shipped numbers exactly on the RVP run but moves Cq by up to
+  0.31 cycles on the other committed runs, and on
+  `20230829_135443_CT019138_SINGLE_STEP_.zpcr` it does not converge — it is a different fixed
+  point reached less reliably, not a simpler route to this one.
+- **Dropping the outer threshold re-resolution** (place regions, then keep the whole-run
+  thresholds) moves Cq by up to 0.73 cycles. Both passes are load-bearing.
+
+Convergence is fast but not as fast as it looks: across the five committed runs most curves never
+move their region at all, an amplifying one takes 3–5 passes, and exactly one curve of the 1056 —
+in the SINGLE_STEP run — oscillates indefinitely between two adjacent regions. That single curve
+is what `MAX_BASELINE_PASSES` exists for, and stopping it at 6 rather than 200 changes no Cq
+anywhere.
 
 This rule replaced two onset detectors (a second-derivative peak finder and an iterative
 regression), a whiteness-based start trim and a flatness/linearity validation gate — together
