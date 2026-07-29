@@ -37,6 +37,11 @@ export interface AnalysisRow {
   noise: number;
   amplified: boolean;
   deltaRfu: number;
+  /** End-point RFU — the mean of the corrected curve's last five cycles (`threshold.md` §8).
+   * The number the instrument's own End Point export reports, and what an assay with no Cq at all
+   * reads instead. Distinct from {@link deltaRfu}, which is the last single value's rise: on a
+   * still-climbing well the two differ by hundreds of RFU. */
+  endRfu: number;
   cq: number | null;
 }
 
@@ -77,6 +82,7 @@ export function buildAnalysisRows(run: RunAnalysis, visible: CurveVisible): Anal
         noise: entry.noise,
         amplified: entry.amplified,
         deltaRfu: entry.deltaRfu,
+        endRfu: entry.endRfu,
         cq: entry.cq,
       });
     }
@@ -99,6 +105,7 @@ export function analysisCsv(rows: AnalysisRow[]): string {
     "threshold",
     "cq",
     "deltaRfu",
+    "endRfu",
     "amplified",
   ]);
   for (const r of rows) {
@@ -113,6 +120,7 @@ export function analysisCsv(rows: AnalysisRow[]): string {
       r.threshold.toFixed(1),
       r.cq != null ? r.cq.toFixed(3) : "",
       r.deltaRfu.toFixed(1),
+      r.endRfu.toFixed(1),
       r.amplified ? "yes" : "no",
     ]);
   }

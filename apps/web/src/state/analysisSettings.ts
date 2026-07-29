@@ -58,11 +58,6 @@ export interface AnalysisSettings {
    * slider rather than burying it. */
   thresholdMultiplier: number;
   /**
-   * Whether the plate read's LED-off `DARKDATA` is subtracted from a reading before the solve —
-   * the optional dark-current stage of `calibration.md` §4.2. Off by default.
-   */
-  subtractDark: boolean;
-  /**
    * Calibration matrix column normalization; see `calibration.md` §3. Deliberately **not**
    * exposed in the UI: §5.1 divides the scaling back out, so all three modes report identical
    * RFU for any full-column-rank matrix — it only changes conditioning, which matters solely
@@ -81,7 +76,6 @@ export const ANALYSIS_KEYS = [
   "thresholdOverrides",
   "curveThresholdOverrides",
   "thresholdMultiplier",
-  "subtractDark",
   "calibrationNormalization",
 ] as const;
 
@@ -98,9 +92,6 @@ export function defaultAnalysisSettings(): AnalysisSettings {
     thresholdOverrides: new Map<string, number>(),
     curveThresholdOverrides: new Map<string, number>(),
     thresholdMultiplier: DEFAULT_THRESHOLD_MULTIPLIER,
-    // The dark-current stage is optional and off by default, which is what matches the reported
-    // RFU scale of the reference run in `calibration.md` §8. See §4.2.
-    subtractDark: false,
     calibrationNormalization: "global",
   };
 }
@@ -120,7 +111,6 @@ export function analysisFromZpcrweb(doc: ZpcrwebSettings | null | undefined): An
       ? new Map(Object.entries(a.curveThresholdOverrides))
       : base.curveThresholdOverrides,
     thresholdMultiplier: a.thresholdMultiplier ?? base.thresholdMultiplier,
-    subtractDark: a.subtractDark ?? base.subtractDark,
     calibrationNormalization: a.calibrationNormalization ?? base.calibrationNormalization,
   };
 }
@@ -136,7 +126,6 @@ export function zpcrwebFromAnalysis(settings: AnalysisSettings): ZpcrwebSettings
     thresholdOverrides: Object.fromEntries(settings.thresholdOverrides),
     curveThresholdOverrides: Object.fromEntries(settings.curveThresholdOverrides),
     thresholdMultiplier: settings.thresholdMultiplier,
-    subtractDark: settings.subtractDark,
     calibrationNormalization: settings.calibrationNormalization,
   };
   return {

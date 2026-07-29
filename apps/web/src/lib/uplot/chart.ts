@@ -7,8 +7,8 @@
  * (`runAnalysis.ts`). Anything the chart draws that relates to a curve's baseline is a pure
  * function of that record — which is what makes it *impossible* for the plotted curve, the Cq
  * marker and the threshold line to disagree. They used to: this file ran a second, subtly
- * different copy of the auto-detection (it skipped the `refineBaselineStart` trim), so the curve
- * on screen had been baselined over a different cycle range than the Cq had.
+ * different copy of the baseline selection, so the curve on screen had been baselined over a
+ * different cycle range than the Cq had.
  *
  * If something here needs a number the analysis doesn't carry, add it to `CurveAnalysis` and
  * compute it in the library — do not compute it here.
@@ -691,10 +691,9 @@ export function buildChart(cfg: BuildChartConfig): {
   // crossing point, and projecting it through `plotDelta` puts the ring exactly on the threshold
   // line the rail draws (and exactly on the curve, since the curve is what defines the crossing).
   //
-  // It used to be placed by interpolating the plotted curve linearly at the fractional Cq. That
-  // silently disagreed with the crossing itself, which `findThresholdCrossing` interpolates in
-  // *log* space: on a curve doubling between reads the ring came out ~10% of the threshold above
-  // the line. Reading the threshold rather than re-deriving the crossing has no such gap to open.
+  // It used to be placed by interpolating the plotted curve at the fractional Cq, which silently
+  // disagreed with the crossing `computeCq` had actually found. Reading the threshold rather than
+  // re-deriving the crossing has no such gap to open.
   const cqMarkers: { x: number; y: number; color: string; seriesIdx: number }[] = [];
   wellCurves.forEach((curve, i) => {
     const { cq, threshold } = curve.analysis ?? {};

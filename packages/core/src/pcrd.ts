@@ -386,6 +386,56 @@ function decodeCalibrationCollection(runDataEl: string): DcalEntry[] {
 }
 
 // ---------------------------------------------------------------------------
+// Analysis parameters: <dataAnalysisParameters>…<fluorDataAnalysisParam fluorId=…>
+// ---------------------------------------------------------------------------
+
+/**
+ * The per-fluorophore threshold a saved run *pinned by hand* — `thresholdOverrideValue` on a
+ * `fluorDataAnalysisParam` whose `autoCalculateThreshold` is `False` (`pcrd.md` §2.5,
+ * `threshold.md` §5.4), keyed by the dye's display name.
+ *
+ * Three details make this less obvious than it looks, each learned the hard way:
+ *
+ * - **The document carries a `fluorDataAnalysisParam` for every fluorophore CFX knows about**, not
+ *   just the ones on this plate, so the first entry usually belongs to a dye the run never used.
+ *   The `fluorId` is the only thing that identifies them, and it is resolved here against the
+ *   plate's own `<dyeLayer><fluor fluorId= fluorName=>` entries — an id with no dye layer is
+ *   dropped rather than guessed at.
+ * - **Only `autoCalculateThreshold="False"` entries mean anything.** An auto entry carries
+ *   `thresholdOverrideValue="NaN"`, and the auto value CFX actually computed is stored nowhere.
+ * - **`baselineBeginRepeat`/`baselineEndRepeat` are deliberately not read.** Both fluorophores of
+ *   the RVP sample persist `2`/`9` while also carrying `autoCalculateBaseline="True"`, and
+ *   recovering CFX's real baseline windows from its exported curves puts several wells nowhere
+ *   near 2–9 (`threshold.md` §0.9). They are the defaults the auto search starts from, not the
+ *   region it used, so honouring them would make results *worse*.
+ */
+function decodePersistedThresholds(
+  params: XmlElement | undefined,
+  plateSetupInner: string | undefined,
+): Map<string, number> | undefined {
+  if (!params || !plateSetupInner) return undefined;
+
+  const nameById = new Map<string, string>();
+  for (const m of plateSetupInner.matchAll(/<fluor\s[^>]*\/?>/g)) {
+    const id = /fluorId="([^"]*)"/.exec(m[0])?.[1];
+    const name = /fluorName="([^"]*)"/.exec(m[0])?.[1];
+    if (id && name) nameById.set(id, unescapeXml(name));
+  }
+  if (nameById.size === 0) return undefined;
+
+  const out = new Map<string, number>();
+  for (const m of params.inner.matchAll(/<fluorDataAnalysisParam\s[^>]*fluorId="([^"]*)"[\s\S]*?<\/fluorDataAnalysisParam>/g)) {
+    const name = nameById.get(m[1]!);
+    if (!name) continue;
+    const el = m[0];
+    if (!/autoCalculateThreshold="False"/i.test(el)) continue;
+    const value = Number(/thresholdOverrideValue="([^"]*)"/.exec(el)?.[1]);
+    if (Number.isFinite(value)) out.set(name, value);
+  }
+  return out.size > 0 ? out : undefined;
+}
+
+// ---------------------------------------------------------------------------
 // Well factors: <wellFactorsCollection><WellFactorsCollection>…
 // ---------------------------------------------------------------------------
 
@@ -602,6 +652,11 @@ function buildZpcr(root: XmlElement[]): Zpcr {
   const runDefinition = protocol2?.attrs.runDefinition;
   const protocolText = runDefinition ? unescapeXml(runDefinition) : "";
 
+  const persistedThresholds = decodePersistedThresholds(
+    byLower.get("dataanalysisparameters"),
+    plateSetup2?.inner,
+  );
+
   const wellFactorsEl = byLower.get("wellfactorscollection");
   const wellFactors = wellFactorsEl ? decodeWellFactors(wellFactorsEl, plate?.scanMode) : undefined;
 
@@ -639,6 +694,7 @@ function buildZpcr(root: XmlElement[]): Zpcr {
     calibrations: (): DcalEntry[] =>
       runData ? decodeCalibrationCollection(runData.inner) : [],
     wellFactors,
+    persistedThresholds,
     factoryRefCal,
     refCalComparison: () => compareRefToCal(reads, factoryRefCal()),
   };

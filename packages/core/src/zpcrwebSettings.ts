@@ -55,7 +55,16 @@ export interface ZpcrwebAnalysisSettings {
   curveThresholdOverrides?: Record<string, number>;
   /** §5.1's auto-threshold multiplier: `threshold = k × median baseline noise`. */
   thresholdMultiplier?: number;
-  /** Whether the LED-off `DARKDATA` is subtracted before color separation (`calibration.md` §4.2). */
+  /**
+   * Whether the LED-off `DARKDATA` was subtracted before colour separation.
+   *
+   * **Retired.** The stage is gone: subtracting the per-cycle dark level makes the reconstruction
+   * of CFX's own curves 260× worse (`calibration.md` §4.2a), and a *constant* background cannot
+   * change any reported number because baselining removes it first. The key is still read and
+   * written so files that carry it keep round-tripping, and nothing consumes it.
+   *
+   * @deprecated Ignored by the analysis pipeline.
+   */
   subtractDark?: boolean;
   /** Calibration matrix column normalization (`calibration.md` §3). */
   calibrationNormalization?: NormalizationMode;

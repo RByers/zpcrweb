@@ -745,7 +745,11 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
                 beginCycle: e.baselineRegion.beginCycle,
                 endCycle: e.baselineRegion.endCycle,
                 noise: e.noise,
-                baselineValid: e.baselineValid,
+                // §0.5's "baseline above threshold" case: a curve whose corrected minimum already
+                // exceeds the threshold can never cross it, so it reports no Cq however obviously
+                // it amplifies. Worth flagging, because in the table it is indistinguishable from
+                // a flat well and means the opposite thing.
+                aboveThreshold: Math.min(...e.correctedValues) > e.threshold,
                 threshold: e.threshold,
                 override: settings.curveThresholdOverrides.get(key),
               },
@@ -1191,21 +1195,6 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
               cqMin={settings.cqMin}
               cqMax={settings.cqMax}
               onChange={onChange}
-            />
-          </div>
-        )}
-
-        {/* §4.2's optional dark-current stage. Only meaningful in dye space: with color separation
-            off the raw channel curves are shown as read. Deliberately outside the !tableMode
-            wrapper above, unlike the display controls it sits under: this one feeds the color
-            separation, so it moves the RFU the table and the CSV export report too. */}
-        {calibrationOn && (
-          <div className="rail__section rail__row">
-            <Switch
-              label="Subtract dark"
-              checked={settings.subtractDark}
-              onChange={(v) => onChange({ subtractDark: v })}
-              title="Subtract each plate read's LED-off dark current before color separation"
             />
           </div>
         )}

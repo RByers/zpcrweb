@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import {
   ANALYSIS_BASELINE_MODE,
-  baselineCorrectCurve,
+  correctCurveForDisplay,
   buildCalibrationMatrix,
   computeCqTable,
   REFERENCE_ROW,
@@ -56,12 +56,6 @@ import {
  * `Zpcr.archive`, `RunResult.documentXml` and `RunResult.selfEncrypted` are the other
  * format-asymmetric surfaces; they belong to the raw views alone (see `apps/web/ARCHITECTURE.md`).
  */
-
-/** Cq is always `threshold.md` §6.1's threshold crossing — the instrument's own default, and the
- * only algorithm whose per-group threshold the "Threshold overrides" rail section can talk about.
- * §6.2's 2nd-derivative variant used to be selectable in the Analysis view; the selector is gone,
- * though `computeCqTable` still accepts either. */
-const CQ_ALGORITHM = "Threshold" as const;
 
 /**
  * The block temperature a step's calibration matrix is built at: the mean across that step's
@@ -163,12 +157,11 @@ export interface RunAnalysis {
    *
    * The Curves view's "Relative" mode subtracts a fitted baseline from *whatever* it is plotting,
    * channel space included — so those series need a baseline even though they will never be
-   * quantified. It comes from the same library call ({@link baselineCorrectCurve}, the one
-   * {@link computeCqTable} makes internally) at the same single point in the app, which is the
-   * whole point: the chart used to run its own copy of the auto-detection, and the copy had
-   * drifted — it skipped the `refineBaselineStart` trim, so it plotted curves baselined over a
-   * region the Cq had not been computed on, and the threshold line missed the Cq marker by the
-   * difference.
+   * quantified. It comes from one library call ({@link correctCurveForDisplay}, which runs the
+   * same two passes {@link computeCqTable} does with a cohort of one) at a single point in the
+   * app, which is the whole point: the chart used to run its own copy of the baseline selection,
+   * and the copy had drifted, so it plotted curves baselined over a region the Cq had not been
+   * computed on and the threshold line missed the Cq marker by the difference.
    */
   plainBaselines: Map<string, CurveBaselineResult>;
   /** The *display* group a well/fluor pair belongs to — its target, the {@link NO_TARGET}
@@ -329,30 +322,20 @@ export function useRunAnalysis(
     const reads = zpcr.reads.filter((r) => r.step === activeStep);
     // §4.1: one position of the reference row — the first — per channel, LED on.
     const referenceLevel = available.map((ch) => reads.map((r) => r.wells[ch]![REFERENCE_ROW]![0]!.mean));
-    // §4.2: the optional dark-current subtraction, as a per-cycle table — DARKDATA is re-read
-    // every scan, so the level varies cycle to cycle. Off by default, in which case nothing is
-    // subtracted and the stage is skipped entirely.
-    const darkByChannel = new Map(darkCurves.map((d) => [d.channel, d]));
-    const backgroundLevel = settings.subtractDark
-      ? available.map((ch) => darkByChannel.get(ch)?.mean ?? [])
-      : undefined;
+    // §4.2 has no second stage here: the LED-off `DARKDATA` is deliberately **not** subtracted.
+    // Measured against CFX's own exported curves, subtracting it makes the reconstruction 260×
+    // worse (median residual 7.3e-3 → 1.90 RFU), because the dark level is re-read every cycle and
+    // its scatter is random noise no linear baseline can absorb (`calibration.md` §4.2a). Any
+    // *constant* background, meanwhile, is removed by baselining before anything is reported, so
+    // the choice of one cannot change a result. `DARKDATA` stays a plotted diagnostic overlay.
     // §4.1's per-well gain factors are deliberately *not* passed. `Zpcr.wellFactors` is decoded
     // only from a `.pcrd`'s `wellFactorsCollection`; a `.zpcr` stores no equivalent, so feeding it
     // in would make the same run quantify differently depending on which file you opened — exactly
     // what the format-independence rule above forbids. See the TODO in `calibration.md` §4.1 if a
     // `.zpcr`-side source for these is ever found. (`referenceLevel` is the pivot for that
     // correction and has no effect on its own, so it stays and costs nothing.)
-    return { referenceLevel, backgroundLevel };
-  }, [
-    zpcr,
-    activeStep,
-    available,
-    darkCurves,
-    calibrations,
-    settings.subtractDark,
-    tube,
-    stepTemperatureC,
-  ]);
+    return { referenceLevel };
+  }, [zpcr, activeStep, available]);
 
   const allFluorCurves = useMemo(() => {
     if (!matrix) return [];
@@ -374,7 +357,6 @@ export function useRunAnalysis(
       contributesToThreshold: loadedFluors.get(wellKey(c.row, c.col))?.has(c.dye) ?? false,
     }));
     return computeCqTable(inputs, {
-      algorithm: CQ_ALGORITHM,
       thresholdOverrides: settings.thresholdOverrides,
       curveThresholdOverrides: settings.curveThresholdOverrides,
       autoThreshold: { multiplier: settings.thresholdMultiplier },
@@ -395,14 +377,21 @@ export function useRunAnalysis(
     for (const c of allCurves) {
       m.set(
         channelCurveKey(c.row, c.col, c.channel),
-        baselineCorrectCurve(c.cycles, c.mean, ANALYSIS_BASELINE_MODE),
+        correctCurveForDisplay(c.cycles, c.mean, ANALYSIS_BASELINE_MODE, {
+          multiplier: settings.thresholdMultiplier,
+        }),
       );
     }
     for (const d of darkCurves) {
-      m.set(darkCurveKey(d.channel), baselineCorrectCurve(d.cycles, d.mean, ANALYSIS_BASELINE_MODE));
+      m.set(
+        darkCurveKey(d.channel),
+        correctCurveForDisplay(d.cycles, d.mean, ANALYSIS_BASELINE_MODE, {
+          multiplier: settings.thresholdMultiplier,
+        }),
+      );
     }
     return m;
-  }, [allCurves, darkCurves]);
+  }, [allCurves, darkCurves, settings.thresholdMultiplier]);
 
   return {
     plateEntry,

@@ -15,7 +15,9 @@ export interface ThresholdCurveRow {
   noise: number;
   /** False when the baseline fit was rejected (`threshold.md` §3.5) — flagged, since a threshold
    * derived from it is the one most worth overriding. */
-  baselineValid: boolean;
+  /** The whole corrected curve sits above this curve's threshold, so no crossing exists — see
+   * `threshold.md` §6. */
+  aboveThreshold: boolean;
   /** The threshold this curve's Cq was actually taken against. */
   threshold: number;
   /** Its own override, when it has one — what makes it differ from the group's threshold. */
@@ -184,13 +186,13 @@ export function ThresholdSection({
                       <span
                         className="analysis__threshold-region"
                         title={
-                          c.baselineValid
-                            ? "Auto-detected baseline region (cycles)"
-                            : "Auto-detected baseline region (cycles) — the fit was rejected"
+                          c.aboveThreshold
+                            ? "Baseline region (cycles) — the whole corrected curve sits above this threshold, so it never crosses"
+                            : "Baseline region (cycles)"
                         }
                       >
                         {c.beginCycle}&ndash;{c.endCycle}
-                        {c.baselineValid ? "" : " ⚠"}
+                        {c.aboveThreshold ? " ⚠" : ""}
                       </span>
                       <span className="analysis__threshold-noise" title="Baseline noise (σ)">
                         σ{c.noise.toFixed(1)}

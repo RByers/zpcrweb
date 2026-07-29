@@ -1,16 +1,13 @@
 import { describe, it, expect } from "vitest";
 import {
-  parseZpcr,
-  smoothCurve,
-  autoBaselineRegion,
-  subtractBaseline,
-  baselineNoise,
   autoThreshold,
-  resolveThreshold,
-  isAmplified,
-  findThresholdCrossing,
-  findInflectionCq,
+  baselineNoise,
+  baselineRegion,
   computeCq,
+  isAmplified,
+  parseZpcr,
+  resolveThreshold,
+  subtractBaseline,
 } from "../src/index.js";
 import { readSampleBytes } from "./sample.js";
 
@@ -20,90 +17,27 @@ function sigmoid(cycles: number[], onset: number, amplitude = 5000): number[] {
 
 describe("baselineNoise", () => {
   it("is zero for a perfectly flat region", () => {
-    const cycles = [1, 2, 3, 4, 5];
-    const values = [10, 10, 10, 10, 10];
-    expect(baselineNoise(cycles, values, { beginCycle: 1, endCycle: 5 })).toBe(0);
-  });
-
-  it("reflects the spread of noisy residuals about their mean, under residualStdDev", () => {
-    const cycles = [1, 2, 3, 4];
-    const values = [-1, 1, -1, 1];
-    expect(
-      baselineNoise(
-        cycles,
-        values,
-        { beginCycle: 1, endCycle: 4 },
-        { skipLeadingCycles: 0, estimator: "residualStdDev" },
-      ),
-    ).toBeCloseTo(1, 6);
+    expect(baselineNoise([1, 2, 3, 4, 5], [10, 10, 10, 10, 10], { beginCycle: 1, endCycle: 5 })).toBe(0);
   });
 
   it("ignores a smooth trend the baseline fit missed, but not the scatter on top of it", () => {
-    // A settling transient (a decaying ramp) plus a fixed ±1 jitter. The residual spread is
-    // dominated by the ramp; the successive differences are not.
+    // A settling transient (a decaying ramp) plus a fixed ±1 jitter. A standard deviation would be
+    // dominated by the ramp; successive differences see only the jitter, which is the point.
     const cycles = Array.from({ length: 20 }, (_, i) => i + 1);
-    const ramp = cycles.map((c) => 60 * Math.exp(-(c - 1) / 4));
-    const jitter = cycles.map((_, i) => (i % 2 === 0 ? 1 : -1));
-    const values = ramp.map((r, i) => r + jitter[i]!);
-    const region = { beginCycle: 1, endCycle: 20 };
-
-    const spread = baselineNoise(cycles, values, region, {
-      skipLeadingCycles: 0,
-      estimator: "residualStdDev",
-    });
-    const mssd = baselineNoise(cycles, values, region, { skipLeadingCycles: 0 });
-
-    // The default is the shipped one, and it is the smaller of the two here by a wide margin.
-    expect(baselineNoise(cycles, values, region, { skipLeadingCycles: 0 })).toBe(mssd);
-    expect(spread).toBeGreaterThan(4 * mssd);
-
-    // Remove the trend and the two land within a few tens of percent of each other: they measure
-    // the same thing on residuals the baseline model actually describes, and only diverge on
-    // mis-fit. (Exact agreement isn't expected — they are different estimators of the same σ, and
-    // on a short series both carry sampling spread of their own.)
-    let seed = 12345;
-    const noiseOnly = cycles.map(() => {
-      seed = (seed * 1103515245 + 12345) % 2147483648;
-      return (seed / 2147483648) * 2 - 1;
-    });
-    const flatSpread = baselineNoise(cycles, noiseOnly, region, {
-      skipLeadingCycles: 0,
-      estimator: "residualStdDev",
-    });
-    const flatMssd = baselineNoise(cycles, noiseOnly, region, { skipLeadingCycles: 0 });
-    expect(flatMssd / flatSpread).toBeGreaterThan(0.7);
-    expect(flatMssd / flatSpread).toBeLessThan(1.4);
-  });
-
-  it("leaves the region's first cycle out of the estimate by default", () => {
-    const cycles = [1, 2, 3, 4, 5, 6];
-    // A flat baseline with one offset first read — the case skipLeadingCycles exists for.
-    const values = [40, 0, 0, 0, 0, 0];
-    const region = { beginCycle: 1, endCycle: 6 };
-    expect(baselineNoise(cycles, values, region)).toBe(0);
-    expect(baselineNoise(cycles, values, region, { skipLeadingCycles: 0 })).toBeGreaterThan(10);
-  });
-
-  it("keeps every cycle when skipping would leave fewer than three points", () => {
-    const cycles = [1, 2, 3];
-    const values = [40, 0, 0];
-    // Skipping here would leave 2 points, whose spread is less trustworthy than the point dropped.
-    expect(baselineNoise(cycles, values, { beginCycle: 1, endCycle: 3 })).toBeCloseTo(
-      baselineNoise(cycles, values, { beginCycle: 1, endCycle: 3 }, { skipLeadingCycles: 0 }),
-      10,
-    );
+    const values = cycles.map((c, i) => 60 * Math.exp(-(c - 1) / 4) + (i % 2 === 0 ? 1 : -1));
+    const noise = baselineNoise(cycles, values, { beginCycle: 1, endCycle: 20 });
+    expect(noise).toBeGreaterThan(0.5);
+    expect(noise).toBeLessThan(3);
   });
 
   it("returns 0 when no cycle falls within the region", () => {
-    const cycles = [1, 2, 3];
-    const values = [10, 20, 30];
-    expect(baselineNoise(cycles, values, { beginCycle: 100, endCycle: 200 })).toBe(0);
+    expect(baselineNoise([1, 2, 3], [10, 20, 30], { beginCycle: 100, endCycle: 200 })).toBe(0);
   });
 
   it("computes a small residual noise on the real B3/channel-0 baseline region", () => {
     const zpcr = parseZpcr(readSampleBytes());
     const curve = zpcr.curves({ channel: 0 }).find((c) => c.wellLabel === "B3")!;
-    const region = { beginCycle: 1, endCycle: 20 };
+    const region = { beginCycle: 3, endCycle: 20 };
     const corrected = subtractBaseline(curve.cycles, curve.mean, region, "LinearBaseLineNormalized");
     const noise = baselineNoise(curve.cycles, corrected, region);
     expect(noise).toBeGreaterThan(0);
@@ -120,26 +54,12 @@ describe("autoThreshold", () => {
     expect(autoThreshold([10])).toBeCloseTo(200, 6);
   });
 
-  it("stays within a factor of ~2 of CFX's own persisted thresholds", () => {
-    // The two anchors from 20260720_Luna_noRT.pcrd, where CFX ran with
-    // autoCalculateThreshold="False" and thresholdOverrideValue=210.72, paired with this
-    // pipeline's median baselineNoise for the same wells. They imply ~40x; the default is
-    // deliberately below that (see `AutoThresholdOptions.multiplier`), so this pins the scale
-    // rather than the exact value — tens of multiples of noise, not the textbook 3-10x.
-    for (const medianNoise of [4.98, 5.31]) {
-      const ours = autoThreshold([medianNoise]);
-      expect(ours).toBeGreaterThan(210.72 / 3);
-      expect(ours).toBeLessThan(210.72);
-    }
+  it("follows the median, not one unusual well", () => {
+    expect(autoThreshold([1, 1, 1, 1, 500], { multiplier: 1 })).toBeCloseTo(1, 6);
   });
 
-  it("floors the result at minThreshold", () => {
-    expect(autoThreshold([0, 0, 0], { multiplier: 3.2, minThreshold: 5 })).toBe(5);
-  });
-
-  it("returns minThreshold (default 0) when given no estimates", () => {
+  it("returns 0 when given no estimates", () => {
     expect(autoThreshold([])).toBe(0);
-    expect(autoThreshold([], { minThreshold: 7 })).toBe(7);
   });
 });
 
@@ -155,180 +75,81 @@ describe("resolveThreshold", () => {
 
 describe("isAmplified", () => {
   it("is true when the total rise is well above the noise multiple", () => {
-    expect(isAmplified([0, 0, 5000], 10, { minRiseMultiplier: 10 })).toBe(true);
+    expect(isAmplified([0, 0, 5000], 10)).toBe(true);
   });
 
   it("is false for a flat well whose rise is just noise", () => {
-    expect(isAmplified([0, 5, -3, 2], 10, { minRiseMultiplier: 10 })).toBe(false);
+    expect(isAmplified([0, 5, -3, 2], 10)).toBe(false);
   });
 
   it("is false for an empty curve", () => {
     expect(isAmplified([], 10)).toBe(false);
   });
-
-  it("uses the default multiplier of 10", () => {
-    expect(isAmplified([0, 50], 10)).toBe(false); // rise 50 < 10*10
-    expect(isAmplified([0, 150], 10)).toBe(true); // rise 150 >= 10*10
-  });
 });
 
-describe("findThresholdCrossing", () => {
-  it("log-interpolates a fractional Cq between the bracketing cycles", () => {
-    // corrected[c] = 2^c, so threshold 6 sits between c=2 (4) and c=3 (8) at c = log2(6) ~= 2.585
-    const cycles = [1, 2, 3, 4];
+describe("computeCq", () => {
+  const cycles = [1, 2, 3, 4, 5];
+
+  it("interpolates linearly between the two bracketing cycles", () => {
+    // Deliberately exponential data: a log interpolation would give log2(6) ≈ 2.585, and the
+    // measured rule gives the linear answer instead (`threshold.md` §0.2).
     const values = cycles.map((c) => 2 ** c);
-    const cq = findThresholdCrossing(cycles, values, 6);
-    expect(cq).toBeCloseTo(Math.log2(6), 6);
+    expect(computeCq(cycles, values, 6)).toBeCloseTo(2.5, 9);
   });
 
-  it("finds the crossing on a clean sigmoid, ahead of the curve's true midpoint", () => {
-    const cycles = Array.from({ length: 40 }, (_, i) => i + 1);
-    const values = sigmoid(cycles, 25);
-    const threshold = 200; // low, close to the ~100 baseline -- crosses well before c=25
-    const cq = findThresholdCrossing(cycles, values, threshold);
-    expect(cq).not.toBeNull();
-    expect(cq!).toBeGreaterThan(10);
-    expect(cq!).toBeLessThan(25);
+  it("puts the abscissa on the cycle number, with no half-cycle offset", () => {
+    expect(computeCq(cycles, [0, 0, 0, 10, 20], 5)).toBeCloseTo(3.5, 9);
   });
 
-  it("falls back to linear interpolation when a bracketing value is <= 0", () => {
-    const cycles = [1, 2, 3];
-    const values = [-5, 15, 30]; // crosses threshold 10 between c=1 (-5) and c=2 (15)
-    const cq = findThresholdCrossing(cycles, values, 10);
-    // linear: -5 + frac*(15-(-5)) = 10 => frac = 15/20 = 0.75 => cycle 1 + 0.75 = 1.75
-    expect(cq).toBeCloseTo(1.75, 6);
+  it("reports no Cq when the threshold is outside the curve's range", () => {
+    expect(computeCq(cycles, [50, 60, 70, 80, 90], 10)).toBeNull(); // starts above
+    expect(computeCq(cycles, [1, 2, 3, 4, 5], 1000)).toBeNull(); // never reaches
+    expect(computeCq([], [], 10)).toBeNull();
   });
 
-  it("returns null when the curve starts at or above threshold", () => {
-    const cycles = [1, 2, 3];
-    const values = [50, 60, 70];
-    expect(findThresholdCrossing(cycles, values, 10)).toBeNull();
+  it("still reports a crossing that falls back below the threshold", () => {
+    // The reference does: a pure-noise well that pokes above the threshold once and then declines
+    // for 30 cycles is reported with a Cq (`threshold.md` §0.5).
+    expect(computeCq(cycles, [0, 50, 5, 2, 1], 10)).toBeCloseTo(1.2, 9);
   });
 
-  it("returns null when the curve never crosses", () => {
-    const cycles = [1, 2, 3];
-    const values = [1, 2, 3];
-    expect(findThresholdCrossing(cycles, values, 1000)).toBeNull();
-  });
-
-  it("returns null when the trace ends below threshold and requireEndsAboveThreshold is on (default)", () => {
-    const cycles = [1, 2, 3, 4];
-    const values = [0, 50, 5, 2]; // crosses at c=2 then falls back below threshold
-    expect(findThresholdCrossing(cycles, values, 10)).toBeNull();
-  });
-
-  it("reports the crossing when requireEndsAboveThreshold is turned off", () => {
-    const cycles = [1, 2, 3, 4];
-    const values = [0, 50, 5, 2];
-    expect(findThresholdCrossing(cycles, values, 10, { requireEndsAboveThreshold: false })).not.toBeNull();
-  });
-
-  it("returns null for an empty curve", () => {
-    expect(findThresholdCrossing([], [], 10)).toBeNull();
-  });
-
-  it("ignores an early excursion that falls back, taking the final crossing", () => {
-    // Baseline noise flicking over a low threshold before the real rise: the first touch is at
-    // cycle 2, but the curve is back under threshold at 3-5 and only takes off at 6.
-    const cycles = [1, 2, 3, 4, 5, 6, 7, 8];
-    const values = [0, 12, 4, -2, 3, 40, 400, 4000];
-    const cq = findThresholdCrossing(cycles, values, 10)!;
+  it("prefers the crossing followed by the longest increasing run", () => {
+    // An early noise spike over a low threshold, then the real rise: the spike's run is 0, the
+    // rise's is 2, so the rise wins.
+    const c = [1, 2, 3, 4, 5, 6, 7, 8];
+    const cq = computeCq(c, [0, 12, 4, -2, 3, 40, 400, 4000], 10)!;
     expect(cq).toBeGreaterThan(5);
     expect(cq).toBeLessThanOrEqual(6);
   });
 
-  it("still reports the sole crossing of a clean single-crossing curve", () => {
-    const cycles = [1, 2, 3, 4, 5];
-    const values = [1, 2, 4, 40, 400];
-    expect(findThresholdCrossing(cycles, values, 10)).toBeCloseTo(
-      findThresholdCrossing(cycles, values, 10, { requireEndsAboveThreshold: false })!,
-      10,
-    );
+  it("takes the later crossing when two runs tie", () => {
+    const c = [1, 2, 3, 4, 5, 6];
+    // Two identical single-step excursions; the later one wins.
+    expect(computeCq(c, [0, 20, 0, 0, 20, 0], 10)!).toBeGreaterThan(4);
   });
 
-  it("finds a plausible crossing on the real B3/channel-0 curve", () => {
-    const zpcr = parseZpcr(readSampleBytes());
-    const curve = zpcr.curves({ channel: 0 }).find((c) => c.wellLabel === "B3")!;
-    const smoothed = smoothCurve(curve.mean, { mode: "WeightedMean", width: 5 });
-    const region = autoBaselineRegion(curve.cycles, smoothed)!;
-    const corrected = subtractBaseline(curve.cycles, smoothed, region, "LinearBaseLineNormalized");
-    const noise = baselineNoise(curve.cycles, corrected, region);
-    const threshold = autoThreshold([noise]);
-    const cq = findThresholdCrossing(curve.cycles, corrected, threshold);
-    expect(cq).not.toBeNull();
-    expect(cq!).toBeGreaterThan(region.beginCycle);
-    expect(cq!).toBeLessThan(40);
-  });
-});
-
-describe("findInflectionCq", () => {
-  it("finds the cycle nearest the sigmoid's true inflection point", () => {
-    const cycles = Array.from({ length: 40 }, (_, i) => i + 1);
-    const values = sigmoid(cycles, 25);
-    const cq = findInflectionCq(cycles, values);
-    expect(cq).not.toBeNull();
-    expect(cq!).toBeGreaterThanOrEqual(22);
-    expect(cq!).toBeLessThan(28);
-  });
-
-  it("returns null for a flat curve with no dominant peak", () => {
-    const cycles = Array.from({ length: 20 }, (_, i) => i + 1);
-    const values = cycles.map(() => 1000);
-    expect(findInflectionCq(cycles, values)).toBeNull();
-  });
-
-  it("returns null when there are too few points", () => {
-    expect(findInflectionCq([1, 2], [10, 20])).toBeNull();
-  });
-});
-
-describe("computeCq", () => {
-  it("computes a threshold-crossing Cq by default", () => {
-    const cycles = Array.from({ length: 40 }, (_, i) => i + 1);
-    const values = sigmoid(cycles, 25);
-    const cq = computeCq(cycles, values, { threshold: 200 });
-    expect(cq).not.toBeNull();
-    expect(cq!).toBeGreaterThan(10);
-    expect(cq!).toBeLessThan(25);
-  });
-
-  it("throws if the Threshold algorithm is used without a threshold", () => {
-    expect(() => computeCq([1, 2, 3], [1, 2, 3])).toThrow();
-  });
-
-  it("uses curve-shape inflection under the NoThreshold algorithm", () => {
-    const cycles = Array.from({ length: 40 }, (_, i) => i + 1);
-    const values = sigmoid(cycles, 25);
-    const cq = computeCq(cycles, values, { algorithm: "NoThreshold" });
-    expect(cq).not.toBeNull();
-    expect(cq!).toBeGreaterThanOrEqual(22);
-    expect(cq!).toBeLessThan(28);
-  });
-
-  it("squelches an unamplified well when noise is given, for both algorithms", () => {
-    const cycles = [1, 2, 3, 4, 5];
-    const values = [0, 5, -3, 2, 1]; // flat, noise-only
-    expect(computeCq(cycles, values, { threshold: 10, noise: 10 })).toBeNull();
-    expect(computeCq(cycles, values, { algorithm: "NoThreshold", noise: 10 })).toBeNull();
-  });
-
-  it("does not squelch an amplified well", () => {
-    const cycles = Array.from({ length: 40 }, (_, i) => i + 1);
-    const values = sigmoid(cycles, 25);
-    expect(computeCq(cycles, values, { threshold: 200, noise: 5 })).not.toBeNull();
+  it("ignores a crossing whose local slope is negligible", () => {
+    // A curve lying flat along the threshold produces no Cq rather than an arbitrary one.
+    const c = [1, 2, 3, 4];
+    expect(computeCq(c, [10 - 1e-9, 10, 10, 10], 10)).toBeNull();
   });
 
   it("produces a plausible Cq on the real B3/channel-0 curve end to end", () => {
     const zpcr = parseZpcr(readSampleBytes());
     const curve = zpcr.curves({ channel: 0 }).find((c) => c.wellLabel === "B3")!;
-    const smoothed = smoothCurve(curve.mean, { mode: "WeightedMean", width: 5 });
-    const region = autoBaselineRegion(curve.cycles, smoothed)!;
-    const corrected = subtractBaseline(curve.cycles, smoothed, region, "LinearBaseLineNormalized");
-    const noise = baselineNoise(curve.cycles, corrected, region);
-    const threshold = autoThreshold([noise]);
-    const cq = computeCq(curve.cycles, corrected, { threshold, noise });
+    const region = baselineRegion(curve.cycles, null);
+    const corrected = subtractBaseline(curve.cycles, curve.mean, region, "LinearBaseLineNormalized");
+    const threshold = autoThreshold([baselineNoise(curve.cycles, corrected, region)]);
+    const cq = computeCq(curve.cycles, corrected, threshold)!;
     expect(cq).not.toBeNull();
-    expect(cq!).toBeGreaterThan(region.beginCycle);
-    expect(cq!).toBeLessThan(40);
+    expect(cq).toBeGreaterThan(10);
+    expect(cq).toBeLessThan(45);
+  });
+
+  it("finds the crossing on a clean sigmoid, ahead of the curve's midpoint", () => {
+    const c = Array.from({ length: 40 }, (_, i) => i + 1);
+    const cq = computeCq(c, sigmoid(c, 25), 200)!;
+    expect(cq).toBeGreaterThan(10);
+    expect(cq).toBeLessThan(25);
   });
 });

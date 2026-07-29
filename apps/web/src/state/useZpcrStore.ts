@@ -56,7 +56,7 @@ export type Baseline = "raw" | "delta" | "percent";
 /**
  * Curves view only — what the chart plots each curve as. Baselining itself is never
  * configurable: it's always an auto-detected linear baseline (`threshold.md` §4's
- * `LinearBaseLineNormalized`, region from `autoBaselineRegion`) — `"relative"` plots the
+ * `LinearBaseLineNormalized`, region from `baselineRegion`) — `"relative"` plots the
  * baseline-corrected curve, `"absolute"` plots the raw curve unmodified. Cq/analysis always use
  * the baseline-corrected values regardless of which is shown.
  */
@@ -409,10 +409,9 @@ function legacyAnalysisFromStored(s: StoredSettings): Partial<AnalysisSettings> 
   if (overrides) out.thresholdOverrides = new Map(overrides);
   if (s.curveThresholdOverrides) out.curveThresholdOverrides = new Map(s.curveThresholdOverrides);
   if (s.thresholdMultiplier !== undefined) out.thresholdMultiplier = s.thresholdMultiplier;
-  // Records predating `subtractDark` carry the retired three-way calibrationBackground
-  // ("none"/"dark"/"plate"); only "dark" maps to the surviving stage.
-  if (s.subtractDark !== undefined) out.subtractDark = s.subtractDark;
-  else if (s.calibrationBackground !== undefined) out.subtractDark = s.calibrationBackground === "dark";
+  // `subtractDark` (and the older three-way `calibrationBackground` it replaced) are deliberately
+  // dropped rather than migrated: the dark-current stage is gone, measured to make results worse
+  // (`calibration.md` §4.2a). Old records still parse; the field is simply ignored.
   if (s.calibrationNormalization !== undefined) {
     out.calibrationNormalization = s.calibrationNormalization;
   }
@@ -932,6 +931,18 @@ export function useZpcrStore(): ZpcrStore {
         if (!zpcr) continue; // not decoded yet (needs a password, or failed) — try again later
         const fromFile = parseZpcrwebSettings(zpcr);
         next = analysisFromZpcrweb(fromFile);
+        // A `.pcrd` that CFX saved with `autoCalculateThreshold="False"` carries the threshold the
+        // instrument's own analysis used, per fluorophore (`threshold.md` §5.4). Seed the app's
+        // override with it — that is what makes this app reproduce CFX's Cq exactly on such a run.
+        //
+        // It seeds *state*, and is never read by the analysis pipeline directly: a `.pcrd` and the
+        // `.zpcr` of the same run must still quantify identically from the same inputs (see
+        // `runAnalysis.ts`), and the difference here is a saved user decision, visible and
+        // editable in the Threshold rail like any other override. `zpcrweb.json` outranks it —
+        // that is this app's own record of the same decision, written later.
+        if (!fromFile?.analysis?.thresholdOverrides && zpcr.persistedThresholds) {
+          next = { ...next, thresholdOverrides: new Map(zpcr.persistedThresholds) };
+        }
         const legacy = legacyAnalysis.current[f.id];
         // The file is authoritative; pre-split IndexedDB state only fills a file that has
         // nothing to say, and is then written into it so the migration happens exactly once.

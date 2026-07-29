@@ -409,6 +409,18 @@ export interface Zpcr {
    * correction in `calibration.md` §4.1 is then simply inactive.
    */
   wellFactors?: WellFactors;
+  /**
+   * Per-fluorophore thresholds the saved run pinned by hand, keyed by dye name — a `.pcrd`'s
+   * `thresholdOverrideValue` where `autoCalculateThreshold="False"` (`threshold.md` §5.4).
+   * Undefined for a `.zpcr`, which stores no analysis parameters at all.
+   *
+   * **This is a saved user decision, not a measurement**, which is why nothing in the analysis
+   * pipeline reads it directly: feeding it in would make a `.pcrd` and the `.zpcr` of the same run
+   * report different Cq values for the same physical measurement. It seeds the app's own
+   * per-fluorophore threshold override instead, where it is visible and editable — see
+   * `apps/web/ARCHITECTURE.md`. Honouring it reproduces CFX's Cq exactly for every overridden dye.
+   */
+  persistedThresholds?: ReadonlyMap<string, number>;
   /** Factory calibration of the reference row, from `RunInfo.xml`'s `FactoryRefRowCal`. */
   factoryRefCal(): RefWellCal[];
   /** Live reference row vs factory calibration, per channel/column (optical drift). */

@@ -1,398 +1,206 @@
 /**
- * Threshold and Cq stages of `threshold.md` (§5–§6): given a baseline-corrected curve
- * ({@link subtractBaseline} in `baseline.ts`), pick a threshold RFU and derive the quantification
- * cycle, Cq, either by threshold crossing (§6.1) or by curve-shape inflection (§6.2). Also covers
- * the §7 quality gates (amplification squelch).
+ * The threshold and Cq stages of `threshold.md` (§5–§6): given a baseline-corrected curve
+ * (`subtractBaseline` in `baseline.ts`), pick a threshold RFU and report the cycle at which the
+ * curve crosses it.
  *
- * `threshold.md` §9 flags this as specified but not yet cross-validated against a reference
- * instrument's own reported Cq — the same caveat `baseline.ts` carries.
+ * **The crossing rule is measured, not inferred.** Fed CFX's own corrected curves and its own
+ * threshold, {@link computeCq} reproduces all 14 Cq values and all 10 no-Cq wells of
+ * `20260726_S183-S185_RVP` to ~1e-10 cycles — see `threshold.md` §0.2 and the regression test in
+ * `test/cfxExport.test.ts`. The *threshold* is the opposite case: CFX's automatic rule is not
+ * documented, not observable, and the one auto value ever recovered from it rules out the obvious
+ * models — see {@link AutoThresholdOptions.multiplier}.
  */
 
-import { meanSquaredSuccessiveDifference, median, stdDev, whiteness } from "./stats.js";
+import { median, stdDev } from "./stats.js";
+import type { BaselineRegion } from "./baseline.js";
 
 /**
- * How {@link baselineNoise} turns a baseline region's residuals into one noise number (§5.1).
- *
- * - `successiveDifference` (**default**) — the root-mean-square *successive difference*,
- *   `sqrt(mean((r[i] − r[i−1])²) / 2)`, also called the MSSD or von Neumann estimator. Measures
- *   only cycle-to-cycle scatter, so it is blind to any smooth trend the fitted baseline failed to
- *   capture.
- * - `residualStdDev` — the plain standard deviation of the residuals. What this library shipped
- *   before, and what the textbook description of §5.1 implies.
- *
- * The two agree on a well whose baseline really is a straight line plus white noise, and diverge
- * exactly when the baseline model is wrong. That divergence is the reason for the default: a
- * standard deviation about a fitted line answers "how far is this curve from my model?", but the
- * threshold rule needs "how much does this curve jitter?" — and those coincide only when the model
- * is right. A well with a settling transient (block and optics still stabilizing over the first
- * cycles, on top of the usual linear drift) leaves residuals that trace a smooth arc rather than
- * scattering, so `residualStdDev` reports the size of that arc and the threshold inflates in
- * proportion to how badly the line mis-described the well — pushing Cq later exactly where the
- * curve is least well understood, and doing it per-well, which makes Cq incomparable across a
- * plate.
- *
- * Measured over the committed samples' loaded curves, `residualStdDev / successiveDifference` runs
- * to **4.2×** on `20260720_FirstQualification.zpcr` and **8.7×** on
- * `20230829_135443_CT019138_SINGLE_STEP_.zpcr`
- * (median 5.5× there, where 67 of 72 curves carry a clearly non-white baseline). On the latter the
- * old estimator put the group threshold at ≈1063 RFU and only 3 of 72 wells reported a Cq at all;
- * the successive-difference estimator puts it at ≈178. On the former it closes the specific defect
- * this option was introduced for: wells A3/B3 (HMPV Ma) and D3 (PIV3 Bo) carry the same dye and
- * near-identical curves, but A3's transient gave it a residual spread of 11.1 against D3's 2.5, so
- * the two targets' thresholds came out 3.3× apart. Under the default they are 3.7 and 2.7.
- *
- * **Where CFX stands is unknown.** Bio-Rad documents neither its noise statistic nor its
- * multiplier, and the only observable is the pair of thresholds the sample `.pcrd` persisted. What
- * those two anchors *do* say is that the successive-difference estimator makes the implied
- * multiplier far more consistent between dyes — see {@link AutoThresholdOptions.multiplier}.
+ * Converts a median absolute second difference into an estimate of σ. **0.6053**, and it is
+ * arithmetic rather than a tuning knob: for white noise of standard deviation σ, second
+ * differences are Gaussian with variance 6σ², so their median absolute value is
+ * `0.6745 × √6 × σ = 1.6521σ`.
  */
-export type NoiseEstimator = "successiveDifference" | "residualStdDev";
-
-export interface BaselineNoiseOptions {
-  /** Which statistic to reduce the region's residuals with. Default `"successiveDifference"` —
-   * see {@link NoiseEstimator}. */
-  estimator?: NoiseEstimator;
-  /**
-   * How many cycles at the *start* of the baseline region to leave out of the noise estimate.
-   * Default **1**.
-   *
-   * The run's first read is routinely offset from the rest of the baseline — block and optics are
-   * still settling — which §3.1 already acknowledges for cycle 0. It is one anomalous point in a
-   * short window, so it inflates the spread out of proportion to its meaning, and because §5.1
-   * multiplies that spread by a large constant ({@link AutoThresholdOptions.multiplier}) the error
-   * is amplified straight into the threshold and hence into every Cq in the group.
-   *
-   * This still matters under the default `successiveDifference` estimator, and if anything matters
-   * slightly more: that estimator is immune to a smooth *trend* the baseline fit missed, but an
-   * isolated spike enters **two** successive differences rather than one squared deviation, so a
-   * lone bad read counts for more, not less. Trend robustness and outlier robustness are separate
-   * properties — see {@link NoiseEstimator}.
-   *
-   * Only the *noise statistic* skips it. The baseline line itself is still fitted over the whole
-   * region ({@link fitLinearBaseline}) and the curve is still corrected across every cycle: the
-   * point is a poor estimator of scatter, not bad data.
-   *
-   * Ignored when it would leave fewer than 3 points, since the remaining spread would be worse than
-   * the one being cleaned up.
-   */
-  skipLeadingCycles?: number;
-}
-
-/** The residuals {@link baselineNoise} reduces: the corrected curve over its baseline region,
- * less the leading cycles {@link BaselineNoiseOptions.skipLeadingCycles} drops. */
-function noiseResiduals(
-  cycles: number[],
-  correctedValues: number[],
-  region: { beginCycle: number; endCycle: number },
-  skipLeadingCycles: number,
-): number[] {
-  const all: number[] = [];
-  for (let i = 0; i < cycles.length; i++) {
-    if (cycles[i]! >= region.beginCycle && cycles[i]! <= region.endCycle) all.push(i);
-  }
-  const idx = all.length - skipLeadingCycles >= 3 ? all.slice(skipLeadingCycles) : all;
-  return idx.map((i) => correctedValues[i]!);
-}
+const SECOND_DIFFERENCE_SIGMA = 1 / (0.674489750196082 * Math.sqrt(6));
 
 /**
- * §5.1: noise estimate for one well, over its baseline region. Pass an
- * already-{@link subtractBaseline}d curve; in that region the corrected values are residuals about
- * zero, so their spread is the quantity §5.1 calls for.
+ * §5.2: the baseline noise of one well — how much its corrected curve jitters from cycle to
+ * cycle, over the baseline region. Pass an already-corrected curve: inside the region its values
+ * *are* the residuals about the fitted line.
  *
- * Which statistic reduces those residuals is {@link BaselineNoiseOptions.estimator}'s choice, and
- * the default is deliberately **not** the plain standard deviation — see {@link NoiseEstimator} for
- * why, and for the measurements behind it.
+ * The estimator is the **median absolute second difference**, scaled to σ. That is a deliberate
+ * choice over the two obvious alternatives, and the reason is that the statistic has to survive
+ * being computed over a region the baseline does *not* describe:
  *
- * The region's leading cycle is excluded by default — see {@link BaselineNoiseOptions.skipLeadingCycles}.
+ * - A **standard deviation** about the fitted line answers "how far is this curve from my model?",
+ *   not "how much does it jitter". The two coincide only when the model is right. Measured over
+ *   the committed samples, `stdDev ÷ jitter` runs to 4.2× on `20260720_FirstQualification.zpcr`
+ *   and 8.7× on `20230829_135443_CT019138_SINGLE_STEP_.zpcr` — that ratio is baseline mis-fit
+ *   being reported as noise, per well, which makes Cq incomparable across a plate.
+ * - **Root-mean-square successive differences** (the MSSD, what this library used to ship) fix the
+ *   *offset* half of that but not the rest: a leftover slope puts a constant into every
+ *   difference, and a single amplifying well leaves a huge one in the differences over its rise.
+ *   Both matter here, because `computeCqTable`'s first pass deliberately baselines every curve
+ *   over the whole run — including the exponential — to find out where the rise is.
+ *
+ * A median of second differences is blind to both: second differences of any straight line are
+ * zero, and a rise occupying a minority of the region cannot move a median. On a curve whose
+ * region really is a line plus white noise all three estimators agree, which is what makes this a
+ * strict improvement rather than a different answer.
+ *
+ * Falls back to the standard deviation below 4 points, where there are too few second differences
+ * to take a median of.
  */
 export function baselineNoise(
   cycles: number[],
   correctedValues: number[],
-  region: { beginCycle: number; endCycle: number },
-  options: BaselineNoiseOptions = {},
+  region: BaselineRegion,
 ): number {
-  const residuals = noiseResiduals(
-    cycles,
-    correctedValues,
-    region,
-    options.skipLeadingCycles ?? 1,
-  );
-  if (residuals.length === 0) return 0;
-  // Below 3 points the successive differences are too few to average, so fall back to the spread.
-  if ((options.estimator ?? "successiveDifference") === "residualStdDev" || residuals.length < 3) {
-    return stdDev(residuals);
+  const residuals: number[] = [];
+  for (let i = 0; i < cycles.length; i++) {
+    if (cycles[i]! >= region.beginCycle && cycles[i]! <= region.endCycle) {
+      residuals.push(correctedValues[i]!);
+    }
   }
-  return Math.sqrt(meanSquaredSuccessiveDifference(residuals) / 2);
-}
+  if (residuals.length === 0) return 0;
+  if (residuals.length < 4) return stdDev(residuals);
 
-/**
- * **von Neumann's ratio** for a baseline region's residuals — mean squared successive difference
- * divided by variance. A scale-free measure of how much of the residual is white noise rather than
- * structure the baseline fit failed to describe:
- *
- * - **≈ 2** — white noise. Successive residuals are independent, so their differences carry twice
- *   the variance of the residuals themselves. This is the value a correctly-modelled baseline gives.
- * - **→ 0** — strongly serially correlated. The residuals trace a smooth path (a settling
- *   transient, a curved drift, or the foot of amplification pulled into the region), which means
- *   the straight-line baseline is the wrong model over this region.
- * - **> 2** — alternating/anti-correlated residuals, e.g. an over-smoothed or aliased trace.
- *
- * The useful property is that it needs **no tuning constant and no scale**: unlike §3.2's
- * flatness/linearity bounds — which are fractions of the curve's *whole span*, and so grow
- * permissive exactly on the high-rising wells where a mis-fit baseline does the most damage — the
- * ratio has a known null value that is the same for every curve, dye, run and instrument.
- *
- * Measured on the committed samples this separates cleanly with a wide margin: every curve whose
- * baseline is visibly mis-modelled lands at 0.03–0.5, every clean one at 1.4–2.5. Returns `2` (the
- * white-noise null) when the residuals have no spread to judge, so a flat-line curve is not
- * reported as structured.
- */
-export function residualWhiteness(
-  cycles: number[],
-  correctedValues: number[],
-  region: { beginCycle: number; endCycle: number },
-  options: BaselineNoiseOptions = {},
-): number {
-  const residuals = noiseResiduals(
-    cycles,
-    correctedValues,
-    region,
-    options.skipLeadingCycles ?? 1,
-  );
-  return whiteness(residuals);
+  const secondDifferences: number[] = [];
+  for (let i = 2; i < residuals.length; i++) {
+    secondDifferences.push(Math.abs(residuals[i]! - 2 * residuals[i - 1]! + residuals[i - 2]!));
+  }
+  return SECOND_DIFFERENCE_SIGMA * median(secondDifferences);
 }
 
 export interface AutoThresholdOptions {
   /**
-   * `T = multiplier × noise`. Default **20**.
+   * `T = multiplier × median baseline noise` over the fluorophore's wells. Default **20**.
    *
-   * Far above the textbook 3–10× because `noise` here is not the quantity those figures describe.
-   * They assume the raw well-to-well scatter of the baseline cycles; {@link baselineNoise} measures
-   * the residual left over after §2 smoothing *and* subtraction of a line fitted tightly to the
-   * pre-amplification region, which is a much smaller number. Multiplying that residual by 3.2 puts
-   * the threshold a few RFU above baseline on a curve that rises by thousands, so the crossing
-   * lands deep in the exponential's foot and every Cq comes out systematically early.
+   * **This is the one number in the pipeline that is neither measured nor derivable**, and the
+   * evidence says the *form* of the rule is wrong, not just the constant. The RVP run pins two of
+   * its three dyes' thresholds and bounds the third (`threshold.md` §0.4, §5.3):
    *
-   * The order of magnitude comes from the only ground truth available: the thresholds CFX itself
-   * persisted in `20260720_Luna_noRT.pcrd` (`autoCalculateThreshold="False"`, so these are the
-   * values the instrument's own analysis used). The plate loads three fluorophores and exactly two
-   * of them carry an override — `fluorId` 5 (FAM) and 12 (Texas Red), both 210.72; `fluorId` 4
-   * (Cy5) is left on `autoCalculateThreshold="True"` and is **not** an anchor. Dividing those by
-   * this pipeline's median {@link baselineNoise} over the four loaded wells of each dye:
-   *
-   * | Fluor | CFX `thresholdOverrideValue` | via `residualStdDev` | via `successiveDifference` |
+   * | Fluor | Threshold CFX used | Baseline noise | Implied multiplier |
    * |---|---|---|---|
-   * | FAM | 210.72 | 2.33 → **90.3×** | 2.47 → **85.3×** |
-   * | Texas Red | 210.72 | 5.08 → **41.5×** | 2.65 → **79.6×** |
+   * | FAM | 92.0212554931641 (persisted override) | ~2.3 | ~40× |
+   * | Tex 615 | 8.06451415811512 (CFX's own auto value, recovered) | ~2.5 | ~3× |
+   * | Cy5 | **> 278** (a well rising to 278 RFU gets no Cq) | ~1.8 | > 150× |
    *
-   * This is the sharpest evidence for the default {@link NoiseEstimator}: under `residualStdDev`
-   * the two anchors disagree by 2.2×, so "the" multiplier would depend on which dye it was
-   * calibrated against — disqualifying for a constant meant to generalize. Under the default they
-   * agree within 7%. The estimator change did not move the anchors closer by construction; it moved
-   * them closer because Texas Red's cohort happened to carry more baseline mis-fit than FAM's, and
-   * removing that from the statistic removed the disagreement with it.
+   * Three dyes on one plate, in the same cycles, with baseline noise within 40% of each other, and
+   * thresholds spanning 35×. No multiple of any noise statistic fits that, and neither does any
+   * curve-shape quantity: Cy5's threshold must exceed 278 RFU while every Cy5 curve on the plate
+   * is flat noise, so nothing read off those curves' shapes can produce it. (That last point
+   * retires the "per-curve shape threshold" this document used to propose; see `threshold.md` §5.3.)
    *
-   * The shipped default of 20 nonetheless sits well *below* the ≈80 those anchors now imply, and
-   * that gap is a deliberate, unresolved judgement call rather than a measurement: re-anchoring to
-   * ≈80 lands every Cq on the samples in hand later than the curves suggest. Two anchors from one
-   * run on one instrument, sharing a single override value, are not enough to overrule that — see
-   * `threshold.md` §9. What they do settle is the scale: tens of multiples of this residual, not
-   * the textbook 3–10×. `computeCqTable`'s `autoThreshold` option makes it adjustable, and the web
-   * app puts it on a slider for exactly this reason.
-   *
-   * Expressing the same anchors as a fraction of the wells' amplification instead (7.5% and 10.1%
-   * of median ΔRFU) fits them more loosely and disagrees sharply on other plates, which is why the
-   * rule stays noise-relative.
+   * So the shipped rule is a *defensible default*, not a reproduction of the instrument's: a
+   * threshold a few tens of multiples above the noise floor sits above the jitter of a flat well
+   * and below the exponential's shoulder on an amplifying one. When exact agreement with CFX
+   * matters, supply the threshold instead of computing it — a `.pcrd` that persists
+   * `thresholdOverrideValue` gives it directly, and the web app seeds its per-fluorophore
+   * override from that and puts this multiplier on a slider.
    */
   multiplier?: number;
-  /** Floor on the resulting threshold, in RFU. Default **0** (no floor) — the doc calls for a
-   * floor without pinning a value; supply one appropriate to the instrument's noise floor. */
-  minThreshold?: number;
 }
 
 /**
- * §5.1: one threshold per fluorophore (not per well) — `noiseEstimates` should be
- * {@link baselineNoise} from a subset of the well group (`subsetPopRDBaseLinePref`), and the
- * *median* of those is used so a single noisy well can't blow the threshold up. Floors the
- * result at `minThreshold` so an all-flat plate doesn't collapse the threshold toward zero.
+ * §5.1: one threshold per fluorophore, from the median baseline noise across that dye's wells.
+ *
+ * The *median*, so one unusually noisy well can't move the group; per **fluorophore**, because
+ * that is the grouping the file format itself uses (`fluorDataAnalysisParam fluorId=…`) and the
+ * one the physics supports — baseline noise is a property of the dye, the optics and the well,
+ * while a target is a biological label attached to the same physical measurement.
  */
 export function autoThreshold(noiseEstimates: number[], options: AutoThresholdOptions = {}): number {
-  const multiplier = options.multiplier ?? 20;
-  const minThreshold = options.minThreshold ?? 0;
-  if (noiseEstimates.length === 0) return minThreshold;
-  return Math.max(multiplier * median(noiseEstimates), minThreshold);
+  if (noiseEstimates.length === 0) return 0;
+  return (options.multiplier ?? 20) * median(noiseEstimates);
 }
 
 export interface ThresholdOptions {
-  /** `thresholdOverrideValue`, with `autoCalculateThreshold="False"`. Authoritative when present — §5.1 is skipped entirely. */
+  /** `thresholdOverrideValue`, with `autoCalculateThreshold="False"` — authoritative when present,
+   * and the only way to reproduce a reference Cq exactly (§5.4). */
   overrideValue?: number;
   auto?: AutoThresholdOptions;
 }
 
-/** §5: resolve the threshold to use for a fluorophore — the manual override if given, else {@link autoThreshold} over `noiseEstimates`. */
+/** §5: the manual override if there is one, else {@link autoThreshold}. */
 export function resolveThreshold(noiseEstimates: number[], options: ThresholdOptions = {}): number {
   if (options.overrideValue !== undefined) return options.overrideValue;
   return autoThreshold(noiseEstimates, options.auto);
 }
 
-export interface AmplificationOptions {
-  /** A well counts as amplified if its total rise is at least this many multiples of `noise`. Default **10**. */
-  minRiseMultiplier?: number;
-}
+/** A well counts as amplified if its total rise is at least this many multiples of its baseline
+ * noise. **Diagnostic only** — see {@link isAmplified}. */
+export const AMPLIFIED_RISE_MULTIPLIER = 10;
 
 /**
- * §7: classify a well as amplified or not, so a flat well's noise can't eventually cross a low
- * auto threshold and produce a spurious late Cq. `noise` is typically {@link baselineNoise} for
- * the same well.
+ * §7: does this curve look amplified at all — total rise against baseline noise.
+ *
+ * **A diagnostic, not a gate.** It used to suppress the Cq of a well that failed it, and the
+ * reference does no such thing: CFX reports a Cq of 14.82 for a pure-noise well whose curve pokes
+ * above the threshold at exactly one cycle, and withholds one from a well that rises cleanly by
+ * 87 RFU (`threshold.md` §0.5). Its only test is {@link computeCq}'s `T ∈ [min, max]`. Keeping
+ * this as a label the UI can show and sort by — rather than as a veto — is both simpler and closer
+ * to the instrument.
  */
-export function isAmplified(values: number[], noise: number, options: AmplificationOptions = {}): boolean {
-  const minRiseMultiplier = options.minRiseMultiplier ?? 10;
+export function isAmplified(values: number[], noise: number): boolean {
   if (values.length === 0) return false;
-  const rise = Math.max(...values) - Math.min(...values);
-  return rise >= minRiseMultiplier * noise;
-}
-
-export interface CqCrossingOptions {
-  /** Report no Cq if the trace's last point is below threshold (a crossing that falls back).
-   * Default **on**, per the doc's recommendation. */
-  requireEndsAboveThreshold?: boolean;
+  return Math.max(...values) - Math.min(...values) >= AMPLIFIED_RISE_MULTIPLIER * noise;
 }
 
 /**
- * §6.1: `algorithmCtDetection="Threshold"`. Finds where the curve crosses `threshold` for real and
- * log-interpolates between the bracketing cycles for a fractional Cq, falling back to linear
- * interpolation when either bracketing value is `<= 0` (the logarithm is undefined).
- *
- * "For real" means the start of the curve's **final** run above the threshold, not the first cycle
- * that touches it: with `requireEndsAboveThreshold` on (the default, per the doc), any earlier
- * excursion that falls back below is by definition not the amplification the trace ends in, so
- * taking the first touch would report baseline noise flickering across a low threshold as a Cq of
- * 1–2 for a well that actually amplifies at cycle 30. Where the two rules agree — a clean sigmoid
- * that crosses once — they give the identical answer.
- *
- * Edge cases:
- *
- * - Above threshold at every cycle (nothing below to cross *from*) ⇒ `null` (a failed baseline,
- *   not an early Cq).
- * - Never crosses ⇒ `null` (no amplification).
- * - Ends below threshold ⇒ `null`, unless `requireEndsAboveThreshold` is turned off — in which case
- *   the first crossing is used, there being no final above-threshold run to anchor to.
+ * A crossing whose local slope is below this many RFU per cycle is ignored — a curve lying flat
+ * along the threshold produces no Cq rather than an arbitrary one. Part of the measured rule.
  */
-export function findThresholdCrossing(
-  cycles: number[],
-  values: number[],
-  threshold: number,
-  options: CqCrossingOptions = {},
-): number | null {
-  const requireEndsAboveThreshold = options.requireEndsAboveThreshold ?? true;
-  if (values.length === 0) return null;
+const MIN_CROSSING_SLOPE = 1e-5;
 
-  let crossIndex = -1;
-  if (requireEndsAboveThreshold) {
-    if (values.at(-1)! < threshold) return null;
-    // The final run above threshold begins just after the last sub-threshold cycle.
-    let lastBelow = -1;
-    for (let i = values.length - 1; i >= 0; i--) {
-      if (values[i]! < threshold) {
-        lastBelow = i;
-        break;
+/**
+ * §6: **the** Cq — the fractional cycle at which a baseline-corrected curve crosses `threshold`.
+ *
+ * ```
+ * if T < min(y) or T > max(y):  no Cq                    ← the only gate there is
+ * for each upward crossing i (y[i] ≥ T > y[i−1]):
+ *   skip it if the local slope is below MIN_CROSSING_SLOPE
+ *   xc  = cycle[i−1] + (T − y[i−1]) / (y[i] − y[i−1])    ← two-point LINEAR interpolation
+ *   run = how many further cycles keep strictly increasing
+ * take the crossing with the longest run; ties go to the later one
+ * ```
+ *
+ * Every clause is measured against CFX's own output (`threshold.md` §0.2), and three of them
+ * replaced something this library used to do differently:
+ *
+ * - **Linear interpolation on the cycle number.** Not logarithmic (physically appealing, and
+ *   simply not what produces the reported numbers — it lands a few hundredths of a cycle early),
+ *   and no half-cycle offset: solving 9 reported Cq values back for the threshold that would
+ *   produce them gives the same threshold to 1e-12 under `x = cycle`, and a ±10% scatter under
+ *   `x = cycle + ½`.
+ * - **Longest following increasing run**, not the start of the final above-threshold run. On a
+ *   clean sigmoid the two agree; on a noise spike followed by decline the run rule still reports a
+ *   Cq, and CFX does too.
+ * - **`T ∈ [min, max]` is the only reason to withhold a Cq.** Not "the trace ends below the
+ *   threshold", not an amplification squelch, not a baseline-validity check. A well whose whole
+ *   corrected curve sits *above* the threshold gets no Cq — which is the real reason an obviously
+ *   amplifying well can report nothing, and worth surfacing in a UI as "baseline above threshold"
+ *   rather than "no amplification": they look identical in the output and mean opposite things.
+ */
+export function computeCq(cycles: number[], values: number[], threshold: number): number | null {
+  const n = values.length;
+  if (n === 0) return null;
+  if (threshold < Math.min(...values) || threshold > Math.max(...values)) return null;
+
+  let best: { run: number; cq: number } | null = null;
+  let i = 1;
+  while (i < n) {
+    if (values[i]! >= threshold && values[i - 1]! < threshold) {
+      const slope = values[i]! - values[i - 1]!;
+      if (Math.abs(slope) >= MIN_CROSSING_SLOPE) {
+        const cq = cycles[i - 1]! + (threshold - values[i - 1]!) / slope;
+        let run = 0;
+        while (i + run + 1 < n && values[i + run + 1]! > values[i + run]!) run++;
+        // `>=`, so a later crossing wins an otherwise equal contest.
+        if (!best || run >= best.run) best = { run, cq };
+        i += run;
       }
     }
-    if (lastBelow < 0) return null;
-    crossIndex = lastBelow + 1;
-  } else {
-    if (values[0]! >= threshold) return null;
-    for (let i = 1; i < values.length; i++) {
-      if (values[i]! >= threshold) {
-        crossIndex = i;
-        break;
-      }
-    }
+    i++;
   }
-  if (crossIndex < 0 || crossIndex >= values.length) return null;
-
-  const prev = values[crossIndex - 1]!;
-  const curr = values[crossIndex]!;
-  const cPrev = cycles[crossIndex - 1]!;
-  const cCurr = cycles[crossIndex]!;
-  if (curr === prev) return cCurr;
-
-  if (prev > 0 && curr > 0) {
-    const frac = (Math.log(threshold) - Math.log(prev)) / (Math.log(curr) - Math.log(prev));
-    return cPrev + frac * (cCurr - cPrev);
-  }
-
-  const frac = (threshold - prev) / (curr - prev);
-  return cPrev + frac * (cCurr - cPrev);
-}
-
-/**
- * §6.2: `algorithmCtDetection="NoThreshold"`. Reports Cq as the cycle of the curve's
- * second-derivative maximum — the point of steepest acceleration, i.e. the start of the
- * exponential phase — needing no threshold at all. Only meaningful for a curve with an actual
- * sigmoidal shape; a flat or linear trace has no dominant peak, so this returns `null` rather
- * than pick an arbitrary cycle. Amplification (the "does this curve have a shape at all" case)
- * should still be checked separately with {@link isAmplified} — this function does not do it.
- */
-export function findInflectionCq(cycles: number[], values: number[]): number | null {
-  if (values.length < 3) return null;
-
-  const secondDiff = values.map((v, i) =>
-    i === 0 || i === values.length - 1 ? -Infinity : values[i + 1]! - 2 * v + values[i - 1]!,
-  );
-
-  let maxIndex = -1;
-  let maxValue = -Infinity;
-  for (let i = 1; i < secondDiff.length - 1; i++) {
-    if (secondDiff[i]! > maxValue) {
-      maxValue = secondDiff[i]!;
-      maxIndex = i;
-    }
-  }
-  if (maxIndex < 0 || maxValue <= 0) return null;
-
-  return cycles[maxIndex]!;
-}
-
-/** `algorithmCtDetection`. */
-export type CqAlgorithm = "Threshold" | "NoThreshold";
-
-export interface CqOptions {
-  /** Default `"Threshold"`, the observed instrument default. */
-  algorithm?: CqAlgorithm;
-  /** Required when `algorithm` is `"Threshold"`. */
-  threshold?: number;
-  /** When given, gates the result on {@link isAmplified} first — both algorithms report `null` for an unamplified well. */
-  noise?: number;
-  amplification?: AmplificationOptions;
-  crossing?: CqCrossingOptions;
-  /** §7's baseline-validation gate — pass `false` (typically `CurveBaselineResult.baselineValid`
-   * from `analysis.ts`, which runs `baseline.ts`'s `validateBaselineRegion`) to report no Cq
-   * outright. A region that fails that check produces a corrected curve that's an artifact of
-   * extrapolating a locally-fit line across cycles it doesn't describe, so any crossing or
-   * inflection found in it is not trustworthy however clean it looks — checked before
-   * `noise`/`isAmplified`, since a spurious rise like that routinely clears the amplification
-   * squelch too. */
-  baselineValid?: boolean;
-}
-
-/**
- * §6 + §7 combined: apply the §7 baseline-validation and amplification squelches (when
- * `baselineValid`/`noise` are given), then compute Cq with whichever algorithm
- * `options.algorithm` selects — {@link findThresholdCrossing} or {@link findInflectionCq}.
- * `cycles`/`values` should already be baseline-corrected ({@link subtractBaseline} in
- * `baseline.ts`).
- */
-export function computeCq(cycles: number[], values: number[], options: CqOptions = {}): number | null {
-  const algorithm = options.algorithm ?? "Threshold";
-  if (options.baselineValid === false) return null;
-  if (options.noise !== undefined && !isAmplified(values, options.noise, options.amplification)) return null;
-
-  if (algorithm === "Threshold") {
-    if (options.threshold === undefined) {
-      throw new Error("computeCq: threshold is required for the Threshold algorithm");
-    }
-    return findThresholdCrossing(cycles, values, options.threshold, options.crossing);
-  }
-  return findInflectionCq(cycles, values);
+  return best ? best.cq : null;
 }

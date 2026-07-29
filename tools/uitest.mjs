@@ -29,6 +29,8 @@ import {
 const ZPCR = join(REPO, "samples/20260720_FirstQualification.zpcr");
 const PCRD = join(REPO, "samples/20260720_Luna_noRT.pcrd");
 const PLTD = join(REPO, "samples/QuickPlate_96 wells_All Channels.pltd");
+/** The run whose `.pcrd` persists a hand-set FAM threshold — see {@link persistedThresholdChecks}. */
+const RVP_PCRD = join(REPO, "samples/20260726_S183-S185_RVP.pcrd");
 const EXAMPLE = "20260726_S183-S185_RVP.zpcr";
 /** Written by {@link makeDupe}: the example under its own name but a different size. */
 const DUPE = join(REPO, "tools/.uishot/dupe", EXAMPLE);
@@ -331,6 +333,53 @@ async function rightAxisChecks(chrome, origin) {
 }
 
 /**
+ * A `.pcrd` that CFX saved with a hand-pinned threshold carries that number per fluorophore
+ * (`threshold.md` §5.4), and loading such a run must seed the app's own override with it —
+ * that single value is what makes this app reproduce the instrument's Cq exactly. Nothing on
+ * screen distinguishes a seeded override from a coincidentally-similar automatic threshold
+ * except the field's state, so this is checked rather than looked at.
+ */
+async function persistedThresholdChecks(chrome, origin, pw) {
+  console.log("\npersisted .pcrd threshold");
+  const cdp = await openPage(chrome.base, origin, `/#cfxPassword=${encodeURIComponent(pw)}`);
+  await sleep(600);
+  await loadFile(cdp, RVP_PCRD);
+  await waitFor(() => cdp.eval(`!!document.querySelector(".chanbar")`), { what: "curves rail" });
+  // The file's own settings are seeded in an effect that runs after the first render, so the rail
+  // shows automatic thresholds for a frame before the run's own values land.
+  await waitFor(
+    () => cdp.eval(`!!document.querySelector(".analysis__thresholds input.is-override")`),
+    { what: "a seeded threshold override" },
+  );
+
+  const fields = await cdp.eval(`(() => {
+    const d = [...document.querySelectorAll("details")]
+      .find((d) => d.textContent.includes("Threshold"));
+    if (!d) return null;
+    d.open = true;
+    return [...d.querySelectorAll("input[type=number]")].map((i) => ({
+      label: i.getAttribute("aria-label"),
+      value: i.value,
+      override: i.className.includes("is-override"),
+    }));
+  })()`);
+  const fam = fields?.find((f) => /^FAM threshold/.test(f.label ?? ""));
+  check("the run's FAM threshold is seeded as an override", fam?.override === true, JSON.stringify(fam));
+  check(
+    "and it is the value the file persisted (92.02)",
+    Math.abs(Number(fam?.value) - 92.0212554931641) < 0.51,
+    fam?.value,
+  );
+  const auto = fields?.find((f) => /^Cy5 threshold/.test(f.label ?? ""));
+  check(
+    "a fluorophore the file left on auto is not overridden",
+    auto?.override === false,
+    JSON.stringify(auto),
+  );
+  cdp.close();
+}
+
+/**
  * The Curves view's table mode: that clicking a header really re-orders the rows, that a second
  * click reverses it, and that the two invariants `CurveTable.sortRows` promises hold in the
  * rendered DOM — a well with no Cq stays at the bottom in *both* directions, and only the active
@@ -445,6 +494,25 @@ async function tableSortChecks(chrome, origin) {
     "a well with no Cq gets an empty axis, not a marker at zero",
     axis.rows.filter((r) => r.cq === "—").every((r) => r.left === null),
     axis.rows.filter((r) => r.cq === "—").map((r) => String(r.left)).join(" "),
+  );
+
+    // End RFU is the instrument's own end-point number (`threshold.md` §8) and is deliberately
+  // *not* ΔRFU: on a still-climbing well the two differ by hundreds of RFU, so a column that
+  // silently mirrored the other one would look entirely reasonable on screen.
+  await clickHead("End RFU");
+  await sleep(200);
+  const endAsc = await column("End RFU");
+  const num = (v) => Number(String(v).replace(/[^-\d.]/g, ""));
+  check(
+    "End RFU sorts numerically",
+    JSON.stringify(endAsc.map(num)) === JSON.stringify([...endAsc.map(num)].sort((a, b) => a - b)),
+    endAsc.join(" "),
+  );
+  const deltas = await column("ΔRFU");
+  check(
+    "End RFU is a column of its own, not a copy of ΔRFU",
+    endAsc.some((v, i) => Math.abs(num(v) - num(deltas[i])) > 1),
+    endAsc.map((v, i) => `${v}/${deltas[i]}`).join(" "),
   );
 
   cdp.close();
@@ -921,6 +989,7 @@ async function main() {
     await routingChecks(chrome, origin, pw);
     await rightAxisChecks(chrome, origin);
     await tableSortChecks(chrome, origin);
+    await persistedThresholdChecks(chrome, origin, pw);
     await cqFilterChecks(chrome, origin);
     await referenceChecks(chrome, origin);
     await calibrationChecks(chrome, origin);

@@ -13,6 +13,7 @@ export { hexDump } from "./hex.js";
 export {
   subtractSeries,
   baselineCorrectCurve,
+  correctCurveForDisplay,
   computeCqTable,
   ANALYSIS_BASELINE_MODE,
 } from "./analysis.js";
@@ -73,27 +74,21 @@ export {
 export { zipCryptoDecrypt } from "./zipcrypto.js";
 export { inflateRaw } from "./inflate.js";
 export {
-  smoothCurve,
-  skipCycles,
-  clampBaselineRegion,
-  dataWindowRange,
-  findBaselineByCurvature,
-  findBaselineByRegression,
-  autoBaselineRegion,
-  refineBaselineStart,
-  validateBaselineRegion,
+  baselineRegion,
   subtractBaseline,
   fitLinearBaseline,
+  smoothPlateauTail,
+  endPointRfu,
+  BASELINE_BEGIN_CYCLE,
+  BASELINE_END_MARGIN,
+  END_POINT_CYCLES,
 } from "./baseline.js";
-export { stdDev, meanSquaredSuccessiveDifference, whiteness, median } from "./stats.js";
+export { stdDev, median } from "./stats.js";
 export {
   baselineNoise,
-  residualWhiteness,
   autoThreshold,
   resolveThreshold,
   isAmplified,
-  findThresholdCrossing,
-  findInflectionCq,
   computeCq,
 } from "./threshold.js";
 
@@ -165,27 +160,5 @@ export type {
   ChannelPreprocessOptions,
   ColorSeparationResult,
 } from "./calibration.js";
-export type {
-  SmoothingMode,
-  SmoothingOptions,
-  BaselineRegion,
-  BaselineRegionConstraints,
-  DataWindowOptions,
-  CurvatureBaselineOptions,
-  RegressionBaselineOptions,
-  AutoBaselineOptions,
-  BaselineStartRefinementOptions,
-  BaselineValidationOptions,
-  BaselineMode,
-  LinearBaselineFit,
-} from "./baseline.js";
-export type {
-  NoiseEstimator,
-  BaselineNoiseOptions,
-  AutoThresholdOptions,
-  ThresholdOptions,
-  AmplificationOptions,
-  CqCrossingOptions,
-  CqAlgorithm,
-  CqOptions,
-} from "./threshold.js";
+export type { BaselineRegion, BaselineMode, LinearBaselineFit } from "./baseline.js";
+export type { AutoThresholdOptions, ThresholdOptions } from "./threshold.js";

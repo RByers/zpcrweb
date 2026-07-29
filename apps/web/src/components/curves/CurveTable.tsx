@@ -24,7 +24,8 @@ type SortKey =
   | "baseline"
   | "threshold"
   | "cq"
-  | "deltaRfu";
+  | "deltaRfu"
+  | "endRfu";
 
 interface Column {
   key: SortKey;
@@ -44,6 +45,7 @@ const COLUMNS: readonly Column[] = [
   { key: "threshold", label: "Threshold", numeric: true },
   { key: "cq", label: "Cq", numeric: true },
   { key: "deltaRfu", label: "ΔRFU", numeric: true },
+  { key: "endRfu", label: "End RFU", numeric: true },
 ];
 
 /** Plate position as one number — so Well sorts A1, A2, … B1 rather than by label text, which
@@ -72,6 +74,8 @@ function sortValue(r: AnalysisRow, key: SortKey): string | number | null {
       return r.cq;
     case "deltaRfu":
       return r.deltaRfu;
+    case "endRfu":
+      return r.endRfu;
   }
 }
 
@@ -321,6 +325,13 @@ export function CurveTable({ rows, usingTargets, cycleCount }: Props) {
                     />
                   </span>
                 </span>
+              </td>
+              {/* The instrument's own end-point number: the mean of the corrected curve's last
+                  five cycles (`threshold.md` §8). Sits beside ΔRFU rather than replacing it —
+                  ΔRFU is a rise from the baseline, this is an absolute plateau level, and on a
+                  still-climbing well they differ by hundreds of RFU. */}
+              <td className="mono atbl__num" title="End-point RFU: mean of the last five cycles">
+                {formatRfu(r.endRfu)}
               </td>
             </tr>
           );

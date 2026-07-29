@@ -5,7 +5,6 @@ import {
   baselineCorrectCurve,
   computeCq,
   computeCqTable,
-  residualWhiteness,
 } from "../src/index.js";
 import { readSampleBytes } from "./sample.js";
 
@@ -28,10 +27,7 @@ describe("subtractSeries", () => {
 });
 
 describe("baselineCorrectCurve", () => {
-  // A clean sigmoid (flat ~100 well before onset, plateauing ~5100 by the end) — the same shape
-  // `baseline.test.ts`'s curvature-detection tests use, so auto-detection's region choice here is
-  // already covered by those tests. Baseline region selection is always automatic now (no manual
-  // override).
+  // A clean sigmoid: flat ~100 well before onset, plateauing ~5100 by the end.
   const cycles = Array.from({ length: 40 }, (_, i) => i + 1);
   const values = cycles.map((c) => 100 + 5000 / (1 + Math.exp(-(c - 25) * 0.5)));
 
@@ -53,41 +49,53 @@ describe("baselineCorrectCurve", () => {
   });
 
   it("computes a large positive ΔRFU from raw values (no subtraction) in Raw mode", () => {
-    const result = baselineCorrectCurve(cycles, values, "Raw");
+    const result = baselineCorrectCurve(cycles, values, "Raw", 200);
     expect(result.correctedValues).toEqual(values);
     // Endpoint (~5100) minus the mean of the flat baseline region (~100).
     expect(result.deltaRfu).toBeGreaterThan(4800);
   });
 
-  it("reports baselineRfu as the mean raw value over the baseline region, unaffected by mode", () => {
-    const raw = baselineCorrectCurve(cycles, values, "Raw");
-    const subtracted = baselineCorrectCurve(cycles, values, "RawBaseLineSubtracted");
-    expect(raw.baselineRfu).toBeCloseTo(subtracted.baselineRfu, 6);
-    expect(raw.baselineRfu).toBeLessThan(300);
+  it("reports baselineRfu as the mean raw value over the baseline region", () => {
+    const result = baselineCorrectCurve(cycles, values, "RawBaseLineSubtracted", 200);
+    const { beginCycle, endCycle } = result.baselineRegion;
+    const inRegion = values.filter((_, i) => cycles[i]! >= beginCycle && cycles[i]! <= endCycle);
+    expect(result.baselineRfu).toBeCloseTo(
+      inRegion.reduce((a, b) => a + b, 0) / inRegion.length,
+      6,
+    );
+    // The flat part of this sigmoid, not halfway up its rise.
+    expect(result.baselineRfu).toBeLessThan(300);
   });
 
   it("exposes the fitted linear baseline (slope, intercept) for display", () => {
-    const result = baselineCorrectCurve(cycles, values, "LinearBaseLineNormalized");
-    // Loose bounds: the exact region auto-detection settles on is covered by
-    // `baseline.test.ts`'s curvature/regression tests — this just checks the fit is exposed and
-    // plausible (well below the curve's ~5100 plateau), not the algorithm's exact boundary.
+    const result = baselineCorrectCurve(cycles, values, "LinearBaseLineNormalized", 200);
+    // Loose bounds: this checks the fit is exposed and plausible (well below the curve's ~5100
+    // plateau), not the region's exact boundary — `baseline.test.ts` covers that.
     expect(result.baselineFit.intercept).toBeGreaterThan(-100);
     expect(result.baselineFit.intercept).toBeLessThan(500);
     expect(Math.abs(result.baselineFit.slope)).toBeLessThan(50);
   });
 
-  it("reports baselineValid true and the real rise as amplified for a clean sigmoid", () => {
-    const result = baselineCorrectCurve(cycles, values, "LinearBaseLineNormalized");
-    expect(result.baselineValid).toBe(true);
-    expect(result.amplified).toBe(true);
+  it("keeps the baseline out of the rise once a threshold is available", () => {
+    // With no threshold the region is the whole run (there is no Cq to stop before); given one,
+    // it stops two cycles short of the Cq that threshold implies.
+    const wholeRun = baselineCorrectCurve(cycles, values, "LinearBaseLineNormalized");
+    expect(wholeRun.baselineRegion.endCycle).toBe(40);
+
+    const refined = baselineCorrectCurve(cycles, values, "LinearBaseLineNormalized", 200);
+    expect(refined.baselineRegion.endCycle).toBeLessThan(22);
+    expect(refined.amplified).toBe(true);
+    // The baseline now describes the pre-amplification part rather than the whole sigmoid, so it
+    // sits near the curve's flat level instead of halfway up the rise.
+    expect(refined.baselineRfu).toBeLessThan(300);
+    expect(wholeRun.baselineRfu).toBeGreaterThan(1000);
   });
 
   // Recorded from a real NTC (no-template control) well: a pure two-segment decay (steep for the
-  // first ~5 cycles, much shallower after) with no amplification anywhere. Auto-detection locks
-  // onto cycles 1-5 as "the baseline" (findBaselineByRegression's local fit-and-extend stops
-  // right where the decay's slope changes), and extrapolating that steep 5-cycle line across all
-  // 40 cycles fabricates a ~200 RFU "rise" out of pure slope-estimation error — exactly the false
-  // positive `validateBaselineRegion`'s §7 gate exists to catch.
+  // first ~5 cycles, much shallower after) with no amplification anywhere. The old onset detector
+  // locked onto cycles 1–5 as "the baseline" and extrapolated that steep line across all 40,
+  // fabricating a ~200 RFU rise out of slope-estimation error — which then needed a validity gate
+  // to suppress. Baselining the whole run removes the failure instead of catching it.
   const ntcCycles = Array.from({ length: 40 }, (_, i) => i + 1);
   const ntcValues = [
     7423.0, 7408.0, 7399.5, 7387.8, 7384.8, 7384.3, 7374.3, 7372.1, 7368.0, 7360.0, 7360.5, 7355.8,
@@ -96,37 +104,24 @@ describe("baselineCorrectCurve", () => {
     7247.6, 7247.0, 7239.8, 7240.0,
   ];
 
-  it("flags an invalid baseline on a two-segment-decay NTC well instead of a spurious rise", () => {
+  it("manufactures no rise on a two-segment-decay NTC well", () => {
     const result = baselineCorrectCurve(ntcCycles, ntcValues, "LinearBaseLineNormalized");
-    expect(result.baselineValid).toBe(false);
-    // Without the gate this would otherwise read as amplified (the mis-fit baseline extrapolates
-    // to a ~200 RFU manufactured rise, well past any reasonable noise-based threshold).
+    expect(result.baselineRegion).toEqual({ beginCycle: 3, endCycle: 40 });
     expect(result.amplified).toBe(false);
-  });
-
-  // Recorded from a real NRT (no-reverse-transcriptase) control well in the same run as the NTC
-  // above: another pure two-segment decay with no amplification, but here auto-detection settles
-  // on a region only 3 cycles wide (the enforced minimum) — narrow enough that it would pass the
-  // flatness/linearity check trivially without `validateBaselineRegion`'s minimum-width extension.
-  const nrtCycles = Array.from({ length: 40 }, (_, i) => i + 1);
-  const nrtValues = [
-    7925.1, 7916.3, 7908.9, 7892.9, 7885.7, 7877.8, 7858.1, 7852.1, 7835.1, 7830.0, 7824.5, 7813.5,
-    7814.3, 7805.0, 7799.6, 7791.2, 7795.4, 7783.5, 7776.4, 7770.4, 7771.5, 7765.2, 7753.6, 7753.9,
-    7748.3, 7742.6, 7737.2, 7730.6, 7730.2, 7725.8, 7728.6, 7720.7, 7712.9, 7713.0, 7705.2, 7698.2,
-    7700.0, 7699.9, 7690.4, 7683.2,
-  ];
-
-  it("flags an invalid baseline on a too-narrow-region NRT well instead of a spurious rise", () => {
-    const result = baselineCorrectCurve(nrtCycles, nrtValues, "LinearBaseLineNormalized");
-    expect(result.baselineValid).toBe(false);
-    expect(result.amplified).toBe(false);
+    // What is left is the decay's own gentle bow about the fitted line — tens of RFU on a curve
+    // sitting at 7400, not the ~200 RFU rise the old early-region fit extrapolated into existence.
+    expect(Math.max(...result.correctedValues.map(Math.abs))).toBeLessThan(25);
+    // And with a threshold in hand it stays that way: no Cq, because nothing crosses.
+    const withThreshold = baselineCorrectCurve(ntcCycles, ntcValues, "LinearBaseLineNormalized", 30);
+    expect(computeCq(ntcCycles, withThreshold.correctedValues, 30)).toBeNull();
   });
 
   // Recorded from well E9 of `20230829_135443_CT019138_SINGLE_STEP_.zpcr` — an NRT control that
   // really does amplify, but late (from ~cycle 32) and still climbing when the run ends at 40, on
-  // a baseline that drifts *down* ~6.5 RFU/cycle. Curvature's second-derivative peak lands at
-  // cycle ~37 on a curve shaped like this, so onset used to be read there and the baseline ran to
-  // cycle 35 — five cycles into the rise, fitted at +0.87 RFU/cycle, the wrong sign.
+  // a baseline that drifts *down* ~6.5 RFU/cycle. The old curvature detector read onset at cycle
+  // ~37 and ran the baseline to 35 — five cycles into the rise, fitted at +0.87 RFU/cycle, the
+  // wrong sign — after which the corrected curve started above the threshold and the well silently
+  // reported no Cq at all.
   const lateCycles = Array.from({ length: 40 }, (_, i) => i + 1);
   const lateValues = [
     5403, 5411, 5407, 5388, 5382, 5381, 5365, 5349, 5339, 5328, 5314, 5314, 5307, 5301, 5299, 5285,
@@ -135,40 +130,18 @@ describe("baselineCorrectCurve", () => {
   ];
 
   it("keeps the baseline out of a late, run-truncated amplification", () => {
-    const result = baselineCorrectCurve(lateCycles, lateValues, "LinearBaseLineNormalized");
-    expect(result.baselineValid).toBe(true);
+    const whole = baselineCorrectCurve(lateCycles, lateValues, "LinearBaseLineNormalized");
+    const threshold = 20 * whole.noise;
+    const result = baselineCorrectCurve(lateCycles, lateValues, "LinearBaseLineNormalized", threshold);
     expect(result.baselineRegion.endCycle).toBeLessThan(32);
-    // The fitted baseline follows the curve's real downward drift instead of being dragged up by
-    // the rise — the sign error that pushed the corrected curve's first cycles above threshold.
+    // The fitted baseline follows the curve's real downward drift instead of being dragged up.
     expect(result.baselineFit.slope).toBeLessThan(0);
-
-    // The bug this guards is that the well silently reported *no* Cq: with the baseline sloping
-    // the wrong way the corrected curve started above the threshold, which §6.1 reads as a failed
-    // baseline. Assert that directly — the early cycles stay well under the threshold this well's
-    // own noise implies, and a Cq comes back somewhere in the visible rise (~cycle 32 onward).
-    const threshold = 20 * result.noise;
+    // The early cycles stay well under the threshold, and a Cq comes back inside the visible rise.
     expect(Math.max(...result.correctedValues.slice(0, 5))).toBeLessThan(threshold);
-    const cq = computeCq(lateCycles, result.correctedValues, {
-      algorithm: "Threshold",
-      threshold,
-      noise: result.noise,
-      baselineValid: result.baselineValid,
-    });
+    const cq = computeCq(lateCycles, result.correctedValues, threshold);
     expect(cq).not.toBeNull();
     expect(cq!).toBeGreaterThan(28);
     expect(cq!).toBeLessThan(36);
-  });
-
-  // Same well, but showing *why* the region no longer starts at cycle 2: its pre-amplification
-  // decay is steep early and shallow later, so a line fitted across the whole of it leaves
-  // residuals that trace an arc rather than scattering. `refineBaselineStart` walks the start
-  // forward until that stops being true.
-  it("trims a settling transient off the front of the baseline region", () => {
-    const result = baselineCorrectCurve(lateCycles, lateValues, "LinearBaseLineNormalized");
-    expect(result.baselineRegion.beginCycle).toBeGreaterThan(2);
-    expect(
-      residualWhiteness(lateCycles, result.correctedValues, result.baselineRegion),
-    ).toBeGreaterThan(1);
   });
 
   it("gives that well a Cq even in a group of otherwise flat wells", () => {
@@ -193,16 +166,6 @@ describe("baselineCorrectCurve", () => {
     for (let i = 0; i < 4; i++) expect(table.get(`1,${i},SYBR`)!.cq).toBeNull();
   });
 
-  it("suppresses Cq via computeCq's baselineValid option for that same well", () => {
-    const result = baselineCorrectCurve(ntcCycles, ntcValues, "LinearBaseLineNormalized");
-    const cq = computeCq(ntcCycles, result.correctedValues, {
-      algorithm: "Threshold",
-      threshold: 30,
-      noise: result.noise,
-      baselineValid: result.baselineValid,
-    });
-    expect(cq).toBeNull();
-  });
 });
 
 describe("darkCurves", () => {
