@@ -66,6 +66,20 @@ several current choices to be wrong; **[`threshold.md`](./threshold.md) §0 is t
       parameter (it documents the alternative and costs nothing), drop the checkbox, and drop
       `subtractDark` from `zpcrweb.json`'s analysis settings — leaving the reader tolerant of the
       key so existing files still load.
+- [ ] **Don't add a reference-row correction — and record why** (`calibration.md` §4.1a). Measured:
+      every per-cycle reference normalization tried (divide by R1, divide by the bright columns,
+      subtract R1's deviation) degrades agreement with CFX by **300–940×**, *and* makes baseline
+      noise 1.1–1.3× and baseline slope 3.3–4.9× worse on its own merits. The cause is in the raw
+      data — sample wells share no per-cycle wiggle (mean pairwise correlation ≈ 0), so there is no
+      common-mode to cancel and a correction only injects the reference's own noise. **No code
+      change needed**; the current no-op is right. This entry exists so the idea doesn't get
+      re-proposed.
+- [ ] **Add a per-run optical-trend metric from the bright reference columns**
+      (`calibration.md` §4.1b). R2–R12 dim 0.3–1.2% over a run and correlate 0.25–0.77 with the
+      plate's common-mode residual — a real optical signal, too small to correct with but a good
+      run-quality indicator. Complements the existing whole-run factory comparison in `refcal.ts`
+      (which answers "has the row drifted since service?") with "did the optics move during *this*
+      run?". Diagnostic only — never into the analysis path.
 - [ ] **Surface `DARKDATA` as instrument QC instead** (`calibration.md` §4.2b). The per-channel
       dark level reproduces to ~1 count in 2000 across runs six days apart, which makes it a
       genuine health signal: flag a channel that moves between runs or drifts within one, and flag

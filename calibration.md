@@ -227,7 +227,9 @@ apply, and its reference level correspondingly has no effect.
 
 **It would be reasonable to expect more: that the instrument compares all 12 live reference
 columns against a factory-measured baseline, every cycle, to derive a per-channel correction
-factor that tracks optical drift in real time. It does not.** The reference-level read described
+factor that tracks optical drift in real time. It does not** — and §4.1a now measures that
+directly, rather than inferring it: every per-cycle reference correction tried degrades agreement
+with CFX's own output by 300–940×, and degrades the data on its own merits too. The reference-level read described
 above is the *only* per-cycle use of reference-row data anywhere in the run-processing path, full
 stop — there is no second routine anywhere that reads columns other than the one, and no routine
 that folds a factory/live comparison back into a correction. What the run's metadata does carry is
@@ -239,6 +241,64 @@ reference-calibration comparison averages each column's *live* readings across t
 a human to look at, surfaced in a calibration/service view rather than fed into any calculation.
 Be careful not to confuse that diagnostic sense of "drift" with the analysis option of the same
 name (§6).
+
+### 4.1a Measured: no per-cycle reference correction, and none would help
+
+The same test that settled the dark current (§4.2a) settles this one, and gives the same shape of
+answer for a different reason. Reconstructing CFX's exported corrected curves from this library's
+separated curves, with a per-cycle reference correction applied in channel space:
+
+| Reference correction | Median residual vs CFX | |
+|---|---|---|
+| **None** (current behaviour) | **7.3 × 10⁻³ RFU** | — |
+| Divide by R1, renormalized | 3.60 RFU | **490× worse** |
+| Divide by mean of R2–R12 | 6.87 RFU | **936× worse** |
+| Subtract R1's deviation | 2.22 RFU | **302× worse** |
+
+So the reference row is **not** consulted per cycle to correct sample readings. That is consistent
+with the §4.1 finding above — it is a pivot for the well-factor division and nothing else, and with
+identity well factors it is mathematically a **no-op**, which is exactly why the "none" row
+reproduces CFX at 7e-3 while still passing `referenceLevel` in. Keeping it passed is harmless and
+documents the algorithm; it changes no number.
+
+**And it is not a missed opportunity.** Judged purely on its own merits, ignoring what CFX does,
+a per-cycle reference correction makes the data *worse* on both axes that matter — measured over
+all 288 well/dye curves of the run, cycles 3–20:
+
+| Reference correction | Median baseline noise | Median \|baseline slope\| |
+|---|---|---|
+| **None** | **1.99** | **0.078** |
+| Divide by R1 | 2.58 (1.29×) | 0.260 (3.3×) |
+| Divide by mean of R2–R12 | 2.24 (1.12×) | 0.379 (4.9×) |
+| Subtract R1's deviation | 2.53 (1.27×) | 0.255 (3.3×) |
+
+The reason is visible directly in the raw data: **the sample wells share no per-cycle wiggle to
+remove.** Mean pairwise correlation of detrended per-cycle residuals across 20 wells is −0.02 to
++0.06 on every channel — each well's jitter is independent read noise, not a common-mode optical
+fluctuation. There is nothing for a reference to cancel, so any reference-based correction can only
+*add* the reference's own noise (its per-cycle scatter is 1.5–5 counts) to every well, and does.
+
+### 4.1b Two things the reference row is genuinely good for
+
+**R1 is a near-black position, not a bright one.** Worth stating because the name "reference level"
+invites the opposite assumption. Across the six channels R1 reads 2248, 2012, 1913, 1931, 2119,
+2113 — only **12 to 120 counts above the same channel's dark current** (§4.2b) — while the other
+11 columns run from 3180 up to 43,535. R1 is the dimmest position in the row in every channel.
+That is what makes it suitable as a pivot: it is a near-zero level, so dividing about it scales
+the *signal* rather than the offset.
+
+**The bright columns carry a real, coherent optical trend.** Over a run, R2–R12 dim by 0.3–1.2%
+while R1 barely moves, and the plate's *common-mode* residual — the per-cycle residual of the
+mean over all 96 wells, which averages away the independent per-well noise — correlates with the
+bright columns at **0.25–0.77** depending on channel. So there *is* a shared optical fluctuation,
+and the reference row does see it; it is simply far below per-well read noise, which is why
+correcting individual wells with it loses more than it gains.
+
+That makes it a **run-quality metric**, not a correction: a channel whose bright reference columns
+dim unusually over a run, or stop tracking the plate's common mode, is telling you something about
+the optics. It sits alongside the existing whole-run factory-calibration comparison
+(`refcal.ts`, surfaced in the Reference view), which answers the slower question of whether the
+row has drifted since the instrument was serviced. Neither belongs in the analysis path.
 
 ### 4.2 The additive background: dark-current subtraction
 
