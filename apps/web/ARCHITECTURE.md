@@ -607,7 +607,7 @@ color-separated `allFluorCurves` — and, on top of those, the run's **Cq table*
 
 - **`cqTable`** — `packages/core/src/analysis.ts`'s `computeCqTable()` over *every* well/dye pair on
   the plate, keyed by `curveKey(row, col, fluor)`. One entry per key: Cq, the §5.2 group threshold,
-  noise, amplification verdict, ΔRFU and the fitted baseline. Views look values up in it and never
+  noise, ΔRFU, end-point RFU and the fitted baseline. Views look values up in it and never
   recompute — that is the whole point. A group's threshold is the median baseline noise across the
   curves it's computed with, so the old arrangement (three independent computations over the plotted
   curves, over every curve, and over the standalone Analysis view's enabled wells) had the same well
@@ -798,7 +798,7 @@ only pieces the two views share.
   number.
   - The slider's stops are the run's cycles **plus one past the last**, which is where the curves
     with no Cq at all live: an upper bound of `null` (that top stop, the default) keeps them, any
-    real bound drops them. That's also what makes "only the curves that never amplified" a
+    real bound drops them. That's also what makes "only the curves with no Cq at all" a
     reachable state — park the *lower* handle on the top stop and no real Cq can satisfy it. A
     plain pair of number fields could express neither, since "no Cq" isn't a number; on a Cq axis
     it has an obvious place, past every real value.
@@ -1003,8 +1003,7 @@ is: a per-target curve needs channel→dye color separation (`calibration.md`).
   (`packages/core/src/analysis.ts`), which `computeCqTable()` applies internally with the fixed
   `ANALYSIS_BASELINE_MODE` constant (`"LinearBaseLineNormalized"` — baselining isn't
   user-configurable at all, see "Baseline is always automatic" under Curves view): the §3 baseline
-  region, the corrected values, `baselineNoise`, the `amplified` label (a diagnostic, never a
-  veto — `threshold.md` §7), ΔRFU (endpoint corrected value minus the baseline region's mean),
+  region, the corrected values, `baselineNoise`, ΔRFU (endpoint corrected value minus the baseline region's mean),
   `endRfu` (§8's end-point RFU, the mean of the last five corrected cycles) and `baselineFit` (the
   fitted `{ slope, intercept }`, rendered via `formatBaselineFormula()`). All of it reaches the
   table through the run's Cq table, so a row's ΔRFU/Cq is the same value the chart's marker and the
@@ -1120,12 +1119,10 @@ is: a per-target curve needs channel→dye color separation (`calibration.md`).
   color-separated curve, not on the raw channel one, and no plotted curve carries the dye's label
   — so `CurvesView` passes no threshold line and no regions, and highlights the fluorophore's own
   channel (or, for a curve row, its well) instead.
-- **Amplification / greying:** a row renders at reduced opacity
-  (`.analysis__row.is-unamplified`) whenever it has no Cq (`cq == null`) — because the
-  baseline-validation gate failed, because `isAmplified` (§7 — total rise under 10× baseline noise)
-  failed, or because the curve never crossed (or didn't end above) the resolved threshold. Keying
-  greying on the Cq result itself, not a separately-cached amplification flag, is what makes greying
-  react live to editing a threshold override. A row is never hidden, so a well's disqualification is
+- **Greying:** a row renders at reduced opacity (`.analysis__row.is-nocq`) whenever it has no Cq
+  (`cq == null`) — which now has exactly one cause, the curve not crossing its threshold
+  (`threshold.md` §6/§7). Keying greying on the Cq result itself, rather than on a separately
+  cached verdict, is what makes it react live to editing a threshold override. A row is never hidden, so a well's disqualification is
   visible instead of silently dropped from the table.
 - **Table/CSV columns, same order in both:** well, sample (`WellDefinition.sampleName`, the
   same field `PlateTable`'s "Sample" column shows), fluor, target (only when `usingTargets`;
@@ -1133,7 +1130,7 @@ is: a per-target curve needs channel→dye color separation (`calibration.md`).
   [channel — CSV only, not shown in the table], baseline (`CurveBaselineResult.baselineFit`,
   rendered as a formula via `formatBaselineFormula()` — the same value the Curves view's
   tooltip shows — placed just before threshold since threshold/noise are derived from the same
-  baseline region), threshold, Cq, ΔRFU, end RFU, amplified. The CSV is built from the same rows via the
+  baseline region), threshold, Cq, ΔRFU, end RFU. The CSV is built from the same rows via the
   shared `csvRow()` quoting helper (`lib/download.ts`) and `downloadText()` — filename
   `<run name>_analysis.csv`, the same `dataFile`-derived naming `plateReadCsvFilename` uses for the
   Raw view's per-cycle export. Its rail button is always present — in Channel mode too, since the

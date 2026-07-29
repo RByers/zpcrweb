@@ -88,7 +88,6 @@ export {
   baselineNoise,
   autoThreshold,
   resolveThreshold,
-  isAmplified,
   computeCq,
 } from "./threshold.js";
 

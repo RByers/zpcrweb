@@ -17,7 +17,6 @@ import {
   autoThreshold,
   baselineNoise,
   computeCq,
-  isAmplified,
   resolveThreshold,
   type AutoThresholdOptions,
 } from "./threshold.js";
@@ -27,8 +26,6 @@ export interface CurveBaselineResult {
   correctedValues: number[];
   /** §5.2 noise estimate — how much the corrected curve jitters over `baselineRegion`. */
   noise: number;
-  /** §7's amplification label. **A diagnostic** — it never suppresses a Cq (see `isAmplified`). */
-  amplified: boolean;
   /** Endpoint rise relative to the baseline: the curve's last corrected value minus the mean
    * corrected value over `baselineRegion` (≈ the last value itself, since baseline subtraction
    * already centers the region near zero — computed explicitly so it stays correct for `"Raw"`
@@ -95,7 +92,6 @@ export function baselineCorrectCurve(
     baselineRegion: region,
     correctedValues,
     noise,
-    amplified: isAmplified(correctedValues, noise),
     deltaRfu: (correctedValues.at(-1) ?? 0) - baselineMean,
     baselineFit: fitLinearBaseline(cycles, values, region),
   };

@@ -35,7 +35,6 @@ export interface AnalysisRow {
   baselineFormula: string;
   threshold: number;
   noise: number;
-  amplified: boolean;
   deltaRfu: number;
   /** End-point RFU — the mean of the corrected curve's last five cycles (`threshold.md` §8).
    * The number the instrument's own End Point export reports, and what an assay with no Cq at all
@@ -80,7 +79,6 @@ export function buildAnalysisRows(run: RunAnalysis, visible: CurveVisible): Anal
         baselineFormula: formatBaselineFormula(entry.baselineFit),
         threshold: entry.threshold,
         noise: entry.noise,
-        amplified: entry.amplified,
         deltaRfu: entry.deltaRfu,
         endRfu: entry.endRfu,
         cq: entry.cq,
@@ -90,9 +88,8 @@ export function buildAnalysisRows(run: RunAnalysis, visible: CurveVisible): Anal
   return out.sort((a, b) => a.target.localeCompare(b.target) || a.row - b.row || a.col - b.col);
 }
 
-/** The same columns the table shows, in the same order, plus `channel` and `amplified` (harmless
- * in an export, redundant on screen — the table carries them as a chip colour and a greyed row
- * rather than as text). */
+/** The same columns the table shows, in the same order, plus `channel` (redundant on screen — the
+ * table carries it as a chip colour rather than as text). */
 export function analysisCsv(rows: AnalysisRow[]): string {
   let csv = csvRow([
     "well",
@@ -106,7 +103,6 @@ export function analysisCsv(rows: AnalysisRow[]): string {
     "cq",
     "deltaRfu",
     "endRfu",
-    "amplified",
   ]);
   for (const r of rows) {
     csv += csvRow([
@@ -121,7 +117,6 @@ export function analysisCsv(rows: AnalysisRow[]): string {
       r.cq != null ? r.cq.toFixed(3) : "",
       r.deltaRfu.toFixed(1),
       r.endRfu.toFixed(1),
-      r.amplified ? "yes" : "no",
     ]);
   }
   return csv;

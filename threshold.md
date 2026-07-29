@@ -483,21 +483,29 @@ up: every Cq CFX reports is far past cycle 3, and the §1.2 regression test is u
 second-derivative maximum) instead of from a threshold. This library used to implement it; it is
 deleted — see §9.
 
-## 7. Quality diagnostics
+## 7. No quality gates
 
-> Implemented by `isAmplified()`; surfaced as `CurveBaselineResult.amplified`.
+*Measured (§1.4).* There is no amplification test, no baseline-validity test, and no
+ends-below-threshold test. §6's `T ∈ [min, max]` is the whole of it.
 
-A curve counts as **amplified** when its total rise is at least 10× its baseline noise. This is a
-label, **not a gate**: it never suppresses a Cq. §1.4 is why — the reference reports a Cq for a
-pure-noise well that touches the threshold once, and withholds one from a well that rises cleanly
-by 87 RFU, purely on `T ∈ [min, max]`.
+This is worth a section because the alternative is so tempting, and because this library shipped
+it: `amplified` (total rise against baseline noise) and a baseline-validity check both used to be
+able to veto a Cq, and each was added in response to a real failure on a real well. The reference
+applies neither — it reports a Cq of 14.82 for a pure-noise well that touches the threshold once,
+and withholds one from a well that rises cleanly by 87 RFU, purely on where the threshold fell.
 
-This library previously let `amplified` and a baseline-validity check veto a Cq, and each was added
-in response to a real failure on a real well. Those failures do not reappear as bad Cq values,
-because §3's region rule removes their cause: both were wells where onset detection picked a short
-early region and extrapolated its line across the run, manufacturing a rise out of
-slope-estimation error. Baselining such a well over the whole run leaves it flat, and a flat well
-crosses nothing.
+Those failures do not reappear as bad Cq values, because §3's region rule removes their cause:
+both were wells where onset detection picked a short early region and extrapolated its line across
+the run, manufacturing a rise out of slope-estimation error. Baselining such a well over the whole
+run leaves it flat, and a flat well crosses nothing.
+
+The gates survived a while as *diagnostics* after being demoted — a label on each curve, reported
+in the CSV. That has now gone too, and the reasoning generalizes: `amplified` was a boolean
+derived from an unmeasured constant (a 10× rise), nothing on screen used it, and the one question
+it half-answered — "did this well rise but fail to cross?" — the app answers exactly, with no
+constant, by comparing the corrected curve's minimum against its threshold (§6). A CSV reader with
+`cq` empty and `deltaRfu` at 1500 can see the same thing without being told a rule they can't
+inspect.
 
 ## 8. End-point RFU
 

@@ -294,14 +294,14 @@ raw bytes ─▶ fflate.unzipSync ─▶ { name: Uint8Array }
   the longest strictly-increasing run, and `T ∈ [min, max]` as the sole gate — narrowed only to the
   cycles the baseline was fitted to describe, since a corrected value before cycle 3 is an
   extrapolation of a line deliberately told not to model the settling transient there, and reading
-  a Cq off one produced a Cq of 1.32 for a flat well. `isAmplified()`
-  survives as a **diagnostic label only** — the reference applies no such gate, and letting one veto
-  a Cq is what kept this library's Cq population from ever matching. See
+  a Cq off one produced a Cq of 1.32 for a flat well. There are no quality
+  gates at all: the reference applies none, and letting one veto a Cq is what kept this library's
+  Cq population from ever matching. See
   [`threshold.md`](./threshold.md) §5–§7, and `packages/core/test/cfxExport.test.ts`, which asserts
   the Cq stage against CFX's own numbers to 1e-9 cycles. `median()` and `stdDev()` live here too:
   they had their own `stats.ts` while `baseline.ts` also needed them, and it does not any more.
 - **`analysis.ts`** — the transforms that sit on top of those two: `baselineCorrectCurve()` (one
-  curve's baseline, noise, amplification label and ΔRFU, iterating region against Cq to a fixed
+  curve's baseline, noise and ΔRFU, iterating region against Cq to a fixed
   point), `correctCurveForDisplay()` (the same for a series that will never be quantified — a raw
   channel trace, a dark overlay) and `computeCqTable()`, **the** Cq entry point. `computeCqTable()`
   takes every curve of a run at once in **two passes** — whole-run baselines to get each group's

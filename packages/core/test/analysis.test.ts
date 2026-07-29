@@ -17,16 +17,10 @@ describe("baselineCorrectCurve", () => {
     expect(result.noise).toBeLessThan(200);
   });
 
-  it("flags a real rise as amplified with a large positive ΔRFU", () => {
-    const result = baselineCorrectCurve(cycles, values, "RawBaseLineSubtracted");
-    expect(result.amplified).toBe(true);
-    expect(result.deltaRfu).toBeGreaterThan(1000);
-  });
-
-  it("does not flag a flat, noisy curve as amplified", () => {
+  it("reports a large positive ΔRFU for a real rise, and ~none for a flat curve", () => {
+    expect(baselineCorrectCurve(cycles, values, "RawBaseLineSubtracted").deltaRfu).toBeGreaterThan(1000);
     const flat = cycles.map((_, i) => (i % 2 === 0 ? 99 : 101));
-    const result = baselineCorrectCurve(cycles, flat, "RawBaseLineSubtracted");
-    expect(result.amplified).toBe(false);
+    expect(Math.abs(baselineCorrectCurve(cycles, flat, "RawBaseLineSubtracted").deltaRfu)).toBeLessThan(5);
   });
 
   it("computes a large positive ΔRFU from raw values (no subtraction) in Raw mode", () => {
@@ -53,7 +47,6 @@ describe("baselineCorrectCurve", () => {
 
     const refined = baselineCorrectCurve(cycles, values, "LinearBaseLineNormalized", 200);
     expect(refined.baselineRegion.endCycle).toBeLessThan(22);
-    expect(refined.amplified).toBe(true);
     // The baseline now describes the pre-amplification part rather than the whole sigmoid, so the
     // line it fits is far flatter than one dragged across the rise.
     expect(refined.baselineFit.slope).toBeLessThan(wholeRun.baselineFit.slope / 10);
@@ -75,7 +68,6 @@ describe("baselineCorrectCurve", () => {
   it("manufactures no rise on a two-segment-decay NTC well", () => {
     const result = baselineCorrectCurve(ntcCycles, ntcValues, "LinearBaseLineNormalized");
     expect(result.baselineRegion).toEqual({ beginCycle: 3, endCycle: 40 });
-    expect(result.amplified).toBe(false);
     // What is left is the decay's own gentle bow about the fitted line — tens of RFU on a curve
     // sitting at 7400, not the ~200 RFU rise the old early-region fit extrapolated into existence.
     expect(Math.max(...result.correctedValues.map(Math.abs))).toBeLessThan(25);
@@ -126,7 +118,6 @@ describe("baselineCorrectCurve", () => {
       })),
     ]);
     const e9 = table.get("4,8,SYBR")!;
-    expect(e9.amplified).toBe(true);
     expect(e9.cq).not.toBeNull();
     // Somewhere in the rise, not cycle 1-2 (baseline noise crossing a low threshold).
     expect(e9.cq!).toBeGreaterThan(20);
@@ -223,9 +214,8 @@ describe("computeCqTable", () => {
     expect(table.size).toBe(4);
     expect(table.get("7,11,FAM")!.group).toBe("(none)");
     expect(table.get("7,11,FAM")!.cq).not.toBeNull();
-    // The flat one is legitimately Cq-less — unamplified, not merely ungrouped.
+    // The flat one is legitimately Cq-less — it never crosses, not merely ungrouped.
     expect(table.get("7,11,HEX")!.cq).toBeNull();
-    expect(table.get("7,11,HEX")!.amplified).toBe(false);
   });
 
   it("honours a per-group threshold override", () => {

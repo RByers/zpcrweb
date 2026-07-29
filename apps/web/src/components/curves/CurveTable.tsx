@@ -215,7 +215,7 @@ const cqInk = (t: number) => Math.round(100 - t * 65);
  * Magnitude is spent on position instead: Cq sits on the run's cycle axis (see {@link CqCell})
  * and ΔRFU on a bar scaled to the whole table.
  *
- * A row with no Cq renders greyed out (`.is-unamplified`) rather than being hidden, so a well
+ * A row with no Cq renders greyed out (`.is-nocq`) rather than being hidden, so a well
  * disqualified by the §7 baseline gate or the amplification squelch stays visible instead of
  * silently vanishing from the table.
  */
@@ -281,7 +281,7 @@ export function CurveTable({ rows, usingTargets, cycleCount }: Props) {
           return (
             <tr
               key={`${r.target}-${r.wellLabel}-${r.fluor}`}
-              className={"analysis__row" + (r.cq == null ? " is-unamplified" : "")}
+              className={"analysis__row" + (r.cq == null ? " is-nocq" : "")}
               // The row's wash and the Well chip both read `--rowc` (see `.atbl` in app.css).
               style={{ "--rowc": typeMeta.color } as React.CSSProperties}
             >

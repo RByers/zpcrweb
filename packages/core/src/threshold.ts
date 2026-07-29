@@ -141,25 +141,6 @@ export function resolveThreshold(noiseEstimates: number[], options: ThresholdOpt
   return autoThreshold(noiseEstimates, options.auto);
 }
 
-/** A well counts as amplified if its total rise is at least this many multiples of its baseline
- * noise. **Diagnostic only** — see {@link isAmplified}. */
-export const AMPLIFIED_RISE_MULTIPLIER = 10;
-
-/**
- * §7: does this curve look amplified at all — total rise against baseline noise.
- *
- * **A diagnostic, not a gate.** It used to suppress the Cq of a well that failed it, and the
- * reference does no such thing: CFX reports a Cq of 14.82 for a pure-noise well whose curve pokes
- * above the threshold at exactly one cycle, and withholds one from a well that rises cleanly by
- * 87 RFU (`threshold.md` §1.4). Its only test is {@link computeCq}'s `T ∈ [min, max]`. Keeping
- * this as a label the UI can show and sort by — rather than as a veto — is both simpler and closer
- * to the instrument.
- */
-export function isAmplified(values: number[], noise: number): boolean {
-  if (values.length === 0) return false;
-  return Math.max(...values) - Math.min(...values) >= AMPLIFIED_RISE_MULTIPLIER * noise;
-}
-
 /**
  * A crossing whose local slope is below this many RFU per cycle is ignored — a curve lying flat
  * along the threshold produces no Cq rather than an arbitrary one. Part of the measured rule.

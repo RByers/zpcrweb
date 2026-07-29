@@ -2126,10 +2126,12 @@
 .analysis__tbl thead th {
   padding-top: 10px;
 }
-.analysis__row.is-unamplified {
+/* A row whose well has no Cq. Named for what it is: the greying tracks the missing Cq, not an
+   "amplified" verdict — a well can rise clearly and still never cross its threshold. */
+.analysis__row.is-nocq {
   opacity: 0.45;
 }
-.analysis__row.is-unamplified:hover {
+.analysis__row.is-nocq:hover {
   opacity: 0.7;
 }
 

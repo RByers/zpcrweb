@@ -4,7 +4,6 @@ import {
   baselineNoise,
   baselineRegion,
   computeCq,
-  isAmplified,
   parseZpcr,
   resolveThreshold,
   subtractBaseline,
@@ -70,20 +69,6 @@ describe("resolveThreshold", () => {
 
   it("falls back to autoThreshold when no override is given", () => {
     expect(resolveThreshold([1, 2, 3], { auto: { multiplier: 3 } })).toBeCloseTo(6, 6);
-  });
-});
-
-describe("isAmplified", () => {
-  it("is true when the total rise is well above the noise multiple", () => {
-    expect(isAmplified([0, 0, 5000], 10)).toBe(true);
-  });
-
-  it("is false for a flat well whose rise is just noise", () => {
-    expect(isAmplified([0, 5, -3, 2], 10)).toBe(false);
-  });
-
-  it("is false for an empty curve", () => {
-    expect(isAmplified([], 10)).toBe(false);
   });
 });
 
