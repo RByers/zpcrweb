@@ -57,6 +57,21 @@ several current choices to be wrong; **[`threshold.md`](./threshold.md) §0 is t
 - [ ] **Ask for an export of `20260720_Luna_noRT.pcrd` too.** `calibration.md` §8's per-dye scale
       factor was measured against two scalars of uncertain definition from that run (one read off
       a chart) and is contradicted by the RVP full-curve comparison. An export settles it.
+- [ ] **Retire the "Subtract dark" setting from the normal UI** (`calibration.md` §4.2a). Now
+      measured, not inferred: enabling it makes the reconstruction of CFX's own curves **260×
+      worse** (median residual 7.3e-3 → 1.90 RFU), because `DARKDATA`'s per-cycle scatter is
+      random noise a linear baseline cannot absorb. It is a footgun — a user toggling it silently
+      gets a worse answer, and per the repo's own rule that settings deciding a Cq belong to the
+      run, this one decides it wrongly. Keep `preprocessChannelReadings`' `backgroundLevel`
+      parameter (it documents the alternative and costs nothing), drop the checkbox, and drop
+      `subtractDark` from `zpcrweb.json`'s analysis settings — leaving the reader tolerant of the
+      key so existing files still load.
+- [ ] **Surface `DARKDATA` as instrument QC instead** (`calibration.md` §4.2b). The per-channel
+      dark level reproduces to ~1 count in 2000 across runs six days apart, which makes it a
+      genuine health signal: flag a channel that moves between runs or drifts within one, and flag
+      a well reading at or below its channel's dark level. **Channel 4 of CT019138 is
+      reproducibly noisy** (2.5–3× the scatter of every other channel, in both committed runs) —
+      a good first test case for whatever the check looks like.
 - [ ] **Chase the last ~2 × 10⁻⁴ of colour separation** (`calibration.md` §8): six Cy5 wells and
       Tex 615 G4 reconstruct to 0.14–0.46 RFU rather than 5e-3. Dye- and well-specific, present on
       flat curves, not well factors. Small, but it is now the largest known separation error.

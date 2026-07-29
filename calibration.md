@@ -242,6 +242,12 @@ name (§6).
 
 ### 4.2 The additive background: dark-current subtraction
 
+> **Resolved 2026-07-28: do not subtract it.** This section used to leave open "which additive
+> background belongs here". The answer, measured against CFX's own exported per-cycle curves
+> ([`pcrd.md`](./pcrd.md) §2.5a), is **none** — see §4.2a. The default has always been *off*,
+> which turns out to be right; what changes is that this is now a measurement rather than a
+> modelling preference, and the option should be treated as a diagnostic rather than a choice.
+
 Distinct from the reference level, there is one genuinely additive background — the **dark
 current** — and subtracting it is an **optional stage** of the pipeline, disabled by default.
 When enabled, it is **subtracted outright** from every channel reading, after the gain
@@ -266,8 +272,62 @@ shift on the plate, ≈0.6 cycles. The two HMPV Ma / Texas Red wells do not move
 modest Cq change, not none. (The absolute thresholds scale with the multiplier, so these figures
 track it; the RFU offset and the direction of the effect do not.)
 
-Leaving it off is what matches the reported RFU scale of the reference run measured in §8; that
-run simply had dark subtraction disabled.
+Leaving it off is what matches the reference — see §4.2a, which measures this directly and
+supersedes the RFU-scale argument §8 used to make.
+
+### 4.2a Measured: the reference does not subtract it
+
+The `20260726_S183-S185_RVP` export makes this testable, because **`DARKDATA` is re-read every
+cycle and its cycle-to-cycle variation is random**. A *constant* background is invisible to any
+comparison downstream of baselining — a linear baseline removes it exactly — but a per-cycle one
+is not: it injects noise that no straight line can absorb. So the question splits cleanly, and
+both halves have answers:
+
+- **The observable half.** Reconstructing CFX's exported corrected curve from this library's
+  separated curve (the method of [`threshold.md`](./threshold.md) §0.9) gives a median residual of
+  **7.3 × 10⁻³ RFU with the stage off, and 1.90 RFU with it on** — a **260× degradation**, rising
+  to 280–540× on the cleanest wells. The 1.9 RFU is exactly the injected noise: `DARKDATA`'s
+  per-cycle scatter is 1.5–5 counts, amplified by the solve. **The reference does not apply the
+  per-cycle dark level.**
+- **The unobservable half.** A constant offset — the dark level's mean, or any other fixed vector
+  — cannot be detected this way and equally **cannot affect any reported number**, since baseline
+  subtraction removes it before the threshold, the Cq or the end-point RFU are computed. So the
+  question of "which constant" is not open; it is empty.
+
+Together those close the section: subtract nothing, and the residual uncertainty is confined to a
+term that provably changes no output.
+
+### 4.2b What `DARKDATA` is actually good for
+
+It is a real measurement and worth keeping — just not as a correction. Across the two committed
+`.pcrd` runs (six days apart, same instrument), the per-channel dark level is a **stable
+instrument fingerprint**:
+
+| Channel | Level, 20260720 | Level, 20260726 | Drift over run | Per-cycle scatter |
+|---|---|---|---|---|
+| 0 | 2127.1 | 2126.9 | ≤ 0.4 | 1.6–2.0 |
+| 1 | 2002.5 | 2002.3 | ≤ 1.9 | 1.5–2.0 |
+| 2 | 1879.8 | 1879.5 | ≤ 3.0 | 1.7–2.0 |
+| 3 | 1898.9 | 1898.2 | ≤ 1.7 | 1.6–1.7 |
+| **4** | **1908.7** | **1909.7** | **−4.1 / −5.4** | **4.1–5.0** |
+| 5 | 2062.6 | 2062.0 | ≤ 2.8 | 1.7–1.8 |
+
+Levels reproduce to **~1 count in 2000 (0.05%)** across runs, and drift under 3 counts within a
+run. That makes three uses, all diagnostic:
+
+1. **Instrument health.** A channel whose dark level moves by more than a few counts between runs,
+   or drifts within one, indicates a detector or electronics problem. The stability above is what
+   "normal" looks like on this instrument.
+2. **A known per-channel anomaly.** **Channel 4 is consistently noisier** — 2.5–3× the scatter of
+   every other channel, plus the largest drift, in *both* runs. Reproducible across runs, so it is
+   a property of this instrument's channel-4 detector rather than a one-off. Worth surfacing.
+3. **A sanity floor on the raw readings.** Dark current is the *majority* of a raw well reading
+   here — ~1880–2130 counts against well readings of ~2250–2950, so the LED-on optical signal is
+   only a few hundred counts above it. A well reading at or below its channel's dark level is
+   physically meaningless and should be flagged rather than separated.
+
+The web app already plots the dark curves as a Curves-view overlay; that is the right home for
+all three, and no analysis stage should consume them.
 
 > The `.Dcal` `empty` blocks are **not** a second background candidate. They are consumed by §2
 > as the per-temperature baseline each matrix column is differenced against
@@ -464,7 +524,8 @@ call is wasted work.
   library's cycle-1 values by the same per-dye ratio gives 2982, 2546 and 4014, against chart
   readings of "just over 3000", "just over 2600" and "a bit over 4000". Three things follow:
 
-  1. **This run had dark subtraction off (§4.2).** The fit needs no additive term at all, and
+  1. **This run had dark subtraction off (§4.2).** *(Now measured directly, and generally — see
+     §4.2a.)* The fit needs no additive term at all, and
      enabling the stage would show up as an offset — it would put B3/FAM's cycle 1 at ≈1152
      against an observed ≈3000. That fixes the setting for this comparison; it says nothing
      about the outstanding scale factor, which is multiplicative.
