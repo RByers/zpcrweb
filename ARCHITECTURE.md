@@ -185,7 +185,10 @@ file re-sorted in a spreadsheet reads back identically. The fixed columns (`Well
 column of empty cells says nothing) are followed by one column per fluorophore, labelled with
 the dye name, whose cells hold only that well's target for it (empty = fluor absent, `+` =
 present with no target) — so a plate reads as a target-per-fluor grid in a spreadsheet. Those
-columns are the plate's whole fluor list; the channel isn't written, since a dye is read on
+columns are ordered by ascending channel (unknown-channel dyes last, `pltd.ts`'s shared
+`byChannel`), so each well row reads its fluors low channel → high; like row order it's
+presentation only, since `parsePlateCsv` keys each cell to its column heading and re-sorts. They
+are the plate's whole fluor list; the channel isn't written, since a dye is read on
 exactly one channel and the run's own `.Dcal` set says which (`Dcal.primaryChannel`).
 The `SampleType` cell holds a normalized type name (`unknown`, `ntc`, …), but a raw CFX
 `wellSampleType` code is accepted too and normalized on read — which is how an `other` well

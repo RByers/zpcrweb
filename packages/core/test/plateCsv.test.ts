@@ -120,6 +120,41 @@ describe("plate CSV round-trip", () => {
     expect(parsePlateCsv(rowMajor, { channelForFluor: SYNTHETIC_CHANNELS })).toEqual(plate);
   });
 
+  it("writes fluor columns in ascending channel order, whatever order the plate declares", () => {
+    const plate = syntheticPlate();
+    plate.fluors = [...plate.fluors].reverse(); // HEX (Ch2) declared before FAM (Ch1)
+    for (const w of plate.wells) w.fluors = [...w.fluors].reverse();
+    const lines = plateToCsv(plate).split("\r\n");
+    expect(lines.find((l) => l.startsWith("Well,"))).toBe(
+      "Well,SampleType,Sample,Replicate,Quantity,FAM,HEX",
+    );
+    // …so each well's cells read low channel → high: FAM's target first, then HEX's bare marker.
+    expect(lines.find((l) => l.startsWith("A1,"))!.endsWith(",GeneA,+")).toBe(true);
+    const back = parsePlateCsv(plateToCsv(plate), { channelForFluor: SYNTHETIC_CHANNELS });
+    expect(back.fluors).toEqual([
+      { fluor: "FAM", channel: 0 },
+      { fluor: "HEX", channel: 1 },
+    ]);
+    expect(back.wells[0]!.fluors).toEqual([
+      { fluor: "FAM", channel: 0, target: "GeneA" },
+      { fluor: "HEX", channel: 1 },
+    ]);
+  });
+
+  it("re-sorts a file whose fluor columns are in another order, unknown channels last", () => {
+    const text =
+      ["# vessel: BR White 8x12", "Well,SampleType,Sample,HEX,Mystery,FAM", "A1,unknown,S1,+,+,GeneA"].join(
+        "\r\n",
+      ) + "\r\n";
+    const back = parsePlateCsv(text, { channelForFluor: SYNTHETIC_CHANNELS });
+    expect(back.fluors).toEqual([
+      { fluor: "FAM", channel: 0 },
+      { fluor: "HEX", channel: 1 },
+      { fluor: "Mystery", channel: undefined },
+    ]);
+    expect(back.wells[0]!.fluors.map((f) => f.fluor)).toEqual(["FAM", "HEX", "Mystery"]);
+  });
+
   it("writes and re-reads a plate with no non-blank wells", () => {
     const plate = syntheticPlate();
     const blank = {

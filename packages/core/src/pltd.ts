@@ -210,9 +210,10 @@ export function toSampleType(raw: string): SampleType {
 /**
  * Order fluors by optical channel, with unknown-channel ones last (in their existing relative
  * order). Every surface that lists a plate's fluors wants the same ordering, so it lives here
- * once instead of being duplicated.
+ * once instead of being duplicated — exported for `plateCsv.ts`, which orders its fluor columns
+ * (and with them each well's fluors) the same way.
  */
-function byChannel(a: { channel?: number }, b: { channel?: number }): number {
+export function byChannel(a: { channel?: number }, b: { channel?: number }): number {
   if (a.channel === undefined) return b.channel === undefined ? 0 : 1;
   if (b.channel === undefined) return -1;
   return a.channel - b.channel;

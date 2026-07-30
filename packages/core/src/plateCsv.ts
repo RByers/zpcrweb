@@ -17,6 +17,12 @@
  * separate header line to keep in sync. A well with no fluor cell filled in is unloaded
  * (`loaded: false`), and a well left out of the table entirely is empty.
  *
+ * Fluor columns are written in ascending channel order (unknown-channel dyes last), so each
+ * well's row reads its fluors low channel → high, matching how every fluor list in the app and in
+ * a parsed `.pltd` is ordered (`byChannel` in `pltd.ts`). Like row order, it's presentation only:
+ * {@link parsePlateCsv} keys each cell to its own column heading and re-sorts, so a file whose
+ * columns are in some other order still reads back the same plate.
+ *
  * `SampleType` holds a normalized {@link SampleType} name; a raw CFX `wellSampleType` code is
  * accepted there too and normalized on read (see {@link SAMPLE_TYPE_TO_RAW}).
  *
@@ -37,7 +43,7 @@
  * commas — still parses.
  */
 
-import { toSampleType } from "./pltd.js";
+import { byChannel, toSampleType } from "./pltd.js";
 import type { PlateDefinition, PlateFluor, SampleType, WellDefinition, WellFluor } from "./pltd.js";
 
 /**
@@ -202,11 +208,16 @@ export function plateToCsv(plate: PlateDefinition): string {
     .sort((a, b) => a.col - b.col || a.row - b.row);
   const hasReplicate = written.some((w) => w.replicate !== undefined);
   const hasQuantity = written.some((w) => w.quantity !== undefined);
+  // Fluor columns in ascending channel order (unknown channel last, keeping its relative order) —
+  // the same `byChannel` ordering `parsePltd` gives each well's fluors and every fluor list in the
+  // app. `plate.fluors` is whatever order the source declared them in, so each well's cells read
+  // in channel order only if the columns are sorted here.
+  const fluorColumns = [...plate.fluors].sort(byChannel);
   out += csvRow([
     ...REQUIRED_COLUMNS,
     ...(hasReplicate ? ["Replicate"] : []),
     ...(hasQuantity ? ["Quantity"] : []),
-    ...plate.fluors.map((f) => f.fluor),
+    ...fluorColumns.map((f) => f.fluor),
   ]);
   for (const w of written) {
     const byFluor = new Map(w.fluors.map((f) => [f.fluor, f]));
@@ -218,7 +229,7 @@ export function plateToCsv(plate: PlateDefinition): string {
       w.sample ?? "",
       ...(hasReplicate ? [w.replicate !== undefined ? String(w.replicate) : ""] : []),
       ...(hasQuantity ? [w.quantity !== undefined ? String(w.quantity) : ""] : []),
-      ...plate.fluors.map((pf) => {
+      ...fluorColumns.map((pf) => {
         const f = byFluor.get(pf.fluor);
         if (!f) return "";
         return f.target ? f.target : PRESENT_NO_TARGET;
@@ -312,7 +323,12 @@ export function parsePlateCsv(text: string, options: ParsePlateCsvOptions = {}):
       const channel = m ? Number(m[2]) - 1 : channelForFluor?.(fluor);
       return { fluor, channel, column };
     });
-  const fluors: PlateFluor[] = fluorColumns.map(({ fluor, channel }) => ({ fluor, channel }));
+  // Channel order, not column order: `plateToCsv` writes the columns sorted, but a hand-authored
+  // or spreadsheet-reordered file needn't be, and every consumer of a plate's fluor list expects
+  // the `byChannel` order `parsePltd` also produces.
+  const fluors: PlateFluor[] = fluorColumns
+    .map(({ fluor, channel }) => ({ fluor, channel }))
+    .sort(byChannel);
 
   // Row/column extent: prefer the declared header, else infer from the max well label seen.
   let maxRow = 0;
@@ -368,6 +384,8 @@ export function parsePlateCsv(text: string, options: ParsePlateCsvOptions = {}):
       if (!cell) continue;
       wellFluors.push(cell === PRESENT_NO_TARGET ? { fluor, channel } : { fluor, channel, target: cell });
     }
+    // As `parsePltd` does for a `.pltd`'s wells: channel order, whatever order the columns are in.
+    wellFluors.sort(byChannel);
     const sample = (r[idx.Sample!] ?? "").trim() || undefined;
     // Both columns are optional: a missing column reads the same as an empty cell.
     const optional = (column: number): number | undefined => {
