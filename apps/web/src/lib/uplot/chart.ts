@@ -71,7 +71,7 @@ export interface PlotCurve {
    * This curve's analysis record, looked up from the run's single analysis
    * (`runAnalysis.ts` — {@link CurveAnalysis}). Everything baseline-, threshold- or Cq-related the
    * chart draws is read from here: the "Relative" view plots `correctedValues`, "Draw baseline"
-   * draws `baselineFit`, the Cq ring sits where `cq` crosses `threshold`, and the rail's
+   * draws `baselineFit`, the Cq ring sits on `correctedValues` at `cq`, and the rail's
    * threshold-hover diagnostic marks `baselineRegion`/`noise`.
    *
    * **This module computes none of it** — see the note at the top of the file. Absent for a series
@@ -292,9 +292,10 @@ export interface SeriesMeta {
    * a constant there under a log scale ({@link logFloor}'s per-curve shift); the fitted baseline
    * itself in the "Absolute" view.
    *
-   * It exists so the threshold line and the Cq ring can be placed *by construction* rather than
-   * by re-deriving where the curve crosses: a threshold `T` is at `T + plotDelta` on screen, and
-   * that is where both are drawn. Absent for a series with no analysis record.
+   * It exists so the threshold line can be placed *by construction* rather than by re-deriving
+   * where the curve crosses: a threshold `T` is at `T + plotDelta` on screen, and that is where
+   * the line is drawn. The Cq ring uses it too, to project its `correctedValues`-space y onto the
+   * same screen space. Absent for a series with no analysis record.
    */
   plotDelta?: number[];
   /** See {@link PlotCurve.sample}. */
@@ -691,23 +692,27 @@ export function buildChart(cfg: BuildChartConfig): {
     if (m.kind !== "aux") rows[i + 1] = logSafe(rows[i + 1] as number[], scale);
   });
 
-  // Cq markers: one ring per well curve with a defined Cq, placed *at its threshold* — Cq is by
-  // definition the cycle at which the corrected curve reaches it, so `(cq, threshold)` is the
-  // crossing point, and projecting it through `plotDelta` puts the ring exactly on the threshold
-  // line the rail draws (and exactly on the curve, since the curve is what defines the crossing).
+  // Cq markers: one ring per well curve with a defined Cq, placed on the curve itself —
+  // interpolating `correctedValues` (the array Cq is measured against) at the fractional Cq and
+  // projecting it through `plotDelta` onto screen space.
   //
-  // It used to be placed by interpolating the plotted curve at the fractional Cq, which silently
-  // disagreed with the crossing `computeCq` had actually found. Reading the threshold rather than
-  // re-deriving the crossing has no such gap to open.
+  // This used to read `(cq, threshold)` directly, on the assumption that Cq is by definition the
+  // cycle at which the corrected curve reaches its threshold. That holds for this library's own
+  // `computeCq` (a linear crossing of `correctedValues` against `threshold`, so the two
+  // interpolations agree exactly), but not for a file-sourced analysis like a Biomeme run's: the
+  // device's reported Cq is not derived from its reported threshold crossing its own
+  // `baselineData` (`biomeme.md` §3), so the ring landed on the threshold line instead of the
+  // curve. Interpolating `correctedValues` is exact for `computeCq` and honest for a file's Cq.
   const cqMarkers: { x: number; y: number; color: string; seriesIdx: number }[] = [];
   wellCurves.forEach((curve, i) => {
-    const { cq, threshold } = curve.analysis ?? {};
-    if (cq == null || threshold == null) return;
+    const { cq, correctedValues } = curve.analysis ?? {};
+    if (cq == null || correctedValues == null) return;
+    const value = interpolateAt(curve.cycles, correctedValues, cq);
     const delta = interpolateAt(curve.cycles, meta[i]!.plotDelta ?? [], cq);
-    if (delta == null) return;
+    if (value == null || delta == null) return;
     cqMarkers.push({
       x: cq,
-      y: threshold + delta,
+      y: value + delta,
       color: channelColor(curve.channel),
       seriesIdx: i + 1,
     });
