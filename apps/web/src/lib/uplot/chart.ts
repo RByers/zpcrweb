@@ -713,6 +713,26 @@ export function buildChart(cfg: BuildChartConfig): {
     });
   });
 
+  // Baseline-region ticks: for each "draw baseline" overlay, two small ticks marking the exact
+  // cycle range (`analysis.baselineRegion`) the fit was actually computed from. The overlay line
+  // itself is drawn across every cycle (so it reads correctly under "relative", where it's the
+  // near-zero reference the whole curve was corrected against) — without the ticks it looks like
+  // the fit was taken over the whole run rather than just the flat region at its start.
+  const baselineTicks: { x: number; y: number; color: string; seriesIdx: number }[] = [];
+  meta.forEach((m, i) => {
+    if (m.kind !== "baseline" || m.parentIndex == null) return;
+    const region = wellCurves[m.parentIndex]?.analysis?.baselineRegion;
+    if (!region) return;
+    const row = rows[i + 1] as (number | null)[];
+    for (const c of [region.beginCycle, region.endCycle]) {
+      const idx = m.cycles.indexOf(c);
+      if (idx === -1) continue;
+      const y = row[idx];
+      if (y == null) continue;
+      baselineTicks.push({ x: c, y, color: channelColor(m.channel), seriesIdx: i + 1 });
+    }
+  });
+
   // Min/max envelope bands — one per plotted well curve, so each channel of a well gets its own,
   // plus one per plotted dark curve, whose DARKDATA record carries the same per-cycle spread over
   // the LED-off wells that WELLDATA does over the lit ones. Curves with no spread of their own
@@ -817,7 +837,17 @@ export function buildChart(cfg: BuildChartConfig): {
     focus: { alpha: 0.12 },
     legend: { show: false },
     plugins: [
-      overlayPlugin(meta, bands, cqMarkers, thresholdLineState, aux, xName, xTick, cfg.onHover),
+      overlayPlugin(
+        meta,
+        bands,
+        cqMarkers,
+        baselineTicks,
+        thresholdLineState,
+        aux,
+        xName,
+        xTick,
+        cfg.onHover,
+      ),
     ],
   };
 
@@ -883,6 +913,7 @@ function overlayPlugin(
   meta: SeriesMeta[],
   bands: BandData[],
   cqMarkers: { x: number; y: number; color: string; seriesIdx: number }[],
+  baselineTicks: { x: number; y: number; color: string; seriesIdx: number }[],
   thresholdLineState: ThresholdLineState,
   /** How to present a right-axis value in the hovercard (see {@link AuxAxis}). */
   aux: AuxAxis,
@@ -895,6 +926,7 @@ function overlayPlugin(
   let svg: SVGSVGElement;
   let bandGroup: SVGGElement;
   let cqGroup: SVGGElement;
+  let baselineTickGroup: SVGGElement;
   let thresholdGroup: SVGGElement;
   let regionGroup: SVGGElement;
   let group: SVGGElement;
@@ -928,6 +960,9 @@ function overlayPlugin(
 
         cqGroup = document.createElementNS(SVG_NS, "g");
         svg.appendChild(cqGroup);
+
+        baselineTickGroup = document.createElementNS(SVG_NS, "g");
+        svg.appendChild(baselineTickGroup);
 
         thresholdGroup = document.createElementNS(SVG_NS, "g");
         svg.appendChild(thresholdGroup);
@@ -996,6 +1031,28 @@ function overlayPlugin(
           c.setAttribute("cy", String(u.valToPos(m.y, "y")));
           c.setAttribute("stroke", m.color);
           c.setAttribute("stroke-opacity", String(u.series[m.seriesIdx]!.alpha ?? 1));
+        });
+
+        // Baseline-region ticks: a short vertical tick at each end of the cycle range a "draw
+        // baseline" overlay was actually fit over (see `baselineTicks`), in the overlay's own
+        // color at full strength — the overlay line itself is drawn at reduced opacity, so
+        // without these the region boundary is invisible against it.
+        while (baselineTickGroup.childElementCount > baselineTicks.length) {
+          baselineTickGroup.lastElementChild!.remove();
+        }
+        while (baselineTickGroup.childElementCount < baselineTicks.length) {
+          baselineTickGroup.appendChild(line());
+        }
+        baselineTicks.forEach((m, i) => {
+          const l = baselineTickGroup.children[i] as SVGLineElement;
+          const x = u.valToPos(m.x, "x");
+          const y = u.valToPos(m.y, "y");
+          l.setAttribute("x1", String(x));
+          l.setAttribute("x2", String(x));
+          l.setAttribute("y1", String(y - 5));
+          l.setAttribute("y2", String(y + 5));
+          l.setAttribute("stroke", m.color);
+          l.setAttribute("stroke-opacity", String(u.series[m.seriesIdx]!.alpha ?? 1));
         });
 
         // Rail-driven threshold-hover line: a dotted horizontal line at the hovered target's
