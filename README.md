@@ -21,7 +21,7 @@ project decodes those files into well-typed data you can use from Node or the br
 The `.Plateread` binary format was reverse-engineered and is documented in
 [`plateread.md`](./plateread.md).
 
-There is also limited support for `.pltd` and `.dpcr` files as produced by CFX software, but they are [encrypted](zipcrypto.md) and this repo does not include the key (DMCA compliance). However you can easily exact the key from a copy a CFX Master using an AI agent like Claude code.
+There is also limited support for `.pltd` and `.pcrd` files as produced by CFX software, but they are [encrypted](zipcrypto.md) and this repo does not include the key (DMCA compliance). However you can easily exact the key from a copy a CFX Master using an AI agent like Claude code.
 
 To minimize the hassle of working with encrypted plate definition files, this package define a simple `.plt.csv` file format for plates which can be exported, modified and imported back and linked into a `.zpcr` file. 
 
