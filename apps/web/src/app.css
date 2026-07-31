@@ -1143,6 +1143,10 @@
 .chanchip__dye {
   font-size: 10px;
   color: var(--ink-muted);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Calibration view: the rail's chip bars are grouped by plate/tube type, since the archive ships
