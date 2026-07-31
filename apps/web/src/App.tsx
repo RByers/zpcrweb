@@ -20,6 +20,9 @@ import { AboutView } from "./components/views/AboutView";
 import type { ViewId } from "./state/useZpcrStore";
 
 const STANDALONE_VIEWS = ["plates", "raw"] as const;
+/** A Biomeme run has no reference row, no `.Dcal` calibration files and no raw archive to
+ * browse (`Zpcr.archive` is honestly empty) — those three tabs have nothing to show. */
+const BIOMEME_VIEWS = ["overview", "curves", "plates"] as const;
 
 /**
  * The run offered on the welcome screen, served from `public/examples/` (a symlink to the
@@ -94,15 +97,17 @@ export function App() {
   }
 
   const isStandalonePlate = active.kind === "pltd" || active.kind === "csv";
+  const isBiomeme = active.kind === "biomeme";
   const zpcr = isStandalonePlate ? null : activeRun?.zpcr ?? null;
-  // `store.view` is global (not per-file), so switching to a standalone entry can land on a
-  // view its restricted tab set doesn't have (e.g. "curves") — fall back to "plates" then.
+  const restrictedViews = isStandalonePlate ? STANDALONE_VIEWS : isBiomeme ? BIOMEME_VIEWS : null;
+  // `store.view` is global (not per-file), so switching to a restricted entry can land on a view
+  // its tab set doesn't have (e.g. "raw" on a Biomeme run) — fall back to its first tab then.
   // "about" is file-independent, so it survives regardless.
   const view =
-    isStandalonePlate &&
+    restrictedViews &&
     store.view !== "about" &&
-    !STANDALONE_VIEWS.includes(store.view as (typeof STANDALONE_VIEWS)[number])
-      ? "plates"
+    !(restrictedViews as readonly ViewId[]).includes(store.view)
+      ? restrictedViews[0]
       : store.view;
 
   return (
@@ -114,7 +119,7 @@ export function App() {
             <ViewSelector
               value={view}
               onChange={store.setView}
-              views={isStandalonePlate ? [...STANDALONE_VIEWS] : undefined}
+              views={restrictedViews ? [...restrictedViews] : undefined}
             />
           </div>
         )}

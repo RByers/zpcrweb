@@ -7,6 +7,7 @@ import {
   type Dcal,
   type DcalEntry,
   type DyeResponseCurve,
+  type FileAnalysis,
   type WellCurve,
 } from "@zpcrweb/core";
 
@@ -114,6 +115,10 @@ export interface FluorCurve {
   isReference: boolean;
   cycles: number[];
   mean: number[];
+  /** This curve's baseline/threshold/Cq as its source file reports them — see `FileAnalysis`.
+   * Only a dye-space source (`Zpcr.dyeSpace`, currently Biomeme) carries one; a color-separated
+   * curve never does, since separation is this app's own arithmetic with no file-side equivalent. */
+  fileAnalysis?: FileAnalysis;
 }
 
 /**
@@ -183,4 +188,28 @@ export function computeFluorCurves(
     });
   }
   return out;
+}
+
+/**
+ * The dye-space equivalent of {@link computeFluorCurves} for a source that needs no color
+ * separation (`Zpcr.dyeSpace`, e.g. Biomeme): each raw curve's channel index already *is* a
+ * dye, one-to-one, so this just relabels {@link WellCurve}s as {@link FluorCurve}s — no solve,
+ * no calibration matrix — and carries each curve's `fileAnalysis` through untouched, which is
+ * how the Curves view's file/computed toggles reach a dye-space run's Cq table.
+ */
+export function dyeSpaceFluorCurves(
+  wellCurves: WellCurve[],
+  fluorForChannel: (channel: number) => string | undefined,
+): FluorCurve[] {
+  return wellCurves.map((c) => ({
+    dye: fluorForChannel(c.channel) ?? `Ch${c.channel}`,
+    channel: c.channel,
+    row: c.row,
+    col: c.col,
+    wellLabel: c.wellLabel,
+    isReference: c.isReference,
+    cycles: c.cycles,
+    mean: c.mean,
+    fileAnalysis: c.fileAnalysis,
+  }));
 }

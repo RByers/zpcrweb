@@ -27,7 +27,7 @@ export interface StoredFile {
   size: number;
   addedAt: number;
   bytes: ArrayBuffer;
-  kind?: "zpcr" | "pcrd" | "pltd" | "csv";
+  kind?: "zpcr" | "pcrd" | "biomeme" | "pltd" | "csv";
 }
 
 /** Persisted per-file view settings. */
@@ -87,6 +87,11 @@ export interface StoredSettings {
   /** Calibration view: response curves (`"relative"`) or the raw dye/empty readings behind them
    * (`"absolute"`). Absent on older records, which then default to `"relative"`. */
   calView?: "relative" | "absolute";
+  /** Curves view: file-vs-computed baseline/Cq toggles for a source that carries its own
+   * analysis (Biomeme). Absent on older records, which then default to `"file"` — see
+   * `FileSettings.baselineSource`/`cqSource`. */
+  baselineSource?: "file" | "computed";
+  cqSource?: "file" | "computed";
   /** Retired: the standalone Analysis view's own target opt-out set. That view is now the Curves
    * view's table mode and shares the rail's {@link disabledFluors}, so these are ignored. */
   analysisDisabledTargets?: string[];

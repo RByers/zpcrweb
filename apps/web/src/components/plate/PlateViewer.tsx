@@ -7,7 +7,9 @@ import { plateDisplayName } from "../../lib/plateNames";
 import { Pair } from "../raw/Pair";
 
 /**
- * The visual plate map for any {@link PlateDefinition}: an 8×12 grid coloured by sample type,
+ * The visual plate map for any {@link PlateDefinition}: a `plate.rows`×`plate.columns` grid
+ * (8×12 for a CFX block; a single row of as few as 3 positions for a Biomeme run's synthesized
+ * plate — `biomeme.ts`) coloured by sample type,
  * each well showing its sample name and per-fluorophore targets (coloured by channel). Used both
  * by the "Plates" tab (for a `.zpcr`'s embedded `.pltd` entries) and a `.pcrd`'s already-decrypted
  * `plateSetup2` subtree — same component either way, only the source of the
@@ -90,7 +92,10 @@ export function PlateViewer({
             <tbody>
               {ROW_LABELS.slice(0, plate.rows).map((label, row) => (
                 <tr key={label}>
-                  <th>{label}</th>
+                  {/* A single-row plate (e.g. a Biomeme run's synthesized strip of tube
+                      positions — `biomeme.ts`) has no row to distinguish, so the header cell is
+                      left blank rather than showing the redundant, always-"A" row letter. */}
+                  <th>{plate.rows === 1 ? "" : label}</th>
                   {Array.from({ length: plate.columns }, (_, col) => (
                     <WellCell
                       key={col}

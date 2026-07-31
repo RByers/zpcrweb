@@ -20,10 +20,12 @@ the doc is always the entry point for understanding *and* changing a decoder. Se
 
 - One parsing library, usable **unchanged** from both a Node app and a browser web app.
 - Well-typed output: the consumer never touches raw bytes unless they want to.
-- **Two input formats, one output shape.** `.zpcr` (instrument raw output) and `.pcrd` (CFX
+- **Three input formats, one output shape.** `.zpcr` (instrument raw output) and `.pcrd` (CFX
   Manager's saved-experiment document) describe overlapping data through very different
   containers — see "Two input formats" below. `parseZpcr`/`parsePcrd` both produce a `Zpcr`,
   so nothing downstream (pivots, the web app's views) needs to know which format it's holding.
+  `parseBiomeme` extends the same rule to a genuinely different instrument — see "A third,
+  non-CFX input: Biomeme" below.
 - Minimal dependencies. One reputable dependency (`fflate`) for ZIP decompression; nothing
   else at runtime.
 - An extensive test suite validated against real instrument samples.
@@ -160,6 +162,61 @@ shape) because the whole document — not just an embedded plate — is ZipCrypt
 needs a password before any of the above exists. `xml` is the full raw decrypted document,
 independent of `zpcr` — the app's only way to browse subtrees this module doesn't decode
 (`dataAnalysisParameters`, `PersistedData`, …).
+
+## A third, non-CFX input: Biomeme
+
+`parseBiomeme` (`biomeme.ts`) reads a Biomeme handheld device's run-export JSON (Franklin/
+Two3/Three9) into the same `Zpcr` shape as `parseZpcr`/`parsePcrd` — but the source instrument
+is different enough that the mapping isn't the field-for-field translation `.pcrd` gets above:
+
+- **No optical channels to unmix, but real ones nonetheless.** A CFX reading is a 6-channel
+  vector that `calibration.md`'s solve separates into per-dye concentrations; a Biomeme reading
+  is per-fluorophore already — the device did its own separation before ever writing the file.
+  `Zpcr.dyeSpace: true` says so. `WellCurve.channel` is still a real optical channel, though, not
+  an arbitrary index: `parseBiomeme` recovers it from each target's `emissionColor`
+  (green/amber/red → channel 0/2/3, i.e. `Ch1`/`Ch3`/`Ch4` — a physical fact about the device's
+  LED/filter pairs, not a per-run naming choice, so it's keyed on color rather than on whichever
+  dye name an assay happens to use for that channel this time; the indices are chosen to land on
+  the same hues `.zpcr`/`.pcrd`'s own channels 1/3/4 already draw as, per `biomeme.md`).
+  `apps/web`'s `useRunAnalysis` checks `dyeSpace` once and skips color separation entirely for
+  such a run — see `apps/web/ARCHITECTURE.md`'s "Dye-space sources skip color separation".
+- **No plate reads, because the device already pivoted.** `.zpcr`/`.pcrd` both start from a
+  `PlateRead[]` — one header-plus-well-grid record per cycle — that `pivot.ts` turns into curves.
+  A Biomeme export has no such per-cycle record at all, only each curve's finished
+  `rawData`/cycle series; `Zpcr.reads` is honestly `[]` (mirroring how a `.pcrd`'s `Zpcr.archive`
+  is honestly empty above), and `curves()` returns the parsed curves directly rather than
+  deriving them.
+- **A synthesized, single-row plate**, because the export's `targets` array already carries
+  per-well fluorophore, sample and (when set) target/gene assignment — the same information a
+  `.pltd`/`plateSetup2` plate carries, just shaped as a flat list instead of a `<platesetup2>`
+  document. `parseBiomeme` builds one `PlateDefinition` from it — a single row (a handheld
+  device's tube positions are one strip of holders, not a grid), with as many columns as the
+  file names distinct positions (3, 6 or 9 on the devices this was measured against; an
+  arbitrary count, not a fixed shape) — so the web app's Wells/Samples/Targets rails work with no
+  format-specific code, the same way `pcrd.ts` reusing `pltd.ts`'s plate schema does above. A
+  plate of exactly one row is still addressed as row 0 ("row A") internally — `wellKey`,
+  `groupOf` and everything else here work in row/col, never in a display string — but the app
+  drops the now-constant row letter from what it shows, since naming a row that can't vary tells
+  a user nothing a bare position number doesn't already say more plainly (`biomeme.md`'s "Wells
+  are one row, not a grid").
+- **The device's own analysis, carried alongside this library's.** Each target in the export
+  states its own baseline-corrected curve, threshold and Cq — a second, independent analysis of
+  the same measurement (`threshold.md`'s pipeline is `.zpcr`/`.pcrd`-only; nothing about it
+  changes for Biomeme). `parseBiomeme` carries that on `WellCurve.fileAnalysis`
+  (`FileAnalysis` — region, baseline fit, corrected curve, threshold, Cq, end-point RFU), and it
+  is never fed into `computeCqTable` as an input — "one analysis per run" above is about *that*
+  pipeline's internal consistency, not a claim that a source file can't also ship its own answer.
+  A consumer that wants to compare the two reads `fileAnalysis` and the library's own
+  `CqTableEntry` side by side; the web app's Curves view does exactly that behind a pair of
+  toggles — see `apps/web/ARCHITECTURE.md`'s "File vs. computed analysis".
+
+What doesn't apply to a handheld device is left honestly absent rather than faked: no `.Dcal`
+calibrations, no `.prcl` protocol steps, no per-well gain factors, no reference row. Measured
+agreement between the device's own Cq and this library's own algorithm over the committed sample
+is in `biomeme.md` §3 — the two disagree substantially (median 4.1 cycles apart where both
+report one), because the device's threshold is a per-*curve* value with no stated derivation
+while `computeCqTable` resolves one threshold per *fluorophore* (`threshold.md` §5.2); that's the
+motivating case for the file/computed toggle rather than a bug to close the gap on.
 
 ## Why fflate
 

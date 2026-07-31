@@ -18,7 +18,7 @@ interface Props {
   disabledTitle?: string;
 }
 
-const DEFAULT_ACCEPT = ".zpcr,.pcrd,.pltd,.csv";
+const DEFAULT_ACCEPT = ".zpcr,.pcrd,.pltd,.csv,.json";
 
 export function DropZone({
   onFiles,

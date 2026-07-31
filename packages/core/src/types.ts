@@ -234,6 +234,43 @@ export interface WellFactors {
   get(row: number, col: number): number[] | undefined;
 }
 
+// Re-exported so `WellCurve`/`FluorCurve` can reference the baseline shapes without a circular
+// import — `baseline.ts` doesn't depend on `types.ts`.
+import type { BaselineRegion, LinearBaselineFit } from "./baseline.js";
+export type { BaselineRegion, LinearBaselineFit } from "./baseline.js";
+
+/**
+ * A curve's baseline/threshold/Cq exactly as its **source file** reports them, alongside
+ * whatever this library computes for the same curve (`threshold.md` §3–§6). Only a handful of
+ * formats carry one — currently the Biomeme JSON export (`biomeme.ts`), whose on-device
+ * software fits its own baseline and picks its own threshold per curve, unlike `.zpcr`/`.pcrd`,
+ * which carry raw readings only.
+ *
+ * This is a second, independent analysis of the same measurement, not a substitute input to
+ * this library's own pipeline (`analysis.ts`'s "one analysis per run" rule is about *that*
+ * pipeline's internal consistency, and is untouched by a file also shipping its own answer). A
+ * consumer that wants to compare the two — the web app's Curves view does, via a toggle — reads
+ * this field and this library's own {@link CqTableEntry} side by side; nothing here feeds back
+ * into `computeCqTable`.
+ */
+export interface FileAnalysis {
+  /** The region the file says its baseline was fitted over (its own background-cycle range). */
+  region: BaselineRegion;
+  /** The file's baseline line, recovered as `raw − correctedValues`'s own best-fit line — present
+   * for display (e.g. overlaying it like {@link CurveBaselineResult.baselineFit}) even though the
+   * file itself states only the corrected curve and the threshold/Cq it read off it. */
+  fit: LinearBaselineFit;
+  /** The file's own baseline-corrected curve, verbatim — not re-derived from {@link fit}, since
+   * the file's own arithmetic is definitionally what "the file's baseline" means. */
+  correctedValues: number[];
+  /** The threshold RFU the file's own Cq was measured against. */
+  threshold: number;
+  /** The file's own Cq, or `null` when the file reports the curve as not amplifying. */
+  cq: number | null;
+  /** The file's own end-point RFU. */
+  endRfu: number;
+}
+
 /** A well-centric amplification curve: mean fluorescence across cycles for one channel. */
 export interface WellCurve {
   /** Optical channel 0–5. */
@@ -256,6 +293,9 @@ export interface WellCurve {
   min: number[];
   /** Maximum raw sample per cycle, aligned with {@link cycles}. */
   max: number[];
+  /** This curve's baseline/threshold/Cq as its source file reports them, when it carries its
+   * own — see {@link FileAnalysis}. Absent for `.zpcr`/`.pcrd`, which carry no such thing. */
+  fileAnalysis?: FileAnalysis;
 }
 
 // Re-exported so the Zpcr interface can reference them without a circular import.
@@ -421,6 +461,18 @@ export interface Zpcr {
    * `apps/web/ARCHITECTURE.md`. Honouring it reproduces CFX's Cq exactly for every overridden dye.
    */
   persistedThresholds?: ReadonlyMap<string, number>;
+  /**
+   * True when {@link curves} already reports one curve **per dye**, with no channel→dye color
+   * separation left to do — `biomeme.ts`'s handheld exports, whose device reports fluorescence
+   * per fluorophore directly rather than per optical channel. Undefined (falsy) for `.zpcr`/
+   * `.pcrd`, whose raw channel readings still need `calibration.md`'s solve.
+   *
+   * A consumer that runs color separation (the web app's `useRunAnalysis`) checks this once and
+   * skips the whole calibration stage when it's set — `channels()` already enumerates one
+   * "channel" per dye and {@link WellCurve.channel} is that same index, so the dye-space curves
+   * the rest of the pipeline expects are just {@link curves}'s output relabelled, not solved for.
+   */
+  dyeSpace?: boolean;
   /** Factory calibration of the reference row, from `RunInfo.xml`'s `FactoryRefRowCal`. */
   factoryRefCal(): RefWellCal[];
   /** Live reference row vs factory calibration, per channel/column (optical drift). */

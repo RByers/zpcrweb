@@ -1188,9 +1188,34 @@
    rail bar (double-click solos, no "only" button), so `.chanchip` alone covers them. */
 
 /* ---- Well matrix -------------------------------------------------------- */
+/* `minmax(0, 19px)` — not a bare `1fr` — caps how wide a column can grow: Grid's track-sizing
+   algorithm distributes a grid's free space to every track up to its own growth limit, which
+   applies to any `minmax()` track (not only ones using `fr`), so this still divides the rail's
+   width evenly across up to about 15 columns exactly as `1fr` did (19px is what a full
+   12-column CFX grid already comes out to at this rail's width) and only kicks in as an actual
+   cap once there are too few columns to use all the free space, e.g. Biomeme's single row of
+   3-9 tube positions (`biomeme.ts`) — which used to divide that same free width across far
+   fewer tracks and grow each cell well past the size every CFX run's grid uses, for no reason
+   tied to the wells themselves.
+   (`min(1fr, 19px)` looks like the obvious way to spell "grow like 1fr, capped at 19px" but is
+   invalid CSS: an `fr` value cannot appear inside `min()`/`max()`/`clamp()`, only directly in a
+   grid track sizing function — using it silently invalidates the whole `grid-template-columns`
+   declaration in every engine tested, collapsing the grid to one column.)
+
+   The leading row-header column is capped the same way, at the same size, rather than left
+   `auto` (content-sized): a single-row plate's row-header button is empty (see `WellMatrix`'s
+   `cellLabel` — there's no row letter to size around when there's only one row), and an `auto`
+   track with nothing sizing it plus every cell's `aspect-ratio: 1` turned into a runaway
+   feedback loop in testing — the empty button's width was resolved from the *row's* height,
+   which a bare `auto` row track will stretch to fill a grid container's available block space
+   when nothing else constrains it, which then fed back into the column's own width via
+   `aspect-ratio`, compounding across both grid dimensions into a corner button (and its whole
+   row) hundreds of pixels across. A fixed track sidesteps the indeterminate auto-sizing
+   entirely; for the normal row-lettered case it's indistinguishable from the old `auto` sizing,
+   since "A"–"H" already fit well inside it. */
 .wellmatrix {
   display: grid;
-  grid-template-columns: auto repeat(var(--cols), minmax(0, 1fr));
+  grid-template-columns: minmax(0, 19px) repeat(var(--cols), minmax(0, 19px));
   gap: 3px;
 }
 .wm-corner,

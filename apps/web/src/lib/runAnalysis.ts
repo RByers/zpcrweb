@@ -9,6 +9,7 @@ import {
   type CqTableEntry,
   type CurveBaselineResult,
   type DarkCurve,
+  type FileAnalysis,
   type PlateDefinition,
   type PltdEntry,
   type WellCurve,
@@ -18,6 +19,7 @@ import { wellKey, type FileSettings } from "../state/useZpcrStore";
 import { NO_TARGET, targetGroups, type TargetGroup } from "./plateTargets";
 import {
   computeFluorCurves,
+  dyeSpaceFluorCurves,
   matchFluorCalibrations,
   resolveTubeType,
   type FluorCalibration,
@@ -90,6 +92,56 @@ export function darkCurveKey(channel: number): string {
 }
 
 /**
+ * Substitute a curve's own {@link FileAnalysis} for the matching half of its computed
+ * {@link CqTableEntry}, per `settings.baselineSource`/`cqSource` — see the {@link RunAnalysis.cqTable}
+ * doc comment for why this is the one place either setting takes effect.
+ *
+ * The two halves are independent by design (two separate toggles): baseline fields
+ * (`correctedValues`/`baselineFit`/`baselineRegion`/`noise`/`deltaRfu`) follow `baselineSource`,
+ * Cq fields (`cq`/`threshold`/`endRfu`) follow `cqSource`. Mixing "file baseline" with "computed
+ * Cq" (or the reverse) is a real combination a user can pick — the chart's Cq marker and
+ * threshold line then sit on the file's threshold against this library's own corrected curve
+ * (or vice versa), which won't necessarily land the marker exactly on the crossing; that's an
+ * honest picture of two independent analyses compared piecewise, not a bug to paper over.
+ *
+ * `noise` has no file equivalent (Biomeme states no noise estimate, only the threshold it
+ * implies) and always stays this library's own, whichever way `baselineSource` points — it's
+ * used only as an internal diagnostic (the Threshold rail's σ), never displayed as "the file's
+ * noise".
+ */
+function blendWithFileAnalysis(
+  entry: CqTableEntry,
+  cycles: number[],
+  fileAnalysis: FileAnalysis | undefined,
+  settings: Pick<FileSettings, "baselineSource" | "cqSource">,
+): CqTableEntry {
+  if (!fileAnalysis) return entry;
+  const out = { ...entry };
+  if (settings.baselineSource === "file") {
+    const { region, correctedValues, fit } = fileAnalysis;
+    let regionSum = 0;
+    let regionCount = 0;
+    for (let i = 0; i < cycles.length; i++) {
+      if (cycles[i]! >= region.beginCycle && cycles[i]! <= region.endCycle) {
+        regionSum += correctedValues[i] ?? 0;
+        regionCount++;
+      }
+    }
+    out.baselineRegion = region;
+    out.correctedValues = correctedValues;
+    out.baselineFit = fit;
+    // Mirrors `analysis.ts`'s `baselineCorrectCurve`: last corrected value minus the region mean.
+    out.deltaRfu = (correctedValues.at(-1) ?? 0) - (regionCount > 0 ? regionSum / regionCount : 0);
+  }
+  if (settings.cqSource === "file") {
+    out.cq = fileAnalysis.cq;
+    out.threshold = fileAnalysis.threshold;
+    out.endRfu = fileAnalysis.endRfu;
+  }
+  return out;
+}
+
+/**
  * The analysis record every plotted series carries — the *only* description of a curve's baseline
  * anywhere downstream of this module.
  *
@@ -106,6 +158,15 @@ export type CurveAnalysis = CurveBaselineResult & {
 };
 
 export interface RunAnalysis {
+  /** `Zpcr.dyeSpace` — true when the source already reports one curve per dye and needs no
+   * channel→dye color separation (currently only Biomeme; see `biomeme.ts`). Callers that gate
+   * on "has a calibration curve" (`FluorCalibration.curve`) to decide whether a fluor's Cq is
+   * trustworthy should treat every fluor as trustworthy here instead — there is no separation to
+   * have failed. */
+  dyeSpace: boolean;
+  /** Whether any curve on this run carries its own {@link FileAnalysis} — whether the file/
+   * computed baseline and Cq toggles have anything to offer. */
+  hasFileAnalysis: boolean;
   /** The first plate entry in the archive, whatever its decode state — the views read
    * `needsPassword`/`error` off it to show the password prompt. */
   plateEntry: PltdEntry | undefined;
@@ -206,6 +267,7 @@ export function useRunAnalysis(
   pltdPassword: string,
   activeStep: number | undefined,
 ): RunAnalysis {
+  const dyeSpace = !!zpcr.dyeSpace;
   const available = useMemo(() => zpcr.channels(), [zpcr]);
 
   const allCurves = useMemo<WellCurve[]>(
@@ -213,6 +275,7 @@ export function useRunAnalysis(
     [zpcr, activeStep],
   );
   const darkCurves = useMemo<DarkCurve[]>(() => zpcr.darkCurves(activeStep), [zpcr, activeStep]);
+  const hasFileAnalysis = useMemo(() => allCurves.some((c) => c.fileAnalysis), [allCurves]);
 
   const plateEntry = useMemo(() => zpcr.plates(pltdPassword || undefined)[0], [zpcr, pltdPassword]);
   const plate = plateEntry?.pltd.plate;
@@ -223,7 +286,12 @@ export function useRunAnalysis(
     () => (plate ? matchFluorCalibrations(plate.fluors, calibrations, tube) : []),
     [plate, calibrations, tube],
   );
-  const calibratedFluors = useMemo(() => fluorCals.filter((f) => f.curve), [fluorCals]);
+  // A dye-space source has no `.Dcal` calibration to match — its fluors are trustworthy by
+  // construction, not by having found one (see `RunAnalysis.dyeSpace`).
+  const calibratedFluors = useMemo(
+    () => (dyeSpace ? fluorCals : fluorCals.filter((f) => f.curve)),
+    [dyeSpace, fluorCals],
+  );
   const calibrationAvailable = calibratedFluors.length > 0;
 
   // Target/gene assigned to each (well, fluor) pair — pltd.md's per-well target, distinct from the
@@ -306,7 +374,9 @@ export function useRunAnalysis(
   const stepTemperatureC = useMemo(() => stepTemperature(zpcr, activeStep), [zpcr, activeStep]);
 
   const matrix = useMemo(() => {
-    if (calibratedFluors.length === 0) return null;
+    // A dye-space source has no channel mixing to solve for at all (see `RunAnalysis.dyeSpace`)
+    // — `allFluorCurves` below reads its curves straight off `allCurves` instead.
+    if (dyeSpace || calibratedFluors.length === 0) return null;
     // `channels` is passed in rather than slicing rows afterwards so the matrix's column norms —
     // the RFU scale factor of calibration.md §5 — are computed over the rows the solve uses.
     return buildCalibrationMatrix(
@@ -314,7 +384,7 @@ export function useRunAnalysis(
       stepTemperatureC,
       { normalization: settings.calibrationNormalization, channels: available },
     );
-  }, [calibratedFluors, stepTemperatureC, settings.calibrationNormalization, available]);
+  }, [dyeSpace, calibratedFluors, stepTemperatureC, settings.calibrationNormalization, available]);
 
   // The §4 corrections applied to every raw reading before the solve. The levels are read per scan,
   // so these are `[channelIndex][cycle]` tables aligned with `available`.
@@ -338,16 +408,28 @@ export function useRunAnalysis(
   }, [zpcr, activeStep, available]);
 
   const allFluorCurves = useMemo(() => {
+    if (dyeSpace) {
+      const fluorForChannel = new Map(plate?.fluors.map((f) => [f.channel, f.fluor]) ?? []);
+      return dyeSpaceFluorCurves(allCurves, (ch) => fluorForChannel.get(ch));
+    }
     if (!matrix) return [];
     const dyeChannels = calibratedFluors.map((f) => f.channel);
     return computeFluorCurves(allCurves, matrix, available, dyeChannels, corrections);
-  }, [matrix, allCurves, available, calibratedFluors, corrections]);
+  }, [dyeSpace, plate, matrix, allCurves, available, calibratedFluors, corrections]);
 
   // ---- The Cq table ------------------------------------------------------------------------
   // Over every well/dye pair on the plate, never a filtered subset. Pairs the plate doesn't load
   // still get an entry — the Curves view can plot them ("Unloaded") and they need a Cq of their own
   // — but stay out of their group's noise cohort, since a dye that was never pipetted into a well
   // shouldn't set the threshold bar for the wells that were.
+  //
+  // This library's own algorithm runs unconditionally, even for a curve carrying `fileAnalysis` —
+  // it's the only thing that can resolve a group threshold at all, and it's what `settings.
+  // baselineSource`/`cqSource` fall back to for a curve the file left unanalyzed. Where a curve
+  // does carry `fileAnalysis` and a setting says "file", {@link blendWithFileAnalysis} below
+  // substitutes the file's own numbers for the matching half of the record (baseline fields, or
+  // Cq/threshold/endRfu) — so this is the *one* place the toggle takes effect, and every
+  // downstream reader (chart, table, hover cards, CSV) needs no format-specific code at all.
   const cqTable = useMemo(() => {
     const inputs: CqTableCurve[] = allFluorCurves.map((c) => ({
       key: curveKey(c.row, c.col, c.dye),
@@ -356,17 +438,28 @@ export function useRunAnalysis(
       values: c.mean,
       contributesToThreshold: loadedFluors.get(wellKey(c.row, c.col))?.has(c.dye) ?? false,
     }));
-    return computeCqTable(inputs, {
+    const computed = computeCqTable(inputs, {
       thresholdOverrides: settings.thresholdOverrides,
       curveThresholdOverrides: settings.curveThresholdOverrides,
       autoThreshold: { multiplier: settings.thresholdMultiplier },
     });
+    if (!hasFileAnalysis) return computed;
+    const out = new Map<string, CqTableEntry>();
+    for (const c of allFluorCurves) {
+      const key = curveKey(c.row, c.col, c.dye);
+      const entry = computed.get(key);
+      if (entry) out.set(key, blendWithFileAnalysis(entry, c.cycles, c.fileAnalysis, settings));
+    }
+    return out;
   }, [
     allFluorCurves,
+    hasFileAnalysis,
     loadedFluors,
     settings.thresholdOverrides,
     settings.curveThresholdOverrides,
     settings.thresholdMultiplier,
+    settings.baselineSource,
+    settings.cqSource,
   ]);
 
   // Display baselines for the no-Cq series — see `RunAnalysis.plainBaselines`. Computed over the
@@ -394,6 +487,8 @@ export function useRunAnalysis(
   }, [allCurves, darkCurves, settings.thresholdMultiplier]);
 
   return {
+    dyeSpace,
+    hasFileAnalysis,
     plateEntry,
     plate,
     allCurves,

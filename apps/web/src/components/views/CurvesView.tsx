@@ -5,6 +5,7 @@ import { NO_TARGET } from "../../lib/plateTargets";
 import { SAMPLE_TYPE_META } from "../../lib/sampleType";
 import {
   wellKey,
+  type AnalysisSource,
   type CurveView,
   type FileSettings,
   type FluorViewMode,
@@ -93,6 +94,8 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
     wellSample,
     targetInfos,
     usingTargets,
+    dyeSpace,
+    hasFileAnalysis,
     groupInfos,
     thresholdGroups,
     loadedFluors,
@@ -274,8 +277,16 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
   // hover is supposed to give — so the visibility filters below let the hovered well/channel/
   // target/sample bypass its own disabled check (but only its own; hovering a disabled target
   // doesn't also reveal wells the user turned off).
+  //
+  // `plateRows`/`cellLabel` mirror `WellMatrix`'s own row-count-aware labelling (see that
+  // component's doc comment) rather than always using core's `wellLabel()`: a Biomeme run's
+  // synthesized plate is a single row, and `WellMatrix` sends hover labels with no row letter
+  // for one — this has to construct the same string to recognize them.
+  const plateRows = plate?.rows ?? 8;
+  const cellLabel = (row: number, col: number) =>
+    plateRows === 1 ? String(col + 1) : wellLabel(row, col);
   const isHoveredWell = (row: number, col: number) =>
-    hoverHighlight?.kind === "well" && hoverHighlight.label === wellLabel(row, col);
+    hoverHighlight?.kind === "well" && hoverHighlight.label === cellLabel(row, col);
   const isHoveredChannel = (channel: number) =>
     hoverHighlight?.kind === "channel" && hoverHighlight.channel === channel;
   const isHoveredSample = (sample: string | undefined) =>
@@ -294,16 +305,17 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
             label: g.target,
             sublabel: usingTargets ? g.fluors.join(", ") : channelLabel(g.channel ?? 0),
             channel: g.channel,
-            calibrated: !!g.curve,
+            // A dye-space source has no `.Dcal` calibration to have matched — see `dyeSpace`.
+            calibrated: dyeSpace || !!g.curve,
           }))
         : fluorCals.map((f) => ({
             key: f.fluor,
             label: f.fluor,
             sublabel: channelLabel(f.channel),
             channel: f.channel,
-            calibrated: !!f.curve,
+            calibrated: dyeSpace || !!f.curve,
           })),
-    [groupByTarget, groupInfos, usingTargets, fluorCals],
+    [groupByTarget, groupInfos, usingTargets, fluorCals, dyeSpace],
   );
 
   // Distinct sample names actually assigned to a well on this plate, in plate order — declared
@@ -725,7 +737,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
   const thresholdRows = useMemo<ThresholdGroupRow[]>(
     () =>
       thresholdGroups
-        .filter((g) => g.curve)
+        .filter((g) => dyeSpace || g.curve)
         .map((g) => ({
           fluor: g.fluor,
           channel: g.channel,
@@ -758,6 +770,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
         })),
     [
       thresholdGroups,
+      dyeSpace,
       groupThresholds,
       plate,
       loadedFluors,
@@ -917,13 +930,14 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
                     calibration.md §5.1 divides the column scaling back out, so every mode
                     reports identical RFU unless the matrix is rank-deficient. The setting still
                     exists (see FileSettings) — it just isn't a user-facing choice. */}
-                {calibrationOn && !calibrationAvailable && (
+                {calibrationOn && !dyeSpace && !calibrationAvailable && (
                   <div className="rail__note mono">
                     No .Dcal calibration matches this plate's fluorophores for {tube}. Check
                     the Calibration files under Raw files.
                   </div>
                 )}
                 {calibrationOn &&
+                  !dyeSpace &&
                   calibrationAvailable &&
                   fluorCals.some((f) => !f.curve) && (
                     <div className="rail__note mono">
@@ -954,6 +968,8 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
             </button>
           </div>
           <WellMatrix
+            rows={plateRows}
+            cols={plate?.columns ?? 12}
             enabled={settings.enabledWells}
             onChange={(next) => onChange({ enabledWells: next })}
             wellTypes={wellTypes}
@@ -1196,6 +1212,39 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
               cqMax={settings.cqMax}
               onChange={onChange}
             />
+          </div>
+        )}
+
+        {/* Only a source that carries its own analysis (currently Biomeme — `Zpcr.dyeSpace`,
+            `WellCurve.fileAnalysis`) has anything for these to switch between; a `.zpcr`/`.pcrd`
+            run never shows them. Two independent toggles, not one: a user may want the device's
+            own Cq call while still inspecting this app's baseline fit, or the reverse — see
+            `runAnalysis.ts`'s `blendWithFileAnalysis`. Shown in every view mode, like Threshold
+            below, since both act on the one Cq table every view reads. */}
+        {hasFileAnalysis && (
+          <div className="rail__section">
+            <div className="rail__row">
+              <Toggle
+                label="Baseline"
+                options={[
+                  ["file", "File"],
+                  ["computed", "Computed"],
+                ]}
+                value={settings.baselineSource}
+                onChange={(v) => onChange({ baselineSource: v as AnalysisSource })}
+              />
+            </div>
+            <div className="rail__row" style={{ marginTop: 8 }}>
+              <Toggle
+                label="Cq"
+                options={[
+                  ["file", "File"],
+                  ["computed", "Computed"],
+                ]}
+                value={settings.cqSource}
+                onChange={(v) => onChange({ cqSource: v as AnalysisSource })}
+              />
+            </div>
           </div>
         )}
 

@@ -61,6 +61,7 @@ export {
 export { parsePrcl, parseProtocol2, isPrclName } from "./prcl.js";
 export { parseDcal, findDcalBlock, isDcalName, dyeChannelLookup } from "./dcal.js";
 export { parsePcrd, isPcrdName, pcrdFromBlob } from "./pcrd.js";
+export { parseBiomeme, isBiomemeJson } from "./biomeme.js";
 export {
   buildDyeResponseCurve,
   buildDyeReadingCurves,
@@ -149,6 +150,7 @@ export type {
   GotoStep,
 } from "./prcl.js";
 export type { Pcrd, PcrdContainer, PcrdOptions } from "./pcrd.js";
+export type { FileAnalysis } from "./types.js";
 export type {
   ResponseKnot,
   DyeResponseCurve,

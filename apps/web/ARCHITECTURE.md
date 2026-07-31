@@ -1,18 +1,22 @@
 # Web app architecture
 
 The web app (`@zpcrweb/web`) is a browser UI over [`@zpcrweb/core`](../../packages/core). It
-loads one or more files — `.zpcr`, `.pcrd`, or a standalone plate file (`.pltd` or zpcrweb's own
-`.plt.csv`, see "Standalone plate entries and attach" below) — switches between them, and
-explores each through up to six views: Overview, Curves, Plates, Reference, Calibration, and Raw
-(a standalone plate file only gets Plates + Raw — see below).
+loads one or more files — `.zpcr`, `.pcrd`, a Biomeme run export (`.json`, see "A third format:
+Biomeme" below), or a standalone plate file (`.pltd` or zpcrweb's own `.plt.csv`, see
+"Standalone plate entries and attach" below) — switches between them, and explores each through
+up to six views: Overview, Curves, Plates, Reference, Calibration, and Raw (a standalone plate
+file only gets Plates + Raw; a Biomeme run only gets Overview, Curves and Plates — see below).
 
 ## Format independence
 
 **Except for the Raw views, the app is entirely format-agnostic. This is an invariant, not an
 observation.**
 
-Concretely, outside `RawFilesView`/`PcrdRawView` and the `App.tsx` line that chooses between
-them, no component may:
+Concretely, outside `RawFilesView`/`PcrdRawView`, the `App.tsx` line that chooses between them,
+and the tab-restriction checks that narrow `ViewSelector` for a standalone plate entry or a
+Biomeme run (`isStandalonePlate`/`isBiomeme` in `App.tsx` — a real capability difference: a
+Biomeme `Zpcr` has no reference row or `.Dcal` calibrations for Reference/Calibration to show,
+same as a standalone plate has no curves), no component may:
 
 - branch on `LoadedFile.kind` (or otherwise ask which format a run came from);
 - read `Zpcr.archive`, which a `.pcrd`-derived `Zpcr` has none of;
@@ -660,6 +664,87 @@ color-separated `allFluorCurves` — and, on top of those, the run's **Cq table*
   mode and both read `cqTable`, which is empty without it — and `OverviewView` already pays for the
   same solve on every run.
 
+## A third format: Biomeme
+
+`@zpcrweb/core`'s `parseBiomeme` decodes a Biomeme handheld device's run-export JSON into the
+same `Zpcr` shape `parseZpcr`/`parsePcrd` produce (see the root
+[`ARCHITECTURE.md`](../../ARCHITECTURE.md#a-third-non-cfx-input-biomeme) and
+[`biomeme.md`](../../biomeme.md)), so `useZpcrStore` routes it through the exact same
+`RunResult`/`useRunAnalysis` pipeline every other run uses — a `.json` file only reaches
+`parseBiomeme` after `isBiomemeJson()` sniffs its content (the extension alone is too generic a
+signal; see `fileKind()` in `state/useZpcrStore.ts`), and from there on almost nothing in the app
+needs to know it isn't a `.zpcr`. Two real differences do surface, both because they're
+capability checks rather than format checks:
+
+- **Fewer view tabs.** `App.tsx`'s `isBiomeme` restricts `ViewSelector` to Overview/Curves/Plates
+  — Reference has no reference row to show, Calibration has no `.Dcal` set, Raw has no archive
+  (`Zpcr.archive` is honestly empty, the same "nothing here" `.pcrd` already models). The same
+  pattern `isStandalonePlate` already used for a bare `.pltd`/`.plt.csv` entry.
+- **`Zpcr.dyeSpace`**, checked once in `useRunAnalysis` — see the next section — and
+  **`WellCurve.fileAnalysis`**, read by the Curves view's file/computed toggles — see "File vs.
+  computed analysis" under Curves view below.
+
+A third thing follows from the *shape* of a Biomeme run's synthesized plate rather than from any
+flag: `PlateDefinition.rows`/`columns` are `1` and (typically) `3`/`6`/`9` rather than the `8`/
+`12` every `.zpcr`/`.pcrd` plate has always had, and the well-selection grid and plate map size
+themselves to that instead of assuming a fixed 8×12 shape:
+
+- `components/curves/WellMatrix.tsx` takes `rows`/`cols` props (defaulting to `8`/`12`, so every
+  existing call site is unaffected) and uses them everywhere a loop used to hardcode `ROWS`/
+  `COLS` — the grid's `--cols` custom property, the corner "toggle all", the row/column toggle
+  buttons, the cell grid itself. A plate with exactly one row drops the row-letter header and
+  cell-label prefix (`cellLabel()`) rather than showing an always-`"A"` column, but the header
+  *button* for that row is still rendered (empty) — CSS grid auto-placement has no way to leave a
+  gap for a genuinely omitted element, so removing it outright would shift every cell in that row
+  into the reserved header column instead. Clicking it still toggles the (only) row, which is the
+  same thing the corner button already does, so nothing is lost by leaving it live.
+- `components/plate/PlateViewer.tsx` (the Plates view's grid) already read `plate.rows`/
+  `plate.columns` rather than hardcoding a size, so a Biomeme run's plate map was correctly
+  sized with no change; the one addition is the same single-row row-letter suppression, safe
+  here as a blank `<th>` since an HTML `<table>` has no auto-placement hazard to work around.
+- `CurvesView`'s own `isHoveredWell` check builds its own well-label string to compare against
+  `WellMatrix`'s hover callback rather than reading a curve's `.wellLabel` field, so it has a
+  `cellLabel` mirroring `WellMatrix`'s (and `biomeme.ts`'s `singleRowAwareLabel`) rather than
+  always calling core's row-letter-always `wellLabel()`. Three copies of the same one-line rule
+  is duplication that would be worth centralizing if a fourth format needed it; for now each side
+  (core's synthesized `WellDefinition.label`, the app's hover label, the app's plate-map header)
+  independently agrees on "no letter when there's only one row" because there's no shared
+  formatting entry point between core and the app to hang one function on without adding an
+  export purely for this.
+
+### Dye-space sources skip color separation
+
+A CFX reading is a raw 6-channel vector `calibration.md`'s solve unmixes into per-dye
+concentrations; a Biomeme reading is per-fluorophore already, so there is nothing to solve.
+`useRunAnalysis` checks `zpcr.dyeSpace` once, near the top, and branches the one stage that
+differs:
+
+- `calibratedFluors` is `fluorCals` unfiltered (every fluor counts as usable — there is no
+  `.Dcal` match to have failed, so gating on `FluorCalibration.curve` the way a CFX run does
+  would hide every fluor), and `calibrationAvailable` follows from that.
+- `matrix` is skipped outright (`dyeSpace || calibratedFluors.length === 0`) rather than built
+  and then discarded.
+- `allFluorCurves` comes from `lib/fluorCurves.ts`'s `dyeSpaceFluorCurves()` instead of
+  `computeFluorCurves()` — a relabelling of `allCurves` (each `WellCurve.channel` is already a
+  fluor index; `dyeSpaceFluorCurves` just resolves it back to a name via the plate's `fluors[]`
+  and carries `WellCurve.fileAnalysis` through untouched), not a solve.
+
+Everything past that point — `cqTable`, the chart, the table, the CSV export, the rail's
+Wells/Targets/Samples/Threshold sections — reads `allFluorCurves` the same way regardless of
+which path produced it, which is the point: a dye-space run needs zero changes below
+`useRunAnalysis`. The one place a *view* still has to ask is where it would otherwise gate on
+`FluorCalibration.curve` for something other than the solve itself — three spots in
+`CurvesView.tsx` (`calibrated` on rail chips, the Threshold section's row filter, and the "no
+.Dcal calibration matches" notes) — those add `dyeSpace ||` because "no curve" means something
+different for the two kinds of run: "the separation failed to match" for a CFX run, nothing at
+all for one that was never going to separate.
+
+Note this is an unrelated concept to the identically-named parameter `computeFluorCurves` used
+to take (removed; see "One analysis per run" above) — that one meant "the Curves view is
+currently displaying dye space rather than channel space", a *display* mode. `Zpcr.dyeSpace` is
+a fact about the **source**, permanently true or false for a given run regardless of which mode
+the view happens to be showing.
+
 ## Curves view
 
 Data flows `zpcr.curves({ includeReference:false })` + `zpcr.darkCurves()` → filter by
@@ -668,9 +753,10 @@ overlays a tooltip. The reference row is excluded here — it has its own chart 
 **Reference** view (below), so `Toggle` (`components/Toggle.tsx`) and `CurveChart` are the
 only pieces the two views share.
 
-- **Selection:** a channel bar (6 dye-labelled toggles) and an 8×12 well matrix (`WellMatrix`)
-  whose row (A–H) and column (1–12) headers toggle whole rows/columns, plus an all/none corner.
-  Once the plate definition is available (password permitting), each cell is tinted by
+- **Selection:** a channel bar (6 dye-labelled toggles) and a well matrix (`WellMatrix`, 8×12 for
+  a CFX plate, sized to the run's actual plate otherwise — see "A third format: Biomeme" above)
+  whose row and column headers toggle whole rows/columns, plus an all/none corner. Once the
+  plate definition is available (password permitting), each cell is tinted by
   `SAMPLE_TYPE_META` (see **Plates** below) so selection state reads alongside sample type; a
   reset button next to the "Wells" label restores the selection to exactly the plate's
   non-empty wells. The matrix sits directly under the View toggle, above the channel/target bar:
@@ -1139,6 +1225,36 @@ is: a per-target curve needs channel→dye color separation (`calibration.md`).
   export is the same target-based table whichever space the chart happens to be showing — and is
   disabled rather than hidden when there are no rows (no usable calibration, or the rail filtered
   everything out), so exporting never requires switching modes first.
+
+### File vs. computed analysis
+
+Only relevant to a source that carries its own analysis alongside the raw curve — currently
+Biomeme (`WellCurve.fileAnalysis`, `biomeme.md`). Two independent `FileSettings` toggles,
+`baselineSource`/`cqSource` (`"file"` default, `"computed"`), rendered as a pair of `Toggle`s in
+the rail whenever `RunAnalysis.hasFileAnalysis` is true — absent entirely for a `.zpcr`/`.pcrd`
+run, which has nothing to switch between.
+
+They take effect in exactly one place, `lib/runAnalysis.ts`'s `blendWithFileAnalysis`, called
+once per curve while building `cqTable` — never in a view. `computeCqTable()` still runs
+unconditionally first (a curve's threshold has to come from *somewhere*, and this library's own
+algorithm is the only thing that can resolve one across a group), and `blendWithFileAnalysis`
+then substitutes the file's own numbers for the matching half of each `CqTableEntry`:
+`baselineSource` swaps `correctedValues`/`baselineFit`/`baselineRegion`/`deltaRfu` (`noise` stays
+this library's own always — Biomeme states no noise estimate, only the threshold it implies, and
+`noise` is an internal diagnostic, never shown as "the file's"); `cqSource` swaps
+`cq`/`threshold`/`endRfu`. Because this happens inside the one `cqTable` every view reads —
+chart, table, hover cards, CSV — none of them need to know the toggle exists; the chart's Cq
+marker, for instance, is still just `(entry.cq, entry.threshold)`, whichever source those came
+from.
+
+The two are genuinely independent, not a single "source" radio: a user comparing this app's
+baseline fit against the device's own Cq call (or the reverse) is a real, useful combination, not
+an edge case to prevent. Picking "file" baseline with "computed" Cq means the chart's marker sits
+at this library's threshold against the *file's* corrected curve, which won't necessarily land
+exactly on a crossing — an honest picture of two independent analyses compared piecewise, not a
+bug. `biomeme.md` §3 has the measured numbers motivating why this is a toggle rather than one
+pipeline reproducing the other: 19/27 curves on the committed sample agree on amplified-or-not,
+median 4.1 cycles apart where both report a Cq.
 
 ## Calibration view
 

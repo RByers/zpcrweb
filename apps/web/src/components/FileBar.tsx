@@ -21,7 +21,7 @@ interface Props {
 
 /** Shorten `20260720_211747_CT019138_Luna_noRT.zpcr` to something legible. */
 function label(f: LoadedFile): string {
-  return f.name.replace(/\.(zpcr|pcrd|pltd|plt\.csv|csv)$/i, "");
+  return f.name.replace(/\.(zpcr|pcrd|pltd|plt\.csv|csv|json)$/i, "");
 }
 
 /** Encryption status for a loaded file's dot color — mirrors the Overview panel's "Encrypted"

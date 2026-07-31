@@ -25,6 +25,14 @@ There is also limited support for `.pltd` and `.pcrd` files as produced by CFX s
 
 To minimize the hassle of working with encrypted plate definition files, this package define a simple `.plt.csv` file format for plates which can be exported, modified and imported back and linked into a `.zpcr` file. 
 
+The app also opens **Biomeme run exports** (`.json`, from the Franklin/Two3/Three9 handheld
+devices) — a genuinely different instrument (a handful of tube positions, fluorescence
+reported directly per dye rather than per optical channel) that shares no bytes with a CFX
+`.zpcr`/`.pcrd`, but is decoded into the same `Zpcr` shape (see `biomeme.ts` and
+`ARCHITECTURE.md`'s "Three input formats"), so it opens in the same Curves view. Unlike a
+CFX file, a Biomeme export carries the device's own baseline and Cq for every curve; the
+Curves view offers a File ↔ Computed toggle for both, defaulting to the file's own numbers.
+
 ## Repository layout
 
 This is an npm-workspaces monorepo:
@@ -99,8 +107,9 @@ See [`ARCHITECTURE.md`](./ARCHITECTURE.md) for design details and
 
 ## `@zpcrweb/web`
 
-A React + Vite web app for exploring `.zpcr` files, in a cyberpunk-dark theme. Drag-and-drop
-or click to load multiple files, switch between them, and view each three ways:
+A React + Vite web app for exploring `.zpcr`/`.pcrd`/Biomeme `.json` files, in a
+cyberpunk-dark theme. Drag-and-drop or click to load multiple files, switch between them, and
+view each several ways:
 
 - **Overview** — run metadata and thermal protocol.
 - **Curves** — amplification curves for up to ~648 well/channel series (uPlot), with a

@@ -85,7 +85,11 @@ export function OverviewView({
     { label: "Block", value: m.blockDescription || "—" },
     { label: "Base serial", value: m.baseSerialNumber || "—" },
     { label: "Channels", value: `${m.channelCount} (mask ${m.scanMask})` },
-    { label: "Cycles", value: String(reads.length) },
+    // `reads.length` for a `.zpcr`/`.pcrd`, but a dye-space source (`Zpcr.dyeSpace`) carries no
+    // `PlateRead[]` at all — its curves are already pivoted — so this sums `steps()` instead,
+    // which both formats populate. Equivalent for a `.zpcr`/`.pcrd` (`toSteps` is itself a tally
+    // of `reads`), and the only number that exists at all for the other kind.
+    { label: "Cycles", value: String(steps.reduce((sum, s) => sum + s.readCount, 0)) },
     { label: "Plate", value: `${m.numberPlateRows}×${m.numberPlateColumns} + ${m.numberReferenceRows} ref` },
     { label: "Protocol", value: protocolName || "—" },
     { label: "Run start", value: m.runStartDate ? m.runStartDate.toUTCString() : m.runStartTime || "—" },

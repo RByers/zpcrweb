@@ -3,11 +3,12 @@ import { wellKey } from "../../state/useZpcrStore";
 import { SAMPLE_TYPE_META } from "../../lib/sampleType";
 import { useHoverCard, type HoverCardData } from "./HoverCard";
 
-const ROWS = 8;
-const COLS = 12;
-const ROW_LETTERS = "ABCDEFGH";
-
 interface Props {
+  /** Plate size — an 8×12 CFX block by default, but arbitrary: a Biomeme run's synthesized
+   * plate (`biomeme.ts`) is a single row of as few as 3 tube positions. See {@link
+   * cellLabel} for how a single-row plate's cells are labelled differently from a real grid's. */
+  rows?: number;
+  cols?: number;
   enabled: Set<string>;
   onChange: (next: Set<string>) => void;
   /** Sample type per well key, from the plate definition — colors each cell to match the
@@ -20,12 +21,13 @@ interface Props {
    * {@link plusOpacity} so an early, strongly-positive well stands out from a late marginal one.
    * Wells with no positive curve are simply absent. */
   positiveWells?: Map<string, number>;
-  /** Hovering a well cell (by its `"A1"`-style label, or `null` on leave) — drives the
-   * curve-chart highlight. */
+  /** Hovering a well cell (by its label — see {@link cellLabel} — or `null` on leave) — drives
+   * the curve-chart highlight. */
   onHoverWell?: (label: string | null) => void;
   /** Double-clicking a well cell — isolates it: only this well stays enabled. */
   onSoloWell?: (row: number, col: number) => void;
-  /** Hover-card content for a well's `"A1"`-style label, or `null`/undefined to show none. */
+  /** Hover-card content for a well's label (see {@link cellLabel}), or `null`/undefined to show
+   * none. */
   cardData?: (label: string) => HoverCardData | null | undefined;
 }
 
@@ -56,11 +58,30 @@ function plusOpacity(cq: number): number {
 }
 
 /**
- * 8×12 plate selection grid. Cells toggle a single well; the row letter (A–H) and column
- * number (1–12) headers toggle a whole row/column; the corner toggles all wells. The
- * reference row is shown separately, in the Reference view.
+ * A well's display label: the normal `"A1"`-style row-letter-plus-column for a real multi-row
+ * plate, or — when the plate has only one row (a Biomeme run's synthesized single strip of tube
+ * positions, `biomeme.ts`) — just the column number. A row that can never vary tells the user
+ * nothing a bare position number doesn't already say more plainly; the row is still internally 0
+ * ("row A") either way, since {@link wellKey} and every selection/highlight callback here work
+ * in row/col, never in this display string. Mirrors `packages/core/src/biomeme.ts`'s
+ * `singleRowAwareLabel`, which labels the same synthesized plate's `WellDefinition`/`WellCurve`
+ * the same way — the two have to agree, since a hover label from here is matched against a
+ * curve's own `wellLabel` field elsewhere in the Curves view.
+ */
+function cellLabel(row: number, col: number, rows: number): string {
+  return rows === 1 ? String(col + 1) : `${String.fromCharCode(65 + row)}${col + 1}`;
+}
+
+/**
+ * Plate selection grid, sized to the run's actual plate (8×12 for a CFX block by default; an
+ * arbitrary, possibly single-row, shape for a Biomeme run — see {@link Props.rows}/`cols`).
+ * Cells toggle a single well; the row and column headers toggle a whole row/column (the row
+ * header is omitted for a single-row plate — see {@link cellLabel}); the corner toggles all
+ * wells. The reference row is shown separately, in the Reference view.
  */
 export function WellMatrix({
+  rows = 8,
+  cols = 12,
   enabled,
   onChange,
   wellTypes,
@@ -70,9 +91,10 @@ export function WellMatrix({
   cardData,
 }: Props) {
   const { show, hide, node } = useHoverCard(cardData ?? (() => null));
+  const singleRow = rows === 1;
   const sampleKeys = () => {
     const keys: string[] = [];
-    for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) keys.push(wellKey(r, c));
+    for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) keys.push(wellKey(r, c));
     return keys;
   };
 
@@ -83,8 +105,8 @@ export function WellMatrix({
     onChange(next);
   };
 
-  const rowKeys = (r: number) => Array.from({ length: COLS }, (_, c) => wellKey(r, c));
-  const colKeys = (c: number) => Array.from({ length: ROWS }, (_, r) => wellKey(r, c));
+  const rowKeys = (r: number) => Array.from({ length: cols }, (_, c) => wellKey(r, c));
+  const colKeys = (c: number) => Array.from({ length: rows }, (_, r) => wellKey(r, c));
 
   const toggleGroup = (keys: string[]) => {
     const allOn = keys.every((k) => enabled.has(k));
@@ -101,21 +123,28 @@ export function WellMatrix({
     onChange(next);
   };
 
-  const renderRow = (r: number, label: string) => (
+  const renderRow = (r: number) => (
     <div className="wm-row" key={`row${r}`} style={{ display: "contents" }}>
+      {/* Still occupies the grid's row-header column — dropping the element entirely would shift
+          every cell after it into that column instead (CSS grid auto-placement has no gap to
+          leave) — but a single-row plate's one row has nothing for a letter to distinguish, so
+          it's left unlabelled rather than showing the redundant "A" (see `cellLabel`). Same
+          click behavior either way: toggling the plate's only row is the same as the corner's
+          "toggle all", so there's nothing misleading about leaving it live. */}
       <button
         className="wm-head"
         onClick={() => toggleGroup(rowKeys(r))}
-        title={`Toggle row ${label}`}
+        title={singleRow ? "Toggle all wells" : `Toggle row ${String.fromCharCode(65 + r)}`}
       >
-        {label}
+        {singleRow ? "" : String.fromCharCode(65 + r)}
       </button>
-      {Array.from({ length: COLS }, (_, c) => {
+      {Array.from({ length: cols }, (_, c) => {
         const key = wellKey(r, c);
         const on = enabled.has(key);
         const type = wellTypes?.get(key);
         const meta = type ? SAMPLE_TYPE_META[type] : undefined;
         const minCq = positiveWells?.get(key);
+        const label = cellLabel(r, c, rows);
         // The `+` takes the cell's border color, dimmed alongside it when the well is off, so a
         // positive NTC reads red and a positive unknown blue without needing a legend.
         const borderColor = meta ? meta.color + (on ? "" : "66") : undefined;
@@ -135,9 +164,8 @@ export function WellMatrix({
             onClick={() => toggleWell(r, c)}
             onDoubleClick={() => onSoloWell?.(r, c)}
             onMouseEnter={(e) => {
-              const wellLabel = `${label}${c + 1}`;
-              onHoverWell?.(wellLabel);
-              show(wellLabel, e.currentTarget);
+              onHoverWell?.(label);
+              show(label, e.currentTarget);
             }}
             onMouseLeave={() => {
               onHoverWell?.(null);
@@ -146,7 +174,7 @@ export function WellMatrix({
             aria-pressed={on}
             aria-label={
               [
-                `Well ${label}${c + 1}`,
+                `Well ${label}`,
                 meta?.label,
                 minCq != null ? `positive, Cq ${minCq.toFixed(1)}` : null,
               ]
@@ -155,7 +183,7 @@ export function WellMatrix({
             }
             // Native tooltip only as a fallback: when a hover card is wired up it already names
             // the well and its sample type, and the two floating boxes fight each other.
-            title={!cardData && meta ? `${label}${c + 1} — ${meta.label}` : undefined}
+            title={!cardData && meta ? `${label} — ${meta.label}` : undefined}
           >
             {/* Drawn rather than typed: a "+" glyph sits on the text baseline with its own
                 side/vertical bearings, so it never centers in a cell this small however the line
@@ -182,11 +210,11 @@ export function WellMatrix({
   );
 
   return (
-    <div className="wellmatrix" style={{ ["--cols" as string]: COLS }}>
+    <div className="wellmatrix" style={{ ["--cols" as string]: cols }}>
       <button className="wm-corner" onClick={toggleAll} title="Toggle all wells">
         ⊕
       </button>
-      {Array.from({ length: COLS }, (_, c) => (
+      {Array.from({ length: cols }, (_, c) => (
         <button
           key={`col${c}`}
           className="wm-head"
@@ -197,7 +225,7 @@ export function WellMatrix({
         </button>
       ))}
 
-      {Array.from({ length: ROWS }, (_, r) => renderRow(r, ROW_LETTERS[r]!))}
+      {Array.from({ length: rows }, (_, r) => renderRow(r))}
       {node}
     </div>
   );

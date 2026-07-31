@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   attachPlateToZpcr,
+  isBiomemeJson,
+  parseBiomeme,
   parsePcrd,
   parsePlateCsv,
   parsePltd,
@@ -37,7 +39,7 @@ import { onHashChange, readHash, writeHash } from "./urlHash";
 
 export { DEFAULT_THRESHOLD_MULTIPLIER } from "./analysisSettings";
 
-export type FileKind = "zpcr" | "pcrd" | "pltd" | "csv";
+export type FileKind = "zpcr" | "pcrd" | "biomeme" | "pltd" | "csv";
 /** The two kinds a plate — standalone or attached to a run — can be uploaded as. */
 type PlateFileKind = "pltd" | "csv";
 
@@ -85,6 +87,16 @@ export type RefXAxis = "cycle" | "column";
  * chart (the former standalone Analysis view). Table mode groups by target, like `"target"`.
  */
 export type FluorViewMode = "fluorophore" | "target" | "table";
+/**
+ * Curves view, dye-space sources that carry their own analysis only (currently Biomeme —
+ * `Zpcr.dyeSpace`, `WellCurve.fileAnalysis`): whether the baseline (`"file"`) or Cq/threshold
+ * (`"file"`) a plotted curve shows come from the source file's own reported values, or from this
+ * library's own algorithm (`"computed"`) — `threshold.md`'s pipeline, the same one every
+ * `.zpcr`/`.pcrd` curve always uses. The two toggles are independent; see `runAnalysis.ts`'s
+ * `blendWithFileAnalysis` for exactly what each one swaps. `"file"` is the default: the source
+ * device's own numbers are what a Biomeme user came to see. Meaningless (and hidden) for a run
+ * with no file-side analysis at all. */
+export type AnalysisSource = "file" | "computed";
 
 /**
  * Per-file settings, in-memory form (Sets for cheap toggling) — everything a view reads off
@@ -188,6 +200,10 @@ export interface FileSettings extends AnalysisSettings {
   /** Calibration view: response curves, or the raw dye/empty readings behind them; see
    * {@link CalView}. */
   calView: CalView;
+  /** See {@link AnalysisSource}. */
+  baselineSource: AnalysisSource;
+  /** See {@link AnalysisSource}. */
+  cqSource: AnalysisSource;
 }
 
 /** A file loaded into memory — bytes only. Parsing is derived (see {@link ZpcrStore.runs}),
@@ -241,13 +257,14 @@ export interface RunResult {
 }
 
 /**
- * The app's format boundary: both source formats go in, one {@link RunResult} comes out. Every
+ * The app's format boundary: every source format goes in, one {@link RunResult} comes out. Every
  * `kind === "pcrd"` test in the app that isn't about the raw view should be here instead.
  */
-function parseRun(bytes: Uint8Array, kind: "zpcr" | "pcrd", password: string): RunResult {
-  if (kind === "zpcr") {
+function parseRun(bytes: Uint8Array, kind: "zpcr" | "pcrd" | "biomeme", password: string): RunResult {
+  if (kind === "zpcr" || kind === "biomeme") {
     try {
-      return { zpcr: parseZpcr(bytes), needsPassword: false, error: null, selfEncrypted: false };
+      const zpcr = kind === "zpcr" ? parseZpcr(bytes) : parseBiomeme(bytes);
+      return { zpcr, needsPassword: false, error: null, selfEncrypted: false };
     } catch (e) {
       return {
         zpcr: null,
@@ -359,6 +376,9 @@ function defaultSettings(): FileSettings {
     calFiles: new Set<string>(),
     // The response curve is what the algorithm consumes, so it's what the view leads with.
     calView: "relative",
+    // "file": a Biomeme user opened the file to see the device's own call, not this app's.
+    baselineSource: "file",
+    cqSource: "file",
     ...defaultAnalysisSettings(),
   };
 }
@@ -391,6 +411,8 @@ function toStored(id: string, s: FileSettings): StoredSettings {
     cqMax: s.cqMax,
     calFiles: [...s.calFiles],
     calView: s.calView,
+    baselineSource: s.baselineSource,
+    cqSource: s.cqSource,
   };
 }
 
@@ -452,6 +474,9 @@ function fromStored(s: StoredSettings): FileSettings {
     // view will seed it from the run the first time it's opened.
     calFiles: new Set(s.calFiles ?? []),
     calView: s.calView ?? "relative",
+    // Absent from records written before this format existed; "file" is the default either way.
+    baselineSource: s.baselineSource ?? "file",
+    cqSource: s.cqSource ?? "file",
     temps: new Set(s.temps ?? []),
     // A record written before the LED series existed has no `leds`; both being non-empty is
     // impossible by construction (see `updateSettings`), so nothing needs reconciling here.
@@ -462,12 +487,15 @@ function fromStored(s: StoredSettings): FileSettings {
   };
 }
 
-/** True for file names this app knows how to load. */
-function fileKind(name: string): FileKind | null {
+/** True for file names this app knows how to load. A `.json` is only accepted once its content
+ * actually looks like a Biomeme run export (see {@link isBiomemeJson}) — the extension alone is
+ * too generic a signal to route into the app's parse/validate path on. */
+function fileKind(name: string, bytes?: Uint8Array): FileKind | null {
   if (/\.zpcr$/i.test(name)) return "zpcr";
   if (/\.pcrd$/i.test(name)) return "pcrd";
   if (/\.pltd$/i.test(name)) return "pltd";
   if (/\.csv$/i.test(name)) return "csv";
+  if (/\.json$/i.test(name) && bytes && isBiomemeJson(bytes)) return "biomeme";
   return null;
 }
 
@@ -703,19 +731,22 @@ export function useZpcrStore(): ZpcrStore {
 
   const addFiles = useCallback(
     async (input: FileList | File[]) => {
-      const list = Array.from(input)
-        .map((file) => ({ file, kind: fileKind(file.name) }))
-        .filter((f): f is { file: File; kind: FileKind } => f.kind !== null);
+      // `.json`'s kind can only be known after reading its bytes (see `fileKind`), so every file
+      // is read up front rather than filtered by extension first the way the other formats are.
+      const candidates = Array.from(input).filter((file) => /\.(zpcr|pcrd|pltd|csv|json)$/i.test(file.name));
       let lastId: string | null = null;
-      for (const { file, kind } of list) {
+      for (const file of candidates) {
         try {
           const buf = await file.arrayBuffer();
           const bytes = new Uint8Array(buf);
+          const kind = fileKind(file.name, bytes);
+          if (!kind) throw new Error("not a .zpcr, .pcrd, .pltd, .csv or Biomeme .json file");
           // Validate the container eagerly so obviously-bad files are rejected up front; a
           // .pcrd/.pltd's payload may still need a password, resolved reactively via `runs`/
           // `plateFiles`.
           if (kind === "zpcr") parseZpcr(bytes);
           else if (kind === "pcrd") parsePcrd(bytes);
+          else if (kind === "biomeme") parseBiomeme(bytes);
           else if (kind === "pltd") parsePltd(bytes);
           else parsePlateCsv(new TextDecoder().decode(bytes));
           const id = fileId(file.name, file.size);
@@ -752,7 +783,11 @@ export function useZpcrStore(): ZpcrStore {
     async (url: string) => {
       const name = fileNameFromUrl(url);
       try {
-        if (!fileKind(name)) throw new Error("not a .zpcr, .pcrd, .pltd or .csv file");
+        // `.json`'s kind needs its bytes (see `fileKind`); only the extension is checked here,
+        // and `addFiles` below does the real (content-based) validation once it has them.
+        if (!/\.(zpcr|pcrd|pltd|csv|json)$/i.test(name)) {
+          throw new Error("not a .zpcr, .pcrd, .pltd, .csv or Biomeme .json file");
+        }
         const res = await fetch(url, { credentials: "omit" });
         if (!res.ok) throw new Error(`fetch failed (HTTP ${res.status})`);
         await addFiles([new File([await res.arrayBuffer()], name)]);
@@ -897,7 +932,9 @@ export function useZpcrStore(): ZpcrStore {
   const runs = useMemo(() => {
     const map = new Map<string, RunResult>();
     for (const f of files) {
-      if (f.kind === "zpcr" || f.kind === "pcrd") map.set(f.id, parseRun(f.bytes, f.kind, password));
+      if (f.kind === "zpcr" || f.kind === "pcrd" || f.kind === "biomeme") {
+        map.set(f.id, parseRun(f.bytes, f.kind, password));
+      }
     }
     return map;
   }, [files, password]);
@@ -927,7 +964,7 @@ export function useZpcrStore(): ZpcrStore {
     for (const f of files) {
       if (seeded.current.has(f.id)) continue;
       let next: AnalysisSettings;
-      if (f.kind === "zpcr" || f.kind === "pcrd") {
+      if (f.kind === "zpcr" || f.kind === "pcrd" || f.kind === "biomeme") {
         const zpcr = runs.get(f.id)?.zpcr;
         if (!zpcr) continue; // not decoded yet (needs a password, or failed) — try again later
         const fromFile = parseZpcrwebSettings(zpcr);
