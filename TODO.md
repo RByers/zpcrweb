@@ -173,7 +173,7 @@ Additional typed parsers for the archive files currently reachable only via the 
 - [ ] **Decide whether `test:ui` runs in CI.** It is deliberately outside `npm test` (needs
       Chrome, ~9s vs ~3s) and `process.exit(1)`s without a `secrets.json` password. To gate CI,
       split the routing checks (no secret needed) from the password checks (secret required).
-- [ ] **Root `ARCHITECTURE.md` doesn't mention `tools/`.** CLAUDE.md and
+- [ ] **Root `ARCHITECTURE.md` doesn't mention `tools/`.** README.md and
       `apps/web/ARCHITECTURE.md` cover the harness; a short "Tooling" section would close the
       loop.
 - [ ] **Hash state is view + file only.** Selected wells/channels/fluorophores stay per-file in

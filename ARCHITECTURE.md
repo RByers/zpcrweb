@@ -14,7 +14,7 @@ color-separation algorithm built on top of `.Dcal` rather than a byte layout, an
 rather than one we decode. Each doc is
 self-contained and ends with a pointer to the `packages/core/src` module that implements it, so
 the doc is always the entry point for understanding *and* changing a decoder. See
-[`CLAUDE.md`](./CLAUDE.md) for the full doc ↔ code table.
+[`README.md`](./README.md) for the full doc ↔ code table.
 
 ## Goals
 

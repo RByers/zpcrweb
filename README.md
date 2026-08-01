@@ -33,6 +33,39 @@ reported directly per dye rather than per optical channel) that shares no bytes 
 CFX file, a Biomeme export carries the device's own baseline and Cq for every curve; the
 Curves view offers a File ↔ Computed toggle for both, defaulting to the file's own numbers.
 
+### Format documentation
+
+The reverse-engineered binary format docs are the reference for anything in
+`packages/core/src` that touches raw bytes. There's also one algorithm doc,
+`calibration.md`, for the color-separation math built on top of `.Dcal`, and `threshold.md`
+for baseline/threshold/Cq.
+
+| Doc | Covers |
+|-----|--------|
+| [`icff.md`](./icff.md) | "ICFF" — the small index container format underlying both `.Plateread` and `.Dcal`: a trailing footer points at an index of `[name, offset, length]` entries. Implemented by `packages/core/src/icff.ts`; locate the index via the footer, not by scanning for a known field name. |
+| [`plateread.md`](./plateread.md) | The `.Plateread` files inside a `.zpcr` — one per plate read (PCR cycle), holding the 6-channel × 108-well raw fluorescence table plus cycle number, block temperature and timestamp. **Mixed endianness:** metadata (version words, ICFF index) is big-endian; the WELLDATA/DARKDATA float arrays are little-endian. Implemented by `packages/core/src/plateread.ts`. |
+| [`dcal.md`](./dcal.md) | The `.Dcal` pure-dye calibration files — per-dye, per-plate-type fluorescence response across all 6 channels at 4 block temperatures, plus a matching empty-plate baseline; the only in-archive source of the channel→dye mapping (`PRIMARYCHANNEL`). Unencrypted ICFF container. Implemented by `packages/core/src/dcal.ts`, entry point `parseDcal(bytes)`; `zpcr.calibrations()` decodes every `.Dcal` entry in an archive. |
+| [`calibration.md`](./calibration.md) | Channel→dye color separation — the algorithm that turns raw per-channel readings plus `.Dcal` calibration data into per-dye concentration estimates. Not a file format doc. Implemented by `packages/core/src/calibration.ts` (linear algebra in `linalg.ts`), entry points `separateDyes()` (one-shot) and the individual `buildDyeResponseCurve`/`buildCalibrationMatrix`/`preprocessChannelReadings`/`separateChannels` stages. |
+| [`threshold.md`](./threshold.md) | Baseline, threshold and Cq — how a per-dye amplification curve becomes a quantification cycle, or a reported non-amplification: baseline region selection, subtraction, threshold determination, the crossing rule, end-point RFU, and the app's controls over them. Not a file format doc. §1 states the problem; §3–§7 are the shipped algorithm, implemented by `packages/core/src/baseline.ts` (§3–§4, §7), `packages/core/src/threshold.ts` (§5–§6, entry point `computeCq()`) and `packages/core/src/analysis.ts` (`computeCqTable()`, the per-run entry point); §10 separates what is deliberately unimplemented from what is still unknown. **Appendix A is the measurement against CFX Manager's own exported results** for a committed sample — the Cq stage exactly (`packages/core/test/cfxExport.test.ts`), the baseline stage to within a cycle of window; Appendix B records the alternatives tried and how noisy curves broke them. |
+| [`pltd.md`](./pltd.md) | The `.pltd` plate-definition files — per-well fluorophores, target/gene, sample name and type, replicate, standard quantity. Encrypted + compressed XML container. Implemented by `packages/core/src/pltd.ts`, entry point `parsePltd(bytes)`; `zpcr.plates()` decodes every plate in an archive. |
+| [`protocol.md`](./protocol.md) | The thermal-protocol language — every directive (`METHOD`, `HOTLID`, `TEMP`, `GRAD`, `MELT`, `INC`, `RATE`, `EXT`, `BEEP`, `PLATEREAD`, `GOTO`, …), what the instrument does with it, the 1-based step numbering `GOTO` counts in — steps count, **modifiers don't** — the `PLATEREAD` scan mask, the melt-curve idiom (§6) and how a protocol is typed at the instrument over USB (§7). Not a file format doc: it is the semantics shared by five carriers of the same text — `.prcl`/`.pcrd`'s `runDefinition`, a `.zpcr`'s `ProtocolRunDefinition.txt` and its `.alf` run report, `.prcl.txt`, and the USB command channel — whose differences §8 tabulates. Every rule is marked **measured** or **stated**; §9 collects what is still unknown, and Appendix A is the step-numbering measurement, from the `.alf` execution log and live `STATUS?`. Implemented by `packages/core/src/runDefinition.ts`, entry point `parseRunDefinition()`. |
+| [`prcl.md`](./prcl.md) | The `.prcl` thermal-cycling protocol files — lid/volume settings plus the ordered step list (hold, gradient, melt, goto, plate read), in the same encrypted-ZIP container as `.pltd`/`.pcrd`. The same `protocol2` XML document `.pcrd` embeds. Implemented by `packages/core/src/prcl.ts`, entry point `parsePrcl(bytes)`; `parseProtocol2()` is reused by `pcrd.ts`; `zpcr.protocols()` decodes every `.prcl` entry in an archive. §3.1 documents `.prcl.txt`, this project's own line-per-directive text form (`formatRunDefinitionText`/`parseRunDefinitionText`) — the one representation here that isn't reverse-engineered. |
+| [`pcrd.md`](./pcrd.md) | The `.pcrd` CFX Manager saved-experiment file — the whole run (plate setup, protocol, every plate read, `RunInfo`/`runlog`, plus analysis/UI state) as one large XML document, in the same encrypted-ZIP container as `.pltd`/`.prcl`. Implemented by `packages/core/src/pcrd.ts`, entry point `parsePcrd(bytes)`, which decodes into the same `Zpcr` shape `parseZpcr` produces. |
+| [`zipcrypto.md`](./zipcrypto.md) | The single-entry ZipCrypto-encrypted ZIP container shared by `.pltd`/`.prcl` and `.pcrd`: container variants, the fixed shared password, and the decrypt → inflate pipeline. Implemented by `packages/core/src/zipcrypto.ts` + `inflate.ts`. |
+| [`zpcrweb-json.md`](./zpcrweb-json.md) | `zpcrweb.json` — the one entry this project *writes* into a `.zpcr`, holding the run's analysis parameters (thresholds, the auto-threshold multiplier, calibration normalization) so they travel with the file instead of sitting in one browser's IndexedDB — plus §1.1's `experimentName`, what the run is *called*, which no CFX format has a field for. Not reverse-engineered. Implemented by `packages/core/src/zpcrwebSettings.ts` (+ `experiment.ts` for the name's resolution and filename derivation); the app side is `apps/web/src/state/analysisSettings.ts` + `analysisPersist.ts`. |
+| [`biomeme.md`](./biomeme.md) | Biomeme handheld device (Franklin/Two3/Three9) run-export JSON — the third input format, not a Bio-Rad format at all: no optical channels to unmix (fluorescence is per-dye already), and the device carries its own baseline/threshold/Cq alongside this library's. Self-describing JSON, not reverse-engineered. Implemented by `packages/core/src/biomeme.ts`, entry point `parseBiomeme(bytes)`, which decodes into the same `Zpcr` shape `parseZpcr`/`parsePcrd` produce. |
+| [`usb.md`](./usb.md) | The CFX96/C1000 instrument's own USB control protocol — not a file format: enumeration, the 5-byte application-layer frame, the ASCII command channel, and the file upload/download mechanism a run is loaded and read back through. Reverse-engineered from USB captures (decoded with `tools/usbpcap_decode.py`), then implemented and driven against live hardware — §10 lists what the instrument corrected. Implemented by `packages/core/src/usb/`, entry point `CfxDevice`; driven by `tools/cfx.mjs` and the web app's Instrument view. Reading and file retrieval only — no upload or run control. |
+| [`ARCHITECTURE.md`](./ARCHITECTURE.md) | Project-level design: isomorphic library goals, monorepo layout, input strategy. |
+| [`apps/web/ARCHITECTURE.md`](./apps/web/ARCHITECTURE.md) | Web app design notes. |
+
+`icff.md`, `plateread.md`, `dcal.md`, `pltd.md`, and `prcl.md` are marked **fully decoded** and
+validated against the committed samples in `samples/`. The last of these to be interpreted was the
+`PLATEREAD` operand — a scan mask, decoded in `usb.md` §3.1. `pcrd.md`'s container, plate-read
+data, and `calibrationCollection` are likewise fully decoded and cross-validated bit-for-bit
+against the matching `.zpcr`; `wellFactorsCollection` is decoded too (it is the only source of the
+per-well gain factors `calibration.md` §4.1 needs), and the remaining analysis-state subtrees
+(`dataAnalysisParameters`, `PersistedData`, …) are mapped but not yet interpreted.
+
 ## Repository layout
 
 This is an npm-workspaces monorepo:
@@ -126,12 +159,111 @@ npm run dev -w @zpcrweb/web      # start the dev server (http://localhost:5173)
 npm run build -w @zpcrweb/web    # production build
 ```
 
+### Everything is in the URL hash, nothing in the query string
+
+- `#file=<name>&view=<overview|curves|plates|reference|calibration|raw|about>` selects the active
+  file and view. `about` is the credits page behind the logo; it has no tab and needs no file.
+- `#load=<url>` fetches a file and loads it — the only key that can put a file the browser doesn't
+  already have into the app. It's consumed on load and replaced by the `#file=` the loaded file
+  produces, so it never survives in the address bar. `apps/web/public/examples/` (a symlink to
+  `samples/`) is what the welcome screen's "Load an example file" button loads, via this key.
+- `#cfxPassword=<value>` seeds the decryption password so encrypted files decrypt instead of
+  sitting behind the prompt. URL-escape it — the password can contain characters like `#`.
+
+All are hash keys in one query string (`#cfxPassword=…&view=curves`), parsed by
+`state/pltdPassword.ts` and `state/urlHash.ts`. **The password is in the fragment because it's a
+secret**: fragments are never sent to the server, so they can't reach access logs, proxies, or a
+`Referer` header — `?cfxPassword=` would reach all three. The app strips the password from the
+address bar the moment it reads it, so a URL copied afterwards can be shared safely. The legacy
+`?cfxPassword=` query form still works but is deprecated; don't write new links with it.
+
 ## Development
 
 ```sh
-npm install                 # install all workspaces
-npm test                    # run the @zpcrweb/core Vitest suite
-npm run build               # build the library (ESM + CJS + .d.ts)
-npm run typecheck           # typecheck the library
-npm run dev -w @zpcrweb/web  # run the web app
+npm install                     # install all workspaces
+npm test                        # @zpcrweb/core Vitest suite
+npm run build                   # build the library (ESM + CJS + .d.ts)
+npm run typecheck               # typecheck the library
+npm run dev -w @zpcrweb/web     # web dev server → http://localhost:5173
+                                # hot-reloads packages/core edits too (aliased to src, no tsup watch)
+npm run build -w @zpcrweb/web   # web production build (typechecks first)
+npm run test:ui                 # browser assertions (needs Chrome, ~35s; not part of npm test)
 ```
+
+Local-only secrets (the CFX file decryption password) live in `secrets.json`, which is gitignored
+and never committed — `{ "cfxPassword": "…" }`. Tests load it via `packages/core/test/secrets.ts`;
+only tests that explicitly exercise the decryption pipeline need it (`describe.skipIf(!PW)`
+blocks) — everything else runs against the plaintext samples committed in `samples/`, where each
+encrypted sample's decrypted payload sits beside it as `<name>.xml`, so the structural tests never
+touch the crypto.
+
+### UI tooling
+
+Two scripts drive a headless Chrome against the app, for two different jobs. They share
+`tools/harness.mjs` (the CDP client and dev-server/Chrome plumbing), boot their own dev server and
+browser on random ports (so they never collide with a server running on 5173), and load a sample
+through the app's own file input.
+
+**`tools/uishot.mjs` — look at it.** One command, ~5s:
+
+```sh
+node tools/uishot.mjs                                    # Overview + Curves, default sample
+node tools/uishot.mjs --views curves                     # one view, biggest and most legible
+node tools/uishot.mjs --views overview,curves,plates,raw # four views in one sheet
+node tools/uishot.mjs --file samples/20260720_Luna_noRT.pcrd --views overview
+```
+
+It walks the requested views and writes **one labelled contact-sheet PNG** —
+`tools/.uishot/shot.png` by default — tiling the views into a single image. It also reports
+console errors, uncaught exceptions and failed page loads, which catch breakage a screenshot
+can't show.
+
+**`tools/uitest.mjs` (`npm run test:ui`) — assert it.** 128 browser assertions covering what
+nothing else can catch: the two URL contracts — hash routing (deep links, back/forward,
+unknown-file and invalid-view fallbacks) and password handling (stripped from both URL forms,
+never leaked into the routing hash, an encrypted `.pcrd` still decrypting) — plus `#load=`, the
+rule that every XML view uses the shared collapsible tree rather than a flat dump, the chart's
+one-right-axis invariant (temperatures and LED currents can never both be on), the Calibration
+view's default selection (only the run's in-use `.Dcal` files of the 28 it ships, the rest a click
+away), and the rail chips' shared interaction contract (double-click solos, hovering a disabled
+chip peeks at it only while hovered) plus the Reference view's overlay toggles and x-axis modes —
+including that hiding the factory line doesn't break the ΔRFU baseline computed from the same
+values, and that its min/max bands draw under that baseline but drop out (with a note) on the
+column axis, where a point is a run mean with no spread of its own — and the Curves table's sort
+contract (a header click re-orders, a second reverses, Well sorts by plate position rather than
+label text, wells with no Cq stay at the bottom in both directions) and its Cq axis (every marker
+at its own cycle, an empty axis where there is no Cq) and its End RFU column (sorts numerically,
+and is a number of its own rather than a copy of ΔRFU) — and the rail's Cq range filter, whose top
+stop is where the curves with no Cq live (an upper bound drops them, the *lower* handle parked
+there leaves only them, and the handles clamp instead of crossing) — and that a `.pcrd` carrying a
+hand-set threshold seeds it as a per-fluorophore override while a dye the file left on auto is
+left alone (`threshold.md` §5.3: that one value is what makes the app reproduce CFX's own Cq) —
+and the Overview tab's `.prcl.txt` download plus the Instrument view's run staging, where the file
+bar is a *multi*-selection (three slots — a run, plus a `.prcl.txt`/`.plt.csv` overriding either
+half; tapping any selected chip releases its slot; a loaded `.prcl.txt` joins the selection and
+lands on the Instrument view; a staged `.plt.csv` takes its dye→channel mapping from the run it is
+paired with, including when that run supplies neither half and is there only as the instrument)
+and Start run appears only with an instrument attached — and that a `.prcl.txt` is a document as
+well as an input: it enables Overview and Instrument and nothing else, and its Overview reports
+the protocol's own settings from the decode — and how a run is *named*: the file bar shows an
+experiment name over a compact local timestamp rather than a file name, derived from the
+filename's `<date>_<time>_<serial>_<name>` unless the format states one (Biomeme) or somebody
+typed one, and a typed name has to survive a reload, which it can only do by reaching the
+archive's own `zpcrweb.json` (clearing it reverts to the derived name rather than blanking it) —
+plus a Biomeme run's Raw tab, which is its JSON document in the standalone (no file list) viewer —
+and what happens when a file with unsaved edits is deleted — an edited file (a rename is enough)
+wears a dot and its ✕ arms into a waste bin that takes a second click, Escape disarms it, neither
+state widens the chip, the flag survives a reload, and downloading the file puts it back to
+deleting on one click — and that the view-tab strip is the *same seven tabs* for every file, a tab
+the file can't answer being disabled rather than dropped (`ViewSelector`'s `enabled` prop), which
+is a claim about two files' headers matching that no single-file check can make — plus the file
+chip's icon, whose shape is what the file *is* (core's `fileCategory`, so the two plate encodings
+draw alike) while its colour stays the encryption status, two claims a screenshot can only show
+one at a time.
+
+A screenshot can't show that the back button works, that a secret reached the address bar, that a
+hover put a curve back, or that eight rows are in the right order — and the core Vitest suite has
+no DOM.
+
+Agent-facing guidance on when and how to run these — cost control, headless flags, sample loading
+— lives in [`CLAUDE.md`](./CLAUDE.md).

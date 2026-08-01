@@ -9,7 +9,7 @@
  *
  * The point is token economy: every click, reload and wait happens *inside* this script, so
  * an agent pays for one command's output and one image rather than a round-trip per step.
- * See CLAUDE.md "UI testing".
+ * See README.md "UI tooling" for what it does, CLAUDE.md "UI testing" for when to run it.
  *
  *   node tools/uishot.mjs                            # overview+curves of the default sample
  *   node tools/uishot.mjs --views curves --width 1100

@@ -197,7 +197,8 @@ never survives into the `file`/`view` hash that `writeHash` maintains.
 
 `tools/uishot.mjs` navigates by hash for exactly this reason — one assignment per view, with no
 dependence on tab label text, and `tools/uitest.mjs` asserts the whole contract above
-(`npm run test:ui`). See CLAUDE.md "UI testing".
+(`npm run test:ui`). See the root README's "UI tooling" for what the two scripts cover, and
+CLAUDE.md "UI testing" for when to reach for each.
 
 ## Stack
 
