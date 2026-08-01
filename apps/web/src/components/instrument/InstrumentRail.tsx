@@ -88,8 +88,17 @@ export function InstrumentRail({
       </div>
 
       {connected && info && (
-        <div className="rail__section">
-          <div className="rail__title">Identity</div>
+        // Collapsed by default: these fields don't change once connected, so they're worth a
+        // confirming glance rather than permanent space that pushes the more useful Status down.
+        <details className="rail__section rail__details">
+          <summary className="rail__title">
+            <span>
+              <span className="rail__chevron" aria-hidden="true">
+                ▸
+              </span>
+              Identity
+            </span>
+          </summary>
           <Stat label="Model" value={`${info.manufacturer.replace(/ LABORATORIES$/, "")} ${info.model}`} />
           <Stat label="Serial" value={info.serial || "—"} />
           <Stat label="Firmware" value={info.firmware || "—"} />
@@ -109,13 +118,20 @@ export function InstrumentRail({
               tone={info.errorCount > 0 ? "warn" : "good"}
             />
           )}
-        </div>
+        </details>
       )}
 
       {connected && (
-        <div className="rail__section">
-          <div className="rail__title">
-            Status
+        // Open by default, unlike Identity above: this is what's actually changing while
+        // connected, so it should be visible without an extra click.
+        <details className="rail__section rail__details" open>
+          <summary className="rail__title">
+            <span>
+              <span className="rail__chevron" aria-hidden="true">
+                ▸
+              </span>
+              Status
+            </span>
             <label className="switch instrument__pollswitch">
               <input
                 type="checkbox"
@@ -124,7 +140,7 @@ export function InstrumentRail({
               />
               poll
             </label>
-          </div>
+          </summary>
           {status ? (
             <>
               <Stat
@@ -149,7 +165,7 @@ export function InstrumentRail({
           ) : (
             <div className="rail__stat">—</div>
           )}
-        </div>
+        </details>
       )}
 
       {connected && (
