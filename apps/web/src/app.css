@@ -1899,24 +1899,47 @@
 }
 
 /* Protocol steps: thermal steps numbered 1-based (GOTO targets), setup lines unnumbered. */
+/* A protocol listing: the directives as written, each with the library's reading of it beside
+   it (protocol.md). The gloss sits to the right when there is room and drops under its own
+   directive when there isn't — the Device view's staged protocol is a half-width column, where
+   two columns would leave the notes wrapping one word per line. Container query, not a media
+   query: what matters is the panel's width, not the window's. */
 .decoded__proto {
   display: flex;
   flex-direction: column;
   gap: 3px;
   color: var(--ink);
+  container-type: inline-size;
 }
 .decoded__protoline {
-  display: flex;
-  gap: 12px;
+  display: grid;
+  grid-template-columns: 2.2em 1fr;
+  gap: 2px 12px;
+  align-items: baseline;
 }
 .decoded__protonum {
-  flex: 0 0 2.2em;
   text-align: right;
   color: var(--neon-cyan);
   font-variant-numeric: tabular-nums;
 }
 .decoded__protoline.is-setup {
   color: var(--ink-muted);
+}
+/* The library's reading of the directive, not the directive itself — a different face and a
+   quieter colour, so the program stays the thing you read and the gloss stays a gloss. */
+.decoded__protonote {
+  grid-column: 2;
+  font-family: var(--font-ui);
+  font-size: 11px;
+  color: var(--ink-muted);
+}
+@container (min-width: 560px) {
+  .decoded__protoline {
+    grid-template-columns: 2.2em minmax(14em, max-content) 1fr;
+  }
+  .decoded__protonote {
+    grid-column: 3;
+  }
 }
 
 /* Pretty XML */

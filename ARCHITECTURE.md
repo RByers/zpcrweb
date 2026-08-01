@@ -150,6 +150,14 @@ than let that difference leak into every consumer, `parsePcrd` decodes straight 
   returns a best-effort document built from `protocolText` alone via
   `protocolDocumentFromRunDefinition` (name from `ProtocolName.txt`, lid/volume recovered from
   the `HOTLID`/`VOLUME` directives, no step list).
+- **`ProtocolDocument.program`** — the `runDefinition` text decoded into typed directives, each
+  with its operands, its 1-based step number and a one-line description of what it does
+  (`runDefinition.ts`, `parseRunDefinition`; the language is [`protocol.md`](./protocol.md)).
+  Always present, whatever the source, so a consumer never parses the `;`-delimited text itself
+  — which is what keeps the web app's protocol views free of format knowledge. The XML step list
+  gets the same treatment from `describeProtocolStep()`, and `parseScanMask()` decodes the
+  `PLATEREAD` operand (`usb.md` §3.1) for the text form, `.Plateread`'s `CHANNELMASK` and
+  `RunInfo.xml`'s `ScanMask` alike.
 - **`Zpcr.plates()`** — a `.pcrd` embeds exactly one plate (`plateSetup2`), already decrypted
   along with the rest of the document. `pcrd.ts` reuses `pltd.ts`'s `parsePlatesetup2` (the
   same `<platesetup2>`/`<plateSetup2>` schema, differing only in root-tag case) and wraps it in

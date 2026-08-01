@@ -64,11 +64,15 @@ export function DecodedProtocol({ zpcr, name }: { zpcr: Zpcr; name: string }) {
 }
 
 /**
- * The decoded protocol for a {@link ProtocolDocument}: root settings (lid, volume, real-time)
- * plus the ordered step table when one was parsed from the XML `protocol2` payload, or the
- * flat `;`-separated `runDefinition` text (via the shared {@link ProtocolDecoded}) for the
- * plaintext variant (`prcl.md` §1.1), which carries no XML step list. Exported so
+ * The decoded protocol for a {@link ProtocolDocument}: the ordered step table when one was
+ * parsed from the XML `protocol2` payload, or the annotated directive list (via the shared
+ * {@link ProtocolDecoded}) for the text-only variant (`prcl.md` §1.1). Exported so
  * `PcrdRawView.tsx` can render a `.pcrd`'s embedded `protocol2` the same way.
+ *
+ * The root settings panel is shown only for the XML form, which carries flags the text grammar
+ * has no directive for (real-time, lid default, email-on-complete). For the text form the same
+ * facts are already on the lines that state them — `HOTLID 105,30` reads "Heated lid at 105 °C,
+ * off below 30 °C" in the margin — so repeating them above would be two views of one directive.
  */
 export function ProtocolDetail({
   protocol,
@@ -81,26 +85,31 @@ export function ProtocolDetail({
     <div className="decoded">
       <section className="decoded__block">
         <h3 className="decoded__h">{protocol.name || "Protocol"}</h3>
-        <dl className="decoded__dl mono">
-          <Pair
-            k="Lid"
-            v={
-              Number.isFinite(protocol.lidTemperatureC)
-                ? `${protocol.lidTemperatureC}°C${protocol.useDefaultLidTemperature ? " (default)" : ""}`
-                : "—"
-            }
-          />
-          <Pair
-            k="Shutoff"
-            v={
-              protocol.shutoffLidEnabled && Number.isFinite(protocol.shutoffTemperatureC)
-                ? `below ${protocol.shutoffTemperatureC}°C`
-                : "disabled"
-            }
-          />
-          <Pair k="Volume" v={Number.isFinite(protocol.volumeUl) ? `${protocol.volumeUl} µL` : "—"} />
-          <Pair k="Real-time" v={protocol.isRealTime ? "yes" : "no"} />
-        </dl>
+        {protocol.steps && (
+          <dl className="decoded__dl mono">
+            <Pair
+              k="Lid"
+              v={
+                Number.isFinite(protocol.lidTemperatureC)
+                  ? `${protocol.lidTemperatureC}°C${protocol.useDefaultLidTemperature ? " (default)" : ""}`
+                  : "—"
+              }
+            />
+            <Pair
+              k="Shutoff"
+              v={
+                protocol.shutoffLidEnabled && Number.isFinite(protocol.shutoffTemperatureC)
+                  ? `below ${protocol.shutoffTemperatureC}°C`
+                  : "disabled"
+              }
+            />
+            <Pair
+              k="Volume"
+              v={Number.isFinite(protocol.volumeUl) ? `${protocol.volumeUl} µL` : "—"}
+            />
+            <Pair k="Real-time" v={protocol.isRealTime ? "yes" : "no"} />
+          </dl>
+        )}
         {sourceHint && <span className="decoded__hint mono">{sourceHint}</span>}
       </section>
 
@@ -113,8 +122,8 @@ export function ProtocolDetail({
         <section className="decoded__block">
           <h3 className="decoded__h">Run definition</h3>
           <span className="decoded__hint mono">
-            No structured step list (plaintext protocol, prcl.md §1.1) — parsed from the text
-            grammar below.
+            No structured step list (plaintext protocol, prcl.md §1.1) — decoded from the text
+            grammar below (protocol.md).
           </span>
           <ProtocolDecoded text={protocol.runDefinition} />
         </section>

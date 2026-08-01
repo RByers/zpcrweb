@@ -207,7 +207,7 @@ order:
 | Command | Notes |
 |---|---|
 | `PROTOCOL '<name>'`, `METHOD <name>` | names the protocol/method being authored — see §5 |
-| `HOTLID <temp>,<ramp>` | e.g. `HOTLID 105,30` |
+| `HOTLID <temp>,<shutoff>` | e.g. `HOTLID 105,30` — the second operand reads as the lid *shutoff* temperature once the file side is brought in (`protocol.md` §6); "ramp" was this table's earlier guess from the wire alone |
 | `VOLUME <µL>` | e.g. `VOLUME 25` |
 | `TEMP <°C>,<seconds>` | one hold step, e.g. `TEMP 95.0,180` |
 | `PLATEREAD #h<hex>` | e.g. `PLATEREAD #h3F` — the **scan mask**: which optical channels to read, and how to sweep the plate. Decoded in §3.1 |
@@ -238,6 +238,10 @@ order:
 | `CRCSENDFILE "<crc>*<path>",<raw bytes>` | file upload, §5 — the one command whose payload is *not* all-ASCII |
 
 ### 3.1 `PLATEREAD`'s operand — the scan mask
+
+> The rest of the protocol language — every verb in the table above, its operands and its
+> meaning — is `protocol.md`. This section decodes the one operand that isn't a temperature or a
+> count.
 
 `PLATEREAD` is the one step command whose operand isn't a temperature or a count, and it is the
 only place in the whole protocol language where a run says *what it will measure* rather than
@@ -306,7 +310,8 @@ all. Every `#h3F` run has all six channels populated.
 **For a client.** Preserve the operand as recorded rather than recomputing it; when authoring a
 protocol to send, `#h3F` — read everything, step-and-repeat — is the safe default, and is what
 CFX Manager itself emits for an authored `.prcl`. `packages/core/src/prcl.ts` keeps the raw value
-and does not synthesize one.
+and does not synthesize one; `parseScanMask()` in `packages/core/src/runDefinition.ts` decodes it,
+and is the same function `.Plateread`'s `CHANNELMASK` goes through.
 
 > **Future:** two encodings are unconfirmed because nothing here exercises them. A FRET plate is
 > expected to set bit 5 with bit 7 (`#hA0` — channel 6, flyover) by symmetry with fast scan, but

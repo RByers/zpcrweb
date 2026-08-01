@@ -10,16 +10,18 @@ import type {
   WellCurve,
 } from "./types.js";
 import { CHANNELS, COLUMNS, ROWS } from "./plateread.js";
+import { parseScanMask } from "./runDefinition.js";
 
 /**
- * Optical channel indices that hold data, from the reads' `CHANNELMASK` (low 6 bits, unioned
- * across reads). Falls back to all channels if no mask is present.
+ * Optical channel indices that hold data, from the reads' `CHANNELMASK` (unioned across reads).
+ * The mask is the same field a protocol's `PLATEREAD` operand carries, decoded by the one
+ * {@link parseScanMask} (`usb.md` §3.1) — 1-based there, 0-based here, where it indexes the
+ * channel arrays. Falls back to all channels if no mask is present.
  */
 export function toChannels(reads: PlateRead[]): number[] {
   let mask = 0;
   for (const r of reads) mask |= r.channelMask;
-  const channels: number[] = [];
-  for (let i = 0; i < CHANNELS; i++) if ((mask >> i) & 1) channels.push(i);
+  const channels = parseScanMask(mask).channels.map((c) => c - 1);
   return channels.length > 0 ? channels : Array.from({ length: CHANNELS }, (_, i) => i);
 }
 

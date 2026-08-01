@@ -49,7 +49,7 @@ app is format-agnostic:
   protocol tile and thermal-protocol block read `zpcr.protocol()` (a real accessor on `Zpcr`,
   not a by-name file lookup), so both the name and — when the format provides one — the step
   table work identically either way; when there's no step list it falls back to
-  `zpcr.protocolText` rendered through the same `ProtocolDecoded` line-numbering the Raw view
+  `zpcr.protocolText` rendered through the same annotated `ProtocolDecoded` listing the Raw view
   uses (see below). `OverviewView` additionally takes the raw `RunResult` (not derivable from
   `Zpcr` alone) for its "Encrypted" block, but only for the format-neutral
   `RunResult.selfEncrypted` flag: set for an encrypted `.pcrd`, clear otherwise, in which case
@@ -461,17 +461,23 @@ so every call site keeps writing one `onChange({ … })` regardless of where the
 - **`RunInfo.xml`** → `RunInfoTable`, a two-column key/value table (it is just a flat
   `KeyValuePairs` blob; parsed with `parseRunInfoRaw`). Takes plain `text`, so `PcrdRawView`
   reuses it directly for a `.pcrd`'s `protocolRunInfo/RunInfo` subtree (same schema).
-- **`ProtocolRunDefinition.txt`** → `ProtocolDecoded`, one step per line (split on `;`),
-  numbered. Also takes plain `text` and is reused by `OverviewView` for the flat-text fallback
-  (a `.zpcr`'s protocol, or any archive without a structured step list).
+- **`ProtocolRunDefinition.txt`** → `ProtocolDecoded`, one directive per line with its step
+  number and, in the right-hand column, the library's plain-English reading of it ("Return to
+  step 2 (TEMP 95.0,10) — 45 passes in total"). It renders `parseRunDefinition()`'s directives
+  and **parses nothing itself**: the verbs, the step numbering `GOTO` counts in, and the
+  `PLATEREAD` scan mask are all core's, per [`protocol.md`](../../protocol.md). Takes plain
+  `text`, so `OverviewView` and the Device view's staged protocol reuse it unchanged.
 - **`.prcl`** → `DecodedProtocol` (`components/raw/DecodedProtocol.tsx`), which decrypts the
-  entry and renders `ProtocolDetail`: root settings (lid/volume/real-time) plus, when the XML
-  `protocol2` payload parsed into a step list, a numbered step table via the shared
-  `ProtocolStepsTable`/`stepSummary` (`components/raw/ProtocolSteps.tsx`) — reused verbatim by
+  entry and renders `ProtocolDetail`: when the XML `protocol2` payload parsed into a step list,
+  a settings panel (lid/shutoff/volume/real-time — flags the text grammar has no directive for)
+  plus a numbered step table via the shared `ProtocolStepsTable` +
+  `describeProtocolStep` (`components/raw/ProtocolSteps.tsx`, core) — reused verbatim by
   `PcrdRawView`'s **Protocol** node and `OverviewView`'s thermal-protocol block, so all three
   format the same `ProtocolStep[]` identically (GOTO-target-friendly numbering, a `●` read
   marker). Falls back to `ProtocolDecoded` on `runDefinition` for the plaintext `.prcl` variant
-  (`prcl.md` §1.1), which carries no XML step list.
+  (`prcl.md` §1.1), which carries no XML step list — and *without* the settings panel, since
+  there the lid and volume are directives the annotated listing already explains, so showing
+  them twice would be two views of one line.
 - **other `.xml`** (e.g. `runlog.xml`) → the shared collapsible `XmlTreeFromString`
   (`lib/xmlTree.tsx` — see "Raw views" below).
 
@@ -1691,8 +1697,12 @@ Four components, under `components/device/`:
   start button — that belongs with the commands that actuate the instrument, in the rail.
 
   What is shown for the protocol is the **ASCII run definition**, not a decoded step table — the
-  same `ProtocolDecoded` the Raw and Overview views use. That text is the artifact that would
+  same `ProtocolDecoded` the Raw and Overview views use, directives as they would go on the wire
+  with core's reading of each beside it. That text is the artifact that would
   actually be sent (`prcl.md` §3), so reviewing anything else would be reviewing the wrong object;
+  the annotations are what make reviewing it possible without knowing the language, which is also
+  why the lid/volume summary line this panel used to carry is gone: `HOTLID 105,30` now says what
+  it means on its own line;
   it also makes a `.prcl.txt` and a run's embedded protocol render identically, since by then they
   are the same thing. The Overview tab's protocol section is where such a file comes from.
 

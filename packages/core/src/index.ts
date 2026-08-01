@@ -66,7 +66,19 @@ export {
   protocolDocumentFromRunDefinition,
   formatRunDefinitionText,
   parseRunDefinitionText,
+  describeProtocolStep,
 } from "./prcl.js";
+export {
+  parseRunDefinition,
+  splitRunDefinition,
+  isRunDefinitionVerb,
+  parseScanMask,
+  parseScanMaskOperand,
+  formatScanMaskOperand,
+  RUN_DEFINITION_VERBS,
+  SCAN_MASK_CHANNELS,
+  SCAN_MASK_FLYOVER_BIT,
+} from "./runDefinition.js";
 export { parseDcal, findDcalBlock, isDcalName, dyeChannelLookup } from "./dcal.js";
 export { parsePcrd, isPcrdName, pcrdFromBlob } from "./pcrd.js";
 export { parseBiomeme, isBiomemeJson } from "./biomeme.js";
@@ -162,6 +174,23 @@ export type {
   MeltCurveStep,
   GotoStep,
 } from "./prcl.js";
+export type {
+  ScanMask,
+  RunDefinitionProgram,
+  RunDefinitionDirective,
+  RunDefinitionVerb,
+  MethodDirective,
+  HotLidDirective,
+  VolumeDirective,
+  TempDirective,
+  GradDirective,
+  IncDirective,
+  RateDirective,
+  PlateReadDirective,
+  GotoDirective,
+  EndDirective,
+  UnknownDirective,
+} from "./runDefinition.js";
 export type { Pcrd, PcrdContainer, PcrdOptions } from "./pcrd.js";
 export type { FileAnalysis } from "./types.js";
 export type {

@@ -17,6 +17,12 @@ import { zipCryptoDecrypt } from "./zipcrypto.js";
 import { inflateRaw } from "./inflate.js";
 import { parseSingleEntryZip } from "./zipsingle.js";
 import { findElement, firstTagAttrs, splitElements, stripBomBytes } from "./xmlLite.js";
+import {
+  isRunDefinitionVerb,
+  parseRunDefinition,
+  splitRunDefinition,
+  type RunDefinitionProgram,
+} from "./runDefinition.js";
 
 /** A `TemperatureStep`: hold one temperature. */
 export interface TemperatureStep {
@@ -95,6 +101,12 @@ export interface ProtocolDocument {
    */
   runDefinition: string;
   /**
+   * {@link runDefinition} decoded into typed directives, numbered steps and per-directive
+   * descriptions (`protocol.md`). Always present — the text form is the one representation
+   * every protocol source carries — so a consumer never has to read the text itself.
+   */
+  program: RunDefinitionProgram;
+  /**
    * Header metadata (created/modified dates, app versions, guid, …) as raw strings. May carry
    * the authoring machine's real absolute path / computer name / user — treat as incidental
    * personal/environmental data, not surfaced by default (`prcl.md` §2.2).
@@ -133,6 +145,7 @@ export function parseProtocol2(xml: string): ProtocolDocument {
     isRealTime: root.isRealTime === "True",
     isEmailWhenComplete: root.isEmailWhenComplete === "True",
     runDefinition: root.runDefinition ?? "",
+    program: parseRunDefinition(root.runDefinition ?? ""),
     meta,
     steps: listEl ? parseSteps(listEl.inner) : undefined,
   };
@@ -204,6 +217,37 @@ function parseSteps(listXml: string): ProtocolStep[] {
   return steps;
 }
 
+/**
+ * A one-line plain-English reading of a structured {@link ProtocolStep} — the XML step list's
+ * counterpart to a directive's `description` (see `runDefinition.ts`), so both protocol
+ * representations are explained by the library rather than by whatever is displaying them.
+ *
+ * `Step N` in the text matches {@link GotoStep.targetStep}, which the XML numbers from 0
+ * (`prcl.md` §3).
+ */
+export function describeProtocolStep(step: ProtocolStep): string {
+  switch (step.kind) {
+    case "temperature":
+      return step.holdSeconds === 0
+        ? `Hold ${step.tempC} °C indefinitely`
+        : `Hold ${step.tempC} °C for ${step.holdSeconds} s`;
+    case "gradient":
+      return (
+        `Gradient ${step.lowTempC}–${step.highTempC} °C across the block's rows ` +
+        `for ${step.holdSeconds} s`
+      );
+    case "melt":
+      return (
+        `Melt from ${step.startTempC} °C to ${step.endTempC ?? "?"} °C in ` +
+        `+${step.incrementC} °C steps, holding ${step.holdSeconds} s at each`
+      );
+    case "goto":
+      return (
+        `Return to step ${step.targetStep} — ${step.repeats + 1} passes in total`
+      );
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Plaintext variant (prcl.md §1.1)
 // ---------------------------------------------------------------------------
@@ -224,27 +268,27 @@ function isPlaintextPrcl(bytes: Uint8Array): boolean {
  * Best-effort {@link ProtocolDocument} for a bare `;`-delimited run-definition string with no
  * XML step list to parse from — the plaintext `.prcl` variant (`prcl.md` §1.1) and a `.zpcr`'s
  * `ProtocolRunDefinition.txt` share this exact grammar, so `zpcr.ts`'s `protocol()` reuses this
- * too. `lidTemperatureC`/`shutoffTemperatureC`/`volumeUl` are recovered from the text via the
- * same `HOTLID`/`VOLUME` directives the full XML form exposes as attributes; everything else
- * this grammar doesn't carry (real-time flag, email-on-complete, …) is left at its default.
+ * too. The lid/shutoff/volume settings come from the decoded `program`'s header directives, the
+ * same values the full XML form exposes as attributes; everything else this grammar doesn't
+ * carry (real-time flag, email-on-complete, …) is left at its default.
  */
 export function protocolDocumentFromRunDefinition(
   name: string,
   runDefinition: string,
 ): ProtocolDocument {
-  const hotlid = /HOTLID\s+([\d.]+)\s*,\s*([\d.]+)/i.exec(runDefinition);
-  const volume = /VOLUME\s+([\d.]+)/i.exec(runDefinition);
+  const program = parseRunDefinition(runDefinition);
 
   return {
     name,
-    lidTemperatureC: hotlid ? Number(hotlid[1]) : NaN,
+    lidTemperatureC: program.lidTemperatureC ?? NaN,
     useDefaultLidTemperature: false,
     shutoffLidEnabled: false,
-    shutoffTemperatureC: hotlid ? Number(hotlid[2]) : NaN,
-    volumeUl: volume ? Number(volume[1]) : NaN,
+    shutoffTemperatureC: program.shutoffTemperatureC ?? NaN,
+    volumeUl: program.volumeUl ?? NaN,
     isRealTime: false,
     isEmailWhenComplete: false,
     runDefinition,
+    program,
     meta: {},
   };
 }
@@ -268,24 +312,6 @@ function parsePlaintextPrcl(bytes: Uint8Array): Prcl {
  * protocol seen uses `06.00`, matching the `currentVersion` of the XML form.
  */
 const RUN_DEFINITION_VERSION = "06.00";
-
-/**
- * Every verb the run-definition grammar uses (`prcl.md` §3). Used to validate text a user typed
- * or edited before it is treated as a protocol — an unrecognized verb is how "you picked the
- * wrong file" is caught, since nothing else about this format is distinctive.
- */
-const RUN_DEFINITION_VERBS = new Set([
-  "METHOD",
-  "HOTLID",
-  "VOLUME",
-  "TEMP",
-  "GRAD",
-  "INC",
-  "RATE",
-  "PLATEREAD",
-  "GOTO",
-  "END",
-]);
 
 /**
  * Render a one-line `runDefinition` as the line-per-directive `.prcl.txt` text form.
@@ -321,20 +347,11 @@ export function parseRunDefinitionText(text: string): string {
   if (directives.length === 0) throw new Error("No protocol directives found.");
   for (const directive of directives) {
     const verb = /^[A-Za-z]+/.exec(directive)?.[0]?.toUpperCase();
-    if (!verb || !RUN_DEFINITION_VERBS.has(verb)) {
+    if (!verb || !isRunDefinitionVerb(verb)) {
       throw new Error(`Not a thermal protocol: unrecognized directive "${truncate(directive)}".`);
     }
   }
   return directives.join(";") + ";";
-}
-
-/** Split on the grammar's `;` delimiter (and any line breaks a text form added), dropping the
- * empties a trailing `;` or a blank line leaves behind. */
-function splitRunDefinition(runDefinition: string): string[] {
-  return runDefinition
-    .split(/[;\n]/)
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
 }
 
 /** Keep an error message readable when the "directive" is really a line of some other file. */

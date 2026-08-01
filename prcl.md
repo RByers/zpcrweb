@@ -193,6 +193,11 @@ Complete verb inventory across all files examined:
 | `GOTO` | step, repeats | **1-based** step index — unlike the XML |
 | `END` | — | Terminator (`END;` in `runDefinition`, bare `END` in the archive `.txt`) |
 
+**What each verb *means*** — and the 1-based step numbering `GOTO` counts in, which is not the
+XML's — is `protocol.md`; this table is the format-side inventory it builds on. Decoding is
+`packages/core/src/runDefinition.ts` (`parseRunDefinition`), which `protocolDocumentFromRunDefinition`
+uses to recover `lidTemperature`/`shutoffTemperature`/`volume` for the text-only variants.
+
 ⚠️ **`GOTO` is 1-based in the text and 0-based in the XML.** The same loop appears as
 `GOTO 3,39` in `runDefinition` and `optionGotoStep="2"` in `GotoStep`. Any cross-validation
 between the two forms has to account for this.

@@ -112,21 +112,7 @@ export function DeviceRun({
               overridden={protocol.overridden}
             />
             {protocol.value ? (
-              <>
-                <div className="devrun__meta mono">
-                  {[
-                    Number.isFinite(protocol.value.document.lidTemperatureC)
-                      ? `lid ${protocol.value.document.lidTemperatureC} °C`
-                      : null,
-                    Number.isFinite(protocol.value.document.volumeUl)
-                      ? `${protocol.value.document.volumeUl} µL`
-                      : null,
-                  ]
-                    .filter(Boolean)
-                    .join(" · ")}
-                </div>
-                <ProtocolDecoded text={protocol.value.runDefinition} />
-              </>
+              <ProtocolDecoded text={protocol.value.runDefinition} />
             ) : (
               <div className="device__empty mono">
                 {protocol.reason ?? "No protocol selected."}

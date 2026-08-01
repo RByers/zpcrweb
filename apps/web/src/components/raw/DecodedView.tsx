@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { parseRunInfoRaw, type Zpcr } from "@zpcrweb/core";
+import { parseRunDefinition, parseRunInfoRaw, type Zpcr } from "@zpcrweb/core";
 import { DecodedPlateread } from "./DecodedPlateread";
 import { DecodedPlate } from "./DecodedPlate";
 import { DecodedDcalFile } from "./DecodedDcal";
@@ -85,39 +85,30 @@ export function RunInfoTable({ text }: { text: string }) {
   );
 }
 
-/** Leading setup directives that are not numbered protocol steps. */
-const PROTOCOL_SETUP = /^(METHOD|HOTLID|VOLUME)\b/i;
-
 /**
  * A `;`-separated thermal protocol program (`.zpcr`'s real `ProtocolRunDefinition.txt`, a
  * `.pcrd`'s `protocol2 runDefinition` attribute, or a plaintext `.prcl`'s `runDefinition` —
- * same one-line format either way). Number the thermal steps 1-based (skipping the
- * METHOD/HOTLID/VOLUME setup directives) so `GOTO N,M` points exactly at step N — e.g.
- * `GOTO 2,44` → step 2.
+ * same one-line format either way).
+ *
+ * Nothing here knows what a directive means: `parseRunDefinition` (core, `protocol.md`) supplies
+ * the step numbers `GOTO` counts in and the plain-English reading shown beside each line, and
+ * this renders the directive text as written with that reading to its right.
  */
 export function ProtocolDecoded({ text }: { text: string }) {
-  const lines = text
-    .trim()
-    .split(";")
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
-  let stepNo = 0;
+  const program = useMemo(() => parseRunDefinition(text), [text]);
   return (
     <div className="decoded">
       <div className="decoded__proto mono">
-        {lines.map((line, i) => {
-          const setup = PROTOCOL_SETUP.test(line);
-          const num = setup ? "" : String((stepNo += 1));
-          return (
-            <div
-              key={i}
-              className={"decoded__protoline" + (setup ? " is-setup" : "")}
-            >
-              <span className="decoded__protonum">{num}</span>
-              <span>{line};</span>
-            </div>
-          );
-        })}
+        {program.directives.map((d) => (
+          <div
+            key={d.index}
+            className={"decoded__protoline" + (d.stepNumber === undefined ? " is-setup" : "")}
+          >
+            <span className="decoded__protonum">{d.stepNumber ?? ""}</span>
+            <span className="decoded__prototext">{d.text};</span>
+            <span className="decoded__protonote">{d.description}</span>
+          </div>
+        ))}
       </div>
     </div>
   );

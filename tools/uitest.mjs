@@ -1112,6 +1112,38 @@ async function deviceRunChecks(chrome, origin) {
     JSON.stringify({ proto: first.protocol.source, plate: first.plate.source }),
   );
 
+  // Every directive carries the library's reading of it (`protocol.md`), which is what makes an
+  // ASCII program reviewable without knowing the language — and is why the panel no longer
+  // repeats lid/volume in a summary line of its own. Checked here rather than by screenshot
+  // because the point is that the *decode* is present and paired with the right line, not that
+  // the column looks right.
+  const notes = await cdp.eval(`(() => {
+    const lines = [...document.querySelectorAll(".devrun__part .decoded__protoline")].map((l) => ({
+      num: l.querySelector(".decoded__protonum").textContent.trim(),
+      text: l.querySelector(".decoded__prototext").textContent.trim(),
+      note: l.querySelector(".decoded__protonote")?.textContent.trim() || "",
+    }));
+    return { lines, annotated: lines.every((l) => l.note.length > 0) };
+  })()`);
+  const hotlid = notes.lines.find((l) => l.text.startsWith("HOTLID"));
+  const read = notes.lines.find((l) => l.text.startsWith("PLATEREAD"));
+  const goto = notes.lines.find((l) => l.text.startsWith("GOTO"));
+  check(
+    "every staged directive is annotated with what it does",
+    notes.annotated && /Heated lid at 105/.test(hotlid?.note ?? "") && hotlid.num === "",
+    JSON.stringify(hotlid),
+  );
+  check(
+    "PLATEREAD's operand is decoded as a scan mask, not shown raw",
+    /all 6 channels, step-and-repeat/.test(read?.note ?? ""),
+    read?.note,
+  );
+  check(
+    "GOTO names the step it returns to, and the pass count that isn't its operand",
+    /Return to step 2 \(TEMP 95\.0,10\)/.test(goto?.note ?? "") && /45 passes/.test(goto?.note ?? ""),
+    `${goto?.num}: ${goto?.text} → ${goto?.note}`,
+  );
+
   // Start run belongs to the instrument, not the panel, so it is absent until one is attached.
   const startWhenIdle = await cdp.eval(`!!document.querySelector(".device__start")`);
   check("Start run appears only with an instrument connected", startWhenIdle === false);

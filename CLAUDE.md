@@ -120,7 +120,7 @@ Cost control, when you do run it:
 npm run test:ui
 ```
 
-104 browser assertions covering what nothing else can catch: the two URL contracts — hash
+110 browser assertions covering what nothing else can catch: the two URL contracts — hash
 routing (deep links, back/forward, unknown-file and invalid-view fallbacks) and password
 handling (stripped from both URL forms, never leaked into the routing hash, an encrypted
 `.pcrd` still decrypting) — plus `#load=`, the rule that every XML view uses the shared
@@ -161,6 +161,7 @@ dependency-free. Run it when you touch `state/urlHash.ts`, `state/pltdPassword.t
 `components/curves/ChipBar.tsx`, `components/curves/CurveTable.tsx`,
 `components/curves/CqRange.tsx`, `components/device/DeviceRun.tsx`, `state/useRunStaging.ts`,
 `lib/protocolSource.ts`, `lib/experiment.ts` (or core's `experiment.ts`),
+core's `runDefinition.ts` or `components/raw/DecodedView.tsx`'s `ProtocolDecoded`,
 `components/FileBar.tsx`, `components/views/StandaloneRawView.tsx`,
 `state/useZpcrStore.ts`'s settings seeding or `fileKind`, or view
 selection. Both
@@ -251,6 +252,7 @@ one algorithm doc, `calibration.md`, for the color-separation math built on top 
 | [`calibration.md`](./calibration.md) | Channel→dye color separation — the algorithm that turns raw per-channel readings plus `.Dcal` calibration data into per-dye concentration estimates. Not a file format doc. Implemented by `packages/core/src/calibration.ts` (linear algebra in `linalg.ts`), entry points `separateDyes()` (one-shot) and the individual `buildDyeResponseCurve`/`buildCalibrationMatrix`/`preprocessChannelReadings`/`separateChannels` stages. |
 | [`threshold.md`](./threshold.md) | Baseline, threshold and Cq — how a per-dye amplification curve becomes a quantification cycle, or a reported non-amplification: baseline region selection, subtraction, threshold determination, the crossing rule, end-point RFU, and the app's controls over them. Not a file format doc. §1 states the problem; §3–§7 are the shipped algorithm, implemented by `packages/core/src/baseline.ts` (§3–§4, §7), `packages/core/src/threshold.ts` (§5–§6, entry point `computeCq()`) and `packages/core/src/analysis.ts` (`computeCqTable()`, the per-run entry point); §10 separates what is deliberately unimplemented from what is still unknown. **Appendix A is the measurement against CFX Manager's own exported results** for a committed sample — the Cq stage exactly (`packages/core/test/cfxExport.test.ts`), the baseline stage to within a cycle of window; Appendix B records the alternatives tried and how noisy curves broke them. |
 | [`pltd.md`](./pltd.md) | The `.pltd` plate-definition files — per-well fluorophores, target/gene, sample name and type, replicate, standard quantity. Encrypted + compressed XML container. Implemented by `packages/core/src/pltd.ts`, entry point `parsePltd(bytes)`; `zpcr.plates()` decodes every plate in an archive. |
+| [`protocol.md`](./protocol.md) | The thermal-protocol language — every `;`-delimited directive (`METHOD`, `HOTLID`, `TEMP`, `GRAD`, `INC`, `RATE`, `PLATEREAD`, `GOTO`, …), what the instrument does with it, the 1-based step numbering `GOTO` counts in, and the `PLATEREAD` scan mask. Not a file format doc: it is the semantics shared by `.prcl`/`.pcrd`'s `runDefinition`, a `.zpcr`'s `ProtocolRunDefinition.txt`, `.prcl.txt`, and the USB command channel. §6 separates what is measured from what is inferred; Appendix A is the step-numbering measurement. Implemented by `packages/core/src/runDefinition.ts`, entry point `parseRunDefinition()`. |
 | [`prcl.md`](./prcl.md) | The `.prcl` thermal-cycling protocol files — lid/volume settings plus the ordered step list (hold, gradient, melt, goto, plate read), in the same encrypted-ZIP container as `.pltd`/`.pcrd`. The same `protocol2` XML document `.pcrd` embeds. Implemented by `packages/core/src/prcl.ts`, entry point `parsePrcl(bytes)`; `parseProtocol2()` is reused by `pcrd.ts`; `zpcr.protocols()` decodes every `.prcl` entry in an archive. §3.1 documents `.prcl.txt`, this project's own line-per-directive text form (`formatRunDefinitionText`/`parseRunDefinitionText`) — the one representation here that isn't reverse-engineered. |
 | [`pcrd.md`](./pcrd.md) | The `.pcrd` CFX Manager saved-experiment file — the whole run (plate setup, protocol, every plate read, `RunInfo`/`runlog`, plus analysis/UI state) as one large XML document, in the same encrypted-ZIP container as `.pltd`/`.prcl`. Implemented by `packages/core/src/pcrd.ts`, entry point `parsePcrd(bytes)`, which decodes into the same `Zpcr` shape `parseZpcr` produces. |
 | [`zipcrypto.md`](./zipcrypto.md) | The single-entry ZipCrypto-encrypted ZIP container shared by `.pltd`/`.prcl` and `.pcrd`: container variants, the fixed shared password, and the decrypt → inflate pipeline. Implemented by `packages/core/src/zipcrypto.ts` + `inflate.ts`. |

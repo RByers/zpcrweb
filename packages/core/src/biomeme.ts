@@ -54,6 +54,7 @@ import type {
 import type { PlateFluor, PltdContainer, PlateDefinition, WellDefinition, WellFluor } from "./pltd.js";
 import { fitLinearBaseline, type BaselineRegion } from "./baseline.js";
 import { wellLabel } from "./pivot.js";
+import { parseRunDefinition } from "./runDefinition.js";
 
 // ---------------------------------------------------------------------------
 // Raw JSON shape (the subset this module reads)
@@ -386,6 +387,9 @@ export function parseBiomeme(data: Uint8Array | ArrayBuffer): Zpcr {
             volumeUl: 0,
             isRealTime: true,
             isEmailWhenComplete: false,
+            // No `;`-delimited program to decode (see `protocolText` above), so the decoded
+            // form is empty too rather than absent — one shape for every protocol source.
+            program: parseRunDefinition(""),
             runDefinition: "",
             meta: {},
           }
