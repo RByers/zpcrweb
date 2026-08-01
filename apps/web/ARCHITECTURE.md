@@ -1603,10 +1603,13 @@ Three components, under `components/device/`:
   `.zpcr`. A retrieved file is **saved to disk, not loaded into the app**: what lives on the
   instrument are the *parts* of a run — individual `.Plateread`s, the `.Dcal` set, the
   `.pltd`/`.prcl` pair — where every format this app opens is a whole run in one container.
-  Assembling a `.zpcr` from them is a separate job, not something to fake here. A directory that
-  can't be listed says so explicitly, because the protocol's failure mode is to return *another
-  directory's* contents (`usb.md` §5) — showing them under the wrong heading would be worse than
-  showing nothing.
+  Assembling a `.zpcr` from them is a separate job, not something to fake here. When
+  `GETFILESLEN` answers with a status code instead of a length, the panel distinguishes the two
+  the instrument actually sends (`usb.md` §5): *empty* — which `\Storage Card` is, holding only
+  the two directories below it — reads as an ordinary empty listing, while *no such directory* is
+  called out as a failure. Either way no names are shown, because the protocol's failure mode is
+  to return *another directory's* contents, and showing them under the wrong heading would be
+  worse than showing nothing.
 - **`DeviceConsole`** — every decoded message in both directions, at the level of logical
   messages rather than USB packets, which is where the protocol is legible. Channel is on every
   line: a reply arriving on channel 2 rather than 1 is exactly the thing that would otherwise be

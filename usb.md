@@ -17,10 +17,11 @@ of claims that rest on a single observation rather than a cross-checked pattern.
 
 **This protocol is now implemented, and the implementation has been driven against live
 hardware** — see §10. Talking to the same CT019138 confirmed §1's descriptors, §2's framing and
-every query in §3 unchanged, and corrected three things the captures alone could not settle:
+every query in §3 unchanged, and corrected four things the captures alone could not settle:
 what `GETFILESLEN` actually returns (§3), that it is a *required prologue* to `LISTALLFILES`
-rather than the sanity check it looked like (§5), and what the header's `passThrough` bit means
-(§2). Those three are marked **measured live** where they appear.
+rather than the sanity check it looked like (§5), what the header's `passThrough` bit means
+(§2), and what the two binary `GETFILESLEN` replies mean — "empty" and "no such directory", not
+"unlistable" (§5). Those are marked **measured live** where they appear.
 
 ## 1. Device identity and topology
 
@@ -338,11 +339,29 @@ Two consequences for a client:
 
 - The pair must be **atomic**. Two directory listings running concurrently will each report the
   other's contents. This is why `CfxDevice.listFiles` holds the command channel across both.
-- When `GETFILESLEN` does *not* return a length, the directory **cannot be listed at all**, and
-  the correct move is to not send `LISTALLFILES` — anything it returned would be another
-  directory's contents under this path's name. `\Storage Card` itself is the known case: it
-  answers with a `passThrough` binary payload (§2) rather than a number, reproducibly. Why the
-  volume root differs isn't established.
+- When `GETFILESLEN` does *not* return a length it answers with a `passThrough` binary payload
+  (§2) instead, and the correct move is to not send `LISTALLFILES` — with nothing newly buffered,
+  anything it returned would be another directory's contents under this path's name. Measured
+  live: after `GETFILESLEN \Storage Card\CurrentRun`, a failing `GETFILESLEN \Storage Card`
+  leaves the buffer intact, so `LISTALLFILES \Storage Card` still hands back CurrentRun's full
+  881-character listing.
+
+**The binary payload is a status code, and there are two of them** (measured live — one probe over
+a dozen paths):
+
+| Payload | Meaning | Paths that produced it |
+|---|---|---|
+| `07 00 09 00` | **Directory exists, but holds no files.** Listings cover files only, so a directory containing nothing but subdirectories reports this. | `\Storage Card`, `\Temp`, `\My Documents` |
+| `04 00 09 00` | **No such directory** — including a path that names a *file*, and a `GETFILESLEN` with no argument at all. | `\Nonexistent`, `\Storage Card\NoSuchDir`, `\Storage Card\CurrentRun\runlog.xml`, `\Application Data` |
+
+So `\Storage Card` is not a special case in the protocol, and the volume root is not what matters:
+`\` itself lists fine (`17;0000` → `Control Panel.lnk`), as does `\Windows` (`4632`).
+`\Storage Card` simply contains nothing but `CurrentRun` and `PCRunReport`, and directories never
+appear in a listing. Path spelling makes no difference — quoted, unquoted, trailing `\`, forward
+slashes and lowercase all give the identical reply, and a `*` glob is taken as a literal name and
+comes back "not found". Whether the four bytes are two little-endian `uint16`s or something else
+isn't established; a client should compare them whole. Anything *other* than these two should be
+treated like "not found": nothing was learned, so nothing can be listed.
 
 This also explains a detail of the capture that previously read as redundancy: CFX Manager always
 issues the two together, in that order, because it has to.

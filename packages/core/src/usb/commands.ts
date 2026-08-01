@@ -74,9 +74,10 @@ export class CfxCommandError extends Error {
 /**
  * The directories a run's files live in (`usb.md` §5), as a starting point for a file browser.
  *
- * `\Storage Card` is the volume root and behaves unlike the other two — it lists only the files
- * directly in it (not the directories below), and answers `GETFILESLEN` with a binary payload
- * rather than a length. See {@link CfxDevice.listingLength}.
+ * `\Storage Card` is the volume root and has no listing of its own: listings cover files only, and
+ * it holds nothing but the two directories below it, so `GETFILESLEN` reports it empty (measured;
+ * `usb.md` §5). It is kept here so the browser shows the shape of the filesystem rather than
+ * silently starting one level down.
  */
 export const CFX_DIRECTORIES = [
   { path: "\\Storage Card", label: "Storage Card" },

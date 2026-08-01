@@ -89,6 +89,20 @@ export interface CfxDeviceOptions {
   timeoutMs?: number;
 }
 
+/**
+ * What `GETFILESLEN` said about a path (`usb.md` §5). An ASCII length means the directory can be
+ * listed; the two binary payloads are the instrument's way of saying it won't produce one.
+ */
+export type CfxListingStatus =
+  /** A length came back, so `LISTALLFILES` was run and `names` is that directory's contents. */
+  | "ok"
+  /** The directory exists but holds no files (only subdirectories, or nothing at all). */
+  | "empty"
+  /** No such directory — a misspelling, or a path that names a file rather than a directory. */
+  | "missing"
+  /** A binary payload this library doesn't recognize. Treated like `missing`: nothing is listed. */
+  | "unknown";
+
 /** One directory listing: the names, plus the byte length `GETFILESLEN` reported for them. */
 export interface CfxDirectory {
   path: string;
@@ -97,14 +111,29 @@ export interface CfxDirectory {
    * {@link CfxDevice.listFiles}. */
   listingBytes: number | null;
   /**
-   * False when `GETFILESLEN` gave no length, so the directory could not be listed at all and
-   * `names` is empty. Not a soft failure to paper over: because `LISTALLFILES` replays the last
+   * What the instrument said. `empty` is a real answer about *this* path and `names` is correctly
+   * empty; `missing`/`unknown` mean nothing was learned.
+   */
+  status: CfxListingStatus;
+  /**
+   * True when `names` describes this directory — `ok` or `empty`.
+   *
+   * False means `GETFILESLEN` gave no length and no other reading of its reply, so `LISTALLFILES`
+   * was never sent. Not a soft failure to paper over: because `LISTALLFILES` replays the last
    * successfully buffered listing — one that survives even a disconnect and reconnect — issuing
-   * it anyway returns *another directory's contents* under this path's name. `\Storage Card` is
-   * the known case.
+   * it anyway returns *another directory's contents* under this path's name.
    */
   listed: boolean;
 }
+
+/**
+ * The two binary `GETFILESLEN` replies, keyed by their four payload bytes (measured live; see
+ * `usb.md` §5). Both are `passThrough` messages (§2) rather than the usual `<value>;<code>` text.
+ */
+const LISTING_STATUS_CODES = new Map<string, CfxListingStatus>([
+  ["7,0,9,0", "empty"],
+  ["4,0,9,0", "missing"],
+]);
 
 /** Throw on a non-success code, else pass the response through. */
 function checked(command: string, res: CfxResponse): CfxResponse {
@@ -390,30 +419,35 @@ export class CfxDevice {
    * run to `QuickPlate_96 wells_All Channels.pltd` — spaces, no commas), so this splits on the
    * separator and accepts the limit rather than pretending to a robustness it can't have.
    *
-   * Lists **files only**: `\Storage Card` reports the one `.alf` at its root and says nothing
-   * about the `CurrentRun`/`PCRunReport` directories beneath it.
+   * Lists **files only**: a directory containing nothing but subdirectories comes back `empty`,
+   * which is why `\Storage Card` — which holds only `CurrentRun` and `PCRunReport` — has no
+   * listing of its own.
+   *
+   * When `GETFILESLEN` answers with a binary payload instead of a length ({@link CfxListingStatus}),
+   * `LISTALLFILES` is **not** sent: with nothing newly buffered it would hand back whichever
+   * directory was listed last (measured — the reply to `LISTALLFILES \Storage Card` is still the
+   * previous `CurrentRun` listing, in full).
    */
   async listFiles(dir: string): Promise<CfxDirectory> {
     return this.sequence(async ({ send, command }) => {
       const lenMsg = await send(`GETFILESLEN ${dir}`);
-      // `\Storage Card` answers this one with four binary bytes rather than a number,
-      // reproducibly. Why that path differs isn't established — but with no length buffered,
-      // `LISTALLFILES` would hand back whichever directory was last listed successfully, so the
-      // only correct move is not to ask.
       let listingBytes: number | null = null;
-      if (!lenMsg.passThrough) {
-        const res = parseResponse(lenMsg.payload);
-        if (!res.ok) throw new CfxCommandError(`GETFILESLEN ${dir}`, res);
-        const n = Number(res.value);
-        listingBytes = Number.isFinite(n) ? n : null;
+      if (lenMsg.passThrough) {
+        const status =
+          LISTING_STATUS_CODES.get(Array.from(lenMsg.payload).join(",")) ?? "unknown";
+        return { path: dir, names: [], listingBytes: null, status, listed: status === "empty" };
       }
+      const res = parseResponse(lenMsg.payload);
+      if (!res.ok) throw new CfxCommandError(`GETFILESLEN ${dir}`, res);
+      const n = Number(res.value);
+      listingBytes = Number.isFinite(n) ? n : null;
       if (listingBytes === null) {
-        return { path: dir, names: [], listingBytes: null, listed: false };
+        return { path: dir, names: [], listingBytes: null, status: "unknown", listed: false };
       }
-      const res = await command(`LISTALLFILES ${dir}`);
-      const v = (res.value ?? "").trim();
+      const res2 = await command(`LISTALLFILES ${dir}`);
+      const v = (res2.value ?? "").trim();
       const names = v === "" ? [] : v.split(",").filter((n) => n !== "");
-      return { path: dir, names, listingBytes, listed: true };
+      return { path: dir, names, listingBytes, status: "ok", listed: true };
     });
   }
 

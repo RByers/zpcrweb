@@ -249,7 +249,7 @@ their definitions:
   `GETFILESLEN` buffered and ignores its own path argument, so listing is an atomic pair;
   `CfxDevice.sequence` is what holds the channel across it.
 
-Driving the real instrument is also what corrected three claims the packet captures had gotten
+Driving the real instrument is also what corrected four claims the packet captures had gotten
 wrong — `usb.md` §10 collects them. That is the argument for keeping the CLI: a protocol
 reverse-engineered from captures is a hypothesis until something speaks it.
 

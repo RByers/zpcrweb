@@ -112,9 +112,15 @@ try {
     case "ls": {
       const dirs = rest.length ? rest.map((path) => ({ path, label: path })) : [...CFX_DIRECTORIES];
       for (const d of dirs) {
-        const { names, listingBytes, listed } = await device.listFiles(d.path);
+        const { names, listingBytes, listed, status } = await device.listFiles(d.path);
+        if (status === "empty") {
+          console.log(`\n${d.path}  — no files (subdirectories aren't listed)`);
+          continue;
+        }
         if (!listed) {
-          console.log(`\n${d.path}  — cannot be listed (GETFILESLEN gave no length)`);
+          const why =
+            status === "missing" ? "no such directory" : "GETFILESLEN gave an unrecognized reply";
+          console.log(`\n${d.path}  — cannot be listed (${why})`);
           continue;
         }
         console.log(`\n${d.path}  — ${names.length} file(s), listing ${listingBytes} bytes`);

@@ -79,14 +79,22 @@ export function DeviceFiles({ device }: { device: CfxDeviceHandle }) {
 
                 {!dir ? (
                   <div className="device__empty mono">Not listed yet.</div>
+                ) : dir.status === "empty" ? (
+                  // A real answer about this path, not a failure: listings cover files only, so a
+                  // directory holding nothing but subdirectories reports itself empty.
+                  <div className="device__empty mono">
+                    No files here. Subdirectories aren't listed.
+                  </div>
                 ) : !dir.listed ? (
                   // Not a soft failure: without a length the instrument would replay whichever
                   // directory was listed last, so showing nothing is the only correct answer.
                   <div className="rail__note">
-                    This directory can't be listed. <code>GETFILESLEN</code> answers it with a
-                    binary payload instead of a length, and <code>LISTALLFILES</code> only ever
-                    returns the last listing that succeeded — so any names shown here would belong
-                    to a different directory.
+                    {dir.status === "missing"
+                      ? "The instrument reports no such directory at this path."
+                      : "This directory can't be listed: GETFILESLEN answered with a binary payload this app doesn't recognize."}{" "}
+                    Nothing is shown because <code>LISTALLFILES</code> only ever returns the last
+                    listing that succeeded — so any names here would belong to a different
+                    directory.
                   </div>
                 ) : dir.names.length === 0 ? (
                   <div className="device__empty mono">Empty.</div>

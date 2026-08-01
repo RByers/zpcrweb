@@ -187,19 +187,26 @@ describe("CfxDevice", () => {
     await dev.close();
   });
 
-  it("refuses to list when GETFILESLEN answers with a binary payload", async () => {
+  // The three binary GETFILESLEN replies, per `usb.md` §5. In every case LISTALLFILES must not
+  // even be sent: with nothing newly buffered it returns another directory's contents under this
+  // path. `empty` differs only in that the empty `names` is then a true statement about the path.
+  it.each([
+    { label: "an empty directory", bytes: [0x07, 0x00, 0x09, 0x00], status: "empty", listed: true },
+    { label: "a missing path", bytes: [0x04, 0x00, 0x09, 0x00], status: "missing", listed: false },
+    { label: "an unknown code", bytes: [0x63, 0x00, 0x09, 0x00], status: "unknown", listed: false },
+  ])("reads GETFILESLEN's binary reply as $status for $label", async ({ bytes, status, listed }) => {
     const mock = new MockInstrument((cmd) =>
       cmd.startsWith("GETFILESLEN")
-        ? { payload: new Uint8Array([0x07, 0x00, 0x09, 0x00]), passThrough: true }
+        ? { payload: new Uint8Array(bytes), passThrough: true }
         : { payload: text("stale.xml;0000") },
     );
     const dev = new CfxDevice(mock);
     await dev.open();
     const dir = await dev.listFiles("\\Storage Card");
-    expect(dir.listed).toBe(false);
+    expect(dir.status).toBe(status);
+    expect(dir.listed).toBe(listed);
     expect(dir.names).toEqual([]);
-    // The point of the guard: LISTALLFILES must not even be sent, or it would return another
-    // directory's contents under this path.
+    expect(dir.listingBytes).toBeNull();
     expect(mock.sent).toEqual(["GETFILESLEN \\Storage Card"]);
     await dev.close();
   });
