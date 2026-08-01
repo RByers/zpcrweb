@@ -1820,11 +1820,10 @@ the transition rule structurally can't catch — the **final** read, whose trans
 own, with `useCfxDevice` re-checking the status immediately before sending it since the same
 `CANCEL` aborts a run still cycling. One further listing establishes a baseline when the connection
 is made — see "The first listing is never pulled" below for why that one is pulled immediately
-rather than diffed against, on the one path where it isn't a stale finished run. A run merely
-*starting* — `STATUS?`'s `running` flag flipping false→true — also lists once: that flag is live,
-but the rail's *Current run* state comes from `runProgressFromNames` on the last listing, not from
-`STATUS?` directly, so without this edge it would keep showing the previous run's `finished`/`no
-run` state until the new run's first plate read completed.
+rather than diffed against, on the one path where it isn't a stale finished run. Nothing lists on a
+run merely *starting*: `STATUS?`'s `running` flag already says that live, and the marker files
+(`begun` etc.) are a property of the archive this watcher assembles rather than of the rail's live
+state, so they can wait for whichever real edge lists next.
 
 Each changed listing is pulled and zipped with `zpcrFromRunFiles`, then handed to `store.addFiles`
 — the same path a drop takes. Three economies make that affordable once a cycle:

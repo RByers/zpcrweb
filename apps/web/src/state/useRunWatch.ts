@@ -15,11 +15,10 @@
  * rule above for every read but the last, and the §7.6 acknowledgement (`finish` below), which is
  * also where the **last** read — `PLATEREAD` → `IDLE` — actually becomes listable — plus one
  * baseline listing on connect, below, needed only to make the "first listing is never downloaded"
- * rule work at all, and one more on the `running` false→true edge: `STATUS?`'s `running` flag says
- * a run has started live, without a listing, but the "Current run" panel's own state comes from
- * `runProgressFromNames` on the *last listing*, not from `status` directly — so without this edge
- * it would keep showing the previous run's `finished`/`no run` state until the new run's first
- * plate read completes.
+ * rule work at all. Nothing here lists on a run merely *starting*: usb.md doesn't call for it, and
+ * `STATUS?`'s `running` flag already says so live without a listing — the `begun` marker is a
+ * property of the archive this watcher assembles, not of what the rail shows moment to moment, so
+ * it can wait for the first listing a real edge triggers anyway.
  *
  * When a listing turns out to differ from the last one, the folder is pulled and zipped into a
  * `.zpcr` exactly as the Instrument view's **Open run** button does, and handed to the store,
@@ -210,23 +209,18 @@ export function useRunWatch(
   // the same reason a first listing that turns out to be that stale finished run is never pulled.
   const acknowledged = useRef<string | null>(null);
   const sawRunning = useRef(false);
-  const runIsActive = useRef(false);
   useEffect(() => {
     if (connection !== "connected" || !watching || !status) return;
-    if (status.running) {
-      // A new run clears the latch, so the next finish is acknowledged too, and — on the
-      // false→true edge — lists once so the "Current run" panel doesn't keep showing the
-      // previous run's terminal state until the first plate read comes in.
-      acknowledged.current = null;
-      sawRunning.current = true;
-      if (!runIsActive.current) {
-        runIsActive.current = true;
-        void check();
+    if (status.running || !status.runName) {
+      // A new run clears the latch, so the next finish is acknowledged too. No listing here: the
+      // step-transition rule's first plate read (or the baseline-on-connect pull, for a run found
+      // already going) is what actually surfaces it — see the module comment.
+      if (status.running) {
+        acknowledged.current = null;
+        sawRunning.current = true;
       }
       return;
     }
-    runIsActive.current = false;
-    if (!status.runName) return;
     if (!sawRunning.current) return;
     if (acknowledged.current === status.runName) return;
     acknowledged.current = status.runName;
@@ -258,7 +252,6 @@ export function useRunWatch(
     lastStep.current = null;
     acknowledged.current = null;
     sawRunning.current = false;
-    runIsActive.current = false;
     cache.current.clear();
   }, [connection]);
 
