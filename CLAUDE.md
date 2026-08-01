@@ -141,12 +141,12 @@ clamp instead of crossing) — and that a `.pcrd` carrying a hand-set threshold 
 per-fluorophore override while a dye the file left on auto is left alone (`threshold.md` §5.3:
 that one value is what makes the app reproduce CFX's own Cq) — and the Overview tab's
 `.prcl.txt` download plus the Device view's run staging, where the file bar is a *multi*-selection
-(one run, plus a `.prcl.txt`/`.plt.csv` overriding either half; a run with both halves overridden
-drops out because it supplies nothing; tapping a selected override releases it; a loaded
-`.prcl.txt` joins the selection and lands on the Device view; a staged `.plt.csv` takes its
-dye→channel mapping from the run it is paired with) and Start run appears only with an
-instrument attached — and how a run is *named*: the file bar shows an experiment name over a
-compact local timestamp rather than a file name, derived from the filename's
+(three slots — a run, plus a `.prcl.txt`/`.plt.csv` overriding either half; tapping any selected
+chip releases its slot; a loaded `.prcl.txt` joins the selection and lands on the Device view; a
+staged `.plt.csv` takes its dye→channel mapping from the run it is paired with, including when
+that run supplies neither half and is there only as the instrument) and Start run appears only
+with an instrument attached — and how a run is *named*: the file bar shows an experiment name
+over a compact local timestamp rather than a file name, derived from the filename's
 `<date>_<time>_<serial>_<name>` unless the format states one (Biomeme) or somebody typed one,
 and a typed name has to survive a reload, which it can only do by reaching the archive's own
 `zpcrweb.json` (clearing it reverts to the derived name rather than blanking it) — plus a

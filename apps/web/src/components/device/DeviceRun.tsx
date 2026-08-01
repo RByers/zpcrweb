@@ -63,6 +63,10 @@ export function DeviceRun({
 }) {
   const { protocol, plate } = staged;
   const empty = !protocol.value && !plate.value && !protocol.reason && !plate.reason;
+  // A run can be staged alongside overrides of *both* halves, in which case it supplies neither
+  // — but it is still the instrument the plate's dyes were read on, which is what gives a
+  // `.plt.csv` its channels. Say so, or its chip is lit for no reason a reader can see.
+  const instrumentOnly = !!staged.runName && protocol.overridden && plate.overridden;
 
   return (
     <section className="device__panel">
@@ -71,7 +75,9 @@ export function DeviceRun({
         <span className="devrun__hint mono">
           {empty
             ? "select files above"
-            : "a run supplies both halves; a .prcl.txt or .plt.csv overrides one"}
+            : instrumentOnly && staged.runName
+              ? `instrument: ${staged.runName}`
+              : "a run supplies both halves; a .prcl.txt or .plt.csv overrides one"}
         </span>
       </div>
 
@@ -130,6 +136,9 @@ export function DeviceRun({
 
           <div className="devrun__part">
             <PartHead title="Plate" sourceName={plate.sourceName} overridden={plate.overridden} />
+            {staged.channelsFrom && (
+              <div className="devrun__meta mono">channels from {staged.channelsFrom}</div>
+            )}
             {plate.value ? (
               <PlateViewer plate={plate.value} compact />
             ) : (

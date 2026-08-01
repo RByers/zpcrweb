@@ -1648,14 +1648,23 @@ list inside the view is the whole point — it is the app's file list doing a se
 copy of it.
 
 **The staging model** lives in `state/useRunStaging.ts`, held by `App` because the bar that edits
-it does. A selection is **one optional run plus an optional override of each half**: a
-`.zpcr`/`.pcrd` carries both halves, a `.prcl.txt` or `.pltd`/`.plt.csv` exactly one. Selecting a
-run replaces any other run; selecting an override claims that half and tapping it again releases
-it. The invariant that makes the bar readable is that **a run with both halves overridden is
-deselected** — it contributes nothing, so leaving it highlighted would misstate what the run is
-made of. That in turn is why selecting a run while both overrides are up clears them: otherwise
-the invariant would immediately undo the click. `lib/protocolSource.ts` turns a selection into the
-two resolved halves, each carrying the file it came from and, when empty, why.
+it does. A selection is **three independent slots** — a run, a protocol override, a plate override
+— since a `.zpcr`/`.pcrd` carries both halves while a `.prcl.txt` or `.pltd`/`.plt.csv` carries
+exactly one. Each slot holds at most one file (so only one run at a time, which would otherwise
+claim both halves), selecting replaces whatever held that slot, and tapping a selected file
+releases it. Every slot behaves the same way, which is what makes any combination reachable and
+"no run at all" among them. `lib/protocolSource.ts` turns a selection into the two resolved
+halves, each carrying the file it came from and, when empty, why.
+
+**A run stays selected even when both halves are overridden**, where it supplies neither. It is
+still the instrument: its `.Dcal` set is what gives a staged `.plt.csv` its dye→channel mapping
+(below), and a plate CSV with no run to pair with simply has none. The panel therefore names it —
+`instrument: <run>` in the heading, `channels from <run>` over the plate — because a chip lit for
+a reason the reader can't see is worse than the extra line. A run is labelled by its **experiment
+name** here, as everywhere else (`lib/experiment.ts`); the override files keep their file names,
+since a `.prcl.txt`/`.plt.csv` is not an experiment and has no name but the one on disk. The selection is seeded once (first
+run loaded, plus the active file in its slot) rather than falling back at read time, so that
+deselecting the last thing sticks instead of being immediately undone.
 
 A newly loaded file joins the selection by role rather than replacing it, which is what makes the
 headline flow work: load a `.prcl.txt`, land on the Device view (`addFiles` switches to it — a

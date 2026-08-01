@@ -101,6 +101,7 @@ export function App() {
             store.plateFiles,
             store.protocolFiles,
             pltdPassword,
+            store.experiments,
           )
         : EMPTY_STAGED_RUN,
     [
@@ -111,6 +112,7 @@ export function App() {
       store.plateFiles,
       store.protocolFiles,
       pltdPassword,
+      store.experiments,
     ],
   );
   // Where "← back" on the About page returns to, so opening About and leaving again is a no-op.

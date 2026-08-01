@@ -1141,15 +1141,16 @@ async function deviceRunChecks(chrome, origin) {
     JSON.stringify(overridden.chips),
   );
 
-  // Overriding the *other* half too leaves the run contributing nothing, so it drops out.
+  // Overriding the *other* half too leaves the run supplying neither — but it stays selected,
+  // because it is still the instrument whose calibration set gives a plate CSV its channels.
   await loadFile(cdp, PLTD);
   await waitFor(() => chipPresent(cdp, "QuickPlate"), { what: "the .pltd chip" });
   await sleep(500);
   const both = await staged();
   const onNames = both.chips.filter((c) => c.on).map((c) => c.name);
   check(
-    "with both halves overridden the run is deselected — it supplies nothing",
-    onNames.length === 2 && !onNames.some((n) => /FirstQualification/.test(n)),
+    "a run stays selected alongside overrides of both halves",
+    onNames.length === 3 && onNames.some((n) => /FirstQualification/.test(n)),
     JSON.stringify(onNames),
   );
   check(
@@ -1158,25 +1159,31 @@ async function deviceRunChecks(chrome, origin) {
     JSON.stringify({ proto: both.protocol.override, plate: both.plate.override }),
   );
 
-  // Tapping a selected override releases it.
-  await cdp.eval(
-    `(() => { [...document.querySelectorAll(".filechip__main")]
-        .find((b) => /Gradient/.test(b.textContent)).click(); })()`,
-  );
+  // Tapping a selected file releases its slot — every slot, including the run's, so that
+  // "no run at all" is reachable and a deselection isn't undone by a default.
+  const tap = (pattern) =>
+    cdp.eval(
+      `(() => { [...document.querySelectorAll(".filechip__main")]
+          .find((b) => ${pattern}.test(b.textContent)).click(); })()`,
+    );
+  await tap("/Gradient/");
   await sleep(300);
   const off = await staged();
   check(
     "tapping a selected .prcl.txt deselects it",
-    off.chips.filter((c) => c.on).length === 1 &&
-      !off.chips.find((c) => /Gradient/.test(c.name)).on,
+    !off.chips.find((c) => /Gradient/.test(c.name)).on &&
+      off.chips.filter((c) => c.on).length === 2,
     JSON.stringify(off.chips.filter((c) => c.on).map((c) => c.name)),
   );
-
-  // Re-selecting the run while only one override is up leaves that override in place.
-  await cdp.eval(
-    `(() => { [...document.querySelectorAll(".filechip__main")]
-        .find((b) => /FirstQualification/.test(b.textContent)).click(); })()`,
+  await tap("/FirstQualification/");
+  await sleep(300);
+  const noRun = await staged();
+  check(
+    "tapping the selected run deselects it too",
+    !noRun.chips.find((c) => /FirstQualification/.test(c.name)).on,
+    JSON.stringify(noRun.chips.filter((c) => c.on).map((c) => c.name)),
   );
+  await tap("/FirstQualification/");
   await sleep(300);
   const rejoined = await staged();
   check(
@@ -1210,6 +1217,37 @@ async function deviceRunChecks(chrome, origin) {
       csvStaged.chips.some((c) => /FAM\s*Ch1/.test(c)) &&
       csvStaged.chips.some((c) => /Cy5\s*Ch4/.test(c)),
     JSON.stringify(csvStaged),
+  );
+
+  // The case the three-slot model exists for: a run staged *alongside* overrides of both halves.
+  // It supplies neither, but it is still the instrument, and that is what gives the plate CSV its
+  // channels — so the panel names it rather than leaving a chip lit for no visible reason.
+  await tap("/Gradient/");
+  await sleep(400);
+  const allThree = await cdp.eval(`(() => {
+    const part = [...document.querySelectorAll(".devrun__part")]
+      .find((p) => p.querySelector(".devrun__parttitle").textContent.trim() === "Plate");
+    return {
+      on: [...document.querySelectorAll(".filebar--multi .filechip.is-active .filechip__name")]
+        .map((n) => n.textContent.trim()),
+      unknown: !!part.querySelector(".plate__chip--unknown"),
+      chips: [...part.querySelectorAll(".plate__chip")].map((c) => c.textContent.trim()),
+      channelsFrom: /channels from/.test(part.textContent),
+      hint: document.querySelector(".devrun__hint").textContent.trim(),
+    };
+  })()`);
+  check(
+    "a run can be staged with both halves overridden, and still lends its channels",
+    allThree.on.length === 3 &&
+      !allThree.unknown &&
+      allThree.chips.some((c) => /FAM\s*Ch1/.test(c)) &&
+      allThree.channelsFrom,
+    JSON.stringify(allThree),
+  );
+  check(
+    "…and the panel names it by experiment name, as the rest of the app does",
+    /^instrument: FirstQualification$/.test(allThree.hint),
+    allThree.hint,
   );
 
   // Only one run at a time: selecting a second replaces the first.

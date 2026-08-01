@@ -24,6 +24,7 @@ import {
 } from "@zpcrweb/core";
 import type { RunStagingSelection } from "../state/useRunStaging";
 import type { LoadedFile, PlateFileResult, RunResult } from "../state/useZpcrStore";
+import type { ExperimentIdentity } from "./experiment";
 
 /**
  * Re-read a staged `.plt.csv` against the selected run's own dye → channel mapping.
@@ -80,6 +81,13 @@ export interface StagedRun {
   plate: StagedPart<PlateDefinition>;
   /** The run supplying whatever isn't overridden, when one is selected. */
   runName: string | null;
+  /**
+   * The run whose calibration set gave the staged plate its channels, when that happened. A
+   * `.plt.csv` records dye names only, so this is the one thing a run still contributes when both
+   * halves are overridden — and naming it is what keeps a run chip from being lit for no reason a
+   * reader can see.
+   */
+  channelsFrom: string | null;
 }
 
 /** Nothing staged — what every view other than Device gets, since none of them read it. */
@@ -87,6 +95,7 @@ export const EMPTY_STAGED_RUN: StagedRun = {
   protocol: { value: null, sourceName: null, overridden: false, reason: null },
   plate: { value: null, sourceName: null, overridden: false, reason: null },
   runName: null,
+  channelsFrom: null,
 };
 
 /**
@@ -114,9 +123,16 @@ export function resolveStagedRun(
   plateFiles: Map<string, PlateFileResult>,
   protocolFiles: Map<string, string>,
   password: string,
+  experiments?: Map<string, ExperimentIdentity>,
 ): StagedRun {
   const byId = new Map(files.map((f) => [f.id, f]));
   const runFile = selection.runId ? (byId.get(selection.runId) ?? null) : null;
+  // A run is shown by its experiment name, as everywhere else in the app (`lib/experiment.ts`).
+  // The override files keep their file names: a `.prcl.txt`/`.plt.csv` is not an experiment and
+  // has no name but the one on disk.
+  const runLabel = runFile
+    ? ((experiments?.get(runFile.id)?.name || "").trim() || runFile.name)
+    : null;
   const run = selection.runId ? runs.get(selection.runId) : undefined;
   const zpcr = run?.zpcr ?? null;
   const problem = selection.runId ? runProblem(run) : null;
@@ -147,7 +163,7 @@ export function resolveStagedRun(
             document: protocolDocumentFromRunDefinition(zpcr?.protocol()?.name || "", text),
           }
         : null,
-      sourceName: text ? (runFile?.name ?? null) : null,
+      sourceName: text ? runLabel : null,
       overridden: false,
       reason: text
         ? null
@@ -159,6 +175,7 @@ export function resolveStagedRun(
 
   // --- plate ------------------------------------------------------------------------------
   let plate: StagedPart<PlateDefinition>;
+  let channelsFrom: string | null = null;
   if (selection.plateId) {
     const result = plateFiles.get(selection.plateId);
     const file = byId.get(selection.plateId);
@@ -168,6 +185,11 @@ export function resolveStagedRun(
       result?.plate && file?.kind === "csv"
         ? plateWithRunChannels(file.bytes, file.name, zpcr)
         : null;
+    // Only claimed when it actually resolved something: a run that calibrates none of the CSV's
+    // dyes has contributed nothing, and saying otherwise would be worse than saying nothing.
+    if (mapped?.fluors.some((f) => f.channel !== undefined)) {
+      channelsFrom = runLabel;
+    }
     plate = {
       value: mapped ?? result?.plate ?? null,
       sourceName: file?.name ?? null,
@@ -185,7 +207,7 @@ export function resolveStagedRun(
     const embedded = zpcr?.plates(password || undefined)[0]?.pltd.plate ?? null;
     plate = {
       value: embedded,
-      sourceName: embedded ? (runFile?.name ?? null) : null,
+      sourceName: embedded ? runLabel : null,
       overridden: false,
       reason: embedded
         ? null
@@ -195,5 +217,10 @@ export function resolveStagedRun(
     };
   }
 
-  return { protocol, plate, runName: runFile?.name ?? null };
+  return {
+    protocol,
+    plate,
+    runName: runLabel,
+    channelsFrom: channelsFrom ?? null,
+  };
 }
