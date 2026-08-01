@@ -69,6 +69,37 @@ Still open:
 - [ ] **The end-point call** (`threshold.md` §7) — `(+) Positive` / `Negative` / `NoCall` /
       `Unassigned`, derived from the plate's negative control rather than a fixed RFU. Visible in
       the export, but from one plate only.
+- [ ] **Biomeme's noise estimator false-positives on flat wells with real thermal drift**
+      (`threshold.ts`'s `baselineNoise`, `biomeme.md`). Reported against
+      `~/lab/MolBioLab/biomeme/runs/1A22DCF3-658B-47DE-BF97-1EDA72A93D38.json`: the device calls
+      every green (FAM) and red (ATTO-647N) well non-amplifying, but `computeCqTable` gives three
+      of them a Cq anyway. Root cause: `baselineNoise`'s median-second-difference estimator is
+      *deliberately* blind to smooth curvature (measured necessary for CFX, whose smooth curvature
+      in a nominal baseline region always means a misplaced window — see the function's doc
+      comment). Biomeme's handheld block has no active thermal feedback like a CFX, so a
+      non-amplifying well's "flat" region carries tens of RFU of genuine smooth drift; the
+      estimator correctly calls that "not jitter" and reports noise as low as 0.17–1.3 RFU, so
+      `20 × noise` sits below the drift and a flat well crosses its own threshold. Measured
+      residual-stddev/jitter ratios on that run's flat wells: 7.6×–29.1× (CFX's own worst
+      documented case, cited in the same doc comment, is 8.7×).
+
+      Tried `max(jitter, stddev)` for dye-space sources only (gated so CFX's own path, and
+      Biomeme's baseline-*placement* pass, stay on pure jitter — only the already-placed final
+      noise/threshold would blend). Fixes the reported file (all green/red curves correctly go to
+      no-Cq, orange keeps its Cq within ~1 cycle of the device's own). **But regresses the
+      committed regression sample** (`samples/biomeme-2024-01-17.json`,
+      `packages/core/test/biomeme.test.ts`): amplified/not agreement drops 19/27 → 16/27, and the
+      sample's one known true-positive well (well 4, TexRedX, file Cq 23.24) disappears — that
+      channel's real positives in this sample are themselves gentle continuous rises from cycle 1
+      with no sharp exponential shoulder, so the already-narrowed baseline region still contains
+      real curve shape, and `stddev` there measures signal, not drift. A side-by-side small-multiples
+      chart of both runs' curves showed the two cases can look visually identical (a slow smooth
+      rise from cycle 1) — one is drift, the other is real low-amplitude amplification — which is
+      probably why no per-curve residual-variance statistic can cleanly separate them; likely needs
+      information a single curve doesn't carry (e.g. comparing against the fluorophore's own
+      no-template/negative wells specifically, or leaning more on the device's own per-curve
+      threshold for Biomeme rather than this library's per-fluorophore auto rule). Change was
+      reverted; nothing shipped.
 
 `threshold.md` §10 also lists the analysis options left deliberately unimplemented (reference
 normalization, drift correction, cycle skips, the data sub-window, the `NoThreshold` Cq
