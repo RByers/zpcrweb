@@ -1157,6 +1157,63 @@ async function instrumentRunChecks(chrome, origin) {
   const loadedTab = await activeTab(cdp);
   check("loading a .prcl.txt lands on the Instrument view", loadedTab === "Instrument", loadedTab);
 
+  // A protocol file is also a document, not only an input: it has an Overview of its own, which
+  // the tab strip has to actually offer — the failure being a tab that is enabled but renders
+  // nothing, or a file forced back to Instrument whatever you click. Everything the page shows
+  // there comes from core's decode (`protocol.md`), which is what the listing check confirms:
+  // this fixture's `GOTO 4,39` names a step that doesn't exist in a 3-step program, so it is
+  // also the degrade-gracefully case (a target it can't name, still counted correctly).
+  const protoTabs = await cdp
+    .eval(
+      `JSON.stringify([...document.querySelectorAll('.viewselect [role="tab"]')]
+         .map(b => ({ label: b.textContent.trim(), off: b.disabled })))`,
+    )
+    .then(JSON.parse);
+  check(
+    "a .prcl.txt enables Overview and Instrument, and nothing else",
+    protoTabs.filter((t) => !t.off).map((t) => t.label).join(",") === "Overview,Instrument",
+    JSON.stringify(protoTabs.filter((t) => !t.off).map((t) => t.label)),
+  );
+
+  await cdp.eval(`(() => [...document.querySelectorAll('.viewselect [role="tab"]')]
+      .find((b) => b.textContent.trim() === "Overview").click())()`);
+  const protoOverviewTab = await tabBecomes(cdp, "Overview");
+  const protoOverview = await cdp.eval(`(() => ({
+    tiles: Object.fromEntries([...document.querySelectorAll(".overview__tiles .tile")]
+      .map((t) => [t.querySelector(".tile__label").textContent.trim(),
+                   t.querySelector(".tile__value").textContent.trim()])),
+    lines: [...document.querySelectorAll(".decoded__protoline")].map((l) => ({
+      num: l.querySelector(".decoded__protonum").textContent.trim(),
+      text: l.querySelector(".decoded__prototext").textContent.trim(),
+      note: l.querySelector(".decoded__protonote").textContent.trim(),
+    })),
+  }))()`);
+  check(
+    "…and its Overview reports the protocol's own settings, from the decode not the text",
+    protoOverviewTab === "Overview" &&
+      protoOverview.tiles.Lid === "105 °C" &&
+      protoOverview.tiles.Volume === "25 µL" &&
+      protoOverview.tiles.Steps === "3" &&
+      /all 6 channels/.test(protoOverview.tiles.Scan ?? ""),
+    JSON.stringify(protoOverview.tiles),
+  );
+  const grad = protoOverview.lines.find((l) => l.text.startsWith("GRAD"));
+  const strayGoto = protoOverview.lines.find((l) => l.text.startsWith("GOTO"));
+  check(
+    "…listing every directive with its reading, including a GOTO whose target doesn't exist",
+    grad.num === "1" &&
+      /Gradient 50–60 °C/.test(grad.note) &&
+      /Return to step 4/.test(strayGoto.note) &&
+      /40 passes/.test(strayGoto.note) &&
+      !/\(/.test(strayGoto.note),
+    `${grad.note} | ${strayGoto.note}`,
+  );
+
+  // Back where the rest of this block expects to be.
+  await cdp.eval(`(() => [...document.querySelectorAll('.viewselect [role="tab"]')]
+      .find((b) => b.textContent.trim() === "Instrument").click())()`);
+  await tabBecomes(cdp, "Instrument");
+
   // Loading it stages it: the headline flow is "load a protocol, see it against the run you
   // already had", so the file joins the selection rather than replacing it.
   const overridden = await staged();

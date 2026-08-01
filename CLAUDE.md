@@ -120,7 +120,7 @@ Cost control, when you do run it:
 npm run test:ui
 ```
 
-114 browser assertions covering what nothing else can catch: the two URL contracts — hash
+117 browser assertions covering what nothing else can catch: the two URL contracts — hash
 routing (deep links, back/forward, unknown-file and invalid-view fallbacks) and password
 handling (stripped from both URL forms, never leaked into the routing hash, an encrypted
 `.pcrd` still decrypting) — plus `#load=`, the rule that every XML view uses the shared
@@ -146,7 +146,9 @@ tapping any selected chip releases its slot; a loaded `.prcl.txt` joins the sele
 on the Instrument view; a
 staged `.plt.csv` takes its dye→channel mapping from the run it is paired with, including when
 that run supplies neither half and is there only as the instrument) and Start run appears only
-with an instrument attached — and how a run is *named*: the file bar shows an experiment name
+with an instrument attached — and that a `.prcl.txt` is a document as well as an input: it enables
+Overview and Instrument and nothing else, and its Overview reports the protocol's own settings
+from the decode — and how a run is *named*: the file bar shows an experiment name
 over a compact local timestamp rather than a file name, derived from the filename's
 `<date>_<time>_<serial>_<name>` unless the format states one (Biomeme) or somebody typed one,
 and a typed name has to survive a reload, which it can only do by reaching the archive's own
@@ -170,7 +172,8 @@ dependency-free. Run it when you touch `state/urlHash.ts`, `state/pltdPassword.t
 `components/curves/CqRange.tsx`, `components/instrument/InstrumentRun.tsx`, `state/useRunStaging.ts`,
 `lib/protocolSource.ts`, `lib/experiment.ts` (or core's `experiment.ts`),
 `components/ViewSelector.tsx` or `App.tsx`'s `enabledViewsFor`,
-core's `runDefinition.ts` or `components/raw/DecodedView.tsx`'s `ProtocolDecoded`,
+core's `runDefinition.ts`, `components/raw/DecodedView.tsx`'s `ProtocolDecoded`,
+`components/views/StandaloneProtocolView.tsx` or `App.tsx`'s `enabledViewsFor`,
 `components/FileBar.tsx`, `components/FileIcons.tsx` (or core's `fileKind.ts`),
 `components/views/StandaloneRawView.tsx`,
 `state/useZpcrStore.ts`'s settings seeding or `fileKind`, or view

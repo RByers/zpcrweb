@@ -18,6 +18,7 @@ import { RawFilesView } from "./components/views/RawFilesView";
 import { PcrdRawView } from "./components/views/PcrdRawView";
 import { StandalonePlateView } from "./components/views/StandalonePlateView";
 import { StandaloneRawView } from "./components/views/StandaloneRawView";
+import { StandaloneProtocolView } from "./components/views/StandaloneProtocolView";
 import { AboutView } from "./components/views/AboutView";
 import { InstrumentView } from "./components/views/InstrumentView";
 import type { ViewId } from "./state/useZpcrStore";
@@ -29,9 +30,10 @@ const STANDALONE_VIEWS = ["plates", "raw"] as const;
  * same {@link StandaloneRawView} a `.plt.csv` gets, for the same reason (one text file, no
  * container around it). */
 const BIOMEME_VIEWS = ["overview", "curves", "plates", "raw"] as const;
-/** A `.prcl.txt` is staged, not viewed — the Instrument view is the only place it does
- * anything. */
-const PROTOCOL_VIEWS = ["instrument"] as const;
+/** A `.prcl.txt` is two things: a document to read (Overview, the annotated directive listing
+ * of `protocol.md`) and an input to a run (Instrument, where it is staged). Nothing else applies
+ * — it has no curves, no plate and no archive to browse. */
+const PROTOCOL_VIEWS = ["overview", "instrument"] as const;
 
 /** A `.pltd`/`.plt.csv` uploaded on its own, rather than a run — only two of the tabs apply. */
 const isStandaloneKind = (kind: string) => kind === "pltd" || kind === "csv";
@@ -46,9 +48,6 @@ const isStandaloneKind = (kind: string) => kind === "pltd" || kind === "csv";
 function enabledViewsFor(kind: string): readonly [ViewId, ...ViewId[]] | null {
   if (isStandaloneKind(kind)) return STANDALONE_VIEWS;
   if (kind === "biomeme") return BIOMEME_VIEWS;
-  // A `.prcl.txt` is an *input to* a run, not a run to look at — it has no file-backed view, and
-  // Instrument is where it is used (`useRunStaging.ts`). Returning the Instrument tab alone
-  // keeps the fallback below total: there is always somewhere for a file to send you.
   if (kind === "prcl") return PROTOCOL_VIEWS;
   return null;
 }
@@ -155,9 +154,9 @@ export function App() {
   // with a cycler and no files yet actually starts. It keeps the file bar, because starting a run
   // needs files: there a chip means "part of the run being staged" rather than "the file you are
   // looking at", which is why it gets `selectedIds` and the staging toggle instead of `activeId`.
-  // A `.prcl.txt` selected from another view has nowhere else to be rendered (it has no
-  // file-backed tab), so it lands here too rather than leaving the content area blank.
-  if (store.view === "instrument" || (active?.kind === "prcl" && store.view !== "about")) {
+  // A `.prcl.txt` selected from a tab it has no answer for is *not* forced here any more: it has
+  // an Overview of its own now, which the fallback below picks as its first enabled tab.
+  if (store.view === "instrument") {
     return (
       <div className={store.files.length > 0 ? "app" : "app app--nofiles"}>
         <header className="app__header" ref={headerRef} data-fit={fit}>
@@ -214,8 +213,9 @@ export function App() {
   }
 
   const isStandalonePlate = isStandaloneKind(active.kind);
+  const isStandaloneProtocol = active.kind === "prcl";
   const isBiomeme = active.kind === "biomeme";
-  const zpcr = isStandalonePlate ? null : activeRun?.zpcr ?? null;
+  const zpcr = isStandalonePlate || isStandaloneProtocol ? null : activeRun?.zpcr ?? null;
   const enabledViews = enabledViewsFor(active.kind);
   // `store.view` is global (not per-file), so switching entries can land on a view this file has
   // no answer for (e.g. "calibration" on a Biomeme run) — fall back to its first enabled tab
@@ -232,7 +232,7 @@ export function App() {
     <div className="app">
       <header className="app__header" ref={headerRef} data-fit={fit}>
         <Logo onClick={showAbout} />
-        {(zpcr || isStandalonePlate) && (
+        {(zpcr || isStandalonePlate || isStandaloneProtocol) && (
           <div className="app__views">
             <ViewSelector
               value={view}
@@ -270,6 +270,10 @@ export function App() {
             )}
             {view === "raw" && <StandaloneRawView key={active.id} file={active} />}
           </>
+        ) : isStandaloneProtocol ? (
+          store.activeProtocolFile !== null && (
+            <StandaloneProtocolView file={active} runDefinition={store.activeProtocolFile} />
+          )
         ) : !zpcr ? (
           <div className="app__gate">
             {activeRun?.needsPassword && (

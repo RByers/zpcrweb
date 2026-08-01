@@ -5,7 +5,8 @@ loads one or more files — `.zpcr`, `.pcrd`, a Biomeme run export (`.json`, see
 Biomeme" below), or a standalone plate file (`.pltd` or zpcrweb's own `.plt.csv`, see
 "Standalone plate entries and attach" below) — switches between them, and explores each through
 up to six views: Overview, Curves, Plates, Reference, Calibration, and Raw (a standalone plate
-file only gets Plates + Raw; a Biomeme run only gets Overview, Curves and Plates — see below).
+file only gets Plates + Raw; a standalone protocol file only Overview; a Biomeme run only
+Overview, Curves and Plates — see below).
 
 ## Format independence
 
@@ -13,8 +14,8 @@ file only gets Plates + Raw; a Biomeme run only gets Overview, Curves and Plates
 observation.**
 
 Concretely, outside `RawFilesView`/`PcrdRawView`, the `App.tsx` line that chooses between them,
-and the capability checks that disable `ViewSelector` tabs for a standalone plate entry or a
-Biomeme run (`isStandalonePlate`/`isBiomeme` in `App.tsx` — a real capability difference: a
+and the capability checks that disable `ViewSelector` tabs for a standalone plate or protocol
+entry or a Biomeme run (`isStandalonePlate`/`isStandaloneProtocol`/`isBiomeme` in `App.tsx` — a real capability difference: a
 Biomeme `Zpcr` has no reference row or `.Dcal` calibrations for Reference/Calibration to show,
 same as a standalone plate has no curves), no component may:
 
@@ -248,6 +249,25 @@ Consequence for testing: there are **no app-level tests yet** — coverage rides
 library's suite. If UI bugs prove frequent we can add Playwright e2e later (tracked in the
 root `TODO.md`). Any new analytical transform must be added to the library with tests, not
 written inline in a component.
+
+## A protocol on its own
+
+A `.prcl.txt` (`prcl.md` §3.1) is the third kind of top-level file, `LoadedFile.kind === "prcl"`,
+resolved via `protocolFiles`/`activeProtocolFile` — a plain string, the canonical one-line run
+definition, since unlike a run or a plate it needs no password and cannot fail to decode (the
+store's `fileKind` only admits bytes that already parsed).
+
+It enables **two** tabs, `["overview","instrument"]`, because it is two things:
+
+- **Overview** (`StandaloneProtocolView`) — the protocol *as a document*: stat tiles for the
+  settings its header directives carry, then the same annotated `ProtocolDecoded` listing a run's
+  Overview uses. Everything shown is `parseRunDefinition`'s (`protocol.md`); the view picks tiles
+  out of the decoded program and counts directives, and reads nothing out of the text.
+- **Instrument** — the protocol *as an input*, staged against a plate (see "The Instrument view").
+
+Enabling Overview is what removed the old special case in `App.tsx`, where a `.prcl.txt` selected
+on any tab was forced into the Instrument view because it had no file-backed view to render. It
+now falls back like every other file, to the first tab its kind enables.
 
 ## Standalone plate entries and attach
 

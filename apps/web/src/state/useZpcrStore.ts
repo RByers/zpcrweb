@@ -567,6 +567,9 @@ export interface ZpcrStore {
    */
   experiments: Map<string, ExperimentIdentity>;
   activePlateFile: PlateFileResult | null;
+  /** The selected file's run definition, when the selection is a `.prcl.txt` — what the
+   * protocol Overview renders, the counterpart of {@link activePlateFile}. */
+  activeProtocolFile: string | null;
   /**
    * Attach (or replace) a `.zpcr` run's plate: rewrites the run's own archive bytes in place
    * (adding/replacing a `.pltd`/`.plt.csv` entry — see `attachPlateToZpcr`) and persists the
@@ -1025,6 +1028,8 @@ export function useZpcrStore(): ZpcrStore {
     return map;
   }, [files]);
 
+  const activeProtocolFile = activeId ? protocolFiles.get(activeId) ?? null : null;
+
   /**
    * Seed each file's analysis settings from its own `zpcrweb.json`, once — after hydration, after
    * an upload, and (for an encrypted `.pcrd`) once a working password finally decodes it. A file
@@ -1112,6 +1117,7 @@ export function useZpcrStore(): ZpcrStore {
     protocolFiles,
     experiments,
     activePlateFile,
+    activeProtocolFile,
     attachPlate,
     settings,
     view,
