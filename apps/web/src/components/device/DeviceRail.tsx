@@ -135,11 +135,18 @@ export function DeviceRail({ device }: { device: CfxDeviceHandle }) {
               );
             })}
           </div>
-          <div className="rail__note device__footnote">
-            Buttons marked <span className="device__badge">?</span> send a command name this
-            protocol was never observed using — the instrument is expected to reject them. The
-            result code is reported below and in the console.
-          </div>
+          {/* Only shown when something actually is a guess. Every action is currently `observed`,
+              so this normally renders nothing — but the note has to appear on its own the moment
+              an unverified command is added, rather than being remembered about separately. */}
+          {(Object.keys(CFX_COMMANDS) as CfxCommandName[]).some(
+            (n) => CFX_COMMANDS[n].confidence === "unverified",
+          ) && (
+            <div className="rail__note device__footnote">
+              Buttons marked <span className="device__badge">?</span> send a command name this
+              protocol was never observed using — the instrument may reject them. The result code
+              is reported below and in the console.
+            </div>
+          )}
           {lastAction && (
             <div className={"device__result" + (lastAction.ok ? " is-ok" : " is-bad")}>
               <span className="mono">{lastAction.command}</span> → {lastAction.code}

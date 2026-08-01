@@ -88,10 +88,15 @@ export const CFX_DIRECTORIES = [
  * How much a command in {@link CFX_COMMANDS} is actually known to do.
  *
  * The distinction is load-bearing rather than decorative. `usb.md` documents only what real
- * traffic demonstrated, so a client that wants a button for something CFX Manager never did
- * during the capture — closing the lid, flashing the indicator — is guessing at a command name.
- * Recording that per command lets the UI say so instead of presenting a guess as a feature, and
- * keeps the guesses collected in one list rather than scattered through call sites.
+ * traffic demonstrated, so a client wanting a button for something the captures never exercised
+ * would be guessing at a command name. Recording that per command lets the UI say so instead of
+ * presenting a guess as a feature, and keeps any guesses in one list rather than scattered
+ * through call sites.
+ *
+ * Every entry currently in {@link CFX_COMMANDS} is `observed` — lid close and the indicator were
+ * briefly carried here as guesses, until re-reading `usb-basic` found both (`LID CLOSE`, and
+ * `BLOCKID` for the indicator). The mechanism stays because the next action command added will
+ * need it, and because "how do we know?" is worth being able to answer per command.
  */
 export type CommandConfidence =
   /** Observed in a reference capture, or exercised against a live instrument by this library. */
@@ -116,30 +121,41 @@ export interface CfxCommandSpec {
  * Queries are not listed here — they are ordinary calls on {@link CfxDevice} and their results are
  * typed. This list exists for the ones that *do* something.
  */
-export const CFX_COMMANDS = {
+export type CfxCommandName = "indicator" | "lidOpen" | "lidClose" | "cancel";
+
+/**
+ * Annotated as a plain `Record`, deliberately — not `as const satisfies`.
+ *
+ * Inferring the entries would narrow each `confidence` to the literal it holds today, and with
+ * every command currently `"observed"` a `=== "unverified"` test elsewhere becomes provably false
+ * and TypeScript rejects it as dead code. That is technically correct and exactly wrong here: that
+ * test is what makes an unverified command announce itself in the UI when one is added, so it has
+ * to keep compiling while none exists. The name union above is spelled out for the same reason —
+ * it's the one thing `keyof typeof` was buying.
+ */
+export const CFX_COMMANDS: Record<CfxCommandName, CfxCommandSpec> = {
+  indicator: {
+    command: "BLOCKID 1",
+    label: "Flash indicator",
+    confidence: "observed",
+    note:
+      "usb.md §3 — 'block identify', the function that flashes a block's indicator so an operator " +
+      "can tell which unit is being addressed. The argument is the block number; BLOCKCOUNT? " +
+      "reports how many exist (1 on a CFX96).",
+    actuates: true,
+  },
   lidOpen: {
     command: "LID OPEN",
     label: "Open lid",
     confidence: "observed",
-    note: "usb.md §3 — issued by CFX Manager on physical lid-open.",
+    note: "usb.md §3.",
     actuates: true,
   },
   lidClose: {
     command: "LID CLOSE",
     label: "Close lid",
-    confidence: "unverified",
-    note:
-      "Guessed by symmetry with LID OPEN, which is the only lid command either reference capture " +
-      "contains. Never observed; may not exist under this name.",
-    actuates: true,
-  },
-  indicator: {
-    command: "FLASHLED",
-    label: "Flash indicator",
-    confidence: "unverified",
-    note:
-      "No indicator command appears in either reference capture. This name is a guess and is " +
-      "expected to return a non-zero code unless it happens to be right.",
+    confidence: "observed",
+    note: "usb.md §3.",
     actuates: true,
   },
   cancel: {
@@ -151,6 +167,4 @@ export const CFX_COMMANDS = {
       "effect on a run still in progress is inferred rather than measured.",
     actuates: true,
   },
-} as const satisfies Record<string, CfxCommandSpec>;
-
-export type CfxCommandName = keyof typeof CFX_COMMANDS;
+};

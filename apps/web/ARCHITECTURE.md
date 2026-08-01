@@ -1613,12 +1613,16 @@ Three components, under `components/device/`:
   invisible. Polling is filtered out by default (it would otherwise be all there is to see), and a
   prompt sends arbitrary commands.
 
-**Actions the captures never exercised are marked, not hidden.** `CFX_COMMANDS` tags each action
-with whether it was actually observed on the wire; `LID OPEN` was, while lid-close and the
-indicator are guesses at a command name. The UI badges those with `?`, dashes their border, and
-reports the instrument's result code either way — so a rejection reads as the expected outcome
-rather than a bug, and the honest state of the reverse engineering is visible in the product
-instead of buried in a comment.
+**Action commands carry their provenance.** `CFX_COMMANDS` tags each action with how it is known
+to do what it says. All four currently offered — `BLOCKID 1` (flash the indicator), `LID OPEN`,
+`LID CLOSE`, `CANCEL` — are `observed` in a capture. Anything tagged `unverified` is badged `?`
+with a dashed border and an explanatory note, so a guess is never presented as a feature; the
+instrument's result code is reported either way. The badge and its footnote are driven off the tag
+rather than hardcoded, so adding an unverified command surfaces the warning on its own.
+
+Two of these were briefly shipped *as* guesses, which is why the mechanism exists — and then a
+re-read of the `usb-basic` capture against the operator's account of it (flash, then open, then
+close) found both: `LID CLOSE` verbatim, and `BLOCKID` as the indicator flash. See `usb.md` §3.
 
 **Testing.** The protocol logic is unit-tested in the library against a mock instrument scripted
 with the real device's replies (`packages/core/test/usbDevice.test.ts`) — the read pump, command

@@ -152,7 +152,7 @@ a value to report at all:
   byte-for-byte (`30 30 30 30`, no `3b`) rather than inferred from the rendered text — respond
   with the bare 4-digit code and no separator: `DELFILE`, `PROTOCOL`, `METHOD`, `HOTLID`, `VOLUME`
   (the setter), `TEMP`, `PLATEREAD`, `GOTO`, `END`, `ADDCYCLES`, `RemoteRun`, `PROCEED`, `CANCEL`,
-  `LID OPEN`, `FRONTENDLOCKED`, `TESTMODE`, `BLOCKID`, and `SETAPILOGLEVEL` all responded `0000`,
+  `LID OPEN`, `LID CLOSE`, `FRONTENDLOCKED`, `TESTMODE`, `BLOCKID`, and `SETAPILOGLEVEL` all responded `0000`,
   never `;0000`. `SetDateTime` is the one exception that looks like this group but isn't: it
   reports success as a value, `True;0000`, because it does have something to report.
 
@@ -216,10 +216,10 @@ order:
 | `RemoteRun "<A>","<B>","<C>","<name>","<user>","<pw?>","<D>","<method>"` | e.g. `RemoteRun "A","True","False","singletest","admin","","True","CALC"` — starts the authored protocol running under a given run name/user |
 | `PROCEED` | resumes/confirms a run (there was a ~2-minute gap between `RemoteRun` and `PROCEED` in the capture — almost certainly the operator closing the lid and confirming on the touchscreen) |
 | `CANCEL` | seen once, immediately after the first plate read was pulled. The subsequent `LISTALLFILES` response only gains the `ended` marker and the second plate read (`Read00002.Plateread`) *after* this command — strong evidence this is normal run-finished cleanup rather than a user abort, though it isn't confirmed from firmware source |
-| `LID OPEN` | issued on physical lid-open |
+| `LID OPEN` / `LID CLOSE` | motorised lid control. In `usb-basic` the operator opened and then closed the lid, and the pair appears in exactly that order. Note CFX Manager emits `LID OPEN` **three times** for one open (t=…010.7, …018.5, …026.5) and `LID CLOSE` once — the repeat looks like the UI re-asserting while the lid travels, not three separate requests. `usb-run` has three `LID OPEN` and no `LID CLOSE`, matching an operator who opened it to load a plate and closed it at the touchscreen instead |
 | `FRONTENDLOCKED ON`/`OFF` | `ON` appears once in `usb-basic`; `OFF` once, at the very end of `usb-run` |
 | `TESTMODE <n>` | e.g. `TESTMODE 3`, issued at the very start of both captures |
-| `BLOCKID <n>` | e.g. `BLOCKID 1` |
+| `BLOCKID <n>` | **block identify — flashes that block's indicator**, so an operator can tell which unit is being addressed. `<n>` is the block number; `BLOCKCOUNT?` reports how many exist (1 on a CFX96). Established by correlating the captures against what the operator did: `usb-basic` opens with an indicator flash, then a lid open, then a lid close, and its only `BLOCKID 1` sits at t=…005.2, immediately before the first `LID OPEN` at t=…010.7. `usb-run`, where no flash was performed, contains **no `BLOCKID` at all** despite having the same lid traffic — which is what rules out its being routine setup |
 | `SETAPILOGLEVEL <n>` | e.g. `SETAPILOGLEVEL 1` |
 | `SetDateTime <mm/dd/yyyy>,<hh:mm:ss>,<AM\|PM>,<tz offset>` | e.g. `SetDateTime 07/31/2026,09:33:04,PM,-04:00` → `True;0000` |
 
@@ -442,9 +442,10 @@ instance, rather than a cross-checked pattern:
   nonzero handle) is ever opened is unconfirmed.
 - **`ALPHAID?` → `4`** (§3) — one instrument, one observed value; the general ID→name mapping for
   other block/head types isn't in this capture.
-- **`GETPOS?`, `TESTMODE`, `BLOCKID`, `SETAPILOGLEVEL`** (§3) — recorded with their literal
-  observed values; the capture doesn't say more about what any of them mean than the command name
-  itself suggests.
+- **`GETPOS?`, `TESTMODE`, `SETAPILOGLEVEL`** (§3) — recorded with their literal observed
+  values; the capture doesn't say more about what any of them mean than the command name itself
+  suggests. (`BLOCKID` was in this list until the operator's own account of `usb-basic` — flash,
+  open, close — identified it; see §3.)
 - **Channel 0 and channel 2's byte layout** (§4) — both channels' examples are real and
   byte-exact, but with this little variation in the traffic, no individual byte's meaning is
   confirmed for either.
@@ -473,6 +474,12 @@ Two clients drive it: `tools/cfx.mjs` (a CLI — `info`, `status`, `ls`, `get`, 
 `--trace` for the raw message log) and the web app's **Device** view, which adds live status
 polling, a file browser, action buttons and a console of decoded traffic. The optional `usb`
 dependency is needed only by the CLI.
+
+`CFX_COMMANDS` in `commands.ts` is the action-command catalog a UI can offer — currently
+`BLOCKID 1` (flash the indicator), `LID OPEN`, `LID CLOSE` and `CANCEL` — each tagged with how it
+is known to do what it says. All four are `observed`; the tag exists so that a future addition
+that *isn't* has somewhere to say so, and so a UI can mark it rather than presenting a guess as a
+feature.
 
 Not implemented: file **upload** (`CRCSENDFILE` and the §5 GUID sequence), run control
 (`RemoteRun`/`PROCEED`), and protocol authoring — this client reads an instrument and retrieves
