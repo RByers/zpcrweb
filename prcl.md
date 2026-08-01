@@ -168,7 +168,9 @@ committed `20190516…SHORT_QUALIF.zpcr`, which carries both, shows two systemat
 
 The archive's `.txt` is what the **instrument recorded for that run**; the `.prcl` is the
 **protocol as authored**. Do not treat either as canonical for the other, and do not diff them
-literally.
+literally. The operand difference is not noise: the authored file has no channel information in
+it, and the real scan mask is substituted from the *plate* when the run starts — see `usb.md`
+§3.1, which decodes the operand.
 
 ```
 METHOD CALC;HOTLID 105,30;VOLUME 25;TEMP 50.0,600;TEMP 95.0,300;TEMP 95.0,10;
@@ -187,7 +189,7 @@ Complete verb inventory across all files examined:
 | `GRAD` | lowTemp, highTemp, holdSeconds | → `GradientStep` |
 | `INC` | °C | Per-cycle temperature increment (melt ramp step size) |
 | `RATE` | °C/s | Ramp rate |
-| `PLATEREAD` | `#h3F`, `#h81` | Channel selector, **hex** (`#h` prefix) — see below |
+| `PLATEREAD` | `#h3F`, `#h81` | Scan mask, **hex** (`#h` prefix) — channels to read plus a sweep-mode bit; decoded in `usb.md` §3.1, and see below for why an authored file always says `#h3F` |
 | `GOTO` | step, repeats | **1-based** step index — unlike the XML |
 | `END` | — | Terminator (`END;` in `runDefinition`, bare `END` in the archive `.txt`) |
 
@@ -195,12 +197,18 @@ Complete verb inventory across all files examined:
 `GOTO 3,39` in `runDefinition` and `optionGotoStep="2"` in `GotoStep`. Any cross-validation
 between the two forms has to account for this.
 
-**The `PLATEREAD` operand is not yet understood.** Every authored `.prcl` uses `#h3F`, which reads
-naturally as a 6-bit all-channels mask (`0b111111`). But the run-time
-`ProtocolRunDefinition.txt` for that same protocol uses **`#h81`** = `0b1000_0001`, which does not
-fit a 6-channel mask at all — bit 7 is outside the channel range. So a plain "bitmask of optical
-channels" reading is inconsistent with the evidence. Until a protocol reading a known channel
-subset is available, **preserve the raw value** rather than decoding it.
+**The `PLATEREAD` operand is a scan mask, and an authored `.prcl` never carries the real one.**
+Bits 0–5 select optical channels 1–6 and bit 7 (`0x80`) picks the sweep — so `#h3F` is
+"all six channels, step-and-repeat" and the run-time `#h81` is "channel 1 only, flyover", the
+fast-scan configuration. `usb.md` §3.1 has the full decoding and the measurements behind it.
+
+What matters here is that the `.prcl` side of it is **not** a channel selection: the structured
+`PlateReadOption` element has no channel field (§2), and every authored file renders the step as
+`#h3F` whatever the run will do. The mask that reaches the instrument comes from the plate
+definition's `scanMode` (`pltd.md` §2), substituted at run start, and is what the recorded
+`ProtocolRunDefinition.txt` reports. So `#h3F` in a `.prcl` means "unspecified", not
+"all channels" — **preserve the raw value** and read the run's actual mask from
+`ProtocolRunDefinition.txt`, `RunInfo.xml`'s `ScanMask`, or any `.Plateread`'s `CHANNELMASK`.
 
 ### 3.1 `.prcl.txt` — this project's own text form
 
@@ -238,11 +246,10 @@ something the instrument reads.
 
 ## 4. Open items
 
-- **The `PLATEREAD` operand** — the biggest open question, since `#h3F` vs `#h81` rules out the
-  obvious 6-bit-channel-mask reading (§3). Resolving it needs either a protocol that reads a known
-  channel subset, or a run whose `.txt` mask can be matched against its actual recorded channels.
-- **Why the authored and recorded masks differ at all** — does the instrument rewrite the operand
-  based on the plate's assigned dyes, or is it a scan-mode encoding independent of the protocol?
+- **Channel subsets in the `PLATEREAD` mask** — the operand itself is decoded (§3, `usb.md` §3.1)
+  and the authored-vs-recorded difference is explained, but only the two whole-configuration masks
+  `#h3F` and `#h81` have ever been observed. Whether a mask selecting an arbitrary subset (or the
+  expected FRET encoding) is even accepted is untested.
 - **`METHOD` values other than `CALC`** — only `CALC` appears in the files examined.
 - **`optionId`** — the constant string `"PlateReadOption"` in every file, so its value space is
   unknown. It may be an enum distinguishing plate-read variants in protocols not seen here.

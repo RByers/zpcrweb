@@ -210,7 +210,7 @@ order:
 | `HOTLID <temp>,<ramp>` | e.g. `HOTLID 105,30` |
 | `VOLUME <µL>` | e.g. `VOLUME 25` |
 | `TEMP <°C>,<seconds>` | one hold step, e.g. `TEMP 95.0,180` |
-| `PLATEREAD #h<hex>` | e.g. `PLATEREAD #h3F` — hex mask, presumably channel/dye selection; not decoded bit-by-bit |
+| `PLATEREAD #h<hex>` | e.g. `PLATEREAD #h3F` — the **scan mask**: which optical channels to read, and how to sweep the plate. Decoded in §3.1 |
 | `GOTO <step>,<count>` | e.g. `GOTO 2,1` — loop back to step 2, 1 more time (2 total passes) |
 | `END` | closes the step list |
 | `ADDCYCLES <n>` | |
@@ -236,6 +236,83 @@ order:
 | `COMPUTEFILECRC "<path>"` | despite the name, does **not** return a CRC — see §5 |
 | `GETFILECRC "<path>"` | `<crc>;0000` |
 | `CRCSENDFILE "<crc>*<path>",<raw bytes>` | file upload, §5 — the one command whose payload is *not* all-ASCII |
+
+### 3.1 `PLATEREAD`'s operand — the scan mask
+
+`PLATEREAD` is the one step command whose operand isn't a temperature or a count, and it is the
+only place in the whole protocol language where a run says *what it will measure* rather than
+*what the block will do*. Two values appear across every capture and every sample in this repo —
+`#h3F` and `#h81` — and the second is what makes the field interesting: read as a plain 6-bit
+channel mask, `0b1000_0001` selects a seventh channel that a CFX96 does not have.
+
+It isn't a plain channel mask. It is **two fields packed into one byte**:
+
+| Bits | Meaning |
+|---|---|
+| 0–5 | one bit per optical channel — bit 0 = channel 1 … bit 5 = channel 6 |
+| 6 | never seen set |
+| 7 (`0x80`) | **sweep mode**: clear = step-and-repeat (stop over each well), set = flyover (scan the plate continuously) |
+
+Which makes the two observed values:
+
+| Operand | Bits | Channels read | Sweep | CFX Manager calls it |
+|---|---|---|---|---|
+| `#h3F` | `0b0011_1111` | all six | step-and-repeat | "All Channels" |
+| `#h81` | `0b1000_0001` | channel 1 only | flyover | fast scan (SYBR/FAM only) |
+
+The wire form is `#h` followed by uppercase hex with no zero-padding, so the operand is one or two
+hex digits, not a fixed width.
+
+**What the value is decided by: the plate, not the protocol.** A `.prcl`'s authored step list has
+no channel information in it at all — its `PlateReadOption` element carries only the marker
+`optionId="PlateReadOption"` (`prcl.md` §2) — and every authored `.prcl` renders the step as
+`PLATEREAD #h3F` regardless of what the run will actually do. The real mask comes from the plate
+definition's `scanMode` attribute (`pltd.md` §2) and is substituted when the run is started, which
+is why the same protocol appears with two different operands in one archive: `#h3F` in the
+`.prcl`, `#h81` in the `ProtocolRunDefinition.txt` the instrument recorded for the run
+(`prcl.md` §3 flags the discrepancy; this is its explanation). **The recorded `.txt` is the one to
+trust** — it is what the instrument was actually told.
+
+**The instrument echoes it back three ways**, which is what makes the decoding checkable rather
+than merely plausible:
+
+- `RunInfo.xml`'s `ScanMask` key — the operand in decimal.
+- every `.Plateread`'s `CHANNELMASK` field (`plateread.md` §4) — the operand verbatim, same bit
+  layout, no reordering.
+- every `.Plateread`'s `SCANMODE` field — `0` for step-and-repeat, `1` for flyover, i.e. exactly
+  bit 7 of the mask on its own. (An unfortunate name: this `SCANMODE` is the *sweep* mode, and is
+  not the plate's `scanMode` attribute, which names the whole configuration.)
+
+And live, on the wire: in `usb-run` CFX Manager sent `PLATEREAD #h3F` as one of the protocol
+authoring commands, and while the read was executing, `STATUS?`'s current-step field echoed the
+command text back unchanged — `…;1;1;PLATEREAD #h3F;4;"SINGLETE",CALC,ON;…`.
+
+**Evidence.** Across the five `.zpcr` samples committed here (Appendix §9 records what a single
+observation does and doesn't settle):
+
+| Sample | Plate `scanMode` | Recorded `PLATEREAD` | `ScanMask` | `CHANNELMASK` / `SCANMODE` | Channels with data |
+|---|---|---|---|---|---|
+| `20190516…SHORT_QUALIF` | `FirstChannelFastSacn` | `#h81` | 129 | 129 / 1 | channel 1 only |
+| `20260725_GRADIENTTEST` | `AllChannelsScan` | `#h3F` | 63 | 63 / 0 | all six |
+| `20230829…SINGLE_STEP_` | — | `#h3F` | 63 | 63 / 0 | — |
+| `20260720_FirstQualification` | — | `#h3F` | 63 | 63 / 0 | all six |
+| `20260726_S183-S185_RVP` | — | `#h3F` | 63 | 63 / 0 | — |
+
+The first row is what pins the low bits down. In the `#h81` run, the `WELLDATA` table's first
+channel slot holds real readings (108 wells, 2222–41106 RFU) and **channels 2–6 are exactly zero
+in every one of its ten plate reads** — so bit 0 selects channel 1, and bit 7 is not a channel at
+all. Every `#h3F` run has all six channels populated.
+
+**For a client.** Preserve the operand as recorded rather than recomputing it; when authoring a
+protocol to send, `#h3F` — read everything, step-and-repeat — is the safe default, and is what
+CFX Manager itself emits for an authored `.prcl`. `packages/core/src/prcl.ts` keeps the raw value
+and does not synthesize one.
+
+> **Future:** two encodings are unconfirmed because nothing here exercises them. A FRET plate is
+> expected to set bit 5 with bit 7 (`#hA0` — channel 6, flyover) by symmetry with fast scan, but
+> no FRET run was captured. And no sample selects an *arbitrary* channel subset (say `#h05` for
+> channels 1 and 3), so whether firmware accepts one, or only the three named configurations, is
+> untested. Don't offer a subset picker on the strength of the bit layout alone.
 
 ## 4. Channel 0 and channel 2 — the binary auxiliary streams (partially understood)
 
@@ -496,8 +573,12 @@ instance, rather than a cross-checked pattern:
 - **Channel 0 and channel 2's byte layout** (§4) — both channels' examples are real and
   byte-exact, but with this little variation in the traffic, no individual byte's meaning is
   confirmed for either.
-- **`PLATEREAD #h<hex>`'s mask** (§3) — only `#h3F` was observed, in a protocol that reads all
-  channels; which bit maps to which channel isn't determined from a single value.
+- **`PLATEREAD #h<hex>`'s per-channel bits** (§3.1) — the mask's two *fields* are cross-checked
+  (five runs, two configurations, three independent echoes of the value), and **bit 0 = channel 1**
+  is measured directly from the one `#h81` run's all-zero channels 2–6. Bits 1–5 mapping to
+  channels 2–6 in order follows by extension: no sample sets any of them individually, so nothing
+  here would distinguish that ordering from another. Nor does anything here exercise bit 6,
+  FRET, or a mask that is neither `#h3F` nor `#h81`.
 
 ## 10. Implementation
 

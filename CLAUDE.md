@@ -251,8 +251,8 @@ one algorithm doc, `calibration.md`, for the color-separation math built on top 
 | [`apps/web/ARCHITECTURE.md`](./apps/web/ARCHITECTURE.md) | Web app design notes. |
 
 `icff.md`, `plateread.md`, `dcal.md`, `pltd.md`, and `prcl.md` are marked **fully decoded** and
-validated against the committed samples in `samples/` — though one `prcl.md` field (the
-`PLATEREAD` operand) remains uninterpreted.
+validated against the committed samples in `samples/`. The last of these to be interpreted was the
+`PLATEREAD` operand — a scan mask, decoded in `usb.md` §3.1.
 `pcrd.md`'s container, plate-read data, and `calibrationCollection` are likewise fully decoded
 and cross-validated bit-for-bit against the matching `.zpcr`; `wellFactorsCollection` is decoded
 too (it is the only source of the per-well gain factors `calibration.md` §4.1 needs), and the
