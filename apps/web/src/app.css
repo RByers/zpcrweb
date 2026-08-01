@@ -2058,6 +2058,14 @@
 }
 .plate__grid {
   table-layout: auto;
+  /* Separate borders, unlike every other `.decoded__grid`: a loaded well tints its own border
+     (see `WellCell`), and under `border-collapse: collapse` two neighbours share one border, with
+     a colour-only conflict resolved in favour of the cell further left/up. A loaded well's tinted
+     left edge therefore lost to its plain neighbour's right edge while its own right edge won —
+     the highlight came out with three sides. Owning all four borders is what makes the tint
+     symmetric (and is also what makes the wells' `border-radius` apply at all). */
+  border-collapse: separate;
+  border-spacing: 0;
   /* One text line inside a well. Both the sample name and each target line are pinned to it so
      the reserved cell height below is exact rather than an estimate of the font's metrics. */
   --plate-well-line: 12px;
