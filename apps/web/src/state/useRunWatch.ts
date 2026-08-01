@@ -28,10 +28,16 @@
  *   megabytes over a 64-byte-packet bulk endpoint for nothing. Bytes are cached by name, and only
  *   names not already held — plus the handful that genuinely change — are fetched. A cycle's
  *   update is then one 22 KB plate read and a small XML.
- * - **The first listing is never downloaded.** `CurrentRun` still holds the *previous* run when
- *   you connect, finished and complete with its `ended` marker. Pulling that unasked would be a
- *   surprise 400 KB transfer and an unrequested file in the bar, so the first sighting only
- *   records the signature to compare later ones against.
+ * - **The first listing is never downloaded — unless it's already running.** `CurrentRun` usually
+ *   holds the *previous* run when you connect, finished and complete with its `ended` marker.
+ *   Pulling that unasked would be a surprise 400 KB transfer and an unrequested file in the bar,
+ *   so the first sighting ordinarily only records the signature to compare later ones against.
+ *   But the folder can just as well hold a run that is genuinely `begun` and not yet `ended` — a
+ *   browser reload mid-run, or the instrument only plugged in (or the app's connect button only
+ *   pressed) after the run had already started — and there the "wait for the next change" rule
+ *   would leave the file bar showing nothing for up to a whole cycle. `runProgressFromNames`
+ *   (`runFolder.ts`) tells the two apart from the same listing, so an in-progress first sighting
+ *   is pulled immediately instead of waited out.
  * - **Nothing is stored about "in progress".** The assembled archive carries the `begun` marker
  *   and not `ended`, which is the whole of how the rest of the app knows (see `runFolder.ts`).
  *   Reload the page mid-run and the file still reads as in-progress, because the fact lives in
@@ -41,7 +47,7 @@
  * `finish` below for why it is both safe and necessary.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { CFX_CURRENT_RUN_DIR, zpcrFromRunFiles } from "@zpcrweb/core";
+import { CFX_CURRENT_RUN_DIR, runProgressFromNames, zpcrFromRunFiles } from "@zpcrweb/core";
 import type { CfxDeviceHandle } from "./useCfxDevice";
 
 /**
@@ -151,9 +157,16 @@ export function useRunWatch(
         const first = signature.current === null;
         const changed = sig !== signature.current;
         signature.current = sig;
-        // See the module comment: the folder already holds the last run when we arrive.
+        // See the module comment: the folder usually holds the last run when we arrive, but not
+        // always — a reload mid-run, or a connect that happens after the run had already started,
+        // presents a first listing that is itself in progress. Don't make that wait for a change.
         if (first && !force) {
-          setNote("Watching for changes to the current run.");
+          if (runProgressFromNames(dir.names).inProgress) {
+            setNote("Found a run already in progress — pulling its current state.");
+            await pull(dir.names);
+          } else {
+            setNote("Watching for changes to the current run.");
+          }
           return;
         }
         if (changed || force) await pull(dir.names);
@@ -190,7 +203,7 @@ export function useRunWatch(
   // That second guard is what stops it firing on connect. An instrument left holding a run that
   // finished yesterday presents exactly the same status, and acknowledging that one would both
   // send an unasked-for command and drag a 400 KB archive nobody requested into the file bar —
-  // the same reason the first listing is never pulled.
+  // the same reason a first listing that turns out to be that stale finished run is never pulled.
   const acknowledged = useRef<string | null>(null);
   const sawRunning = useRef(false);
   useEffect(() => {
@@ -220,10 +233,10 @@ export function useRunWatch(
 
   // --- the baseline listing on connect --------------------------------------------------------
   //
-  // `check`'s `first` case never pulls — it only records what the folder already holds, so a run
-  // already mid-flight when we connect diffs against a real baseline instead of nothing. That
-  // baseline still takes one listing, so it happens once here rather than waiting on whichever of
-  // the edges above happens to fire first.
+  // `check`'s `first` case pulls immediately if the folder is already mid-run, and otherwise just
+  // records what it holds as a baseline to diff later listings against. Either way it takes one
+  // listing, so it happens once here rather than waiting on whichever of the edges above happens
+  // to fire first.
   useEffect(() => {
     if (connection !== "connected" || !watching) return;
     void check();

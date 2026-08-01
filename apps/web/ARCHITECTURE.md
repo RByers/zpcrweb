@@ -1830,9 +1830,13 @@ Each changed listing is pulled and zipped with `zpcrFromRunFiles`, then handed t
   never change during a run; re-pulling them every cycle would push megabytes over a
   64-byte-packet bulk endpoint for nothing. A cycle's update is one 22 KB plate read and a small
   XML. (A name *disappearing* means a different run, and clears the cache.)
-- **The first listing is never pulled.** `CurrentRun` still holds the previous run when you
-  connect — finished, `ended` and all — so the first sighting only records a baseline to diff
-  against, rather than surprising the user with a 400 KB transfer and an unrequested file.
+- **The first listing is never pulled — unless it's already running.** `CurrentRun` usually still
+  holds the previous run when you connect — finished, `ended` and all — so the first sighting
+  ordinarily only records a baseline to diff against, rather than surprising the user with a
+  400 KB transfer and an unrequested file. But a browser reload mid-run, or a connect that happens
+  after the run had already started, presents a first listing that is itself `begun` and not yet
+  `ended`; `runProgressFromNames` tells the two cases apart, and an in-progress first sighting is
+  pulled right away instead of waiting for the next transition or the 30 s backstop.
 - **The refresh doesn't steal the selection.** Every snapshot is a new file id (ids hash name+size,
   and the archive grows), so `addFiles` takes an `activate` option: the new copy becomes active
   only if the user was already on the one it supersedes. That is what makes the Curves view grow a
