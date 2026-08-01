@@ -11,11 +11,14 @@
  * Listing the folder is entirely **edge-triggered**, never on a timer: a `GETFILESLEN`+
  * `LISTALLFILES` round trip holds `useCfxDevice`'s `busy` flag, and a periodic listing here used to
  * flicker the Instrument rail's Start-run button (which disables while `busy`) every 30 s, even
- * with no run in progress. Four edges cover what §7.5 says a client needs, none of them recurring:
- * the step-transition rule above for every read but the last; the §7.6 acknowledgement (`finish`
- * below), which is also where the **last** read — `PLATEREAD` → `IDLE` — actually becomes listable,
- * per §7.5; a run starting, to pick up the `begun`/`calibrationfilescopied` markers promptly and
- * set a fresh baseline; and one baseline listing on connect, below.
+ * with no run in progress. What's left is exactly §7.5/§7.7's own two triggers — the step-transition
+ * rule above for every read but the last, and the §7.6 acknowledgement (`finish` below), which is
+ * also where the **last** read — `PLATEREAD` → `IDLE` — actually becomes listable — plus one
+ * baseline listing on connect, below, needed only to make the "first listing is never downloaded"
+ * rule work at all. Nothing here lists on a run merely *starting*: usb.md doesn't call for it, and
+ * `STATUS?`'s `running` flag already says so live without a listing — the `begun` marker is a
+ * property of the archive this watcher assembles, not of what the rail shows moment to moment, so
+ * it can wait for the first listing a real edge triggers anyway.
  *
  * When a listing turns out to differ from the last one, the folder is pulled and zipped into a
  * `.zpcr` exactly as the Instrument view's **Open run** button does, and handed to the store,
@@ -209,13 +212,12 @@ export function useRunWatch(
   useEffect(() => {
     if (connection !== "connected" || !watching || !status) return;
     if (status.running || !status.runName) {
-      // A new run clears the latch, so the next finish is acknowledged too — and, only on that
-      // same transition (not on every poll tick while it keeps running), lists the folder once to
-      // pick up the `begun`/`calibrationfilescopied` markers and set a fresh baseline.
-      if (status.running && !sawRunning.current) {
+      // A new run clears the latch, so the next finish is acknowledged too. No listing here: the
+      // step-transition rule's first plate read (or the baseline-on-connect pull, for a run found
+      // already going) is what actually surfaces it — see the module comment.
+      if (status.running) {
         acknowledged.current = null;
         sawRunning.current = true;
-        void check();
       }
       return;
     }

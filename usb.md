@@ -989,13 +989,16 @@ polling: the status poll is already running, its current-step field carries the 
 verbatim, and the completed `.Plateread` appears when a `PLATEREAD` step *ends* — so the watcher
 lists the run folder on that transition. Listing is entirely edge-triggered, never on a timer — a
 periodic listing here once made the Start-run button visibly flicker, since a `GETFILESLEN`+
-`LISTALLFILES` round trip holds the busy flag the button disables on. The two cases §7.5 says the
-transition rule alone cannot catch are each their own edge instead: the final read, whose transition
-is to `IDLE`, is caught by the §7.6 acknowledgement (issued automatically when `STATUS?` reports the
-finished-but-still-named state, because the last read and `ended` only appear after it); the marker
-files are caught by a listing on the run *starting* (`STATUS?` going from not-running to running).
-One more listing establishes a baseline on connect, since the folder may already hold a previous,
-finished run when the app arrives.
+`LISTALLFILES` round trip holds the busy flag the button disables on. The one case §7.5 says the
+transition rule alone cannot catch — the final read, whose transition is to `IDLE` — is caught by
+the §7.6 acknowledgement instead, issued automatically when `STATUS?` reports the
+finished-but-still-named state, because the last read and `ended` only appear after it. One more
+listing establishes a baseline on connect: ordinarily it just records what the folder already holds
+(usually a previous, finished run), but when that first listing is itself `begun` and not yet
+`ended` — a reconnect made after a run had already started — it is pulled immediately rather than
+waited out. Nothing lists on a run merely *starting*: `STATUS?`'s `running` flag already says that
+live, and the marker files it would otherwise chase are a property of the archive this watcher
+assembles, not of the rail's live state, so they can wait for whichever real edge lists next.
 
 Each time the listing changes, the folder is pulled — **only the names not already cached**, since
 28 of a `CurrentRun`'s ~40 files are the `.Dcal` set and never change — zipped with

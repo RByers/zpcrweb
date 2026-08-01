@@ -1812,16 +1812,18 @@ plate rather than in the rail, because the fix is to change one of those two fil
 command text verbatim, and a completed `.Plateread` appears when a `PLATEREAD` step *ends* — so the
 watcher lists the run folder on that transition. Listing is **edge-triggered, never on a timer**: a
 periodic listing here used to flicker the Instrument rail's Start-run button, since a
-`GETFILESLEN`+`LISTALLFILES` round trip holds the `busy` flag the button disables on. The two cases
-the transition rule structurally can't catch (both named in §7.5) are each their own edge instead:
-the **final** read, whose transition is `PLATEREAD` → `IDLE`, is caught by the §7.6 acknowledgement
-— when the run finishes (`STATUS?` reports `IDLE` with the run's name still attached) it goes out
-automatically, because the last read and `ended` only appear after it, and that is the one
-instrument-actuating command the app sends on its own, with `useCfxDevice` re-checking the status
-immediately before sending it since the same `CANCEL` aborts a run still cycling; the **marker
-files** are caught by a listing when `STATUS?` shows the run *starting* (not running → running). One
-further listing establishes a baseline when the connection is made, since the folder may already
-hold a finished run from before the app arrived.
+`GETFILESLEN`+`LISTALLFILES` round trip holds the `busy` flag the button disables on. The one case
+the transition rule structurally can't catch — the **final** read, whose transition is `PLATEREAD`
+→ `IDLE` — is caught by the §7.6 acknowledgement instead: when the run finishes (`STATUS?` reports
+`IDLE` with the run's name still attached) it goes out automatically, because the last read and
+`ended` only appear after it, and that is the one instrument-actuating command the app sends on its
+own, with `useCfxDevice` re-checking the status immediately before sending it since the same
+`CANCEL` aborts a run still cycling. One further listing establishes a baseline when the connection
+is made — see "The first listing is never pulled" below for why that one is pulled immediately
+rather than diffed against, on the one path where it isn't a stale finished run. Nothing lists on a
+run merely *starting*: `STATUS?`'s `running` flag already says that live, and the marker files
+(`begun` etc.) are a property of the archive this watcher assembles rather than of the rail's live
+state, so they can wait for whichever real edge lists next.
 
 Each changed listing is pulled and zipped with `zpcrFromRunFiles`, then handed to `store.addFiles`
 — the same path a drop takes. Three economies make that affordable once a cycle:
