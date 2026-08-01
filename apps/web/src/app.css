@@ -244,6 +244,7 @@
   border: 1px dashed var(--border-strong);
   border-radius: var(--radius);
   color: var(--ink-2);
+  cursor: pointer;
   transition: border-color 120ms, background 120ms, box-shadow 120ms;
 }
 .dropzone--large {
