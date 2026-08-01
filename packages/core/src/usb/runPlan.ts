@@ -31,6 +31,7 @@ import { formatRunDefinitionText } from "../prcl.js";
 import {
   parseRunDefinition,
   splitRunDefinition,
+  SCAN_MASK_CHANNELS,
   type RunDefinitionProgram,
 } from "../runDefinition.js";
 import { assertCommandArgument } from "./commands.js";
@@ -180,8 +181,11 @@ const list = (items: (string | number)[]) => items.join(", ");
  * curves are flat zero. Nothing downstream can tell that from a failed reaction, which is why
  * this is an `error` rather than a note.
  *
- * The reverse — reading channels the plate doesn't use — costs only time and is reported as a
- * warning, since a deliberately-broad mask is a reasonable thing to want.
+ * The reverse — reading channels the plate doesn't use — costs only time, and is worth a warning
+ * in exactly one case: an all-6 mask over a channel-1-only plate, where the single-channel mask
+ * would do the same job faster. `#h81`/`#h01` (channel 1) and `#h3F` (all 6) are the only mask
+ * configurations this project has exercised, so for any other plate subset an all-6 mask is the
+ * right thing to send and there is nothing to report.
  */
 export function checkRunPlan(
   program: RunDefinitionProgram,
@@ -238,16 +242,22 @@ export function checkRunPlan(
           "record as zero for the whole run.",
       });
     }
+    // Only the two mask configurations this project has actually exercised are worth mentioning,
+    // and only in the one combination where a *better* mask exists: a channel-1 plate read by an
+    // all-6 mask could be read by the single-channel mask instead, for free. A plate using some
+    // other subset (say channels 1–3) has no tested narrower mask to switch to — all 6 is the
+    // right thing to send — so saying "3 channels are idle" would be noise recommending nothing.
     const idle = mask.channels.filter((c) => !used.includes(c));
-    if (idle.length > 0 && missing.length === 0) {
+    const allChannels = mask.channels.length === SCAN_MASK_CHANNELS;
+    const channelOneOnly = used.length === 1 && used[0] === 1;
+    if (idle.length > 0 && missing.length === 0 && allChannels && channelOneOnly) {
       checks.push({
         severity: "warning",
         code: "channels-idle",
         message:
           `PLATEREAD #h${mask.raw.toString(16).toUpperCase()} reads ${mask.summary}; the plate ` +
-          `uses only channel${used.length > 1 ? "s" : ""} ${list(used)}. Reading ` +
-          `${idle.length} unused channel${idle.length > 1 ? "s" : ""} costs time per cycle but ` +
-          "loses nothing.",
+          "uses only channel 1. Reading the other 5 channels costs time per cycle but loses " +
+          "nothing.",
       });
     }
     // `#h81` — flyover, channel 1 — is the fast-scan configuration, and the only mask observed

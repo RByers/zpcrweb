@@ -96,6 +96,12 @@ describe("checkRunPlan — PLATEREAD against the plate", () => {
     expect(checks.map((c) => c.code)).toContain("channels-idle");
   });
 
+  it("says nothing about idle channels when the plate uses a subset with no tested mask", () => {
+    // Channels 1–3 have no narrower mask this project has exercised, so all 6 is what to send.
+    const checks = checkRunPlan(parseRunDefinition(ALL_CHANNELS), plateUsing([1, 2, 3]));
+    expect(checks).toEqual([]);
+  });
+
   it("errors when the mask omits a channel the plate uses", () => {
     // #h81 reads channel 1 only; this plate also carries dyes on 2 and 4.
     const checks = checkRunPlan(parseRunDefinition(FAST_SCAN), plateUsing([1, 2, 4]));
