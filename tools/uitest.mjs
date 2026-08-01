@@ -1183,11 +1183,13 @@ async function instrumentRunChecks(chrome, origin) {
       num: l.querySelector(".decoded__protonum").textContent.trim(),
       text: l.querySelector(".decoded__prototext").textContent.trim(),
       note: l.querySelector(".decoded__protonote")?.textContent.trim() || "",
+      scan: l.querySelector(".decoded__protoscan")?.textContent.trim() || "",
     }));
     return { lines, annotated: lines.some((l) => l.note.length > 0) };
   })()`);
   const stagedLid = staging.lines.find((l) => l.text.startsWith("HOTLID"));
   const stagedGoto = staging.lines.find((l) => l.text.startsWith("GOTO"));
+  const stagedRead = staging.lines.find((l) => l.text.startsWith("PLATEREAD"));
   check(
     "the staged protocol lists the directives themselves, with no decode column",
     staging.lines.length > 0 &&
@@ -1196,6 +1198,14 @@ async function instrumentRunChecks(chrome, origin) {
       /^GOTO/.test(stagedGoto?.text ?? "") &&
       Number(stagedGoto?.num) > 0,
     JSON.stringify({ annotated: staging.annotated, lid: stagedLid, goto: stagedGoto }),
+  );
+  // …with one exception: a scan mask is a packed byte, so `#h3F` alone doesn't say what would be
+  // read. It keeps its decode on a line of its own, and nothing else picks one up.
+  check(
+    "…except PLATEREAD, whose packed operand keeps its channels and scan mode",
+    /^all 6 channels, step-and-repeat$/.test(stagedRead?.scan ?? "") &&
+      staging.lines.filter((l) => l.scan).length === 1,
+    JSON.stringify({ read: stagedRead, withScan: staging.lines.filter((l) => l.scan).length }),
   );
 
   // Start run belongs to the instrument, not the panel, so it is absent until one is attached.

@@ -1978,6 +1978,15 @@
   font-size: 11px;
   color: var(--ink-muted);
 }
+/* The scan mask's two fields, under the PLATEREAD that packs them into one hex byte — kept even
+   in the unannotated listing (see `ProtocolDecoded`), so it stays under the directive text rather
+   than moving to the reading column the way a note does. */
+.decoded__protoscan {
+  grid-column: 2;
+  font-family: var(--font-ui);
+  font-size: 10px;
+  color: var(--ink-muted);
+}
 @container (min-width: 560px) {
   .decoded__protoline {
     grid-template-columns: 2.2em minmax(14em, max-content) 1fr;

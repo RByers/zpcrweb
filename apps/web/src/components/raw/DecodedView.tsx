@@ -98,22 +98,34 @@ export function RunInfoTable({ text }: { text: string }) {
  * directive per line, numbered as the instrument numbers them. That is what the Instrument view's
  * staging panel wants: there the protocol sits beside a plate map in half the width, and the
  * gloss is a thing you read once, on Overview, not every time you check what would be sent.
+ *
+ * The one exception is a scan mask (`PLATEREAD`/`MELT`'s `#h<hex>` operand, `usb.md` §3.1), which
+ * stays even unannotated, in smaller type on a line of its own: unlike a temperature or a hold
+ * time, that operand is a *packed byte* — which channels are read and how the head sweeps the
+ * plate are not readable from `#h3F`, and they are exactly what someone checks before a run.
  */
 export function ProtocolDecoded({ text, annotated = true }: { text: string; annotated?: boolean }) {
   const program = useMemo(() => parseRunDefinition(text), [text]);
   return (
     <div className="decoded">
       <div className="decoded__proto mono">
-        {program.directives.map((d) => (
-          <div
-            key={d.index}
-            className={"decoded__protoline" + (d.stepNumber === undefined ? " is-setup" : "")}
-          >
-            <span className="decoded__protonum">{d.stepNumber ?? ""}</span>
-            <span className="decoded__prototext">{d.text};</span>
-            {annotated && <span className="decoded__protonote">{d.description}</span>}
-          </div>
-        ))}
+        {program.directives.map((d) => {
+          const scan = "scanMask" in d ? d.scanMask : undefined;
+          return (
+            <div
+              key={d.index}
+              className={"decoded__protoline" + (d.stepNumber === undefined ? " is-setup" : "")}
+            >
+              <span className="decoded__protonum">{d.stepNumber ?? ""}</span>
+              <span className="decoded__prototext">{d.text};</span>
+              {annotated ? (
+                <span className="decoded__protonote">{d.description}</span>
+              ) : (
+                scan && <span className="decoded__protoscan">{scan.summary}</span>
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );

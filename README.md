@@ -246,7 +246,9 @@ the selection but opens on its Overview; a staged `.plt.csv` takes its dye→cha
 from the run it is paired with, including when that run supplies neither half and is there only
 as the instrument)
 and Start run appears only with an instrument attached, and the staged protocol is the directives
-alone — the plain-English reading of each one belongs to Overview, which is where it is asserted —
+alone — the plain-English reading of each one belongs to Overview, which is where it is asserted,
+save the `PLATEREAD` scan mask, whose channels and sweep mode are a packed byte the text can't
+show and so stay on a sub-line of their own —
 and that a `.prcl.txt` is a document as
 well as an input: it enables Overview and Instrument and nothing else, and its Overview reports
 the protocol's own settings from the decode — and how a run is *named*: the file bar shows an

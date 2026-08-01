@@ -530,7 +530,8 @@ so every call site keeps writing one `onChange({ … })` regardless of where the
   and **parses nothing itself**: the verbs, the step numbering `GOTO` counts in, and the
   `PLATEREAD` scan mask are all core's, per [`protocol.md`](../../protocol.md). Takes plain
   `text`, so `OverviewView` and the Instrument view's staged protocol reuse it unchanged — the
-  latter with `annotated={false}`, which drops the reading column and leaves the program itself.
+  latter with `annotated={false}`, which drops the reading column and leaves the program itself
+  (plus the scan mask's channels and sweep mode, on a sub-line — a packed operand no text says).
 - **`.prcl`** → `DecodedProtocol` (`components/raw/DecodedProtocol.tsx`), which decrypts the
   entry and renders `ProtocolDetail`: when the XML `protocol2` payload parsed into a step list,
   a settings panel (lid/shutoff/volume/real-time — flags the text grammar has no directive for)
@@ -1763,7 +1764,10 @@ doesn't: the loaded protocol is the active file while the *run* is the chip this
 The staged protocol is rendered by the same `ProtocolDecoded` with `annotated={false}` — the
 directives and their step numbers, no plain-English column. The gloss belongs to the protocol *as
 a document* (Overview); here the protocol shares half the panel with a plate map, and the question
-is what would be sent, not what the language means.
+is what would be sent, not what the language means. A **scan mask** survives that cut, in smaller
+type on a line below its `PLATEREAD`: `#h3F` is a packed byte (`usb.md` §3.1), so which channels
+are read and how the head sweeps the plate are not in the text at all — and they are what someone
+checks before starting a run.
 
 The `CfxDevice` lives in a **ref**, not state: it is a long-lived object with a background read
 loop, and a re-render must not be able to look like a new connection — `open()` on an
