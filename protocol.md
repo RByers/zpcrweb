@@ -267,7 +267,7 @@ PLATEREAD #h3F                                → 0000
 GOTO 2,1                                      → 0000
 END                                           → 0000
 RemoteRun "A","True","False","singletest","admin","","True","CALC"   → 0000
-PROCEED                                       → 0000     (≈2 min later — the operator at the lid)
+PROCEED                                       → 0000     (3½ min later, mid-run — skips a step)
 ```
 
 Three things this adds to the stored forms:
@@ -276,14 +276,17 @@ Three things this adds to the stored forms:
   file has no analogue on the wire. `END` is a command like any other, not a terminator character.
 - **Every directive is acknowledged individually** with the bare `0000` of `usb.md` §3 — a
   malformed step fails at the step, not at the end.
-- **`RemoteRun` starts it**, and carries what the protocol text cannot: which block, whether the
-  lid is on, the run name, the operator, a sample ID, and the method again. Its eight positional
-  operands are `<block>,<lid on>,<remote start>,<protocol name>,<user>,<sample ID>,<sierra
-  mode>,<method>`.
+- **`RemoteRun` starts it** — on that command, with nothing further required — and carries what the
+  protocol text cannot: which block, whether the lid is on, the run name, the operator, a sample
+  ID, and the method again. Its eight positional operands are `<block>,<lid on>,<remote
+  start>,<protocol name>,<user>,<sample ID>,<sierra mode>,<method>`. The `PROCEED` above is *not*
+  part of starting it: the run was already 3½ minutes in, and `PROCEED` skipped the rest of the
+  step it was on (`usb.md` §7.5).
 
 `ADDCYCLES <n>` extends the running protocol's loop after the fact; the capture sends `ADDCYCLES
 0`, a no-op, as part of ordinary run setup. Everything else about run control — `PROCEED`,
-`CANCEL`, `PAUSE`/`RESUME` — is instrument state, not protocol language, and lives in `usb.md` §3.
+`CANCEL`, `PAUSE`/`RESUME` — is instrument state, not protocol language, and lives in `usb.md` §3;
+the full start-to-finish sequence a run is embedded in is `usb.md` §7.
 
 > **Not implemented here.** `packages/core/src/usb/` reads an instrument and retrieves files; it
 > does not author protocols or start runs (`usb.md` §10). The Device view's protocol staging panel

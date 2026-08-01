@@ -23,6 +23,13 @@ rather than the sanity check it looked like (§5), what the header's `passThroug
 (§2), and what the two binary `GETFILESLEN` replies mean — "empty" and "no such directory", not
 "unlistable" (§5). Those are marked **measured live** where they appear.
 
+**§7 is the run.** §1–§5 are the protocol's pieces in isolation; §7 reconstructs the complete
+sequence a run is made of — pre-flight, authoring, start, file deposit, plate-read collection,
+finish — in the order it actually goes out. Reading it changes two things a reader of §5 alone
+would get wrong: the uploaded `.prcl`/`.pltd` are not what starts a run (they arrive after it is
+already running), and `PROCEED`/`CANCEL` are "skip a step" and "acknowledge the finished run", not
+"start" and "abort".
+
 ## 1. Device identity and topology
 
 The instrument enumerates as a single USB device (not a hub with sub-devices) with:
@@ -215,8 +222,8 @@ order:
 | `END` | closes the step list |
 | `ADDCYCLES <n>` | extends the running protocol's loop; the capture sends `ADDCYCLES 0`, a no-op, as ordinary run setup |
 | `RemoteRun "<block>","<lid on>","<remote start>","<name>","<user>","<sample ID>","<sierra mode>","<method>"` | e.g. `RemoteRun "A","True","False","singletest","admin","","True","CALC"` — starts the authored protocol, carrying what the protocol text cannot (`protocol.md` §7) |
-| `PROCEED` | resumes/confirms a run (there was a ~2-minute gap between `RemoteRun` and `PROCEED` in the capture — almost certainly the operator closing the lid and confirming on the touchscreen) |
-| `CANCEL` | seen once, immediately after the first plate read was pulled. The subsequent `LISTALLFILES` response only gains the `ended` marker and the second plate read (`Read00002.Plateread`) *after* this command — strong evidence this is normal run-finished cleanup rather than a user abort, though it isn't confirmed from firmware source |
+| `PROCEED` | **skips to the next step** of a running protocol. Not a start or a resume: it was sent 215 s into a run, while a 3-minute hold still had time left, and the very next `STATUS?` was on the following step — §7.5 |
+| `CANCEL` | **acknowledges a finished run**, clearing the run name the instrument keeps holding after the protocol ends; §7.6 has the `STATUS?` transition that shows this, and the run's final `Read0000N.Plateread` is picked up after it. It is presumably also the abort, but nothing here aborts a run in progress |
 | `LID OPEN` / `LID CLOSE` | motorised lid control. In `usb-basic` the operator opened and then closed the lid, and the pair appears in exactly that order. Note CFX Manager emits `LID OPEN` **three times** for one open (t=…010.7, …018.5, …026.5) and `LID CLOSE` once — the repeat looks like the UI re-asserting while the lid travels, not three separate requests. `usb-run` has three `LID OPEN` and no `LID CLOSE`, matching an operator who opened it to load a plate and closed it at the touchscreen instead |
 | `FRONTENDLOCKED ON`/`OFF` | `ON` appears once in `usb-basic`; `OFF` once, at the very end of `usb-run` |
 | `TESTMODE <n>` | e.g. `TESTMODE 3`, issued at the very start of both captures |
@@ -358,15 +365,16 @@ IN   02 00 00 00 22  01 00 00 00 00 00 01 00 00 00 00 00 00 00 00 00 00 00 07 27
 
 ## 5. File transfer — how a run is actually loaded and read back
 
-This is the practically important part for a WebUSB client that just wants to run an existing
-protocol and pull results, and it's simpler than the ASCII `PROGRAM`/`TEMP`/`GOTO` authoring
-commands in §3 might suggest: **the protocol and plate map are uploaded as complete files**, in
-exactly the same encrypted-ZIP container this project's `.pltd`/`.prcl` parsers already decode
-(see `pltd.md`, `prcl.md`, `zipcrypto.md`) — not built up command-by-command on the wire. `PROTOCOL`/
-`METHOD`/`TEMP`/`GOTO` (§3) *were* also issued in the captured run, in parallel — CFX Manager
-appears to author the run both ways (an ASCII step list *and* the equivalent `.prcl`/`.pltd`
-files); which one the firmware actually executes wasn't determined from this capture, but the file
-upload is the one that matters for reproducing a run without re-deriving the ASCII step grammar.
+This section is the file-transfer *mechanism* — how bytes move in either direction. What a run
+does with it, and in what order, is §7.
+
+A run involves both directions: the protocol and plate map are also **uploaded as complete files**,
+in exactly the same encrypted-ZIP container this project's `.pltd`/`.prcl` parsers already decode
+(see `pltd.md`, `prcl.md`, `zipcrypto.md`), and the results come back down the same way. Note that
+the upload is *not* how the instrument is told what to run — the ASCII `PROTOCOL`/`METHOD`/`TEMP`/
+`GOTO` directives of §3 are, and they precede the start while the files follow it (§7.3, §7.4).
+The uploaded pair is a record deposited in the run folder, which is why §5.1's conclusion — that
+the instrument probably never decrypts either file — is consistent with a run working at all.
 
 **Upload**, one command per file, no separate chunking protocol observed (small files went in one
 message; see §2's note on message-vs-USB-packet size):
@@ -375,10 +383,14 @@ message; see §2's note on message-vs-USB-packet size):
 CRCSENDFILE "<crc>*<device path>",<raw file bytes>
 ```
 
-`<crc>` is the client's own CRC of the file it's about to send — not a session ID or ticket number,
-and not a length field. This is confirmed end-to-end, not guessed: `usb-run` uploaded four files,
-and for every one of them, the CRC the device reports back after the upload (via
-`COMPUTEFILECRC`/`GETFILECRC`, below) matches the `<crc>` CFX Manager sent up front, exactly:
+`<crc>` is the client's own checksum of the file it's about to send — not a session ID or ticket
+number, and not a length field. Despite the command name it is **not a CRC**: it is a
+byte-interleaved XOR (XOR the even-indexed bytes into a high byte, the odd-indexed into a low one,
+combine as `(even << 8) | odd`), written as **5 zero-padded decimal digits**. That formula
+reproduces all four uploads in the capture exactly; §7.4 has it written out and notes what it does
+and doesn't catch. The round trip is confirmed end-to-end, not guessed: for every one of the four
+files, the value the device reports back after the upload (via `COMPUTEFILECRC`/`GETFILECRC`,
+below) matches the `<crc>` sent up front, exactly:
 
 | File | `<crc>` sent | Upload size | GUID `COMPUTEFILECRC` returned | `GETFILECRC` on that GUID |
 |---|---|---|---|---|
@@ -390,11 +402,13 @@ and for every one of them, the CRC the device reports back after the upload (via
 That resolves what was previously two separate open questions about this sequence into one
 mechanism. The full per-file sequence observed:
 
-1. `DELFILE <friendly path>` — clear any stale file at the well-known name.
+1. `DELFILE <friendly path>` — clear any stale file at the well-known name. Answers `0000` if one
+   was there, the `05 00 09 00` `passThrough` payload below if not; both are fine.
 2. `CRCSENDFILE "<crc>*<friendly path>",<bytes>` — upload, `<crc>` computed by the client beforehand.
 3. `COMPUTEFILECRC "<friendly path>"` — **despite the name, this doesn't return a CRC.** The
    device stores the just-uploaded file under a generated GUID name rather than the friendly one,
-   and this is the call that hands that GUID name back: the response is `<dir>\<GUID>;0000`.
+   and this is the call that hands that GUID name back: the response is `<dir>\<GUID>;0000`. The
+   GUID entry is short-lived (§7.4) — use it for step 5 and don't keep it.
 4. `GETFILESLEN`/`LISTALLFILES <dir>` — the host re-lists the directory. The GUID name is already
    in hand from step 3 by this point, so the *purpose* here looks like a UI refresh — but the
    pairing itself is mandatory, not incidental. See "Listing a directory" below.
@@ -403,7 +417,11 @@ mechanism. The full per-file sequence observed:
    above).
 
 The observed upload order across a run's four files: `GlobData.xml`, the `.pltd` plate map,
-`RunInfo.xml`, the `.prcl` protocol.
+`RunInfo.xml`, the `.prcl` protocol — all four *after* the run has already started (§7.4).
+
+Nothing here uploads a file large enough to need splitting (the largest is 17 KB, and §2 records
+that a whole file went out as one logical message). Whether there is a ceiling, and what a client
+should do at it, is untested.
 
 ### 5.1 There is no protocol library on the instrument, and probably no decryption either
 
@@ -459,6 +477,7 @@ a dozen paths):
 |---|---|---|
 | `07 00 09 00` | **Directory exists, but holds no files.** Listings cover files only, so a directory containing nothing but subdirectories reports this. | `\Storage Card`, `\Temp`, `\My Documents` |
 | `04 00 09 00` | **No such directory** — including a path that names a *file*, and a `GETFILESLEN` with no argument at all. | `\Nonexistent`, `\Storage Card\NoSuchDir`, `\Storage Card\CurrentRun\runlog.xml`, `\Application Data` |
+| `05 00 09 00` | **No such file** — the same family, seen from `DELFILE` rather than `GETFILESLEN`: deleting a file that isn't there answers with this instead of `0000` (§7.4). Not an error; a client clearing a destination before an upload should accept it. | three of the four `DELFILE`s that precede a run's uploads |
 
 So `\Storage Card` is not a special case in the protocol, and the volume root is not what matters:
 `\` itself lists fine (`17;0000` → `Control Panel.lnk`), as does `\Windows` (`4632`).
@@ -496,43 +515,287 @@ opened further here.
 ## 6. What's still a real gap
 
 The captures used here never triggered the optical head's own scan command surface. Both plate
-reads in `usb-run` came from firmware executing a `PLATEREAD` step already baked into the uploaded
-protocol, autonomously, with the result simply pulled off afterward as a file — the host never had
+reads in `usb-run` came from firmware executing a `PLATEREAD` step already baked into the authored
+protocol (§7.2), autonomously, with the result simply pulled off afterward as a file — the host never had
 to speak to the optical head directly. **This means a WebUSB client that only needs to run an
 existing protocol and collect its plate reads does not need to reverse the optical protocol at
 all** — §2 through §5 are sufficient for that. Only a client that wants to trigger a scan *outside*
 of a running protocol (e.g. a manual single-read, or calibration) would need §4 characterized
 further, or a capture that actually exercises that path.
 
-## 7. Minimal sequence for a WebUSB client
+## 7. Performing a run
 
-Putting §1–§5 together, the shape of a client that loads and runs an existing `.prcl`/`.pltd` pair
-and collects the plate reads:
+§3 and §5 give the vocabulary; this section is the **order the pieces go in**, start to finish,
+reconstructed command-by-command from `usb-run` — the one capture in which a complete run happens.
+It describes what a client has to do, not what CFX Manager's UI happens to do around it: the
+timings and the one operator intervention are that instrument and that operator, the sequence is
+the protocol.
 
-1. `navigator.usb.requestDevice({ filters: [{ vendorId: 0x0614 }] })`, `open()`, `selectConfiguration(1)`,
-   `claimInterface(0)`.
+Six phases, and the shape is not what §5's upload machinery suggests:
+
+| Phase | What happens | §  |
+|---|---|---|
+| 1. Pre-flight | a burst of readiness queries; clear the old run report | 7.1 |
+| 2. Author | the protocol typed in as ASCII directives, one per command | 7.2 |
+| 3. Start | `RemoteRun` — **the run begins here**, on this command | 7.3 |
+| 4. Deposit | the four host-side files copied into the run folder, *after* the start | 7.4 |
+| 5. Watch | poll `STATUS?`; pull each `Read0000N.Plateread` as its step completes | 7.5 |
+| 6. Finish | acknowledge the finished run with `CANCEL`; pull the last read and the report | 7.6 |
+
+Throughout all six, the §3 polling loop — `STATUS?`, `ERRORLIST A`, `RTSTATUS?`, about once a
+second — never stops. Everything below is interleaved into it, not substituted for it.
+
+**The headline correction.** Reading §5 alone, the obvious model is "upload the protocol, then tell
+the instrument to run it". That is not what happens. The protocol is **typed in as ASCII
+directives** (§7.2) and `RemoteRun` starts *that*; the `.prcl`/`.pltd` upload begins **13 seconds
+after `RemoteRun`, with the run already under way** and cannot be what the instrument executes.
+§5.1 argued from
+the sample archives that the instrument probably never decrypts a `.prcl`; the ordering here is the
+direct wire evidence for the same conclusion. The files are a **deposit**, not an instruction —
+see §7.4.
+
+### 7.1 Pre-flight
+
+A burst of queries that appears nowhere else in `usb-run` — each of them exactly here, and four of
+them once more after the run ends, which is what marks the burst as run setup rather than either
+the ordinary polling of §3 or the connection-time identification burst §3 describes:
+
+```
+WORKING?  BOOTMODE?  BLOCKCOUNT?  VOLUME?  ALPHAID?  BLOCKCOUNT?
+ERRORS?   SELFTEST?  ENABLERT?    ALPHAID?           SUPERLOCKDOWNMODE?
+```
+
+The repeats are as observed — the burst is not deduplicated. Read as a readiness check it is
+coherent: the front end is alive (`WORKING?`) and not in bootloader (`BOOTMODE?`), the block is
+the one expected (`ALPHAID?`, `BLOCKCOUNT?`), nothing is faulted (`ERRORS?`, `SELFTEST?`), and the
+instrument isn't locked against remote control (`SUPERLOCKDOWNMODE?` → `OFF`). A client can send as
+much or as little of this as it wants; none of it changes instrument state.
+
+Then the **run-report directory is cleared** — the previous run's report is deleted before the new
+run creates one:
+
+```
+GETFILESLEN  \Storage Card\PCRunReport   → 41;0000
+LISTALLFILES \Storage Card\PCRunReport   → 20260725_124811_CT019138_GRADIENTTEST.alf;0000
+DELFILE      \Storage Card\PCRunReport\20260725_124811_CT019138_GRADIENTTEST.alf   → 0000
+```
+
+This is worth copying rather than skipping: `\Storage Card\PCRunReport` then holds exactly one
+`.alf`, so in §7.6 the new report is identifiable without matching names or timestamps.
+
+### 7.2 Authoring the protocol
+
+Each directive of the protocol language is its own command frame, each acknowledged with a bare
+`0000`. **`protocol.md` §7 is the authority for this half** — the grammar, the operand meanings,
+and why the wire form has no `;` separator. In brief, and in the order sent:
+
+```
+PROTOCOL 'PCRUN'          METHOD CALC   HOTLID 105,30   VOLUME 25
+TEMP 95.0,180   TEMP 95.0,10   TEMP 55.0,30   PLATEREAD #h3F   GOTO 2,1   END
+```
+
+Two things about `PROTOCOL`'s operand. It is **not the run's name** — the name travels in
+`RemoteRun` (§7.3), and the run this capture performed is called `singletest` everywhere it
+matters (`STATUS?`, the `.alf`) while `PROTOCOL` says `PCRUN`. And it is not a *lookup*: §5.1
+establishes there is no stored-protocol library to select from, so this names the protocol being
+authored right now, into the one slot the instrument has. `PCRUN` reads as a fixed placeholder for
+a PC-driven run, and a client has no reason to send anything else.
+
+`PLATEREAD`'s operand is the scan mask of §3.1 — take it from the plate, not from the authored
+protocol.
+
+### 7.3 Starting — `RemoteRun`
+
+```
+RemoteRun "A","True","False","singletest","admin","","True","CALC"   → 0000
+```
+
+Eight positional operands: `<block>,<lid on>,<remote start>,<run name>,<user>,<sample ID>,<sierra
+mode>,<method>` (§9 records which four are corroborated and which three are named from the language
+rather than demonstrated).
+
+**The run starts on this command, with nothing further required.** Measured: `RemoteRun` returned
+`0000`, and 11 s later `STATUS?` left `IDLE` for
+`…;1;1;TEMP 95.0,180;1;"SINGLETE",CALC,ON;…` — cycle 1, step 1, the authored run name, the lid
+`ON`. No confirmation, no second command. With `<remote start>` = `"False"`, "wait for someone to
+press start at the instrument" is evidently what the client is *declining*.
+
+What follows the start is the lid: for the next ~180 s the lid temperature climbs 19 → 95 °C while
+the block sits at ambient 17 °C, and only then does the block ramp. A client that expects to see
+block temperature move immediately will think the run has hung. `STATUS?`'s step-remaining field
+does not tick during this phase either.
+
+Two more commands appear here, both optional: `VOLUME?` (reading back the `VOLUME 25` just set —
+a verification, and note the instrument reverts to its own value once the run ends) and
+`ADDCYCLES 0`, a no-op form of the command that extends a running loop.
+
+### 7.4 Depositing the run's files
+
+**Thirteen seconds after the run is already under way**, four files are copied into
+`\Storage Card\CurrentRun\`, in this order:
+
+| # | File | Size | What it is |
+|---|---|---|---|
+| 1 | `GlobData.xml` | 17,299 | the *host's* inventory — machine name, user, and a 114-entry list of the PC software's own files and versions |
+| 2 | `QuickPlate_96 wells_All Channels.pltd` | 1,821 | the plate map, as the encrypted ZIP of `pltd.md` |
+| 3 | `RunInfo.xml` | 8,751 | run metadata, including the `ScanMask` echo of §3.1 |
+| 4 | `singletest.prcl` | 1,291 | the protocol, as the encrypted ZIP of `prcl.md` |
+
+Each one goes through the same five-command cycle of §5 — `DELFILE`, `CRCSENDFILE`,
+`COMPUTEFILECRC`, `GETFILESLEN`+`LISTALLFILES`, `GETFILECRC` — with the returned checksum matching
+the one sent, all four times.
+
+**What this is for.** It cannot be the instruction to run: `STATUS?` had been reporting the run's
+first step for 13 s by the time the first byte of it went out. What it does do is make the run
+folder self-contained. The instrument writes its *own* record of the
+protocol as the plaintext `ProtocolRunDefinition.txt`, transcribed from the §7.2 directives; the
+`.prcl`/`.pltd` pair deposited here is the host's richer version — plate map, well contents, dye
+assignments, none of which the directive list can express — so that when the whole directory is
+later zipped into a `.zpcr` (§7.6), the archive reopens with everything the PC knew about the run.
+`GlobData.xml` is provenance in the same spirit. **A client that only wants to run a protocol and
+read the fluorescence can skip this phase entirely**; a client that wants the run to open later as
+a complete experiment should not.
+
+**The upload checksum is not a CRC** — it is a byte-interleaved XOR, and it reproduces all four
+uploads exactly:
+
+```
+even = 0; odd = 0
+for i, b in file:  (i even ? even : odd) ^= b
+checksum = (even << 8) | odd          → formatted as 5 zero-padded decimal digits
+```
+
+`GlobData.xml` → `24700`, the `.pltd` → `05672`, `RunInfo.xml` → `49503`, the `.prcl` → `46850`,
+each matching both the value sent in `CRCSENDFILE` and the value `GETFILECRC` returns for the
+stored file. It is a weak check — any two bytes swapped an even distance apart is invisible to it —
+but it is the one the instrument agrees with, and the zero-padded 5-digit format is fixed (`05672`,
+not `5672`), so a client must format it that way going out even though `GETFILECRC` answers back
+unpadded.
+
+Three details of the cycle that only this sequence shows:
+
+- **`DELFILE` on a file that isn't there** answers with a `passThrough` binary payload (§2) of
+  `05 00 09 00` — a third member of §5's status-code family, "no such file", alongside
+  `07 00 09 00` (empty directory) and `04 00 09 00` (no such directory). Three of the four
+  `DELFILE`s got it, and the fourth — `RunInfo.xml`, left over from the previous run — got a plain
+  `0000`. Neither is an error; a client should accept both and continue.
+- **The GUID is transient.** `COMPUTEFILECRC` hands back `<dir>\<GUID>` (§5), and the listing taken
+  immediately after contains that GUID *and* the friendly name; by the next file's listing the GUID
+  is gone and only the friendly name remains. So the GUID is a staging copy with a short life —
+  use it for the `GETFILECRC` that follows and don't retain it.
+- **The listing in the middle of the cycle is a UI refresh**, not a protocol requirement — the GUID
+  is already known from `COMPUTEFILECRC`. The `GETFILESLEN`+`LISTALLFILES` *pairing* is mandatory
+  (§5); this particular pair of listings is not.
+
+### 7.5 Watching the run, and pulling plate reads
+
+`STATUS?` is the whole mechanism. Its current-step field carries the step's command text verbatim,
+so while a plate read executes it reads `PLATEREAD #h3F` (§3.1's live echo), and **the completed
+`.Plateread` file appears when that step ends**. The host does not poll the filesystem waiting for
+it — it watches `STATUS?` for the step to change, and reacts:
+
+```
+STATUS? → …;1;1;PLATEREAD #h3F;4;"SINGLETE",CALC,ON;…      the read is running
+STATUS? → …;2;2;TEMP 95.0,10;2;"SINGLETE",CALC,ON;…        step moved on, cycle 2
+GETFILESLEN  \Storage Card\CurrentRun          → 798;0000    ← 200 ms later
+LISTALLFILES \Storage Card\CurrentRun          → …,Read00001.Plateread;0000
+GETFILESIZE  \Storage Card\CurrentRun\Read00001.Plateread   → 22037;0000
+GETFILE      \Storage Card\CurrentRun\Read00001.Plateread   → 22,037 raw bytes
+```
+
+Reads are numbered `Read00001.Plateread`, `Read00002.Plateread`, … in execution order and are
+exactly the format `plateread.md` documents. `GETFILE`'s reply is raw bytes with no `;0000` — see
+§5's warning about not putting it through the response parser.
+
+**The last read of a run needs separate handling.** When the final `PLATEREAD` is also the last
+step, the transition this whole mechanism watches for is `PLATEREAD` → `IDLE`, not `PLATEREAD` →
+another step, and in the capture no listing was attempted at that moment at all: the second read
+was picked up after the run was acknowledged (§7.6), 66 s later. Whether it would have been
+listable earlier is untested — so a client should re-list once at the end rather than assume the
+step-transition rule caught everything.
+
+The run folder also accumulates **marker files** the instrument writes as it goes:
+`calibrationfilescopied` and `begun` are already there by the first listing after the start,
+`lastplatereadstatus` appears alongside the first plate read, and `ended` plus `ProtocolName.txt`
+at the finish. They are a coarse second source of run state, and `ended` is the filesystem-visible
+answer to "is it done"; `STATUS?` is the faster one.
+
+**`PROCEED` is "skip to the next step", not "resume" or "confirm".** This corrects what §3's table
+guessed from a two-minute gap in the capture. Measured: `PROCEED` went out 215 s after `RemoteRun`,
+while `STATUS?` was reporting step 1 — `TEMP 95.0,180`, a 3-minute hold the block had only reached
+95 °C for 9 s earlier, so it cannot have run out — and the very next poll, 1.1 s later, reported
+step 2. It did not start the run (§7.3 shows the run started at `RemoteRun`) and there was nothing
+paused to resume. The operator was cutting the initial denaturation short.
+
+### 7.6 Finishing
+
+When the protocol completes, `STATUS?` reports a state that is neither running nor truly idle:
+
+```
+…;0;0;IDLE;0;"SINGLETE",CALC,OFF;32;192.13;…      finished, still holding the run
+…;0;0;IDLE;0;"",BLOCK,OFF;0;0.00;…                 idle — after CANCEL
+```
+
+The step is `IDLE` and the cycle counters are 0, but the **run name is still attached** and the
+method still reads `CALC` — the instrument is holding the finished run. `CANCEL` clears it to the
+empty-name `"",BLOCK,OFF` idle of §3. So `CANCEL` here is an acknowledgement, not an abort; §3
+inferred that from the listing, and this state transition is the direct evidence. Sequence:
+
+```
+CANCEL                                          → 0000
+ERRORS?                                         → 0;0000    (twice, a few seconds apart)
+GETFILESLEN + LISTALLFILES \Storage Card\CurrentRun    → now with `ended`, Read00002, ProtocolName.txt, and the .alf
+GETFILESIZE + GETFILE      …\Read00002.Plateread       → the final read
+GETFILESLEN + LISTALLFILES \Storage Card\PCRunReport   → 20260731_213926_CT019138_SINGLETEST.alf
+GETFILESIZE + GETFILE      …\<that file>               → the run report
+```
+
+The report's name is `<yyyymmdd>_<hhmmss>_<serial>_<RUN NAME>.alf`, and because §7.1 emptied the
+directory it is the only entry. It is small (693 bytes here) and its first line is a `*`-separated
+summary — run name, user, block serials, model, start/end/elapsed times, lid temperature, volume.
+The same `.alf` is also copied into `\Storage Card\CurrentRun`, so a client taking the whole folder
+gets it either way.
+
+Finally, `FRONTENDLOCKED OFF` releases the instrument's touchscreen, which was locked for the
+duration of the PC-driven session (`ON` appears in `usb-basic`, at the other end of the same
+mechanism). A client that locks the front end must release it; one that never locked it has nothing
+to undo.
+
+### 7.7 Minimal client sequence
+
+Putting §1–§5 and the above together — the shape of a client that runs a protocol and collects its
+plate reads:
+
+1. `navigator.usb.requestDevice({ filters: [{ vendorId: 0x0614 }] })`, `open()`,
+   `selectConfiguration(1)`, `claimInterface(0)`.
 2. Send `*IDN?` (§3) over endpoint 2 OUT, read the response on endpoint 6 IN, to confirm framing
    and identify the unit. Read the IN endpoint with **one loop that reassembles and demultiplexes
    by channel**, not a read-per-command: channel 2 carries unsolicited traffic (§2, §4), so a
    per-command reader eventually returns a channel-2 payload as the answer to a channel-1 query
    and every reply after it is off by one.
-3. Poll `STATUS?`/`RTSTATUS?`/`ERRORLIST A` (§3) — not strictly required, but this is what every
-   real client does between commands and is a cheap liveness/error check.
-4. Upload the plate map and protocol with `DELFILE`/`CRCSENDFILE`/`COMPUTEFILECRC`/`GETFILECRC`
-   for each file (§5), comparing the CRC that comes back against the one sent — the well-known
-   destination paths seen were under `\Storage Card\CurrentRun\`.
-5. `RemoteRun "A","True","False","<name>","<user>","","True","<method>"`, then wait for the
-   operator (or, for an unattended flow, whatever confirms lid closure) before `PROCEED`.
-6. Poll `STATUS?` for step/cycle progress; each `PLATEREAD` step produces a new
-   `Read0000N.Plateread` under `\Storage Card\CurrentRun\` — pull each with `GETFILESIZE` +
-   `GETFILE` (§5) and decode with the existing `plateread.md`/`packages/core` parser. To discover
-   them, list the directory with the mandatory `GETFILESLEN` + `LISTALLFILES` pair (§5), keeping
-   the two adjacent.
-7. After the run, pull the `.alf` report from `\Storage Card\PCRunReport\` the same way, if wanted.
-8. To take the *whole* run rather than its pieces: pull every file `LISTALLFILES` reported for
-   `\Storage Card\CurrentRun` and zip them unchanged — a `.zpcr` is a plain ZIP of exactly that
-   directory, so no conversion is involved. `zpcrFromRunFiles` (`packages/core/src/runFolder.ts`)
-   does this, and is what the web app's Instrument view "Open run" button calls.
+3. Start the polling loop — `STATUS?`/`RTSTATUS?`/`ERRORLIST A` (§3), ~1 Hz — and keep it running
+   for everything below. It is both the liveness check and, from §7.5, the run's only real progress
+   signal.
+4. Pre-flight (§7.1): confirm `SUPERLOCKDOWNMODE?` is `OFF` and `ERRORS?` is `0`; clear
+   `\Storage Card\PCRunReport` of the previous `.alf`.
+5. Author the protocol (§7.2, `protocol.md` §7): `PROTOCOL 'PCRUN'`, the `METHOD`/`HOTLID`/`VOLUME`
+   header, one command per step, `END`. Check every `0000`; a bad step fails at that step.
+6. `RemoteRun "A","True","False","<name>","<user>","","True","<method>"` (§7.3) — **this starts
+   it.** Expect `STATUS?` to leave `IDLE` within ~10 s, and expect the lid, not the block, to heat
+   first.
+7. Optionally deposit `GlobData.xml`/`.pltd`/`RunInfo.xml`/`.prcl` into
+   `\Storage Card\CurrentRun\` (§7.4) if the finished run should be a complete experiment rather
+   than just fluorescence. Skip it otherwise.
+8. Watch `STATUS?` (§7.5). Each time the current step leaves a `PLATEREAD`, list the run directory
+   with the mandatory `GETFILESLEN`+`LISTALLFILES` pair (§5, keep the two adjacent) and pull the
+   new `Read0000N.Plateread` with `GETFILESIZE`+`GETFILE`. Decode with the existing
+   `plateread.md`/`packages/core` parser.
+9. On `IDLE`-with-a-run-name (§7.6): `CANCEL`, re-list — the final read appears only now — pull it,
+   then pull the `.alf` from `\Storage Card\PCRunReport\` if wanted.
+10. To take the *whole* run rather than its pieces: pull every file `LISTALLFILES` reported for
+    `\Storage Card\CurrentRun` and zip them unchanged — a `.zpcr` is a plain ZIP of exactly that
+    directory, so no conversion is involved. `zpcrFromRunFiles` (`packages/core/src/runFolder.ts`)
+    does this, and is what the web app's Instrument view "Open run" button calls.
 
 ## 8. Tooling
 
@@ -583,6 +846,14 @@ instance, rather than a cross-checked pattern:
   `.alf` report carries, `"admin"` the operator, `"CALC"` the method already sent as `METHOD`. The
   three booleans between them are named from the language rather than demonstrated — nothing in
   either capture varies them.
+- **The run sequence** (§7) — one run, one operator, one instrument. The *ordering* claims are
+  strong (they are what the wire did, and the run-starts-at-`RemoteRun` and `PROCEED`-skips-a-step
+  findings each rest on a `STATUS?` transition, not on inference), but nothing here varies the
+  protocol, the plate, `RemoteRun`'s booleans, or the failure paths. In particular: no run was
+  aborted mid-flight, no step failed authoring, and no error code other than `0000` was ever seen,
+  so what a client should do when something goes wrong is not documented because it was never
+  observed. The pre-flight burst of §7.1 is likewise "what this client sends", not a demonstrated
+  requirement — none of it changes instrument state.
 - **`PLATEREAD #h<hex>`'s per-channel bits** (§3.1) — the mask's two *fields* are cross-checked
   (five runs, two configurations, three independent echoes of the value), and **bit 0 = channel 1**
   is measured directly from the one `#h81` run's all-zero channels 2–6. Bits 1–5 mapping to
