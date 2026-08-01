@@ -506,7 +506,7 @@ instance, rather than a cross-checked pattern:
 | File | Covers |
 |---|---|
 | `frame.ts` | §2 — the 5-byte header codec, and `FrameReassembler`, which turns a direction's byte stream into complete logical messages. The only supported way to read this protocol; see §8 for the bug that parsing per packet causes. |
-| `commands.ts` | §3 — command encoding and the two response shapes, plus `CFX_COMMANDS`, the action commands a UI might offer, each tagged with whether it was actually observed. |
+| `commands.ts` | §3 — command encoding and the two response shapes, plus `CFX_COMMANDS`, the action commands a UI might offer, each tagged with whether it was actually observed, and `assertCommandArgument`, which keeps a path from injecting a second command line. |
 | `status.ts` | §3 — typed views over `*IDN?`, `STATUS?` and `RTSTATUS?`. Names only the fields whose meaning is established, and keeps the raw field array beside them for the rest. |
 | `transport.ts` | §1 — the endpoint/interface constants and `UsbDeviceLike`, the structural interface both environments satisfy. |
 | `device.ts` | §3–§5 — the read pump, the command queue, and the typed operations. |
@@ -517,16 +517,33 @@ differ only in how the device handle is obtained — `navigator.usb` versus `new
 above that line is environment-specific. `transport.ts`'s module comment carries the full
 rationale.
 
-Two clients drive it: `tools/cfx.mjs` (a CLI — `info`, `status`, `ls`, `get`, `cmd`, plus
-`--trace` for the raw message log) and the web app's **Device** view, which adds live status
-polling, a file browser, action buttons and a console of decoded traffic. The optional `usb`
-dependency is needed only by the CLI.
+Two clients drive it: `tools/cfx.mjs` (a CLI — `info`, `status`, `ls`, `get`, plus `--trace` for
+the raw message log) and the web app's **Device** view, which adds live status polling, a file
+browser, action buttons and a console of decoded traffic. The optional `usb` dependency is needed
+only by the CLI.
 
-`CFX_COMMANDS` in `commands.ts` is the action-command catalog a UI can offer — currently
-`BLOCKID 1` (flash the indicator), `LID OPEN`, `LID CLOSE` and `CANCEL` — each tagged with how it
-is known to do what it says. All four are `observed`; the tag exists so that a future addition
-that *isn't* has somewhere to say so, and so a UI can mark it rather than presenting a guess as a
-feature.
+**The client sends only command lines it builds itself.** `CfxDevice`'s public surface is named
+operations — `status()`, `listFiles(dir)`, `getFile(path)`, `runAction(name)` — and the primitives
+that take a command line (`send`/`command`/`tryCommand`/`sequence`) are private. There is no
+"send this string" call, and correspondingly no command prompt in the Device view and no `cmd`
+subcommand in the CLI; both had one, and both lost it deliberately. The reasoning is the same in
+each place: the vocabulary in §3 is what two captures happened to contain rather than a
+specification, a mistyped line is indistinguishable on the wire from an intended one, and the
+instrument on the other end heats a block and moves a lid. Reaching a command this library doesn't
+implement means adding a method — which is also where its reply becomes typed and its provenance
+gets recorded here.
+
+The one caller-supplied text that still reaches a command line is a filesystem path, which the
+`GETFILE`/`GETFILESIZE`/`LISTALLFILES`/`DELFILE` operations interpolate. `assertCommandArgument`
+in `commands.ts` rejects any byte outside printable ASCII before that happens — a path carrying a
+CR or LF would otherwise terminate the line early and frame the rest as a second, caller-chosen
+command, reintroducing the arbitrary-command channel through the back door.
+
+`CFX_COMMANDS` in `commands.ts` is the action-command catalog a UI can offer, and now also the
+complete set of things a client can make the instrument do — currently `BLOCKID 1` (flash the
+indicator), `LID OPEN`, `LID CLOSE` and `CANCEL` — each tagged with how it is known to do what it
+says. All four are `observed`; the tag exists so that a future addition that *isn't* has somewhere
+to say so, and so a UI can mark it rather than presenting a guess as a feature.
 
 Not implemented: file **upload** (`CRCSENDFILE` and the §5 GUID sequence), run control
 (`RemoteRun`/`PROCEED`), and protocol authoring — this client reads an instrument and retrieves

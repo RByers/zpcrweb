@@ -3086,31 +3086,6 @@
 .device__linebytes {
   color: var(--ink-muted);
 }
-.device__prompt {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 14px;
-  border-top: 1px solid var(--border);
-  flex: 0 0 auto;
-}
-.device__promptmark {
-  color: var(--neon-magenta);
-}
-.device__promptinput {
-  flex: 1 1 auto;
-  min-width: 0;
-  background: var(--raised);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  color: var(--ink);
-  padding: 5px 8px;
-  font-size: 12px;
-}
-.device__promptinput:focus-visible {
-  outline: 2px solid var(--neon-magenta);
-  outline-offset: 1px;
-}
 
 /* Narrow: the rail stacks above the content, matching `.curves`' own narrow behaviour. */
 @media (max-width: 900px) {

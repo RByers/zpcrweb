@@ -12,6 +12,7 @@ export {
   CFX_DIRECTORIES,
   CfxCommandError,
   OK_CODE,
+  assertCommandArgument,
   encodeCommand,
   parseResponse,
 } from "./commands.js";

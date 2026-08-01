@@ -15,10 +15,14 @@
  *   node tools/cfx.mjs ls                         # the well-known directories
  *   node tools/cfx.mjs ls '\Storage Card\CurrentRun'
  *   node tools/cfx.mjs get '\Storage Card\CurrentRun\Read00001.Plateread' -o read1.Plateread
- *   node tools/cfx.mjs cmd 'BLOCKDESC?'           # any command, raw
  *
  * `--trace` prints every framed message in both directions, which is the CLI equivalent of the
  * Device view's debug console.
+ *
+ * There is no "send an arbitrary command line" subcommand: `CfxDevice` exposes named operations
+ * only (see its design point 3), so every subcommand here is one of those. Reaching a command the
+ * library doesn't implement means implementing it there, where its reply gets parsed and its
+ * provenance recorded in `usb.md` §3.
  */
 import { writeFile } from "node:fs/promises";
 import { CFX_DIRECTORIES, CFX_USB_FILTER, CfxDevice } from "../packages/core/dist/index.js";
@@ -136,16 +140,6 @@ try {
       const bytes = await device.getFile(path);
       await writeFile(out, bytes);
       console.log(`${path} → ${out} (${bytes.length} bytes)`);
-      break;
-    }
-    case "cmd": {
-      const line = rest.join(" ");
-      if (!line) throw new Error("usage: cmd '<command line>'");
-      const msg = await device.send(line);
-      const res = (await import("../packages/core/dist/index.js")).parseResponse(msg.payload);
-      console.log(`code ${res.code}${res.ok ? " (ok)" : ""}`);
-      if (msg.passThrough) console.log(`binary payload: ${hex(msg.payload)}`);
-      else console.log(`value: ${res.value === null ? "(none)" : res.value}`);
       break;
     }
     default:

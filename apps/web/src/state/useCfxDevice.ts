@@ -6,6 +6,10 @@
  * session* adds on top: obtaining the device through `navigator.usb`, a poll timer, a bounded
  * traffic log for the debug console, and the React state the view renders.
  *
+ * Everything it exposes is a *named* operation — status, listings, file fetches, and `runAction`
+ * over the fixed `CFX_COMMANDS` table. There is no "send this line" call, here or in the library
+ * beneath it (see `CfxDevice`'s design point 3).
+ *
  * The `CfxDevice` itself lives in a ref rather than in state. It is a long-lived object with a
  * background read loop; putting it in `useState` would invite a re-render to be interpreted as a
  * new connection, and re-running `open()` on a claimed interface fails.
@@ -259,11 +263,6 @@ export function useCfxDevice() {
     [withBusy],
   );
 
-  const sendRaw = useCallback(
-    async (line: string) => withBusy(line, (d) => d.tryCommand(line)),
-    [withBusy],
-  );
-
   const clearTraffic = useCallback(() => setTraffic([]), []);
 
   return {
@@ -284,7 +283,6 @@ export function useCfxDevice() {
     fetchFile,
     fetchDirectoryFiles,
     runAction,
-    sendRaw,
     clearTraffic,
   };
 }

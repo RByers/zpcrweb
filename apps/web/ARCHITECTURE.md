@@ -1569,7 +1569,7 @@ response curves, not channel numbers.
 ## The Device view
 
 The one view that operates on **no file at all**. It connects to a CFX96 over WebUSB and shows the
-instrument: identity, live status, its filesystem, and the raw protocol traffic. Everything it
+instrument: identity, live status, its filesystem, and the decoded protocol traffic. Everything it
 knows about the protocol comes from `@zpcrweb/core`'s `CfxDevice` (see the root
 [`ARCHITECTURE.md`](../../ARCHITECTURE.md#talking-to-an-instrument-not-a-file-srcusb) and
 [`usb.md`](../../usb.md)), per the standing rule that logic lives in the library — the app side is
@@ -1641,8 +1641,14 @@ Four components, under `components/device/`:
 - **`DeviceConsole`** — every decoded message in both directions, at the level of logical
   messages rather than USB packets, which is where the protocol is legible. Channel is on every
   line: a reply arriving on channel 2 rather than 1 is exactly the thing that would otherwise be
-  invisible. Polling is filtered out by default (it would otherwise be all there is to see), and a
-  prompt sends arbitrary commands.
+  invisible. Polling is filtered out by default (it would otherwise be all there is to see).
+
+  **Read-only, deliberately.** It used to carry a prompt that sent whatever was typed into it;
+  that is gone, and the library no longer offers the call it was built on (`usb.md` §10). The
+  vocabulary is reverse-engineered rather than specified, a mistyped line is indistinguishable
+  from an intended one, and the thing on the other end heats a block and moves a lid — so what the
+  app can ask an instrument to *do* is the fixed set of buttons below, each an entry in
+  `CFX_COMMANDS`. The debugging value was in watching the traffic, which is unchanged.
 
 **Action commands carry their provenance.** `CFX_COMMANDS` tags each action with how it is known
 to do what it says. All four currently offered — `BLOCKID 1` (flash the indicator), `LID OPEN`,

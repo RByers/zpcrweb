@@ -488,8 +488,10 @@ Wells are addressed as `(channel, row, col)`:
 
 ## Tooling
 
-- **`tools/cfx.mjs`** — a CLI over a live instrument (`info`, `status`, `ls`, `get`, `cmd`, and
-  `--trace` for the raw message log). Needs the optional `usb` dependency and a built core.
+- **`tools/cfx.mjs`** — a CLI over a live instrument (`info`, `status`, `ls`, `get`, and `--trace`
+  for the raw message log). Needs the optional `usb` dependency and a built core. Every subcommand
+  is a named `CfxDevice` operation; there is no "send this command line" escape hatch, in the CLI
+  or the library (`usb.md` §10).
 - **Vitest** for tests — isomorphic, fast, and ready for a future browser-mode test run.
 - **tsup** for builds — emits dual ESM + CJS plus `.d.ts` from a single entry point. The web app
   deliberately does not consume this output (see [Why the web app imports core's

@@ -26,8 +26,23 @@
  * interleave with. `LISTALLFILES` is the sharp case: it returns whatever listing the preceding
  * `GETFILESLEN` buffered and **ignores its own path argument** (measured — see
  * {@link CfxDevice.listFiles}), so `GETFILESLEN A` / `GETFILESLEN B` / `LISTALLFILES A` answers
- * for B. {@link CfxDevice.sequence} therefore holds the channel across several commands, and
- * every multi-command operation here runs inside one.
+ * for B. `sequence` therefore holds the channel across several commands, and every multi-command
+ * operation here runs inside one.
+ *
+ * **3. Command lines are built here and nowhere else.** Every public method on this class is a
+ * *named operation* — `status()`, `listFiles(dir)`, `runAction("lidOpen")` — and the machinery
+ * that turns one into a command line (`send`/`command`/`tryCommand`/`sequence`) is private. There
+ * is deliberately no "send this string" escape hatch: the command channel drives an instrument
+ * that heats a block and moves a lid, one where a typo is indistinguishable from an intended
+ * command and the vocabulary is reverse-engineered rather than specified (`usb.md` §3), so an
+ * arbitrary line is a hazard with no matching benefit. Adding a capability means adding a method
+ * here — or, for an action with no return value, an entry in {@link CFX_COMMANDS} — which is also
+ * where its reply gets parsed into something typed and its provenance recorded.
+ *
+ * The one thing a caller still supplies verbatim is a *path*, which the filesystem operations
+ * interpolate into a command line. {@link assertCommandArgument} keeps that from becoming the
+ * escape hatch by the back door: a path carrying a CR or LF would otherwise frame a second,
+ * caller-chosen command line after the first.
  */
 import {
   FrameReassembler,
@@ -38,6 +53,7 @@ import {
 import {
   CFX_COMMANDS,
   CfxCommandError,
+  assertCommandArgument,
   encodeCommand,
   parseResponse,
   type CfxCommandName,
@@ -302,7 +318,7 @@ export class CfxDevice {
    * than calling back into {@link send}/{@link command}, which would wait for a channel `fn`
    * itself is holding and deadlock.
    */
-  async sequence<T>(
+  private async sequence<T>(
     fn: (ops: {
       send: (command: string, timeoutMs?: number) => Promise<CfxMessage>;
       command: (command: string, timeoutMs?: number) => Promise<CfxResponse>;
@@ -319,24 +335,28 @@ export class CfxDevice {
   }
 
   /**
-   * Send one command line and resolve with the raw reply message.
+   * Send one command line and resolve with the reply message, unparsed.
    *
-   * Most callers want {@link command}, which parses the reply. This is the escape hatch for the
-   * replies that are *not* `value;code` text — `GETFILE`'s file bytes, and any `passThrough`
-   * response — where parsing would corrupt the payload.
+   * Most callers want {@link command}, which parses the reply. This is for the replies that are
+   * *not* `value;code` text — `GETFILE`'s file bytes, and any `passThrough` response — where
+   * parsing would corrupt the payload.
+   *
+   * Private, along with {@link command} and {@link tryCommand}: see design point 3. The command
+   * lines these take are literals in this file, not caller input.
    */
-  async send(command: string, timeoutMs?: number): Promise<CfxMessage> {
+  private async send(command: string, timeoutMs?: number): Promise<CfxMessage> {
     return this.hold(() => this.exchange(command, timeoutMs));
   }
 
   /** Send a command and parse its reply. Throws {@link CfxCommandError} on a non-`0000` code. */
-  async command(command: string, timeoutMs?: number): Promise<CfxResponse> {
+  private async command(command: string, timeoutMs?: number): Promise<CfxResponse> {
     return checked(command, parseResponse((await this.send(command, timeoutMs)).payload));
   }
 
   /** As {@link command}, but returns the failing response instead of throwing — for the queries
-   * gathered best-effort at connect time, and for deliberately probing an unverified command. */
-  async tryCommand(command: string, timeoutMs?: number): Promise<CfxResponse> {
+   * gathered best-effort at connect time, and for an action command whose rejection is a result
+   * to report rather than a failure. */
+  private async tryCommand(command: string, timeoutMs?: number): Promise<CfxResponse> {
     return parseResponse((await this.send(command, timeoutMs)).payload);
   }
 
@@ -429,6 +449,7 @@ export class CfxDevice {
    * previous `CurrentRun` listing, in full).
    */
   async listFiles(dir: string): Promise<CfxDirectory> {
+    assertCommandArgument("directory", dir);
     return this.sequence(async ({ send, command }) => {
       const lenMsg = await send(`GETFILESLEN ${dir}`);
       let listingBytes: number | null = null;
@@ -453,6 +474,7 @@ export class CfxDevice {
 
   /** `GETFILESIZE <path>` — the file's size in bytes. */
   async fileSize(path: string): Promise<number> {
+    assertCommandArgument("path", path);
     const res = await this.command(`GETFILESIZE ${path}`);
     const n = Number(res.value);
     if (!Number.isFinite(n)) throw new Error(`GETFILESIZE ${path}: unparseable size ${res.raw}`);
@@ -471,6 +493,7 @@ export class CfxDevice {
    * rather than assumed independent.
    */
   async getFile(path: string, timeoutMs = 60_000): Promise<Uint8Array> {
+    assertCommandArgument("path", path);
     return this.sequence(async ({ send, command }) => {
       const sizeRes = await command(`GETFILESIZE ${path}`);
       const expected = Number(sizeRes.value);
@@ -489,6 +512,7 @@ export class CfxDevice {
 
   /** `DELFILE <path>`. */
   async deleteFile(path: string): Promise<void> {
+    assertCommandArgument("path", path);
     await this.command(`DELFILE ${path}`);
   }
 

@@ -42,6 +42,24 @@ export function encodeCommand(command: string): Uint8Array {
 }
 
 /**
+ * Reject an argument that would change the *shape* of the command line it is interpolated into.
+ *
+ * Command lines are built inside `CfxDevice` from literals, so the only caller-supplied text that
+ * reaches the wire is an argument — a filesystem path. A CR or LF in one would terminate the line
+ * early and frame whatever follows as a second command of the caller's choosing, which is exactly
+ * the arbitrary-command channel the client deliberately doesn't offer. The rest of the C0 range
+ * and anything non-ASCII goes too: the payload is ASCII by specification (§3), so a byte outside
+ * it is a mistake caught here rather than an unexplained instrument error later.
+ */
+export function assertCommandArgument(what: string, value: string): void {
+  const bad = /[^\x20-\x7e]/.exec(value);
+  if (bad) {
+    const code = bad[0]!.codePointAt(0)!.toString(16).padStart(2, "0");
+    throw new Error(`${what} contains a character that cannot go in a command line (0x${code})`);
+  }
+}
+
+/**
  * Parse a channel-1 response payload.
  *
  * `latin1` rather than UTF-8 on purpose: the payload is ASCII by specification, and a strict
@@ -120,7 +138,10 @@ export interface CfxCommandSpec {
  * The action commands a client might reasonably offer as a button, with their provenance.
  *
  * Queries are not listed here — they are ordinary calls on {@link CfxDevice} and their results are
- * typed. This list exists for the ones that *do* something.
+ * typed. This list exists for the ones that *do* something, and it is the *whole* of what a client
+ * can make the instrument do: `CfxDevice.runAction` takes a name from this table, and there is no
+ * public way to send a command line the library didn't build. Offering a new action means adding
+ * an entry here, where its provenance is recorded alongside it.
  */
 export type CfxCommandName = "indicator" | "lidOpen" | "lidClose" | "cancel";
 

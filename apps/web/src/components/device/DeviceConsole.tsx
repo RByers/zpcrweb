@@ -6,6 +6,14 @@
  * 64-byte transfers into whole messages, which is the level at which the protocol is legible (see
  * `packages/core/src/usb/frame.ts`). Channel is shown on every line because a reply that arrives
  * on channel 2 rather than 1 is precisely the thing that would otherwise be invisible.
+ *
+ * **Read-only, deliberately.** This panel used to carry a prompt that sent whatever was typed
+ * into it. It doesn't any more, and `CfxDevice` no longer offers a way to build one: the command
+ * vocabulary is reverse-engineered (`usb.md` §3), the instrument on the other end heats a block
+ * and moves a lid, and a mistyped line there is indistinguishable from an intended one. What the
+ * app can ask the instrument to *do* is the fixed set of buttons in `DeviceRail`, each backed by
+ * an entry in `CFX_COMMANDS`. Watching the traffic keeps all of the debugging value the prompt
+ * had; typing into it was the part with the sharp edge.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CfxDeviceHandle, TrafficLine } from "../../state/useCfxDevice";
@@ -29,7 +37,6 @@ function isPollLine(line: TrafficLine, prevOut: string | null): boolean {
 export function DeviceConsole({ device }: { device: CfxDeviceHandle }) {
   const [hidePolls, setHidePolls] = useState(true);
   const [follow, setFollow] = useState(true);
-  const [draft, setDraft] = useState("");
   const bodyRef = useRef<HTMLDivElement | null>(null);
 
   // A response carries no copy of the request, so "is this a poll reply?" is answered by the
@@ -47,14 +54,6 @@ export function DeviceConsole({ device }: { device: CfxDeviceHandle }) {
     if (!follow || !bodyRef.current) return;
     bodyRef.current.scrollTop = bodyRef.current.scrollHeight;
   }, [lines, follow]);
-
-  const submit = (e: { preventDefault: () => void }) => {
-    e.preventDefault();
-    const line = draft.trim();
-    if (!line || device.connection !== "connected") return;
-    setDraft("");
-    void device.sendRaw(line);
-  };
 
   return (
     <section className="device__panel device__panel--console">
@@ -113,22 +112,6 @@ export function DeviceConsole({ device }: { device: CfxDeviceHandle }) {
           ))
         )}
       </div>
-
-      <form className="device__prompt" onSubmit={submit}>
-        <span className="device__promptmark mono">&gt;</span>
-        <input
-          className="device__promptinput mono"
-          value={draft}
-          placeholder={
-            device.connection === "connected" ? "send a command, e.g. BLOCKDESC?" : "not connected"
-          }
-          disabled={device.connection !== "connected" || !!device.busy}
-          onChange={(e) => setDraft((e.target as HTMLInputElement).value)}
-        />
-        <button className="btn btn--sm" type="submit" disabled={device.connection !== "connected"}>
-          Send
-        </button>
-      </form>
     </section>
   );
 }

@@ -139,17 +139,38 @@ describe("CfxDevice", () => {
   });
 
   it("serializes concurrent commands so each caller gets its own reply", async () => {
-    const mock = new MockInstrument((cmd) => ({ payload: text(`${cmd}-value;0000`) }));
+    // Three different typed operations in flight at once: the protocol has no request ids, so a
+    // reply is matched purely by arrival order and a lost turn shows up as one caller receiving
+    // another's answer.
+    const mock = new MockInstrument((cmd) => {
+      if (cmd === "*IDN?") return { payload: text("BIO-RAD LABORATORIES,C1000,CT019138,2.0;0000") };
+      if (cmd === "STATUS?") return { payload: text(STATUS_IDLE) };
+      if (cmd === "ERRORLIST A") return { payload: text("E01,E02;0000") };
+      return null;
+    });
     const dev = new CfxDevice(mock);
     await dev.open();
-    const [a, b, c] = await Promise.all([
-      dev.command("BASESN?"),
-      dev.command("ALPHASN?"),
-      dev.command("CPLD?"),
+    const [idn, status, errors] = await Promise.all([
+      dev.identify(),
+      dev.status(),
+      dev.errorList(),
     ]);
-    expect(a.value).toBe("BASESN?-value");
-    expect(b.value).toBe("ALPHASN?-value");
-    expect(c.value).toBe("CPLD?-value");
+    expect(idn.serial).toBe("CT019138");
+    expect(status.blockTempC).toBe(18.4);
+    expect(errors).toEqual(["E01", "E02"]);
+    expect(mock.sent).toEqual(["*IDN?", "STATUS?", "ERRORLIST A"]);
+    await dev.close();
+  });
+
+  it("refuses a path that would inject a second command line", async () => {
+    const mock = new MockInstrument(() => ({ payload: text("0000") }));
+    const dev = new CfxDevice(mock);
+    await dev.open();
+    // A CR ends the line, so everything after it would be framed as a command of its own.
+    await expect(dev.getFile("\\x\\y\r\nLID OPEN")).rejects.toThrow(/cannot go in a command line/);
+    await expect(dev.listFiles("\\x\nCANCEL")).rejects.toThrow(/cannot go in a command line/);
+    await expect(dev.deleteFile("\\x\nCANCEL")).rejects.toThrow(/cannot go in a command line/);
+    expect(mock.sent).toEqual([]);
     await dev.close();
   });
 
@@ -258,7 +279,7 @@ describe("CfxDevice", () => {
     const mock = new MockInstrument(() => null);
     const dev = new CfxDevice(mock, { timeoutMs: 30 });
     await dev.open();
-    await expect(dev.command("WORKING?")).rejects.toThrow(/timed out/);
+    await expect(dev.status()).rejects.toThrow(/timed out/);
     // The channel must still work afterwards: a dropped request has to leave the queue clean.
     mock.push(text("True;0000"));
     await dev.close();
@@ -268,7 +289,7 @@ describe("CfxDevice", () => {
     const mock = new MockInstrument(() => null);
     const dev = new CfxDevice(mock);
     await dev.open();
-    const pending = dev.command("WORKING?");
+    const pending = dev.status();
     await dev.close();
     await expect(pending).rejects.toThrow(/closed/);
   });
