@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useZpcrStore } from "./state/useZpcrStore";
 import { useCfxDevice } from "./state/useCfxDevice";
 import { useRunWatch } from "./state/useRunWatch";
@@ -172,10 +172,19 @@ export function App() {
   };
 
   /**
+   * A run happening right now, live on the instrument and connected over USB — as opposed to
+   * merely `inProgressIds` (a loaded file missing its `ended` marker), which stays true for an
+   * archive nobody is watching any more. Elsewhere this drives the rail's own state; here it's
+   * what scopes the Instrument view's selection lock below.
+   */
+  const runActive = instrument.connection === "connected" && !!instrument.status?.running;
+  /**
    * What a file chip does. Everywhere but the Instrument view it means the one thing it always
    * meant — *show me this file* — which is the app's **primary selection**, `activeId`, drawn in
    * the bar's usual cyan. Every kind can hold it: a run, a standalone plate, and (since it has an
-   * Overview of its own) a `.prcl.txt`.
+   * Overview of its own) a `.prcl.txt`. Switching there is never blocked, run in progress or not
+   * — reading Curves while a run cycles is the headline use of the connection staying open across
+   * tabs (see `instrument` above), and it would defeat that to pin the selection.
    *
    * The Instrument view asks a different question — what is the run made of — so there the chips
    * split in two. The run is the primary one, and selecting another *switches* it rather than
@@ -184,23 +193,35 @@ export function App() {
    * makes it the active file, so it is what you land on when you leave the view — without that,
    * a bar whose only action was staging left no way to change what the rest of the app was
    * pointed at from here at all.
+   *
+   * A run live on the instrument owns the primary selection **while this view is showing it**:
+   * switching to some other run here would abandon watching the one in progress, and there's
+   * nothing to stage against a run that hasn't started yet anyway. The effect below is what keeps
+   * it pinned there on arrival; this only has to refuse the escape. The auxiliary staging chips
+   * stay clickable regardless — they're what the *next* run would use, unrelated to this one.
    */
-  /**
-   * A run happening right now, live on the instrument, owns the active file: switching away mid-
-   * run would leave `runWatch` growing a `.zpcr` nobody is looking at, and switching *to* some
-   * other file would abandon it looking like the run had stopped. The auxiliary staging chips
-   * (below) stay clickable regardless — they're what the *next* run would use, unrelated to the
-   * one in progress.
-   */
-  const activeLocked = instrument.connection === "connected" && !!instrument.status?.running;
   const selectFile = (id: string) => {
     const f = store.files.find((x) => x.id === id);
     if (!f) return;
     if (store.view !== "instrument" || stagingRole(f.kind) === "run") {
-      if (activeLocked) return;
+      if (store.view === "instrument" && runActive) return;
       store.setActive(id);
     } else staging.toggle(id);
   };
+  /**
+   * Arriving at the Instrument view while a run is live snaps the selection to it, even if the
+   * user had been looking at something else — that's the one file this view can usefully show
+   * while a run owns the selection (see `selectFile` above). `runWatch.fileId` rather than
+   * `store.activeId` because the two can have drifted apart: a snapshot pulled while the user was
+   * elsewhere doesn't activate itself (`AddFilesOptions.activate`), so the store's `activeId` may
+   * still be a stale one from before they left. Keyed off `store.view` alone, not `runWatch.fileId`
+   * too, so a later snapshot of the *same* run doesn't re-snap someone who has since staged an
+   * override.
+   */
+  useEffect(() => {
+    if (store.view !== "instrument" || !runActive || !runWatch.fileId) return;
+    if (store.activeId !== runWatch.fileId) store.setActive(runWatch.fileId);
+  }, [store.view]);
 
   const exampleHref = `#${formatLoadHash(EXAMPLE_FILE)}`;
   const loadExample = (e: { preventDefault: () => void }) => {
@@ -249,7 +270,7 @@ export function App() {
             stagedIds={staging.stagedIds}
             modifiedIds={store.modifiedIds}
             inProgressIds={store.inProgressIds}
-            activeLocked={activeLocked}
+            activeLocked={runActive}
             onSelect={selectFile}
             onRemove={store.remove}
             experiments={store.experiments}
@@ -332,7 +353,6 @@ export function App() {
         activeId={store.activeId}
         modifiedIds={store.modifiedIds}
         inProgressIds={store.inProgressIds}
-        activeLocked={activeLocked}
         onSelect={selectFile}
         onRemove={store.remove}
         experiments={store.experiments}

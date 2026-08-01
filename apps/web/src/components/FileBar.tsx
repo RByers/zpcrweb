@@ -59,10 +59,11 @@ interface Props {
    */
   inProgressIds: Set<string>;
   /**
-   * True while a run in progress on a connected instrument owns the primary selection — see
-   * `App.tsx`'s `activeLocked`. A click that would switch it does nothing while this is set; the
-   * auxiliary staging chips (magenta, `stagedIds`) are unaffected, since they stage the *next*
-   * run rather than touching what's live now.
+   * True while a run in progress on a connected instrument owns the primary selection — passed
+   * only by the Instrument view's bar (see `App.tsx`'s `runActive`/`selectFile`), since that's the
+   * one place a chip click could otherwise abandon the run it's showing. A click that would switch
+   * it does nothing while this is set; the auxiliary staging chips (magenta, `stagedIds`) are
+   * unaffected, since they stage the *next* run rather than touching what's live now.
    */
   activeLocked?: boolean;
   /** What each file is called and when it ran, keyed by id (`ZpcrStore.experiments`). A chip

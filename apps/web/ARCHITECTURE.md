@@ -1878,15 +1878,24 @@ Each changed listing is pulled and zipped with `zpcrFromRunFiles`, then handed t
   going on connect, which looks identical in the listing, does not set the flag — only the live
   transition does.)
 
-**While a run is in progress and the instrument is connected, the primary selection is locked.**
-`App.tsx`'s `activeLocked` (`instrument.connection === "connected" && !!instrument.status?.running`)
-blocks `selectFile` from calling `store.setActive` — a chip click that would switch away from, or
-to, some other file is a no-op — and `FileBar`/`FileChip` grey the cursor on the chips it would
-otherwise be a change to (`is-locked`). Switching away would leave this watcher growing a `.zpcr`
-nobody is looking at; switching to some other file would make the live run look stopped. The
-Instrument view's auxiliary staging chips (protocol/plate overrides) stay clickable regardless —
-they stage the *next* run, unrelated to the one in progress, and `checkRunPlan()`/`canStart` already
-keep a second run from starting on top of the first.
+**The primary selection is locked to the running file, but only inside the Instrument view.**
+`App.tsx`'s `runActive` (`instrument.connection === "connected" && !!instrument.status?.running`)
+scopes both halves of this:
+
+- A chip click in the Instrument view that would switch the run away from the one in progress is a
+  no-op while `runActive` — `selectFile` refuses it — and `FileBar`/`FileChip` grey the cursor on
+  the chips it would otherwise be a change to (`is-locked`, `activeLocked` prop). Everywhere else —
+  Overview, Curves, any other tab — switching files is never blocked: reading Curves while a run
+  cycles is the point of the connection staying open across tabs, and pinning the selection there
+  would defeat it. The Instrument view's auxiliary staging chips (protocol/plate overrides) stay
+  clickable regardless of the lock — they stage the *next* run, unrelated to the one in progress,
+  and `checkRunPlan()`/`canStart` already keep a second run from starting on top of the first.
+- Since the selection can roam freely elsewhere, an effect in `App` snaps it back on *arrival*:
+  switching to the Instrument view while `runActive` sets `activeId` to `runWatch.fileId` (the
+  watcher's own record of what it last put in the store), not `store.activeId` — the two can have
+  drifted, since a snapshot pulled while the user was elsewhere doesn't activate itself
+  (`AddFilesOptions.activate`). The effect is keyed on `store.view` alone so it fires once on
+  arrival rather than on every later snapshot of the same run.
 
 **"In progress" is stored nowhere.** The `begun`-without-`ended` markers travel *inside* the
 assembled archive, so `runProgressFromNames` (core, `runFolder.ts`) reads the answer out of the
