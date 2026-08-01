@@ -179,6 +179,7 @@ export function App() {
             plateFiles={store.plateFiles}
             activeId={store.activeId}
             selectedIds={staging.selectedIds}
+            modifiedIds={store.modifiedIds}
             onSelect={staging.toggle}
             onRemove={store.remove}
             experiments={store.experiments}
@@ -250,6 +251,7 @@ export function App() {
         runs={store.runs}
         plateFiles={store.plateFiles}
         activeId={store.activeId}
+        modifiedIds={store.modifiedIds}
         onSelect={store.setActive}
         onRemove={store.remove}
         experiments={store.experiments}
@@ -303,7 +305,13 @@ export function App() {
                 // Only a `.zpcr` has an archive to write `zpcrweb.json` into; see
                 // `analysisPersist.ts`'s `resolve`.
                 namePersists={active.kind === "zpcr"}
-                onDownload={() => store.exportBytes(active.id)}
+                // Saving the file to disk is what un-modifies it: the copy leaving the browser
+                // is the one carrying the edits, so the chip's delete stops asking twice.
+                onDownload={() => {
+                  const bytes = store.exportBytes(active.id);
+                  store.markDownloaded(active.id);
+                  return bytes;
+                }}
               />
             )}
             {view === "curves" && (

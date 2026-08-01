@@ -5,6 +5,8 @@
  *   re-parsed on demand. This is the app's *only* source of run data.
  * - `settings` — per-file **display** state: which channels/wells/fluorophores are shown, log
  *   vs. linear, which protocol step, whether to draw baselines. A per-person view onto a run.
+ *   Plus one field that is not a view setting at all — {@link StoredSettings.modified}, which
+ *   needs a per-file record that survives a reload, and this is the app's only one.
  *
  * **Analysis state is deliberately absent.** Thresholds, the auto-threshold multiplier, dark
  * subtraction and calibration normalization all change the numbers the app reports, so they
@@ -33,6 +35,15 @@ export interface StoredFile {
 /** Persisted per-file view settings. */
 export interface StoredSettings {
   fileId: string;
+  /**
+   * Not a view setting: whether this file's *content* has been edited since it was loaded (or
+   * since it was last downloaded) — a threshold moved, the run renamed. It rides in this record
+   * because that is the app's one per-file store keyed by id, and because the fact has to
+   * outlive a reload: the edits themselves are already durable (in the archive's `zpcrweb.json`,
+   * in IndexedDB), so what is at risk is the copy on the user's disk, which is stale until they
+   * download again. See `useZpcrStore`'s `modifiedIds` and the file chip's two-stage delete.
+   */
+  modified?: boolean;
   enabledChannels: number[];
   enabledWells: string[]; // "row,col" keys
   /** Reference columns (0-based) shown in the Reference view. */

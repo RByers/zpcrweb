@@ -12,6 +12,7 @@ import {
 import type { ExperimentIdentity } from "../lib/experiment";
 import { fileCategory, type FileCategory } from "@zpcrweb/core";
 import { FileKindIcon } from "./FileIcons";
+import { TrashIcon } from "./TrashIcon";
 
 /** Tooltip wording for the chip icon — its shape, then its colour. */
 const CATEGORY_TEXT: Record<FileCategory, string> = {
@@ -39,6 +40,10 @@ interface Props {
    * `onSelect` toggles membership instead of switching the view's subject.
    */
   selectedIds?: Set<string>;
+  /** Files whose content has been edited since it was loaded and not since downloaded
+   * (`ZpcrStore.modifiedIds`). Deleting one of those throws work away that exists nowhere else,
+   * so its chip asks a second time first — see {@link DeleteButton}. */
+  modifiedIds: Set<string>;
   /** What each file is called and when it ran, keyed by id (`ZpcrStore.experiments`). A chip
    * leads with the name and carries the timestamp underneath; the file name moves to the hover
    * card, where it is still one glance away. */
@@ -165,6 +170,63 @@ function HoverCard({
   );
 }
 
+/**
+ * The chip's delete control, and the one place the file bar knows about unsaved work.
+ *
+ * A file the app loaded and never touched exists on the user's disk too, so removing it costs
+ * nothing but a re-drop and the button deletes on the first click, as it always has. A file whose
+ * content has been *edited* — a threshold moved, the run renamed, a plate attached — exists in
+ * this form only in this browser until it's downloaded, so its ✕ arms instead: it becomes a waste
+ * bin on red, and the click after that is the one that deletes.
+ *
+ * The armed state is deliberately cheap to escape — moving the pointer off the chip or pressing
+ * Escape disarms it (see {@link FileChip}) — because it is a warning, not a modal: nothing
+ * should be able to leave a red button sitting in the bar waiting for a stray click.
+ */
+function DeleteButton({
+  name,
+  modified,
+  armed,
+  onArm,
+  onDelete,
+}: {
+  name: string;
+  modified: boolean;
+  armed: boolean;
+  onArm: () => void;
+  onDelete: () => void;
+}) {
+  return (
+    <button
+      className={"filechip__del" + (armed ? " is-armed" : "")}
+      aria-label={
+        armed
+          ? `Confirm deleting ${name} — its unsaved changes will be lost`
+          : `Delete ${name} from storage`
+      }
+      title={
+        armed
+          ? "Click again to delete. This file has changes that aren't on disk — download it first to keep them."
+          : modified
+            ? "Delete from storage — this file has changes that aren't on disk, so it will ask again"
+            : "Delete from storage"
+      }
+      onClick={(e) => {
+        e.stopPropagation();
+        if (armed) onDelete();
+        else onArm();
+      }}
+    >
+      <span className="filechip__delglyph">{armed ? <TrashIcon /> : "✕"}</span>
+      {/* The editor's universal "unsaved" dot, in the space under the ✕ that was empty anyway —
+          so a modified chip announces itself before anyone reaches for the delete, and the bar
+          neither grows nor reflows when it does. The slot is always there, just invisible
+          (`app.css`), which is what keeps the ✕ from hopping as files are edited. */}
+      <span className="filechip__moddot" aria-hidden="true" />
+    </button>
+  );
+}
+
 /** One file chip plus its hover card. The card is a fixed-position portal (see {@link HoverCard})
  * positioned from the chip's own bounding rect on hover, since `.filebar`'s horizontal scroll
  * clips a plain absolutely-positioned dropdown. */
@@ -175,6 +237,7 @@ function FileChip({
   plateFile,
   password,
   isActive,
+  isModified,
   onSelect,
   onRemove,
 }: {
@@ -184,15 +247,32 @@ function FileChip({
   plateFile: PlateFileResult | undefined;
   password: string;
   isActive: boolean;
+  /** See {@link Props.modifiedIds} — what makes this chip's delete a two-step. */
+  isModified: boolean;
   onSelect: (id: string) => void;
   onRemove: (id: string) => void | Promise<void>;
 }) {
   const mainRef = useRef<HTMLButtonElement>(null);
   const [cardPos, setCardPos] = useState<{ top: number; left: number } | null>(null);
+  // Armed = the confirm click is pending on this chip. A file that stops being modified (it was
+  // just downloaded) can't stay armed, since there is no longer anything to confirm.
+  const [armed, setArmed] = useState(false);
+  const isArmed = armed && isModified;
   const encStatus = fileEncryptionStatus(f, run, plateFile, password);
 
   return (
-    <div className={"filechip" + (isActive ? " is-active" : "")}>
+    <div
+      className={
+        "filechip" +
+        (isActive ? " is-active" : "") +
+        (isModified ? " is-modified" : "") +
+        (isArmed ? " is-arming" : "")
+      }
+      onMouseLeave={() => setArmed(false)}
+      onKeyDown={(e) => {
+        if (e.key === "Escape") setArmed(false);
+      }}
+    >
       <button
         ref={mainRef}
         className="filechip__main"
@@ -239,17 +319,15 @@ function FileChip({
           />,
           document.body,
         )}
-      <button
-        className="filechip__del"
-        aria-label={`Delete ${identity.name} from storage`}
-        title="Delete from storage"
-        onClick={(e) => {
-          e.stopPropagation();
-          void onRemove(f.id);
-        }}
-      >
-        ✕
-      </button>
+      <DeleteButton
+        name={identity.name}
+        modified={isModified}
+        // An untouched file deletes on the first click: `armed` is only ever consulted for one
+        // whose edits would go with it.
+        armed={isArmed}
+        onArm={() => (isModified ? setArmed(true) : void onRemove(f.id))}
+        onDelete={() => void onRemove(f.id)}
+      />
     </div>
   );
 }
@@ -262,6 +340,7 @@ export function FileBar({
   onSelect,
   onRemove,
   selectedIds,
+  modifiedIds,
   experiments,
 }: Props) {
   const [password] = usePltdPassword();
@@ -288,6 +367,7 @@ export function FileBar({
           plateFile={plateFiles.get(f.id)}
           password={password}
           isActive={selectedIds ? selectedIds.has(f.id) : f.id === activeId}
+          isModified={modifiedIds.has(f.id)}
           onSelect={onSelect}
           onRemove={onRemove}
         />

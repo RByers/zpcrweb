@@ -211,6 +211,15 @@ export interface FileSettings extends AnalysisSettings {
   baselineSource: AnalysisSource;
   /** See {@link AnalysisSource}. */
   cqSource: AnalysisSource;
+  /**
+   * Whether this file's content has been edited since it was loaded — a threshold moved, the run
+   * renamed, a plate attached — and not yet downloaded. The odd one out in this interface: not a
+   * view setting at all, and no view reads it. It lives here because this is the per-file record
+   * that is persisted and keyed by id, and it must survive a reload for the same reason it exists
+   * — the stale copy is the one on the user's disk. Surfaced to the UI as
+   * {@link ZpcrStore.modifiedIds}, which is what makes the file chip's delete ask twice.
+   */
+  modified: boolean;
 }
 
 /** A file loaded into memory — bytes only. Parsing is derived (see {@link ZpcrStore.runs}),
@@ -386,6 +395,8 @@ function defaultSettings(): FileSettings {
     // "file": a Biomeme user opened the file to see the instrument's own call, not this app's.
     baselineSource: "file",
     cqSource: "file",
+    // A freshly loaded file is by definition the copy on disk.
+    modified: false,
     ...defaultAnalysisSettings(),
   };
 }
@@ -420,6 +431,7 @@ function toStored(id: string, s: FileSettings): StoredSettings {
     calView: s.calView,
     baselineSource: s.baselineSource,
     cqSource: s.cqSource,
+    modified: s.modified,
   };
 }
 
@@ -484,6 +496,10 @@ function fromStored(s: StoredSettings): FileSettings {
     // Absent from records written before this format existed; "file" is the default either way.
     baselineSource: s.baselineSource ?? "file",
     cqSource: s.cqSource ?? "file",
+    // Absent on a record written before the flag existed: such a file may well carry edits, but
+    // "not modified" is the honest default — a wrong `true` would make every old file ask twice
+    // forever, since only a download clears it.
+    modified: s.modified ?? false,
     temps: new Set(s.temps ?? []),
     // A record written before the LED series existed has no `leds`; both being non-empty is
     // impossible by construction (see `updateSettings`), so nothing needs reconciling here.
@@ -570,6 +586,20 @@ export interface ZpcrStore {
   /** The selected file's run definition, when the selection is a `.prcl.txt` — what the
    * protocol Overview renders, the counterpart of {@link activePlateFile}. */
   activeProtocolFile: string | null;
+  /**
+   * Ids of the files whose content has been edited since they were loaded and not since
+   * downloaded — thresholds, the experiment name, an attached plate (see
+   * {@link FileSettings.modified}). The file bar reads it to decide whether deleting a chip
+   * throws work away, and so has to be confirmed.
+   */
+  modifiedIds: Set<string>;
+  /**
+   * The user has just saved this file to disk: its edits are no longer at risk, so it stops
+   * counting as modified. Called by the Overview view's download button — the one that writes the
+   * *whole* file including its `zpcrweb.json` ({@link ZpcrStore.exportBytes}), and so the only
+   * download that actually gets the edits out of the browser.
+   */
+  markDownloaded: (fileId: string) => void;
   /**
    * Attach (or replace) a `.zpcr` run's plate: rewrites the run's own archive bytes in place
    * (adding/replacing a `.pltd`/`.plt.csv` entry — see `attachPlateToZpcr`) and persists the
@@ -769,6 +799,29 @@ export function useZpcrStore(): ZpcrStore {
     });
   }, []);
 
+  /**
+   * Flip a file's "edited since loaded" flag (see {@link FileSettings.modified}). Written
+   * straight through rather than on `updateSettings`'s 300 ms debounce — it records that work
+   * exists which the disk copy doesn't have, so a tab closed in the next moment must not lose it.
+   * Cancelling any pending display write is part of that: it holds an older snapshot, taken
+   * before the flag changed, and would otherwise land after this one.
+   */
+  const setModifiedFlag = useCallback((id: string, value: boolean) => {
+    setSettingsMap((prev) => {
+      const current = prev[id] ?? defaultSettings();
+      if (current.modified === value) return prev;
+      const next = { ...current, modified: value };
+      window.clearTimeout(saveTimers.current[id]);
+      void putSettings(toStored(id, next));
+      return { ...prev, [id]: next };
+    });
+  }, []);
+
+  const markDownloaded = useCallback(
+    (id: string) => setModifiedFlag(id, false),
+    [setModifiedFlag],
+  );
+
   const addFiles = useCallback(
     async (input: FileList | File[]) => {
       // `.json`'s kind can only be known after reading its bytes (see `fileKind`), so every file
@@ -916,11 +969,14 @@ export function useZpcrStore(): ZpcrStore {
             f.id === target.id ? { ...f, size: augmented.byteLength, bytes: augmented } : f,
           ),
         );
+        // The archive itself now differs from the one on disk, which is exactly what the flag is
+        // for — a plate attached and then deleted is as much lost work as a threshold is.
+        setModifiedFlag(target.id, true);
       } catch (e) {
         setError(`${file.name}: ${e instanceof Error ? e.message : String(e)}`);
       }
     },
-    [files],
+    [files, setModifiedFlag],
   );
 
   // One flat object per file, assembled from the two stores. The analysis half wins, so a
@@ -981,9 +1037,13 @@ export function useZpcrStore(): ZpcrStore {
         });
         // Rate-limited archive rewrite — see `analysisPersist.ts`.
         persister.current!.markDirty(activeId);
+        // The analysis half is precisely what a download writes into the file (`exportBytes`), so
+        // an edit to it is what makes the copy on disk stale. Display state — which channels are
+        // shown, log vs. linear — never leaves this browser and so never counts.
+        setModifiedFlag(activeId, true);
       }
     },
-    [activeId],
+    [activeId, setModifiedFlag],
   );
 
   const runs = useMemo(() => {
@@ -1091,6 +1151,14 @@ export function useZpcrStore(): ZpcrStore {
     return map;
   }, [files, runs, analysisMap]);
 
+  /** The flag from every file's record, as the set the file bar wants — see
+   * {@link ZpcrStore.modifiedIds}. */
+  const modifiedIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const [id, s] of Object.entries(settingsMap)) if (s.modified) ids.add(id);
+    return ids;
+  }, [settingsMap]);
+
   const exportBytes = useCallback(
     (id: string): Uint8Array | null => {
       const file = files.find((f) => f.id === id);
@@ -1118,6 +1186,8 @@ export function useZpcrStore(): ZpcrStore {
     experiments,
     activePlateFile,
     activeProtocolFile,
+    modifiedIds,
+    markDownloaded,
     attachPlate,
     settings,
     view,

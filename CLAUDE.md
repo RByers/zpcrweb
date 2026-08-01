@@ -120,7 +120,7 @@ Cost control, when you do run it:
 npm run test:ui
 ```
 
-117 browser assertions covering what nothing else can catch: the two URL contracts — hash
+128 browser assertions covering what nothing else can catch: the two URL contracts — hash
 routing (deep links, back/forward, unknown-file and invalid-view fallbacks) and password
 handling (stripped from both URL forms, never leaked into the routing hash, an encrypted
 `.pcrd` still decrypting) — plus `#load=`, the rule that every XML view uses the shared
@@ -154,7 +154,10 @@ over a compact local timestamp rather than a file name, derived from the filenam
 and a typed name has to survive a reload, which it can only do by reaching the archive's own
 `zpcrweb.json` (clearing it reverts to the derived name rather than blanking it) — plus a
 Biomeme run's Raw tab, which is its JSON document in the standalone (no file list) viewer —
-and that the view-tab strip is the *same seven tabs* for every file, a tab the file can't
+and what happens when a file with unsaved edits is deleted — an edited file (a rename is
+enough) wears a dot and its ✕ arms into a waste bin that takes a second click, Escape disarms it,
+neither state widens the chip, the flag survives a reload, and downloading the file puts it back
+to deleting on one click — and that the view-tab strip is the *same seven tabs* for every file, a tab the file can't
 answer being disabled rather than dropped (`ViewSelector`'s `enabled` prop), which is a claim
 about two files' headers matching that no single-file check can make — plus the file chip's
 icon, whose shape is what the file *is* (core's `fileCategory`, so the two plate encodings draw
@@ -175,6 +178,7 @@ dependency-free. Run it when you touch `state/urlHash.ts`, `state/pltdPassword.t
 core's `runDefinition.ts`, `components/raw/DecodedView.tsx`'s `ProtocolDecoded`,
 `components/views/StandaloneProtocolView.tsx` or `App.tsx`'s `enabledViewsFor`,
 `components/FileBar.tsx`, `components/FileIcons.tsx` (or core's `fileKind.ts`),
+`state/useZpcrStore.ts`'s `modifiedIds`/`markDownloaded`,
 `components/views/StandaloneRawView.tsx`,
 `state/useZpcrStore.ts`'s settings seeding or `fileKind`, or view
 selection. Both

@@ -320,7 +320,8 @@ a minimal IndexedDB wrapper with two object stores:
   attach changes `size`, so re-persisting after one just writes the same `id` again — no
   separate override record to keep in sync, see above). `kind` defaults to `"zpcr"` for records
   written before `.pcrd` support existed.
-- `settings` — **display state only**: `{ fileId, enabledChannels[], enabledWells[],
+- `settings` — **display state** (plus the one `modified` flag noted below): `{ fileId,
+  enabledChannels[], enabledWells[],
   enabledRefCols[], baseline, curveView, drawBaseline, scale, … }`, so each file remembers its
   enabled wells/channels/reference columns. `baseline` (Reference view's factory-relative
   ΔRFU/Drift %) and `curveView` (the Curves view's display mode — baselining itself is never
@@ -335,6 +336,34 @@ a minimal IndexedDB wrapper with two object stores:
 
 Deleting a file removes both its `files` and `settings` records and drops it from memory —
 exposed as a clear affordance on each file chip.
+
+The `settings` record carries one field that isn't display state at all: `modified`, meaning this
+file's *content* has been edited since it was loaded and not since downloaded (see "Deleting an
+edited file" below). It rides there because that is the app's one per-file store keyed by id.
+
+### Deleting an edited file
+
+A loaded file is normally disposable: it came off the user's disk and is still there, so the file
+chip's ✕ deletes on the click. Once its content has been edited it isn't — the edits live in the
+archive bytes in IndexedDB (thresholds, the experiment name, an attached plate) and the copy on
+disk is stale until the user downloads again. So the chip changes in two ways:
+
+- an amber dot under the ✕, in space the button had spare, saying "this has changes that aren't on
+  disk". The dot's row is reserved on every chip whether or not it shows one, so becoming modified
+  never reflows the bar;
+- the ✕ arms rather than deletes: it turns into a waste bin on solid red, and the *next* click is
+  the one that removes the file. Moving the pointer off the chip or pressing Escape disarms it —
+  it is a warning, not a modal, and a red button must not be left sitting in the bar waiting for a
+  stray click.
+
+`ZpcrStore.modifiedIds` is the set the file bar reads. It is set by `updateSettings` whenever the
+patch touches an **analysis** key — precisely what a download writes into the file, so display
+state (which channels are shown, log vs. linear) never counts — and by `attachPlate`, which
+rewrites the archive outright. It is cleared by `markDownloaded`, called from the Overview view's
+download button: the one control that writes the whole file including its `zpcrweb.json`
+(`exportBytes`), and so the only one that actually gets the edits out of the browser. The flag is
+persisted because what is at risk outlives a reload; a record written before the flag existed
+loads as unmodified, since only a download clears it and a wrong `true` would never go away.
 
 ### Analysis state lives in the file, not in IndexedDB
 
@@ -373,8 +402,9 @@ so every call site keeps writing one `onChange({ … })` regardless of where the
   value on each save. `size` is deliberately left at the loaded file's size so `fileId()` still
   dedupes a re-add of the same file.
 - **Downloads** go through `ZpcrStore.exportBytes`, which re-zips on demand, so a copy saved from
-  the Overview view carries the thresholds it was read with. A download deliberately changes
-  *nothing* about the session: it does not re-seed, does not swap the in-memory bytes, and does
+  the Overview view carries the thresholds it was read with. It is also what clears the file's
+  `modified` flag ("Deleting an edited file", above) — the edits are on disk now. Otherwise a
+  download deliberately changes *nothing* about the session: it does not re-seed, does not swap the in-memory bytes, and does
   not reset the persister. React state stays the single source of truth from seeding until the
   file is closed, and the flush cycle above converges IndexedDB onto it on its own schedule.
   There is nothing to "reconcile" precisely because the pre-edit document is never read a second

@@ -1410,6 +1410,27 @@ async function instrumentRunChecks(chrome, origin) {
 
 
 /**
+ * Type into the Overview header's name field and commit it — a rename, which is also the cheapest
+ * way to make a file *modified* (see {@link deleteConfirmChecks}). The two halves are separate
+ * turns on purpose: the field commits on blur from the *committed* draft state, so blurring in the
+ * same tick as the input event would read the value React hasn't applied yet — which real typing
+ * never does.
+ */
+async function setExperimentName(cdp, value) {
+  await cdp.eval(
+    // `focus()` first because the commit is on blur, and blurring an element that was never
+    // focused fires nothing at all — the field would keep the text and store none of it.
+    `(() => { const el = document.querySelector(".overview__name");
+       el.focus();
+       const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
+       setter.call(el, ${JSON.stringify(value)});
+       el.dispatchEvent(new Event("input", { bubbles: true })); })()`,
+  );
+  await sleep(200);
+  await cdp.eval(`document.querySelector(".overview__name").blur()`);
+}
+
+/**
  * What a run is called, and where that name comes from.
  *
  * The file bar stopped showing file names: a chip is now a run's *name* over its start date, and
@@ -1465,24 +1486,7 @@ async function experimentNameChecks(chrome, origin) {
     JSON.stringify(first),
   );
 
-  /**
-   * Type into the name field and commit it. The two halves are separate turns on purpose: the
-   * field commits on blur from the *committed* draft state, so blurring in the same tick as the
-   * input event would read the value React hasn't applied yet — which real typing never does.
-   */
-  const setName = async (value) => {
-    await cdp.eval(
-      // `focus()` first because the commit is on blur, and blurring an element that was never
-      // focused fires nothing at all — the field would keep the text and store none of it.
-      `(() => { const el = document.querySelector(".overview__name");
-         el.focus();
-         const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
-         setter.call(el, ${JSON.stringify(value)});
-         el.dispatchEvent(new Event("input", { bubbles: true })); })()`,
-    );
-    await sleep(200);
-    await cdp.eval(`document.querySelector(".overview__name").blur()`);
-  };
+  const setName = (value) => setExperimentName(cdp, value);
 
   // Type a name: it must reach the chip, and — the part that matters — survive a reload, which
   // it can only do by having been written into the archive's own zpcrweb.json.
@@ -1581,6 +1585,132 @@ async function experimentNameChecks(chrome, origin) {
   cdp.close();
 }
 
+/**
+ * Deleting a file that carries edits nothing else has.
+ *
+ * A loaded file is normally disposable — it is on the user's disk too, so its ✕ deletes on the
+ * click. Once its *content* has been edited (a threshold moved, the run renamed) the browser holds
+ * the only copy in that form, so the same ✕ arms first and the click after it is the one that
+ * deletes, and the chip wears a dot to say so before anyone reaches for it. All of that is state:
+ * a screenshot can show one of the two button faces, never that the first click didn't delete,
+ * that the flag outlived a reload (it must — the stale copy is the one on disk), or that
+ * downloading the file put it back to disposable.
+ */
+async function deleteConfirmChecks(chrome, origin) {
+  console.log("\ndelete confirmation");
+  const cdp = await openPage(chrome.base, origin);
+  await emptyReload(cdp, origin);
+  await loadFile(cdp, join(REPO, "samples", EXAMPLE));
+  await waitFor(() => chipPresent(cdp, "S183"), { what: "the .zpcr chip" });
+
+  const chips = () => cdp.eval(`document.querySelectorAll(".filebar .filechip").length`);
+  const clickDelete = () =>
+    cdp.eval(`(() => { document.querySelector(".filebar .filechip__del").click(); })()`);
+  /** What the delete control currently is: armed or not, and what it draws. */
+  const del = () =>
+    cdp
+      .eval(
+        `(() => { const chip = document.querySelector(".filebar .filechip");
+           if (!chip) return "null";
+           const dot = chip.querySelector(".filechip__moddot");
+           return JSON.stringify({
+             modified: chip.classList.contains("is-modified"),
+             armed: chip.classList.contains("is-arming"),
+             bin: !!chip.querySelector(".filechip__del svg"),
+             dot: getComputedStyle(dot).backgroundColor,
+             // The delete control's own width: the chip's would move with the name, and it is
+             // this column the dot is squeezed into.
+             width: Math.round(chip.querySelector(".filechip__del").getBoundingClientRect().width),
+           }); })()`,
+      )
+      .then((v) => (v === "null" ? null : JSON.parse(v)));
+
+  const untouched = await del();
+  check(
+    "an unedited file wears no dot and an ordinary ✕",
+    untouched.modified === false && !untouched.bin && /rgba\(0, 0, 0, 0\)|transparent/.test(untouched.dot),
+    JSON.stringify(untouched),
+  );
+  await clickDelete();
+  await waitFor(async () => (await chips()) === 0, { what: "the unedited file to delete" });
+  check("…and one click deletes it, as it always did", (await chips()) === 0);
+
+  // Now edit one: a rename is the cheapest thing that changes what a download would contain.
+  await loadFile(cdp, join(REPO, "samples", EXAMPLE));
+  await waitFor(() => chipPresent(cdp, "S183"), { what: "the .zpcr chip again" });
+  await cdp.eval(`window.location.hash = "view=overview", undefined`);
+  await tabBecomes(cdp, "Overview");
+  const clean = await del();
+  await setExperimentName(cdp, "Edited RVP");
+  await waitFor(() => chipPresent(cdp, "Edited RVP"), { what: "the renamed chip" });
+  const dirty = await del();
+  check(
+    "editing a file lights the modified dot",
+    dirty.modified === true && !/rgba\(0, 0, 0, 0\)|transparent/.test(dirty.dot),
+    JSON.stringify(dirty),
+  );
+  check(
+    "…without the chip taking any more room for it",
+    dirty.width === clean.width,
+    `${clean.width}px → ${dirty.width}px`,
+  );
+
+  // The flag is about the copy on disk, so it has to outlive this browser session.
+  await sleep(700); // the archive rewrite is immediate but asynchronous (`analysisPersist.ts`)
+  await cdp.send("Page.navigate", { url: `${origin}#file=${EXAMPLE}&view=overview` });
+  await tabBecomes(cdp, "Overview");
+  await waitFor(async () => (await del())?.modified === true, { what: "the flag after a reload" });
+  check("the modified state survives a reload", (await del()).modified === true);
+
+  await clickDelete();
+  const armed = await del();
+  check(
+    "the first click on an edited file's ✕ arms it instead of deleting",
+    armed.armed && armed.bin && (await chips()) === 1,
+    JSON.stringify(armed),
+  );
+  // The bin glyph is not the ✕'s size, so without a fixed box arming would widen the chip and
+  // shove every chip after it along the bar.
+  check(
+    "…in place: the bin occupies exactly the ✕'s box",
+    armed.width === dirty.width,
+    `${dirty.width}px → ${armed.width}px`,
+  );
+  await cdp.eval(
+    `(() => { document.querySelector(".filebar .filechip__del")
+        .dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); })()`,
+  );
+  await waitFor(async () => (await del()).armed === false, { what: "Escape to disarm" });
+  const disarmed = await del();
+  check(
+    "Escape disarms it — a red button can't be left waiting for a stray click",
+    disarmed.armed === false && !disarmed.bin && (await chips()) === 1,
+    JSON.stringify(disarmed),
+  );
+
+  await clickDelete();
+  await waitFor(async () => (await del()).armed === true, { what: "the armed button again" });
+  await clickDelete();
+  await waitFor(async () => (await chips()) === 0, { what: "the confirmed delete" });
+  check("the second click deletes", (await chips()) === 0);
+
+  // Download it: the edits are on disk now, so the chip goes back to deleting on one click.
+  await loadFile(cdp, join(REPO, "samples", EXAMPLE));
+  await waitFor(() => chipPresent(cdp, "S183"), { what: "the .zpcr chip once more" });
+  await cdp.eval(`window.location.hash = "view=overview", undefined`);
+  await tabBecomes(cdp, "Overview");
+  await setExperimentName(cdp, "Saved RVP");
+  await waitFor(async () => (await del()).modified === true, { what: "the modified flag" });
+  await cdp.eval(`(() => { document.querySelector(".overview__toolbar .raw__download").click(); })()`);
+  await waitFor(async () => (await del()).modified === false, { what: "the flag to clear" });
+  check("downloading the file clears the modified state", (await del()).modified === false);
+  await clickDelete();
+  await waitFor(async () => (await chips()) === 0, { what: "the one-click delete" });
+  check("…so its ✕ deletes on one click again", (await chips()) === 0);
+  cdp.close();
+}
+
+
 async function main() {
   const pw = cfxPassword();
   if (!pw) {
@@ -1609,6 +1739,7 @@ async function main() {
     await xmlViewChecks(chrome, origin, pw);
     await instrumentRunChecks(chrome, origin);
     await experimentNameChecks(chrome, origin);
+    await deleteConfirmChecks(chrome, origin);
   } finally {
     chrome.stop();
     dev.stop();
