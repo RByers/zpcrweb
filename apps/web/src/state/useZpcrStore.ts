@@ -10,6 +10,7 @@ import {
   parseZpcr,
   parseZpcrwebSettings,
   writeZpcrwebSettings,
+  type FileKind,
   type NormalizationMode,
   type PlateDefinition,
   type PltdContainer,
@@ -41,7 +42,10 @@ import { onHashChange, readHash, writeHash } from "./urlHash";
 
 export { DEFAULT_THRESHOLD_MULTIPLIER } from "./analysisSettings";
 
-export type FileKind = "zpcr" | "pcrd" | "biomeme" | "pltd" | "csv" | "prcl";
+/** The accepted encodings, and their grouping into runs/plates/protocols, are the library's
+ * (`core/fileKind.ts`) — re-exported here because the store's `LoadedFile` is where the app meets
+ * them. */
+export type { FileKind };
 /** The two kinds a plate — standalone or attached to a run — can be uploaded as. */
 type PlateFileKind = "pltd" | "csv";
 

@@ -29,15 +29,15 @@
  * is the selection" rule would do.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { FileKind, LoadedFile } from "./useZpcrStore";
+import { fileCategory, type FileCategory, type FileKind } from "@zpcrweb/core";
+import type { LoadedFile } from "./useZpcrStore";
 
-/** Which half of a run a file kind can supply. */
-export type StagingRole = "run" | "protocol" | "plate";
+/** Which half of a run a file kind can supply — which is exactly what the file *is*
+ * (`core/fileKind.ts`), since a plate file supplies the plate and a protocol the protocol. */
+export type StagingRole = FileCategory;
 
 export function stagingRole(kind: FileKind): StagingRole {
-  if (kind === "prcl") return "protocol";
-  if (kind === "pltd" || kind === "csv") return "plate";
-  return "run";
+  return fileCategory(kind);
 }
 
 export interface RunStagingSelection {

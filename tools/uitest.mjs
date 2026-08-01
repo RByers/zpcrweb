@@ -1306,6 +1306,34 @@ async function instrumentRunChecks(chrome, origin) {
     JSON.stringify(runsOn),
   );
 
+  // A chip's icon is two independent claims: its *shape* is what the file is (core's
+  // `fileCategory`), its *colour* is whether it's encrypted. All five chips are loaded by now —
+  // two runs, two plates in different encodings, one protocol — so this is the one place the
+  // "an encoding is not a kind" rule can be checked: the `.pltd` and the `.plt.csv` must draw the
+  // same icon *while* differing in colour, and a run and a protocol must not draw a plate.
+  const icons = await cdp.eval(`(() => {
+    const out = {};
+    for (const chip of document.querySelectorAll(".filebar .filechip")) {
+      const name = chip.querySelector(".filechip__name").textContent.trim();
+      const icon = chip.querySelector(".filechip__icon");
+      out[name] = { shape: icon.querySelector("svg").innerHTML, cls: icon.className };
+    }
+    return out;
+  })()`);
+  const shapeOf = (n) => Object.entries(icons).find(([k]) => new RegExp(n).test(k))?.[1];
+  const [zpcr, pcrd, pltd, csv, prcl] = ["FirstQualification", "Luna noRT", "QuickPlate", "Staged", "Gradient"].map(shapeOf);
+  check(
+    "the two plate encodings share one plate icon, in whatever colour their encryption earns",
+    pltd.shape === csv.shape && pltd.cls !== csv.cls && /--decrypted/.test(pltd.cls) && /--none/.test(csv.cls),
+    JSON.stringify({ pltd: pltd.cls, csv: csv.cls, same: pltd.shape === csv.shape }),
+  );
+  check(
+    "…and a run, a plate and a protocol are three different shapes",
+    zpcr.shape === pcrd.shape &&
+      new Set([zpcr.shape, pltd.shape, prcl.shape]).size === 3,
+    JSON.stringify({ runsAlike: zpcr.shape === pcrd.shape, distinct: new Set([zpcr.shape, pltd.shape, prcl.shape]).size }),
+  );
+
   // Garbage in reports itself rather than arriving as an unusable chip.
   writeFileSync(BAD_TXT, "<?xml version=\"1.0\"?>\n<protocol2 />\n");
   const before = await cdp.eval(`document.querySelectorAll(".filebar .filechip").length`);

@@ -10,6 +10,20 @@ import {
   type EncryptionStatus,
 } from "../lib/encryptionStatus";
 import type { ExperimentIdentity } from "../lib/experiment";
+import { fileCategory, type FileCategory } from "@zpcrweb/core";
+import { FileKindIcon } from "./FileIcons";
+
+/** Tooltip wording for the chip icon — its shape, then its colour. */
+const CATEGORY_TEXT: Record<FileCategory, string> = {
+  run: "Run",
+  plate: "Plate map",
+  protocol: "Thermal protocol",
+};
+const ENCRYPTION_TEXT: Record<EncryptionStatus["kind"], string> = {
+  none: "not encrypted",
+  decrypted: "encrypted, decrypted",
+  locked: "encrypted, locked",
+};
 
 interface Props {
   files: LoadedFile[];
@@ -37,7 +51,7 @@ function fallbackLabel(f: LoadedFile): string {
   return f.name.replace(/\.(zpcr|pcrd|pltd|plt\.csv|csv|json)$/i, "");
 }
 
-/** Encryption status for a loaded file's dot color — mirrors the Overview panel's "Encrypted"
+/** Encryption status for a loaded file's icon color — mirrors the Overview panel's "Encrypted"
  * block (see `encryptionStatus.ts`): green (not encrypted), orange (encrypted, decrypted with
  * the current password), red (encrypted, not yet opened). */
 function fileEncryptionStatus(
@@ -57,9 +71,9 @@ function fileEncryptionStatus(
  * `.pcrd`/`.pltd`/run password is unresolved. Run chips (`.zpcr`/`.pcrd`) carry no badge once
  * loaded — their detail lives in the hover card instead. */
 function meta(f: LoadedFile, run: RunResult | undefined, plateFile: PlateFileResult | undefined): string {
-  // Named rather than counted: a protocol has no well count to report, and the badge is what
-  // tells the two override kinds apart at a glance in the Instrument view.
-  if (f.kind === "prcl") return "proto";
+  // A protocol has no well count to report, and no longer needs the word "proto" either: the
+  // chip's icon is what tells the two override kinds apart at a glance in the Instrument view.
+  if (f.kind === "prcl") return "";
   if (f.kind === "pltd" || f.kind === "csv") {
     if (plateFile?.plate) return `${plateFile.plate.wells.filter((w) => w.loaded).length}w`;
     return plateFile?.needsPassword ? "🔒" : plateFile?.error ? "⚠" : "…";
@@ -196,7 +210,15 @@ function FileChip({
         }}
         onBlur={() => setCardPos(null)}
       >
-        <span className={`filechip__dot filechip__dot--${encStatus.kind}`} />
+        {/* Shape says what the file is (run / plate / protocol — the library's own grouping, so
+            a `.pltd` and a `.plt.csv` look alike), colour says whether it's encrypted, which is
+            what the dot this replaced said on its own. */}
+        <span
+          className={`filechip__icon filechip__icon--${encStatus.kind}`}
+          title={`${CATEGORY_TEXT[fileCategory(f.kind)]} · ${ENCRYPTION_TEXT[encStatus.kind]}`}
+        >
+          <FileKindIcon kind={f.kind} />
+        </span>
         {/* Two lines, so the chip is a name rather than a path: the run's name, and under it a
             compact local timestamp at a smaller, dimmer size. The full file name is in the
             hover card. */}

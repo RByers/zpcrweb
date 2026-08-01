@@ -109,6 +109,16 @@ carries `documentXml` for a successfully-decoded `.pcrd` — the full raw docume
 "Format independence" above). It is the app's only genuinely format-specific payload; the rest
 of `RunResult` is neutral by construction.
 
+A chip leads with an icon that says two things at once (`components/FileIcons.tsx`): its **shape**
+is what the file is — a run, a plate map or a thermal protocol — and its **color** is the
+encryption status above. The shape comes from core's `fileCategory()` (`fileKind.ts`), not from the
+extension, which is why the two plate encodings (`.pltd`, `.plt.csv`) and the two protocol ones
+(`.prcl`, `.prcl.txt`) each draw as one icon: the bar shows the six accepted formats as the three
+kinds of thing they actually are. The same grouping is what `state/useRunStaging.ts` stages a run
+from, so a file's icon and the slot it claims in the Instrument view can't drift apart. The icon
+replaced a plain colored dot, which carried the encryption half alone; a protocol chip's "proto"
+badge went with it, the icon now being what tells the two override kinds apart at a glance.
+
 Each chip's hover card (protocol name, cycle count, and the plate's target/sample lists — the
 same lists `OverviewView` shows in its "Plate" section, via the shared `lib/plateTargets.ts`
 helper) renders through a `createPortal` into `document.body` at a `position: fixed` spot
@@ -364,7 +374,7 @@ so every call site keeps writing one `onChange({ … })` regardless of where the
   samples as chips, plus an "Encrypted" block (see above) showing
   green "No" when nothing in the file is encrypted, orange "Yes" with the password used when
   encrypted content was successfully decrypted, or red "Yes" when it wasn't. The file bar's
-  per-chip dot (`components/FileBar.tsx`) mirrors the same three states/colors, computed the
+  per-chip icon (`components/FileBar.tsx`) mirrors the same three states/colors, computed the
   same way for `.pltd`/`.csv` chips via `lib/encryptionStatus.ts`'s
   `plateFileEncryptionStatus`.
 

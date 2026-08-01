@@ -373,32 +373,38 @@
     max-width: 22ch;
   }
 }
-.filechip__dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--ink-muted);
+/* The chip's leading glyph carries two things at once: its *shape* is what the file is — run,
+   plate map or thermal protocol (`FileIcons.tsx`, grouping by `core`'s `fileCategory`, so the two
+   plate encodings look alike) — and its *color* is the encryption status the plain dot here used
+   to carry alone. The icon draws in `currentColor`, so the modifiers below only set `color`. */
+.filechip__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink-muted);
   flex: 0 0 auto;
 }
-/* Dot color mirrors the Overview panel's "Encrypted" block: green (not encrypted), orange
+/* Icon color mirrors the Overview panel's "Encrypted" block: green (not encrypted), orange
    (encrypted, decrypted with the current password), red (encrypted, not yet opened). */
-.filechip__dot--none {
-  background: var(--good);
+.filechip__icon--none {
+  color: var(--good);
 }
-.filechip__dot--decrypted {
-  background: var(--warn);
+.filechip__icon--decrypted {
+  color: var(--warn);
 }
-.filechip__dot--locked {
-  background: var(--danger);
+.filechip__icon--locked {
+  color: var(--danger);
 }
-.filechip.is-active .filechip__dot--none {
-  box-shadow: 0 0 8px var(--good);
+/* The active chip's glow, as before — a `drop-shadow` rather than a `box-shadow`, so it follows
+   the drawn strokes instead of haloing the icon's square box. */
+.filechip.is-active .filechip__icon--none {
+  filter: drop-shadow(0 0 4px var(--good));
 }
-.filechip.is-active .filechip__dot--decrypted {
-  box-shadow: 0 0 8px var(--warn);
+.filechip.is-active .filechip__icon--decrypted {
+  filter: drop-shadow(0 0 4px var(--warn));
 }
-.filechip.is-active .filechip__dot--locked {
-  box-shadow: 0 0 8px var(--danger);
+.filechip.is-active .filechip__icon--locked {
+  filter: drop-shadow(0 0 4px var(--danger));
 }
 /* A chip is two stacked lines — the run's name over its date — so the bar reads as a list of
    experiments rather than of paths, and stays narrow enough for several to fit across a phone.

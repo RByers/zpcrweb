@@ -82,6 +82,7 @@ export {
 export { parseDcal, findDcalBlock, isDcalName, dyeChannelLookup } from "./dcal.js";
 export { parsePcrd, isPcrdName, pcrdFromBlob } from "./pcrd.js";
 export { parseBiomeme, isBiomemeJson } from "./biomeme.js";
+export { fileCategory } from "./fileKind.js";
 export {
   buildDyeResponseCurve,
   buildDyeReadingCurves,
@@ -192,6 +193,7 @@ export type {
   UnknownDirective,
 } from "./runDefinition.js";
 export type { Pcrd, PcrdContainer, PcrdOptions } from "./pcrd.js";
+export type { FileKind, FileCategory } from "./fileKind.js";
 export type { FileAnalysis } from "./types.js";
 export type {
   ResponseKnot,

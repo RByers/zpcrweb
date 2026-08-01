@@ -474,6 +474,10 @@ raw bytes ─▶ fflate.unzipSync ─▶ { name: Uint8Array }
   embedded plate, and `protocolText` — `Zpcr.archive` is a trivial empty stub (see above).
 - **`zpcr.ts`** — orchestrates the above into the public `Zpcr` object (the `.zpcr` path;
   `pcrd.ts` builds the equivalent object directly for `.pcrd`).
+- **`fileKind.ts`** — the accepted encodings (`FileKind`) and what each one *is*
+  (`fileCategory()`: a run, a plate map or a thermal protocol). No bytes: it exists so consumers
+  stop re-deriving "a `.pltd` and a `.plt.csv` are both a plate" from file extensions. The web
+  app's file-chip icons and its Instrument-view run staging are both driven by it.
 
 ## Two output shapes
 

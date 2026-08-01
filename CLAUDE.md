@@ -120,7 +120,7 @@ Cost control, when you do run it:
 npm run test:ui
 ```
 
-112 browser assertions covering what nothing else can catch: the two URL contracts — hash
+114 browser assertions covering what nothing else can catch: the two URL contracts — hash
 routing (deep links, back/forward, unknown-file and invalid-view fallbacks) and password
 handling (stripped from both URL forms, never leaked into the routing hash, an encrypted
 `.pcrd` still decrypting) — plus `#load=`, the rule that every XML view uses the shared
@@ -154,7 +154,10 @@ and a typed name has to survive a reload, which it can only do by reaching the a
 Biomeme run's Raw tab, which is its JSON document in the standalone (no file list) viewer —
 and that the view-tab strip is the *same seven tabs* for every file, a tab the file can't
 answer being disabled rather than dropped (`ViewSelector`'s `enabled` prop), which is a claim
-about two files' headers matching that no single-file check can make.
+about two files' headers matching that no single-file check can make — plus the file chip's
+icon, whose shape is what the file *is* (core's `fileCategory`, so the two plate encodings draw
+alike) while its colour stays the encryption status, two claims a screenshot can only show one
+at a time.
 
 A screenshot
 can't show that the back button works, that a secret reached the address bar, that a hover
@@ -168,7 +171,8 @@ dependency-free. Run it when you touch `state/urlHash.ts`, `state/pltdPassword.t
 `lib/protocolSource.ts`, `lib/experiment.ts` (or core's `experiment.ts`),
 `components/ViewSelector.tsx` or `App.tsx`'s `enabledViewsFor`,
 core's `runDefinition.ts` or `components/raw/DecodedView.tsx`'s `ProtocolDecoded`,
-`components/FileBar.tsx`, `components/views/StandaloneRawView.tsx`,
+`components/FileBar.tsx`, `components/FileIcons.tsx` (or core's `fileKind.ts`),
+`components/views/StandaloneRawView.tsx`,
 `state/useZpcrStore.ts`'s settings seeding or `fileKind`, or view
 selection. Both
 tools share `tools/harness.mjs` (the CDP client and dev-server/Chrome plumbing); add new checks there rather than starting a third
