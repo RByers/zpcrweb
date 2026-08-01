@@ -2969,6 +2969,17 @@
   border-color: var(--border) !important;
   background: transparent !important;
 }
+/* Start run stays functionally disabled the instant another USB command is in flight (only one
+   can be outstanding at a time), but a lid/indicator command round-trips fast enough that the
+   dimmed `:disabled` look above would otherwise flash on and off. `InstrumentRail` adds this
+   class only once busy has lasted long enough to be worth showing, so it wins over `:disabled`
+   for that brief, purely-transient window. */
+.instrument__start--armed:disabled {
+  opacity: 1;
+  cursor: default;
+  border-color: var(--neon-magenta) !important;
+  background: var(--neon-magenta-dim) !important;
+}
 
 /* The one action in a group that does the thing you came for — "Open run" beside "Reload". It
    borrows the Instrument view's magenta so it reads as this view's primary action. */
@@ -3032,8 +3043,39 @@
   font-size: 10px;
   letter-spacing: 0.08em;
 }
-.instrument__busy {
+/* A boxed, dotted readout rather than a bare line of text: this appears for every USB command in
+   flight, including ones that resolve in well under a second (lid open/close), so it needs to
+   read at a glance as "the app is narrating a live device state" rather than as an error toast or
+   a rendering glitch. */
+.instrument__busybox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 5px 9px;
+  font-size: 12px;
   color: var(--neon-cyan);
+  border: 1px solid var(--neon-cyan-dim);
+  border-radius: var(--radius-sm);
+  background: var(--neon-cyan-dim);
+}
+.instrument__busydot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--neon-cyan);
+  flex: 0 0 auto;
+  box-shadow: 0 0 6px var(--neon-cyan);
+  animation: instrument-busy-pulse 1s ease-in-out infinite;
+}
+@keyframes instrument-busy-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
 }
 
 /* Actions. The `?` badge marks a command name this protocol was never observed using — the

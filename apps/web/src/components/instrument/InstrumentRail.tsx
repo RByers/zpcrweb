@@ -5,7 +5,7 @@
  * surface — but this one is about an instrument rather than a file, which is the whole reason the
  * view sits apart in the tab strip.
  */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { CFX_COMMANDS, type CfxCommandName, type RunPlan } from "@zpcrweb/core";
 import type { CfxDeviceHandle } from "../../state/useCfxDevice";
 import type { RunWatchState } from "../../state/useRunWatch";
@@ -55,6 +55,22 @@ export function InstrumentRail({
             ? "The instrument is already running something."
             : null;
   const canStart = !!plan && plan.startable && connected && !busy && !status?.running;
+  // The USB command channel carries one request at a time, so Start run has to become
+  // *un-clickable* the instant any other command is in flight — but a lid or indicator command
+  // round-trips fast enough that dimming the button for that whole window reads as a flash
+  // rather than a state change. Delay only the dimmed *look* by a beat; `canStart` above (and so
+  // the real `disabled` attribute) never waits, so the race this guards against still can't happen.
+  const [busyLingering, setBusyLingering] = useState(false);
+  useEffect(() => {
+    if (!busy) {
+      setBusyLingering(false);
+      return;
+    }
+    const t = window.setTimeout(() => setBusyLingering(true), 150);
+    return () => window.clearTimeout(t);
+  }, [busy]);
+  const startLooksArmed =
+    !!plan && plan.startable && connected && !status?.running && !!busy && !busyLingering;
 
   const start = async () => {
     if (!plan) return;
@@ -177,7 +193,10 @@ export function InstrumentRail({
               heats a block, so it stays disabled with a reason attached until every half of the
               run is present and every check passes. */}
           <button
-            className="btn btn--primary instrument__start"
+            className={
+              "btn btn--primary instrument__start" +
+              (startLooksArmed ? " instrument__start--armed" : "")
+            }
             disabled={!canStart}
             title={
               missing ??
@@ -290,7 +309,15 @@ export function InstrumentRail({
         </div>
       )}
 
-      {busy && <div className="rail__note mono instrument__busy">{busy}…</div>}
+      {/* Boxed rather than a plain note: this fires for every command, including the near-instant
+          ones (lid open/close), so it needs to read as a live status readout — not an error or a
+          glitch — even when it only lives on screen for a beat. */}
+      {busy && (
+        <div className="instrument__busybox mono">
+          <span className="instrument__busydot" aria-hidden="true" />
+          {busy}…
+        </div>
+      )}
     </aside>
   );
 }
