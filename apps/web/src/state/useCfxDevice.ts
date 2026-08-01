@@ -90,6 +90,11 @@ export function useCfxDevice() {
   const [busy, setBusy] = useState<string | null>(null);
   const [lastAction, setLastAction] = useState<ActionResult | null>(null);
   const [polling, setPolling] = useState(true);
+  /**
+   * Set the instant Start run is clicked, cleared by the first `STATUS?` that comes back after the
+   * start sequence has run — see {@link useCfxDevice.startRun}.
+   */
+  const [runPending, setRunPending] = useState(false);
   /** The last listing of `CurrentRun`, which is what the run watcher works from. */
   const [runFolder, setRunFolder] = useState<CfxDirectory | null>(null);
   // The latest status, reachable from a callback without making that callback depend on it —
@@ -123,6 +128,7 @@ export function useCfxDevice() {
     setConnection("disconnected");
     setInfo(null);
     setStatus(null);
+    setRunPending(false);
     setDirectories({});
     setBusy(null);
   }, []);
@@ -275,9 +281,20 @@ export function useCfxDevice() {
    * (`usb.md` §7).
    *
    * Everything about *what* is sent was decided by `planRun` before this is called — see
-   * `usb/runPlan.ts`. This adds only the two things a browser session owns: a progress label
-   * while the sequence runs, and a re-read of `STATUS?` afterwards, since a run that has just
-   * started changes what the rail shows and waiting a poll period for it looks like a failure.
+   * `usb/runPlan.ts`. This adds only the three things a browser session owns: a progress label
+   * while the sequence runs, a re-read of `STATUS?` afterwards, since a run that has just
+   * started changes what the rail shows and waiting a poll period for it looks like a failure,
+   * and {@link runPending}.
+   *
+   * `runPending` is set **synchronously**, before a single byte goes out: authoring the protocol
+   * is dozens of round trips, so between the click and the first status there are seconds during
+   * which the instrument still answers "idle" and the rail would otherwise look untouched — long
+   * enough to invite a second click on a button that heats a block. Nothing is asked of the
+   * instrument to know this; it is the local fact that a start has been requested, and it lasts
+   * exactly until the instrument's own answer replaces it. That answer is the `STATUS?` below,
+   * which is *whatever it says*: a successful start reports `running` and the rail moves on to
+   * the real running state on its own, and a start that failed reports idle and releases the
+   * button rather than leaving it stuck pending forever.
    *
    * Resolves with the deposit phase's outcome, or undefined if the start itself failed (the error
    * banner then carries the reason). Note that the block does *not* start heating immediately —
@@ -289,18 +306,23 @@ export function useCfxDevice() {
       // about to be answered by a new run's own status — starting one is exactly the moment that
       // readout stops being relevant, so it shouldn't linger through it.
       setLastAction(null);
-      const result = await withBusy("Starting run", (d) =>
-        d.startRun(plan, (what) => setBusy(what)),
-      );
-      const d = deviceRef.current;
-      if (d) {
-        try {
-          setStatus(await d.status());
-        } catch {
-          /* the poll will catch up */
+      setRunPending(true);
+      try {
+        const result = await withBusy("Starting run", (d) =>
+          d.startRun(plan, (what) => setBusy(what)),
+        );
+        const d = deviceRef.current;
+        if (d) {
+          try {
+            setStatus(await d.status());
+          } catch {
+            /* the poll will catch up */
+          }
         }
+        return result;
+      } finally {
+        setRunPending(false);
       }
-      return result;
     },
     [withBusy],
   );
@@ -384,6 +406,7 @@ export function useCfxDevice() {
     busy,
     lastAction,
     polling,
+    runPending,
     setPolling,
     connect,
     disconnect,

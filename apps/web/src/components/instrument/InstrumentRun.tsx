@@ -82,6 +82,7 @@ export function InstrumentRun({
   onNameChange,
   plan,
   status,
+  pending,
 }: {
   staged: StagedRun;
   /** The run's name, as typed. Held by {@link InstrumentView} — it outlives this panel's renders
@@ -95,6 +96,9 @@ export function InstrumentRun({
    * selection, not necessarily what's running, so the highlight is a bonus for the common case
    * (staged run *is* the running one) rather than something this panel asserts as fact. */
   status: CfxStatus | null;
+  /** True from the click on Start run until the instrument's first status answers it — the badge
+   * has to say something in that window, since the run is neither un-started nor yet running. */
+  pending: boolean;
 }) {
   const { protocol, plate } = staged;
   const empty = !protocol.value && !plate.value && !protocol.reason && !plate.reason;
@@ -108,7 +112,11 @@ export function InstrumentRun({
       <div className="instrument__panelhead">
         <h2 className="instrument__paneltitle">
           Run to start
-          {status?.running && <span className="instrument__runbadge">running</span>}
+          {pending ? (
+            <span className="instrument__runbadge">pending</span>
+          ) : (
+            status?.running && <span className="instrument__runbadge">running</span>
+          )}
         </h2>
         <span className="devrun__hint mono">
           {empty

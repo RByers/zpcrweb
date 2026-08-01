@@ -80,6 +80,7 @@ export function InstrumentView({
           onNameChange={setExperimentName}
           plan={plan}
           status={instrument.status}
+          pending={instrument.runPending}
         />
         <InstrumentFiles instrument={instrument} onOpenRun={onOpenRun} />
         <InstrumentConsole instrument={instrument} />

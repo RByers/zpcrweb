@@ -35,7 +35,7 @@ export function InstrumentRail({
   plan: RunPlan | null;
   runWatch: RunWatchState;
 }) {
-  const { connection, info, status, busy, lastAction, runProgress } = instrument;
+  const { connection, info, status, busy, lastAction, runProgress, runPending } = instrument;
   const connected = connection === "connected";
   // What the last start did — kept so the deposit phase can report itself. A run whose files
   // didn't copy is still a run (`usb.md` §7.4), so this is a note, never a failure.
@@ -51,15 +51,20 @@ export function InstrumentRail({
         ? "Connect to the instrument first."
         : blockers.length > 0
           ? blockers[0]!.message
-          : status?.running
-            ? "The instrument is already running something."
-            : null;
-  const canStart = !!plan && plan.startable && connected && !busy && !status?.running;
+          : runPending
+            ? "The run has been started; waiting for the instrument to report it."
+            : status?.running
+              ? "The instrument is already running something."
+              : null;
+  const canStart =
+    !!plan && plan.startable && connected && !busy && !runPending && !status?.running;
   // The USB command channel carries one request at a time, so Start run has to become
   // *un-clickable* the instant any other command is in flight — but a lid or indicator command
   // round-trips fast enough that dimming the button for that whole window reads as a flash
   // rather than a state change. Delay only the dimmed *look* by a beat; `canStart` above (and so
   // the real `disabled` attribute) never waits, so the race this guards against still can't happen.
+  // A pending run is the exception — that dims immediately, because there the change of state *is*
+  // the feedback for the click, and it will not be over in a beat.
   const [busyLingering, setBusyLingering] = useState(false);
   useEffect(() => {
     if (!busy) {
@@ -70,7 +75,13 @@ export function InstrumentRail({
     return () => window.clearTimeout(t);
   }, [busy]);
   const startLooksArmed =
-    !!plan && plan.startable && connected && !status?.running && !!busy && !busyLingering;
+    !!plan &&
+    plan.startable &&
+    connected &&
+    !status?.running &&
+    !runPending &&
+    !!busy &&
+    !busyLingering;
 
   const start = async () => {
     if (!plan) return;
@@ -161,8 +172,11 @@ export function InstrumentRail({
             <>
               <Stat
                 label="State"
-                value={status.running ? status.stepText : "Idle"}
-                tone={status.running ? "warn" : "good"}
+                // Pending outranks what the instrument last said: between the click and the
+                // instrument's first answer, "Idle" is stale rather than wrong, and this is the
+                // one moment where what the app knows is ahead of what STATUS? reports.
+                value={runPending ? "Run pending" : status.running ? status.stepText : "Idle"}
+                tone={runPending || status.running ? "warn" : "good"}
               />
               <Stat label="Block" value={temp(status.blockTempC, 2)} />
               <Stat label="Sample*" value={temp(status.sampleTempC, 2)} />
@@ -205,7 +219,7 @@ export function InstrumentRail({
             }
             onClick={() => void start()}
           >
-            Start run
+            {runPending ? "Run pending…" : "Start run"}
           </button>
           <div className="rail__note instrument__footnote">
             {missing ??
@@ -285,7 +299,9 @@ export function InstrumentRail({
               follow
             </label>
           </div>
-          {runProgress ? (
+          {/* A pending start shows here even before the folder has ever been listed: the whole
+              point of it is to answer the click, and "—" would not. */}
+          {runProgress || runPending ? (
             <>
               <Stat
                 label="State"
@@ -293,16 +309,19 @@ export function InstrumentRail({
                   // `STATUS?`'s `running` flag is live and free — it's already being polled for
                   // the Status section above — so it settles "in progress" the instant a run
                   // starts, without waiting on the run folder to be listed (that only happens on
-                  // usb.md's own §7.5/§7.6 edges, not on a run merely starting).
-                  status?.running || runProgress.inProgress
-                    ? "in progress"
-                    : runProgress.ended
-                      ? "finished"
-                      : "no run"
+                  // usb.md's own §7.5/§7.6 edges, not on a run merely starting). Ahead of even
+                  // that is a locally pending start, which nothing on the wire knows about yet.
+                  runPending
+                    ? "run pending"
+                    : status?.running || runProgress?.inProgress
+                      ? "in progress"
+                      : runProgress?.ended
+                        ? "finished"
+                        : "no run"
                 }
-                tone={status?.running || runProgress.inProgress ? "warn" : "good"}
+                tone={runPending || status?.running || runProgress?.inProgress ? "warn" : "good"}
               />
-              <Stat label="Plate reads" value={String(runProgress.plateReads)} />
+              {runProgress && <Stat label="Plate reads" value={String(runProgress.plateReads)} />}
             </>
           ) : (
             <div className="rail__stat">—</div>

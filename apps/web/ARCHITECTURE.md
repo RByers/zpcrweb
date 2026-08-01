@@ -1806,6 +1806,22 @@ the run is going, and the files are provenance (they are what let the archive op
 plate map intact), so the rail says the archive may be incomplete rather than pretending the run
 failed.
 
+**The click is answered locally, before the wire.** `useCfxDevice.startRun()` sets a `runPending`
+flag synchronously, and only then begins the §7 sequence. Authoring the protocol is dozens of
+round trips, and the status poll stands back for the whole of it (it skips while `busy`), so
+without this the seconds between the click and the first `STATUS?` show an instrument that still
+says *Idle* next to an armed Start button — an invitation to click twice on the one control in the
+app that heats a block. Nothing is asked of the instrument to know a start was requested: the rail
+reads **Run pending** in both its *Status* and *Current run* sections, the button dims immediately
+(the 150 ms anti-flash delay on the dimmed look applies to short commands, not to this) and relabels
+itself, and the panel badges *pending*.
+
+It lasts exactly until the instrument's own answer replaces it — the `STATUS?` read at the end of
+`startRun()`, taken *whatever it says*. A successful start reports `running` and every live readout
+moves on to the real running state on its own, in the same render; a start that failed reports idle
+and releases the button, so a pending state can never outlive the attempt that set it. Cleared on
+teardown too, so a disconnect mid-start doesn't strand it.
+
 **What blocks a start.** `checkRunPlan()` compares the plate against every `PLATEREAD` scan mask in
 the protocol. A mask omitting a channel the plate carries dyes on is an **error**, not a warning:
 that run completes, reports nothing wrong, and yields an archive in which those dyes are flat zero
@@ -1887,7 +1903,8 @@ Four components, under `components/instrument/`:
   commands rather than beside the staged run because that is what it is: the control that actuates
   the instrument. It is disabled until every half of the run is present, the instrument is
   connected and idle, and every check passes, and it names the **first** missing piece rather than
-  a generic refusal, so the tooltip is always the next thing to do. A *Current run* section carries
+  a generic refusal, so the tooltip is always the next thing to do — including the pending window
+  after a click (above), where the next thing to do is wait. A *Current run* section carries
   what the watcher is doing and a `follow` switch to stop it. Status fields the protocol doesn't
   name are either omitted or footnoted rather than labelled with a guess (the sample temperature is
   the live example).
