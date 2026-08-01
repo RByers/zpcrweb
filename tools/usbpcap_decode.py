@@ -98,29 +98,68 @@ def summarize_devices(path):
         print(f"device #{dev}: {counts[dev]:6d} packets  VID:PID seen = {ids or '(none captured)'}{flag}")
 
 
+def _emit(i, ts, direction, m, raw):
+    body = bytes(m["body"])
+    if m["channel"] == 1:
+        try:
+            text = body.decode("ascii", errors="replace").rstrip("\r\n")
+        except Exception:
+            text = body.hex()
+        print(f"{i:6d} {ts:.6f} ch{m['channel']} {direction:3s} {text}")
+    elif raw:
+        print(f"{i:6d} {ts:.6f} ch{m['channel']} {direction:3s} "
+              f"pt={m['passthrough']} {body.hex()}")
+
+
 def dump_device(path, device, raw):
+    """Reassemble each direction's bulk stream into logical messages before
+    printing anything. A message's 5-byte header (see usb.md §2) appears only
+    on the packet that starts it; every packet before that message's `length`
+    payload bytes have arrived is a headerless continuation. Earlier versions
+    of this function re-ran decode_cfx_header on every packet independently —
+    which mostly worked, but occasionally mistook raw continuation bytes of a
+    large transfer (e.g. a GETFILE download) for a fresh header when those
+    bytes happened to look like one, fabricating short spurious messages on
+    channels that were never really used. Tracking `pending`/`remaining` per
+    direction, as done here, removes that ambiguity."""
+    pending = {"IN": None, "OUT": None}  # dict with handle/channel/length/body/start_i/start_ts, or None
+    remaining = {"IN": 0, "OUT": 0}
+
     for i, u in enumerate(iter_urbs(path)):
         if u.device != device:
             continue
         if u.transfer == 3 and u.data_length > 0:  # BULK
-            h = decode_cfx_header(u.payload)
-            if h and h["body_complete"]:
-                if h["channel"] == 1:
-                    try:
-                        text = h["body"].decode("ascii", errors="replace").rstrip("\r\n")
-                    except Exception:
-                        text = h["body"].hex()
-                    print(f"{i:6d} {u.ts:.6f} ch{h['channel']} {u.direction:3s} {text}")
-                elif raw:
-                    print(f"{i:6d} {u.ts:.6f} ch{h['channel']} {u.direction:3s} "
-                          f"pt={h['passthrough']} {h['body'].hex()}")
-            elif raw:
-                print(f"{i:6d} {u.ts:.6f} BULK {u.direction:3s} continuation, "
-                      f"{u.data_length} bytes: {u.payload[:32].hex()}...")
+            d = u.direction
+            if remaining[d] == 0:
+                h = decode_cfx_header(u.payload)
+                if h is None:
+                    if raw:
+                        print(f"{i:6d} {u.ts:.6f} BULK {d:3s} short packet (< 5 bytes), "
+                              f"can't hold a header: {u.payload.hex()}")
+                    continue
+                pending[d] = dict(handle=h["handle"], channel=h["channel"], length=h["length"],
+                                   passthrough=h["passthrough"], body=bytearray(h["body"]),
+                                   start_i=i, start_ts=u.ts)
+                remaining[d] = h["length"] - len(h["body"])
+            else:
+                pending[d]["body"].extend(u.payload)
+                remaining[d] -= len(u.payload)
+
+            if remaining[d] <= 0:
+                m = pending[d]
+                _emit(m["start_i"], m["start_ts"], d, m, raw)
+                pending[d] = None
+                remaining[d] = 0
         elif raw and u.transfer == 2 and u.stage == "SETUP" and len(u.payload) == 8:
             bmReq, bReq, wVal, wIdx, wLen = struct.unpack("<BBHHH", u.payload)
             print(f"{i:6d} {u.ts:.6f} CONTROL SETUP bmRequestType={bmReq:#04x} "
                   f"bRequest={bReq:#04x} wValue={wVal:#06x} wIndex={wIdx:#06x} wLength={wLen}")
+
+    for d in ("IN", "OUT"):
+        if pending[d] is not None and raw:
+            m = pending[d]
+            print(f"{m['start_i']:6d} {m['start_ts']:.6f} BULK {d:3s} truncated: capture ended "
+                  f"{remaining[d]} bytes short of the declared length={m['length']}")
 
 
 if __name__ == "__main__":

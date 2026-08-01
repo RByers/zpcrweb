@@ -10,8 +10,10 @@ through CFX Manager. It covers only what real USB traffic demonstrates.
 Manager 3.1 talked to a real CT019138 (a C1000 Touch running a CFX96 head): `usb-basic`
 (enumeration, lid open/close, idle status polling, no run) and `usb-run` (load a protocol + plate
 map, run 2 cycles with 2 plate reads, pull the results). Decoding was done with
-`tools/usbpcap_decode.py` (§8) against the raw pcapng bytes — every field and byte offset below
-was checked against the actual capture, not assumed.
+`tools/usbpcap_decode.py` (§8), which reassembles each direction's bulk stream into logical
+messages before parsing anything — see §8 for why that reassembly step matters. Every field and
+byte offset below was checked against the raw pcapng bytes, not assumed; §9 collects the handful
+of claims that rest on a single observation rather than a cross-checked pattern.
 
 ## 1. Device identity and topology
 
@@ -21,11 +23,11 @@ The instrument enumerates as a single USB device (not a hub with sub-devices) wi
 |---|---|
 | idVendor | `0x0614` (Bio-Rad) |
 | idProduct | `0x057B` (C1000 Touch Thermal Cycler) |
-| bDeviceClass/SubClass/Protocol | `0xEF/0x02/0x01` (IAD — misc. composite marker; harmless, there's only one function) |
-| bMaxPacketSize0 | 64 |
+| bDeviceClass/SubClass/Protocol | `0x00/0x00/0x00` — unspecified at the device level; the one interface below carries its own class instead |
+| bMaxPacketSize0 | 16 (endpoint 0, control transfers only — not the same field as the bulk/interrupt endpoints' max packet size below, which is a separate 64) |
 
 Other Bio-Rad PIDs likely share this same family (C1000 non-touch, CFX Connect, S1000) but weren't
-captured here, so their exact values aren't confirmed by this document. A device presenting
+captured here, so their exact values aren't confirmed by this document (§9). A device presenting
 `0x0547:0x0080` or `0x0547:0x2131` (Cypress's own default IDs, the bridge-chip vendor this base
 unit uses) would be a factory-fresh unit that hasn't had firmware pushed to it yet — that state
 wasn't captured either.
@@ -46,13 +48,18 @@ assume it's dead — but it isn't part of the request/response path documented h
 in these two captures (idle polling, lid control, full 2-cycle run, plate read pulls) happened
 without it.
 
-> **Caveat on the config descriptor.** Neither capture shows the host fetching this descriptor
-> for the CFX96 device itself — only for two unrelated peripherals on the same root hub (a
-> Bluetooth radio and a webcam). The interface/endpoint table above comes from a
-> `GET_DESCRIPTOR(CONFIGURATION)` that *is* present at the very start of `usb-run` for a device
-> that is already `0x0614:0x057B` — so the values are measured, just from `usb-run` rather than
-> `usb-basic`. The query for it simply isn't inside `usb-basic`'s capture window; only the
-> endpoints' *use* is confirmed in both.
+Both captures show the host fetching this configuration descriptor for the CFX96 itself — a short
+9-byte read (just the configuration header, to learn the total length) immediately followed by the
+full 39-byte one, right as device address 3 becomes `0x0614:0x057B` (at the very start of
+`usb-run`; about 30 seconds into `usb-basic`, once the instrument finishes enumerating). Both reads
+return the identical bytes:
+
+```
+09 02 27 00 01 01 00 c0 00  09 04 00 00 03 ff ff ff 00  07 05 86 02 40 00 00  07 05 02 02 40 00 00  07 05 83 03 40 00 20
+```
+— configuration header, one interface (`bNumEndpoints=3`, class `ff/ff/ff`), then the three
+endpoint descriptors (`0x86`=EP6 IN bulk, `0x02`=EP2 OUT bulk, `0x83`=EP3 IN interrupt) in the
+order shown in the table above.
 
 ## 2. The application-layer wire format
 
@@ -70,18 +77,18 @@ the application's own framing, present only inside the payload bytes of a bulk t
 | 3–4 | payload length, **big-endian** `uint16` |
 | 5.. | payload (exactly the announced length) |
 
-This layout was derived directly from the capture: every channel-1 message in both files (over a
-thousand of them) decodes cleanly against it, with the announced length always matching the
-trailing ASCII payload exactly. Example, byte-exact from `usb-basic` (a `*IDN?` query):
+This layout was derived directly from the capture: every message in both files decodes cleanly
+against it, with the announced length always matching the payload actually delivered. Example,
+byte-exact from `usb-basic` (a `*IDN?` query):
 
 ```
 01 7f 0c 00 07  2a 49 44 4e 3f 0d 0a
 ```
 `handle=0, channel=1` · `newLine=1, charTimeout=7, msgTimeout=7` · `ascii=1, textPayload=1,
 passThrough=0, dummyAdded=0` · length=`0x0007=7` · payload = `"*IDN?\r\n"`. The `msgTimeout=7,
-charTimeout=7` pair is constant — the same 7/7 values show up in **every** channel-1 message
-across both captures, so it's evidently a fixed value this protocol always uses, not something
-that needs to vary.
+charTimeout=7` pair is constant — the same 7/7 values show up in every channel-1 message across
+both captures, so it's evidently a fixed value this protocol always uses, not something that needs
+to vary.
 
 **Multi-packet messages.** The 5-byte header describes the whole logical message, which can be
 much larger than one 64-byte USB bulk packet (max packet size, per §1). Only the *first* USB
@@ -95,18 +102,21 @@ was seen going out as a single message with no visible upper bound in these capt
 protocol does not appear to impose its own additional chunk-size ceiling beyond what the USB
 transport naturally splits into.
 
-**Channels.** The `channel` field (2 bits, so 0–3) multiplexes independent logical streams over
-the same pair of bulk endpoints:
+**Channels.** The `channel` field is 2 bits (0–3), multiplexing independent logical streams over
+the same pair of bulk endpoints. Reassembling each direction's bulk stream into complete messages
+(§8) and tallying the result across both captures gives an exact picture of how the four values are
+actually used:
 
-| Channel | Use | Evidence |
+| Channel | Messages (`usb-basic` + `usb-run`) | Use |
 |---|---|---|
-| 1 | ASCII command/response (§3) — the vast majority of traffic in both captures | every message decodes as a printable ASCII command line, CR-terminated |
-| 2 | A binary auxiliary stream, still only partially decoded (§4) | short fixed-format binary requests/responses, high frequency during lid/LED-adjacent polling |
-| 0 | Rare — a handful of short messages per capture | not characterized; too little traffic to reverse |
+| 1 | 1,188 + 3,191 = 4,379 | ASCII command/response (§3) — every message decodes as a printable, CR-terminated command line |
+| 2 | 242 + 32 = 274 | A binary auxiliary stream, still only partially decoded (§4) |
+| 0 | 4 + 0 = 4 | Rare — one exchange, repeated twice, only in `usb-basic` (§4) |
+| 3 | 0 + 0 = 0 | Never seen as a genuine message in either capture, despite being a representable value |
 
-`handle` was **always 0** across every message in both captures — either this instrument only ever
-hands out handle 0, or CFX Manager never had cause to open a second one in the traffic captured.
-Don't assume it's always 0 without checking a capture that opens more than one logical session.
+`handle` was 0 for every one of those 4,657 reassembled messages — either this instrument only
+ever hands out handle 0, or CFX Manager never had cause to open a second one in the traffic
+captured (§9).
 
 ## 3. Channel 1 — the ASCII command language
 
@@ -114,59 +124,137 @@ A channel-1 message's payload is the literal command line: **ASCII, CR-terminate
 (`\r\n` was used consistently in every message captured), no other structure — a plain text
 command in, a plain text response out, framed per §2.
 
-**Response shape.** A successful response is `<value>;<errcode>\r\n`, where `<errcode>` is a
-decimal number, `0000` for success — e.g. `*IDN?` → `BIO-RAD LABORATORIES,C1000,CT019138,2.0.231.0;0000`.
-For commands with no return value the `<value>` part is simply empty (`ERRORLIST A` →
-`;0000`). This four-digit-error-code suffix is consistent across every response in both captures —
-worth keeping in mind if a future capture ever shows a *non-zero* code, since neither capture here
-triggered an actual device error.
+**Response shape.** There are two shapes, and which one a command uses depends on whether it has
+a value to report at all:
+
+- Commands with something to report — even an empty string, even just a boolean — separate the
+  value from the error code with a semicolon: `*IDN?` → `BIO-RAD LABORATORIES,C1000,CT019138,2.0.231.0;0000`;
+  `WORKING?` → `True;0000`; `ERRORLIST A`, which has nothing to report this run, still sends the
+  semicolon with an empty value → `;0000`.
+- Pure action commands — the ones with no return-value slot in their response at all, confirmed
+  byte-for-byte (`30 30 30 30`, no `3b`) rather than inferred from the rendered text — respond
+  with the bare 4-digit code and no separator: `DELFILE`, `PROTOCOL`, `METHOD`, `HOTLID`, `VOLUME`
+  (the setter), `TEMP`, `PLATEREAD`, `GOTO`, `END`, `ADDCYCLES`, `RemoteRun`, `PROCEED`, `CANCEL`,
+  `LID OPEN`, `FRONTENDLOCKED`, `TESTMODE`, `BLOCKID`, and `SETAPILOGLEVEL` all responded `0000`,
+  never `;0000`. `SetDateTime` is the one exception that looks like this group but isn't: it
+  reports success as a value, `True;0000`, because it does have something to report.
+
+`<errcode>` is `0000` for success in every response seen in both captures; neither capture ever
+triggered an actual device error, so what a non-zero code looks like is unconfirmed.
 
 Commands actually observed on the wire (this is not a complete command vocabulary — only what
-appeared in these two captures):
+appeared in these two captures), grouped by role:
+
+**Identification and static status** — queried once during startup, not polled again:
 
 | Command | Example response | Notes |
 |---|---|---|
 | `*IDN?` | `BIO-RAD LABORATORIES,C1000,CT019138,2.0.231.0;0000` | manufacturer, model, serial, firmware |
-| `STATUS?` | `17.04;18.3;0;0;IDLE;0;"",BLOCK,OFF;0;0.00;0.00;0.00;0.00;0.00;0;0;0;17.04;CLOSED;0;0000` | polled every ~1s while idle; mid-run: `60.25;104.9;2;2;TEMP 95.0,10;2;"SINGLETE",CALC,ON;96;110.22;0000` — block temp, lid temp, cycle, step index, current step text, run name, method, lid state, block count, elapsed... |
+| `SOFTWARE?` | `2.0.231.0;0000` | matches the firmware field of `*IDN?` |
+| `FrontEndSoftware?` | `1.102.548.801;0000` | a second, longer version string — front-end/UI software, distinct from `SOFTWARE?` |
+| `BASESN?` | `CT019138;0000` | base unit serial, matches `*IDN?`'s serial field |
+| `ALPHASN?` | `RN050773;0000` | a second serial number, distinct from the base unit's |
+| `ALPHAID?` | `4;0000` | a block/head type identifier; this instrument (a CFX96) reports `4` — the general ID→name mapping wasn't derived from the capture, just this one observed value (§9) |
+| `BLOCKDESC?` | `"96FX";0000` | block/plate-type descriptor |
+| `BLOCKCOUNT?` | `1;0000` | |
+| `CPLD?` | `B;0000` | a firmware/hardware revision letter |
+| `DEVICES?` | `0;0000` | unclear what this counts; `0` in both captures |
+| `VOLUME?` | `10;0000` | last-set reaction volume, µL |
+| `WORKING?` | `True;0000` | |
+| `BOOTMODE?` | `False;0000` | |
+| `SELFTEST?` | `0;0000` | |
+| `ENABLERT?` | `0;0000` | |
+| `ERRORS?` | `0;0000` | an error *count* — distinct from `ERRORLIST A`'s error *contents* |
+| `GETSIPOSTERRORS` | `true;;0000` | the doubled `;;` is real — an empty middle field between a `true`/`false` flag and the error code |
+| `SUPERLOCKDOWNMODE?` | `OFF;0000` | |
+| `GETFREESPACE` | `4018397184;0000` | bytes free on storage |
+| `GETTOTALRAM` | `96014336;0000` | bytes of RAM |
+| `NAME?` | `"";0000` | current run name; empty while idle |
+| `LIDFORCE?` | `AUTO;0000` | |
+| `LIDVERSION?` | `54;0000` | |
+| `LIDBVERSION?` | `236;0000` | |
+| `GETPOS?` | `0;0000` | an unidentified position query — the capture doesn't say what it's a position *of* |
+
+**The polling loop** — repeated roughly every second for the life of the connection, in this
+order:
+
+| Command | Example response | Notes |
+|---|---|---|
+| `STATUS?` | idle: `17.04;18.3;0;0;IDLE;0;"",BLOCK,OFF;0;0.00;0.00;0.00;0.00;0.00;0;0;0;17.04;CLOSED;0;0000` — mid-run: `60.25;104.9;2;2;TEMP 95.0,10;2;"SINGLETE",CALC,ON;96;110.22;0.00;75.15;2.10;0.00;0;0;6;55.61;CLOSED;0;0000` | block temp, lid temp, cycle, step index, current step text, run name, method, lid state, block count, elapsed... — both examples are the complete response, not truncated |
 | `RTSTATUS?` | `18.31;26;;0000` | shorter status, polled alongside `STATUS?` |
 | `ERRORLIST A` | `;0000` | polled every cycle in lockstep with `STATUS?`/`RTSTATUS?` |
-| `ALPHAID?` | `4;0000` | a block/head type identifier; this instrument (a CFX96) reports `4` — the general ID→name mapping wasn't derived from the capture, just this one observed value |
-| `BLOCKCOUNT?`, `VOLUME?`, `WORKING?`, `BOOTMODE?`, `SELFTEST?`, `ENABLERT?` | — | queried once at the start of a run, not polled |
-| `LID OPEN` | — | issued on physical lid-open; no response payload observed beyond `;0000` |
-| `PROTOCOL '<name>'`, `METHOD <name>` | — | names the protocol/method being authored — see §5 |
-| `HOTLID <temp>,<ramp>` | — | e.g. `HOTLID 105,30` |
-| `VOLUME <µL>` | — | e.g. `VOLUME 25` |
-| `TEMP <°C>,<seconds>` | — | one hold step, e.g. `TEMP 95.0,180` |
-| `PLATEREAD #h<hex>` | — | e.g. `PLATEREAD #h3F` — hex mask, presumably channel/dye selection; not decoded bit-by-bit |
-| `GOTO <step>,<count>` | — | e.g. `GOTO 2,1` — loop back to step 2, 1 more time (2 total passes) |
-| `END` | — | closes the step list |
-| `ADDCYCLES <n>` | — | |
-| `RemoteRun "<A>","<B>","<C>","<name>","<user>","<pw?>","<D>","<method>"` | — | e.g. `RemoteRun "A","True","False","singletest","admin","","True","CALC"` — starts the authored protocol running under a given run name/user |
-| `PROCEED` | — | resumes/confirms a run (there was a ~2-minute gap between `RemoteRun` and `PROCEED` in the capture — almost certainly the operator closing the lid and confirming on the touchscreen) |
-| `CANCEL` | — | seen once, immediately after the first plate read was pulled — likely normal run-finished cleanup rather than a user abort, but not confirmed either way |
-| `GETFILESLEN <dir>`, `LISTALLFILES <dir>`, `GETFILESIZE <path>`, `GETFILE <path>`, `DELFILE <path>` | — | filesystem access, §5 |
-| `COMPUTEFILECRC "<path>"`, `GETFILECRC "<path>"` | `<crc>;0000` | upload verification, §5 |
-| `CRCSENDFILE "<n>*<path>",<raw bytes>` | — | file upload, §5 — note this is the one command whose payload is *not* all-ASCII |
-| `FRONTENDLOCKED OFF` | — | seen once, at the very end of the run capture |
 
-## 4. Channel 2 — the binary auxiliary stream (partially understood)
+**Protocol authoring and run control:**
 
-Distinct from channel 1: same 5-byte header, `channel=2`, but the payload is a short fixed binary
-structure instead of ASCII text. Example exchange (from `usb-basic`, during idle lid-position
-polling):
+| Command | Notes |
+|---|---|
+| `PROTOCOL '<name>'`, `METHOD <name>` | names the protocol/method being authored — see §5 |
+| `HOTLID <temp>,<ramp>` | e.g. `HOTLID 105,30` |
+| `VOLUME <µL>` | e.g. `VOLUME 25` |
+| `TEMP <°C>,<seconds>` | one hold step, e.g. `TEMP 95.0,180` |
+| `PLATEREAD #h<hex>` | e.g. `PLATEREAD #h3F` — hex mask, presumably channel/dye selection; not decoded bit-by-bit |
+| `GOTO <step>,<count>` | e.g. `GOTO 2,1` — loop back to step 2, 1 more time (2 total passes) |
+| `END` | closes the step list |
+| `ADDCYCLES <n>` | |
+| `RemoteRun "<A>","<B>","<C>","<name>","<user>","<pw?>","<D>","<method>"` | e.g. `RemoteRun "A","True","False","singletest","admin","","True","CALC"` — starts the authored protocol running under a given run name/user |
+| `PROCEED` | resumes/confirms a run (there was a ~2-minute gap between `RemoteRun` and `PROCEED` in the capture — almost certainly the operator closing the lid and confirming on the touchscreen) |
+| `CANCEL` | seen once, immediately after the first plate read was pulled. The subsequent `LISTALLFILES` response only gains the `ended` marker and the second plate read (`Read00002.Plateread`) *after* this command — strong evidence this is normal run-finished cleanup rather than a user abort, though it isn't confirmed from firmware source |
+| `LID OPEN` | issued on physical lid-open |
+| `FRONTENDLOCKED ON`/`OFF` | `ON` appears once in `usb-basic`; `OFF` once, at the very end of `usb-run` |
+| `TESTMODE <n>` | e.g. `TESTMODE 3`, issued at the very start of both captures |
+| `BLOCKID <n>` | e.g. `BLOCKID 1` |
+| `SETAPILOGLEVEL <n>` | e.g. `SETAPILOGLEVEL 1` |
+| `SetDateTime <mm/dd/yyyy>,<hh:mm:ss>,<AM\|PM>,<tz offset>` | e.g. `SetDateTime 07/31/2026,09:33:04,PM,-04:00` → `True;0000` |
+
+**Filesystem and file transfer** — see §5 for the full upload/download mechanism:
+
+| Command | Notes |
+|---|---|
+| `GETFILESLEN <dir>` | count of entries in a directory |
+| `LISTALLFILES <dir>` | comma-separated filenames |
+| `GETFILESIZE <path>` | byte count |
+| `GETFILE <path>` | raw file bytes |
+| `DELFILE <path>` | |
+| `COMPUTEFILECRC "<path>"` | despite the name, does **not** return a CRC — see §5 |
+| `GETFILECRC "<path>"` | `<crc>;0000` |
+| `CRCSENDFILE "<crc>*<path>",<raw bytes>` | file upload, §5 — the one command whose payload is *not* all-ASCII |
+
+## 4. Channel 0 and channel 2 — the binary auxiliary streams (partially understood)
+
+Both channels carry a short, fixed-layout binary payload instead of channel 1's command text —
+same 5-byte header, `channel=0` or `channel=2`, but the body isn't ASCII. Neither channel's byte
+layout is confirmed beyond "it's short and looks fixed-format": the captures don't give enough
+variation to pin down what any individual byte means, and nothing here should be read as more
+than that.
+
+**Channel 0** is rare (§2's table: 4 messages total, all in `usb-basic`) and is the same exchange
+repeated verbatim twice, both times folded into the general identification-query burst right after
+enumeration — interleaved with `BASESN?`/`SOFTWARE?`/`ALPHASN?`/`*IDN?`/`CPLD?` (§3), not
+lid-specific:
 
 ```
-OUT  02 05 0a 00 03  02 00 00
-IN   02 00 00 00 06  04 00 00 04 0b 00
+OUT  00 05 0a 00 03  02 00 00
+IN   00 00 00 00 06  02 00 00 04 0b 00
 ```
 
-The request payload (`02 00 00`) and response payload (`04 00 00 04 0b 00`) look like a small
-fixed-layout record, but **no byte-level field mapping is confirmed here** — the capture doesn't
-give enough variation to pin down what each byte means. This channel carried a lot of short
-traffic during idle polling in both captures (hundreds of frames), always ≤ 12 bytes payload, so
-it's evidently some kind of frequent low-latency status/position register read rather than
-anything related to the optical scan pipeline. **Nothing in either capture exercises the optical
-head's scan protocol at all** — see §6.
+**Channel 2** is the busier of the two — 242 messages in `usb-basic`, 32 in `usb-run` — and, unlike
+channel 0, genuinely does cluster around lid activity: this example is the pair immediately
+preceding the `LIDFORCE?`/`GETPOS?`/`LIDVERSION?`/`LIDBVERSION?` queries (§3) in `usb-basic`:
+
+```
+OUT  02 05 0a 00 05  04 00 00 00 00
+IN   02 00 00 00 06  04 00 00 04 64 00
+```
+
+A second, longer channel-2 exchange from the same window returns 34 bytes:
+
+```
+OUT  02 05 0a 00 07  01 fa 00 10 00 00 20
+IN   02 00 00 00 22  01 00 00 00 00 00 01 00 00 00 00 00 00 00 00 00 00 00 07 27 0f 27 0f ee e1
+     41 87 a7 30 41 b0 00 00 00
+```
+
+**Nothing in either capture exercises the optical head's own scan protocol at all** — see §6.
 
 ## 5. File transfer — how a run is actually loaded and read back
 
@@ -184,32 +272,40 @@ upload is the one that matters for reproducing a run without re-deriving the ASC
 message; see §2's note on message-vs-USB-packet size):
 
 ```
-CRCSENDFILE "<n>*<device path>",<raw file bytes>
+CRCSENDFILE "<crc>*<device path>",<raw file bytes>
 ```
 
-e.g. `CRCSENDFILE "05672*\Storage Card\CurrentRun\QuickPlate_96 wells_All Channels.pltd",<1821
-bytes of zip>` — the zip payload is byte-for-byte a complete, valid ZipCrypto container (local
-file header, one entry, EOCD record present at the tail). **The `<n>*` prefix's meaning is not
-confirmed** — in the two calls captured it was `05672` and `46850`, neither of which matches the
-uploaded byte count (1821 and 1291 respectively), so it isn't a length field; likely some kind of
-session/ticket identifier, but this is a guess, not a finding.
+`<crc>` is the client's own CRC of the file it's about to send — not a session ID or ticket number,
+and not a length field. This is confirmed end-to-end, not guessed: `usb-run` uploaded four files,
+and for every one of them, the CRC the device reports back after the upload (via
+`COMPUTEFILECRC`/`GETFILECRC`, below) matches the `<crc>` CFX Manager sent up front, exactly:
 
-The observed upload sequence, per file (`GlobData.xml`, the `.pltd` plate map, `RunInfo.xml`, the
-`.prcl` protocol), each following the same shape:
+| File | `<crc>` sent | Upload size | GUID `COMPUTEFILECRC` returned | `GETFILECRC` on that GUID |
+|---|---|---|---|---|
+| `GlobData.xml` | 24700 | 17,299 bytes (XML) | `fad4f43f-e127-4b35-857d-1aba9bd5a615` | `24700;0000` |
+| `QuickPlate_96 wells_All Channels.pltd` | 05672 | 1,821 bytes (zip) | `0e72e6e2-5b85-4d00-b08a-41db67adaaa8` | `5672;0000` |
+| `RunInfo.xml` | 49503 | 8,751 bytes (XML) | `e6328d75-08d1-406d-914f-88ea6dfa16df` | `49503;0000` |
+| `singletest.prcl` | 46850 | 1,291 bytes (zip) | `988ed34b-647d-48be-ab4c-db6b1b3af9f0` | `46850;0000` |
 
-1. `DELFILE <friendly path>` — clear any stale file at the well-known name
-2. `CRCSENDFILE "<n>*<friendly path>",<bytes>` — upload
-3. `COMPUTEFILECRC "<friendly path>"` — device computes a CRC of what it has under that name
-4. `GETFILESLEN`/`LISTALLFILES <dir>` — host re-lists the directory
-5. `GETFILECRC "<dir>\<GUID>"` — host reads back a CRC for what turns out to be a **different,
-   GUID-named file** in the same directory
+That resolves what was previously two separate open questions about this sequence into one
+mechanism. The full per-file sequence observed:
 
-Step 5's filename never matches step 1/2's — the device evidently stores the just-uploaded file
-under a generated GUID name while `LISTALLFILES` is how the host discovers what that name turned
-out to be, and it's that GUID name that gets CRC-verified. The rename-to-friendly-name step (if
-any) wasn't isolated in this capture.
+1. `DELFILE <friendly path>` — clear any stale file at the well-known name.
+2. `CRCSENDFILE "<crc>*<friendly path>",<bytes>` — upload, `<crc>` computed by the client beforehand.
+3. `COMPUTEFILECRC "<friendly path>"` — **despite the name, this doesn't return a CRC.** The
+   device stores the just-uploaded file under a generated GUID name rather than the friendly one,
+   and this is the call that hands that GUID name back: the response is `<dir>\<GUID>;0000`.
+4. `GETFILESLEN`/`LISTALLFILES <dir>` — the host re-lists the directory. The GUID name is already
+   in hand from step 3 by this point, so this looks like a UI-refresh/sanity check rather than how
+   the client discovers it.
+5. `GETFILECRC "<dir>\<GUID>"` — the device's own CRC of the GUID-stored file, which the client can
+   now compare against the `<crc>` it sent in step 2 to confirm the upload landed intact (table
+   above).
 
-**Download** is simpler and doesn't have this indirection:
+The observed upload order across a run's four files: `GlobData.xml`, the `.pltd` plate map,
+`RunInfo.xml`, the `.prcl` protocol.
+
+**Download** is simpler and has no GUID indirection:
 
 ```
 GETFILESIZE <path>          → "<byte count>;0000"
@@ -247,8 +343,9 @@ and collects the plate reads:
    and identify the unit.
 3. Poll `STATUS?`/`RTSTATUS?`/`ERRORLIST A` (§3) — not strictly required, but this is what every
    real client does between commands and is a cheap liveness/error check.
-4. Upload the plate map and protocol with `DELFILE`/`CRCSENDFILE`/`COMPUTEFILECRC` for each file
-   (§5) — the well-known destination paths seen were under `\Storage Card\CurrentRun\`.
+4. Upload the plate map and protocol with `DELFILE`/`CRCSENDFILE`/`COMPUTEFILECRC`/`GETFILECRC`
+   for each file (§5), comparing the CRC that comes back against the one sent — the well-known
+   destination paths seen were under `\Storage Card\CurrentRun\`.
 5. `RemoteRun "A","True","False","<name>","<user>","","True","<method>"`, then wait for the
    operator (or, for an unattended flow, whatever confirms lid closure) before `PROCEED`.
 6. Poll `STATUS?` for step/cycle progress; each `PLATEREAD` step produces a new
@@ -267,5 +364,37 @@ parsing is hand-rolled (`dpkt` doesn't know either format). Usage:
 ```sh
 python3 tools/usbpcap_decode.py capture.pcapng                  # list devices + VID:PID seen
 python3 tools/usbpcap_decode.py capture.pcapng --device 3        # decode channel-1 traffic for device #3
-python3 tools/usbpcap_decode.py capture.pcapng --device 3 --raw  # + channel 2, control transfers, continuation frames
+python3 tools/usbpcap_decode.py capture.pcapng --device 3 --raw  # + channel 0/2, control transfers
 ```
+
+`dump_device()` reassembles each direction's bulk stream into complete logical messages —
+tracking how many payload bytes are still owed to the in-progress message, per direction — before
+trying to parse a 5-byte header out of anything. An earlier version parsed every packet
+independently instead, which worked for the ASCII channel-1 traffic that makes up the bulk of both
+captures, but occasionally misread raw continuation bytes of a large transfer (e.g. mid-`GETFILE`
+of a multi-hundred-KB `.zpcr` file) as a fresh header when those bytes happened to look like one —
+fabricating short spurious messages on channels that were never really used. §2's channel counts
+and §4's examples were produced with the reassembling version and are the basis for saying channel
+3 never really appears in either capture.
+
+## 9. Appendix: single-observation caveats
+
+Claims elsewhere in this document that rest on one instrument, one capture pair, or one observed
+instance, rather than a cross-checked pattern:
+
+- **Other Bio-Rad PIDs** (§1) — the C1000 non-touch, CFX Connect, and S1000 likely share idVendor
+  `0x0614` with their own idProduct, but none were captured; a factory-fresh unit presenting
+  Cypress's own `0x0547:0x0080`/`0x0547:0x2131` (the bridge-chip vendor) wasn't captured either.
+- **`handle` is always 0** (§2) — true for all 4,657 reassembled messages across both captures,
+  from one instrument talking to one CFX Manager install. Whether a second logical session (a
+  nonzero handle) is ever opened is unconfirmed.
+- **`ALPHAID?` → `4`** (§3) — one instrument, one observed value; the general ID→name mapping for
+  other block/head types isn't in this capture.
+- **`GETPOS?`, `TESTMODE`, `BLOCKID`, `SETAPILOGLEVEL`** (§3) — recorded with their literal
+  observed values; the capture doesn't say more about what any of them mean than the command name
+  itself suggests.
+- **Channel 0 and channel 2's byte layout** (§4) — both channels' examples are real and
+  byte-exact, but with this little variation in the traffic, no individual byte's meaning is
+  confirmed for either.
+- **`PLATEREAD #h<hex>`'s mask** (§3) — only `#h3F` was observed, in a protocol that reads all
+  channels; which bit maps to which channel isn't determined from a single value.
