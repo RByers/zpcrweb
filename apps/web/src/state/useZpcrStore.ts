@@ -6,6 +6,7 @@ import {
   parsePcrd,
   parsePlateCsv,
   parsePltd,
+  parseRunDefinitionText,
   parseZpcr,
   parseZpcrwebSettings,
   writeZpcrwebSettings,
@@ -39,7 +40,7 @@ import { onHashChange, readHash, writeHash } from "./urlHash";
 
 export { DEFAULT_THRESHOLD_MULTIPLIER } from "./analysisSettings";
 
-export type FileKind = "zpcr" | "pcrd" | "biomeme" | "pltd" | "csv";
+export type FileKind = "zpcr" | "pcrd" | "biomeme" | "pltd" | "csv" | "prcl";
 /** The two kinds a plate — standalone or attached to a run — can be uploaded as. */
 type PlateFileKind = "pltd" | "csv";
 
@@ -497,7 +498,21 @@ function fileKind(name: string, bytes?: Uint8Array): FileKind | null {
   if (/\.pltd$/i.test(name)) return "pltd";
   if (/\.csv$/i.test(name)) return "csv";
   if (/\.json$/i.test(name) && bytes && isBiomemeJson(bytes)) return "biomeme";
+  // `.txt` is far too generic an extension to route on, so it is admitted only when the content
+  // really is a run definition (`prcl.md` §3.1) — the same content-sniffing rule `.json` gets
+  // above. That also lets an instrument's own `ProtocolRunDefinition.txt` in unrenamed.
+  if (/\.txt$/i.test(name) && bytes && looksLikeProtocolText(bytes)) return "prcl";
   return null;
+}
+
+/** True when these bytes parse as a thermal-protocol run definition. */
+function looksLikeProtocolText(bytes: Uint8Array): boolean {
+  try {
+    parseRunDefinitionText(new TextDecoder().decode(bytes));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -534,6 +549,8 @@ export interface ZpcrStore {
   activeRun: RunResult | null;
   /** Parse result for every loaded standalone `.pltd`/`.csv` file, keyed by id. */
   plateFiles: Map<string, PlateFileResult>;
+  /** `.prcl.txt` entries, id → canonical one-line run definition (`prcl.md` §3.1). */
+  protocolFiles: Map<string, string>;
   activePlateFile: PlateFileResult | null;
   /**
    * Attach (or replace) a `.zpcr` run's plate: rewrites the run's own archive bytes in place
@@ -738,14 +755,23 @@ export function useZpcrStore(): ZpcrStore {
     async (input: FileList | File[]) => {
       // `.json`'s kind can only be known after reading its bytes (see `fileKind`), so every file
       // is read up front rather than filtered by extension first the way the other formats are.
-      const candidates = Array.from(input).filter((file) => /\.(zpcr|pcrd|pltd|csv|json)$/i.test(file.name));
+      const candidates = Array.from(input).filter((file) => /\.(zpcr|pcrd|pltd|csv|json|txt)$/i.test(file.name));
       let lastId: string | null = null;
+      let lastKind: FileKind | null = null;
       for (const file of candidates) {
         try {
           const buf = await file.arrayBuffer();
           const bytes = new Uint8Array(buf);
           const kind = fileKind(file.name, bytes);
-          if (!kind) throw new Error("not a .zpcr, .pcrd, .pltd, .csv or Biomeme .json file");
+          if (!kind) {
+            throw new Error(
+              /\.txt$/i.test(file.name)
+                ? // The name got this far, so say what was wrong with the *content* rather than
+                  // repeating the extension list — a `.txt` is only ever rejected for that.
+                  "not a thermal protocol (.prcl.txt)"
+                : "not a .zpcr, .pcrd, .pltd, .csv, .prcl.txt or Biomeme .json file",
+            );
+          }
           // Validate the container eagerly so obviously-bad files are rejected up front; a
           // .pcrd/.pltd's payload may still need a password, resolved reactively via `runs`/
           // `plateFiles`.
@@ -753,6 +779,8 @@ export function useZpcrStore(): ZpcrStore {
           else if (kind === "pcrd") parsePcrd(bytes);
           else if (kind === "biomeme") parseBiomeme(bytes);
           else if (kind === "pltd") parsePltd(bytes);
+          // Already validated by `fileKind`'s content sniff — parsing again would only repeat it.
+          else if (kind === "prcl") void 0;
           else parsePlateCsv(new TextDecoder().decode(bytes));
           const id = fileId(file.name, file.size);
           // Re-loading a name that's already here replaces it. Ids hash name+size, so an edited
@@ -765,6 +793,7 @@ export function useZpcrStore(): ZpcrStore {
           const addedAt = Date.now();
           await putFile({ id, name: file.name, size: file.size, addedAt, bytes: buf, kind });
           lastId = id;
+          lastKind = kind;
           setFiles((prev) => {
             const rest = prev.filter((f) => f.id !== id && !supersededIds.has(f.id));
             return [...rest, { id, name: file.name, size: file.size, addedAt, kind, bytes }];
@@ -774,6 +803,10 @@ export function useZpcrStore(): ZpcrStore {
         }
       }
       if (lastId) setActiveId(lastId);
+      // A `.prcl.txt` is not a run to look at — it's an input to one. It has no file-backed view
+      // of its own, so loading one goes where it can actually be used. Done here rather than at
+      // the call site so every entry point (the header button, a drop, `#load=`) behaves alike.
+      if (lastKind === "prcl") setView("device");
       return lastId;
     },
     [forget],
@@ -960,6 +993,24 @@ export function useZpcrStore(): ZpcrStore {
   const activePlateFile = activeId ? plateFiles.get(activeId) ?? null : null;
 
   /**
+   * Decoded `.prcl.txt` entries. Unlike a run or a plate file this needs no password and cannot
+   * fail here — `fileKind` only admits bytes that already parsed — so the value is the canonical
+   * one-line run definition itself rather than a result wrapper.
+   */
+  const protocolFiles = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const f of files) {
+      if (f.kind !== "prcl") continue;
+      try {
+        map.set(f.id, parseRunDefinitionText(new TextDecoder().decode(f.bytes)));
+      } catch {
+        /* admitted only if it parsed; a failure here means the bytes changed underneath us */
+      }
+    }
+    return map;
+  }, [files]);
+
+  /**
    * Seed each file's analysis settings from its own `zpcrweb.json`, once — after hydration, after
    * an upload, and (for an encrypted `.pcrd`) once a working password finally decodes it. A file
    * that fails to parse stays unseeded rather than being seeded with defaults, so unlocking it
@@ -1034,6 +1085,7 @@ export function useZpcrStore(): ZpcrStore {
     runs,
     activeRun,
     plateFiles,
+    protocolFiles,
     activePlateFile,
     attachPlate,
     settings,

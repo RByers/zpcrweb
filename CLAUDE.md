@@ -120,7 +120,7 @@ Cost control, when you do run it:
 npm run test:ui
 ```
 
-92 browser assertions covering what nothing else can catch: the two URL contracts — hash
+95 browser assertions covering what nothing else can catch: the two URL contracts — hash
 routing (deep links, back/forward, unknown-file and invalid-view fallbacks) and password
 handling (stripped from both URL forms, never leaked into the routing hash, an encrypted
 `.pcrd` still decrypting) — plus `#load=`, the rule that every XML view uses the shared
@@ -140,11 +140,11 @@ of ΔRFU) — and the rail's Cq range filter, whose top stop is where the curves
 clamp instead of crossing) — and that a `.pcrd` carrying a hand-set threshold seeds it as a
 per-fluorophore override while a dye the file left on auto is left alone (`threshold.md` §5.3:
 that one value is what makes the app reproduce CFX's own Cq) — and the Overview tab's
-`.prcl.txt` download plus the Device view's protocol staging panel (a file with no embedded
-protocol is offered *disabled with a reason* rather than hidden, switching the pick re-renders the review, a `.prcl.txt` off disk replaces it and a run
-replaces that back, a file that isn't a protocol is rejected with a reason, and both action
-buttons stay inert while the library has no upload or run-control commands — a safety property,
-not a cosmetic one). A screenshot
+`.prcl.txt` download plus the Device view's run staging, where the file bar is a *multi*-selection
+(one run, plus a `.prcl.txt`/`.plt.csv` overriding either half; a run with both halves overridden
+drops out because it supplies nothing; tapping a selected override releases it; a loaded
+`.prcl.txt` joins the selection and lands on the Device view) and Start run appears only with an
+instrument attached. A screenshot
 can't show that the back button works, that a secret reached the address bar, that a hover
 put a curve back, or that eight rows are in the right order — and the core Vitest suite has no
 DOM.
@@ -152,8 +152,9 @@ DOM.
 Takes ~35s and needs Chrome, so it is **not** part of `npm test` — that stays fast and
 dependency-free. Run it when you touch `state/urlHash.ts`, `state/pltdPassword.ts`,
 `components/curves/ChipBar.tsx`, `components/curves/CurveTable.tsx`,
-`components/curves/CqRange.tsx`, `components/device/DeviceProtocol.tsx`,
-`lib/protocolSource.ts`, `state/useZpcrStore.ts`'s settings seeding, or view selection. Both
+`components/curves/CqRange.tsx`, `components/device/DeviceRun.tsx`, `state/useRunStaging.ts`,
+`lib/protocolSource.ts`, `state/useZpcrStore.ts`'s settings seeding or `fileKind`, or view
+selection. Both
 tools share `tools/harness.mjs` (the CDP client and dev-server/Chrome plumbing); add new checks there rather than starting a third
 script. Note that rail hover ("peek") needs a real `Input.dispatchMouseEvent` — React derives
 `onMouseEnter`/`onMouseLeave` from an over/out pair plus `relatedTarget`, so a synthesized

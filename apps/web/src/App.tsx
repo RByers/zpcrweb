@@ -1,5 +1,7 @@
 import { useRef } from "react";
 import { useZpcrStore } from "./state/useZpcrStore";
+import { useRunStaging } from "./state/useRunStaging";
+import { resolveStagedRun } from "./lib/protocolSource";
 import { usePltdPassword } from "./state/pltdPassword";
 import { formatLoadHash } from "./state/urlHash";
 import { useHeaderFit } from "./state/useHeaderFit";
@@ -24,6 +26,8 @@ const STANDALONE_VIEWS = ["plates", "raw"] as const;
 /** A Biomeme run has no reference row, no `.Dcal` calibration files and no raw archive to
  * browse (`Zpcr.archive` is honestly empty) — those three tabs have nothing to show. */
 const BIOMEME_VIEWS = ["overview", "curves", "plates"] as const;
+/** A `.prcl.txt` is staged, not viewed — the Device view is the only place it does anything. */
+const PROTOCOL_VIEWS = ["device"] as const;
 
 /** A `.pltd`/`.plt.csv` uploaded on its own, rather than a run — it gets a restricted tab set. */
 const isStandaloneKind = (kind: string) => kind === "pltd" || kind === "csv";
@@ -37,6 +41,10 @@ const isStandaloneKind = (kind: string) => kind === "pltd" || kind === "csv";
 function restrictedViewsFor(kind: string): readonly [ViewId, ...ViewId[]] | null {
   if (isStandaloneKind(kind)) return STANDALONE_VIEWS;
   if (kind === "biomeme") return BIOMEME_VIEWS;
+  // A `.prcl.txt` is an *input to* a run, not a run to look at — it has no file-backed view, and
+  // Device is where it is used (`useRunStaging.ts`). Returning the Device tab alone keeps the
+  // fallback below total: there is always somewhere for a file to send you.
+  if (kind === "prcl") return PROTOCOL_VIEWS;
   return null;
 }
 
@@ -73,6 +81,18 @@ export function App() {
   // header's natural width other than a resize: the selected tab (level 2 keeps its label) and
   // the active file (a standalone plate shows two tabs, a run five).
   const { ref: headerRef, fit } = useHeaderFit([store.view, store.activeId]);
+  // Which files make up the run the Device view would start. Held here rather than inside that
+  // view because the file bar — which lives in this component — is the control that edits it.
+  const staging = useRunStaging(store.files, store.activeId);
+  const [pltdPassword] = usePltdPassword();
+  const staged = resolveStagedRun(
+    staging.selection,
+    store.files,
+    store.runs,
+    store.plateFiles,
+    store.protocolFiles,
+    pltdPassword,
+  );
   // Where "← back" on the About page returns to, so opening About and leaving again is a no-op.
   const lastView = useRef<ViewId>("curves");
   if (store.view !== "about") lastView.current = store.view;
@@ -107,11 +127,14 @@ export function App() {
 
   // The Device view operates on an instrument, not a file, so it renders the same way whether or
   // not anything is loaded — and is reachable from the welcome screen, which is where someone
-  // with a cycler and no files yet actually starts. It gets the normal header (so the tabs can
-  // take you back) but no file bar.
-  if (store.view === "device") {
+  // with a cycler and no files yet actually starts. It keeps the file bar, because starting a run
+  // needs files: there a chip means "part of the run being staged" rather than "the file you are
+  // looking at", which is why it gets `selectedIds` and the staging toggle instead of `activeId`.
+  // A `.prcl.txt` selected from another view has nowhere else to be rendered (it has no
+  // file-backed tab), so it lands here too rather than leaving the content area blank.
+  if (store.view === "device" || (active?.kind === "prcl" && store.view !== "about")) {
     return (
-      <div className="app app--nofiles">
+      <div className={store.files.length > 0 ? "app" : "app app--nofiles"}>
         <header className="app__header" ref={headerRef} data-fit={fit}>
           <Logo onClick={showAbout} />
           <div className="app__views">
@@ -125,14 +148,19 @@ export function App() {
           <div className="app__header-spacer" />
           <DropZone onFiles={store.addFiles} />
         </header>
-        <main className="app__main">
-          <DeviceView
-            onOpenRun={openRun}
+        {store.files.length > 0 && (
+          <FileBar
             files={store.files}
             runs={store.runs}
             plateFiles={store.plateFiles}
             activeId={store.activeId}
+            selectedIds={staging.selectedIds}
+            onSelect={staging.toggle}
+            onRemove={store.remove}
           />
+        )}
+        <main className="app__main">
+          <DeviceView onOpenRun={openRun} staged={staged} />
         </main>
         {store.error && <div className="app__error mono">{store.error}</div>}
       </div>

@@ -1577,17 +1577,37 @@ knows about the protocol comes from `@zpcrweb/core`'s `CfxDevice` (see the root
 `navigator.usb`, a poll timer, a bounded traffic log, and the React state the components render.
 
 **Why it is set apart in the chrome.** Every other tab is a lens on the active file, and the file
-bar underneath says which one. This tab isn't, so three things follow, and they are one decision
-rather than three:
+bar underneath says which one. This tab isn't:
 
 - Its tab sits in its **own group** in the strip (`ViewSelector`'s `DEVICE_VIEW`, kept out of
   `ALL_VIEWS`), separated by a gap and accented magenta where the file tabs are cyan. Grouping it
-  with the rest would assert that the file selection applies to it.
-- `App` renders it through an **early return** that omits the `FileBar` entirely — there is no
-  active file for it to be about.
+  with the rest would assert that the file *selection* applies to it in the usual way.
 - It renders **with nothing loaded**, ahead of the empty-state branch, so someone with a cycler
   and no files can reach it. That is also why the welcome screen carries a "Connect an instrument
   over USB" button: it is the one thing the drop zone can't offer.
+
+**But it keeps the file bar, meaning something else.** Starting a run needs a protocol and a plate
+map, and those come from files — the instrument has no protocol library of its own to pick from
+(`usb.md` §5.1). So the same `FileBar` renders here with `selectedIds` instead of `activeId`: a
+chip is *part of the run being staged* rather than the thing you are looking at, several can be on
+at once, and it is accented magenta to say so. Reusing the bar rather than growing a second file
+list inside the view is the whole point — it is the app's file list doing a second job, not a
+copy of it.
+
+**The staging model** lives in `state/useRunStaging.ts`, held by `App` because the bar that edits
+it does. A selection is **one optional run plus an optional override of each half**: a
+`.zpcr`/`.pcrd` carries both halves, a `.prcl.txt` or `.pltd`/`.plt.csv` exactly one. Selecting a
+run replaces any other run; selecting an override claims that half and tapping it again releases
+it. The invariant that makes the bar readable is that **a run with both halves overridden is
+deselected** — it contributes nothing, so leaving it highlighted would misstate what the run is
+made of. That in turn is why selecting a run while both overrides are up clears them: otherwise
+the invariant would immediately undo the click. `lib/protocolSource.ts` turns a selection into the
+two resolved halves, each carrying the file it came from and, when empty, why.
+
+A newly loaded file joins the selection by role rather than replacing it, which is what makes the
+headline flow work: load a `.prcl.txt`, land on the Device view (`addFiles` switches to it — a
+protocol is an input to a run, not a run to look at, and has no file-backed view of its own), and
+see it staged against the run already loaded.
 
 The `CfxDevice` lives in a **ref**, not state: it is a long-lived object with a background read
 loop, and a re-render must not be able to look like a new connection — `open()` on an
@@ -1597,26 +1617,27 @@ Four components, under `components/device/`:
 
 - **`DeviceRail`** — the left rail, reusing the Curves view's `.rail__*` vocabulary so the two
   read as the same kind of surface. Connection, the identification block, live status, and the
-  action buttons. Status fields the protocol doesn't name are either omitted or footnoted rather
-  than labelled with a guess (the sample temperature is the live example).
-- **`DeviceProtocol`** — stage a thermal protocol for a new run. Everything on the host side of
-  starting one, and nothing on the wire: the library has no upload or run-control commands
-  (`usb.md` §10), so both action buttons are disabled and say what they are waiting for.
+  action buttons — **Start run** among them, at their head. It sits with the lid and indicator
+  commands rather than beside the staged run because that is what it is: the control that actuates
+  the instrument. It is permanently disabled for now (the library has no `RemoteRun`/`PROCEED` —
+  `usb.md` §10) and names the first missing piece when a run isn't staged, so the tooltip is
+  always the next thing to do. Status fields the protocol doesn't name are either omitted or
+  footnoted rather than labelled with a guess (the sample temperature is the live example).
+- **`DeviceRun`** — the run that would be started, as its two halves side by side: the thermal
+  protocol and the plate map, each headed by the file supplying it and badged when that file is an
+  override. It renders a selection it does not own (see the staging model above), and it has no
+  start button — that belongs with the commands that actuate the instrument, in the rail.
 
-  It is the one place the file list comes back. The view hides the `FileBar` because no *view* is
-  about a file — but "which protocol" is a question about the app's loaded runs, since the
-  instrument has no protocol library to pick from (`usb.md` §5.1). So the panel carries its own
-  list, and a file that can't supply a protocol is listed **disabled with the reason** rather than
-  omitted: "this run has no protocol in it", "this is a plate file", and "this run isn't decrypted
-  yet" are different problems and only one is fixed by typing a password. `lib/protocolSource.ts`
-  answers that question for each file; the picker only renders it.
+  What is shown for the protocol is the **ASCII run definition**, not a decoded step table — the
+  same `ProtocolDecoded` the Raw and Overview views use. That text is the artifact that would
+  actually be sent (`prcl.md` §3), so reviewing anything else would be reviewing the wrong object;
+  it also makes a `.prcl.txt` and a run's embedded protocol render identically, since by then they
+  are the same thing. The Overview tab's protocol section is where such a file comes from.
 
-  What is reviewed is the **ASCII run definition**, not a decoded step table — the same
-  `ProtocolDecoded` the Raw and Overview views use. That text is the artifact that would actually
-  be sent (`prcl.md` §3), so reviewing anything else would be reviewing the wrong object; it also
-  makes a loaded `.prcl.txt` and a run's embedded protocol render identically, since by then they
-  are the same kind of thing. The `.prcl.txt` picker is the escape hatch for a protocol no loaded
-  run carries, and the Overview tab's protocol section is where that file comes from.
+  The plate uses the shared `PlateViewer` in its `compact` variant — no vessel/scan-mode metadata
+  and wells shrunk to coloured cells, so a 96-well plate fits the column instead of scrolling out
+  of it. Nothing is lost that isn't one hover away, and the question this preview answers is "is
+  this the right plate?", not "what is in well F7?".
 - **`DeviceFiles`** — the instrument's storage, grouped by kind the way the Raw view groups a
   `.zpcr`. A *single* retrieved file is **saved to disk, not loaded into the app**: what lives on
   the instrument are the *parts* of a run — individual `.Plateread`s, the `.Dcal` set, the

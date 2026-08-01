@@ -7,6 +7,7 @@
  */
 import { CFX_COMMANDS, type CfxCommandName } from "@zpcrweb/core";
 import type { CfxDeviceHandle } from "../../state/useCfxDevice";
+import type { StagedRun } from "../../lib/protocolSource";
 
 function Stat({ label, value, tone }: { label: string; value: string; tone?: "warn" | "good" }) {
   return (
@@ -20,9 +21,16 @@ function Stat({ label, value, tone }: { label: string; value: string; tone?: "wa
 const temp = (v: number | null | undefined, digits = 1) =>
   v == null ? "—" : `${v.toFixed(digits)} °C`;
 
-export function DeviceRail({ device }: { device: CfxDeviceHandle }) {
+export function DeviceRail({ device, staged }: { device: CfxDeviceHandle; staged: StagedRun }) {
   const { connection, info, status, busy, lastAction } = device;
   const connected = connection === "connected";
+  // What a run still needs, in the order it reads: the button says the *first* missing thing
+  // rather than a generic "can't start", so the fix is always the next click.
+  const missing = !staged.protocol.value
+    ? "Select a protocol in the file bar first."
+    : !staged.plate.value
+      ? "Select a plate in the file bar first."
+      : null;
 
   return (
     <aside className="curves__rail device__rail">
@@ -117,6 +125,25 @@ export function DeviceRail({ device }: { device: CfxDeviceHandle }) {
       {connected && (
         <div className="rail__section">
           <div className="rail__title">Actions</div>
+          {/* Start run leads the actions because it is the one that runs the experiment, and
+              sits with them rather than beside the staged run because it *actuates the
+              instrument* — that is what this group is. Permanently disabled for now: the library
+              has no RemoteRun/PROCEED (`usb.md` §10), and this is the one control in the app that
+              would heat a block, so it says what it is waiting for rather than looking armed. */}
+          <button
+            className="btn btn--primary device__start"
+            disabled
+            title={
+              missing ??
+              "Not implemented yet: starting a run needs RemoteRun and PROCEED (usb.md §3), " +
+                "which this library doesn't have."
+            }
+          >
+            Start run
+          </button>
+          <div className="rail__note device__footnote">
+            {missing ?? "Staged and ready — but this client has no run-control commands yet."}
+          </div>
           <div className="device__actions">
             {(Object.keys(CFX_COMMANDS) as CfxCommandName[]).map((name) => {
               const spec = CFX_COMMANDS[name];

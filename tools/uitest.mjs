@@ -1019,29 +1019,42 @@ async function xmlViewChecks(chrome, origin, pw) {
   solo.close();
 }
 
+/** True once a chip whose label matches `text` is in the file bar. */
+const chipPresent = (cdp, text) =>
+  cdp.eval(
+    `[...document.querySelectorAll(".filechip__name")].some((n) => /${text}/.test(n.textContent))`,
+  );
+
 /**
- * The Device view's protocol staging panel.
+ * The Device view's run staging: which loaded files make up the run that would be started.
  *
- * Everything here is state a screenshot can't judge: that a file with no protocol is offered as
- * *disabled with a reason* rather than silently missing, that switching the pick re-renders the
- * review (the whole point of the picker), that a `.prcl.txt` off disk replaces it, and that both
- * action buttons stay inert while the library has no commands behind them — the last being a
- * safety property, not a cosmetic one.
+ * All of it is state a screenshot can't judge, and the selection rules are the substance —
+ * one run at a time, a `.prcl.txt`/plate file overriding half of it, a run deselected once both
+ * halves are overridden because it then contributes nothing (`state/useRunStaging.ts`). Getting
+ * one of those wrong would silently stage a run out of the wrong files, which is the failure
+ * mode that matters here. Also: that a `.prcl.txt` loaded through the app's ordinary load button
+ * arrives as a chip and goes where it can be used, and that Start run appears only with an
+ * instrument attached.
  */
-async function deviceProtocolChecks(chrome, origin) {
-  console.log("\ndevice protocol staging");
+async function deviceRunChecks(chrome, origin) {
+  console.log("\ndevice run staging");
   const cdp = await openPage(chrome.base, origin);
   await sleep(600);
-  // A run that carries a run definition, and a standalone plate that by definition cannot.
+  // Earlier checks leave their own files in IndexedDB, so start from a known empty bar rather
+  // than from whatever the suite happened to load last — the selection rules below are about
+  // *which* chips are on, and a stray one makes every count meaningless.
+  await emptyReload(cdp, origin);
   await loadFile(cdp, ZPCR);
-  await sleep(600);
-
-  // Overview is where a `.prcl.txt` comes from in the first place — the button is beside the
-  // protocol section's heading, not the archive download at the top of the page.
-  await cdp.eval(`window.location.hash = "file=20260720_FirstQualification.zpcr&view=overview", undefined`);
+  await sleep(800);
+  await cdp.eval(
+    `window.location.hash = "file=20260720_FirstQualification.zpcr&view=overview", undefined`,
+  );
   await waitFor(() => cdp.eval(`!!document.querySelector(".overview__blockhead")`), {
     what: "the overview protocol section",
   });
+
+  // Overview is where a `.prcl.txt` comes from in the first place — the button is beside the
+  // protocol section's heading, not the archive download at the top of the page.
   const dlLabel = await cdp.eval(
     `(document.querySelector(".overview__blockhead .raw__download") || {})
        .getAttribute?.("aria-label") ?? "missing"`,
@@ -1052,105 +1065,158 @@ async function deviceProtocolChecks(chrome, origin) {
     dlLabel,
   );
 
-  await loadFile(cdp, PLTD);
-  await sleep(800);
   await cdp.eval(`window.location.hash = "view=device", undefined`);
-  await waitFor(() => cdp.eval(`!!document.querySelector(".devproto")`), { what: "protocol panel" });
+  await waitFor(() => cdp.eval(`!!document.querySelector(".devrun")`), { what: "the run panel" });
   await sleep(300);
 
-  const rows = await cdp.eval(
-    `[...document.querySelectorAll(".devproto__file")].map(b => ({
-       name: b.querySelector(".devproto__filename").textContent.trim(),
-       disabled: b.disabled,
-       title: b.getAttribute("title") || "",
-     }))`,
-  );
-  check(
-    "the picker lists every loaded file, runs and plate files alike",
-    rows.length === 2,
-    JSON.stringify(rows.map((r) => r.name)),
-  );
-  const pltdRow = rows.find((r) => /\.pltd$/i.test(r.name));
-  check(
-    "a file with no embedded protocol is disabled rather than hidden",
-    !!pltdRow && pltdRow.disabled,
-    JSON.stringify(pltdRow),
-  );
-  check(
-    "…and its tooltip says why it can't be picked",
-    !!pltdRow && /no thermal protocol/i.test(pltdRow.title),
-    pltdRow?.title,
-  );
-  const zpcrRow = rows.find((r) => /\.zpcr$/i.test(r.name));
-  check("a run with a protocol is pickable", !!zpcrRow && !zpcrRow.disabled, JSON.stringify(zpcrRow));
+  /** The staged run as the panel renders it: each half's source file and override badge. */
+  const staged = () =>
+    cdp.eval(`(() => {
+      const parts = [...document.querySelectorAll(".devrun__part")].map((p) => ({
+        title: p.querySelector(".devrun__parttitle").textContent.trim(),
+        source: p.querySelector(".devrun__source")?.textContent.replace("override", "").trim() || null,
+        override: !!p.querySelector(".devrun__badge"),
+        text: p.textContent,
+      }));
+      return {
+        protocol: parts.find((p) => p.title === "Protocol") || null,
+        plate: parts.find((p) => p.title === "Plate") || null,
+        chips: [...document.querySelectorAll(".filebar--multi .filechip")].map((c) => ({
+          name: c.querySelector(".filechip__name").textContent.trim(),
+          on: c.classList.contains("is-active"),
+        })),
+      };
+    })()`);
 
-  // The review shows the run's own directives, without a click — the default selection.
-  const review = await cdp.eval(`document.querySelector(".devproto__review").textContent`);
+  // The file bar is still the file bar — the Device view just reads it as a selection.
+  const first = await staged();
   check(
-    "the review renders the selected run's ASCII directives",
-    /METHOD CALC/.test(review) && /PLATEREAD/.test(review),
-    review.slice(0, 60),
-  );
-
-  // Both actions are inert, and stay that way. "Start run" is the one that would heat a block.
-  const actions = await cdp.eval(
-    `[...document.querySelectorAll(".devproto__actions .btn")].map(b => ({
-       label: b.textContent.trim(), disabled: b.disabled }))`,
+    "the Device view keeps the app's file bar, in multi-select mode",
+    first.chips.length === 1 && first.chips[0].on,
+    JSON.stringify(first.chips),
   );
   check(
-    "Upload protocol and Start run are both disabled pending library support",
-    actions.length === 2 && actions.every((a) => a.disabled),
-    JSON.stringify(actions),
+    "a selected run supplies both halves of the staged run",
+    /METHOD CALC/.test(first.protocol.text) &&
+      !first.protocol.override &&
+      /8×12/.test(first.plate.text),
+    JSON.stringify({ proto: first.protocol.source, plate: first.plate.source }),
   );
 
-  // A `.prcl.txt` off disk replaces the selection — the path for a protocol no loaded run has.
+  // Start run belongs to the instrument, not the panel, so it is absent until one is attached.
+  const startWhenIdle = await cdp.eval(`!!document.querySelector(".device__start")`);
+  check("Start run appears only with an instrument connected", startWhenIdle === false);
+
+  // A `.prcl.txt` goes in through the ordinary load button, not a picker of its own.
   mkdirSync(dirname(PRCL_TXT), { recursive: true });
   writeFileSync(PRCL_TXT, PRCL_TXT_BODY);
-  await setFileInput(cdp, ".devproto__input", PRCL_TXT);
-  await waitFor(() => cdp.eval(`/GRAD 50/.test(document.querySelector(".devproto__review").textContent)`), {
-    what: "the uploaded protocol in the review",
-  });
-  const uploaded = await cdp.eval(
-    `(() => {
-       const t = document.querySelector(".devproto__review").textContent;
-       return { text: t, badge: !!document.querySelector(".devproto__uploaded"),
-                active: document.querySelectorAll(".devproto__file.is-active").length }; })()`,
+  await loadFile(cdp, PRCL_TXT);
+  await waitFor(() => chipPresent(cdp, "Gradient"), { what: "the .prcl.txt chip" });
+  await sleep(400);
+  const loadedTab = await activeTab(cdp);
+  check("loading a .prcl.txt lands on the Device view", loadedTab === "Device", loadedTab);
+
+  // Loading it stages it: the headline flow is "load a protocol, see it against the run you
+  // already had", so the file joins the selection rather than replacing it.
+  const overridden = await staged();
+  check(
+    "a loaded .prcl.txt overrides the run's protocol and is badged as an override",
+    /GRAD 50/.test(overridden.protocol.text) && overridden.protocol.override,
+    JSON.stringify({ source: overridden.protocol.source, badge: overridden.protocol.override }),
   );
   check(
-    "a loaded .prcl.txt becomes the staged protocol",
-    /GRAD 50/.test(uploaded.text) && uploaded.badge && uploaded.active === 0,
-    JSON.stringify({ badge: uploaded.badge, active: uploaded.active }),
+    "…while the run still supplies the plate, and stays selected",
+    !overridden.plate.override &&
+      /8×12/.test(overridden.plate.text) &&
+      overridden.chips.filter((c) => c.on).length === 2,
+    JSON.stringify(overridden.chips),
   );
 
-  // Picking a run again drops back to that run's protocol, rather than sticking on the upload.
+  // Overriding the *other* half too leaves the run contributing nothing, so it drops out.
+  await loadFile(cdp, PLTD);
+  await waitFor(() => chipPresent(cdp, "QuickPlate"), { what: "the .pltd chip" });
+  await sleep(500);
+  const both = await staged();
+  const onNames = both.chips.filter((c) => c.on).map((c) => c.name);
+  check(
+    "with both halves overridden the run is deselected — it supplies nothing",
+    onNames.length === 2 && !onNames.some((n) => /FirstQualification/.test(n)),
+    JSON.stringify(onNames),
+  );
+  check(
+    "…and both halves are badged as overrides",
+    both.protocol.override && both.plate.override,
+    JSON.stringify({ proto: both.protocol.override, plate: both.plate.override }),
+  );
+
+  // Tapping a selected override releases it.
   await cdp.eval(
-    `(() => { const b = [...document.querySelectorAll(".devproto__file")]
-        .find(x => !x.disabled); b.click(); return true; })()`,
+    `(() => { [...document.querySelectorAll(".filechip__main")]
+        .find((b) => /Gradient/.test(b.textContent)).click(); })()`,
   );
   await sleep(300);
-  const back = await cdp.eval(`document.querySelector(".devproto__review").textContent`);
+  const off = await staged();
   check(
-    "picking a run again replaces the uploaded protocol",
-    /METHOD CALC/.test(back) && !/GRAD 50/.test(back),
-    back.slice(0, 60),
+    "tapping a selected .prcl.txt deselects it",
+    off.chips.filter((c) => c.on).length === 1 &&
+      !off.chips.find((c) => /Gradient/.test(c.name)).on,
+    JSON.stringify(off.chips.filter((c) => c.on).map((c) => c.name)),
   );
 
-  // Garbage in reports itself instead of staging an empty protocol.
+  // Re-selecting the run while only one override is up leaves that override in place.
+  await cdp.eval(
+    `(() => { [...document.querySelectorAll(".filechip__main")]
+        .find((b) => /FirstQualification/.test(b.textContent)).click(); })()`,
+  );
+  await sleep(300);
+  const rejoined = await staged();
+  check(
+    "a run rejoins a lone override rather than replacing it",
+    rejoined.plate.override &&
+      !rejoined.protocol.override &&
+      /METHOD CALC/.test(rejoined.protocol.text),
+    JSON.stringify({ plate: rejoined.plate.source, proto: rejoined.protocol.source }),
+  );
+
+  // Only one run at a time: selecting a second replaces the first.
+  await loadFile(cdp, PCRD);
+  await waitFor(() => chipPresent(cdp, "Luna_noRT"), { what: "the .pcrd chip" });
+  await sleep(500);
+  const clickRun = (pattern) =>
+    cdp.eval(
+      `(() => { [...document.querySelectorAll(".filechip__main")]
+          .find((b) => ${pattern}.test(b.textContent)).click(); })()`,
+    );
+  await clickRun("/FirstQualification/");
+  await sleep(300);
+  await clickRun("/Luna_noRT/");
+  await sleep(400);
+  const runs = await staged();
+  const runsOn = runs.chips.filter((c) => c.on).map((c) => c.name);
+  check(
+    "selecting a second run replaces the first — only one can be staged",
+    runsOn.filter((n) => /FirstQualification|Luna_noRT/.test(n)).length === 1 &&
+      runsOn.some((n) => /Luna_noRT/.test(n)),
+    JSON.stringify(runsOn),
+  );
+
+  // Garbage in reports itself rather than arriving as an unusable chip.
   writeFileSync(BAD_TXT, "<?xml version=\"1.0\"?>\n<protocol2 />\n");
-  await setFileInput(cdp, ".devproto__input", BAD_TXT);
-  await waitFor(() => cdp.eval(`!!document.querySelector(".device__panel .rail__note")`), {
+  const before = await cdp.eval(`document.querySelectorAll(".filebar .filechip").length`);
+  await setFileInput(cdp, 'input[type="file"]', BAD_TXT);
+  await waitFor(() => cdp.eval(`!!document.querySelector(".app__error")`), {
     what: "the rejection notice",
   });
-  const rejected = await cdp.eval(
-    `document.querySelector(".device__panel .rail__note").textContent`,
-  );
+  const rejected = await cdp.eval(`document.querySelector(".app__error").textContent`);
+  const after = await cdp.eval(`document.querySelectorAll(".filebar .filechip").length`);
   check(
-    "a file that isn't a protocol is rejected with a reason",
-    /not a thermal protocol/i.test(rejected),
+    "a .txt that isn't a protocol is rejected rather than loaded",
+    /not a thermal protocol/i.test(rejected) && after === before,
     rejected,
   );
   cdp.close();
 }
+
 
 async function main() {
   const pw = cfxPassword();
@@ -1178,7 +1244,7 @@ async function main() {
     await calibrationChecks(chrome, origin);
     await passwordChecks(chrome, origin, pw);
     await xmlViewChecks(chrome, origin, pw);
-    await deviceProtocolChecks(chrome, origin);
+    await deviceRunChecks(chrome, origin);
   } finally {
     chrome.stop();
     dev.stop();

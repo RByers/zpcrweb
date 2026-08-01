@@ -23,12 +23,22 @@ export function PlateViewer({
   plate,
   sourceHint,
   toolbar,
+  compact,
 }: {
   plate: PlateDefinition;
   sourceHint?: string;
   /** The view's attach/download controls, rendered on the heading line rather than above it —
    * see `.plateviewer__head`. Parents keep their own copy for the no-plate branches. */
   toolbar?: ReactNode;
+  /**
+   * Preview variant: drop the vessel/scan-mode metadata and shrink the wells to colour-coded
+   * cells, so a full 12-column plate fits a narrow column instead of scrolling sideways out of
+   * it. Nothing is lost that isn't still one hover away — each cell keeps its full `title` — and
+   * the fluor chips above still name the dyes. Used by the Device view's staged run, where the
+   * plate sits beside a protocol and the question is "is this the right plate?", not "what is in
+   * well F7?".
+   */
+  compact?: boolean;
 }) {
   // Gated on `loaded` exactly as the cells are (see `WellCell`), so the legend lists the colors
   // actually on screen. Without the gate an unloaded well's configured sample type — often just
@@ -51,7 +61,7 @@ export function PlateViewer({
   );
 
   return (
-    <div className="plateviewer">
+    <div className={"plateviewer" + (compact ? " plateviewer--compact" : "")}>
       <section className="decoded__block">
         <div className="plateviewer__head">
           <h3 className="decoded__h">
@@ -60,19 +70,21 @@ export function PlateViewer({
           </h3>
           {toolbar}
         </div>
-        <dl className="decoded__dl mono">
-          <Pair k="Vessel" v={plate.plateName || "—"} />
-          <Pair k="Scan mode" v={plate.scanMode || "—"} />
-          <Pair k="Plate type" v={plate.plateType || "—"} />
-          <Pair k="Std units" v={plate.standardUnits || "—"} />
-        </dl>
+        {!compact && (
+          <dl className="decoded__dl mono">
+            <Pair k="Vessel" v={plate.plateName || "—"} />
+            <Pair k="Scan mode" v={plate.scanMode || "—"} />
+            <Pair k="Plate type" v={plate.plateType || "—"} />
+            <Pair k="Std units" v={plate.standardUnits || "—"} />
+          </dl>
+        )}
         <div className="plate__fluors">
           {fluorOrder.map((f) => (
             <FluorChannelChip key={f.fluor} fluor={f.fluor} channel={f.channel} />
           ))}
         </div>
         {hasUnknownChannel(plate.fluors) && <UnknownChannelNote />}
-        {sourceHint && <span className="decoded__hint mono">{sourceHint}</span>}
+        {sourceHint && !compact && <span className="decoded__hint mono">{sourceHint}</span>}
       </section>
 
       <section className="decoded__block">

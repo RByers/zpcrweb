@@ -630,9 +630,11 @@ Not implemented: file **upload** (`CRCSENDFILE` and the §5 GUID sequence), run 
 (`RemoteRun`/`PROCEED`), and protocol authoring — this client reads an instrument and retrieves
 files from it; it does not start runs. §6's gap is unchanged and unaffected.
 
-The Device view nonetheless has a **protocol staging panel**, which is everything on the host side
-of starting a run and nothing on the wire: pick a protocol from a loaded run or a `.prcl.txt`
-(`prcl.md` §3.1), review the exact directives that would be sent, and stop there. Its "Upload
-protocol" and "Start run" buttons are disabled, and will stay disabled until the commands above
-exist — a button that looks live and does nothing is worse than one that says what it's waiting
-for, and this is the one part of the app that would heat a block.
+The Device view nonetheless **stages a run**, which is everything on the host side of starting one
+and nothing on the wire: pick the protocol and the plate from the app's loaded files — a whole run
+supplies both, a `.prcl.txt` (`prcl.md` §3.1) or a `.pltd`/`.plt.csv` overrides either half —
+review the exact directives that would be sent alongside the plate they'd run on, and stop there.
+Its **Start run** button is disabled, and will stay disabled until the commands above exist: a
+button that looks live and does nothing is worse than one that says what it is waiting for, and
+this is the one part of the app that would heat a block. The app side is documented in
+`apps/web/ARCHITECTURE.md`, "The Device view".

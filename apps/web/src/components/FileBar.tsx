@@ -17,6 +17,13 @@ interface Props {
   activeId: string | null;
   onSelect: (id: string) => void;
   onRemove: (id: string) => void | Promise<void>;
+  /**
+   * Multi-selection, for the Device view: the same bar, but a chip is "part of the run being
+   * staged" rather than "the file you are looking at" — up to three at once (see
+   * `useRunStaging.ts`). When present it replaces {@link Props.activeId} for highlighting, and
+   * `onSelect` toggles membership instead of switching the view's subject.
+   */
+  selectedIds?: Set<string>;
 }
 
 /** Shorten `20260720_211747_CT019138_Luna_noRT.zpcr` to something legible. */
@@ -34,6 +41,9 @@ function fileEncryptionStatus(
   password: string,
 ): EncryptionStatus {
   if (f.kind === "pltd" || f.kind === "csv") return plateFileEncryptionStatus(plateFile, password);
+  // A `.prcl.txt` is plaintext by definition — it is admitted only once it has parsed as one
+  // (`useZpcrStore`'s `fileKind`), so there is no locked or failed state to show.
+  if (f.kind === "prcl") return { kind: "none" };
   return runEncryptionStatus(run, password);
 }
 
@@ -41,6 +51,9 @@ function fileEncryptionStatus(
  * `.pcrd`/`.pltd`/run password is unresolved. Run chips (`.zpcr`/`.pcrd`) carry no badge once
  * loaded — their detail lives in the hover card instead. */
 function meta(f: LoadedFile, run: RunResult | undefined, plateFile: PlateFileResult | undefined): string {
+  // Named rather than counted: a protocol has no well count to report, and the badge is what
+  // tells the two override kinds apart at a glance in the Device view.
+  if (f.kind === "prcl") return "proto";
   if (f.kind === "pltd" || f.kind === "csv") {
     if (plateFile?.plate) return `${plateFile.plate.wells.filter((w) => w.loaded).length}w`;
     return plateFile?.needsPassword ? "🔒" : plateFile?.error ? "⚠" : "…";
@@ -202,10 +215,23 @@ function FileChip({
   );
 }
 
-export function FileBar({ files, runs, plateFiles, activeId, onSelect, onRemove }: Props) {
+export function FileBar({
+  files,
+  runs,
+  plateFiles,
+  activeId,
+  onSelect,
+  onRemove,
+  selectedIds,
+}: Props) {
   const [password] = usePltdPassword();
   return (
-    <div className="filebar" role="tablist" aria-label="Loaded files">
+    <div
+      className={"filebar" + (selectedIds ? " filebar--multi" : "")}
+      role="tablist"
+      aria-label={selectedIds ? "Files for the run to start" : "Loaded files"}
+      aria-multiselectable={selectedIds ? true : undefined}
+    >
       {files.map((f) => (
         <FileChip
           key={f.id}
@@ -213,7 +239,7 @@ export function FileBar({ files, runs, plateFiles, activeId, onSelect, onRemove 
           run={runs.get(f.id)}
           plateFile={plateFiles.get(f.id)}
           password={password}
-          isActive={f.id === activeId}
+          isActive={selectedIds ? selectedIds.has(f.id) : f.id === activeId}
           onSelect={onSelect}
           onRemove={onRemove}
         />

@@ -27,7 +27,7 @@ export interface StoredFile {
   size: number;
   addedAt: number;
   bytes: ArrayBuffer;
-  kind?: "zpcr" | "pcrd" | "biomeme" | "pltd" | "csv";
+  kind?: "zpcr" | "pcrd" | "biomeme" | "pltd" | "csv" | "prcl";
 }
 
 /** Persisted per-file view settings. */

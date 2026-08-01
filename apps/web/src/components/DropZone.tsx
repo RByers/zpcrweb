@@ -18,7 +18,7 @@ interface Props {
   disabledTitle?: string;
 }
 
-const DEFAULT_ACCEPT = ".zpcr,.pcrd,.pltd,.csv,.json";
+const DEFAULT_ACCEPT = ".zpcr,.pcrd,.pltd,.csv,.json,.txt";
 
 export function DropZone({
   onFiles,
@@ -83,7 +83,9 @@ export function DropZone({
       {large ? (
         <>
           <div className="dropzone__icon mono">⇪</div>
-          <div className="dropzone__title">{title ?? "Drop .zpcr, .pcrd, .pltd or .plt.csv files here"}</div>
+          <div className="dropzone__title">
+            {title ?? "Drop .zpcr, .pcrd, .pltd, .plt.csv or .prcl.txt files here"}
+          </div>
           <div className="dropzone__sub">
             or <span className="dropzone__link">click to browse</span> · multiple files
             supported

@@ -1617,6 +1617,26 @@
   margin-bottom: 0;
 }
 
+/* Preview variant (the Device view's staged run): no metadata block, and wells shrunk to
+   colour-coded cells so a 96-well plate fits a column instead of scrolling out of it. The
+   per-cell `title` still carries everything, so this hides detail rather than losing it. */
+.plateviewer--compact {
+  gap: 12px;
+}
+.plateviewer--compact .plate__grid td.plate__well {
+  min-width: 0;
+  width: 26px;
+  height: 20px;
+  padding: 1px 2px;
+}
+.plateviewer--compact .plate__wellsample,
+.plateviewer--compact .plate__welltargets {
+  display: none;
+}
+.plateviewer--compact .decoded__h {
+  margin-bottom: 4px;
+}
+
 /* ---- Decoded view ------------------------------------------------------- */
 .raw__decoded {
   flex: 1;
@@ -2949,125 +2969,83 @@
   overflow-wrap: anywhere;
 }
 
-/* Protocol staging — the loaded-file picker beside a review of the ASCII run definition. Two
-   columns on a wide screen, stacked below it, since the directive list is the wider of the two
-   and reads badly in a narrow column. */
-.devproto {
+/* The staged run — protocol and plate as two equal areas, since they are the two halves of the
+   same object. `auto-fit` rather than a media query because what matters is the width of *this
+   column* (the rail takes a fixed slice of the window), so the split has to respond to the
+   container: two columns when there is room for both, stacked when there isn't. The 1px gap over
+   a border-coloured backdrop draws the divider in either arrangement, which a border on one edge
+   could not. */
+.devrun {
   display: grid;
-  grid-template-columns: minmax(180px, 260px) 1fr;
-  gap: 0;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 1px;
+  background: var(--border);
   min-height: 0;
 }
-@media (max-width: 900px) {
-  .devproto {
-    grid-template-columns: 1fr;
-  }
-  .devproto__files {
-    border-right: 0;
-    border-bottom: 1px solid var(--border);
-  }
-}
-.devproto__files {
-  border-right: 1px solid var(--border);
+.devrun__part {
+  background: var(--plane);
   padding: 12px 14px;
-  overflow-y: auto;
-  max-height: 200px;
+  min-width: 0;
+  /* Each half scrolls on its own rather than the panel scrolling as a whole: a 60-step melt
+     protocol beside a 96-well plate would otherwise make the shorter one unreachable. The cap is
+     generous because `.device__content` scrolls too — it only stops a long protocol burying the
+     panels below, it isn't the panel's height budget. */
+  max-height: 420px;
+  overflow: auto;
 }
-.devproto__listtitle {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--ink-muted);
-  margin-bottom: 8px;
-}
-.devproto__list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.devproto__file {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-  width: 100%;
-  text-align: left;
-  padding: 6px 8px;
-  border: 1px solid transparent;
-  border-radius: var(--radius);
-  background: none;
-  color: inherit;
-  cursor: pointer;
-}
-.devproto__file:hover:not(.is-disabled) {
-  background: var(--panel);
-  border-color: var(--border);
-}
-.devproto__file.is-active {
-  background: var(--panel);
-  border-color: var(--neon-cyan);
-}
-/* Kept legible rather than faded to nothing: the row still has to say which file it is, and its
-   tooltip is the only place the reason lives. */
-.devproto__file.is-disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-.devproto__filename {
-  font-size: 12px;
-  color: var(--ink-2);
-  overflow-wrap: anywhere;
-}
-.devproto__fileproto {
-  font-size: 11px;
-  color: var(--ink-muted);
-}
-.devproto__uploaded {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin-top: 10px;
-  padding: 6px 8px;
-  border: 1px solid var(--neon-cyan);
-  border-radius: var(--radius);
-}
-/* The column itself isn't a scroll container — the action buttons sit at its bottom, and
-   scrolling the whole column would hide the two controls the panel exists for. The directive
-   listing inside it scrolls instead, so a 60-step melt protocol can't push them off. */
-.devproto__review {
-  padding: 12px 14px;
-}
-.devproto__review .decoded {
-  max-height: 190px;
-  overflow-y: auto;
-}
-.devproto__reviewhead {
+.devrun__parthead {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 8px;
 }
-.devproto__label {
-  font-size: 13px;
-  color: var(--ink);
+.devrun__parttitle {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-muted);
 }
-.devproto__meta {
+.devrun__source {
+  font-size: 11px;
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+.devrun__badge {
+  margin-left: 6px;
+  padding: 1px 5px;
+  border: 1px solid var(--neon-magenta);
+  border-radius: 999px;
+  color: var(--neon-magenta);
+  font-size: 10px;
+  white-space: nowrap;
+}
+.devrun__meta {
+  font-size: 11px;
+  color: var(--ink-muted);
+  margin-bottom: 6px;
+}
+.devrun__hint {
   font-size: 11px;
   color: var(--ink-muted);
 }
-.devproto__actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 12px;
+
+/* Start run sits at the head of the rail's actions, full width so it doesn't read as one more
+   equal peer of "Open lid". */
+.device__start {
+  width: 100%;
+  margin-bottom: 6px;
 }
-.devproto__hint {
-  font-size: 11px;
-  color: var(--ink-muted);
+
+/* The file bar in its multi-select role (the Device view): a chip is part of the run being
+   staged, so several can be on at once. Magenta rather than the file views' cyan, matching the
+   Device tab and saying that the selection means something different here. */
+.filebar--multi .filechip.is-active {
+  border-color: var(--neon-magenta);
+}
+.filebar--multi .filechip.is-active .filechip__name {
+  color: var(--neon-magenta);
 }
 
 /* Traffic console */
