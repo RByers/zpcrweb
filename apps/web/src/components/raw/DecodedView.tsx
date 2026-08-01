@@ -112,10 +112,7 @@ export function ProtocolDecoded({ text, annotated = true }: { text: string; anno
         {program.directives.map((d) => {
           const scan = "scanMask" in d ? d.scanMask : undefined;
           return (
-            <div
-              key={d.index}
-              className={"decoded__protoline" + (d.stepNumber === undefined ? " is-setup" : "")}
-            >
+            <div key={d.index} className="decoded__protoline">
               <span className="decoded__protonum">{d.stepNumber ?? ""}</span>
               <span className="decoded__prototext">{d.text};</span>
               {annotated ? (

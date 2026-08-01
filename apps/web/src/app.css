@@ -1967,9 +1967,6 @@
   color: var(--neon-cyan);
   font-variant-numeric: tabular-nums;
 }
-.decoded__protoline.is-setup {
-  color: var(--ink-muted);
-}
 /* The library's reading of the directive, not the directive itself — a different face and a
    quieter colour, so the program stays the thing you read and the gloss stays a gloss. */
 .decoded__protonote {
