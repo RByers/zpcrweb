@@ -573,6 +573,15 @@ export interface AddFilesOptions {
    * or two no matter what they had opened.
    */
   activate?: boolean;
+  /**
+   * Mark the added file(s) as {@link FileSettings.modified} from the moment they land, rather
+   * than the ordinary "a freshly loaded file matches disk" default. The instrument's own file
+   * chips are the only caller: a run pulled off the CFX — in progress or just finished — exists
+   * nowhere but the browser until it's actually saved, exactly like an edited file whose disk
+   * copy has gone stale, so its delete chip should ask twice too. {@link markDownloaded} clears
+   * it the same way a download does for any other file.
+   */
+  modified?: boolean;
 }
 
 export interface ZpcrStore {
@@ -893,6 +902,7 @@ export function useZpcrStore(): ZpcrStore {
             const rest = prev.filter((f) => f.id !== id && !supersededIds.has(f.id));
             return [...rest, { id, name: file.name, size: file.size, addedAt, kind, bytes }];
           });
+          if (options?.modified) setModifiedFlag(id, true);
         } catch (e) {
           setError(`${file.name}: ${e instanceof Error ? e.message : String(e)}`);
         }
@@ -906,7 +916,7 @@ export function useZpcrStore(): ZpcrStore {
       if (lastKind === "prcl") setView("overview");
       return lastId;
     },
-    [forget],
+    [forget, setModifiedFlag],
   );
 
   /**

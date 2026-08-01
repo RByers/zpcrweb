@@ -113,7 +113,7 @@ export function App() {
     useCallback(
       async (file: File, previousId: string | null) => {
         const wasWatchingIt = store.activeId !== null && store.activeId === previousId;
-        return store.addFiles([file], { activate: wasWatchingIt });
+        return store.addFiles([file], { activate: wasWatchingIt, modified: true });
       },
       [store],
     ),
@@ -164,7 +164,7 @@ export function App() {
   // view that shows no file would make a successful open look like nothing happened. Only on success:
   // a rejected archive leaves you where you are, with the error banner.
   const openRun = async (file: File) => {
-    if (await store.addFiles([file])) store.setView("overview");
+    if (await store.addFiles([file], { modified: true })) store.setView("overview");
   };
 
   /**
