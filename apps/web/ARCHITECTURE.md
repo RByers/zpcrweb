@@ -426,6 +426,7 @@ so every call site keeps writing one `onChange({ … })` regardless of where the
   plate's target list — it is long enough to wrap to several lines, and every target it names is
   already visible in the grid below.
 - **Raw** — `RawFilesView` for `.zpcr`, `PcrdRawView` for `.pcrd` (see "Raw views" below).
+- **Device** — a live instrument over USB rather than a file; see "The Device view" below.
 - **About** — `AboutView` (`components/views/AboutView.tsx`): one card carrying both the credits
   (name, the "nothing leaves your device" line, author and GitHub links) *and* the large
   `DropZone` plus the "Load an example file" link. About and the welcome screen used to be two
@@ -1564,3 +1565,64 @@ response curves, not channel numbers.
   touching anything here.
 - `prefers-reduced-motion` is respected (the drawer animates with a `transition`, which
   `theme.css`'s global reduced-motion rule already disables).
+
+## The Device view
+
+The one view that operates on **no file at all**. It connects to a CFX96 over WebUSB and shows the
+instrument: identity, live status, its filesystem, and the raw protocol traffic. Everything it
+knows about the protocol comes from `@zpcrweb/core`'s `CfxDevice` (see the root
+[`ARCHITECTURE.md`](../../ARCHITECTURE.md#talking-to-an-instrument-not-a-file-srcusb) and
+[`usb.md`](../../usb.md)), per the standing rule that logic lives in the library — the app side is
+`state/useCfxDevice.ts`, which owns only what a browser session adds: obtaining the device through
+`navigator.usb`, a poll timer, a bounded traffic log, and the React state the components render.
+
+**Why it is set apart in the chrome.** Every other tab is a lens on the active file, and the file
+bar underneath says which one. This tab isn't, so three things follow, and they are one decision
+rather than three:
+
+- Its tab sits in its **own group** in the strip (`ViewSelector`'s `DEVICE_VIEW`, kept out of
+  `ALL_VIEWS`), separated by a gap and accented magenta where the file tabs are cyan. Grouping it
+  with the rest would assert that the file selection applies to it.
+- `App` renders it through an **early return** that omits the `FileBar` entirely — there is no
+  active file for it to be about.
+- It renders **with nothing loaded**, ahead of the empty-state branch, so someone with a cycler
+  and no files can reach it. That is also why the welcome screen carries a "Connect an instrument
+  over USB" button: it is the one thing the drop zone can't offer.
+
+The `CfxDevice` lives in a **ref**, not state: it is a long-lived object with a background read
+loop, and a re-render must not be able to look like a new connection — `open()` on an
+already-claimed interface fails.
+
+Three components, under `components/device/`:
+
+- **`DeviceRail`** — the left rail, reusing the Curves view's `.rail__*` vocabulary so the two
+  read as the same kind of surface. Connection, the identification block, live status, and the
+  action buttons. Status fields the protocol doesn't name are either omitted or footnoted rather
+  than labelled with a guess (the sample temperature is the live example).
+- **`DeviceFiles`** — the instrument's storage, grouped by kind the way the Raw view groups a
+  `.zpcr`. A retrieved file is **saved to disk, not loaded into the app**: what lives on the
+  instrument are the *parts* of a run — individual `.Plateread`s, the `.Dcal` set, the
+  `.pltd`/`.prcl` pair — where every format this app opens is a whole run in one container.
+  Assembling a `.zpcr` from them is a separate job, not something to fake here. A directory that
+  can't be listed says so explicitly, because the protocol's failure mode is to return *another
+  directory's* contents (`usb.md` §5) — showing them under the wrong heading would be worse than
+  showing nothing.
+- **`DeviceConsole`** — every decoded message in both directions, at the level of logical
+  messages rather than USB packets, which is where the protocol is legible. Channel is on every
+  line: a reply arriving on channel 2 rather than 1 is exactly the thing that would otherwise be
+  invisible. Polling is filtered out by default (it would otherwise be all there is to see), and a
+  prompt sends arbitrary commands.
+
+**Actions the captures never exercised are marked, not hidden.** `CFX_COMMANDS` tags each action
+with whether it was actually observed on the wire; `LID OPEN` was, while lid-close and the
+indicator are guesses at a command name. The UI badges those with `?`, dashes their border, and
+reports the instrument's result code either way — so a rejection reads as the expected outcome
+rather than a bug, and the honest state of the reverse engineering is visible in the product
+instead of buried in a comment.
+
+**Testing.** The protocol logic is unit-tested in the library against a mock instrument scripted
+with the real device's replies (`packages/core/test/usbDevice.test.ts`) — the read pump, command
+serialization, the atomic listing pair, and `GETFILE`'s verbatim bytes. The *browser* connect path
+can't be automated: WebUSB permission can't be granted to a headless Chrome, so `uishot`/`uitest`
+only ever see the disconnected state, and the connected UI is checked by hand or by stubbing
+`navigator.usb`.

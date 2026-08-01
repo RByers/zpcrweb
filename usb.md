@@ -15,6 +15,13 @@ messages before parsing anything — see §8 for why that reassembly step matter
 byte offset below was checked against the raw pcapng bytes, not assumed; §9 collects the handful
 of claims that rest on a single observation rather than a cross-checked pattern.
 
+**This protocol is now implemented, and the implementation has been driven against live
+hardware** — see §10. Talking to the same CT019138 confirmed §1's descriptors, §2's framing and
+every query in §3 unchanged, and corrected three things the captures alone could not settle:
+what `GETFILESLEN` actually returns (§3), that it is a *required prologue* to `LISTALLFILES`
+rather than the sanity check it looked like (§5), and what the header's `passThrough` bit means
+(§2). Those three are marked **measured live** where they appear.
+
 ## 1. Device identity and topology
 
 The instrument enumerates as a single USB device (not a hub with sub-devices) with:
@@ -89,6 +96,16 @@ passThrough=0, dummyAdded=0` · length=`0x0007=7` · payload = `"*IDN?\r\n"`. Th
 charTimeout=7` pair is constant — the same 7/7 values show up in every channel-1 message across
 both captures, so it's evidently a fixed value this protocol always uses, not something that needs
 to vary.
+
+**Byte 2 differs by direction, and `passThrough` is the bit that matters** (measured live). A host
+request sets `ascii` and `textPayload`, giving the `0x0c` above. A *response* leaves both clear —
+byte 2 is `0x00` even for an ordinary ASCII reply — so those two flags describe what the sender is
+declaring about its own payload, not a property of the message the receiver can rely on.
+`passThrough` is the exception and the useful one: the device sets it (byte 2 = `0x02`) exactly
+when the payload is **raw bytes rather than text**. `GETFILESLEN "\Storage Card"` is the
+reproducible example — `01 00 02 00 04` framing four binary bytes `07 00 09 00`, where every text
+reply in the same session came back as `01 00 00 00 <len>`. A client should treat `passThrough` as
+the signal to skip response parsing and take the payload as-is.
 
 **Multi-packet messages.** The 5-byte header describes the whole logical message, which can be
 much larger than one 64-byte USB bulk packet (max packet size, per §1). Only the *first* USB
@@ -210,8 +227,8 @@ order:
 
 | Command | Notes |
 |---|---|
-| `GETFILESLEN <dir>` | count of entries in a directory |
-| `LISTALLFILES <dir>` | comma-separated filenames |
+| `GETFILESLEN <dir>` | **The byte length of the `LISTALLFILES` response for that directory** — not a count of entries (measured live; see §5). A `PCRunReport` holding one 39-character name answers `39`; a `CurrentRun` whose listing is 881 characters answers `881`. Also the required prologue to `LISTALLFILES`. |
+| `LISTALLFILES <dir>` | comma-separated filenames — **of whichever directory the preceding `GETFILESLEN` buffered, ignoring the path given here** (measured live; see §5) |
 | `GETFILESIZE <path>` | byte count |
 | `GETFILE <path>` | raw file bytes |
 | `DELFILE <path>` | |
@@ -296,14 +313,39 @@ mechanism. The full per-file sequence observed:
    device stores the just-uploaded file under a generated GUID name rather than the friendly one,
    and this is the call that hands that GUID name back: the response is `<dir>\<GUID>;0000`.
 4. `GETFILESLEN`/`LISTALLFILES <dir>` — the host re-lists the directory. The GUID name is already
-   in hand from step 3 by this point, so this looks like a UI-refresh/sanity check rather than how
-   the client discovers it.
+   in hand from step 3 by this point, so the *purpose* here looks like a UI refresh — but the
+   pairing itself is mandatory, not incidental. See "Listing a directory" below.
 5. `GETFILECRC "<dir>\<GUID>"` — the device's own CRC of the GUID-stored file, which the client can
    now compare against the `<crc>` it sent in step 2 to confirm the upload landed intact (table
    above).
 
 The observed upload order across a run's four files: `GlobData.xml`, the `.pltd` plate map,
 `RunInfo.xml`, the `.prcl` protocol.
+
+**Listing a directory** is a two-command operation that has to stay together (measured live):
+
+```
+GETFILESLEN <dir>            → "<byte length of the listing>;0000"   ← computes AND buffers it
+LISTALLFILES <dir>           → the buffered listing, comma-separated
+```
+
+`LISTALLFILES` returns whatever the **last** `GETFILESLEN` buffered and **ignores its own path
+argument entirely**. Issuing `GETFILESLEN \Storage Card\CurrentRun` and then
+`LISTALLFILES \Storage Card\PCRunReport` returns CurrentRun's 42 entries; issuing
+`LISTALLFILES` with no `GETFILESLEN` before it returns whatever was buffered last — a value that
+survives closing the USB connection and reopening it, since the state lives on the instrument.
+Two consequences for a client:
+
+- The pair must be **atomic**. Two directory listings running concurrently will each report the
+  other's contents. This is why `CfxDevice.listFiles` holds the command channel across both.
+- When `GETFILESLEN` does *not* return a length, the directory **cannot be listed at all**, and
+  the correct move is to not send `LISTALLFILES` — anything it returned would be another
+  directory's contents under this path's name. `\Storage Card` itself is the known case: it
+  answers with a `passThrough` binary payload (§2) rather than a number, reproducibly. Why the
+  volume root differs isn't established.
+
+This also explains a detail of the capture that previously read as redundancy: CFX Manager always
+issues the two together, in that order, because it has to.
 
 **Download** is simpler and has no GUID indirection:
 
@@ -312,6 +354,11 @@ GETFILESIZE <path>          → "<byte count>;0000"
 GETFILE <path>               → raw file bytes, length == the announced GETFILESIZE, as one
                                 logical message chunked per §2 (4096-byte reads observed)
 ```
+
+`GETFILE`'s reply is the file and nothing else — no trailing `;0000` — so it is the one response
+that must not go through the §3 value/code parser, which would read the last `;` in a binary file
+as a field separator. Confirmed live: `Read00001.Plateread` came back as exactly the 22,037 bytes
+`GETFILESIZE` announced, and decoded with this repo's existing `plateread.md` parser unchanged.
 
 Both plate reads in the `usb-run` capture were pulled this way — `Read00001.Plateread` (22,037
 bytes) partway through the run, `Read00002.Plateread` after the second cycle, then the run
@@ -340,7 +387,10 @@ and collects the plate reads:
 1. `navigator.usb.requestDevice({ filters: [{ vendorId: 0x0614 }] })`, `open()`, `selectConfiguration(1)`,
    `claimInterface(0)`.
 2. Send `*IDN?` (§3) over endpoint 2 OUT, read the response on endpoint 6 IN, to confirm framing
-   and identify the unit.
+   and identify the unit. Read the IN endpoint with **one loop that reassembles and demultiplexes
+   by channel**, not a read-per-command: channel 2 carries unsolicited traffic (§2, §4), so a
+   per-command reader eventually returns a channel-2 payload as the answer to a channel-1 query
+   and every reply after it is off by one.
 3. Poll `STATUS?`/`RTSTATUS?`/`ERRORLIST A` (§3) — not strictly required, but this is what every
    real client does between commands and is a cheap liveness/error check.
 4. Upload the plate map and protocol with `DELFILE`/`CRCSENDFILE`/`COMPUTEFILECRC`/`GETFILECRC`
@@ -350,7 +400,9 @@ and collects the plate reads:
    operator (or, for an unattended flow, whatever confirms lid closure) before `PROCEED`.
 6. Poll `STATUS?` for step/cycle progress; each `PLATEREAD` step produces a new
    `Read0000N.Plateread` under `\Storage Card\CurrentRun\` — pull each with `GETFILESIZE` +
-   `GETFILE` (§5) and decode with the existing `plateread.md`/`packages/core` parser.
+   `GETFILE` (§5) and decode with the existing `plateread.md`/`packages/core` parser. To discover
+   them, list the directory with the mandatory `GETFILESLEN` + `LISTALLFILES` pair (§5), keeping
+   the two adjacent.
 7. After the run, pull the `.alf` report from `\Storage Card\PCRunReport\` the same way, if wanted.
 
 ## 8. Tooling
@@ -398,3 +450,30 @@ instance, rather than a cross-checked pattern:
   confirmed for either.
 - **`PLATEREAD #h<hex>`'s mask** (§3) — only `#h3F` was observed, in a protocol that reads all
   channels; which bit maps to which channel isn't determined from a single value.
+
+## 10. Implementation
+
+`packages/core/src/usb/` implements §1–§5 as an isomorphic client, entry point `CfxDevice`:
+
+| File | Covers |
+|---|---|
+| `frame.ts` | §2 — the 5-byte header codec, and `FrameReassembler`, which turns a direction's byte stream into complete logical messages. The only supported way to read this protocol; see §8 for the bug that parsing per packet causes. |
+| `commands.ts` | §3 — command encoding and the two response shapes, plus `CFX_COMMANDS`, the action commands a UI might offer, each tagged with whether it was actually observed. |
+| `status.ts` | §3 — typed views over `*IDN?`, `STATUS?` and `RTSTATUS?`. Names only the fields whose meaning is established, and keeps the raw field array beside them for the rest. |
+| `transport.ts` | §1 — the endpoint/interface constants and `UsbDeviceLike`, the structural interface both environments satisfy. |
+| `device.ts` | §3–§5 — the read pump, the command queue, and the typed operations. |
+
+**One implementation serves both a browser and Node.** node-usb ships a WebUSB implementation, so
+a browser `USBDevice` and node-usb's satisfy the same structural interface and the environments
+differ only in how the device handle is obtained — `navigator.usb` versus `new WebUSB(…)`. Nothing
+above that line is environment-specific. `transport.ts`'s module comment carries the full
+rationale.
+
+Two clients drive it: `tools/cfx.mjs` (a CLI — `info`, `status`, `ls`, `get`, `cmd`, plus
+`--trace` for the raw message log) and the web app's **Device** view, which adds live status
+polling, a file browser, action buttons and a console of decoded traffic. The optional `usb`
+dependency is needed only by the CLI.
+
+Not implemented: file **upload** (`CRCSENDFILE` and the §5 GUID sequence), run control
+(`RemoteRun`/`PROCEED`), and protocol authoring — this client reads an instrument and retrieves
+files from it; it does not start runs. §6's gap is unchanged and unaffected.

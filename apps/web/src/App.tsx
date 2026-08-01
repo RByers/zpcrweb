@@ -30,8 +30,11 @@ const isStandaloneKind = (kind: string) => kind === "pltd" || kind === "csv";
 
 /** The file-backed tabs a given file kind supports, or `null` for "all of them". Shared by the
  * normal render and the Device view's early return, which needs the same answer to draw the rest
- * of the tab strip while it is the selected one. */
-function restrictedViewsFor(kind: string): readonly ViewId[] | null {
+ * of the tab strip while it is the selected one.
+ *
+ * Typed as a non-empty tuple so the view fallback below can take `[0]` — a restricted set with no
+ * tabs in it would leave nowhere to fall back to. */
+function restrictedViewsFor(kind: string): readonly [ViewId, ...ViewId[]] | null {
   if (isStandaloneKind(kind)) return STANDALONE_VIEWS;
   if (kind === "biomeme") return BIOMEME_VIEWS;
   return null;

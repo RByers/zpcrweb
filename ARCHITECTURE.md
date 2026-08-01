@@ -218,6 +218,41 @@ report one), because the device's threshold is a per-*curve* value with no state
 while `computeCqTable` resolves one threshold per *fluorophore* (`threshold.md` §5.2); that's the
 motivating case for the file/computed toggle rather than a bug to close the gap on.
 
+## Talking to an instrument, not a file (`src/usb/`)
+
+Every other subsystem here decodes bytes someone already saved. `src/usb/` is the exception: it
+drives a **live CFX96 over USB**, implementing the protocol in [`usb.md`](./usb.md) — enumeration,
+the 5-byte application frame, the ASCII command channel, and file retrieval. Entry point
+`CfxDevice`. It gets its own directory rather than a flat module because it is a five-file
+subsystem with an internal seam (framing → commands → device), and because "this one talks to
+hardware" is worth being able to see in the tree.
+
+**It stays isomorphic, the same as everything else, and for a cheaper reason than expected.** The
+obvious design is two backends — WebUSB in the browser, libusb in Node — behind an abstract
+transport. That isn't needed: node-usb already ships a WebUSB implementation, so a browser
+`USBDevice` and node-usb's expose the same `transferIn`/`transferOut` surface. The library
+therefore takes a *structural* `UsbDeviceLike` interface naming just the members it uses, which
+both satisfy with no adapter and no `instanceof`, and the environments differ only in how the
+device handle is obtained. It is spelled structurally rather than imported from
+`@types/w3c-web-usb` so core keeps taking no browser-typing dependency (see [Dependency
+policy](#dependency-policy)). `usb` itself is an **optional** dependency used only by
+`tools/cfx.mjs`; neither core nor the web app imports it.
+
+Two things about the client are load-bearing and easy to undo by accident, both documented at
+their definitions:
+
+- **Reading is one background pump, not a read per command.** The IN endpoint is shared by
+  channels the host never asked for, so a per-command reader eventually returns unsolicited
+  channel-2 traffic as the answer to a channel-1 query, and every reply after it is off by one.
+- **Commands are serialized, and some in groups.** There are no request ids — a reply is matched
+  to a request by arrival order alone. Worse, `LISTALLFILES` replays whatever the preceding
+  `GETFILESLEN` buffered and ignores its own path argument, so listing is an atomic pair;
+  `CfxDevice.sequence` is what holds the channel across it.
+
+Driving the real instrument is also what corrected three claims the packet captures had gotten
+wrong — `usb.md` §10 collects them. That is the argument for keeping the CLI: a protocol
+reverse-engineered from captures is a hypothesis until something speaks it.
+
 ## Why fflate
 
 ZIP decompression is the one thing not worth hand-rolling. `fflate` is tiny (~8 KB), has
@@ -438,6 +473,8 @@ Wells are addressed as `(channel, row, col)`:
 
 ## Tooling
 
+- **`tools/cfx.mjs`** — a CLI over a live instrument (`info`, `status`, `ls`, `get`, `cmd`, and
+  `--trace` for the raw message log). Needs the optional `usb` dependency and a built core.
 - **Vitest** for tests — isomorphic, fast, and ready for a future browser-mode test run.
 - **tsup** for builds — emits dual ESM + CJS plus `.d.ts` from a single entry point. The web app
   deliberately does not consume this output (see [Why the web app imports core's
