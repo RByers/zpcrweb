@@ -43,7 +43,7 @@ describe("parseBiomeme", () => {
     expect(plate!.columns).toBe(9);
     expect(plate!.fluors.map((f) => f.fluor).sort()).toEqual(["ATTO-647N", "FAM", "TexRedX"]);
     expect(plate!.wells.every((w) => w.loaded)).toBe(true);
-    expect(plate!.wells[0]!.sample).toBe("Sample 1");
+    expect(plate!.wells[0]!.sample).toBe("1");
   });
 
   it("labels a single-row plate's wells by position alone, with no row letter", () => {

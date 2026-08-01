@@ -54,7 +54,7 @@ rows` are `1` accordingly, and the app's well-selection grid and plate map both 
 now-constant row letter for a one-row plate rather than showing an always-"A" column — see
 `apps/web/ARCHITECTURE.md`'s "A third format: Biomeme". `details.sampleId` is shared by every
 fluorophore tested on the same tube (well 0's three targets all carry `sampleId: "1"`), which is
-how `parseBiomeme` derives one sample name (`"Sample 1"`) per well rather than per curve.
+how `parseBiomeme` derives one sample name (`"1"`, used verbatim) per well rather than per curve.
 
 **Channels come from `emissionColor`, not the fluorophore name.** `WellCurve.channel` is the
 device's actual optical channel: green → channel 1, amber → channel 3, red → channel 4 (0-based

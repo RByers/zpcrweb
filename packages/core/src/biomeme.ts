@@ -289,7 +289,7 @@ export function parseBiomeme(data: Uint8Array | ArrayBuffer): Zpcr {
         fluors: [],
         sampleType: "unknown",
         sampleTypeRaw: "",
-        sample: t.details?.sampleId ? `Sample ${t.details.sampleId}` : undefined,
+        sample: t.details?.sampleId || undefined,
       };
       wellsMap.set(key, well);
     }
