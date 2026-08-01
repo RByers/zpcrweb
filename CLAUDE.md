@@ -120,7 +120,7 @@ Cost control, when you do run it:
 npm run test:ui
 ```
 
-82 browser assertions covering what nothing else can catch: the two URL contracts — hash
+92 browser assertions covering what nothing else can catch: the two URL contracts — hash
 routing (deep links, back/forward, unknown-file and invalid-view fallbacks) and password
 handling (stripped from both URL forms, never leaked into the routing hash, an encrypted
 `.pcrd` still decrypting) — plus `#load=`, the rule that every XML view uses the shared
@@ -139,7 +139,12 @@ of ΔRFU) — and the rail's Cq range filter, whose top stop is where the curves
 (an upper bound drops them, the *lower* handle parked there leaves only them, and the handles
 clamp instead of crossing) — and that a `.pcrd` carrying a hand-set threshold seeds it as a
 per-fluorophore override while a dye the file left on auto is left alone (`threshold.md` §5.3:
-that one value is what makes the app reproduce CFX's own Cq). A screenshot
+that one value is what makes the app reproduce CFX's own Cq) — and the Overview tab's
+`.prcl.txt` download plus the Device view's protocol staging panel (a file with no embedded
+protocol is offered *disabled with a reason* rather than hidden, switching the pick re-renders the review, a `.prcl.txt` off disk replaces it and a run
+replaces that back, a file that isn't a protocol is rejected with a reason, and both action
+buttons stay inert while the library has no upload or run-control commands — a safety property,
+not a cosmetic one). A screenshot
 can't show that the back button works, that a secret reached the address bar, that a hover
 put a curve back, or that eight rows are in the right order — and the core Vitest suite has no
 DOM.
@@ -147,7 +152,8 @@ DOM.
 Takes ~35s and needs Chrome, so it is **not** part of `npm test` — that stays fast and
 dependency-free. Run it when you touch `state/urlHash.ts`, `state/pltdPassword.ts`,
 `components/curves/ChipBar.tsx`, `components/curves/CurveTable.tsx`,
-`components/curves/CqRange.tsx`, `state/useZpcrStore.ts`'s settings seeding, or view selection. Both
+`components/curves/CqRange.tsx`, `components/device/DeviceProtocol.tsx`,
+`lib/protocolSource.ts`, `state/useZpcrStore.ts`'s settings seeding, or view selection. Both
 tools share `tools/harness.mjs` (the CDP client and dev-server/Chrome plumbing); add new checks there rather than starting a third
 script. Note that rail hover ("peek") needs a real `Input.dispatchMouseEvent` — React derives
 `onMouseEnter`/`onMouseLeave` from an over/out pair plus `relatedTarget`, so a synthesized
@@ -235,7 +241,7 @@ one algorithm doc, `calibration.md`, for the color-separation math built on top 
 | [`calibration.md`](./calibration.md) | Channel→dye color separation — the algorithm that turns raw per-channel readings plus `.Dcal` calibration data into per-dye concentration estimates. Not a file format doc. Implemented by `packages/core/src/calibration.ts` (linear algebra in `linalg.ts`), entry points `separateDyes()` (one-shot) and the individual `buildDyeResponseCurve`/`buildCalibrationMatrix`/`preprocessChannelReadings`/`separateChannels` stages. |
 | [`threshold.md`](./threshold.md) | Baseline, threshold and Cq — how a per-dye amplification curve becomes a quantification cycle, or a reported non-amplification: baseline region selection, subtraction, threshold determination, the crossing rule, end-point RFU, and the app's controls over them. Not a file format doc. §1 states the problem; §3–§7 are the shipped algorithm, implemented by `packages/core/src/baseline.ts` (§3–§4, §7), `packages/core/src/threshold.ts` (§5–§6, entry point `computeCq()`) and `packages/core/src/analysis.ts` (`computeCqTable()`, the per-run entry point); §10 separates what is deliberately unimplemented from what is still unknown. **Appendix A is the measurement against CFX Manager's own exported results** for a committed sample — the Cq stage exactly (`packages/core/test/cfxExport.test.ts`), the baseline stage to within a cycle of window; Appendix B records the alternatives tried and how noisy curves broke them. |
 | [`pltd.md`](./pltd.md) | The `.pltd` plate-definition files — per-well fluorophores, target/gene, sample name and type, replicate, standard quantity. Encrypted + compressed XML container. Implemented by `packages/core/src/pltd.ts`, entry point `parsePltd(bytes)`; `zpcr.plates()` decodes every plate in an archive. |
-| [`prcl.md`](./prcl.md) | The `.prcl` thermal-cycling protocol files — lid/volume settings plus the ordered step list (hold, gradient, melt, goto, plate read), in the same encrypted-ZIP container as `.pltd`/`.pcrd`. The same `protocol2` XML document `.pcrd` embeds. Implemented by `packages/core/src/prcl.ts`, entry point `parsePrcl(bytes)`; `parseProtocol2()` is reused by `pcrd.ts`; `zpcr.protocols()` decodes every `.prcl` entry in an archive. |
+| [`prcl.md`](./prcl.md) | The `.prcl` thermal-cycling protocol files — lid/volume settings plus the ordered step list (hold, gradient, melt, goto, plate read), in the same encrypted-ZIP container as `.pltd`/`.pcrd`. The same `protocol2` XML document `.pcrd` embeds. Implemented by `packages/core/src/prcl.ts`, entry point `parsePrcl(bytes)`; `parseProtocol2()` is reused by `pcrd.ts`; `zpcr.protocols()` decodes every `.prcl` entry in an archive. §3.1 documents `.prcl.txt`, this project's own line-per-directive text form (`formatRunDefinitionText`/`parseRunDefinitionText`) — the one representation here that isn't reverse-engineered. |
 | [`pcrd.md`](./pcrd.md) | The `.pcrd` CFX Manager saved-experiment file — the whole run (plate setup, protocol, every plate read, `RunInfo`/`runlog`, plus analysis/UI state) as one large XML document, in the same encrypted-ZIP container as `.pltd`/`.prcl`. Implemented by `packages/core/src/pcrd.ts`, entry point `parsePcrd(bytes)`, which decodes into the same `Zpcr` shape `parseZpcr` produces. |
 | [`zipcrypto.md`](./zipcrypto.md) | The single-entry ZipCrypto-encrypted ZIP container shared by `.pltd`/`.prcl` and `.pcrd`: container variants, the fixed shared password, and the decrypt → inflate pipeline. Implemented by `packages/core/src/zipcrypto.ts` + `inflate.ts`. |
 | [`zpcrweb-json.md`](./zpcrweb-json.md) | `zpcrweb.json` — the one entry this project *writes* into a `.zpcr`, holding the run's analysis parameters (thresholds, the auto-threshold multiplier, calibration normalization) so they travel with the file instead of sitting in one browser's IndexedDB. Not reverse-engineered. Implemented by `packages/core/src/zpcrwebSettings.ts`; the app side is `apps/web/src/state/analysisSettings.ts` + `analysisPersist.ts`. |

@@ -20,6 +20,7 @@ import {
   cfxPassword,
   loadFile,
   openPage,
+  setFileInput,
   sleep,
   startChrome,
   startDevServer,
@@ -34,6 +35,14 @@ const RVP_PCRD = join(REPO, "samples/20260726_S183-S185_RVP.pcrd");
 const EXAMPLE = "20260726_S183-S185_RVP.zpcr";
 /** Written by {@link makeDupe}: the example under its own name but a different size. */
 const DUPE = join(REPO, "tools/.uishot/dupe", EXAMPLE);
+/** Fixtures for the Device view's `.prcl.txt` picker — written at test time rather than
+ * committed, since the point is the text form this app writes, not a captured artifact. */
+const PRCL_TXT = join(REPO, "tools/.uishot/dupe/Gradient.prcl.txt");
+const BAD_TXT = join(REPO, "tools/.uishot/dupe/not-a-protocol.txt");
+/** A gradient protocol, so the review is unmistakably *not* the loaded run's. */
+const PRCL_TXT_BODY =
+  "[ProtocolRunDefinition version 06.00]\nMETHOD CALC;\nHOTLID 105,30;\nVOLUME 25;\n" +
+  "GRAD 50.0,60.0,30;\nPLATEREAD #h3F;\nGOTO 4,39;\nEND;\n";
 
 /**
  * A same-name, *different-size* copy of the example — the only way to exercise the replace rule,
@@ -1010,6 +1019,139 @@ async function xmlViewChecks(chrome, origin, pw) {
   solo.close();
 }
 
+/**
+ * The Device view's protocol staging panel.
+ *
+ * Everything here is state a screenshot can't judge: that a file with no protocol is offered as
+ * *disabled with a reason* rather than silently missing, that switching the pick re-renders the
+ * review (the whole point of the picker), that a `.prcl.txt` off disk replaces it, and that both
+ * action buttons stay inert while the library has no commands behind them — the last being a
+ * safety property, not a cosmetic one.
+ */
+async function deviceProtocolChecks(chrome, origin) {
+  console.log("\ndevice protocol staging");
+  const cdp = await openPage(chrome.base, origin);
+  await sleep(600);
+  // A run that carries a run definition, and a standalone plate that by definition cannot.
+  await loadFile(cdp, ZPCR);
+  await sleep(600);
+
+  // Overview is where a `.prcl.txt` comes from in the first place — the button is beside the
+  // protocol section's heading, not the archive download at the top of the page.
+  await cdp.eval(`window.location.hash = "file=20260720_FirstQualification.zpcr&view=overview", undefined`);
+  await waitFor(() => cdp.eval(`!!document.querySelector(".overview__blockhead")`), {
+    what: "the overview protocol section",
+  });
+  const dlLabel = await cdp.eval(
+    `(document.querySelector(".overview__blockhead .raw__download") || {})
+       .getAttribute?.("aria-label") ?? "missing"`,
+  );
+  check(
+    "Overview offers the thermal protocol as a .prcl.txt download",
+    /\.prcl\.txt/.test(dlLabel),
+    dlLabel,
+  );
+
+  await loadFile(cdp, PLTD);
+  await sleep(800);
+  await cdp.eval(`window.location.hash = "view=device", undefined`);
+  await waitFor(() => cdp.eval(`!!document.querySelector(".devproto")`), { what: "protocol panel" });
+  await sleep(300);
+
+  const rows = await cdp.eval(
+    `[...document.querySelectorAll(".devproto__file")].map(b => ({
+       name: b.querySelector(".devproto__filename").textContent.trim(),
+       disabled: b.disabled,
+       title: b.getAttribute("title") || "",
+     }))`,
+  );
+  check(
+    "the picker lists every loaded file, runs and plate files alike",
+    rows.length === 2,
+    JSON.stringify(rows.map((r) => r.name)),
+  );
+  const pltdRow = rows.find((r) => /\.pltd$/i.test(r.name));
+  check(
+    "a file with no embedded protocol is disabled rather than hidden",
+    !!pltdRow && pltdRow.disabled,
+    JSON.stringify(pltdRow),
+  );
+  check(
+    "…and its tooltip says why it can't be picked",
+    !!pltdRow && /no thermal protocol/i.test(pltdRow.title),
+    pltdRow?.title,
+  );
+  const zpcrRow = rows.find((r) => /\.zpcr$/i.test(r.name));
+  check("a run with a protocol is pickable", !!zpcrRow && !zpcrRow.disabled, JSON.stringify(zpcrRow));
+
+  // The review shows the run's own directives, without a click — the default selection.
+  const review = await cdp.eval(`document.querySelector(".devproto__review").textContent`);
+  check(
+    "the review renders the selected run's ASCII directives",
+    /METHOD CALC/.test(review) && /PLATEREAD/.test(review),
+    review.slice(0, 60),
+  );
+
+  // Both actions are inert, and stay that way. "Start run" is the one that would heat a block.
+  const actions = await cdp.eval(
+    `[...document.querySelectorAll(".devproto__actions .btn")].map(b => ({
+       label: b.textContent.trim(), disabled: b.disabled }))`,
+  );
+  check(
+    "Upload protocol and Start run are both disabled pending library support",
+    actions.length === 2 && actions.every((a) => a.disabled),
+    JSON.stringify(actions),
+  );
+
+  // A `.prcl.txt` off disk replaces the selection — the path for a protocol no loaded run has.
+  mkdirSync(dirname(PRCL_TXT), { recursive: true });
+  writeFileSync(PRCL_TXT, PRCL_TXT_BODY);
+  await setFileInput(cdp, ".devproto__input", PRCL_TXT);
+  await waitFor(() => cdp.eval(`/GRAD 50/.test(document.querySelector(".devproto__review").textContent)`), {
+    what: "the uploaded protocol in the review",
+  });
+  const uploaded = await cdp.eval(
+    `(() => {
+       const t = document.querySelector(".devproto__review").textContent;
+       return { text: t, badge: !!document.querySelector(".devproto__uploaded"),
+                active: document.querySelectorAll(".devproto__file.is-active").length }; })()`,
+  );
+  check(
+    "a loaded .prcl.txt becomes the staged protocol",
+    /GRAD 50/.test(uploaded.text) && uploaded.badge && uploaded.active === 0,
+    JSON.stringify({ badge: uploaded.badge, active: uploaded.active }),
+  );
+
+  // Picking a run again drops back to that run's protocol, rather than sticking on the upload.
+  await cdp.eval(
+    `(() => { const b = [...document.querySelectorAll(".devproto__file")]
+        .find(x => !x.disabled); b.click(); return true; })()`,
+  );
+  await sleep(300);
+  const back = await cdp.eval(`document.querySelector(".devproto__review").textContent`);
+  check(
+    "picking a run again replaces the uploaded protocol",
+    /METHOD CALC/.test(back) && !/GRAD 50/.test(back),
+    back.slice(0, 60),
+  );
+
+  // Garbage in reports itself instead of staging an empty protocol.
+  writeFileSync(BAD_TXT, "<?xml version=\"1.0\"?>\n<protocol2 />\n");
+  await setFileInput(cdp, ".devproto__input", BAD_TXT);
+  await waitFor(() => cdp.eval(`!!document.querySelector(".device__panel .rail__note")`), {
+    what: "the rejection notice",
+  });
+  const rejected = await cdp.eval(
+    `document.querySelector(".device__panel .rail__note").textContent`,
+  );
+  check(
+    "a file that isn't a protocol is rejected with a reason",
+    /not a thermal protocol/i.test(rejected),
+    rejected,
+  );
+  cdp.close();
+}
+
 async function main() {
   const pw = cfxPassword();
   if (!pw) {
@@ -1036,6 +1178,7 @@ async function main() {
     await calibrationChecks(chrome, origin);
     await passwordChecks(chrome, origin, pw);
     await xmlViewChecks(chrome, origin, pw);
+    await deviceProtocolChecks(chrome, origin);
   } finally {
     chrome.stop();
     dev.stop();

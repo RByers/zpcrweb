@@ -59,7 +59,14 @@ export {
   ZPCRWEB_SETTINGS_NAME,
   ZPCRWEB_SETTINGS_VERSION,
 } from "./zpcrwebSettings.js";
-export { parsePrcl, parseProtocol2, isPrclName } from "./prcl.js";
+export {
+  parsePrcl,
+  parseProtocol2,
+  isPrclName,
+  protocolDocumentFromRunDefinition,
+  formatRunDefinitionText,
+  parseRunDefinitionText,
+} from "./prcl.js";
 export { parseDcal, findDcalBlock, isDcalName, dyeChannelLookup } from "./dcal.js";
 export { parsePcrd, isPcrdName, pcrdFromBlob } from "./pcrd.js";
 export { parseBiomeme, isBiomemeJson } from "./biomeme.js";

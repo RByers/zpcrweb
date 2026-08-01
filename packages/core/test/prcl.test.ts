@@ -2,7 +2,15 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { describe, it, expect } from "vitest";
-import { isPrclName, parsePcrd, parsePrcl, parseProtocol2, parseZpcr } from "../src/index.js";
+import {
+  formatRunDefinitionText,
+  isPrclName,
+  parsePcrd,
+  parsePrcl,
+  parseProtocol2,
+  parseRunDefinitionText,
+  parseZpcr,
+} from "../src/index.js";
 import { readMultistepBytes } from "./sample.js";
 import { readCfxPassword } from "./secrets.js";
 import { TEST_PASSWORD, buildEncryptedZip } from "./zipCrypto.js";
@@ -205,5 +213,46 @@ describe("parsePcrd — protocol2 exposure", () => {
   it("does not typed-decode a PrclEntry for the embedded protocol2 (no separate file)", () => {
     const pcrd = parsePcrd(bytes, { password: pw });
     expect(pcrd.zpcr!.protocols()).toEqual([]);
+  });
+});
+
+describe("the .prcl.txt text form (prcl.md §1.1, §3)", () => {
+  const oneLine = "METHOD CALC;HOTLID 105,30;VOLUME 25;TEMP 95.0,10;PLATEREAD #h3F;GOTO 4,39;END;";
+
+  it("formats one directive per line under a plaintext header", () => {
+    expect(formatRunDefinitionText(oneLine)).toBe(
+      "[ProtocolRunDefinition version 06.00]\n" +
+        "METHOD CALC;\nHOTLID 105,30;\nVOLUME 25;\nTEMP 95.0,10;\n" +
+        "PLATEREAD #h3F;\nGOTO 4,39;\nEND;\n",
+    );
+  });
+
+  it("round-trips back to the canonical one-line form", () => {
+    expect(parseRunDefinitionText(formatRunDefinitionText(oneLine))).toBe(oneLine);
+  });
+
+  // The written file is a real plaintext .prcl, not merely a listing of its lines — so the
+  // existing sniffing parser reads it back with no new code path (prcl.md §1.1).
+  it("is itself a plaintext .prcl that parsePrcl accepts", () => {
+    const prcl = parsePrcl(new TextEncoder().encode(formatRunDefinitionText(oneLine)));
+    expect(prcl.container.format).toBe("text");
+    expect(prcl.protocol!.lidTemperatureC).toBe(105);
+    expect(prcl.protocol!.volumeUl).toBe(25);
+  });
+
+  it("accepts a header-less list of directives, and an instrument's own single line", () => {
+    expect(parseRunDefinitionText("METHOD CALC;\nHOTLID 105,30;\nEND;\n")).toBe(
+      "METHOD CALC;HOTLID 105,30;END;",
+    );
+    expect(parseRunDefinitionText("METHOD CALC;HOTLID 105,30;END\r\n")).toBe(
+      "METHOD CALC;HOTLID 105,30;END;",
+    );
+  });
+
+  it("rejects text that is not a protocol, naming the offending directive", () => {
+    expect(() => parseRunDefinitionText("")).toThrow(/no protocol directives/i);
+    expect(() => parseRunDefinitionText("<?xml version=\"1.0\"?>\n<protocol2 />")).toThrow(
+      /not a thermal protocol/i,
+    );
   });
 });

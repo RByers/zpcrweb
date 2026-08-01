@@ -323,6 +323,30 @@ mechanism. The full per-file sequence observed:
 The observed upload order across a run's four files: `GlobData.xml`, the `.pltd` plate map,
 `RunInfo.xml`, the `.prcl` protocol.
 
+### 5.1 There is no protocol library on the instrument, and probably no decryption either
+
+Two things a client wanting to start a run will look for, and not find.
+
+**No stored-protocol library to name.** The live filesystem probe below found `\Storage Card`
+holds nothing but `CurrentRun` and `PCRunReport`, directories never appear in listings, and no
+command in either capture selects a protocol by name — `RemoteRun` takes a run name, user and
+method, not a path. So "run a protocol the instrument already has" is not a thing the protocol
+expresses: a run's protocol is whatever the host most recently put in `CurrentRun`. The one
+untested variant is `RemoteRun` with no upload at all, re-running whatever `CurrentRun` still
+holds.
+
+**The instrument probably never decrypts a `.prcl`/`.pltd`.** Not established, but the evidence
+points one way. Of the five committed `.zpcr` samples — all written by the instrument itself —
+every one carries a plaintext `ProtocolRunDefinition.txt`, exactly one carries a `.prcl` at all,
+and none carries a `.pltd` the instrument produced. Encryption (`zipcrypto.md`) arrived in CFX
+Manager, and the firmware looks to have been left alone; the encrypted pair in the upload set
+reads as the PC software round-tripping its own config files through a run's results, so that
+CFX Manager can reopen the run with its plate map intact. If that's right, the plaintext
+directive list of `prcl.md` §3 is what actually matters to the instrument, and the ASCII step
+list CFX Manager sends in parallel (below) is not redundant at all. Confirming it takes one
+experiment on live hardware: author a run over the ASCII channel only, upload nothing, and see
+whether it cycles.
+
 **Listing a directory** is a two-command operation that has to stay together (measured live):
 
 ```
@@ -507,3 +531,10 @@ feature.
 Not implemented: file **upload** (`CRCSENDFILE` and the §5 GUID sequence), run control
 (`RemoteRun`/`PROCEED`), and protocol authoring — this client reads an instrument and retrieves
 files from it; it does not start runs. §6's gap is unchanged and unaffected.
+
+The Device view nonetheless has a **protocol staging panel**, which is everything on the host side
+of starting a run and nothing on the wire: pick a protocol from a loaded run or a `.prcl.txt`
+(`prcl.md` §3.1), review the exact directives that would be sent, and stop there. Its "Upload
+protocol" and "Start run" buttons are disabled, and will stay disabled until the commands above
+exist — a button that looks live and does nothing is worse than one that says what it's waiting
+for, and this is the one part of the app that would heat a block.

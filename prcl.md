@@ -202,6 +202,40 @@ fit a 6-channel mask at all — bit 7 is outside the channel range. So a plain "
 channels" reading is inconsistent with the evidence. Until a protocol reading a known channel
 subset is available, **preserve the raw value** rather than decoding it.
 
+### 3.1 `.prcl.txt` — this project's own text form
+
+The one representation in this document that is **not** reverse-engineered: `.prcl.txt` is what
+this project writes when a protocol has to leave the app as a file. It is the §3 grammar with one
+directive per line, under the §1.1 plaintext header:
+
+```
+[ProtocolRunDefinition version 06.00]
+METHOD CALC;
+HOTLID 105,30;
+VOLUME 20;
+TEMP 95.0,60;
+…
+END;
+```
+
+The line breaks are presentational only — the grammar is `;`-delimited and ignores whitespace — so
+this is the same protocol as the one-liner, just readable and diffable. Keeping the header means
+the file **is a valid plaintext `.prcl`** rather than a listing of one: `parsePrcl` reads it back
+with no new code path.
+
+Implemented by `formatRunDefinitionText()` / `parseRunDefinitionText()` in
+`packages/core/src/prcl.ts`. Reading is deliberately lenient about layout and strict about
+content: the header is optional and directives may be split across lines however the writer liked
+(so an instrument's own `ProtocolRunDefinition.txt` is accepted unchanged), but every directive
+must start with a verb from §3's inventory — which is what makes picking a non-protocol file
+report itself instead of yielding an empty protocol. The web app writes it from the Overview
+tab and reads it in the Device view (`apps/web/ARCHITECTURE.md`, "The Device view").
+
+**Why a text form exists at all.** A protocol that has to be handed to an instrument, or moved
+between machines, wants a representation that isn't an encrypted container — see `usb.md` §5.1
+for the evidence that the encrypted `.prcl`/`.pltd` pair is a CFX Manager concern rather than
+something the instrument reads.
+
 ## 4. Open items
 
 - **The `PLATEREAD` operand** — the biggest open question, since `#h3F` vs `#h81` rules out the

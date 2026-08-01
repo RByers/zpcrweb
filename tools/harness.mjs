@@ -229,22 +229,28 @@ export async function openPage(chromeBase, url, { domains = ["Page", "Runtime", 
  * drag-and-drop triggers — rather than seeding IndexedDB directly, which would skip validation
  * and so could "pass" on a file the app cannot actually open.
  */
-export async function loadFile(cdp, absPath, { timeout = 60000 } = {}) {
+/**
+ * Put `absPath` on the `<input type=file>` matching `selector` — the real user gesture, as far as
+ * the page can tell. Shared by {@link loadFile} and any other input the app exposes (the Device
+ * view's `.prcl.txt` picker), so there is one place that knows the CDP dance.
+ */
+export async function setFileInput(cdp, selector, absPath, { timeout = 60000 } = {}) {
   // The input only exists once the app has rendered — during the boot splash (and briefly
   // after a reload, e.g. `uitest`'s `emptyReload`) there is nothing to set files on. Wait for
   // it rather than racing the first paint, and only then take a document snapshot, so the
   // nodeIds below refer to the DOM that actually has the input in it.
-  await waitFor(() => cdp.eval(`!!document.querySelector('input[type="file"]')`), {
+  await waitFor(() => cdp.eval(`!!document.querySelector(${JSON.stringify(selector)})`), {
     timeout,
-    what: "the app's file input",
+    what: `the ${selector} file input`,
   });
   const { root } = await cdp.send("DOM.getDocument");
-  const { nodeId } = await cdp.send("DOM.querySelector", {
-    nodeId: root.nodeId,
-    selector: 'input[type="file"]',
-  });
-  if (!nodeId) throw new Error("no file input found on the page");
+  const { nodeId } = await cdp.send("DOM.querySelector", { nodeId: root.nodeId, selector });
+  if (!nodeId) throw new Error(`no file input found for ${selector}`);
   await cdp.send("DOM.setFileInputFiles", { nodeId, files: [absPath] });
+}
+
+export async function loadFile(cdp, absPath, { timeout = 60000 } = {}) {
+  await setFileInput(cdp, 'input[type="file"]', absPath, { timeout });
   // The run is parsed/decrypted async; the view tabs only exist once it lands.
   await waitFor(() => cdp.eval(`!!document.querySelector('[role="tab"]')`), {
     timeout,

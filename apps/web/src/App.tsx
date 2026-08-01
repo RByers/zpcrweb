@@ -126,7 +126,13 @@ export function App() {
           <DropZone onFiles={store.addFiles} />
         </header>
         <main className="app__main">
-          <DeviceView onOpenRun={openRun} />
+          <DeviceView
+            onOpenRun={openRun}
+            files={store.files}
+            runs={store.runs}
+            plateFiles={store.plateFiles}
+            activeId={store.activeId}
+          />
         </main>
         {store.error && <div className="app__error mono">{store.error}</div>}
       </div>

@@ -260,6 +260,89 @@ function parsePlaintextPrcl(bytes: Uint8Array): Prcl {
 }
 
 // ---------------------------------------------------------------------------
+// The `.prcl.txt` line-per-directive text form
+// ---------------------------------------------------------------------------
+
+/**
+ * The version stamp the plaintext header carries (`prcl.md` §1.1). Every shipped plaintext
+ * protocol seen uses `06.00`, matching the `currentVersion` of the XML form.
+ */
+const RUN_DEFINITION_VERSION = "06.00";
+
+/**
+ * Every verb the run-definition grammar uses (`prcl.md` §3). Used to validate text a user typed
+ * or edited before it is treated as a protocol — an unrecognized verb is how "you picked the
+ * wrong file" is caught, since nothing else about this format is distinctive.
+ */
+const RUN_DEFINITION_VERBS = new Set([
+  "METHOD",
+  "HOTLID",
+  "VOLUME",
+  "TEMP",
+  "GRAD",
+  "INC",
+  "RATE",
+  "PLATEREAD",
+  "GOTO",
+  "END",
+]);
+
+/**
+ * Render a one-line `runDefinition` as the line-per-directive `.prcl.txt` text form.
+ *
+ * The output is a valid plaintext `.prcl` (`prcl.md` §1.1): the same `[ProtocolRunDefinition
+ * version …]` header, then one `;`-terminated directive per line. Keeping the header means the
+ * file identifies itself rather than being an anonymous list of lines, and {@link parsePrcl}
+ * reads it back unchanged. The line breaks are purely presentational — the grammar is
+ * `;`-delimited and ignores whitespace, so this is the same protocol either way.
+ */
+export function formatRunDefinitionText(runDefinition: string): string {
+  const directives = splitRunDefinition(runDefinition);
+  const body = directives.map((d) => `${d};`).join("\n");
+  return `[ProtocolRunDefinition version ${RUN_DEFINITION_VERSION}]\n${body}\n`;
+}
+
+/**
+ * Read the text form back to the canonical one-line `runDefinition`
+ * {@link protocolDocumentFromRunDefinition} expects.
+ *
+ * Deliberately lenient about layout and strict about content: the header is optional, and
+ * directives may be split across lines however the writer liked (this accepts a
+ * `ProtocolRunDefinition.txt` pulled off an instrument, this project's own `.prcl.txt`, and a
+ * hand-typed list alike), but every directive must start with a verb the grammar defines.
+ *
+ * @throws if the text holds no directives, or any directive's verb is not in `prcl.md` §3's
+ * inventory — which is what makes picking a non-protocol file report itself rather than
+ * producing an empty protocol.
+ */
+export function parseRunDefinitionText(text: string): string {
+  const body = text.replace(/\r\n/g, "\n").trim().replace(PLAINTEXT_HEADER, "");
+  const directives = splitRunDefinition(body);
+  if (directives.length === 0) throw new Error("No protocol directives found.");
+  for (const directive of directives) {
+    const verb = /^[A-Za-z]+/.exec(directive)?.[0]?.toUpperCase();
+    if (!verb || !RUN_DEFINITION_VERBS.has(verb)) {
+      throw new Error(`Not a thermal protocol: unrecognized directive "${truncate(directive)}".`);
+    }
+  }
+  return directives.join(";") + ";";
+}
+
+/** Split on the grammar's `;` delimiter (and any line breaks a text form added), dropping the
+ * empties a trailing `;` or a blank line leaves behind. */
+function splitRunDefinition(runDefinition: string): string[] {
+  return runDefinition
+    .split(/[;\n]/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
+
+/** Keep an error message readable when the "directive" is really a line of some other file. */
+function truncate(s: string, max = 40): string {
+  return s.length <= max ? s : `${s.slice(0, max)}…`;
+}
+
+// ---------------------------------------------------------------------------
 // Public entry point
 // ---------------------------------------------------------------------------
 

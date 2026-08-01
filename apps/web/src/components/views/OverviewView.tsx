@@ -1,9 +1,10 @@
 import { useMemo } from "react";
-import type { CqTableEntry, PlateDefinition, Zpcr } from "@zpcrweb/core";
+import { formatRunDefinitionText, type CqTableEntry, type PlateDefinition, type Zpcr } from "@zpcrweb/core";
 import { ProtocolDecoded } from "../raw/DecodedView";
 import { ProtocolStepsTable } from "../raw/ProtocolSteps";
 import { DownloadIcon } from "../DownloadIcon";
-import { downloadBytes } from "../../lib/download";
+import { downloadBytes, downloadText } from "../../lib/download";
+import { protocolFileBase } from "../../lib/protocolSource";
 import { usePltdPassword } from "../../state/pltdPassword";
 import { plateTargets } from "../../lib/plateTargets";
 import { channelColor } from "../../lib/channelColors";
@@ -120,18 +121,39 @@ export function OverviewView({
         </div>
       </div>
 
-      {protocol?.steps ? (
+      {(protocol?.steps || protocolText) && (
         <section className="overview__block">
-          <h2 className="overview__h">Thermal protocol</h2>
-          <ProtocolStepsTable steps={protocol.steps} />
-        </section>
-      ) : (
-        protocolText && (
-          <section className="overview__block">
+          <div className="overview__blockhead">
             <h2 className="overview__h">Thermal protocol</h2>
-            <ProtocolDecoded text={protocolText} />
-          </section>
-        )
+            {/* The ASCII run definition, not the `.prcl` — see the button's own title. Offered
+                only when the run carries that text form at all; a run whose protocol is
+                structured-only would have nothing to write. */}
+            {protocolText && (
+              <button
+                className="raw__download"
+                onClick={() =>
+                  downloadText(
+                    `${protocolFileBase(protocolName, file.name)}.prcl.txt`,
+                    formatRunDefinitionText(protocolText),
+                  )
+                }
+                aria-label="Download the thermal protocol as .prcl.txt"
+                title={
+                  "Download the ASCII run definition as .prcl.txt — one directive per line. " +
+                  "This is the form the instrument itself records, and what the Device view " +
+                  "loads to stage a protocol for a new run."
+                }
+              >
+                <DownloadIcon />
+              </button>
+            )}
+          </div>
+          {protocol?.steps ? (
+            <ProtocolStepsTable steps={protocol.steps} />
+          ) : (
+            <ProtocolDecoded text={protocolText!} />
+          )}
+        </section>
       )}
 
       {plate && (targets.length > 0 || samples.length > 0) && (

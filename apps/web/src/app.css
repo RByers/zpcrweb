@@ -659,6 +659,14 @@
   color: var(--neon-cyan);
   margin: 0 0 8px;
 }
+/* A section heading with its own download button beside it (the thermal protocol's .prcl.txt).
+   The heading keeps its bottom margin, so the row aligns with sections that have no button. */
+.overview__blockhead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
 .overview__dl {
   display: grid;
   grid-template-columns: max-content 1fr;
@@ -2655,9 +2663,11 @@
 .device__rail {
   border-right-color: var(--neon-magenta-dim);
 }
+/* Protocol staging (content-sized — it bounds its own scrolling parts), then the file browser
+   taking the slack, then the console. */
 .device__content {
   display: grid;
-  grid-template-rows: 1fr minmax(180px, 40%);
+  grid-template-rows: auto 1fr minmax(180px, 40%);
   min-width: 0;
   min-height: 0;
 }
@@ -2668,6 +2678,21 @@
   padding: 3px 9px;
   font-size: 12px;
 }
+/* A disabled action has to *look* unavailable, not merely refuse the click — the protocol
+   panel's "Upload protocol" and "Start run" are permanently inert until the library grows the
+   commands behind them, and a button that looks live and does nothing reads as a bug. `!important`
+   beats `.btn--primary`'s own background, which would otherwise keep "Start run" looking armed. */
+.btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  border-color: var(--border) !important;
+  background: transparent !important;
+}
+.btn:disabled:hover {
+  border-color: var(--border) !important;
+  background: transparent !important;
+}
+
 /* The one action in a group that does the thing you came for — "Open run" beside "Reload". It
    borrows the Device view's magenta so it reads as this view's primary action. */
 .btn--primary {
@@ -2883,6 +2908,127 @@
   font-size: 12px;
   color: var(--ink-2);
   overflow-wrap: anywhere;
+}
+
+/* Protocol staging — the loaded-file picker beside a review of the ASCII run definition. Two
+   columns on a wide screen, stacked below it, since the directive list is the wider of the two
+   and reads badly in a narrow column. */
+.devproto {
+  display: grid;
+  grid-template-columns: minmax(180px, 260px) 1fr;
+  gap: 0;
+  min-height: 0;
+}
+@media (max-width: 900px) {
+  .devproto {
+    grid-template-columns: 1fr;
+  }
+  .devproto__files {
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+}
+.devproto__files {
+  border-right: 1px solid var(--border);
+  padding: 12px 14px;
+  overflow-y: auto;
+  max-height: 200px;
+}
+.devproto__listtitle {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-muted);
+  margin-bottom: 8px;
+}
+.devproto__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.devproto__file {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  text-align: left;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+.devproto__file:hover:not(.is-disabled) {
+  background: var(--panel);
+  border-color: var(--border);
+}
+.devproto__file.is-active {
+  background: var(--panel);
+  border-color: var(--neon-cyan);
+}
+/* Kept legible rather than faded to nothing: the row still has to say which file it is, and its
+   tooltip is the only place the reason lives. */
+.devproto__file.is-disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.devproto__filename {
+  font-size: 12px;
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
+}
+.devproto__fileproto {
+  font-size: 11px;
+  color: var(--ink-muted);
+}
+.devproto__uploaded {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 10px;
+  padding: 6px 8px;
+  border: 1px solid var(--neon-cyan);
+  border-radius: var(--radius);
+}
+/* The column itself isn't a scroll container — the action buttons sit at its bottom, and
+   scrolling the whole column would hide the two controls the panel exists for. The directive
+   listing inside it scrolls instead, so a 60-step melt protocol can't push them off. */
+.devproto__review {
+  padding: 12px 14px;
+}
+.devproto__review .decoded {
+  max-height: 190px;
+  overflow-y: auto;
+}
+.devproto__reviewhead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.devproto__label {
+  font-size: 13px;
+  color: var(--ink);
+}
+.devproto__meta {
+  font-size: 11px;
+  color: var(--ink-muted);
+}
+.devproto__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+.devproto__hint {
+  font-size: 11px;
+  color: var(--ink-muted);
 }
 
 /* Traffic console */

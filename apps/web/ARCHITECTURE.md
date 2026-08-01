@@ -1593,12 +1593,30 @@ The `CfxDevice` lives in a **ref**, not state: it is a long-lived object with a 
 loop, and a re-render must not be able to look like a new connection — `open()` on an
 already-claimed interface fails.
 
-Three components, under `components/device/`:
+Four components, under `components/device/`:
 
 - **`DeviceRail`** — the left rail, reusing the Curves view's `.rail__*` vocabulary so the two
   read as the same kind of surface. Connection, the identification block, live status, and the
   action buttons. Status fields the protocol doesn't name are either omitted or footnoted rather
   than labelled with a guess (the sample temperature is the live example).
+- **`DeviceProtocol`** — stage a thermal protocol for a new run. Everything on the host side of
+  starting one, and nothing on the wire: the library has no upload or run-control commands
+  (`usb.md` §10), so both action buttons are disabled and say what they are waiting for.
+
+  It is the one place the file list comes back. The view hides the `FileBar` because no *view* is
+  about a file — but "which protocol" is a question about the app's loaded runs, since the
+  instrument has no protocol library to pick from (`usb.md` §5.1). So the panel carries its own
+  list, and a file that can't supply a protocol is listed **disabled with the reason** rather than
+  omitted: "this run has no protocol in it", "this is a plate file", and "this run isn't decrypted
+  yet" are different problems and only one is fixed by typing a password. `lib/protocolSource.ts`
+  answers that question for each file; the picker only renders it.
+
+  What is reviewed is the **ASCII run definition**, not a decoded step table — the same
+  `ProtocolDecoded` the Raw and Overview views use. That text is the artifact that would actually
+  be sent (`prcl.md` §3), so reviewing anything else would be reviewing the wrong object; it also
+  makes a loaded `.prcl.txt` and a run's embedded protocol render identically, since by then they
+  are the same kind of thing. The `.prcl.txt` picker is the escape hatch for a protocol no loaded
+  run carries, and the Overview tab's protocol section is where that file comes from.
 - **`DeviceFiles`** — the instrument's storage, grouped by kind the way the Raw view groups a
   `.zpcr`. A *single* retrieved file is **saved to disk, not loaded into the app**: what lives on
   the instrument are the *parts* of a run — individual `.Plateread`s, the `.Dcal` set, the
