@@ -151,10 +151,11 @@ over a compact local timestamp rather than a file name, derived from the filenam
 `<date>_<time>_<serial>_<name>` unless the format states one (Biomeme) or somebody typed one,
 and a typed name has to survive a reload, which it can only do by reaching the archive's own
 `zpcrweb.json` (clearing it reverts to the derived name rather than blanking it) — plus a
-Biomeme run's Raw tab, which is its JSON document in the standalone (no file list) viewer.
-— and that the view-tab strip is the *same seven tabs* for every file, a tab the file can't
+Biomeme run's Raw tab, which is its JSON document in the standalone (no file list) viewer —
+and that the view-tab strip is the *same seven tabs* for every file, a tab the file can't
 answer being disabled rather than dropped (`ViewSelector`'s `enabled` prop), which is a claim
 about two files' headers matching that no single-file check can make.
+
 A screenshot
 can't show that the back button works, that a secret reached the address bar, that a hover
 put a curve back, or that eight rows are in the right order — and the core Vitest suite has no
