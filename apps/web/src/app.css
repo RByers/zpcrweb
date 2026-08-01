@@ -1746,10 +1746,23 @@
 .plateviewer--compact {
   gap: 12px;
 }
+/* Square cells, every column the same width. The full-size grid sizes its columns to their
+   contents, which here let a two-digit column header ("10"–"12") widen its own column by the 8px
+   of header padding — enough extra room that a well's dots wrapped differently in the last three
+   columns than in the first nine. `table-layout: fixed` takes every column's width from the
+   header row and ignores cell content, so the wells stay square and the dots wrap identically
+   across the plate; the header gives up its horizontal padding to fit "12" in that width. */
+.plateviewer--compact .plate__grid {
+  table-layout: fixed;
+}
+.plateviewer--compact .plate__grid th {
+  width: 24px;
+  padding: 3px 0;
+}
 .plateviewer--compact .plate__grid td.plate__well {
   min-width: 0;
-  width: 26px;
-  height: 20px;
+  width: 24px;
+  height: 24px;
   padding: 1px 2px;
 }
 .plateviewer--compact .plate__wellsample,
@@ -2289,8 +2302,10 @@
   gap: 2px;
   height: 100%;
 }
-/* 4px dots with a 2px gap put four across the 22px of content a compact cell has, so a 5- or
-   6-dye well wraps to a second row rather than overflowing. */
+/* 4px dots with a 2px gap put three across the 18px of content a square 24px compact cell has,
+   so a 4-dye well wraps to a second row rather than overflowing and a 6-dye one comes out an even
+   3+3. The cell is square by construction (see `.plateviewer--compact .plate__grid`), so this
+   wrapping is the same in every column. */
 .plate__welldot {
   width: 4px;
   height: 4px;
