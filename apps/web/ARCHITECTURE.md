@@ -1636,7 +1636,8 @@ response curves, not channel numbers.
   `enabledViewsFor`). A strip that changed shape per file moved every other tab out from under
   the pointer on each selection change, and read as a per-file menu rather than as the app's
   fixed set of lenses; greying a tab out says "not for this file", while removing it says
-  nothing. It also makes the header's width independent of the active file, which is why
+  nothing. A run still behind the password prompt greys out *every* file tab for the same reason:
+  the prompt gates the content area, not the app's chrome. It also makes the header's width independent of the active file, which is why
   `useHeaderFit`'s only dep is the selected view. Which view the *content* area falls back to
   when the current one is disabled is still `App.tsx`'s job (the first enabled tab).
 - The header **goes iconographic when it stops fitting** rather than scrolling, in four steps
@@ -1716,20 +1717,30 @@ bar underneath says which one. This tab isn't:
 
 **But it keeps the file bar, meaning something else.** Starting a run needs a protocol and a plate
 map, and those come from files — the instrument has no protocol library of its own to pick from
-(`usb.md` §5.1). So the same `FileBar` renders here with `selectedIds` instead of `activeId`: a
-chip is *part of the run being staged* rather than the thing you are looking at, several can be on
-at once, and it is accented magenta to say so. Reusing the bar rather than growing a second file
-list inside the view is the whole point — it is the app's file list doing a second job, not a
-copy of it.
+(`usb.md` §5.1). So the same `FileBar` renders here with `stagedIds` alongside `activeId`, and the
+two are different claims. Reusing the bar rather than growing a second file list inside the view
+is the whole point — it is the app's file list doing a second job, not a copy of it.
+
+**One chip is always the primary selection**, in the app's ordinary cyan. Everywhere else that is
+`activeId`, the file every view is pointed at; here — a view that shows no file — it is the run
+being staged, which is what the bar has to name even when a just-loaded `.prcl.txt` is the active
+file. It is not a toggle — the app
+always has one file selected — so selecting another run *switches* it. The **auxiliary** chips are
+the plate and protocol files staged over it (`stagedIds`, magenta, matching the Instrument tab):
+those do toggle, and each supersedes half of the run. Making all three symmetric toggles, as an
+earlier version did, read as three equal switches when only two of them are, and let the selection
+empty out entirely — leaving the view with nothing named while the rest of the app was still
+pointed at a file.
 
 **The staging model** lives in `state/useRunStaging.ts`, held by `App` because the bar that edits
-it does. A selection is **three independent slots** — a run, a protocol override, a plate override
-— since a `.zpcr`/`.pcrd` carries both halves while a `.prcl.txt` or `.pltd`/`.plt.csv` carries
-exactly one. Each slot holds at most one file (so only one run at a time, which would otherwise
-claim both halves), selecting replaces whatever held that slot, and tapping a selected file
-releases it. Every slot behaves the same way, which is what makes any combination reachable and
-"no run at all" among them. `lib/protocolSource.ts` turns a selection into the two resolved
-halves, each carrying the file it came from and, when empty, why.
+it does. A selection is **three slots** — a run, a protocol override, a plate override — since a
+`.zpcr`/`.pcrd` carries both halves while a `.prcl.txt` or `.pltd`/`.plt.csv` carries exactly one.
+The run slot is *derived* from the primary selection rather than stored, so the run this view
+would start and the file the rest of the app is showing can never disagree (with the last run to
+hold it remembered, for while you are looking at a standalone plate). The two override slots hold
+at most one file each, selecting replaces whatever held the slot, and tapping a selected file
+releases it. `lib/protocolSource.ts` turns a selection into the two resolved halves, each carrying
+the file it came from and, when empty, why.
 
 **A run stays selected even when both halves are overridden**, where it supplies neither. It is
 still the instrument: its `.Dcal` set is what gives a staged `.plt.csv` its dye→channel mapping
@@ -1737,14 +1748,15 @@ still the instrument: its `.Dcal` set is what gives a staged `.plt.csv` its dye�
 `instrument: <run>` in the heading, `channels from <run>` over the plate — because a chip lit for
 a reason the reader can't see is worse than the extra line. A run is labelled by its **experiment
 name** here, as everywhere else (`lib/experiment.ts`); the override files keep their file names,
-since a `.prcl.txt`/`.plt.csv` is not an experiment and has no name but the one on disk. The selection is seeded once (first
-run loaded, plus the active file in its slot) rather than falling back at read time, so that
-deselecting the last thing sticks instead of being immediately undone.
+since a `.prcl.txt`/`.plt.csv` is not an experiment and has no name but the one on disk.
 
-A newly loaded file joins the selection by role rather than replacing it, which is what makes the
-headline flow work: load a `.prcl.txt`, land on the Instrument view (`addFiles` switches to it — a
-protocol is an input to a run, not a run to look at, and has no file-backed view of its own), and
-see it staged against the run already loaded.
+A newly *loaded* override file joins the selection by role rather than replacing it, which is what
+makes the headline flow work: load a `.prcl.txt`, land on the Instrument view (`addFiles` switches
+to it — a protocol is an input to a run first, whatever else its own Overview says about it), and
+see it staged against the run already loaded. That fold is keyed off the file *list* rather than
+off the active file, so every entry point stages alike and staging doesn't ride on which file a
+load happened to leave active — which here it doesn't: the loaded protocol is the active file
+while the *run* is the chip this bar has to name.
 
 The `CfxDevice` lives in a **ref**, not state: it is a long-lived object with a background read
 loop, and a re-render must not be able to look like a new connection — `open()` on an

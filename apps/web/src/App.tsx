@@ -1,6 +1,6 @@
 import { useMemo, useRef } from "react";
 import { useZpcrStore } from "./state/useZpcrStore";
-import { useRunStaging } from "./state/useRunStaging";
+import { useRunStaging, stagingRole } from "./state/useRunStaging";
 import { EMPTY_STAGED_RUN, resolveStagedRun } from "./lib/protocolSource";
 import { usePltdPassword } from "./state/pltdPassword";
 import { formatLoadHash } from "./state/urlHash";
@@ -138,6 +138,27 @@ export function App() {
     if (await store.addFiles([file])) store.setView("overview");
   };
 
+  /**
+   * What a file chip does. Everywhere but the Instrument view it means the one thing it always
+   * meant — *show me this file* — which is the app's **primary selection**, `activeId`, drawn in
+   * the bar's usual cyan. Every kind can hold it: a run, a standalone plate, and (since it has an
+   * Overview of its own) a `.prcl.txt`.
+   *
+   * The Instrument view asks a different question — what is the run made of — so there the chips
+   * split in two. The run is the primary one, and selecting another *switches* it rather than
+   * toggling: it can't be cleared, and there is always one. The plate and protocol files staged
+   * over it are auxiliary (magenta), and those do toggle on and off. Selecting a run here also
+   * makes it the active file, so it is what you land on when you leave the view — without that,
+   * a bar whose only action was staging left no way to change what the rest of the app was
+   * pointed at from here at all.
+   */
+  const selectFile = (id: string) => {
+    const f = store.files.find((x) => x.id === id);
+    if (!f) return;
+    if (store.view !== "instrument" || stagingRole(f.kind) === "run") store.setActive(id);
+    else staging.toggle(id);
+  };
+
   const exampleHref = `#${formatLoadHash(EXAMPLE_FILE)}`;
   const loadExample = (e: { preventDefault: () => void }) => {
     if (window.location.hash !== exampleHref) return; // let the navigation do the work
@@ -152,10 +173,11 @@ export function App() {
   // The Instrument view operates on an instrument, not a file, so it renders the same way
   // whether or not anything is loaded — and is reachable from the welcome screen, which is where someone
   // with a cycler and no files yet actually starts. It keeps the file bar, because starting a run
-  // needs files: there a chip means "part of the run being staged" rather than "the file you are
-  // looking at", which is why it gets `selectedIds` and the staging toggle instead of `activeId`.
-  // A `.prcl.txt` selected from a tab it has no answer for is *not* forced here any more: it has
-  // an Overview of its own now, which the fallback below picks as its first enabled tab.
+  // needs files: the chip in cyan is the run to start — the same "primary selection" highlight
+  // the bar carries everywhere — and the plate/protocol chips staged over it are the auxiliary
+  // `stagedIds`, in magenta. A `.prcl.txt` selected from a tab it has no answer for is *not*
+  // forced here any more: it has an Overview of its own now, which the fallback below picks as
+  // its first enabled tab.
   if (store.view === "instrument") {
     return (
       <div className={store.files.length > 0 ? "app" : "app app--nofiles"}>
@@ -177,10 +199,13 @@ export function App() {
             files={store.files}
             runs={store.runs}
             plateFiles={store.plateFiles}
-            activeId={store.activeId}
-            selectedIds={staging.selectedIds}
+            // The cyan chip here is the *run being staged*, not `store.activeId`: this view shows
+            // no file, and a protocol loaded into it is the active file while the run is what the
+            // bar has to name. Selecting one makes it active too (see `selectFile`).
+            activeId={staging.selection.runId}
+            stagedIds={staging.stagedIds}
             modifiedIds={store.modifiedIds}
-            onSelect={staging.toggle}
+            onSelect={selectFile}
             onRemove={store.remove}
             experiments={store.experiments}
           />
@@ -215,8 +240,9 @@ export function App() {
 
   const isStandalonePlate = isStandaloneKind(active.kind);
   const isStandaloneProtocol = active.kind === "prcl";
-  const isBiomeme = active.kind === "biomeme";
   const zpcr = isStandalonePlate || isStandaloneProtocol ? null : activeRun?.zpcr ?? null;
+  /** The run is here but not open yet: the password prompt, or a decode that failed. */
+  const gated = !zpcr && !isStandalonePlate && !isStandaloneProtocol;
   const enabledViews = enabledViewsFor(active.kind);
   // `store.view` is global (not per-file), so switching entries can land on a view this file has
   // no answer for (e.g. "calibration" on a Biomeme run) — fall back to its first enabled tab
@@ -233,15 +259,18 @@ export function App() {
     <div className="app">
       <header className="app__header" ref={headerRef} data-fit={fit}>
         <Logo onClick={showAbout} />
-        {(zpcr || isStandalonePlate || isStandaloneProtocol) && (
-          <div className="app__views">
-            <ViewSelector
-              value={view}
-              onChange={store.setView}
-              enabled={enabledViews ?? undefined}
-            />
-          </div>
-        )}
+        <div className="app__views">
+          <ViewSelector
+            value={view}
+            onChange={store.setView}
+            // A run that hasn't decoded yet — locked behind the password prompt, or failed — has
+            // nothing to show in any tab, so they all grey out. The strip itself stays: the
+            // password prompt is a gate in the content area, not a reason for the app's chrome to
+            // change shape, and a strip that vanished under it made unlocking look like the tabs
+            // were something the file had earned.
+            enabled={gated ? [] : enabledViews ?? undefined}
+          />
+        </div>
         <div className="app__header-spacer" />
         <DropZone onFiles={store.addFiles} />
       </header>
@@ -252,7 +281,7 @@ export function App() {
         plateFiles={store.plateFiles}
         activeId={store.activeId}
         modifiedIds={store.modifiedIds}
-        onSelect={store.setActive}
+        onSelect={selectFile}
         onRemove={store.remove}
         experiments={store.experiments}
       />

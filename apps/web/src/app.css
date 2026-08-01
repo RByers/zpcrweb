@@ -3222,13 +3222,16 @@
   margin-bottom: 6px;
 }
 
-/* The file bar in its multi-select role (the Instrument view): a chip is part of the run being
-   staged, so several can be on at once. Magenta rather than the file views' cyan, matching the
-   Instrument tab and saying that the selection means something different here. */
-.filebar--multi .filechip.is-active {
+/* The file bar in its multi-select role (the Instrument view). The primary selection keeps the
+   app's cyan `.is-active` treatment — it is the same "the file you are on" it is everywhere else,
+   and in this view it is also the run to start. The *auxiliary* chips staged over it (a plate or
+   protocol overriding half of that run) are magenta, matching the Instrument tab and saying that
+   these mean something different: not what you're looking at, but what's being assembled. */
+.filebar--multi .filechip.is-staged {
   border-color: var(--neon-magenta);
+  box-shadow: 0 0 0 1px var(--neon-magenta-dim), 0 0 16px var(--neon-magenta-dim);
 }
-.filebar--multi .filechip.is-active .filechip__name {
+.filebar--multi .filechip.is-staged .filechip__name {
   color: var(--neon-magenta);
 }
 

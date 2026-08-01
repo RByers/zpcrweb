@@ -30,16 +30,20 @@ interface Props {
   files: LoadedFile[];
   runs: Map<string, RunResult>;
   plateFiles: Map<string, PlateFileResult>;
+  /** The **primary selection** — one chip, in cyan, that a click switches and can never clear.
+   * Usually `ZpcrStore.activeId`, the file every view is pointed at; in the Instrument view,
+   * which shows no file, it is the run being staged (`App.tsx`). */
   activeId: string | null;
   onSelect: (id: string) => void;
   onRemove: (id: string) => void | Promise<void>;
   /**
-   * Multi-selection, for the Instrument view: the same bar, but a chip is "part of the run being
-   * staged" rather than "the file you are looking at" — up to three at once (see
-   * `useRunStaging.ts`). When present it replaces {@link Props.activeId} for highlighting, and
-   * `onSelect` toggles membership instead of switching the view's subject.
+   * The *auxiliary* files staged alongside the primary one, for the Instrument view: a plate or
+   * protocol file overriding half of the run being assembled (see `useRunStaging.ts`). They are
+   * highlighted magenta, and toggle on and off, where {@link Props.activeId} stays what it always
+   * is — the one primarily selected file, in the app's usual cyan. Passing this puts the bar in
+   * multi-select mode; the run is never in here, since it *is* the primary selection there.
    */
-  selectedIds?: Set<string>;
+  stagedIds?: Set<string>;
   /** Files whose content has been edited since it was loaded and not since downloaded
    * (`ZpcrStore.modifiedIds`). Deleting one of those throws work away that exists nowhere else,
    * so its chip asks a second time first — see {@link DeleteButton}. */
@@ -238,6 +242,7 @@ function FileChip({
   password,
   isActive,
   isModified,
+  isStaged,
   onSelect,
   onRemove,
 }: {
@@ -249,6 +254,7 @@ function FileChip({
   isActive: boolean;
   /** See {@link Props.modifiedIds} — what makes this chip's delete a two-step. */
   isModified: boolean;
+  isStaged: boolean;
   onSelect: (id: string) => void;
   onRemove: (id: string) => void | Promise<void>;
 }) {
@@ -265,6 +271,7 @@ function FileChip({
       className={
         "filechip" +
         (isActive ? " is-active" : "") +
+        (isStaged && !isActive ? " is-staged" : "") +
         (isModified ? " is-modified" : "") +
         (isArmed ? " is-arming" : "")
       }
@@ -277,7 +284,7 @@ function FileChip({
         ref={mainRef}
         className="filechip__main"
         role="tab"
-        aria-selected={isActive}
+        aria-selected={isActive || isStaged}
         onClick={() => onSelect(f.id)}
         onMouseEnter={() => {
           const r = mainRef.current?.getBoundingClientRect();
@@ -339,17 +346,17 @@ export function FileBar({
   activeId,
   onSelect,
   onRemove,
-  selectedIds,
+  stagedIds,
   modifiedIds,
   experiments,
 }: Props) {
   const [password] = usePltdPassword();
   return (
     <div
-      className={"filebar" + (selectedIds ? " filebar--multi" : "")}
+      className={"filebar" + (stagedIds ? " filebar--multi" : "")}
       role="tablist"
-      aria-label={selectedIds ? "Files for the run to start" : "Loaded files"}
-      aria-multiselectable={selectedIds ? true : undefined}
+      aria-label={stagedIds ? "Files for the run to start" : "Loaded files"}
+      aria-multiselectable={stagedIds ? true : undefined}
     >
       {files.map((f) => (
         <FileChip
@@ -366,7 +373,8 @@ export function FileBar({
           run={runs.get(f.id)}
           plateFile={plateFiles.get(f.id)}
           password={password}
-          isActive={selectedIds ? selectedIds.has(f.id) : f.id === activeId}
+          isActive={f.id === activeId}
+          isStaged={stagedIds ? stagedIds.has(f.id) : false}
           isModified={modifiedIds.has(f.id)}
           onSelect={onSelect}
           onRemove={onRemove}

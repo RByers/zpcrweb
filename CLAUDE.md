@@ -150,7 +150,7 @@ touch `state/urlHash.ts`, `state/pltdPassword.ts`, `components/curves/ChipBar.ts
 `components/curves/CurveTable.tsx`, `components/curves/CqRange.tsx`,
 `components/instrument/InstrumentRun.tsx`, `state/useRunStaging.ts`, `lib/protocolSource.ts`,
 `lib/experiment.ts` (or core's `experiment.ts`), `components/ViewSelector.tsx` or `App.tsx`'s
-`enabledViewsFor`, core's `runDefinition.ts`, `components/raw/DecodedView.tsx`'s
+`enabledViewsFor`/`selectFile`, core's `runDefinition.ts`, `components/raw/DecodedView.tsx`'s
 `ProtocolDecoded`, `components/views/StandaloneProtocolView.tsx`, `components/FileBar.tsx`,
 `components/FileIcons.tsx` (or core's `fileKind.ts`), `components/views/StandaloneRawView.tsx`,
 `state/useZpcrStore.ts`'s `modifiedIds`/`markDownloaded`, its settings seeding or `fileKind`, or

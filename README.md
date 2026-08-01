@@ -218,7 +218,7 @@ It walks the requested views and writes **one labelled contact-sheet PNG** —
 console errors, uncaught exceptions and failed page loads, which catch breakage a screenshot
 can't show.
 
-**`tools/uitest.mjs` (`npm run test:ui`) — assert it.** 128 browser assertions covering what
+**`tools/uitest.mjs` (`npm run test:ui`) — assert it.** 130 browser assertions covering what
 nothing else can catch: the two URL contracts — hash routing (deep links, back/forward,
 unknown-file and invalid-view fallbacks) and password handling (stripped from both URL forms,
 never leaked into the routing hash, an encrypted `.pcrd` still decrypting) — plus `#load=`, the
@@ -239,10 +239,12 @@ there leaves only them, and the handles clamp instead of crossing) — and that 
 hand-set threshold seeds it as a per-fluorophore override while a dye the file left on auto is
 left alone (`threshold.md` §5.3: that one value is what makes the app reproduce CFX's own Cq) —
 and the Overview tab's `.prcl.txt` download plus the Instrument view's run staging, where the file
-bar is a *multi*-selection (three slots — a run, plus a `.prcl.txt`/`.plt.csv` overriding either
-half; tapping any selected chip releases its slot; a loaded `.prcl.txt` joins the selection and
-lands on the Instrument view; a staged `.plt.csv` takes its dye→channel mapping from the run it is
-paired with, including when that run supplies neither half and is there only as the instrument)
+bar carries a primary selection plus overrides (three slots — the run, plus a
+`.prcl.txt`/`.plt.csv` overriding either half; tapping a staged override releases its slot while
+tapping the run leaves it, since the primary selection is never empty; a loaded `.prcl.txt` joins
+the selection and lands on the Instrument view; a staged `.plt.csv` takes its dye→channel mapping
+from the run it is paired with, including when that run supplies neither half and is there only
+as the instrument)
 and Start run appears only with an instrument attached — and that a `.prcl.txt` is a document as
 well as an input: it enables Overview and Instrument and nothing else, and its Overview reports
 the protocol's own settings from the decode — and how a run is *named*: the file bar shows an
@@ -255,8 +257,12 @@ and what happens when a file with unsaved edits is deleted — an edited file (a
 wears a dot and its ✕ arms into a waste bin that takes a second click, Escape disarms it, neither
 state widens the chip, the flag survives a reload, and downloading the file puts it back to
 deleting on one click — and that the view-tab strip is the *same seven tabs* for every file, a tab
-the file can't answer being disabled rather than dropped (`ViewSelector`'s `enabled` prop), which
-is a claim about two files' headers matching that no single-file check can make — plus the file
+the file can't answer being disabled rather than dropped (`ViewSelector`'s `enabled` prop),
+including a run still behind the password prompt, which greys out all six file tabs rather than
+dropping the strip — a claim about two files' headers matching that no single-file check can make
+— and the file bar's two kinds of selection, the run staged in the Instrument view reading as its
+one primary chip (cyan, and tapping it can't clear it) while the `.prcl.txt` over it is auxiliary
+(magenta) — plus the file
 chip's icon, whose shape is what the file *is* (core's `fileCategory`, so the two plate encodings
 draw alike) while its colour stays the encryption status, two claims a screenshot can only show
 one at a time.

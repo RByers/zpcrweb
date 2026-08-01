@@ -862,6 +862,33 @@ async function referenceChecks(chrome, origin) {
 async function passwordChecks(chrome, origin, pw) {
   console.log("\npassword handling");
 
+  // A locked run, before any password: the prompt gates the *content*, and the header keeps its
+  // strip with every file tab greyed out. The old behaviour dropped the strip entirely, which
+  // made unlocking look like the tabs were something the file had to earn — and moved the rest
+  // of the header sideways as it appeared.
+  const locked = await openPage(chrome.base, origin);
+  await emptyReload(locked, origin);
+  await locked.eval(`localStorage.removeItem("zpcr:pltdPassword")`);
+  await emptyReload(locked, origin);
+  await loadFile(locked, PCRD).catch(() => {});
+  await waitFor(() => locked.eval(`!!document.querySelector(".app__gate")`), {
+    what: "the password prompt",
+  });
+  const lockedStrip = await locked
+    .eval(
+      `JSON.stringify([...document.querySelectorAll('.viewselect [role="tab"]')]
+         .map((b) => ({ label: b.textContent.trim(), off: b.disabled })))`,
+    )
+    .then(JSON.parse);
+  check(
+    "a locked run keeps the tab strip, with every file tab disabled",
+    lockedStrip.length === 7 &&
+      lockedStrip.filter((t) => t.off).length === 6 &&
+      !lockedStrip.find((t) => t.label === "Instrument").off,
+    JSON.stringify(lockedStrip),
+  );
+  locked.close();
+
   // Hash form: consumed, then stripped so a copied URL can't leak the secret.
   const a = await openPage(chrome.base, `${origin}#cfxPassword=${encodeURIComponent(pw)}`);
   await sleep(500);
@@ -1092,7 +1119,11 @@ async function instrumentRunChecks(chrome, origin) {
         plate: parts.find((p) => p.title === "Plate") || null,
         chips: [...document.querySelectorAll(".filebar--multi .filechip")].map((c) => ({
           name: c.querySelector(".filechip__name").textContent.trim(),
-          on: c.classList.contains("is-active"),
+          // Two different kinds of on: the primary selection (cyan, is-active — the run, and
+          // the file the rest of the app is showing) and an auxiliary override staged over it
+          // (magenta, is-staged).
+          on: c.classList.contains("is-active") || c.classList.contains("is-staged"),
+          primary: c.classList.contains("is-active"),
         })),
       };
     })()`);
@@ -1214,6 +1245,29 @@ async function instrumentRunChecks(chrome, origin) {
       .find((b) => b.textContent.trim() === "Instrument").click())()`);
   await tabBecomes(cdp, "Instrument");
 
+  // In this view the cyan chip is the *run being staged*, not the active file: a loaded
+  // `.prcl.txt` is the file the app is on (it has an Overview of its own), but what the bar has
+  // to name here is the run it is being staged against. So the run reads as the primary
+  // selection and the protocol as an auxiliary one, and the two colours mean two different
+  // things rather than one washed-out "selected".
+  const roles = await cdp
+    .eval(
+      `JSON.stringify({
+         primary: [...document.querySelectorAll(".filechip.is-active .filechip__name")]
+           .map((n) => n.textContent.trim()),
+         staged: [...document.querySelectorAll(".filechip.is-staged .filechip__name")]
+           .map((n) => n.textContent.trim()),
+       })`,
+    )
+    .then(JSON.parse);
+  check(
+    "the staged run is the bar's one primary chip, the .prcl.txt an auxiliary one",
+    roles.primary.length === 1 &&
+      /FirstQualification/.test(roles.primary[0]) &&
+      roles.staged.some((n) => /Gradient/.test(n)),
+    JSON.stringify(roles),
+  );
+
   // Loading it stages it: the headline flow is "load a protocol, see it against the run you
   // already had", so the file joins the selection rather than replacing it.
   const overridden = await staged();
@@ -1248,8 +1302,8 @@ async function instrumentRunChecks(chrome, origin) {
     JSON.stringify({ proto: both.protocol.override, plate: both.plate.override }),
   );
 
-  // Tapping a selected file releases its slot — every slot, including the run's, so that
-  // "no run at all" is reachable and a deselection isn't undone by a default.
+  // Tapping a staged override releases its slot. The run is not one of those: it is the app's
+  // primary selection, which is never empty (`useRunStaging.ts`).
   const tap = (pattern) =>
     cdp.eval(
       `(() => { [...document.querySelectorAll(".filechip__main")]
@@ -1266,21 +1320,20 @@ async function instrumentRunChecks(chrome, origin) {
   );
   await tap("/FirstQualification/");
   await sleep(300);
-  const noRun = await staged();
+  const stillRun = await staged();
+  const runChip = stillRun.chips.find((c) => /FirstQualification/.test(c.name));
+  const plateChip = stillRun.chips.find((c) => /QuickPlate/.test(c.name));
   check(
-    "tapping the selected run deselects it too",
-    !noRun.chips.find((c) => /FirstQualification/.test(c.name)).on,
-    JSON.stringify(noRun.chips.filter((c) => c.on).map((c) => c.name)),
+    "tapping the selected run leaves it selected — the primary selection is never empty",
+    runChip.primary && /METHOD CALC/.test(stillRun.protocol.text) && !stillRun.protocol.override,
+    JSON.stringify(stillRun.chips),
   );
-  await tap("/FirstQualification/");
-  await sleep(300);
-  const rejoined = await staged();
+  // …and the two highlights say which is which: the run is the app's ordinary primary selection,
+  // the plate is an override staged over it.
   check(
-    "a run rejoins a lone override rather than replacing it",
-    rejoined.plate.override &&
-      !rejoined.protocol.override &&
-      /METHOD CALC/.test(rejoined.protocol.text),
-    JSON.stringify({ plate: rejoined.plate.source, proto: rejoined.protocol.source }),
+    "the run is the primary chip, the override an auxiliary one",
+    runChip.primary && plateChip.on && !plateChip.primary && stillRun.plate.override,
+    JSON.stringify({ run: runChip, plate: plateChip }),
   );
 
   // A staged `.plt.csv` borrows the run's dye→channel mapping. The format records dye names
@@ -1317,8 +1370,9 @@ async function instrumentRunChecks(chrome, origin) {
     const part = [...document.querySelectorAll(".devrun__part")]
       .find((p) => p.querySelector(".devrun__parttitle").textContent.trim() === "Plate");
     return {
-      on: [...document.querySelectorAll(".filebar--multi .filechip.is-active .filechip__name")]
-        .map((n) => n.textContent.trim()),
+      on: [...document.querySelectorAll(
+        ".filebar--multi :is(.filechip.is-active, .filechip.is-staged) .filechip__name",
+      )].map((n) => n.textContent.trim()),
       unknown: !!part.querySelector(".plate__chip--unknown"),
       chips: [...part.querySelectorAll(".plate__chip")].map((c) => c.textContent.trim()),
       channelsFrom: /channels from/.test(part.textContent),
