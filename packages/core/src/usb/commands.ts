@@ -128,7 +128,11 @@ export interface CfxCommandSpec {
   command: string;
   label: string;
   confidence: CommandConfidence;
-  /** Why it is believed to do what the label says. */
+  /**
+   * Why it is believed to do what the label says — provenance for whoever reads or changes this
+   * table, not UI copy. It cites `usb.md` sections, which mean nothing to an operator, so clients
+   * shouldn't show it as a button tooltip; the labels say what the buttons do.
+   */
   note?: string;
   /** True when running it changes instrument state rather than just reporting it. */
   actuates?: boolean;
@@ -193,13 +197,15 @@ export const CFX_COMMANDS: Record<CfxCommandName, CfxCommandSpec> = {
   },
   cancel: {
     command: "CANCEL",
-    label: "Cancel / acknowledge run",
+    label: "Cancel run",
     confidence: "observed",
     note:
       "usb.md §7.6 — two things depending on when it is sent. On a *finished* run (STATUS? " +
       "reports IDLE but the run's name is still attached) it is the acknowledgement that " +
       "releases the instrument, and the final plate read, the `ended` marker and the .alf " +
-      "report appear only afterwards. On a run still cycling it aborts it.",
+      "report appear only afterwards. On a run still cycling it aborts it. The label names only " +
+      "the abort: acknowledging a finished run is bookkeeping a client should do for itself (see " +
+      "`CfxDevice.acknowledgeRun`), not a decision to put in front of an operator.",
     actuates: true,
   },
 };

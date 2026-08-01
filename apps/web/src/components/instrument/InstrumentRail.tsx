@@ -225,6 +225,9 @@ export function InstrumentRail({
               </ul>
             </div>
           )}
+          {/* No tooltips here: each spec's `note` is provenance written for whoever maintains the
+              command table — it cites `usb.md` sections, which mean nothing to an operator — and
+              the labels already say what the buttons do. */}
           <div className="instrument__actions">
             {(Object.keys(CFX_COMMANDS) as CfxCommandName[]).map((name) => {
               const spec = CFX_COMMANDS[name];
@@ -237,7 +240,6 @@ export function InstrumentRail({
                     (unverified ? " instrument__action--unverified" : "")
                   }
                   disabled={!!busy}
-                  title={spec.note}
                   onClick={() => void instrument.runAction(name, spec)}
                 >
                   {spec.label}

@@ -1938,11 +1938,18 @@ shrink to its header — no `grid-template-rows` track can express that; open pa
 (`.instrument__panel--collapsible[open]`), with the console keeping its ~40% share.
 
 **Action commands carry their provenance.** `CFX_COMMANDS` tags each action with how it is known
-to do what it says. All four currently offered — `BLOCKID 1` (flash the indicator), `LID OPEN`,
-`LID CLOSE`, `CANCEL` — are `observed` in a capture. Anything tagged `unverified` is badged `?`
-with a dashed border and an explanatory note, so a guess is never presented as a feature; the
-instrument's result code is reported either way. The badge and its footnote are driven off the tag
-rather than hardcoded, so adding an unverified command surfaces the warning on its own.
+to do what it says. All five currently offered — `BLOCKID 1` (flash the indicator), `LID OPEN`,
+`LID CLOSE`, `PROCEED` (skip step), `CANCEL` — are `observed` in a capture. Anything tagged
+`unverified` is badged `?` with a dashed border and an explanatory note, so a guess is never
+presented as a feature; the instrument's result code is reported either way. The badge and its
+footnote are driven off the tag rather than hardcoded, so adding an unverified command surfaces
+the warning on its own.
+
+That provenance is for whoever maintains the table, though, so **the buttons carry no tooltip**:
+each spec's `note` cites `usb.md` sections, which mean nothing to an operator, and the labels say
+what the buttons do. `CANCEL`'s reads just **Cancel run** for the same reason — its other job,
+acknowledging a run the instrument has finished but is still holding, is done automatically by
+`useRunWatch` (`usb.md` §7.6), so it is never something to ask an operator for.
 
 Two of these were briefly shipped *as* guesses, which is why the mechanism exists — and then a
 re-read of the `usb-basic` capture against the operator's account of it (flash, then open, then
