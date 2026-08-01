@@ -464,10 +464,12 @@ so every call site keeps writing one `onChange({ … })` regardless of where the
   fixed column tracks would strand the lone content pane in the narrow first track when
   there's no sidebar to occupy the other. `PlateViewer` itself is a single full-width column —
   there is no side panel and no click-through well detail: everything the old panel showed
-  (replicate, quantity, the fluor→channel→target mapping) is in each cell's `title` tooltip, and
-  the 320px column it needed was one a narrow container could only stack below the grid. Wells
-  are therefore not clickable; the hover outline stays, as a reading aid pairing with the
-  tooltip.
+  (replicate, quantity, the fluor→channel→target mapping) is in each cell's **hover card**, and
+  the 320px column it needed was one a narrow container could only stack below the grid. That card
+  is the Curves view's `HoverCard` (`PlateViewer`'s `wellCard`), so a well reads the same in both
+  views — same title, same sample-type/sample subtitle, same channel-coloured swatch per fluor —
+  minus the Cq column, since a plate definition is a setup with no run to quantify. Wells are
+  therefore not clickable; the hover outline stays, as a reading aid pairing with the card.
   Cells: each well cell writes the well's `sample` and each loaded fluor's `target` directly
   into the cell, the target text colored by that fluor's channel (`channelColor`) — trading
   grid density for being able to read sample identity and target at a glance. Every cell is the
@@ -1809,8 +1811,11 @@ Four components, under `components/instrument/`:
 
   The plate uses the shared `PlateViewer` in its `compact` variant — no vessel/scan-mode metadata
   and wells shrunk to coloured cells, so a 96-well plate fits the column instead of scrolling out
-  of it. Nothing is lost that isn't one hover away, and the question this preview answers is "is
-  this the right plate?", not "what is in well F7?".
+  of it. A loaded well still carries one channel-coloured dot per fluor it holds
+  (`.plate__welldots`, hidden in the full-size grid where the per-fluor target text says the same
+  thing), so the cell answers "what is loaded here?" without a hover; everything else is one hover
+  away in the well card. The question this preview answers is "is this the right plate?", not
+  "what is in well F7?".
 - **`InstrumentFiles`** — the instrument's storage, grouped by kind the way the Raw view groups a
   `.zpcr`. A *single* retrieved file is **saved to disk, not loaded into the app**: what lives on
   the instrument are the *parts* of a run — individual `.Plateread`s, the `.Dcal` set, the

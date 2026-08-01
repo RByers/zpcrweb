@@ -4,6 +4,7 @@ import { channelColor } from "../../lib/channelColors";
 import { FluorChannelChip, UnknownChannelNote, hasUnknownChannel } from "./FluorChannelChip";
 import { ROW_LABELS, SAMPLE_TYPE_META } from "../../lib/sampleType";
 import { plateDisplayName } from "../../lib/plateNames";
+import { useHoverCard, type HoverCardData, type HoverCardRow } from "../curves/HoverCard";
 import { Pair } from "../raw/Pair";
 
 /**
@@ -16,8 +17,9 @@ import { Pair } from "../raw/Pair";
  * {@link PlateDefinition} differs.
  *
  * There is no click-through detail panel: a well's remaining fields (replicate, quantity, the
- * fluor→channel→target mapping) are already in the cell's `title` tooltip, and the panel it used
- * to open cost a 320px column that a narrow container had to stack below the grid.
+ * fluor→channel→target mapping) are already in the cell's hover card ({@link wellCard} — the same
+ * card the Curves view's well grid shows, minus the Cq column), and the panel it used to open cost
+ * a 320px column that a narrow container had to stack below the grid.
  */
 export function PlateViewer({
   plate,
@@ -33,7 +35,9 @@ export function PlateViewer({
   /**
    * Preview variant: drop the vessel/scan-mode metadata and shrink the wells to colour-coded
    * cells, so a full 12-column plate fits a narrow column instead of scrolling sideways out of
-   * it. Nothing is lost that isn't still one hover away — each cell keeps its full `title` — and
+   * it. A loaded well keeps a row of channel-coloured dots, one per fluor it carries, so a cell
+   * still says at a glance what is in it; nothing else is lost that isn't one hover away — each
+   * cell keeps its full card ({@link wellCard}) — and
    * the fluor chips above still name the dyes. Used by the Instrument view's staged run, where the
    * plate sits beside a protocol and the question is "is this the right plate?", not "what is in
    * well F7?".
@@ -59,6 +63,10 @@ export function PlateViewer({
         ? -1
         : a.channel - b.channel,
   );
+
+  // Keyed by the `WellDefinition` itself rather than by label: the grid already has the well in
+  // hand at the point it hovers, and a Biomeme strip's positions are labelled by column alone.
+  const { show, hide, node } = useHoverCard((well: WellDefinition) => wellCard(well, fluorOrder));
 
   return (
     <div className={"plateviewer" + (compact ? " plateviewer--compact" : "")}>
@@ -113,6 +121,8 @@ export function PlateViewer({
                       key={col}
                       well={plate.wells[row * plate.columns + col]!}
                       fluorOrder={fluorOrder}
+                      show={show}
+                      hide={hide}
                     />
                   ))}
                 </tr>
@@ -130,35 +140,71 @@ export function PlateViewer({
           ))}
         </div>
       </section>
+      {node}
     </div>
   );
 }
 
-/** One well: a line for the sample name, then one line per plate fluor in `fluorOrder`, blank
- * where this well doesn't carry that fluor. The `title` carries everything the cell has no room
- * to show — replicate, quantity, the full fluor→target list — which is why there's no
- * click-through panel. */
-function WellCell({ well, fluorOrder }: { well: WellDefinition; fluorOrder: PlateFluor[] }) {
-  const meta = SAMPLE_TYPE_META[well.sampleType];
-  const title = [
-    well.label,
+/** Hover-card content for one well: what it holds, in the plate's own fluor order. Mirrors the
+ * Curves view's well card (`CurvesView`'s `cardForWell`) — same title, same sample-type/sample
+ * subtitle, same channel-coloured swatch per fluor — minus the Cq column, since a plate
+ * *definition* is a setup, with no run and so nothing quantified. Every fluor listed is one the
+ * well carries, so every row is `selected`; the dimmed state has no meaning without a rail to
+ * filter by. */
+function wellCard(well: WellDefinition, fluorOrder: PlateFluor[]): HoverCardData {
+  // Sample type reads as "empty" for an unloaded well however the plate design typed it, exactly
+  // as the cell's own colouring does (see `WellCell`).
+  const meta = SAMPLE_TYPE_META[well.loaded ? well.sampleType : "empty"];
+  const subtitle = [
     meta.label,
-    well.sample && `Sample: ${well.sample}`,
-    well.replicate !== undefined && `Rep ${well.replicate}`,
-    well.quantity !== undefined && `Qty ${well.quantity}`,
-    well.fluors.length
-      ? "Fluors: " +
-        well.fluors.map((f) => (f.target ? `${f.fluor}→${f.target}` : f.fluor)).join(", ")
-      : "not loaded",
+    well.sample ? `Sample: ${well.sample}` : null,
+    well.replicate !== undefined ? `Rep ${well.replicate}` : null,
+    well.quantity !== undefined ? `Qty ${well.quantity}` : null,
   ]
     .filter(Boolean)
     .join(" · ");
+
+  const rows: HoverCardRow[] = fluorOrder.flatMap((pf) => {
+    const f = well.fluors.find((wf) => wf.fluor === pf.fluor);
+    if (!f) return [];
+    return [
+      {
+        key: pf.fluor,
+        label: pf.fluor,
+        sublabel: f.target || undefined,
+        color: channelColor(pf.channel),
+        selected: true,
+      },
+    ];
+  });
+
+  return { title: `Well ${well.label}`, subtitle, rows, empty: "Not loaded" };
+}
+
+/** One well: a line for the sample name, then one line per plate fluor in `fluorOrder`, blank
+ * where this well doesn't carry that fluor — plus a row of channel-coloured dots, one per fluor
+ * the well actually carries, which is all the compact variant has room for (the text lines are
+ * hidden there). Everything the cell can't show — replicate, quantity, the full fluor→target
+ * list — is one hover away in {@link wellCard}, which is why there's no click-through panel. */
+function WellCell({
+  well,
+  fluorOrder,
+  show,
+  hide,
+}: {
+  well: WellDefinition;
+  fluorOrder: PlateFluor[];
+  show: (well: WellDefinition, el: HTMLElement) => void;
+  hide: () => void;
+}) {
+  const meta = SAMPLE_TYPE_META[well.sampleType];
 
   return (
     <td
       className={"plate__well" + (well.loaded ? "" : " is-empty")}
       style={well.loaded ? { background: meta.color + "22", borderColor: meta.color + "55" } : undefined}
-      title={title}
+      onMouseEnter={(e) => show(well, e.currentTarget)}
+      onMouseLeave={hide}
     >
       {well.loaded && (
         <>
@@ -181,6 +227,20 @@ function WellCell({ well, fluorOrder }: { well: WellDefinition; fluorOrder: Plat
                 </span>
               );
             })}
+          </span>
+          {/* Only the fluors present, unlike the target lines above: a dot row is read across,
+              not down a column of cells, so there is no line to hold open — and in a 26px-wide
+              compact cell, blanks for the plate's other dyes would crowd out the real ones. */}
+          <span className="plate__welldots">
+            {fluorOrder
+              .filter((pf) => well.fluors.some((wf) => wf.fluor === pf.fluor))
+              .map((pf) => (
+                <span
+                  key={pf.fluor}
+                  className="plate__welldot"
+                  style={{ background: channelColor(pf.channel) }}
+                />
+              ))}
           </span>
         </>
       )}

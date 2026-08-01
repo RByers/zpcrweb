@@ -1714,7 +1714,7 @@
 }
 
 /* PlateViewer: header block above the grid, full width. There is no side panel — a well's extra
- * fields live in its cell tooltip (see `PlateViewer`), which spares the layout a second column
+ * fields live in its hover card (see `PlateViewer`), which spares the layout a second column
  * that narrow containers could only stack. */
 .plateviewer {
   display: flex;
@@ -1740,8 +1740,9 @@
 }
 
 /* Preview variant (the Instrument view's staged run): no metadata block, and wells shrunk to
-   colour-coded cells so a 96-well plate fits a column instead of scrolling out of it. The
-   per-cell `title` still carries everything, so this hides detail rather than losing it. */
+   colour-coded cells so a 96-well plate fits a column instead of scrolling out of it. A loaded
+   well still shows one dot per fluor it carries (`.plate__welldots`), and the per-cell hover card
+   still carries everything, so this hides detail rather than losing it. */
 .plateviewer--compact {
   gap: 12px;
 }
@@ -2243,8 +2244,8 @@
 .plate__grid td.plate__well.is-empty {
   background: var(--plane);
 }
-/* Cells are not clickable — the hover outline is a reading aid, pairing with the cell's `title`
-   tooltip to say which well the tooltip is describing. */
+/* Cells are not clickable — the hover outline is a reading aid, pairing with the cell's hover
+   card (`.curvecard`, shared with the Curves view) to say which well the card is describing. */
 .plate__well:hover:not(.is-empty) {
   outline-color: var(--border-strong);
 }
@@ -2273,6 +2274,27 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+/* Channel-coloured dots, one per fluor the well carries. Hidden in the full-size grid, where the
+   per-fluor target text above already names and colours them; the compact variant, which hides
+   that text, turns them on (see `.plateviewer--compact`). */
+.plate__welldots {
+  display: none;
+}
+.plateviewer--compact .plate__welldots {
+  display: flex;
+  flex-wrap: wrap;
+  align-content: center;
+  justify-content: center;
+  gap: 2px;
+  height: 100%;
+}
+/* 4px dots with a 2px gap put four across the 22px of content a compact cell has, so a 5- or
+   6-dye well wraps to a second row rather than overflowing. */
+.plate__welldot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
 }
 .plate__legend {
   display: flex;

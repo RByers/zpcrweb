@@ -25,6 +25,10 @@ export interface HoverCardData {
   title: string;
   subtitle?: string;
   rows: HoverCardRow[];
+  /** What to show in place of the rows when there are none. Defaults to the Curves view's
+   * "No curves plotted"; the plate map, whose rows are a well's *contents* rather than plotted
+   * curves, overrides it (see `PlateViewer`). */
+  empty?: string;
 }
 
 /** Fixed-position portal card, positioned from the hovered chip/cell's own bounding rect — see
@@ -63,7 +67,7 @@ function HoverCard({
           )}
         </>
       ) : (
-        <div className="curvecard__empty">No curves plotted</div>
+        <div className="curvecard__empty">{data.empty ?? "No curves plotted"}</div>
       )}
     </div>,
     document.body,
