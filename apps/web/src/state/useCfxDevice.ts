@@ -115,6 +115,9 @@ export function useCfxDevice() {
     });
   }, []);
 
+  // Deliberately does not touch `traffic`: the console is the one place a disconnect's cause is
+  // visible after the fact (what was in flight, what the last messages before the failure were),
+  // so wiping it on the same event that most needs debugging would defeat the point.
   const teardown = useCallback(() => {
     deviceRef.current = null;
     setConnection("disconnected");
@@ -139,7 +142,13 @@ export function useCfxDevice() {
       const device = new CfxDevice(chosen, {
         onTraffic,
         onClose: (err) => {
-          if (err) setError(err.message);
+          if (err) {
+            // The library already logs the retries and the final failure; this adds the one
+            // thing it can't know — that the UI is about to drop the connection because of it —
+            // so the console shows cause and effect together rather than an isolated stack trace.
+            console.error("[useCfxDevice] device closed unexpectedly, tearing down:", err);
+            setError(err.message);
+          }
           teardown();
         },
       });
@@ -151,7 +160,10 @@ export function useCfxDevice() {
     } catch (e) {
       // requestDevice() rejects when the user dismisses the picker — not an error worth shouting.
       const msg = e instanceof Error ? e.message : String(e);
-      if (!/no device selected/i.test(msg)) setError(msg);
+      if (!/no device selected/i.test(msg)) {
+        console.error("[useCfxDevice] connect() failed:", e);
+        setError(msg);
+      }
       deviceRef.current = null;
       setConnection("disconnected");
     }
@@ -175,8 +187,11 @@ export function useCfxDevice() {
       try {
         const s = await d.status();
         if (!cancelled) setStatus(s);
-      } catch {
-        /* a transient failure is not worth tearing the connection down over */
+      } catch (e) {
+        // A transient failure is not worth tearing the connection down over — the read pump
+        // already retries and, if it can't recover, fires `onClose` on its own — but log it so a
+        // string of these leading up to a disconnect shows up in the same console as the cause.
+        console.warn("[useCfxDevice] status poll failed:", e);
       }
     };
     const timer = setInterval(tick, POLL_MS);
@@ -203,6 +218,7 @@ export function useCfxDevice() {
     try {
       return await fn(d);
     } catch (e) {
+      console.error(`[useCfxDevice] ${what} failed:`, e);
       setError(e instanceof Error ? e.message : String(e));
       return undefined;
     } finally {

@@ -256,6 +256,11 @@ their definitions:
   to a request by arrival order alone. Worse, `LISTALLFILES` replays whatever the preceding
   `GETFILESLEN` buffered and ignores its own path argument, so listing is an atomic pair;
   `CfxDevice.sequence` is what holds the channel across it.
+- **A single `transferIn` failure isn't treated as a disconnect.** Chrome throws "A transfer error
+  has occurred" for a stalled/babbling endpoint as well as a genuine unplug, and the former is
+  usually readable again on the next call. The pump retries a bounded number of times (giving up
+  immediately if `usb.opened` has already gone false) before failing pending commands and calling
+  `onClose` — see the constants and logging at the top of `readLoop` in `device.ts`.
 
 Driving the real instrument is also what corrected four claims the packet captures had gotten
 wrong — `usb.md` §10 collects them. That is the argument for keeping the CLI: a protocol

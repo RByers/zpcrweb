@@ -6,7 +6,7 @@
  * below are the real instrument's, so a regression here is a regression against measured
  * behaviour rather than against an invented fixture.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   CfxDevice,
   FRAME_HEADER_BYTES,
@@ -32,6 +32,8 @@ class MockInstrument implements UsbDeviceLike {
   /** Queued IN frames the pump will drain. */
   private outbox: Uint8Array[] = [];
   private waiters: ((v: UsbInTransferResultLike) => void)[] = [];
+  /** Errors `transferIn` throws instead of resolving, one per call, oldest first. */
+  transferInFailures: Error[] = [];
 
   constructor(
     private readonly replies: (cmd: string) => { payload: Uint8Array; passThrough?: boolean; channel?: number } | null,
@@ -80,6 +82,8 @@ class MockInstrument implements UsbDeviceLike {
   }
 
   async transferIn(): Promise<UsbInTransferResultLike> {
+    const failure = this.transferInFailures.shift();
+    if (failure) throw failure;
     const next = this.outbox.shift();
     if (next) return { data: new DataView(next.buffer, next.byteOffset, next.byteLength) };
     // Park until something is pushed — the real endpoint blocks the same way.
@@ -292,5 +296,39 @@ describe("CfxDevice", () => {
     const pending = dev.status();
     await dev.close();
     await expect(pending).rejects.toThrow(/closed/);
+  });
+
+  it("survives a transient transferIn error without dropping the connection", async () => {
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const mock = new MockInstrument((cmd) =>
+      cmd === "STATUS?" ? { payload: text(STATUS_IDLE) } : null,
+    );
+    // Fewer than the retry limit — the pump should recover on its own.
+    mock.transferInFailures = [new Error("A transfer error has occurred")];
+    let closed: Error | null | undefined;
+    const dev = new CfxDevice(mock, { onClose: (e) => (closed = e) });
+    await dev.open();
+    const res = await dev.status();
+    expect(res.running).toBe(false);
+    expect(closed).toBeUndefined();
+    expect(dev.isOpen).toBe(true);
+    expect(errSpy).toHaveBeenCalled();
+    await dev.close();
+    errSpy.mockRestore();
+  });
+
+  it("gives up and fires onClose after repeated transferIn errors", async () => {
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const mock = new MockInstrument(() => null);
+    // More than the retry limit — every retry fails, so the pump must eventually give up.
+    mock.transferInFailures = Array.from({ length: 10 }, () => new Error("A transfer error has occurred"));
+    let closed: Error | null | undefined;
+    const dev = new CfxDevice(mock, { onClose: (e) => (closed = e) });
+    await dev.open();
+    const pending = dev.status();
+    await expect(pending).rejects.toThrow(/transfer error/);
+    expect(closed).toBeInstanceOf(Error);
+    expect(dev.isOpen).toBe(false);
+    errSpy.mockRestore();
   });
 });

@@ -78,10 +78,29 @@ import {
   CFX_READ_CHUNK,
   transferBytes,
   type UsbDeviceLike,
+  type UsbInTransferResultLike,
 } from "./transport.js";
 
 /** The ASCII command channel (`usb.md` §3). */
 const CHANNEL_ASCII = 1;
+
+/**
+ * How many consecutive `transferIn` failures the read pump tolerates before giving up.
+ *
+ * A single "A transfer error has occurred" is usually one glitched USB transaction — Chrome
+ * throws it for a stalled or babbling endpoint, not only for a genuine unplug — and the endpoint
+ * is usually readable again on the very next call. Killing the whole connection (and with it every
+ * in-flight command and the UI's `connected` state) on the first one is a worse trade than a short
+ * retry, so only a *run* of failures, or the device itself reporting it's no longer open, is
+ * treated as fatal.
+ */
+const READ_ERROR_RETRY_LIMIT = 4;
+/** Pause between retries, so a still-settling endpoint isn't hammered immediately. */
+const READ_ERROR_RETRY_DELAY_MS = 200;
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 /** One decoded message crossing the wire, as handed to {@link CfxDeviceOptions.onTraffic}. */
 export interface CfxTrafficEvent {
@@ -274,18 +293,46 @@ export class CfxDevice {
 
   private async readLoop(): Promise<void> {
     let error: Error | null = null;
-    try {
-      while (!this.closing) {
-        const result = await this.usb.transferIn(CFX_ENDPOINT_IN, CFX_READ_CHUNK);
-        const chunk = transferBytes(result);
-        if (chunk.length === 0) continue;
-        for (const msg of this.inbound.push(chunk)) this.dispatch(msg);
+    let consecutiveErrors = 0;
+    readLoop: while (!this.closing) {
+      let result: UsbInTransferResultLike;
+      try {
+        result = await this.usb.transferIn(CFX_ENDPOINT_IN, CFX_READ_CHUNK);
+      } catch (e) {
+        // A close() in progress rejects the in-flight transfer; that isn't a failure.
+        if (this.closing) break readLoop;
+        const err = e instanceof Error ? e : new Error(String(e));
+        consecutiveErrors++;
+        // `usb.opened` flips to false the moment Chrome notices a real unplug; a transient
+        // stall on an otherwise-live device leaves it true, which is what distinguishes "try
+        // again" from "the device is gone" here.
+        const fatal = consecutiveErrors >= READ_ERROR_RETRY_LIMIT || !this.usb.opened;
+        console.error(
+          `[CfxDevice] transferIn failed (attempt ${consecutiveErrors}/${READ_ERROR_RETRY_LIMIT}` +
+            `, endpoint ${CFX_ENDPOINT_IN}, opened=${this.usb.opened}, ` +
+            `${this.queue.length} command(s) pending)${fatal ? " — giving up" : " — retrying"}:`,
+          err,
+        );
+        if (fatal) {
+          error = err;
+          break readLoop;
+        }
+        await delay(READ_ERROR_RETRY_DELAY_MS);
+        continue readLoop;
       }
-    } catch (e) {
-      // A close() in progress rejects the in-flight transfer; that isn't a failure.
-      if (!this.closing) error = e instanceof Error ? e : new Error(String(e));
+      consecutiveErrors = 0;
+      const chunk = transferBytes(result);
+      if (chunk.length === 0) continue readLoop;
+      for (const msg of this.inbound.push(chunk)) this.dispatch(msg);
     }
-    if (error) this.failAll(error);
+    this.pump = null;
+    if (error) {
+      console.error(
+        `[CfxDevice] read pump stopped; failing ${this.queue.length} pending command(s)`,
+        error,
+      );
+      this.failAll(error);
+    }
     this.opts.onClose?.(error);
   }
 
