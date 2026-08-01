@@ -3182,8 +3182,13 @@
   padding: 10px 14px;
   border-bottom: 1px solid var(--border);
   flex: 0 0 auto;
-  cursor: pointer;
   list-style: none;
+}
+/* Only the collapsible panels' heads are `<summary>` elements you can click to open them —
+   "Run to start" wears the same class on a plain `<div>`, and a pointer cursor over a head that
+   does nothing reads as a dead control. */
+summary.instrument__panelhead {
+  cursor: pointer;
 }
 /* Same marker suppression as `.rail__details`: the chevron in the title is the disclosure. */
 .instrument__panelhead::-webkit-details-marker {

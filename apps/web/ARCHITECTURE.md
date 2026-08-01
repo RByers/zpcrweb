@@ -1691,6 +1691,14 @@ response curves, not channel numbers.
   specificity and are resolved by source order alone. `.analysis__table-wrap`'s landscape
   override consequently lives next to its own base rule far down the file rather than in the
   main landscape block.
+- **`cursor: pointer` means "this does something when you click it"** — a button, a link, a
+  `<summary>`, an element with an `onClick`. Never put it on decoration, on a container merely
+  because some of its children are clickable, or on a class that a non-interactive element also
+  wears: a pointer over inert content promises a control that isn't there. `.instrument__panelhead`
+  is the shape of the mistake — it styles both the collapsible panels' `<summary>` heads and "Run
+  to start"'s plain `<div>`, so the pointer rule is scoped `summary.instrument__panelhead`. Use
+  `cursor: help` for a hover explanation, `not-allowed` for a disabled control, and leave
+  everything else at the default.
 - Touch targets are enlarged under `@media (pointer: coarse)` only, and safe-area insets
   (`env(safe-area-inset-*)`, with `viewport-fit=cover` in `index.html`) pad the header and file
   bar. Both are no-ops for a desktop mouse on a notchless screen.
