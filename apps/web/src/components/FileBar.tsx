@@ -59,11 +59,13 @@ interface Props {
    */
   inProgressIds: Set<string>;
   /**
-   * True while a run in progress on a connected instrument owns the primary selection — passed
-   * only by the Instrument view's bar (see `App.tsx`'s `runActive`/`selectFile`), since that's the
-   * one place a chip click could otherwise abandon the run it's showing. A click that would switch
-   * it does nothing while this is set; the auxiliary staging chips (magenta, `stagedIds`) are
-   * unaffected, since they stage the *next* run rather than touching what's live now.
+   * True while a run in progress on a connected instrument owns the whole bar — passed only by
+   * the Instrument view's bar (see `App.tsx`'s `runActive`/`selectFile`), since that's the one
+   * place a chip click could otherwise show something other than what the instrument is actually
+   * running. Locks every chip but the active one, primary *and* auxiliary staging (magenta,
+   * `stagedIds`) alike: an override staged over the run in progress isn't "the next run" the way
+   * it is once the run finishes, it's a claim about the plate or protocol *this* run is using, so
+   * leaving it clickable would be exactly the confusion the lock exists to prevent.
    */
   activeLocked?: boolean;
   /** What each file is called and when it ran, keyed by id (`ZpcrStore.experiments`). A chip
@@ -262,7 +264,6 @@ function FileChip({
   isModified,
   isRunning,
   isStaged,
-  multi,
   activeLocked,
   onSelect,
   onRemove,
@@ -278,8 +279,6 @@ function FileChip({
   /** See {@link Props.inProgressIds} — the run is still being written to. */
   isRunning: boolean;
   isStaged: boolean;
-  /** Whether the bar is in multi-select (Instrument view) mode — see {@link Props.stagedIds}. */
-  multi: boolean;
   /** See {@link Props.activeLocked}. */
   activeLocked: boolean;
   onSelect: (id: string) => void;
@@ -292,11 +291,10 @@ function FileChip({
   const [armed, setArmed] = useState(false);
   const isArmed = armed && isModified;
   const encStatus = fileEncryptionStatus(f, run, plateFile, password);
-  // Outside the Instrument view every chip click is a primary-selection change; inside it, only
-  // a run chip is — a protocol/plate chip stages instead (`App.tsx`'s `selectFile`), and staging
-  // isn't locked by a run in progress.
-  const isPrimaryClick = !multi || fileCategory(f.kind) === "run";
-  const clickLocked = activeLocked && isPrimaryClick && !isActive;
+  // A staging chip (protocol/plate override) locks along with the run chip: showing something
+  // other than what the instrument is actually running is exactly the confusion the lock exists
+  // to prevent, so there's no carve-out for "only the primary selection."
+  const clickLocked = activeLocked && !isActive;
 
   return (
     <div
@@ -420,7 +418,6 @@ export function FileBar({
           isStaged={stagedIds ? stagedIds.has(f.id) : false}
           isModified={modifiedIds.has(f.id)}
           isRunning={inProgressIds.has(f.id)}
-          multi={!!stagedIds}
           activeLocked={!!activeLocked}
           onSelect={onSelect}
           onRemove={onRemove}

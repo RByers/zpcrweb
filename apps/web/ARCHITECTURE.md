@@ -1886,18 +1886,20 @@ Each changed listing is pulled and zipped with `zpcrFromRunFiles`, then handed t
   going on connect, which looks identical in the listing, does not set the flag — only the live
   transition does.)
 
-**The primary selection is locked to the running file, but only inside the Instrument view.**
-`App.tsx`'s `runActive` (`instrument.connection === "connected" && !!instrument.status?.running`)
-scopes both halves of this:
+**The whole bar locks to the running file, but only inside the Instrument view.** `App.tsx`'s
+`runActive` (`instrument.connection === "connected" && !!instrument.status?.running`) scopes both
+halves of this:
 
-- A chip click in the Instrument view that would switch the run away from the one in progress is a
-  no-op while `runActive` — `selectFile` refuses it — and `FileBar`/`FileChip` grey the cursor on
-  the chips it would otherwise be a change to (`is-locked`, `activeLocked` prop). Everywhere else —
-  Overview, Curves, any other tab — switching files is never blocked: reading Curves while a run
-  cycles is the point of the connection staying open across tabs, and pinning the selection there
-  would defeat it. The Instrument view's auxiliary staging chips (protocol/plate overrides) stay
-  clickable regardless of the lock — they stage the *next* run, unrelated to the one in progress,
-  and `checkRunPlan()`/`canStart` already keep a second run from starting on top of the first.
+- A chip click in the Instrument view that would change what the bar shows — switching the run
+  away from the one in progress, *or* toggling a protocol/plate override — is a no-op while
+  `runActive`: `selectFile` refuses both, and `FileBar`/`FileChip` grey the cursor on every chip
+  but the active one (`is-locked`, `activeLocked` prop). The two are locked together on purpose —
+  an override staged over the run in progress isn't "the next run" the way it is once this one
+  finishes, it's a claim about the plate or protocol *this* run is using, so leaving it toggleable
+  would let the panel show something other than what the instrument is actually running, exactly
+  the confusion the run-side lock exists to prevent. Everywhere else — Overview, Curves, any other
+  tab — switching files is never blocked: reading Curves while a run cycles is the point of the
+  connection staying open across tabs, and pinning the selection there would defeat it.
 - Since the selection can roam freely elsewhere, an effect in `App` snaps it back on *arrival*:
   switching to the Instrument view while `runActive` sets `activeId` to `runWatch.fileId` (the
   watcher's own record of what it last put in the store), not `store.activeId` — the two can have

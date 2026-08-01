@@ -194,19 +194,18 @@ export function App() {
    * a bar whose only action was staging left no way to change what the rest of the app was
    * pointed at from here at all.
    *
-   * A run live on the instrument owns the primary selection **while this view is showing it**:
-   * switching to some other run here would abandon watching the one in progress, and there's
-   * nothing to stage against a run that hasn't started yet anyway. The effect below is what keeps
-   * it pinned there on arrival; this only has to refuse the escape. The auxiliary staging chips
-   * stay clickable regardless — they're what the *next* run would use, unrelated to this one.
+   * A run live on the instrument owns the **whole bar** while this view is showing it: switching
+   * to some other run would abandon watching the one in progress, and toggling an override would
+   * claim the plate or protocol *this* run is using is something other than what it actually is —
+   * both are confusing in the same way, so both are refused. The effect below is what keeps the
+   * run pinned there on arrival; this only has to refuse the escape.
    */
   const selectFile = (id: string) => {
     const f = store.files.find((x) => x.id === id);
     if (!f) return;
-    if (store.view !== "instrument" || stagingRole(f.kind) === "run") {
-      if (store.view === "instrument" && runActive) return;
-      store.setActive(id);
-    } else staging.toggle(id);
+    if (store.view === "instrument" && runActive) return;
+    if (store.view !== "instrument" || stagingRole(f.kind) === "run") store.setActive(id);
+    else staging.toggle(id);
   };
   /**
    * Arriving at the Instrument view while a run is live snaps the selection to it, even if the
