@@ -242,10 +242,12 @@ and the Overview tab's `.prcl.txt` download plus the Instrument view's run stagi
 bar carries a primary selection plus overrides (three slots — the run, plus a
 `.prcl.txt`/`.plt.csv` overriding either half; tapping a staged override releases its slot while
 tapping the run leaves it, since the primary selection is never empty; a loaded `.prcl.txt` joins
-the selection and lands on the Instrument view; a staged `.plt.csv` takes its dye→channel mapping
+the selection but opens on its Overview; a staged `.plt.csv` takes its dye→channel mapping
 from the run it is paired with, including when that run supplies neither half and is there only
 as the instrument)
-and Start run appears only with an instrument attached — and that a `.prcl.txt` is a document as
+and Start run appears only with an instrument attached, and the staged protocol is the directives
+alone — the plain-English reading of each one belongs to Overview, which is where it is asserted —
+and that a `.prcl.txt` is a document as
 well as an input: it enables Overview and Instrument and nothing else, and its Overview reports
 the protocol's own settings from the decode — and how a run is *named*: the file bar shows an
 experiment name over a compact local timestamp rather than a file name, derived from the

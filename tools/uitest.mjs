@@ -1101,6 +1101,37 @@ async function instrumentRunChecks(chrome, origin) {
     dlLabel,
   );
 
+  // Overview is also where the *reading* of the protocol lives (`protocol.md`) — the per-directive
+  // gloss that makes an ASCII program reviewable without knowing the language. Checked here rather
+  // than by screenshot because the point is that the decode is present and paired with the right
+  // line. The Instrument view deliberately doesn't repeat it (see below).
+  const notes = await cdp.eval(`(() => {
+    const lines = [...document.querySelectorAll(".overview__block .decoded__protoline")].map((l) => ({
+      num: l.querySelector(".decoded__protonum").textContent.trim(),
+      text: l.querySelector(".decoded__prototext").textContent.trim(),
+      note: l.querySelector(".decoded__protonote")?.textContent.trim() || "",
+    }));
+    return { lines, annotated: lines.length > 0 && lines.every((l) => l.note.length > 0) };
+  })()`);
+  const hotlid = notes.lines.find((l) => l.text.startsWith("HOTLID"));
+  const read = notes.lines.find((l) => l.text.startsWith("PLATEREAD"));
+  const goto = notes.lines.find((l) => l.text.startsWith("GOTO"));
+  check(
+    "every directive on Overview is annotated with what it does",
+    notes.annotated && /Heated lid at 105/.test(hotlid?.note ?? "") && hotlid.num === "",
+    JSON.stringify(hotlid),
+  );
+  check(
+    "PLATEREAD's operand is decoded as a scan mask, not shown raw",
+    /all 6 channels, step-and-repeat/.test(read?.note ?? ""),
+    read?.note,
+  );
+  check(
+    "GOTO names the step it returns to, and the pass count that isn't its operand",
+    /Return to step 2 \(TEMP 95\.0,10\)/.test(goto?.note ?? "") && /45 passes/.test(goto?.note ?? ""),
+    `${goto?.num}: ${goto?.text} → ${goto?.note}`,
+  );
+
   await cdp.eval(`window.location.hash = "view=instrument", undefined`);
   await waitFor(() => cdp.eval(`!!document.querySelector(".devrun")`), { what: "the run panel" });
   await sleep(300);
@@ -1143,36 +1174,28 @@ async function instrumentRunChecks(chrome, origin) {
     JSON.stringify({ proto: first.protocol.source, plate: first.plate.source }),
   );
 
-  // Every directive carries the library's reading of it (`protocol.md`), which is what makes an
-  // ASCII program reviewable without knowing the language — and is why the panel no longer
-  // repeats lid/volume in a summary line of its own. Checked here rather than by screenshot
-  // because the point is that the *decode* is present and paired with the right line, not that
-  // the column looks right.
-  const notes = await cdp.eval(`(() => {
+  // The staged protocol is the program and nothing else: no per-directive gloss. It shares this
+  // panel's width with a plate map, and what the language *means* is a question Overview answers
+  // (checked above) — here the question is what would be sent, so every line is still numbered
+  // as the instrument numbers it, setup directives included (no number).
+  const staging = await cdp.eval(`(() => {
     const lines = [...document.querySelectorAll(".devrun__part .decoded__protoline")].map((l) => ({
       num: l.querySelector(".decoded__protonum").textContent.trim(),
       text: l.querySelector(".decoded__prototext").textContent.trim(),
       note: l.querySelector(".decoded__protonote")?.textContent.trim() || "",
     }));
-    return { lines, annotated: lines.every((l) => l.note.length > 0) };
+    return { lines, annotated: lines.some((l) => l.note.length > 0) };
   })()`);
-  const hotlid = notes.lines.find((l) => l.text.startsWith("HOTLID"));
-  const read = notes.lines.find((l) => l.text.startsWith("PLATEREAD"));
-  const goto = notes.lines.find((l) => l.text.startsWith("GOTO"));
+  const stagedLid = staging.lines.find((l) => l.text.startsWith("HOTLID"));
+  const stagedGoto = staging.lines.find((l) => l.text.startsWith("GOTO"));
   check(
-    "every staged directive is annotated with what it does",
-    notes.annotated && /Heated lid at 105/.test(hotlid?.note ?? "") && hotlid.num === "",
-    JSON.stringify(hotlid),
-  );
-  check(
-    "PLATEREAD's operand is decoded as a scan mask, not shown raw",
-    /all 6 channels, step-and-repeat/.test(read?.note ?? ""),
-    read?.note,
-  );
-  check(
-    "GOTO names the step it returns to, and the pass count that isn't its operand",
-    /Return to step 2 \(TEMP 95\.0,10\)/.test(goto?.note ?? "") && /45 passes/.test(goto?.note ?? ""),
-    `${goto?.num}: ${goto?.text} → ${goto?.note}`,
+    "the staged protocol lists the directives themselves, with no decode column",
+    staging.lines.length > 0 &&
+      !staging.annotated &&
+      stagedLid?.num === "" &&
+      /^GOTO/.test(stagedGoto?.text ?? "") &&
+      Number(stagedGoto?.num) > 0,
+    JSON.stringify({ annotated: staging.annotated, lid: stagedLid, goto: stagedGoto }),
   );
 
   // Start run belongs to the instrument, not the panel, so it is absent until one is attached.
@@ -1186,11 +1209,13 @@ async function instrumentRunChecks(chrome, origin) {
   await waitFor(() => chipPresent(cdp, "Gradient"), { what: "the .prcl.txt chip" });
   await sleep(400);
   const loadedTab = await activeTab(cdp);
-  check("loading a .prcl.txt lands on the Instrument view", loadedTab === "Instrument", loadedTab);
+  // Opening a protocol shows what it *is*, not the staging panel: a `.prcl.txt` is a document
+  // first, and Instrument is where you go when you mean to start a run.
+  check("loading a .prcl.txt lands on the Overview view", loadedTab === "Overview", loadedTab);
 
   // A protocol file is also a document, not only an input: it has an Overview of its own, which
   // the tab strip has to actually offer — the failure being a tab that is enabled but renders
-  // nothing, or a file forced back to Instrument whatever you click. Everything the page shows
+  // nothing, or a file forced to one view whatever you click. Everything the page shows
   // there comes from core's decode (`protocol.md`), which is what the listing check confirms:
   // this fixture's `GOTO 4,39` names a step that doesn't exist in a 3-step program, so it is
   // also the degrade-gracefully case (a target it can't name, still counted correctly).
@@ -1206,8 +1231,6 @@ async function instrumentRunChecks(chrome, origin) {
     JSON.stringify(protoTabs.filter((t) => !t.off).map((t) => t.label)),
   );
 
-  await cdp.eval(`(() => [...document.querySelectorAll('.viewselect [role="tab"]')]
-      .find((b) => b.textContent.trim() === "Overview").click())()`);
   const protoOverviewTab = await tabBecomes(cdp, "Overview");
   const protoOverview = await cdp.eval(`(() => ({
     tiles: Object.fromEntries([...document.querySelectorAll(".overview__tiles .tile")]

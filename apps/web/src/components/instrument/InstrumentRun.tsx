@@ -10,7 +10,9 @@
  * because that text is the artifact that would actually be sent (`prcl.md` §3). Reviewing anything
  * other than the bytes that would leave the machine would be reviewing the wrong object — and it
  * makes a `.prcl.txt` and a run's embedded protocol render identically, since by then they are
- * the same thing.
+ * the same thing. It is listed *without* the per-directive gloss (`annotated={false}`): the
+ * protocol shares this panel's width with a plate map, and what the language means is a question
+ * Overview answers — here the question is what would be sent.
  *
  * The one thing this panel *owns* rather than renders is the run's name: unlike the protocol and
  * the plate, it comes from neither file — no Bio-Rad format has a field for it (see
@@ -113,7 +115,7 @@ export function InstrumentRun({
               overridden={protocol.overridden}
             />
             {protocol.value ? (
-              <ProtocolDecoded text={protocol.value.runDefinition} />
+              <ProtocolDecoded text={protocol.value.runDefinition} annotated={false} />
             ) : (
               <div className="instrument__empty mono">
                 {protocol.reason ?? "No protocol selected."}

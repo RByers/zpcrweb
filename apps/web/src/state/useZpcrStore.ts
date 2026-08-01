@@ -874,10 +874,12 @@ export function useZpcrStore(): ZpcrStore {
         }
       }
       if (lastId) setActiveId(lastId);
-      // A `.prcl.txt` is not a run to look at — it's an input to one. It has no file-backed view
-      // of its own, so loading one goes where it can actually be used. Done here rather than at
-      // the call site so every entry point (the header button, a drop, `#load=`) behaves alike.
-      if (lastKind === "prcl") setView("instrument");
+      // A `.prcl.txt` is a document first: opening one shows what the protocol *is* — the
+      // annotated directive listing on Overview — rather than dropping you into the Instrument
+      // view's staging panel, which is a thing you go to when you mean to start a run. Done here
+      // rather than at the call site so every entry point (the header button, a drop, `#load=`)
+      // behaves alike.
+      if (lastKind === "prcl") setView("overview");
       return lastId;
     },
     [forget],

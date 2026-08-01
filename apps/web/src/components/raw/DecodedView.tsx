@@ -93,8 +93,13 @@ export function RunInfoTable({ text }: { text: string }) {
  * Nothing here knows what a directive means: `parseRunDefinition` (core, `protocol.md`) supplies
  * the step numbers `GOTO` counts in and the plain-English reading shown beside each line, and
  * this renders the directive text as written with that reading to its right.
+ *
+ * With `annotated={false}` the reading is dropped and only the program itself is listed — one
+ * directive per line, numbered as the instrument numbers them. That is what the Instrument view's
+ * staging panel wants: there the protocol sits beside a plate map in half the width, and the
+ * gloss is a thing you read once, on Overview, not every time you check what would be sent.
  */
-export function ProtocolDecoded({ text }: { text: string }) {
+export function ProtocolDecoded({ text, annotated = true }: { text: string; annotated?: boolean }) {
   const program = useMemo(() => parseRunDefinition(text), [text]);
   return (
     <div className="decoded">
@@ -106,7 +111,7 @@ export function ProtocolDecoded({ text }: { text: string }) {
           >
             <span className="decoded__protonum">{d.stepNumber ?? ""}</span>
             <span className="decoded__prototext">{d.text};</span>
-            <span className="decoded__protonote">{d.description}</span>
+            {annotated && <span className="decoded__protonote">{d.description}</span>}
           </div>
         ))}
       </div>

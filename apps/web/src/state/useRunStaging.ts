@@ -32,8 +32,8 @@
  * so, rather than leaving a chip lit for no visible reason.
  *
  * **Newly loaded override files join the selection.** Loading a `.prcl.txt` or a plate file folds
- * it into its slot, which is what makes the headline flow work — load a `.prcl.txt`, land on the
- * Instrument view, see it staged against the run you already had.
+ * it into its slot, which is what makes the headline flow work — load a `.prcl.txt`, read it on
+ * its Overview, then switch to Instrument and find it already staged against the run you had.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fileCategory, type FileCategory, type FileKind } from "@zpcrweb/core";

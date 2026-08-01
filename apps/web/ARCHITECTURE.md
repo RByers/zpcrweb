@@ -268,7 +268,9 @@ It enables **two** tabs, `["overview","instrument"]`, because it is two things:
 
 Enabling Overview is what removed the old special case in `App.tsx`, where a `.prcl.txt` selected
 on any tab was forced into the Instrument view because it had no file-backed view to render. It
-now falls back like every other file, to the first tab its kind enables.
+now falls back like every other file, to the first tab its kind enables — and **loading one lands
+on Overview** (`addFiles`), because opening a protocol is asking what it is; Instrument is where
+you go when you mean to start a run.
 
 ## Standalone plate entries and attach
 
@@ -527,7 +529,8 @@ so every call site keeps writing one `onChange({ … })` regardless of where the
   step 2 (TEMP 95.0,10) — 45 passes in total"). It renders `parseRunDefinition()`'s directives
   and **parses nothing itself**: the verbs, the step numbering `GOTO` counts in, and the
   `PLATEREAD` scan mask are all core's, per [`protocol.md`](../../protocol.md). Takes plain
-  `text`, so `OverviewView` and the Instrument view's staged protocol reuse it unchanged.
+  `text`, so `OverviewView` and the Instrument view's staged protocol reuse it unchanged — the
+  latter with `annotated={false}`, which drops the reading column and leaves the program itself.
 - **`.prcl`** → `DecodedProtocol` (`components/raw/DecodedProtocol.tsx`), which decrypts the
   entry and renders `ProtocolDetail`: when the XML `protocol2` payload parsed into a step list,
   a settings panel (lid/shutoff/volume/real-time — flags the text grammar has no directive for)
@@ -1751,12 +1754,16 @@ name** here, as everywhere else (`lib/experiment.ts`); the override files keep t
 since a `.prcl.txt`/`.plt.csv` is not an experiment and has no name but the one on disk.
 
 A newly *loaded* override file joins the selection by role rather than replacing it, which is what
-makes the headline flow work: load a `.prcl.txt`, land on the Instrument view (`addFiles` switches
-to it — a protocol is an input to a run first, whatever else its own Overview says about it), and
-see it staged against the run already loaded. That fold is keyed off the file *list* rather than
-off the active file, so every entry point stages alike and staging doesn't ride on which file a
-load happened to leave active — which here it doesn't: the loaded protocol is the active file
-while the *run* is the chip this bar has to name.
+makes the headline flow work: load a `.prcl.txt`, read it on its own Overview (`addFiles` lands
+there), then switch to Instrument and find it already staged against the run already loaded. That
+fold is keyed off the file *list* rather than off the active file, so every entry point stages
+alike and staging doesn't ride on which file a load happened to leave active — which here it
+doesn't: the loaded protocol is the active file while the *run* is the chip this bar has to name.
+
+The staged protocol is rendered by the same `ProtocolDecoded` with `annotated={false}` — the
+directives and their step numbers, no plain-English column. The gloss belongs to the protocol *as
+a document* (Overview); here the protocol shares half the panel with a plate map, and the question
+is what would be sent, not what the language means.
 
 The `CfxDevice` lives in a **ref**, not state: it is a long-lived object with a background read
 loop, and a re-render must not be able to look like a new connection — `open()` on an
