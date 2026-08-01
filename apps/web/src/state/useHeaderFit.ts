@@ -4,16 +4,16 @@ import { useLayoutEffect, useRef, useState } from "react";
  * How hard the header is currently squeezed. Each level drops one more piece of text, leaving
  * the icon (and the `title`/`aria-label` that names it) behind:
  *
- * - 0 — everything: `zpcr//web`, five labelled tabs, "load file".
+ * - 0 — everything: `zpcr//web`, seven labelled tabs, "load file".
  * - 1 — the wordmark's tail and the load button's word go: `zpcr` + icon.
  * - 2 — every tab label but the selected one's, so the current view still reads as a word.
  * - 3 — all icons.
  *
- * The old rule was a `max-width: 599px` media query, which is wrong twice over: the header's
- * natural width depends on the tab *set* (a standalone `.pltd` shows two tabs, a run shows five)
- * and on which label is the long one, so a single breakpoint necessarily either collapses a
- * header that still fits or lets one overflow. Measuring instead means the header collapses at
- * the exact width it stops fitting, whatever it currently holds.
+ * The old rule was a `max-width: 599px` media query, which is wrong: at level 2 the header's
+ * natural width depends on which label is the surviving one ("Calibration" is nearly three times
+ * "Raw files"), so a single breakpoint necessarily either collapses a header that still fits or
+ * lets one overflow. Measuring instead means the header collapses at the exact width it stops
+ * fitting, whatever it currently holds.
  */
 const MAX_FIT = 3;
 
@@ -61,8 +61,10 @@ function contentWidth(header: HTMLElement) {
  * off the clone and written to the real label's `--w`, which is what the CSS animates back out
  * to (`max-width` can't transition to `auto`).
  *
- * @param deps re-measure when these change — the selected view and the active file, since both
- *   change what the tab strip contains. Resizes are caught by a `ResizeObserver`.
+ * @param deps re-measure when these change — in practice the selected view, which is what decides
+ *   the one label level 2 keeps. The tab strip itself is the same tabs for every file (`App.tsx`
+ *   disables the ones a file has no answer for rather than dropping them), so a file switch
+ *   doesn't change the header's width. Resizes are caught by a `ResizeObserver`.
  */
 export function useHeaderFit(deps: unknown[]) {
   const ref = useRef<HTMLElement>(null);

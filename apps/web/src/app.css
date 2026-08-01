@@ -49,7 +49,8 @@
   background: transparent;
   padding: 0;
 }
-/* Scroller around the view-tab strip: the strip's intrinsic width (~430px of tabs) is wider
+/* Scroller around the view-tab strip: the strip's intrinsic width (~520px — the same seven tabs
+   for every file, since a tab a file has no answer for is disabled rather than dropped) is wider
    than a phone viewport, so on narrow screens it scrolls horizontally inside the header rather
    than stretching `.app__header` (and the whole `.app` grid) past the viewport. `flex: 0 1 auto`
    + `min-width: 0` let it shrink down to whatever room the logo/drop-button leave; the `.segmented`
@@ -82,7 +83,7 @@
 .app__tag {
   color: var(--ink-muted);
 }
-/* Narrow header: the wordmark, the five tab labels and "load file" together overflow the
+/* Narrow header: the wordmark, the seven tab labels and "load file" together overflow the
    viewport, so the header goes iconographic — in four steps, driven by `data-fit`, which
    `useHeaderFit` sets by measuring what actually fits (see that file for the level meanings and
    for why this isn't a media query). Every label that goes still carries its word in a

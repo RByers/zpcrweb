@@ -1456,6 +1456,43 @@ async function experimentNameChecks(chrome, origin) {
       /"id"\s*:/.test(raw.body),
     JSON.stringify(raw),
   );
+
+  // The tab strip is static: the same seven tabs whatever the file is, with the ones this file
+  // has no answer for *disabled* rather than removed (`ViewSelector`'s `enabled` prop). Only a
+  // browser can show this — it is a claim about two different files' headers being the same
+  // shape, and the failure it guards against (tabs appearing and disappearing under the pointer
+  // as the selection moves) is invisible to any single-file check.
+  const strip = () =>
+    cdp
+      .eval(
+        `JSON.stringify([...document.querySelectorAll('.viewselect [role="tab"]')]
+           .map(b => ({ label: b.textContent.trim(), off: b.disabled })))`,
+      )
+      .then(JSON.parse);
+  const offLabels = (s) => s.filter((t) => t.off).map((t) => t.label);
+  const bio = await strip();
+  check(
+    "a Biomeme run keeps all seven tabs, greying out the two it can't answer",
+    bio.length === 7 && offLabels(bio).join(",") === "Reference,Calibration",
+    JSON.stringify(bio),
+  );
+
+  // Back to the .zpcr loaded above: the same seven tabs, none of them off — so the strip's shape
+  // really is file-independent, and the greying above is about capability rather than layout.
+  await cdp.eval(
+    `(() => { [...document.querySelectorAll(".filechip__main")]
+        .find((b) => /S183/.test(b.textContent)).click(); })()`,
+  );
+  await waitFor(
+    async () => (await strip()).every((t) => !t.off),
+    { what: "the .zpcr's tabs to all enable" },
+  );
+  const run = await strip();
+  check(
+    "switching back to a .zpcr re-enables them in place, with the strip unchanged",
+    run.length === 7 && run.map((t) => t.label).join(",") === bio.map((t) => t.label).join(","),
+    JSON.stringify(run),
+  );
   cdp.close();
 }
 

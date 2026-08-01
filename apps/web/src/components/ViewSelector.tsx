@@ -32,24 +32,31 @@ const INSTRUMENT_VIEW = { id: "instrument" as ViewId, label: "Instrument", Icon:
 interface Props {
   value: ViewId;
   onChange: (v: ViewId) => void;
-  /** Restrict the file-backed tab set, e.g. `["plates", "raw"]` for a standalone `.pltd`/`.plt.csv`
-   * entry. Defaults to every tab (a `.zpcr`/`.pcrd` run). Does not affect the Instrument tab,
-   * which is not file-backed. */
-  views?: ViewId[];
+  /** Which file-backed tabs the active file supports, e.g. `["plates", "raw"]` for a standalone
+   * `.pltd`/`.plt.csv` entry. Defaults to every tab (a `.zpcr`/`.pcrd` run).
+   *
+   * **The tab strip is the same six tabs whatever the answer is** — a file the tab doesn't apply
+   * to disables it rather than removing it. A tab set that changed shape per file moved every
+   * other tab under the pointer each time the selection changed, and hid the fact that the strip
+   * is the app's fixed set of lenses rather than a per-file menu. Greying out says "not for this
+   * file"; disappearing says nothing at all.
+   *
+   * Does not affect the Instrument tab, which is not file-backed and is always enabled. */
+  enabled?: readonly ViewId[];
 }
 
-export function ViewSelector({ value, onChange, views }: Props) {
-  const shown = views ? ALL_VIEWS.filter((v) => views.includes(v.id)) : ALL_VIEWS;
-  const tab = (v: (typeof ALL_VIEWS)[number]) => (
+export function ViewSelector({ value, onChange, enabled }: Props) {
+  const tab = (v: (typeof ALL_VIEWS)[number], off = false) => (
     <button
       key={v.id}
       role="tab"
       aria-selected={value === v.id}
+      disabled={off}
       // The label is hidden on a narrow viewport (`app.css`), so name the tab explicitly:
       // `aria-label` keeps it readable to a screen reader either way, and `title` gives a
-      // pointer user the word back on hover.
-      aria-label={v.label}
-      title={v.label}
+      // pointer user the word back on hover — and, when the tab is off, the reason it is.
+      aria-label={off ? `${v.label} — not available for this file` : v.label}
+      title={off ? `${v.label} — not available for this file` : v.label}
       className={"segmented__item" + (value === v.id ? " is-active" : "")}
       onClick={() => onChange(v.id)}
     >
@@ -60,7 +67,9 @@ export function ViewSelector({ value, onChange, views }: Props) {
 
   return (
     <div className="viewselect" role="tablist" aria-label="View">
-      {shown.length > 0 && <div className="segmented">{shown.map(tab)}</div>}
+      <div className="segmented">
+        {ALL_VIEWS.map((v) => tab(v, !!enabled && !enabled.includes(v.id)))}
+      </div>
       <div className="segmented segmented--instrument">{tab(INSTRUMENT_VIEW)}</div>
     </div>
   );

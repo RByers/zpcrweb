@@ -120,7 +120,7 @@ Cost control, when you do run it:
 npm run test:ui
 ```
 
-110 browser assertions covering what nothing else can catch: the two URL contracts — hash
+112 browser assertions covering what nothing else can catch: the two URL contracts — hash
 routing (deep links, back/forward, unknown-file and invalid-view fallbacks) and password
 handling (stripped from both URL forms, never leaked into the routing hash, an encrypted
 `.pcrd` still decrypting) — plus `#load=`, the rule that every XML view uses the shared
@@ -152,6 +152,9 @@ over a compact local timestamp rather than a file name, derived from the filenam
 and a typed name has to survive a reload, which it can only do by reaching the archive's own
 `zpcrweb.json` (clearing it reverts to the derived name rather than blanking it) — plus a
 Biomeme run's Raw tab, which is its JSON document in the standalone (no file list) viewer.
+— and that the view-tab strip is the *same seven tabs* for every file, a tab the file can't
+answer being disabled rather than dropped (`ViewSelector`'s `enabled` prop), which is a claim
+about two files' headers matching that no single-file check can make.
 A screenshot
 can't show that the back button works, that a secret reached the address bar, that a hover
 put a curve back, or that eight rows are in the right order — and the core Vitest suite has no
@@ -162,6 +165,7 @@ dependency-free. Run it when you touch `state/urlHash.ts`, `state/pltdPassword.t
 `components/curves/ChipBar.tsx`, `components/curves/CurveTable.tsx`,
 `components/curves/CqRange.tsx`, `components/instrument/InstrumentRun.tsx`, `state/useRunStaging.ts`,
 `lib/protocolSource.ts`, `lib/experiment.ts` (or core's `experiment.ts`),
+`components/ViewSelector.tsx` or `App.tsx`'s `enabledViewsFor`,
 core's `runDefinition.ts` or `components/raw/DecodedView.tsx`'s `ProtocolDecoded`,
 `components/FileBar.tsx`, `components/views/StandaloneRawView.tsx`,
 `state/useZpcrStore.ts`'s settings seeding or `fileKind`, or view

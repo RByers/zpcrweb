@@ -13,7 +13,7 @@ file only gets Plates + Raw; a Biomeme run only gets Overview, Curves and Plates
 observation.**
 
 Concretely, outside `RawFilesView`/`PcrdRawView`, the `App.tsx` line that chooses between them,
-and the tab-restriction checks that narrow `ViewSelector` for a standalone plate entry or a
+and the capability checks that disable `ViewSelector` tabs for a standalone plate entry or a
 Biomeme run (`isStandalonePlate`/`isBiomeme` in `App.tsx` — a real capability difference: a
 Biomeme `Zpcr` has no reference row or `.Dcal` calibrations for Reference/Calibration to show,
 same as a standalone plate has no curves), no component may:
@@ -248,8 +248,8 @@ alongside `"zpcr"`/`"pcrd"`:
 - **Standalone entries** — a `.pltd` or `.plt.csv` dropped with no run selected becomes its own
   top-level file, resolved via `plateFiles`/`activePlateFile` (a `PlateFileResult`, parallel to
   `runs`/`activeRun` but with no `Zpcr` involved). `App.tsx` detects `active.kind === "pltd" |
-  "csv"` and renders a restricted `ViewSelector` (`views={["plates","raw"]}`) routing to
-  `StandalonePlateView`/`StandaloneRawView` instead of the normal five-view `Zpcr`-gated branch
+  "csv"` and enables only two of the tabs (`enabled={["plates","raw"]}`; the rest grey out) routing to
+  `StandalonePlateView`/`StandaloneRawView` instead of the normal `Zpcr`-gated branch
   — both are thin, `Zpcr`-free versions of `PlatesView`/`RawFilesView` operating directly on the
   file's own bytes. A standalone `.plt.csv` names its fluor columns by dye with no channel, and
   carries no calibration of its own to resolve them against, so its channels are simply
@@ -729,7 +729,7 @@ signal; see `fileKind()` in `state/useZpcrStore.ts`), and from there on almost n
 needs to know it isn't a `.zpcr`. Two real differences do surface, both because they're
 capability checks rather than format checks:
 
-- **Fewer view tabs.** `App.tsx`'s `BIOMEME_VIEWS` restricts `ViewSelector` to
+- **Fewer live view tabs.** `App.tsx`'s `BIOMEME_VIEWS` enables only
   Overview/Curves/Plates/Raw — Reference has no reference row to show and Calibration has no
   `.Dcal` set. The same pattern `isStandalonePlate` already used for a bare `.pltd`/`.plt.csv`
   entry. Raw *does* appear, but not through `RawFilesView`: the run has no archive to browse
@@ -1570,9 +1570,17 @@ response curves, not channel numbers.
   intrinsic width used to stretch the whole `.app` grid past a phone viewport and push every
   view into horizontal overflow. The tabs therefore live in their own `.app__views` scroller
   (`min-width: 0; overflow-x: auto`) and the logo/drop button are `flex: 0 0 auto`.
+- **The tab strip is the same seven tabs for every file.** A tab a file has no answer for is
+  *disabled*, never dropped (`ViewSelector`'s `enabled` prop, fed by `App.tsx`'s
+  `enabledViewsFor`). A strip that changed shape per file moved every other tab out from under
+  the pointer on each selection change, and read as a per-file menu rather than as the app's
+  fixed set of lenses; greying a tab out says "not for this file", while removing it says
+  nothing. It also makes the header's width independent of the active file, which is why
+  `useHeaderFit`'s only dep is the selected view. Which view the *content* area falls back to
+  when the current one is disabled is still `App.tsx`'s job (the first enabled tab).
 - The header **goes iconographic when it stops fitting** rather than scrolling, in four steps
   driven by a `data-fit` attribute that `state/useHeaderFit.ts` sets by measurement: 0 is the
-  full `zpcr//web` + five labelled tabs (each with its line icon from `components/ViewIcons.tsx`)
+  full `zpcr//web` + seven labelled tabs (each with its line icon from `components/ViewIcons.tsx`)
   + "load file"; 1 drops the wordmark's `//web` tail and the load button's word; 2 drops every
   tab label *but the selected one's*, so the current view still reads as a word for as long as
   there's room for it; 3 is all icons. Nothing is lost at any level — each control keeps its word
@@ -1581,13 +1589,13 @@ response curves, not channel numbers.
   `.app__header` carries `data-fit`, so the welcome screen's `.app__brand` — no tabs, plenty of
   room — keeps the full mark unconditionally.
 - **Why measurement and not a media query.** The header's natural width depends on what it
-  currently holds: a standalone `.pltd` shows two tabs and a run shows five, and level 2's width
-  depends on which label happens to be selected. Any single breakpoint therefore either collapses
+  currently holds: level 2's width depends on which label happens to be selected ("Calibration"
+  is nearly three times "Raw files"). Any single breakpoint therefore either collapses
   a header that still fits or lets one truncate — the old `@media (max-width: 599px)` rule let
   the tab strip scroll away about a third of its width before it fired. `useHeaderFit` instead
   probes a **hidden clone** of the header pinned to the real one's width, writing each candidate
   `data-fit` onto the clone and reading the resulting flex layout back, and takes the first level
-  whose content fits the real header's content box (re-run on a `ResizeObserver`, on view/file
+  whose content fits the real header's content box (re-run on a `ResizeObserver`, on a view
   change, and on `document.fonts.ready`). Probing a copy is what makes the transitions work: an
   in-place probe has to suppress transitions to avoid measuring a half-finished animation, and
   doing that right after React commits the new state computes the destination widths with no

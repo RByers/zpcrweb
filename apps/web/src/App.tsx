@@ -23,8 +23,8 @@ import { InstrumentView } from "./components/views/InstrumentView";
 import type { ViewId } from "./state/useZpcrStore";
 
 const STANDALONE_VIEWS = ["plates", "raw"] as const;
-/** A Biomeme run has no reference row and no `.Dcal` calibration files, so those two tabs have
- * nothing to show. Raw stays: the run *is* one JSON document, so there is no archive to browse
+/** A Biomeme run has no reference row and no `.Dcal` calibration files, so those two tabs are
+ * disabled. Raw stays: the run *is* one JSON document, so there is no archive to browse
  * (`Zpcr.archive` is honestly empty) but there is very much a file to read — rendered by the
  * same {@link StandaloneRawView} a `.plt.csv` gets, for the same reason (one text file, no
  * container around it). */
@@ -33,16 +33,17 @@ const BIOMEME_VIEWS = ["overview", "curves", "plates", "raw"] as const;
  * anything. */
 const PROTOCOL_VIEWS = ["instrument"] as const;
 
-/** A `.pltd`/`.plt.csv` uploaded on its own, rather than a run — it gets a restricted tab set. */
+/** A `.pltd`/`.plt.csv` uploaded on its own, rather than a run — only two of the tabs apply. */
 const isStandaloneKind = (kind: string) => kind === "pltd" || kind === "csv";
 
-/** The file-backed tabs a given file kind supports, or `null` for "all of them". Shared by the
- * normal render and the Instrument view's early return, which needs the same answer to draw
- * the rest of the tab strip while it is the selected one.
+/** The file-backed tabs a given file kind supports, or `null` for "all of them". The tabs it
+ * leaves out are still drawn — greyed out, see `ViewSelector` — so this decides what is *enabled*,
+ * not what exists. Shared by the normal render and the Instrument view's early return, which
+ * needs the same answer to draw the rest of the tab strip while it is the selected one.
  *
- * Typed as a non-empty tuple so the view fallback below can take `[0]` — a restricted set with no
- * tabs in it would leave nowhere to fall back to. */
-function restrictedViewsFor(kind: string): readonly [ViewId, ...ViewId[]] | null {
+ * Typed as a non-empty tuple so the view fallback below can take `[0]` — a file with no enabled
+ * tab at all would leave nowhere to fall back to. */
+function enabledViewsFor(kind: string): readonly [ViewId, ...ViewId[]] | null {
   if (isStandaloneKind(kind)) return STANDALONE_VIEWS;
   if (kind === "biomeme") return BIOMEME_VIEWS;
   // A `.prcl.txt` is an *input to* a run, not a run to look at — it has no file-backed view, and
@@ -61,7 +62,7 @@ const EXAMPLE_FILE = "examples/20260726_S183-S185_RVP.zpcr";
 
 /** The wordmark, doubling as the link to the About page. Split so a narrow header can drop the
  * "//web" tail (see `.app__logo-rest` in `app.css` and `useHeaderFit`) and keep "zpcr" — the
- * full mark plus five view tabs plus the load button don't fit across a phone in portrait. */
+ * full mark plus the seven view tabs plus the load button don't fit across a phone in portrait. */
 function Logo({ onClick }: { onClick: () => void }) {
   return (
     <button
@@ -80,10 +81,11 @@ function Logo({ onClick }: { onClick: () => void }) {
 export function App() {
   const store = useZpcrStore();
   const { active, activeRun, settings } = store;
-  // Called before the early returns below, as hook order demands. The deps are what changes the
-  // header's natural width other than a resize: the selected tab (level 2 keeps its label) and
-  // the active file (a standalone plate shows two tabs, a run five).
-  const { ref: headerRef, fit } = useHeaderFit([store.view, store.activeId]);
+  // Called before the early returns below, as hook order demands. The only dep is the selected
+  // tab: the strip is the same tabs for every file (they disable rather than disappear), so the
+  // header's natural width changes only with which label level 2 keeps — or with a resize, which
+  // the hook's own `ResizeObserver` catches.
+  const { ref: headerRef, fit } = useHeaderFit([store.view]);
   // Which files make up the run the Instrument view would start. Held here rather than inside that
   // view because the file bar — which lives in this component — is the control that edits it.
   const staging = useRunStaging(store.files, store.activeId);
@@ -164,8 +166,8 @@ export function App() {
             <ViewSelector
               value="instrument"
               onChange={store.setView}
-              // With no file loaded there are no file-backed tabs to offer — only Instrument.
-              views={active ? restrictedViewsFor(active.kind)?.slice() : []}
+              // With no file loaded no file-backed tab leads anywhere, so they all grey out.
+              enabled={active ? enabledViewsFor(active.kind) ?? undefined : []}
             />
           </div>
           <div className="app__header-spacer" />
@@ -214,15 +216,16 @@ export function App() {
   const isStandalonePlate = isStandaloneKind(active.kind);
   const isBiomeme = active.kind === "biomeme";
   const zpcr = isStandalonePlate ? null : activeRun?.zpcr ?? null;
-  const restrictedViews = restrictedViewsFor(active.kind);
-  // `store.view` is global (not per-file), so switching to a restricted entry can land on a view
-  // its tab set doesn't have (e.g. "raw" on a Biomeme run) — fall back to its first tab then.
+  const enabledViews = enabledViewsFor(active.kind);
+  // `store.view` is global (not per-file), so switching entries can land on a view this file has
+  // no answer for (e.g. "calibration" on a Biomeme run) — fall back to its first enabled tab
+  // then. The tab is drawn either way, just disabled, so this is about where the *content* goes.
   // "about" is file-independent, so it survives regardless.
   const view =
-    restrictedViews &&
+    enabledViews &&
     store.view !== "about" &&
-    !(restrictedViews as readonly ViewId[]).includes(store.view)
-      ? restrictedViews[0]
+    !(enabledViews as readonly ViewId[]).includes(store.view)
+      ? enabledViews[0]
       : store.view;
 
   return (
@@ -234,7 +237,7 @@ export function App() {
             <ViewSelector
               value={view}
               onChange={store.setView}
-              views={restrictedViews ? [...restrictedViews] : undefined}
+              enabled={enabledViews ?? undefined}
             />
           </div>
         )}
