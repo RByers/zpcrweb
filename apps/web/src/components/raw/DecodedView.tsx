@@ -104,15 +104,30 @@ export function RunInfoTable({ text }: { text: string }) {
  * time, that operand is a *packed byte* — which channels are read and how the head sweeps the
  * plate are not readable from `#h3F`, and they are exactly what someone checks before a run.
  */
-export function ProtocolDecoded({ text, annotated = true }: { text: string; annotated?: boolean }) {
+export function ProtocolDecoded({
+  text,
+  annotated = true,
+  activeStepNumber,
+}: {
+  text: string;
+  annotated?: boolean;
+  /** The step the instrument reports it's on right now (`CfxStatus.step`), or `null`/`undefined`
+   * when nothing is running. Matched against `d.stepNumber` to mark that line, so the STATUS?
+   * poll gives someone watching a run something more useful than a number to cross-reference. */
+  activeStepNumber?: number | null;
+}) {
   const program = useMemo(() => parseRunDefinition(text), [text]);
   return (
     <div className="decoded">
       <div className="decoded__proto mono">
         {program.directives.map((d) => {
           const scan = "scanMask" in d ? d.scanMask : undefined;
+          const active = activeStepNumber != null && d.stepNumber === activeStepNumber;
           return (
-            <div key={d.index} className="decoded__protoline">
+            <div
+              key={d.index}
+              className={"decoded__protoline" + (active ? " is-active" : "")}
+            >
               <span className="decoded__protonum">{d.stepNumber ?? ""}</span>
               <span className="decoded__prototext">{d.text};</span>
               {annotated ? (

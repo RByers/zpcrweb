@@ -285,6 +285,10 @@ export function useCfxDevice() {
    */
   const startRun = useCallback(
     async (plan: RunPlan) => {
+      // Whatever the last action-button command reported (e.g. a stale "CANCEL → accepted") is
+      // about to be answered by a new run's own status — starting one is exactly the moment that
+      // readout stops being relevant, so it shouldn't linger through it.
+      setLastAction(null);
       const result = await withBusy("Starting run", (d) =>
         d.startRun(plan, (what) => setBusy(what)),
       );

@@ -23,7 +23,7 @@
  * There is no "start" button here: it lives in the rail with the other commands that actuate the
  * instrument (see `InstrumentRail`), because that is what it is.
  */
-import type { RunPlan } from "@zpcrweb/core";
+import type { CfxStatus, RunPlan } from "@zpcrweb/core";
 import { ProtocolDecoded } from "../raw/DecodedView";
 import { PlateViewer } from "../plate/PlateViewer";
 import type { StagedRun } from "../../lib/protocolSource";
@@ -81,6 +81,7 @@ export function InstrumentRun({
   name,
   onNameChange,
   plan,
+  status,
 }: {
   staged: StagedRun;
   /** The run's name, as typed. Held by {@link InstrumentView} — it outlives this panel's renders
@@ -89,6 +90,11 @@ export function InstrumentRun({
   onNameChange: (name: string) => void;
   /** The staged run as it would be sent, or null when a half is missing. */
   plan: RunPlan | null;
+  /** The instrument's live status (`InstrumentView`), or null when disconnected. Used only to
+   * mark which protocol line is executing right now — this panel still shows the *staged*
+   * selection, not necessarily what's running, so the highlight is a bonus for the common case
+   * (staged run *is* the running one) rather than something this panel asserts as fact. */
+  status: CfxStatus | null;
 }) {
   const { protocol, plate } = staged;
   const empty = !protocol.value && !plate.value && !protocol.reason && !plate.reason;
@@ -100,7 +106,10 @@ export function InstrumentRun({
   return (
     <section className="instrument__panel">
       <div className="instrument__panelhead">
-        <h2 className="instrument__paneltitle">Run to start</h2>
+        <h2 className="instrument__paneltitle">
+          Run to start
+          {status?.running && <span className="instrument__runbadge">running</span>}
+        </h2>
         <span className="devrun__hint mono">
           {empty
             ? "select files above"
@@ -143,7 +152,11 @@ export function InstrumentRun({
               overridden={protocol.overridden}
             />
             {protocol.value ? (
-              <ProtocolDecoded text={protocol.value.runDefinition} annotated={false} />
+              <ProtocolDecoded
+                text={protocol.value.runDefinition}
+                annotated={false}
+                activeStepNumber={status?.running ? status.step : null}
+              />
             ) : (
               <div className="instrument__empty mono">
                 {protocol.reason ?? "No protocol selected."}

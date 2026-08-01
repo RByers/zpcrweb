@@ -2033,6 +2033,17 @@
   grid-template-columns: 2.2em 1fr;
   gap: 2px 12px;
   align-items: baseline;
+  border-radius: var(--radius-sm);
+}
+/* The line the instrument reports it's executing right now (`InstrumentRun`'s `activeStepNumber`,
+   from `CfxStatus.step`). Same cyan accent as `.segmented__item.is-active`, but padded and boxed
+   rather than just tinted text — this list has no other affordance for "selected", so the line
+   needs to read as picked-out at a glance, not just a slightly different color. */
+.decoded__protoline.is-active {
+  background: var(--neon-cyan-dim);
+  box-shadow: inset 2px 0 0 var(--neon-cyan);
+  padding: 2px 6px;
+  margin: 0 -6px;
 }
 .decoded__protonum {
   text-align: right;
@@ -3186,6 +3197,23 @@
   letter-spacing: 0.1em;
   color: var(--ink-muted);
   font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+/* The staged protocol is otherwise indistinguishable whether the instrument is idle or mid-run —
+   the per-line highlight below only shows once you've found the right line, so the panel needs
+   its own "this is live" signal first. Pulses like `.instrument__busydot` for the same reason:
+   a static badge reads as a label, a pulsing one reads as "happening right now". */
+.instrument__runbadge {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--warn);
+  border: 1px solid var(--warn);
+  border-radius: var(--radius-sm);
+  padding: 1px 6px;
+  animation: instrument-busy-pulse 1.4s ease-in-out infinite;
 }
 .instrument__empty {
   padding: 14px;

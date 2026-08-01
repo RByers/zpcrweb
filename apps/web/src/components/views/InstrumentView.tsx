@@ -79,6 +79,7 @@ export function InstrumentView({
           name={experimentName}
           onNameChange={setExperimentName}
           plan={plan}
+          status={instrument.status}
         />
         <InstrumentFiles instrument={instrument} onOpenRun={onOpenRun} />
         <InstrumentConsole instrument={instrument} />
