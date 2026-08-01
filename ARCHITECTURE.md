@@ -310,6 +310,14 @@ produces a wrong answer that looks plausible rather than a missing one. `WellFlu
 gap as unknown rather than substituting a default (the web app shows `Ch?`, a neutral swatch and
 a footnote; see `apps/web/ARCHITECTURE.md`). Go through `zpcr.plates()` where an archive is in
 hand, so the lookup is wired up; a plate CSV read on its own simply has unknown channels.
+
+For a plate CSV that *isn't* in the archive, `Zpcr.channelForDye(dye)` publishes the same cached
+lookup, so a caller pairing a run with an outside plate can hand it to `parsePlateCsv` as
+`channelForFluor` and get the channels the run's own optics say. That is not the positional guess
+ruled out above and not a guess at all: it is one instrument's calibration set applied to a plate
+the caller has stated belongs with that run — the app's Device view stages exactly that pair (see
+`apps/web/ARCHITECTURE.md`). A source with no calibrations of its own (a Biomeme run) answers
+`undefined` for every dye, as it should.
 Channels only drive colouring and grouping, never the color-separation solve, so an unknown one
 costs presentation rather than correctness. Wells with nothing on them aren't written at
 all, and a well missing from the table parses back as empty, so the only header line that

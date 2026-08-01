@@ -380,3 +380,41 @@ describe("plate CSV round-trip", () => {
     });
   });
 });
+
+describe("Zpcr.channelForDye — giving an outside plate CSV its channels", () => {
+  // The mapping `plates()` uses internally for an in-archive `.plt.csv`, published so a caller
+  // can pair a run with a plate CSV that isn't in the archive (the app's Device view stages
+  // exactly that). Read from the run's own `.Dcal` set, so it is a fact about this instrument.
+  const zpcr = parseZpcr(readSampleBytes());
+
+  it("resolves a calibrated dye to its primary channel, case- and space-insensitively", () => {
+    const channels = zpcr.calibrations().map((e) => [e.dcal.dye, e.dcal.primaryChannel] as const);
+    const [dye, channel] = channels.find(([d]) => d)!;
+    expect(zpcr.channelForDye(dye!)).toBe(channel);
+    expect(zpcr.channelForDye(dye!.toLowerCase())).toBe(channel);
+    expect(zpcr.channelForDye(`  ${dye}  `)).toBe(channel);
+  });
+
+  it("leaves a dye the run doesn't calibrate unknown, rather than guessing one", () => {
+    expect(zpcr.channelForDye("NotADye")).toBeUndefined();
+  });
+
+  it("gives a standalone plate CSV the same channels as parsing it inside the archive", () => {
+    // The CSV records dye names only, so parsed bare every channel is unknown; parsed against
+    // the run it matches what the same bytes yield as an archive entry.
+    // This sample's plate *is* a `.plt.csv` archive entry, which never needs a password — so
+    // this runs with or without secrets.json, and asserting rather than skipping keeps it from
+    // passing silently if that ever changes.
+    const plate = zpcr.plates(PW)[0]?.pltd.plate;
+    if (!plate) throw new Error("expected the sample's own .plt.csv entry to decode");
+    const csv = plateToCsv(plate);
+    const bare = parsePlateCsv(csv, { sourceName: "x.plt.csv" });
+    const mapped = parsePlateCsv(csv, {
+      sourceName: "x.plt.csv",
+      channelForFluor: (f) => zpcr.channelForDye(f),
+    });
+    expect(bare.fluors.every((f) => f.channel === undefined)).toBe(true);
+    expect(mapped.fluors.map((f) => f.channel)).toEqual(plate.fluors.map((f) => f.channel));
+    expect(mapped.fluors.some((f) => f.channel !== undefined)).toBe(true);
+  });
+});

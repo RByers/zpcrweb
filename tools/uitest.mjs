@@ -39,6 +39,12 @@ const DUPE = join(REPO, "tools/.uishot/dupe", EXAMPLE);
  * committed, since the point is the text form this app writes, not a captured artifact. */
 const PRCL_TXT = join(REPO, "tools/.uishot/dupe/Gradient.prcl.txt");
 const BAD_TXT = join(REPO, "tools/.uishot/dupe/not-a-protocol.txt");
+/** A plate CSV naming its dyes and nothing else — the format records no channels, so the only
+ * way these get one is the run they are staged with (`Zpcr.channelForDye`). */
+const PLATE_CSV = join(REPO, "tools/.uishot/dupe/Staged.plt.csv");
+const PLATE_CSV_BODY =
+  "# zpcrweb plate definition\r\n# vessel: BR Clear 8x12\r\n" +
+  "Well,SampleType,Sample,FAM,Cy5\r\nA1,unknown,S1,TargetA,TargetB\r\n";
 /** A gradient protocol, so the review is unmistakably *not* the loaded run's. */
 const PRCL_TXT_BODY =
   "[ProtocolRunDefinition version 06.00]\nMETHOD CALC;\nHOTLID 105,30;\nVOLUME 25;\n" +
@@ -1176,6 +1182,31 @@ async function deviceRunChecks(chrome, origin) {
       !rejoined.protocol.override &&
       /METHOD CALC/.test(rejoined.protocol.text),
     JSON.stringify({ plate: rejoined.plate.source, proto: rejoined.protocol.source }),
+  );
+
+  // A staged `.plt.csv` borrows the run's dye→channel mapping. The format records dye names
+  // only, so parsed on its own every channel is unknown; pairing it with a run is what resolves
+  // them, and getting this wrong shows dyes with no colour and no channel grouping.
+  writeFileSync(PLATE_CSV, PLATE_CSV_BODY);
+  await loadFile(cdp, PLATE_CSV);
+  await waitFor(() => chipPresent(cdp, "Staged"), { what: "the .plt.csv chip" });
+  await sleep(500);
+  const csvStaged = await cdp.eval(`(() => {
+    const part = [...document.querySelectorAll(".devrun__part")]
+      .find((p) => p.querySelector(".devrun__parttitle").textContent.trim() === "Plate");
+    return {
+      chips: [...part.querySelectorAll(".plate__chip")].map((c) => c.textContent.trim()),
+      unknown: !!part.querySelector(".plate__chip--unknown"),
+      source: part.querySelector(".devrun__source")?.textContent.replace("override", "").trim(),
+    };
+  })()`);
+  check(
+    "a staged .plt.csv takes its channels from the run it is paired with",
+    /Staged\.plt\.csv/.test(csvStaged.source) &&
+      !csvStaged.unknown &&
+      csvStaged.chips.some((c) => /FAM\s*Ch1/.test(c)) &&
+      csvStaged.chips.some((c) => /Cy5\s*Ch4/.test(c)),
+    JSON.stringify(csvStaged),
   );
 
   // Only one run at a time: selecting a second replaces the first.

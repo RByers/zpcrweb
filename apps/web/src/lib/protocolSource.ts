@@ -16,12 +16,47 @@
  * likely, the only one that matters to the instrument. See `usb.md` §5.1.
  */
 import {
+  parsePlateCsv,
   protocolDocumentFromRunDefinition,
   type PlateDefinition,
   type ProtocolDocument,
+  type Zpcr,
 } from "@zpcrweb/core";
 import type { RunStagingSelection } from "../state/useRunStaging";
 import type { LoadedFile, PlateFileResult, RunResult } from "../state/useZpcrStore";
+
+/**
+ * Re-read a staged `.plt.csv` against the selected run's own dye → channel mapping.
+ *
+ * A plate CSV labels its fluor columns with the dye name alone — the channel is a fact about the
+ * optics, not about the plate, so the format doesn't record it (`plateCsv.ts`). Parsed on its own
+ * (which is what the store does, having no run to consult) every fluor's channel is therefore
+ * unknown, and the preview shows dyes with no channel and no colour.
+ *
+ * Pairing it with a run here is not the guess the store declines to make. The store sees a
+ * `.plt.csv` sitting in a list beside unrelated files and cannot know which instrument it belongs
+ * to; here the user has explicitly staged this plate *with this run*, as the two halves of one
+ * experiment on one instrument — which is exactly the statement the mapping needs, and the same
+ * one `zpcr.plates()` acts on for a `.plt.csv` stored inside an archive.
+ *
+ * Returns `null` when there is nothing to add (no run, or the CSV no longer parses), leaving the
+ * caller with the store's channel-less parse rather than no plate at all.
+ */
+function plateWithRunChannels(
+  bytes: Uint8Array,
+  sourceName: string,
+  zpcr: Zpcr | null,
+): PlateDefinition | null {
+  if (!zpcr) return null;
+  try {
+    return parsePlateCsv(new TextDecoder().decode(bytes), {
+      sourceName,
+      channelForFluor: (fluor) => zpcr.channelForDye(fluor),
+    });
+  } catch {
+    return null;
+  }
+}
 
 /** One half of a staged run, and where it came from. */
 export interface StagedPart<T> {
@@ -46,6 +81,13 @@ export interface StagedRun {
   /** The run supplying whatever isn't overridden, when one is selected. */
   runName: string | null;
 }
+
+/** Nothing staged — what every view other than Device gets, since none of them read it. */
+export const EMPTY_STAGED_RUN: StagedRun = {
+  protocol: { value: null, sourceName: null, overridden: false, reason: null },
+  plate: { value: null, sourceName: null, overridden: false, reason: null },
+  runName: null,
+};
 
 /**
  * A filename base for a protocol download: the protocol's own name when it has one, else the
@@ -119,9 +161,16 @@ export function resolveStagedRun(
   let plate: StagedPart<PlateDefinition>;
   if (selection.plateId) {
     const result = plateFiles.get(selection.plateId);
+    const file = byId.get(selection.plateId);
+    // A `.plt.csv` records no channels; borrow the selected run's. Only for a CSV — a `.pltd`
+    // carries `channelPosition` itself, so re-reading one would gain nothing.
+    const mapped =
+      result?.plate && file?.kind === "csv"
+        ? plateWithRunChannels(file.bytes, file.name, zpcr)
+        : null;
     plate = {
-      value: result?.plate ?? null,
-      sourceName: byId.get(selection.plateId)?.name ?? null,
+      value: mapped ?? result?.plate ?? null,
+      sourceName: file?.name ?? null,
       overridden: true,
       reason: result?.plate
         ? null

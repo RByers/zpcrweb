@@ -1634,6 +1634,15 @@ Four components, under `components/device/`:
   it also makes a `.prcl.txt` and a run's embedded protocol render identically, since by then they
   are the same thing. The Overview tab's protocol section is where such a file comes from.
 
+  A staged **`.plt.csv` borrows the run's channels.** The format names its fluor columns by dye
+  alone — a channel is a fact about the optics, not about the plate — so the store, which sees
+  the file sitting in a list beside unrelated ones, parses it with every channel unknown. Here the
+  user has explicitly staged this plate *with this run*, which is the statement the mapping needs,
+  so `resolveStagedRun` re-parses the CSV through `Zpcr.channelForDye` (the run's own `.Dcal`
+  set). Only for a `.plt.csv`: a `.pltd` records `channelPosition` itself. Without this the
+  preview shows dyes with no colour and no channel grouping, which is the plate looking broken
+  when only the pairing was missing.
+
   The plate uses the shared `PlateViewer` in its `compact` variant — no vessel/scan-mode metadata
   and wells shrunk to coloured cells, so a 96-well plate fits the column instead of scrolling out
   of it. Nothing is lost that isn't one hover away, and the question this preview answers is "is

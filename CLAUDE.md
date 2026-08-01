@@ -120,7 +120,7 @@ Cost control, when you do run it:
 npm run test:ui
 ```
 
-95 browser assertions covering what nothing else can catch: the two URL contracts — hash
+96 browser assertions covering what nothing else can catch: the two URL contracts — hash
 routing (deep links, back/forward, unknown-file and invalid-view fallbacks) and password
 handling (stripped from both URL forms, never leaked into the routing hash, an encrypted
 `.pcrd` still decrypting) — plus `#load=`, the rule that every XML view uses the shared
@@ -143,7 +143,8 @@ that one value is what makes the app reproduce CFX's own Cq) — and the Overvie
 `.prcl.txt` download plus the Device view's run staging, where the file bar is a *multi*-selection
 (one run, plus a `.prcl.txt`/`.plt.csv` overriding either half; a run with both halves overridden
 drops out because it supplies nothing; tapping a selected override releases it; a loaded
-`.prcl.txt` joins the selection and lands on the Device view) and Start run appears only with an
+`.prcl.txt` joins the selection and lands on the Device view; a staged `.plt.csv` takes its
+dye→channel mapping from the run it is paired with) and Start run appears only with an
 instrument attached. A screenshot
 can't show that the back button works, that a secret reached the address bar, that a hover
 put a curve back, or that eight rows are in the right order — and the core Vitest suite has no

@@ -1,7 +1,7 @@
-import { useRef } from "react";
+import { useMemo, useRef } from "react";
 import { useZpcrStore } from "./state/useZpcrStore";
 import { useRunStaging } from "./state/useRunStaging";
-import { resolveStagedRun } from "./lib/protocolSource";
+import { EMPTY_STAGED_RUN, resolveStagedRun } from "./lib/protocolSource";
 import { usePltdPassword } from "./state/pltdPassword";
 import { formatLoadHash } from "./state/urlHash";
 import { useHeaderFit } from "./state/useHeaderFit";
@@ -76,7 +76,6 @@ function Logo({ onClick }: { onClick: () => void }) {
 export function App() {
   const store = useZpcrStore();
   const { active, activeRun, settings } = store;
-  const [, setPassword] = usePltdPassword();
   // Called before the early returns below, as hook order demands. The deps are what changes the
   // header's natural width other than a resize: the selected tab (level 2 keeps its label) and
   // the active file (a standalone plate shows two tabs, a run five).
@@ -84,14 +83,32 @@ export function App() {
   // Which files make up the run the Device view would start. Held here rather than inside that
   // view because the file bar — which lives in this component — is the control that edits it.
   const staging = useRunStaging(store.files, store.activeId);
-  const [pltdPassword] = usePltdPassword();
-  const staged = resolveStagedRun(
-    staging.selection,
-    store.files,
-    store.runs,
-    store.plateFiles,
-    store.protocolFiles,
-    pltdPassword,
+  const [pltdPassword, setPassword] = usePltdPassword();
+  // Memoized, and skipped entirely off the Device view: resolving decodes a run's plate and, for
+  // a staged `.plt.csv`, re-parses it against the run's calibration set — real work to repeat on
+  // every render of a view that never looks at the result.
+  const onDevice = store.view === "device";
+  const staged = useMemo(
+    () =>
+      onDevice
+        ? resolveStagedRun(
+            staging.selection,
+            store.files,
+            store.runs,
+            store.plateFiles,
+            store.protocolFiles,
+            pltdPassword,
+          )
+        : EMPTY_STAGED_RUN,
+    [
+      onDevice,
+      staging.selection,
+      store.files,
+      store.runs,
+      store.plateFiles,
+      store.protocolFiles,
+      pltdPassword,
+    ],
   );
   // Where "← back" on the About page returns to, so opening About and leaving again is a no-op.
   const lastView = useRef<ViewId>("curves");

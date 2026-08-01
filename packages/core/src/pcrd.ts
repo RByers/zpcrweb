@@ -37,6 +37,7 @@ import type { PlateDefinition } from "./pltd.js";
 import { parsePlatesetup2 } from "./pltd.js";
 import { parseProtocol2 } from "./prcl.js";
 import type { Dcal, DcalBlock } from "./dcal.js";
+import { dyeChannelLookup } from "./dcal.js";
 import { zipCryptoDecrypt } from "./zipcrypto.js";
 import { inflateRaw } from "./inflate.js";
 import { parseSingleEntryZip } from "./zipsingle.js";
@@ -660,6 +661,17 @@ function buildZpcr(root: XmlElement[]): Zpcr {
   const wellFactorsEl = byLower.get("wellfactorscollection");
   const wellFactors = wellFactorsEl ? decodeWellFactors(wellFactorsEl, plate?.scanMode) : undefined;
 
+  const calibrations = (): DcalEntry[] =>
+    runData ? decodeCalibrationCollection(runData.inner) : [];
+
+  // Dye → optical channel from `calibrationCollection`, cached: decoding it is the same work
+  // `calibrations()` does (typically 28 entries), and `Zpcr.channelForDye` is asked per fluor.
+  let dyeLookup: ((dye: string) => number | undefined) | undefined;
+  const channelForDye = (dye: string): number | undefined => {
+    if (!dyeLookup) dyeLookup = dyeChannelLookup(calibrations().map((e) => e.dcal));
+    return dyeLookup(dye);
+  };
+
   const factoryRefCal = () =>
     parseFactoryRefRowCal(
       metadata.raw["FactoryRefRowCal"] ?? "",
@@ -691,8 +703,8 @@ function buildZpcr(root: XmlElement[]): Zpcr {
     // .zpcr's real .prcl archive entries are, since there's no separate password-gated file
     // here to model.
     protocols: (): PrclEntry[] => [],
-    calibrations: (): DcalEntry[] =>
-      runData ? decodeCalibrationCollection(runData.inner) : [],
+    calibrations,
+    channelForDye,
     wellFactors,
     persistedThresholds,
     factoryRefCal,

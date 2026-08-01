@@ -155,6 +155,9 @@ export function parseZpcr(data: Uint8Array | ArrayBuffer): Zpcr {
       archive.entries
         .filter(isDcalName)
         .map((name) => ({ name, dcal: parseDcal(files[name] as Uint8Array) })),
+    // The same cached closure `plates()` hands to a `.plt.csv` entry, published so a caller can
+    // give channels to a plate CSV that isn't in this archive — see `Zpcr.channelForDye`.
+    channelForDye,
     factoryRefCal,
     refCalComparison: () => compareRefToCal(reads, factoryRefCal()),
   };

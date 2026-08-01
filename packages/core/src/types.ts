@@ -441,6 +441,22 @@ export interface Zpcr {
   protocols(password?: string): PrclEntry[];
   /** Decode every `.Dcal` pure-dye calibration entry in the archive (unencrypted). */
   calibrations(): DcalEntry[];
+  /**
+   * This run's own dye → optical channel mapping, from its calibration set
+   * (`Dcal.primaryChannel`). `undefined` for a dye the run doesn't calibrate, and for every dye
+   * on a source that ships no calibrations at all (a Biomeme run, whose fluorescence is per-dye
+   * already).
+   *
+   * Exposed because it is a **fact about the instrument that produced this run**, and the only
+   * thing that can give channels to a plate whose format doesn't record them — a `.plt.csv`
+   * labels its fluor columns with the dye name alone (`plateCsv.ts`). {@link plates} uses this
+   * internally for a `.plt.csv` inside the archive; this makes the same mapping available for one
+   * the caller pairs with the run from outside it.
+   *
+   * Cached per run: building it decodes every `.Dcal` (typically 28), so it is worth not
+   * repeating, and callers are expected to ask per fluor.
+   */
+  channelForDye(dye: string): number | undefined;
   /** Optical channel indices that hold data, from `CHANNELMASK` (e.g. `[0]` or `[0..5]`). */
   channels(): number[];
   /**

@@ -400,6 +400,9 @@ export function parseBiomeme(data: Uint8Array | ArrayBuffer): Zpcr {
     plates: (): PltdEntry[] => plateEntries,
     protocols: (): PrclEntry[] => [],
     calibrations: (): DcalEntry[] => [],
+    // A Biomeme run reads per-dye already — there are no optical channels to map a dye onto, and
+    // no calibration set that could say so (see `biomeme.md`).
+    channelForDye: () => undefined,
     dyeSpace: true,
     factoryRefCal: () => [],
     refCalComparison: () => [],
