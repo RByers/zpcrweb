@@ -519,6 +519,15 @@ new decoding needed there, this just confirms *where* and *when* those bytes com
 `.alf` (the run-report archive CFX Manager itself opens back up as a `.pcrd`-shaped view) wasn't
 opened further here.
 
+**A zero-byte file's `GETFILE` reply is unreliable — observed live, not in the reference
+capture.** `\Storage Card\CurrentRun`'s `begun`/`ended` markers (`runFolder.ts`) are zero-content
+by design, and asking for one after a reconnect-mid-run (which re-fetches every name, having lost
+its cache) has been seen to leave `GETFILE`'s reply unanswered until the client's own reply timer
+gives up — up to a minute per marker, stalling the fetch loop on that one name. The instrument's
+side of this is unconfirmed (no capture exercises it); the client-side fix is to skip the
+`GETFILE` round-trip entirely once `GETFILESIZE` answers `0`, since there is nothing to transfer
+either way (`device.ts`'s `getFile`).
+
 ## 6. What's still a real gap
 
 The captures used here never triggered the optical head's own scan command surface. Both plate

@@ -605,6 +605,10 @@ export class CfxDevice {
       if (!Number.isFinite(expected)) {
         throw new Error(`GETFILESIZE ${path}: unparseable size ${sizeRes.raw}`);
       }
+      // The run's `begun`/`ended` markers are zero-content by design (runFolder.ts), and a
+      // `GETFILE` sent for one has been observed to go unanswered until the reply timer below
+      // finally rejects it — costing up to `timeoutMs` per marker. Nothing to fetch, so don't ask.
+      if (expected === 0) return new Uint8Array(0);
       const msg = await send(`GETFILE ${path}`, timeoutMs);
       if (msg.payload.length !== expected) {
         throw new Error(

@@ -250,6 +250,21 @@ describe("CfxDevice", () => {
     await dev.close();
   });
 
+  it("skips the GETFILE round-trip for a zero-byte file", async () => {
+    // A run's `begun`/`ended` markers are always zero-content; GETFILE for one has been observed
+    // to hang on real hardware, so getFile must short-circuit on GETFILESIZE reporting 0 rather
+    // than sending GETFILE and waiting on a reply that may never come.
+    const mock = new MockInstrument((cmd) => {
+      if (cmd.startsWith("GETFILESIZE")) return { payload: text("0;0000") };
+      if (cmd.startsWith("GETFILE")) throw new Error("GETFILE should not have been sent");
+      return null;
+    });
+    const dev = new CfxDevice(mock);
+    await dev.open();
+    expect(Array.from(await dev.getFile("\\CurrentRun\\begun"))).toEqual([]);
+    await dev.close();
+  });
+
   it("fails a truncated GETFILE rather than returning a short file", async () => {
     const mock = new MockInstrument((cmd) => {
       if (cmd.startsWith("GETFILESIZE")) return { payload: text("100;0000") };
