@@ -54,10 +54,13 @@ export function InstrumentConsole({ instrument }: { instrument: CfxDeviceHandle 
     });
   }, [instrument.traffic, hidePolls]);
 
+  // Depends on `instrument.traffic`, not the filtered `lines`: `lines` gets a new reference
+  // whenever "hide polling" is toggled too, which would otherwise snap the view to the bottom
+  // even though no new traffic arrived.
   useEffect(() => {
     if (!open || !follow || !bodyRef.current) return;
     bodyRef.current.scrollTop = bodyRef.current.scrollHeight;
-  }, [lines, follow, open]);
+  }, [instrument.traffic, follow, open]);
 
   return (
     // Collapsed by default: the console is for watching the protocol when something is being
