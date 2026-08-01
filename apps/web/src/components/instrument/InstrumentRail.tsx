@@ -288,13 +288,17 @@ export function InstrumentRail({
               <Stat
                 label="State"
                 value={
-                  runProgress.inProgress
+                  // `STATUS?`'s `running` flag is live and free — it's already being polled for
+                  // the Status section above — so it settles "in progress" the instant a run
+                  // starts, without waiting on the run folder to be listed (that only happens on
+                  // usb.md's own §7.5/§7.6 edges, not on a run merely starting).
+                  status?.running || runProgress.inProgress
                     ? "in progress"
                     : runProgress.ended
                       ? "finished"
                       : "no run"
                 }
-                tone={runProgress.inProgress ? "warn" : "good"}
+                tone={status?.running || runProgress.inProgress ? "warn" : "good"}
               />
               <Stat label="Plate reads" value={String(runProgress.plateReads)} />
             </>
