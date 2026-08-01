@@ -257,8 +257,9 @@ something the instrument reads.
 
 - **Channel subsets in the `PLATEREAD` mask** — the operand itself is decoded (§3, `usb.md` §3.1)
   and the authored-vs-recorded difference is explained, but only the two whole-configuration masks
-  `#h3F` and `#h81` have ever been observed. Whether a mask selecting an arbitrary subset (or the
-  expected FRET encoding) is even accepted is untested.
+  `#h3F` and `#h81` have ever been observed. Two further configurations the language defines —
+  FRET (`#hA0`) and two-colour (`#h03`) — are named in `usb.md` §3.1 but appear in no file here,
+  and whether a mask selecting an *arbitrary* subset is accepted at all remains untested.
 - **`METHOD` values other than `CALC`** — only `CALC` appears in the files examined; the language
   also defines `BLOCK` and `OTHER` (`protocol.md` §3.2).
 - **`optionId`** — the constant string `"PlateReadOption"` in every file, so its value space is

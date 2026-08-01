@@ -277,11 +277,18 @@ Three things this adds to the stored forms:
 - **Every directive is acknowledged individually** with the bare `0000` of `usb.md` §3 — a
   malformed step fails at the step, not at the end.
 - **`RemoteRun` starts it** — on that command, with nothing further required — and carries what the
-  protocol text cannot: which block, whether the lid is on, the run name, the operator, a sample
-  ID, and the method again. Its eight positional operands are `<block>,<lid on>,<remote
-  start>,<protocol name>,<user>,<sample ID>,<sierra mode>,<method>`. The `PROCEED` above is *not*
-  part of starting it: the run was already 3½ minutes in, and `PROCEED` skipped the rest of the
-  step it was on (`usb.md` §7.5).
+  protocol text cannot. Its eight positional operands are `<block>,<lid on>,<remote start>,<run
+  name>,<user>,<sample ID>,<sierra mode>,<method>`, defined one by one in **`usb.md` §7.3**. Three
+  of them are the ones a protocol file has no way to express: `<remote start>` chooses between
+  starting now and staging the run for someone to start at the instrument's own touchscreen;
+  `<sierra mode>` asks the instrument to run the protocol *and* its own optics autonomously, which
+  is why a plate read needs no command from the host and why the results are simply files
+  afterwards; and `<method>` repeats the `METHOD` of §3.2 — the copy `STATUS?` reports back. Note
+  the run's name lives *here*, not in `PROTOCOL`, whose operand is a fixed placeholder. The first
+  two are **stated** in this document's sense: the capture sends each with a single value and never
+  varies it, so what the other value does is not measured here.
+  The `PROCEED` above is *not* part of starting it: the run was already 3½ minutes in, and
+  `PROCEED` skipped the rest of the step it was on (`usb.md` §7.5).
 
 `ADDCYCLES <n>` extends the running protocol's loop after the fact; the capture sends `ADDCYCLES
 0`, a no-op, as part of ordinary run setup. Everything else about run control — `PROCEED`,

@@ -221,7 +221,7 @@ order:
 | `GOTO <step>,<count>` | e.g. `GOTO 2,1` — loop back to step 2, 1 more time (2 total passes) |
 | `END` | closes the step list |
 | `ADDCYCLES <n>` | extends the running protocol's loop; the capture sends `ADDCYCLES 0`, a no-op, as ordinary run setup |
-| `RemoteRun "<block>","<lid on>","<remote start>","<name>","<user>","<sample ID>","<sierra mode>","<method>"` | e.g. `RemoteRun "A","True","False","singletest","admin","","True","CALC"` — starts the authored protocol, carrying what the protocol text cannot (`protocol.md` §7) |
+| `RemoteRun "<block>","<lid on>","<remote start>","<name>","<user>","<sample ID>","<sierra mode>","<method>"` | e.g. `RemoteRun "A","True","False","singletest","admin","","True","CALC"` — starts the authored protocol, carrying what the protocol text cannot (`protocol.md` §7). **§7.3 defines all eight operands** — notably `<remote start>` (start from the instrument's own touchscreen instead of now) and `<sierra mode>` (the instrument runs the protocol *and* its own optics autonomously, which is why §6's optical protocol never has to be spoken) |
 | `PROCEED` | **skips to the next step** of a running protocol. Not a start or a resume: it was sent 215 s into a run, while a 3-minute hold still had time left, and the very next `STATUS?` was on the following step — §7.5 |
 | `CANCEL` | **acknowledges a finished run**, clearing the run name the instrument keeps holding after the protocol ends; §7.6 has the `STATUS?` transition that shows this, and the run's final `Read0000N.Plateread` is picked up after it. It is presumably also the abort, but nothing here aborts a run in progress |
 | `LID OPEN` / `LID CLOSE` | motorised lid control. In `usb-basic` the operator opened and then closed the lid, and the pair appears in exactly that order. Note CFX Manager emits `LID OPEN` **three times** for one open (t=…010.7, …018.5, …026.5) and `LID CLOSE` once — the repeat looks like the UI re-asserting while the lid travels, not three separate requests. `usb-run` has three `LID OPEN` and no `LID CLOSE`, matching an operator who opened it to load a plate and closed it at the touchscreen instead |
@@ -320,11 +320,18 @@ CFX Manager itself emits for an authored `.prcl`. `packages/core/src/prcl.ts` ke
 and does not synthesize one; `parseScanMask()` in `packages/core/src/runDefinition.ts` decodes it,
 and is the same function `.Plateread`'s `CHANNELMASK` goes through.
 
-> **Future:** two encodings are unconfirmed because nothing here exercises them. A FRET plate is
-> expected to set bit 5 with bit 7 (`#hA0` — channel 6, flyover) by symmetry with fast scan, but
-> no FRET run was captured. And no sample selects an *arbitrary* channel subset (say `#h05` for
-> channels 1 and 3), so whether firmware accepts one, or only the three named configurations, is
-> untested. Don't offer a subset picker on the strength of the bit layout alone.
+**Two more configurations the language defines, neither exercised here.** The mask is not limited
+to the two values above: a **FRET** scan is `#hA0` — bit 5 with bit 7, i.e. channel 6 read in
+flyover, the exact symmetry with fast scan this section previously only guessed at — and a
+**two-colour** scan is `#h03`, channels 1 and 2, step-and-repeat. The second matters because it
+answers the standing question about subsets: a mask that is not one of the named configurations is
+at least *expressible*, so the byte really is a channel selection and not an enum in disguise.
+
+> **Still unconfirmed:** no sample or capture here contains either value, so nothing measures what
+> the instrument does with them; and nothing exercises an arbitrary subset (say `#h05`, channels 1
+> and 3) that no named configuration corresponds to. Bit 6 remains unused and unexplained. A client
+> should still preserve a recorded mask rather than synthesize one, and should not offer a
+> free-form channel picker on the strength of the bit layout alone.
 
 ## 4. Channel 0 and channel 2 — the binary auxiliary streams (partially understood)
 
@@ -517,11 +524,15 @@ opened further here.
 The captures used here never triggered the optical head's own scan command surface. Both plate
 reads in `usb-run` came from firmware executing a `PLATEREAD` step already baked into the authored
 protocol (§7.2), autonomously, with the result simply pulled off afterward as a file — the host never had
-to speak to the optical head directly. **This means a WebUSB client that only needs to run an
-existing protocol and collect its plate reads does not need to reverse the optical protocol at
-all** — §2 through §5 are sufficient for that. Only a client that wants to trigger a scan *outside*
-of a running protocol (e.g. a manual single-read, or calibration) would need §4 characterized
-further, or a capture that actually exercises that path.
+to speak to the optical head directly. That is not incidental: it is what `RemoteRun`'s
+`<sierra mode>` operand asks for (§7.3) — the instrument runs the protocol *and* its own optics,
+and the host collects files.
+
+**This means a WebUSB client that only needs to run an existing protocol and collect its plate
+reads does not need to reverse the optical protocol at all** — §2 through §5 are sufficient for
+that, provided it starts runs in that mode. Only a client that wants to trigger a scan *outside* of
+a running protocol (a manual single-read, or calibration) would need §4 characterized further, or a
+capture that actually exercises that path.
 
 ## 7. Performing a run
 
@@ -610,15 +621,34 @@ protocol.
 RemoteRun "A","True","False","singletest","admin","","True","CALC"   → 0000
 ```
 
-Eight positional operands: `<block>,<lid on>,<remote start>,<run name>,<user>,<sample ID>,<sierra
-mode>,<method>` (§9 records which four are corroborated and which three are named from the language
-rather than demonstrated).
+Eight positional operands, comma-separated, each quoted:
+
+| # | Operand | Type | Meaning |
+|---|---|---|---|
+| 1 | `<block>` | `A` or `B` | which block. A base unit carries at most two, lettered `A` and `B`; `BLOCKCOUNT?` says how many exist, and a CFX96 has one, so `"A"`. This is the same letter `ERRORLIST A` takes |
+| 2 | `<lid on>` | `True`/`False` | **run the heated lid.** `HOTLID` (§7.2) sets its temperature; this decides whether it is used at all. `STATUS?`'s run descriptor echoes it as the third element — `"SINGLETE",CALC,ON` while running, flipping to `OFF` when the run ends and the lid heater is released |
+| 3 | `<remote start>` | `True`/`False` | **start it at the instrument, not from here.** `False` (this capture) means run *now* — measured below. `True` is the language's "prepare the run and wait for someone to press start on the instrument's own touchscreen", the front panel's counterpart to the host's start; it is what a client declines by sending `False` |
+| 4 | `<run name>` | string | the run's name, and the only place it is given — `PROTOCOL`'s operand is not it (§7.2). It reaches `STATUS?` (uppercased and truncated to 8 characters: `singletest` → `"SINGLETE"`) and the report's filename in full (`…_SINGLETEST.alf`), so keep it to characters that are safe in a filename |
+| 5 | `<user>` | string | the operator, recorded in the run report. Free text; `admin` here |
+| 6 | `<sample ID>` | string | free-text sample/plate identifier, empty in this capture |
+| 7 | `<sierra mode>` | `True`/`False` | **run autonomously.** `True` — the instrument owns the whole run, driving its own optics at each `PLATEREAD` step and writing each `Read0000N.Plateread` to its own storage, which is why the host never speaks to the optical head (§6) and why the run survives the host going away: everything it produced is on the instrument to be collected whenever. `False` is the non-autonomous mode, in which the optical head is *not* the instrument's own business — and driving it is the gap §6 describes, so a client has no reason to ask for it |
+| 8 | `<method>` | `CALC`/`BLOCK`/`OTHER` | the same thermal-control method already sent as `METHOD` (`protocol.md` §3.2), repeated here. Not redundant in practice: it is this copy that `STATUS?` reports back, as the second element of the run descriptor |
+
+**Types are strict.** The booleans are the literal words `True`/`False` (case-insensitive; nothing
+else parses — not `1`/`0`, not `ON`/`OFF`), and `<method>` is one of the three enumerated names.
+None of the strings may contain `'`, `"`, `,` or `;`: the first two are the operand quoting, the
+third is the operand separator, and the fourth is the response's value/error separator — a name
+carrying any of them either breaks the command or corrupts the reply that comes back. The same
+`assertCommandArgument` reasoning as §10 applies, one layer up.
+
+Operands 1, 4, 5 and 8 are corroborated by the capture's own echoes (`STATUS?`, the `.alf`); 2, 3
+and 7 are defined by the command language but never *varied* here, so their off-values are
+undemonstrated — §9.
 
 **The run starts on this command, with nothing further required.** Measured: `RemoteRun` returned
 `0000`, and 11 s later `STATUS?` left `IDLE` for
-`…;1;1;TEMP 95.0,180;1;"SINGLETE",CALC,ON;…` — cycle 1, step 1, the authored run name, the lid
-`ON`. No confirmation, no second command. With `<remote start>` = `"False"`, "wait for someone to
-press start at the instrument" is evidently what the client is *declining*.
+`…;1;1;TEMP 95.0,180;1;"SINGLETE",CALC,ON;…` — cycle 1, step 1, and the run descriptor built out of
+operands 4, 8 and 2. No confirmation, no second command.
 
 What follows the start is the lid: for the next ~180 s the lid temperature climbs 19 → 95 °C while
 the block sits at ambient 17 °C, and only then does the block ramp. A client that expects to see
@@ -841,11 +871,14 @@ instance, rather than a cross-checked pattern:
 - **Channel 0 and channel 2's byte layout** (§4) — both channels' examples are real and
   byte-exact, but with this little variation in the traffic, no individual byte's meaning is
   confirmed for either.
-- **`RemoteRun`'s operand names** (§3) — the capture corroborates four of the eight positionally:
-  `"A"` is the block letter `ERRORLIST A` also uses, `"singletest"` is the run name the resulting
-  `.alf` report carries, `"admin"` the operator, `"CALC"` the method already sent as `METHOD`. The
-  three booleans between them are named from the language rather than demonstrated — nothing in
-  either capture varies them.
+- **`RemoteRun`'s three booleans** (§3, §7.3) — the capture corroborates four of the eight operands
+  positionally: `"A"` is the block letter `ERRORLIST A` also uses, `"singletest"` is the run name
+  the resulting `.alf` report carries, `"admin"` the operator, `"CALC"` the method already sent as
+  `METHOD`. What `<lid on>`, `<remote start>` and `<sierra mode>` *mean* is settled (§7.3), but
+  each was sent with one value only — `True`, `False`, `True` — so **no off-value is
+  demonstrated**: no run here was started from the touchscreen, run without the heated lid, or run
+  non-autonomously. §7.3's account of what `False` for `<sierra mode>` would entail is the weakest
+  claim in that table, and the one a client has no reason to test.
 - **The run sequence** (§7) — one run, one operator, one instrument. The *ordering* claims are
   strong (they are what the wire did, and the run-starts-at-`RemoteRun` and `PROCEED`-skips-a-step
   findings each rest on a `STATUS?` transition, not on inference), but nothing here varies the
@@ -858,8 +891,9 @@ instance, rather than a cross-checked pattern:
   (five runs, two configurations, three independent echoes of the value), and **bit 0 = channel 1**
   is measured directly from the one `#h81` run's all-zero channels 2–6. Bits 1–5 mapping to
   channels 2–6 in order follows by extension: no sample sets any of them individually, so nothing
-  here would distinguish that ordering from another. Nor does anything here exercise bit 6,
-  FRET, or a mask that is neither `#h3F` nor `#h81`.
+  here would distinguish that ordering from another. Nor does anything here exercise bit 6, or a
+  mask that is neither `#h3F` nor `#h81` — including the FRET (`#hA0`) and two-colour (`#h03`)
+  configurations §3.1 names, which are the language's, not measurements.
 
 ## 10. Implementation
 
