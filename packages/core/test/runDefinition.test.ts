@@ -73,14 +73,54 @@ describe("parseRunDefinition", () => {
     expect(goto.description).toContain("45 passes");
   });
 
-  it("numbers PLATEREAD/INC/RATE as steps too — the melt case, where GOTO 7 needs it", () => {
+  it("numbers PLATEREAD but not the modifiers — the melt case, where GOTO 7 needs both", () => {
     const p = parseRunDefinition(CYCLING_AND_MELT);
     const gotos = p.directives.filter((d): d is GotoDirective => d.verb === "GOTO");
     expect(gotos.map((g) => g.targetStep)).toEqual([2, 7]);
     expect(p.steps[gotos[0]!.targetStep - 1]!.text).toBe("TEMP 98.0,5");
-    // Step 7 is only the melt's per-pass hold if the PLATEREAD and the first GOTO were
-    // themselves numbered — the measurement behind protocol.md §4.
+    // Step 7 is the melt's per-pass hold only because PLATEREAD and the first GOTO are
+    // themselves numbered — protocol.md §4, confirmed live by STATUS? in usb.md §3.
     expect(p.steps[gotos[1]!.targetStep - 1]!.text).toBe("TEMP 56.5,5");
+    // …and because INC/RATE are modifiers of the step before them, not steps (protocol.md §4).
+    expect(p.steps.map((s) => s.text)).not.toContain("INC 5.0");
+    expect(p.directives.find((d) => d.verb === "INC")!.stepNumber).toBeUndefined();
+    expect(p.directives.find((d) => d.verb === "RATE")!.stepNumber).toBeUndefined();
+    // The melt group occupies exactly four numbered positions (protocol.md §6).
+    expect(p.steps.slice(5).map((s) => s.text)).toEqual([
+      "TEMP 56.5,31",
+      "TEMP 56.5,5",
+      "PLATEREAD #h3F",
+      "GOTO 7,7",
+    ]);
+  });
+
+  it("decodes the modifiers and the compact MELT form (protocol.md §3, §6)", () => {
+    const p = parseRunDefinition(
+      "METHOD CALC;HOTLID 105,30;VOLUME 20;TEMP 95.0,10;EXT 5;BEEP;" +
+        "MELT 65.0,95.0,0.5,5,#h3f;END;",
+    );
+    expect(p.unknownVerbs).toEqual([]);
+    const ext = p.directives.find((d) => d.verb === "EXT")!;
+    expect(ext.stepNumber).toBeUndefined();
+    expect(ext.description).toBe("Extend the previous step's hold by 5 s on each pass");
+    expect(p.directives.find((d) => d.verb === "BEEP")!.stepNumber).toBeUndefined();
+
+    const melt = p.directives.find((d) => d.verb === "MELT")!;
+    expect(melt.stepNumber).toBe(2);
+    expect([melt.startTempC, melt.endTempC, melt.incrementC, melt.holdSeconds]).toEqual([
+      65, 95, 0.5, 5,
+    ]);
+    expect(melt.scanMask!.raw).toBe(0x3f);
+    expect(p.scanMasks.map((m) => m.raw)).toEqual([0x3f]);
+  });
+
+  it("accepts INC/EXT riding inline on a TEMP directive (protocol.md §3.2)", () => {
+    const p = parseRunDefinition("METHOD CALC;TEMP 95.0,10,INC 0.5,EXT 5;END;");
+    const temp = p.steps[0]!;
+    expect(temp.verb).toBe("TEMP");
+    expect(temp).toMatchObject({ tempC: 95, holdSeconds: 10, incrementC: 0.5, extendSeconds: 5 });
+    expect(temp.description).toBe("Hold 95 °C for 10 s, then 0.5 °C and 5 s more on each pass");
+    expect(p.unknownVerbs).toEqual([]);
   });
 
   it("decodes each directive's operands and describes it", () => {

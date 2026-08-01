@@ -86,8 +86,11 @@ export const RUN_DEFINITION_VERBS = [
   "VOLUME",
   "TEMP",
   "GRAD",
+  "MELT",
   "INC",
   "RATE",
+  "EXT",
+  "BEEP",
   "PLATEREAD",
   "GOTO",
   "END",
@@ -96,6 +99,21 @@ export const RUN_DEFINITION_VERBS = [
 export type RunDefinitionVerb = (typeof RUN_DEFINITION_VERBS)[number];
 
 const VERB_SET: ReadonlySet<string> = new Set<string>(RUN_DEFINITION_VERBS);
+
+/**
+ * The verbs that take a numbered position in the step list `GOTO` counts (`protocol.md` §4).
+ *
+ * The setup header and `END` are not steps, and neither are the four **modifiers** — `INC`,
+ * `RATE`, `EXT`, `BEEP` — which attach to the step they follow rather than standing as steps of
+ * their own, and so are skipped when numbering.
+ */
+const STEP_VERBS: ReadonlySet<string> = new Set<string>([
+  "TEMP",
+  "GRAD",
+  "MELT",
+  "PLATEREAD",
+  "GOTO",
+]);
 
 /** True if `verb` (any case) is one this grammar defines. */
 export function isRunDefinitionVerb(verb: string): verb is RunDefinitionVerb {
@@ -137,11 +155,19 @@ export interface VolumeDirective extends DirectiveBase {
   volumeUl: number;
 }
 
-/** `TEMP <°C>,<seconds>` — hold one temperature. */
+/**
+ * `TEMP <°C>,<seconds>` — hold one temperature. The grammar also allows the `INC` and `EXT`
+ * modifiers to ride inline as extra operands (`TEMP 95.0,10,INC 0.5`); no file here uses that
+ * form, but it decodes to the same thing as the separate directives (`protocol.md` §3.2).
+ */
 export interface TempDirective extends DirectiveBase {
   verb: "TEMP";
   tempC: number;
   holdSeconds: number;
+  /** An inline `INC` modifier's °C, if this directive carried one. */
+  incrementC?: number;
+  /** An inline `EXT` modifier's seconds, if this directive carried one. */
+  extendSeconds?: number;
 }
 
 /** `GRAD <low>,<high>,<seconds>` — hold a temperature gradient across the block's rows. */
@@ -150,6 +176,24 @@ export interface GradDirective extends DirectiveBase {
   lowTempC: number;
   highTempC: number;
   holdSeconds: number;
+  /** An inline `EXT` modifier's seconds, if this directive carried one. */
+  extendSeconds?: number;
+}
+
+/**
+ * `MELT <start>,<end>,<increment>,<hold>,#h<mask>` — a melt curve as one directive, the compact
+ * alternative to the six-directive expansion every stored protocol here uses (`protocol.md` §6).
+ */
+export interface MeltDirective extends DirectiveBase {
+  verb: "MELT";
+  startTempC: number;
+  endTempC: number;
+  incrementC: number;
+  holdSeconds: number;
+  /** The operand as written, e.g. `#h3f`. */
+  operand: string;
+  /** The decoded mask, or undefined if the operand wasn't a recognizable one. */
+  scanMask?: ScanMask;
 }
 
 /** `INC <°C>` — per-pass temperature increment applied to the preceding step. */
@@ -162,6 +206,17 @@ export interface IncDirective extends DirectiveBase {
 export interface RateDirective extends DirectiveBase {
   verb: "RATE";
   rateCPerSecond: number;
+}
+
+/** `EXT <seconds>` — lengthen (or, negative, shorten) the preceding step's hold each pass. */
+export interface ExtDirective extends DirectiveBase {
+  verb: "EXT";
+  extendSeconds: number;
+}
+
+/** `BEEP` — sound the instrument's beeper when the preceding step completes. */
+export interface BeepDirective extends DirectiveBase {
+  verb: "BEEP";
 }
 
 /** `PLATEREAD #h<hex>` — read the plate, with the scan mask of `usb.md` §3.1. */
@@ -201,8 +256,11 @@ export type RunDefinitionDirective =
   | VolumeDirective
   | TempDirective
   | GradDirective
+  | MeltDirective
   | IncDirective
   | RateDirective
+  | ExtDirective
+  | BeepDirective
   | PlateReadDirective
   | GotoDirective
   | EndDirective
@@ -243,9 +301,9 @@ export function splitRunDefinition(runDefinition: string): string[] {
     .filter((s) => s.length > 0);
 }
 
-/** Directives that are not numbered steps: the setup header and the terminator. */
+/** True for the verbs that take a numbered position in the step list (`protocol.md` §4). */
 function isStepVerb(verb: string): boolean {
-  return verb !== "METHOD" && verb !== "HOTLID" && verb !== "VOLUME" && verb !== "END";
+  return STEP_VERBS.has(verb);
 }
 
 const num = (s: string | undefined): number => {
@@ -257,6 +315,31 @@ const num = (s: string | undefined): number => {
 const degrees = (v: number): string => (Number.isFinite(v) ? String(v) : "?");
 
 const seconds = (v: number): string => (Number.isFinite(v) ? `${v} s` : "? s");
+
+/**
+ * `INC` and `EXT` may ride inside a `TEMP`/`GRAD` directive as extra comma-separated operands
+ * (`TEMP 95.0,10,INC 0.5,EXT 5`) instead of following it as directives of their own — the two
+ * spellings mean the same thing (`protocol.md` §3.2).
+ */
+function inlineModifiers(extra: string[]): { incrementC?: number; extendSeconds?: number } {
+  const out: { incrementC?: number; extendSeconds?: number } = {};
+  for (const arg of extra) {
+    const m = /^(INC|EXT)\s+(\S+)$/i.exec(arg.trim());
+    if (!m) continue;
+    const value = num(m[2]);
+    if (!Number.isFinite(value)) continue;
+    if ((m[1] as string).toUpperCase() === "INC") out.incrementC = value;
+    else out.extendSeconds = value;
+  }
+  return out;
+}
+
+function describeInlineModifiers(m: { incrementC?: number; extendSeconds?: number }): string {
+  const parts: string[] = [];
+  if (m.incrementC !== undefined) parts.push(`${degrees(m.incrementC)} °C`);
+  if (m.extendSeconds !== undefined) parts.push(`${m.extendSeconds} s`);
+  return parts.length > 0 ? `, then ${parts.join(" and ")} more on each pass` : "";
+}
 
 /**
  * Decode a `;`-delimited run definition into typed directives with step numbers and
@@ -323,15 +406,18 @@ export function parseRunDefinition(runDefinition: string): RunDefinitionProgram 
       case "TEMP": {
         const tempC = num(args[0]);
         const holdSeconds = num(args[1]);
+        const inline = inlineModifiers(args.slice(2));
         directives.push({
           ...base,
           verb: "TEMP",
           tempC,
           holdSeconds,
+          ...inline,
           description:
-            holdSeconds === 0
+            (holdSeconds === 0
               ? `Hold ${degrees(tempC)} °C indefinitely`
-              : `Hold ${degrees(tempC)} °C for ${seconds(holdSeconds)}`,
+              : `Hold ${degrees(tempC)} °C for ${seconds(holdSeconds)}`) +
+            describeInlineModifiers(inline),
         });
         break;
       }
@@ -339,18 +425,65 @@ export function parseRunDefinition(runDefinition: string): RunDefinitionProgram 
         const lowTempC = num(args[0]);
         const highTempC = num(args[1]);
         const holdSeconds = num(args[2]);
+        const inline = inlineModifiers(args.slice(3));
         directives.push({
           ...base,
           verb: "GRAD",
           lowTempC,
           highTempC,
           holdSeconds,
+          ...inline,
           description:
             `Gradient ${degrees(lowTempC)}–${degrees(highTempC)} °C across the block's rows ` +
-            `for ${seconds(holdSeconds)}`,
+            `for ${seconds(holdSeconds)}` +
+            describeInlineModifiers(inline),
         });
         break;
       }
+      case "MELT": {
+        const startTempC = num(args[0]);
+        const endTempC = num(args[1]);
+        const incrementC = num(args[2]);
+        const holdSeconds = num(args[3]);
+        const maskOperand = (args[4] ?? "").trim();
+        const raw = parseScanMaskOperand(maskOperand);
+        const scanMask = raw === null ? undefined : parseScanMask(raw);
+        directives.push({
+          ...base,
+          verb: "MELT",
+          startTempC,
+          endTempC,
+          incrementC,
+          holdSeconds,
+          operand: maskOperand,
+          scanMask,
+          description:
+            `Melt from ${degrees(startTempC)} to ${degrees(endTempC)} °C in ` +
+            `${degrees(incrementC)} °C steps, holding ${seconds(holdSeconds)} and reading ` +
+            (scanMask ? scanMask.summary : `scan mask "${maskOperand}"`),
+        });
+        break;
+      }
+      case "EXT": {
+        const extendSeconds = num(args[0]);
+        directives.push({
+          ...base,
+          verb: "EXT",
+          extendSeconds,
+          description:
+            extendSeconds < 0
+              ? `Shorten the previous step's hold by ${seconds(-extendSeconds)} on each pass`
+              : `Extend the previous step's hold by ${seconds(extendSeconds)} on each pass`,
+        });
+        break;
+      }
+      case "BEEP":
+        directives.push({
+          ...base,
+          verb: "BEEP",
+          description: "Beep when the previous step completes",
+        });
+        break;
       case "INC": {
         const incrementC = num(args[0]);
         directives.push({
@@ -426,7 +559,8 @@ export function parseRunDefinition(runDefinition: string): RunDefinitionProgram 
 
   const scanMasks: ScanMask[] = [];
   for (const d of directives) {
-    if (d.verb !== "PLATEREAD" || !d.scanMask) continue;
+    if (d.verb !== "PLATEREAD" && d.verb !== "MELT") continue;
+    if (!d.scanMask) continue;
     if (!scanMasks.some((m) => m.raw === d.scanMask!.raw)) scanMasks.push(d.scanMask);
   }
 
@@ -447,9 +581,10 @@ function finiteOrNull(v: number | undefined): number | null {
 }
 
 /**
- * `CALC` is the only method any file or capture here carries; `BLOCK` appears in the
- * instrument's idle `STATUS?` response (`usb.md` §3), which is what makes the pair readable as
- * sample-temperature vs. block-temperature control. See `protocol.md` §6.
+ * `CALC` is the only method any file or capture here carries; `BLOCK` also appears in the
+ * instrument's idle `STATUS?` response (`usb.md` §3), and the two read as sample-temperature vs.
+ * block-temperature control. `OTHER` is the language's third value and is unexercised here.
+ * See `protocol.md` §3.2, and §9 for what stays unmeasured.
  */
 function describeMethod(method: string): string {
   switch (method.toUpperCase()) {
@@ -457,6 +592,8 @@ function describeMethod(method: string): string {
       return "Control the calculated sample temperature (not the block's own)";
     case "BLOCK":
       return "Control the block temperature directly";
+    case "OTHER":
+      return "Thermal control method OTHER";
     default:
       return method ? `Thermal control method ${method}` : "Thermal control method";
   }

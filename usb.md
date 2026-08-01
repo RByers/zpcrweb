@@ -198,7 +198,7 @@ order:
 
 | Command | Example response | Notes |
 |---|---|---|
-| `STATUS?` | idle: `17.04;18.3;0;0;IDLE;0;"",BLOCK,OFF;0;0.00;0.00;0.00;0.00;0.00;0;0;0;17.04;CLOSED;0;0000` — mid-run: `60.25;104.9;2;2;TEMP 95.0,10;2;"SINGLETE",CALC,ON;96;110.22;0.00;75.15;2.10;0.00;0;0;6;55.61;CLOSED;0;0000` | block temp, lid temp, cycle, step index, current step text, run name, method, lid state, block count, elapsed... — both examples are the complete response, not truncated |
+| `STATUS?` | idle: `17.04;18.3;0;0;IDLE;0;"",BLOCK,OFF;0;0.00;0.00;0.00;0.00;0.00;0;0;0;17.04;CLOSED;0;0000` — mid-run: `60.25;104.9;2;2;TEMP 95.0,10;2;"SINGLETE",CALC,ON;96;110.22;0.00;75.15;2.10;0.00;0;0;6;55.61;CLOSED;0;0000` | block temp, lid temp, two counters that both track the **cycle**, the current step text, that step's **1-based protocol step number**, run name, method, lid state, block count, elapsed... — both examples are the complete response, not truncated. The step number is the field *after* the step text — `PLATEREAD #h3F` reports `4` in a protocol where the plate read is the fourth step, which is one of the two measurements behind `protocol.md` §4. The two counters *before* the step text are not separable from each other in this capture (`protocol.md` §9) |
 | `RTSTATUS?` | `18.31;26;;0000` | shorter status, polled alongside `STATUS?` |
 | `ERRORLIST A` | `;0000` | polled every cycle in lockstep with `STATUS?`/`RTSTATUS?` |
 
@@ -207,14 +207,14 @@ order:
 | Command | Notes |
 |---|---|
 | `PROTOCOL '<name>'`, `METHOD <name>` | names the protocol/method being authored — see §5 |
-| `HOTLID <temp>,<shutoff>` | e.g. `HOTLID 105,30` — the second operand reads as the lid *shutoff* temperature once the file side is brought in (`protocol.md` §6); "ramp" was this table's earlier guess from the wire alone |
+| `HOTLID <temp>,<shutoff>` | e.g. `HOTLID 105,30` — the second operand is the lid *shutoff* temperature (`protocol.md` §3.2); "ramp" was this table's earlier guess from the wire alone |
 | `VOLUME <µL>` | e.g. `VOLUME 25` |
 | `TEMP <°C>,<seconds>` | one hold step, e.g. `TEMP 95.0,180` |
 | `PLATEREAD #h<hex>` | e.g. `PLATEREAD #h3F` — the **scan mask**: which optical channels to read, and how to sweep the plate. Decoded in §3.1 |
 | `GOTO <step>,<count>` | e.g. `GOTO 2,1` — loop back to step 2, 1 more time (2 total passes) |
 | `END` | closes the step list |
-| `ADDCYCLES <n>` | |
-| `RemoteRun "<A>","<B>","<C>","<name>","<user>","<pw?>","<D>","<method>"` | e.g. `RemoteRun "A","True","False","singletest","admin","","True","CALC"` — starts the authored protocol running under a given run name/user |
+| `ADDCYCLES <n>` | extends the running protocol's loop; the capture sends `ADDCYCLES 0`, a no-op, as ordinary run setup |
+| `RemoteRun "<block>","<lid on>","<remote start>","<name>","<user>","<sample ID>","<sierra mode>","<method>"` | e.g. `RemoteRun "A","True","False","singletest","admin","","True","CALC"` — starts the authored protocol, carrying what the protocol text cannot (`protocol.md` §7) |
 | `PROCEED` | resumes/confirms a run (there was a ~2-minute gap between `RemoteRun` and `PROCEED` in the capture — almost certainly the operator closing the lid and confirming on the touchscreen) |
 | `CANCEL` | seen once, immediately after the first plate read was pulled. The subsequent `LISTALLFILES` response only gains the `ended` marker and the second plate read (`Read00002.Plateread`) *after* this command — strong evidence this is normal run-finished cleanup rather than a user abort, though it isn't confirmed from firmware source |
 | `LID OPEN` / `LID CLOSE` | motorised lid control. In `usb-basic` the operator opened and then closed the lid, and the pair appears in exactly that order. Note CFX Manager emits `LID OPEN` **three times** for one open (t=…010.7, …018.5, …026.5) and `LID CLOSE` once — the repeat looks like the UI re-asserting while the lid travels, not three separate requests. `usb-run` has three `LID OPEN` and no `LID CLOSE`, matching an operator who opened it to load a plate and closed it at the touchscreen instead |
@@ -578,6 +578,11 @@ instance, rather than a cross-checked pattern:
 - **Channel 0 and channel 2's byte layout** (§4) — both channels' examples are real and
   byte-exact, but with this little variation in the traffic, no individual byte's meaning is
   confirmed for either.
+- **`RemoteRun`'s operand names** (§3) — the capture corroborates four of the eight positionally:
+  `"A"` is the block letter `ERRORLIST A` also uses, `"singletest"` is the run name the resulting
+  `.alf` report carries, `"admin"` the operator, `"CALC"` the method already sent as `METHOD`. The
+  three booleans between them are named from the language rather than demonstrated — nothing in
+  either capture varies them.
 - **`PLATEREAD #h<hex>`'s per-channel bits** (§3.1) — the mask's two *fields* are cross-checked
   (five runs, two configurations, three independent echoes of the value), and **bit 0 = channel 1**
   is measured directly from the one `#h81` run's all-zero channels 2–6. Bits 1–5 mapping to

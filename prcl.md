@@ -164,7 +164,7 @@ committed `20190516…SHORT_QUALIF.zpcr`, which carries both, shows two systemat
 | | `.prcl` `runDefinition` | `ProtocolRunDefinition.txt` |
 |---|---|---|
 | Plate-read operand | `PLATEREAD #h3F` | `PLATEREAD #h81` |
-| Terminator | `END;` | `END` + CRLF |
+| Terminator | `END;` | `END` + CRLF here — but the trailing `;` is **optional** in a recorded `.txt` and two of the five committed samples do carry it (`protocol.md` §8) |
 
 The archive's `.txt` is what the **instrument recorded for that run**; the `.prcl` is the
 **protocol as authored**. Do not treat either as canonical for the other, and do not diff them
@@ -191,10 +191,14 @@ Complete verb inventory across all files examined:
 | `RATE` | °C/s | Ramp rate |
 | `PLATEREAD` | `#h3F`, `#h81` | Scan mask, **hex** (`#h` prefix) — channels to read plus a sweep-mode bit; decoded in `usb.md` §3.1, and see below for why an authored file always says `#h3F` |
 | `GOTO` | step, repeats | **1-based** step index — unlike the XML |
-| `END` | — | Terminator (`END;` in `runDefinition`, bare `END` in the archive `.txt`) |
+| `END` | — | Terminator (`END;` in `runDefinition`; the archive `.txt` writes it bare *or* with the `;`, varying by run — `protocol.md` §8) |
+
+This is the inventory the committed files contain, not the whole language: `MELT`, `EXT` and
+`BEEP` are verbs no file here uses. `protocol.md` §3.2 has the full set.
 
 **What each verb *means*** — and the 1-based step numbering `GOTO` counts in, which is not the
-XML's — is `protocol.md`; this table is the format-side inventory it builds on. Decoding is
+XML's and which skips the `INC`/`RATE` modifiers — is `protocol.md`; this table is the format-side
+inventory it builds on. Decoding is
 `packages/core/src/runDefinition.ts` (`parseRunDefinition`), which `protocolDocumentFromRunDefinition`
 uses to recover `lidTemperature`/`shutoffTemperature`/`volume` for the text-only variants.
 
@@ -255,10 +259,11 @@ something the instrument reads.
   and the authored-vs-recorded difference is explained, but only the two whole-configuration masks
   `#h3F` and `#h81` have ever been observed. Whether a mask selecting an arbitrary subset (or the
   expected FRET encoding) is even accepted is untested.
-- **`METHOD` values other than `CALC`** — only `CALC` appears in the files examined.
+- **`METHOD` values other than `CALC`** — only `CALC` appears in the files examined; the language
+  also defines `BLOCK` and `OTHER` (`protocol.md` §3.2).
 - **`optionId`** — the constant string `"PlateReadOption"` in every file, so its value space is
   unknown. It may be an enum distinguishing plate-read variants in protocols not seen here.
-- **The pre-melt `TEMP <start>,31` hold** — every melt protocol emits two holds at the melt start
-  temperature (`TEMP 56.5,31; TEMP 56.5,5`) where only the second matches `meltCurveHoldTime`. The
-  `31` is unexplained and has no XML counterpart.
+- ~~**The pre-melt `TEMP <start>,31` hold**~~ — resolved: the `31` is a fixed equilibration hold
+  and doubles as the marker that makes a six-directive group read back as a melt curve, which is
+  why it has no XML counterpart. `protocol.md` §6.
 - **`BurnIn.prcl`'s plaintext container** — is it a legacy form, or does the app still write it?
