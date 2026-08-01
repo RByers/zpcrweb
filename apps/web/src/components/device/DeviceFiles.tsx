@@ -72,13 +72,26 @@ export function DeviceFiles({
   };
 
   return (
-    <section className="device__panel">
-      <div className="device__panelhead">
-        <h2 className="device__paneltitle">Files on the instrument</h2>
-        <button className="btn btn--sm" disabled={!connected || !!busy} onClick={() => void device.refreshAll()}>
+    // Collapsed by default: browsing the instrument's storage is a deliberate act, and a listed
+    // `CurrentRun` is long enough to bury the protocol panel above it when it isn't wanted.
+    <details className="device__panel device__panel--collapsible">
+      <summary className="device__panelhead">
+        <h2 className="device__paneltitle">
+          <span className="rail__chevron" aria-hidden="true">
+            ▸
+          </span>
+          Files on the instrument
+        </h2>
+        <button
+          className="btn btn--sm"
+          disabled={!connected || !!busy}
+          // No toggle guard needed: a <button> inside a <summary> is its own activation target,
+          // so clicking it never folds the panel.
+          onClick={() => void device.refreshAll()}
+        >
           Refresh all
         </button>
-      </div>
+      </summary>
 
       {openError && <div className="rail__note">Couldn't open the run: {openError}</div>}
 
@@ -177,6 +190,6 @@ export function DeviceFiles({
           })}
         </div>
       )}
-    </section>
+    </details>
   );
 }

@@ -37,6 +37,9 @@ function isPollLine(line: TrafficLine, prevOut: string | null): boolean {
 export function DeviceConsole({ device }: { device: CfxDeviceHandle }) {
   const [hidePolls, setHidePolls] = useState(true);
   const [follow, setFollow] = useState(true);
+  // Tracked because a closed panel has no scrollable body: without this the first thing seen on
+  // opening would be the *top* of the backlog, whatever "follow" says.
+  const [open, setOpen] = useState(false);
   const bodyRef = useRef<HTMLDivElement | null>(null);
 
   // A response carries no copy of the request, so "is this a poll reply?" is answered by the
@@ -51,14 +54,27 @@ export function DeviceConsole({ device }: { device: CfxDeviceHandle }) {
   }, [device.traffic, hidePolls]);
 
   useEffect(() => {
-    if (!follow || !bodyRef.current) return;
+    if (!open || !follow || !bodyRef.current) return;
     bodyRef.current.scrollTop = bodyRef.current.scrollHeight;
-  }, [lines, follow]);
+  }, [lines, follow, open]);
 
   return (
-    <section className="device__panel device__panel--console">
-      <div className="device__panelhead">
-        <h2 className="device__paneltitle">USB traffic</h2>
+    // Collapsed by default: the console is for watching the protocol when something is being
+    // debugged, not a thing to have open while using the view.
+    <details
+      className="device__panel device__panel--console device__panel--collapsible"
+      onToggle={(e) => setOpen((e.currentTarget as HTMLDetailsElement).open)}
+    >
+      <summary className="device__panelhead">
+        <h2 className="device__paneltitle">
+          <span className="rail__chevron" aria-hidden="true">
+            ▸
+          </span>
+          USB traffic
+        </h2>
+        {/* These act on the console, not on the panel — but they need no guard: the checkboxes
+            and the button are their own activation targets, so the <summary> around them never
+            sees the click as a toggle. */}
         <div className="device__consoleopts">
           <label className="switch">
             <input
@@ -80,7 +96,7 @@ export function DeviceConsole({ device }: { device: CfxDeviceHandle }) {
             Clear
           </button>
         </div>
-      </div>
+      </summary>
 
       <div className="device__consolebody mono" ref={bodyRef}>
         {lines.length === 0 ? (
@@ -112,6 +128,6 @@ export function DeviceConsole({ device }: { device: CfxDeviceHandle }) {
           ))
         )}
       </div>
-    </section>
+    </details>
   );
 }

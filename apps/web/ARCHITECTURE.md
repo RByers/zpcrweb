@@ -1650,6 +1650,15 @@ Four components, under `components/device/`:
   app can ask an instrument to *do* is the fixed set of buttons below, each an entry in
   `CFX_COMMANDS`. The debugging value was in watching the traffic, which is unchanged.
 
+The lower two panels are `<details>`, **collapsed by default**: browsing the instrument's storage
+and watching the wire are both deliberate acts, and a listed `CurrentRun` is 42 entries long — open
+by default they buried the protocol panel, which is the one thing on this view that is about the
+run you already have. Their header controls need no toggle guard: a `<button>` or checkbox inside a
+`<summary>` is its own activation target, so clicking one never folds the panel. The content column
+is a flex column rather than the fixed three-row grid it was, because a closed `<details>` must
+shrink to its header — no `grid-template-rows` track can express that; open panels claim the slack
+(`.device__panel--collapsible[open]`), with the console keeping its ~40% share.
+
 **Action commands carry their provenance.** `CFX_COMMANDS` tags each action with how it is known
 to do what it says. All four currently offered — `BLOCKID 1` (flash the indicator), `LID OPEN`,
 `LID CLOSE`, `CANCEL` — are `observed` in a capture. Anything tagged `unverified` is badged `?`

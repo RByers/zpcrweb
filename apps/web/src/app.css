@@ -2664,12 +2664,15 @@
   border-right-color: var(--neon-magenta-dim);
 }
 /* Protocol staging (content-sized — it bounds its own scrolling parts), then the file browser
-   taking the slack, then the console. */
+   taking the slack, then the console. A flex column rather than a fixed-row grid because the
+   lower two panels collapse: a closed <details> must shrink to its header, which no
+   `grid-template-rows` track can express — the open/closed rules live on the panels below. */
 .device__content {
-  display: grid;
-  grid-template-rows: auto 1fr minmax(180px, 40%);
+  display: flex;
+  flex-direction: column;
   min-width: 0;
   min-height: 0;
+  overflow-y: auto;
 }
 
 /* Buttons: the base `button` element rule already carries the look; these only add the compact
@@ -2810,10 +2813,34 @@
   display: flex;
   flex-direction: column;
   min-height: 0;
+  /* Content-sized by default; the open collapsible panels below claim the slack. */
+  flex: 0 0 auto;
   border-bottom: 1px solid var(--border);
 }
 .device__panel:last-child {
   border-bottom: 0;
+}
+/* The two collapsible panels (`<details>`): closed, a panel is just its header, and the space
+   goes to whichever is open. The file browser takes the slack; the console keeps the ~40% it
+   had, so opening it doesn't swallow the browser above. */
+.device__panel--collapsible {
+  flex: 0 0 auto;
+}
+.device__panel--collapsible[open] {
+  flex: 1 1 auto;
+}
+.device__panel--console[open] {
+  flex: 0 1 40%;
+  min-height: 180px;
+}
+/* A <details>' children sit inside a `::details-content` box in browsers that have it, which
+   would otherwise be a block and break the console body's `flex: 1` sizing. Where the pseudo
+   isn't supported the children are flex items of the panel already, and this rule is a no-op. */
+.device__panel--collapsible[open]::details-content {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1 1 auto;
 }
 .device__panelhead {
   display: flex;
@@ -2823,6 +2850,18 @@
   padding: 10px 14px;
   border-bottom: 1px solid var(--border);
   flex: 0 0 auto;
+  cursor: pointer;
+  list-style: none;
+}
+/* Same marker suppression as `.rail__details`: the chevron in the title is the disclosure. */
+.device__panelhead::-webkit-details-marker {
+  display: none;
+}
+.device__panel--collapsible:not([open]) > .device__panelhead {
+  border-bottom: 0;
+}
+.device__panel--collapsible[open] > .device__panelhead > .device__paneltitle > .rail__chevron {
+  transform: rotate(90deg);
 }
 .device__paneltitle {
   margin: 0;
@@ -3089,8 +3128,11 @@
 
 /* Narrow: the rail stacks above the content, matching `.curves`' own narrow behaviour. */
 @media (max-width: 900px) {
-  .device__content {
-    grid-template-rows: auto auto;
+  /* Stacked, the column is as tall as its content, so an open panel sizes itself rather than
+     splitting a fixed height; the console keeps a bounded, scrolling body. */
+  .device__panel--collapsible[open],
+  .device__panel--console[open] {
+    flex: 0 0 auto;
   }
   .device__consolebody {
     max-height: 320px;
