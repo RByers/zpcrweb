@@ -283,7 +283,7 @@ sample). The archive is named after `RunInfo.xml`'s `DataFile`, which is already
 Manager would have saved the same run under, and the call throws when `RunInfo.xml` is missing
 rather than handing back an archive `parseZpcr` would reject.
 
-This is what lets the web app's Device view open a run off a connected instrument as an ordinary
+This is what lets the web app's Instrument view open a run off a connected instrument as an ordinary
 file (see [`apps/web/ARCHITECTURE.md`](./apps/web/ARCHITECTURE.md)).
 
 ## Plate CSV + attaching a plate (`plateCsv.ts`, `attachPlate.ts`)
@@ -323,7 +323,7 @@ For a plate CSV that *isn't* in the archive, `Zpcr.channelForDye(dye)` publishes
 lookup, so a caller pairing a run with an outside plate can hand it to `parsePlateCsv` as
 `channelForFluor` and get the channels the run's own optics say. That is not the positional guess
 ruled out above and not a guess at all: it is one instrument's calibration set applied to a plate
-the caller has stated belongs with that run — the app's Device view stages exactly that pair (see
+the caller has stated belongs with that run — the app's Instrument view stages exactly that pair (see
 `apps/web/ARCHITECTURE.md`). A source with no calibrations of its own (a Biomeme run) answers
 `undefined` for every dye, as it should.
 Channels only drive colouring and grouping, never the color-separation solve, so an unknown one

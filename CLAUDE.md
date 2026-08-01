@@ -140,9 +140,10 @@ of ΔRFU) — and the rail's Cq range filter, whose top stop is where the curves
 clamp instead of crossing) — and that a `.pcrd` carrying a hand-set threshold seeds it as a
 per-fluorophore override while a dye the file left on auto is left alone (`threshold.md` §5.3:
 that one value is what makes the app reproduce CFX's own Cq) — and the Overview tab's
-`.prcl.txt` download plus the Device view's run staging, where the file bar is a *multi*-selection
-(three slots — a run, plus a `.prcl.txt`/`.plt.csv` overriding either half; tapping any selected
-chip releases its slot; a loaded `.prcl.txt` joins the selection and lands on the Device view; a
+`.prcl.txt` download plus the Instrument view's run staging, where the file bar is a
+*multi*-selection (three slots — a run, plus a `.prcl.txt`/`.plt.csv` overriding either half;
+tapping any selected chip releases its slot; a loaded `.prcl.txt` joins the selection and lands
+on the Instrument view; a
 staged `.plt.csv` takes its dye→channel mapping from the run it is paired with, including when
 that run supplies neither half and is there only as the instrument) and Start run appears only
 with an instrument attached — and how a run is *named*: the file bar shows an experiment name
@@ -159,7 +160,7 @@ DOM.
 Takes ~35s and needs Chrome, so it is **not** part of `npm test` — that stays fast and
 dependency-free. Run it when you touch `state/urlHash.ts`, `state/pltdPassword.ts`,
 `components/curves/ChipBar.tsx`, `components/curves/CurveTable.tsx`,
-`components/curves/CqRange.tsx`, `components/device/DeviceRun.tsx`, `state/useRunStaging.ts`,
+`components/curves/CqRange.tsx`, `components/instrument/InstrumentRun.tsx`, `state/useRunStaging.ts`,
 `lib/protocolSource.ts`, `lib/experiment.ts` (or core's `experiment.ts`),
 core's `runDefinition.ts` or `components/raw/DecodedView.tsx`'s `ProtocolDecoded`,
 `components/FileBar.tsx`, `components/views/StandaloneRawView.tsx`,
@@ -258,7 +259,7 @@ one algorithm doc, `calibration.md`, for the color-separation math built on top 
 | [`zipcrypto.md`](./zipcrypto.md) | The single-entry ZipCrypto-encrypted ZIP container shared by `.pltd`/`.prcl` and `.pcrd`: container variants, the fixed shared password, and the decrypt → inflate pipeline. Implemented by `packages/core/src/zipcrypto.ts` + `inflate.ts`. |
 | [`zpcrweb-json.md`](./zpcrweb-json.md) | `zpcrweb.json` — the one entry this project *writes* into a `.zpcr`, holding the run's analysis parameters (thresholds, the auto-threshold multiplier, calibration normalization) so they travel with the file instead of sitting in one browser's IndexedDB — plus §1.1's `experimentName`, what the run is *called*, which no CFX format has a field for. Not reverse-engineered. Implemented by `packages/core/src/zpcrwebSettings.ts` (+ `experiment.ts` for the name's resolution and filename derivation); the app side is `apps/web/src/state/analysisSettings.ts` + `analysisPersist.ts`. |
 | [`biomeme.md`](./biomeme.md) | Biomeme handheld device (Franklin/Two3/Three9) run-export JSON — the third input format, not a Bio-Rad format at all: no optical channels to unmix (fluorescence is per-dye already), and the device carries its own baseline/threshold/Cq alongside this library's. Self-describing JSON, not reverse-engineered. Implemented by `packages/core/src/biomeme.ts`, entry point `parseBiomeme(bytes)`, which decodes into the same `Zpcr` shape `parseZpcr`/`parsePcrd` produce. |
-| [`usb.md`](./usb.md) | The CFX96/C1000 instrument's own USB control protocol — not a file format: enumeration, the 5-byte application-layer frame, the ASCII command channel, and the file upload/download mechanism a run is loaded and read back through. Reverse-engineered from USB captures (decoded with `tools/usbpcap_decode.py`), then implemented and driven against live hardware — §10 lists what the instrument corrected. Implemented by `packages/core/src/usb/`, entry point `CfxDevice`; driven by `tools/cfx.mjs` and the web app's Device view. Reading and file retrieval only — no upload or run control. |
+| [`usb.md`](./usb.md) | The CFX96/C1000 instrument's own USB control protocol — not a file format: enumeration, the 5-byte application-layer frame, the ASCII command channel, and the file upload/download mechanism a run is loaded and read back through. Reverse-engineered from USB captures (decoded with `tools/usbpcap_decode.py`), then implemented and driven against live hardware — §10 lists what the instrument corrected. Implemented by `packages/core/src/usb/`, entry point `CfxDevice`; driven by `tools/cfx.mjs` and the web app's Instrument view. Reading and file retrieval only — no upload or run control. |
 | [`ARCHITECTURE.md`](./ARCHITECTURE.md) | Project-level design: isomorphic library goals, monorepo layout, input strategy. |
 | [`apps/web/ARCHITECTURE.md`](./apps/web/ARCHITECTURE.md) | Web app design notes. |
 

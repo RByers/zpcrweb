@@ -231,7 +231,7 @@ export async function openPage(chromeBase, url, { domains = ["Page", "Runtime", 
  */
 /**
  * Put `absPath` on the `<input type=file>` matching `selector` — the real user gesture, as far as
- * the page can tell. Shared by {@link loadFile} and any other input the app exposes (the Device
+ * the page can tell. Shared by {@link loadFile} and any other input the app exposes (the Instrument
  * view's `.prcl.txt` picker), so there is one place that knows the CDP dance.
  */
 export async function setFileInput(cdp, selector, absPath, { timeout = 60000 } = {}) {

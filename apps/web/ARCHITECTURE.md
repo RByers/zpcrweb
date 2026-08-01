@@ -426,7 +426,7 @@ so every call site keeps writing one `onChange({ … })` regardless of where the
   plate's target list — it is long enough to wrap to several lines, and every target it names is
   already visible in the grid below.
 - **Raw** — `RawFilesView` for `.zpcr`, `PcrdRawView` for `.pcrd` (see "Raw views" below).
-- **Device** — a live instrument over USB rather than a file; see "The Device view" below.
+- **Instrument** — a live instrument over USB rather than a file; see "The Instrument view" below.
 - **About** — `AboutView` (`components/views/AboutView.tsx`): one card carrying both the credits
   (name, the "nothing leaves your device" line, author and GitHub links) *and* the large
   `DropZone` plus the "Load an example file" link. About and the welcome screen used to be two
@@ -466,7 +466,7 @@ so every call site keeps writing one `onChange({ … })` regardless of where the
   step 2 (TEMP 95.0,10) — 45 passes in total"). It renders `parseRunDefinition()`'s directives
   and **parses nothing itself**: the verbs, the step numbering `GOTO` counts in, and the
   `PLATEREAD` scan mask are all core's, per [`protocol.md`](../../protocol.md). Takes plain
-  `text`, so `OverviewView` and the Device view's staged protocol reuse it unchanged.
+  `text`, so `OverviewView` and the Instrument view's staged protocol reuse it unchanged.
 - **`.prcl`** → `DecodedProtocol` (`components/raw/DecodedProtocol.tsx`), which decrypts the
   entry and renders `ProtocolDetail`: when the XML `protocol2` payload parsed into a step list,
   a settings panel (lid/shutoff/volume/real-time — flags the text grammar has no directive for)
@@ -517,9 +517,9 @@ is never written back, so renaming the file on disk still renames the run. For a
 Biomeme run there is no archive to write into, so the edit lasts the session — the field says so
 in its tooltip rather than losing it silently.
 
-The Device view has a name field too, for a run that does not exist yet: it is the one part of a
+The Instrument view has a name field too, for a run that does not exist yet: it is the one part of a
 staged run that is typed rather than selected from a file, so it sits in the "Run to start" panel
-with the protocol and plate, and is held by `DeviceView` so it outlives that panel's renders and
+with the protocol and plate, and is held by `InstrumentView` so it outlives that panel's renders and
 is reachable by Start run once there is one to send (`usb.md` §10).
 
 ## Raw views
@@ -719,7 +719,7 @@ color-separated `allFluorCurves` — and, on top of those, the run's **Cq table*
 
 ## A third format: Biomeme
 
-`@zpcrweb/core`'s `parseBiomeme` decodes a Biomeme handheld device's run-export JSON into the
+`@zpcrweb/core`'s `parseBiomeme` decodes a Biomeme handheld instrument's run-export JSON into the
 same `Zpcr` shape `parseZpcr`/`parsePcrd` produce (see the root
 [`ARCHITECTURE.md`](../../ARCHITECTURE.md#a-third-non-cfx-input-biomeme) and
 [`biomeme.md`](../../biomeme.md)), so `useZpcrStore` routes it through the exact same
@@ -1308,7 +1308,7 @@ marker, for instance, is still just `(entry.cq, entry.threshold)`, whichever sou
 from.
 
 The two are genuinely independent, not a single "source" radio: a user comparing this app's
-baseline fit against the device's own Cq call (or the reverse) is a real, useful combination, not
+baseline fit against the instrument's own Cq call (or the reverse) is a real, useful combination, not
 an edge case to prevent. Picking "file" baseline with "computed" Cq means the chart's marker sits
 at this library's threshold against the *file's* corrected curve, which won't necessarily land
 exactly on a crossing — an honest picture of two independent analyses compared piecewise, not a
@@ -1625,20 +1625,20 @@ response curves, not channel numbers.
 - `prefers-reduced-motion` is respected (the drawer animates with a `transition`, which
   `theme.css`'s global reduced-motion rule already disables).
 
-## The Device view
+## The Instrument view
 
 The one view that operates on **no file at all**. It connects to a CFX96 over WebUSB and shows the
 instrument: identity, live status, its filesystem, and the decoded protocol traffic. Everything it
 knows about the protocol comes from `@zpcrweb/core`'s `CfxDevice` (see the root
 [`ARCHITECTURE.md`](../../ARCHITECTURE.md#talking-to-an-instrument-not-a-file-srcusb) and
 [`usb.md`](../../usb.md)), per the standing rule that logic lives in the library — the app side is
-`state/useCfxDevice.ts`, which owns only what a browser session adds: obtaining the device through
+`state/useCfxDevice.ts`, which owns only what a browser session adds: obtaining the instrument through
 `navigator.usb`, a poll timer, a bounded traffic log, and the React state the components render.
 
 **Why it is set apart in the chrome.** Every other tab is a lens on the active file, and the file
 bar underneath says which one. This tab isn't:
 
-- Its tab sits in its **own group** in the strip (`ViewSelector`'s `DEVICE_VIEW`, kept out of
+- Its tab sits in its **own group** in the strip (`ViewSelector`'s `INSTRUMENT_VIEW`, kept out of
   `ALL_VIEWS`), separated by a gap and accented magenta where the file tabs are cyan. Grouping it
   with the rest would assert that the file *selection* applies to it in the usual way.
 - It renders **with nothing loaded**, ahead of the empty-state branch, so someone with a cycler
@@ -1673,7 +1673,7 @@ run loaded, plus the active file in its slot) rather than falling back at read t
 deselecting the last thing sticks instead of being immediately undone.
 
 A newly loaded file joins the selection by role rather than replacing it, which is what makes the
-headline flow work: load a `.prcl.txt`, land on the Device view (`addFiles` switches to it — a
+headline flow work: load a `.prcl.txt`, land on the Instrument view (`addFiles` switches to it — a
 protocol is an input to a run, not a run to look at, and has no file-backed view of its own), and
 see it staged against the run already loaded.
 
@@ -1681,9 +1681,9 @@ The `CfxDevice` lives in a **ref**, not state: it is a long-lived object with a 
 loop, and a re-render must not be able to look like a new connection — `open()` on an
 already-claimed interface fails.
 
-Four components, under `components/device/`:
+Four components, under `components/instrument/`:
 
-- **`DeviceRail`** — the left rail, reusing the Curves view's `.rail__*` vocabulary so the two
+- **`InstrumentRail`** — the left rail, reusing the Curves view's `.rail__*` vocabulary so the two
   read as the same kind of surface. Connection, the identification block, live status, and the
   action buttons — **Start run** among them, at their head. It sits with the lid and indicator
   commands rather than beside the staged run because that is what it is: the control that actuates
@@ -1691,7 +1691,7 @@ Four components, under `components/device/`:
   `usb.md` §10) and names the first missing piece when a run isn't staged, so the tooltip is
   always the next thing to do. Status fields the protocol doesn't name are either omitted or
   footnoted rather than labelled with a guess (the sample temperature is the live example).
-- **`DeviceRun`** — the run that would be started, as its two halves side by side: the thermal
+- **`InstrumentRun`** — the run that would be started, as its two halves side by side: the thermal
   protocol and the plate map, each headed by the file supplying it and badged when that file is an
   override. It renders a selection it does not own (see the staging model above), and it has no
   start button — that belongs with the commands that actuate the instrument, in the rail.
@@ -1719,7 +1719,7 @@ Four components, under `components/device/`:
   and wells shrunk to coloured cells, so a 96-well plate fits the column instead of scrolling out
   of it. Nothing is lost that isn't one hover away, and the question this preview answers is "is
   this the right plate?", not "what is in well F7?".
-- **`DeviceFiles`** — the instrument's storage, grouped by kind the way the Raw view groups a
+- **`InstrumentFiles`** — the instrument's storage, grouped by kind the way the Raw view groups a
   `.zpcr`. A *single* retrieved file is **saved to disk, not loaded into the app**: what lives on
   the instrument are the *parts* of a run — individual `.Plateread`s, the `.Dcal` set, the
   `.pltd`/`.prcl` pair — where every format this app opens is a whole run in one container.
@@ -1740,7 +1740,7 @@ Four components, under `components/device/`:
   called out as a failure. Either way no names are shown, because the protocol's failure mode is
   to return *another directory's* contents, and showing them under the wrong heading would be
   worse than showing nothing.
-- **`DeviceConsole`** — every decoded message in both directions, at the level of logical
+- **`InstrumentConsole`** — every decoded message in both directions, at the level of logical
   messages rather than USB packets, which is where the protocol is legible. Channel is on every
   line: a reply arriving on channel 2 rather than 1 is exactly the thing that would otherwise be
   invisible. Polling is filtered out by default (it would otherwise be all there is to see).
@@ -1759,7 +1759,7 @@ run you already have. Their header controls need no toggle guard: a `<button>` o
 `<summary>` is its own activation target, so clicking one never folds the panel. The content column
 is a flex column rather than the fixed three-row grid it was, because a closed `<details>` must
 shrink to its header — no `grid-template-rows` track can express that; open panels claim the slack
-(`.device__panel--collapsible[open]`), with the console keeping its ~40% share.
+(`.instrument__panel--collapsible[open]`), with the console keeping its ~40% share.
 
 **Action commands carry their provenance.** `CFX_COMMANDS` tags each action with how it is known
 to do what it says. All four currently offered — `BLOCKID 1` (flash the indicator), `LID OPEN`,
@@ -1773,7 +1773,7 @@ re-read of the `usb-basic` capture against the operator's account of it (flash, 
 close) found both: `LID CLOSE` verbatim, and `BLOCKID` as the indicator flash. See `usb.md` §3.
 
 **Testing.** The protocol logic is unit-tested in the library against a mock instrument scripted
-with the real device's replies (`packages/core/test/usbDevice.test.ts`) — the read pump, command
+with the real instrument's replies (`packages/core/test/usbDevice.test.ts`) — the read pump, command
 serialization, the atomic listing pair, and `GETFILE`'s verbatim bytes. The *browser* connect path
 can't be automated: WebUSB permission can't be granted to a headless Chrome, so `uishot`/`uitest`
 only ever see the disconnected state, and the connected UI is checked by hand or by stubbing

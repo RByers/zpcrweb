@@ -383,7 +383,7 @@ describe("plate CSV round-trip", () => {
 
 describe("Zpcr.channelForDye — giving an outside plate CSV its channels", () => {
   // The mapping `plates()` uses internally for an in-archive `.plt.csv`, published so a caller
-  // can pair a run with a plate CSV that isn't in the archive (the app's Device view stages
+  // can pair a run with a plate CSV that isn't in the archive (the app's Instrument view stages
   // exactly that). Read from the run's own `.Dcal` set, so it is a fact about this instrument.
   const zpcr = parseZpcr(readSampleBytes());
 

@@ -95,15 +95,16 @@ export function RawIcon() {
   );
 }
 
-/** Device: the instrument itself — a block with a lid line and a status indicator. Deliberately
- * unlike the document-shaped icons beside it, since this tab is the one that isn't about a file. */
-export function DeviceIcon() {
+/** Instrument: the thermal cycler itself, drawn head-on — the sloped lid with its vent panel on
+ * top of the base, and the base's touchscreen. Deliberately unlike the document-shaped icons
+ * beside it, since this tab is the one that isn't about a file. */
+export function InstrumentIcon() {
   return (
     <Svg>
-      <rect x="2" y="4" width="12" height="9" rx="1" />
-      <path d="M2 7h12" />
-      <path d="M5 10.5h4" />
-      <circle cx="11.5" cy="10.5" r="1" />
+      <path d="M3.5 8V4a1.5 1.5 0 0 1 1.5-1.5h6A1.5 1.5 0 0 1 12.5 4v4" />
+      <rect x="6" y="4.3" width="4" height="2.6" rx="0.5" />
+      <rect x="1.8" y="8" width="12.4" height="5.5" rx="1" />
+      <rect x="5.4" y="9.6" width="5.2" height="2.3" rx="0.5" />
     </Svg>
   );
 }

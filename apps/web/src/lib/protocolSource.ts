@@ -10,8 +10,8 @@
  * `.prcl`/`.pltd` is an encrypted container (`zipcrypto.md`), and the evidence is that the
  * instrument never decrypts one: of the five committed samples — all written by the instrument
  * itself — every one carries `ProtocolRunDefinition.txt`, only one carries a `.prcl` at all, and
- * none a `.pltd` from the device. Encryption arrived in CFX Manager and the firmware looks to have
- * been left alone; the encrypted pair reads as the PC software round-tripping its own config
+ * none a `.pltd` from the instrument. Encryption arrived in CFX Manager and the firmware looks
+ * to have been left alone; the encrypted pair reads as the PC software round-tripping its own config
  * through a run's results. So the plaintext directive list is both the portable form and, most
  * likely, the only one that matters to the instrument. See `usb.md` §5.1.
  */
@@ -90,7 +90,7 @@ export interface StagedRun {
   channelsFrom: string | null;
 }
 
-/** Nothing staged — what every view other than Device gets, since none of them read it. */
+/** Nothing staged — what every view other than Instrument gets, since none of them read it. */
 export const EMPTY_STAGED_RUN: StagedRun = {
   protocol: { value: null, sourceName: null, overridden: false, reason: null },
   plate: { value: null, sourceName: null, overridden: false, reason: null },

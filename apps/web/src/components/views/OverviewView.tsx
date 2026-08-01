@@ -159,7 +159,7 @@ export function OverviewView({
                 aria-label="Download the thermal protocol as .prcl.txt"
                 title={
                   "Download the ASCII run definition as .prcl.txt — one directive per line. " +
-                  "This is the form the instrument itself records, and what the Device view " +
+                  "This is the form the instrument itself records, and what the Instrument view " +
                   "loads to stage a protocol for a new run."
                 }
               >

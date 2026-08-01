@@ -19,7 +19,7 @@ import { PcrdRawView } from "./components/views/PcrdRawView";
 import { StandalonePlateView } from "./components/views/StandalonePlateView";
 import { StandaloneRawView } from "./components/views/StandaloneRawView";
 import { AboutView } from "./components/views/AboutView";
-import { DeviceView } from "./components/views/DeviceView";
+import { InstrumentView } from "./components/views/InstrumentView";
 import type { ViewId } from "./state/useZpcrStore";
 
 const STANDALONE_VIEWS = ["plates", "raw"] as const;
@@ -29,15 +29,16 @@ const STANDALONE_VIEWS = ["plates", "raw"] as const;
  * same {@link StandaloneRawView} a `.plt.csv` gets, for the same reason (one text file, no
  * container around it). */
 const BIOMEME_VIEWS = ["overview", "curves", "plates", "raw"] as const;
-/** A `.prcl.txt` is staged, not viewed — the Device view is the only place it does anything. */
-const PROTOCOL_VIEWS = ["device"] as const;
+/** A `.prcl.txt` is staged, not viewed — the Instrument view is the only place it does
+ * anything. */
+const PROTOCOL_VIEWS = ["instrument"] as const;
 
 /** A `.pltd`/`.plt.csv` uploaded on its own, rather than a run — it gets a restricted tab set. */
 const isStandaloneKind = (kind: string) => kind === "pltd" || kind === "csv";
 
 /** The file-backed tabs a given file kind supports, or `null` for "all of them". Shared by the
- * normal render and the Device view's early return, which needs the same answer to draw the rest
- * of the tab strip while it is the selected one.
+ * normal render and the Instrument view's early return, which needs the same answer to draw
+ * the rest of the tab strip while it is the selected one.
  *
  * Typed as a non-empty tuple so the view fallback below can take `[0]` — a restricted set with no
  * tabs in it would leave nowhere to fall back to. */
@@ -45,8 +46,8 @@ function restrictedViewsFor(kind: string): readonly [ViewId, ...ViewId[]] | null
   if (isStandaloneKind(kind)) return STANDALONE_VIEWS;
   if (kind === "biomeme") return BIOMEME_VIEWS;
   // A `.prcl.txt` is an *input to* a run, not a run to look at — it has no file-backed view, and
-  // Device is where it is used (`useRunStaging.ts`). Returning the Device tab alone keeps the
-  // fallback below total: there is always somewhere for a file to send you.
+  // Instrument is where it is used (`useRunStaging.ts`). Returning the Instrument tab alone
+  // keeps the fallback below total: there is always somewhere for a file to send you.
   if (kind === "prcl") return PROTOCOL_VIEWS;
   return null;
 }
@@ -83,17 +84,17 @@ export function App() {
   // header's natural width other than a resize: the selected tab (level 2 keeps its label) and
   // the active file (a standalone plate shows two tabs, a run five).
   const { ref: headerRef, fit } = useHeaderFit([store.view, store.activeId]);
-  // Which files make up the run the Device view would start. Held here rather than inside that
+  // Which files make up the run the Instrument view would start. Held here rather than inside that
   // view because the file bar — which lives in this component — is the control that edits it.
   const staging = useRunStaging(store.files, store.activeId);
   const [pltdPassword, setPassword] = usePltdPassword();
-  // Memoized, and skipped entirely off the Device view: resolving decodes a run's plate and, for
-  // a staged `.plt.csv`, re-parses it against the run's calibration set — real work to repeat on
-  // every render of a view that never looks at the result.
-  const onDevice = store.view === "device";
+  // Memoized, and skipped entirely off the Instrument view: resolving decodes a run's plate
+  // and, for a staged `.plt.csv`, re-parses it against the run's calibration set — real work to
+  // repeat on every render of a view that never looks at the result.
+  const onInstrument = store.view === "instrument";
   const staged = useMemo(
     () =>
-      onDevice
+      onInstrument
         ? resolveStagedRun(
             staging.selection,
             store.files,
@@ -105,7 +106,7 @@ export function App() {
           )
         : EMPTY_STAGED_RUN,
     [
-      onDevice,
+      onInstrument,
       staging.selection,
       store.files,
       store.runs,
@@ -129,8 +130,8 @@ export function App() {
   // value (a repeat click after a failed fetch), which fires no `hashchange`, so nothing would
   // otherwise happen.
   // A run assembled off the instrument is an ordinary added file, so it takes the same
-  // `addFiles` path as a drop — and then leaves the Device view for it, since staying on a view
-  // that shows no file would make a successful open look like nothing happened. Only on success:
+  // `addFiles` path as a drop — and then leaves the Instrument view for it, since staying on a
+  // view that shows no file would make a successful open look like nothing happened. Only on success:
   // a rejected archive leaves you where you are, with the error banner.
   const openRun = async (file: File) => {
     if (await store.addFiles([file])) store.setView("overview");
@@ -147,23 +148,23 @@ export function App() {
     return <div className="splash mono">initializing…</div>;
   }
 
-  // The Device view operates on an instrument, not a file, so it renders the same way whether or
-  // not anything is loaded — and is reachable from the welcome screen, which is where someone
+  // The Instrument view operates on an instrument, not a file, so it renders the same way
+  // whether or not anything is loaded — and is reachable from the welcome screen, which is where someone
   // with a cycler and no files yet actually starts. It keeps the file bar, because starting a run
   // needs files: there a chip means "part of the run being staged" rather than "the file you are
   // looking at", which is why it gets `selectedIds` and the staging toggle instead of `activeId`.
   // A `.prcl.txt` selected from another view has nowhere else to be rendered (it has no
   // file-backed tab), so it lands here too rather than leaving the content area blank.
-  if (store.view === "device" || (active?.kind === "prcl" && store.view !== "about")) {
+  if (store.view === "instrument" || (active?.kind === "prcl" && store.view !== "about")) {
     return (
       <div className={store.files.length > 0 ? "app" : "app app--nofiles"}>
         <header className="app__header" ref={headerRef} data-fit={fit}>
           <Logo onClick={showAbout} />
           <div className="app__views">
             <ViewSelector
-              value="device"
+              value="instrument"
               onChange={store.setView}
-              // With no file loaded there are no file-backed tabs to offer — only Device.
+              // With no file loaded there are no file-backed tabs to offer — only Instrument.
               views={active ? restrictedViewsFor(active.kind)?.slice() : []}
             />
           </div>
@@ -183,7 +184,7 @@ export function App() {
           />
         )}
         <main className="app__main">
-          <DeviceView onOpenRun={openRun} staged={staged} />
+          <InstrumentView onOpenRun={openRun} staged={staged} />
         </main>
         {store.error && <div className="app__error mono">{store.error}</div>}
       </div>
@@ -200,8 +201,8 @@ export function App() {
           <span className="app__tag">Bio-Rad CFX qPCR viewer</span>
         </header>
         <AboutView onFiles={store.addFiles} exampleHref={exampleHref} onLoadExample={loadExample} />
-        <div className="app__welcomedevice">
-          <button className="btn" onClick={() => store.setView("device")}>
+        <div className="app__welcomeinstrument">
+          <button className="btn" onClick={() => store.setView("instrument")}>
             Connect an instrument over USB
           </button>
         </div>

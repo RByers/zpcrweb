@@ -54,7 +54,7 @@ export type ViewId =
   | "reference"
   | "calibration"
   | "raw"
-  | "device"
+  | "instrument"
   | "about";
 /** Reference view only — drift relative to the factory calibration value; see `ReferenceView`. */
 export type Baseline = "raw" | "delta" | "percent";
@@ -97,7 +97,7 @@ export type FluorViewMode = "fluorophore" | "target" | "table";
  * library's own algorithm (`"computed"`) — `threshold.md`'s pipeline, the same one every
  * `.zpcr`/`.pcrd` curve always uses. The two toggles are independent; see `runAnalysis.ts`'s
  * `blendWithFileAnalysis` for exactly what each one swaps. `"file"` is the default: the source
- * device's own numbers are what a Biomeme user came to see. Meaningless (and hidden) for a run
+ * instrument's own numbers are what a Biomeme user came to see. Meaningless (and hidden) for a run
  * with no file-side analysis at all. */
 export type AnalysisSource = "file" | "computed";
 
@@ -379,7 +379,7 @@ function defaultSettings(): FileSettings {
     calFiles: new Set<string>(),
     // The response curve is what the algorithm consumes, so it's what the view leads with.
     calView: "relative",
-    // "file": a Biomeme user opened the file to see the device's own call, not this app's.
+    // "file": a Biomeme user opened the file to see the instrument's own call, not this app's.
     baselineSource: "file",
     cqSource: "file",
     ...defaultAnalysisSettings(),
@@ -817,7 +817,7 @@ export function useZpcrStore(): ZpcrStore {
       // A `.prcl.txt` is not a run to look at — it's an input to one. It has no file-backed view
       // of its own, so loading one goes where it can actually be used. Done here rather than at
       // the call site so every entry point (the header button, a drop, `#load=`) behaves alike.
-      if (lastKind === "prcl") setView("device");
+      if (lastKind === "prcl") setView("instrument");
       return lastId;
     },
     [forget],

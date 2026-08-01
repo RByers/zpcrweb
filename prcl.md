@@ -242,7 +242,7 @@ content: the header is optional and directives may be split across lines however
 (so an instrument's own `ProtocolRunDefinition.txt` is accepted unchanged), but every directive
 must start with a verb from §3's inventory — which is what makes picking a non-protocol file
 report itself instead of yielding an empty protocol. The web app writes it from the Overview
-tab and reads it in the Device view (`apps/web/ARCHITECTURE.md`, "The Device view").
+tab and reads it in the Instrument view (`apps/web/ARCHITECTURE.md`, "The Instrument view").
 
 **Why a text form exists at all.** A protocol that has to be handed to an instrument, or moved
 between machines, wants a representation that isn't an encrypted container — see `usb.md` §5.1

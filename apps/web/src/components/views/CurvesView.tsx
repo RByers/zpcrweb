@@ -1217,7 +1217,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
 
         {/* Only a source that carries its own analysis (currently Biomeme — `Zpcr.dyeSpace`,
             `WellCurve.fileAnalysis`) has anything for these to switch between; a `.zpcr`/`.pcrd`
-            run never shows them. Two independent toggles, not one: a user may want the device's
+            run never shows them. Two independent toggles, not one: a user may want the instrument's
             own Cq call while still inspecting this app's baseline fit, or the reverse — see
             `runAnalysis.ts`'s `blendWithFileAnalysis`. Shown in every view mode, like Threshold
             below, since both act on the one Cq table every view reads. */}

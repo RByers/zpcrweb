@@ -2,7 +2,7 @@
 /**
  * Talk to a CFX96 / C1000 Touch over USB from the command line.
  *
- * This is the Node face of the same `@zpcrweb/core` USB client the web app's Device view drives
+ * This is the Node face of the same `@zpcrweb/core` USB client the web app's Instrument view drives
  * in the browser — see `packages/core/src/usb/transport.ts` for why there's only one
  * implementation. The only thing this file supplies that the browser doesn't is the device
  * handle: node-usb's `WebUSB` in place of `navigator.usb`. Everything after that line is shared.
@@ -17,7 +17,7 @@
  *   node tools/cfx.mjs get '\Storage Card\CurrentRun\Read00001.Plateread' -o read1.Plateread
  *
  * `--trace` prints every framed message in both directions, which is the CLI equivalent of the
- * Device view's debug console.
+ * Instrument view's debug console.
  *
  * There is no "send an arbitrary command line" subcommand: `CfxDevice` exposes named operations
  * only (see its design point 3), so every subcommand here is one of those. Reaching a command the

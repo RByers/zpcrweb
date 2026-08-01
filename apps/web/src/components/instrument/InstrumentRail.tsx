@@ -1,5 +1,5 @@
 /**
- * The Device view's left rail: connection, identity, live status, and the action buttons.
+ * The Instrument view's left rail: connection, identity, live status, and the action buttons.
  *
  * Same `.rail__*` vocabulary the Curves view's rail uses, so the two read as the same kind of
  * surface — but this one is about an instrument rather than a file, which is the whole reason the
@@ -21,8 +21,14 @@ function Stat({ label, value, tone }: { label: string; value: string; tone?: "wa
 const temp = (v: number | null | undefined, digits = 1) =>
   v == null ? "—" : `${v.toFixed(digits)} °C`;
 
-export function DeviceRail({ device, staged }: { device: CfxDeviceHandle; staged: StagedRun }) {
-  const { connection, info, status, busy, lastAction } = device;
+export function InstrumentRail({
+  instrument,
+  staged,
+}: {
+  instrument: CfxDeviceHandle;
+  staged: StagedRun;
+}) {
+  const { connection, info, status, busy, lastAction } = instrument;
   const connected = connection === "connected";
   // What a run still needs, in the order it reads: the button says the *first* missing thing
   // rather than a generic "can't start", so the fix is always the next click.
@@ -33,7 +39,7 @@ export function DeviceRail({ device, staged }: { device: CfxDeviceHandle; staged
       : null;
 
   return (
-    <aside className="curves__rail device__rail">
+    <aside className="curves__rail instrument__rail">
       <div className="rail__section">
         <div className="rail__title">Instrument</div>
         {connection === "unsupported" ? (
@@ -43,18 +49,18 @@ export function DeviceRail({ device, staged }: { device: CfxDeviceHandle; staged
             cannot.
           </div>
         ) : (
-          <div className="device__connect">
+          <div className="instrument__connect">
             <button
               className="btn"
-              onClick={connected ? device.disconnect : device.connect}
+              onClick={connected ? instrument.disconnect : instrument.connect}
               disabled={connection === "connecting"}
             >
               {connected ? "Disconnect" : connection === "connecting" ? "Connecting…" : "Connect over USB"}
             </button>
-            <span className={"device__dot" + (connected ? " is-on" : "")} aria-hidden="true" />
+            <span className={"instrument__dot" + (connected ? " is-on" : "")} aria-hidden="true" />
           </div>
         )}
-        {device.error && <div className="rail__note mono">{device.error}</div>}
+        {instrument.error && <div className="rail__note mono">{instrument.error}</div>}
       </div>
 
       {connected && info && (
@@ -86,11 +92,11 @@ export function DeviceRail({ device, staged }: { device: CfxDeviceHandle; staged
         <div className="rail__section">
           <div className="rail__title">
             Status
-            <label className="switch device__pollswitch">
+            <label className="switch instrument__pollswitch">
               <input
                 type="checkbox"
-                checked={device.polling}
-                onChange={(e) => device.setPolling((e.target as HTMLInputElement).checked)}
+                checked={instrument.polling}
+                onChange={(e) => instrument.setPolling((e.target as HTMLInputElement).checked)}
               />
               poll
             </label>
@@ -111,7 +117,7 @@ export function DeviceRail({ device, staged }: { device: CfxDeviceHandle; staged
                 value={`${status.cycle ?? "—"} / ${status.step ?? "—"}`}
               />
               <Stat label="Run" value={status.runName || "(none)"} />
-              <div className="rail__note device__footnote">
+              <div className="rail__note instrument__footnote">
                 * The sample temperature is inferred: it tracks the block and lags it on a ramp,
                 but nothing in the protocol names this field.
               </div>
@@ -131,7 +137,7 @@ export function DeviceRail({ device, staged }: { device: CfxDeviceHandle; staged
               has no RemoteRun/PROCEED (`usb.md` §10), and this is the one control in the app that
               would heat a block, so it says what it is waiting for rather than looking armed. */}
           <button
-            className="btn btn--primary device__start"
+            className="btn btn--primary instrument__start"
             disabled
             title={
               missing ??
@@ -141,23 +147,26 @@ export function DeviceRail({ device, staged }: { device: CfxDeviceHandle; staged
           >
             Start run
           </button>
-          <div className="rail__note device__footnote">
+          <div className="rail__note instrument__footnote">
             {missing ?? "Staged and ready — but this client has no run-control commands yet."}
           </div>
-          <div className="device__actions">
+          <div className="instrument__actions">
             {(Object.keys(CFX_COMMANDS) as CfxCommandName[]).map((name) => {
               const spec = CFX_COMMANDS[name];
               const unverified = spec.confidence === "unverified";
               return (
                 <button
                   key={name}
-                  className={"btn device__action" + (unverified ? " device__action--unverified" : "")}
+                  className={
+                    "btn instrument__action" +
+                    (unverified ? " instrument__action--unverified" : "")
+                  }
                   disabled={!!busy}
                   title={spec.note}
-                  onClick={() => void device.runAction(name, spec)}
+                  onClick={() => void instrument.runAction(name, spec)}
                 >
                   {spec.label}
-                  {unverified && <span className="device__badge">?</span>}
+                  {unverified && <span className="instrument__badge">?</span>}
                 </button>
               );
             })}
@@ -168,14 +177,14 @@ export function DeviceRail({ device, staged }: { device: CfxDeviceHandle; staged
           {(Object.keys(CFX_COMMANDS) as CfxCommandName[]).some(
             (n) => CFX_COMMANDS[n].confidence === "unverified",
           ) && (
-            <div className="rail__note device__footnote">
-              Buttons marked <span className="device__badge">?</span> send a command name this
+            <div className="rail__note instrument__footnote">
+              Buttons marked <span className="instrument__badge">?</span> send a command name this
               protocol was never observed using — the instrument may reject them. The result code
               is reported below and in the console.
             </div>
           )}
           {lastAction && (
-            <div className={"device__result" + (lastAction.ok ? " is-ok" : " is-bad")}>
+            <div className={"instrument__result" + (lastAction.ok ? " is-ok" : " is-bad")}>
               <span className="mono">{lastAction.command}</span> → {lastAction.code}
               {lastAction.ok ? " (accepted)" : " (rejected)"}
             </div>
@@ -183,7 +192,7 @@ export function DeviceRail({ device, staged }: { device: CfxDeviceHandle; staged
         </div>
       )}
 
-      {busy && <div className="rail__note mono device__busy">{busy}…</div>}
+      {busy && <div className="rail__note mono instrument__busy">{busy}…</div>}
     </aside>
   );
 }

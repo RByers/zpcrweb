@@ -39,26 +39,26 @@ const GROUP_ORDER = [
   "Other",
 ];
 
-export function DeviceFiles({
-  device,
+export function InstrumentFiles({
+  instrument,
   onOpenRun,
 }: {
-  device: CfxDeviceHandle;
+  instrument: CfxDeviceHandle;
   /** Hand the assembled `.zpcr` to the app, exactly as if it had been dropped on the drop zone. */
   onOpenRun: (file: File) => Promise<void> | void;
 }) {
-  const { directories, busy, connection } = device;
+  const { directories, busy, connection } = instrument;
   const connected = connection === "connected";
   const [openError, setOpenError] = useState<string | null>(null);
 
   const retrieve = async (dir: string, name: string) => {
-    const bytes = await device.fetchFile(dir, name);
+    const bytes = await instrument.fetchFile(dir, name);
     if (bytes) downloadBytes(name, bytes);
   };
 
   const openRun = async (dir: string, names: string[]) => {
     setOpenError(null);
-    const files = await device.fetchDirectoryFiles(dir, names);
+    const files = await instrument.fetchDirectoryFiles(dir, names);
     // `undefined` means the fetch itself failed, which the rail already reports.
     if (!files) return;
     try {
@@ -74,9 +74,9 @@ export function DeviceFiles({
   return (
     // Collapsed by default: browsing the instrument's storage is a deliberate act, and a listed
     // `CurrentRun` is long enough to bury the protocol panel above it when it isn't wanted.
-    <details className="device__panel device__panel--collapsible">
-      <summary className="device__panelhead">
-        <h2 className="device__paneltitle">
+    <details className="instrument__panel instrument__panel--collapsible">
+      <summary className="instrument__panelhead">
+        <h2 className="instrument__paneltitle">
           <span className="rail__chevron" aria-hidden="true">
             ▸
           </span>
@@ -87,7 +87,7 @@ export function DeviceFiles({
           disabled={!connected || !!busy}
           // No toggle guard needed: a <button> inside a <summary> is its own activation target,
           // so clicking it never folds the panel.
-          onClick={() => void device.refreshAll()}
+          onClick={() => void instrument.refreshAll()}
         >
           Refresh all
         </button>
@@ -96,9 +96,9 @@ export function DeviceFiles({
       {openError && <div className="rail__note">Couldn't open the run: {openError}</div>}
 
       {!connected ? (
-        <div className="device__empty mono">Connect to browse the instrument's storage.</div>
+        <div className="instrument__empty mono">Connect to browse the instrument's storage.</div>
       ) : (
-        <div className="device__dirs">
+        <div className="instrument__dirs">
           {CFX_DIRECTORIES.map((d) => {
             const dir = directories[d.path];
             const groups = new Map<string, string[]>();
@@ -111,13 +111,13 @@ export function DeviceFiles({
             // would zip into an archive `parseZpcr` rejects.
             const isRun = !!dir?.listed && dir.names.some((n) => n.toLowerCase() === RUNINFO_NAME.toLowerCase());
             return (
-              <div key={d.path} className="device__dir">
-                <div className="device__dirhead">
+              <div key={d.path} className="instrument__dir">
+                <div className="instrument__dirhead">
                   <div>
-                    <span className="device__dirname">{d.label}</span>
-                    <span className="device__dirpath mono">{d.path}</span>
+                    <span className="instrument__dirname">{d.label}</span>
+                    <span className="instrument__dirpath mono">{d.path}</span>
                   </div>
-                  <div className="device__dirbtns">
+                  <div className="instrument__dirbtns">
                     {isRun && (
                       <button
                         className="btn btn--sm btn--primary"
@@ -131,7 +131,7 @@ export function DeviceFiles({
                     <button
                       className="btn btn--sm"
                       disabled={!!busy}
-                      onClick={() => void device.refreshDirectory(d.path)}
+                      onClick={() => void instrument.refreshDirectory(d.path)}
                     >
                       {dir ? "Reload" : "List"}
                     </button>
@@ -139,11 +139,11 @@ export function DeviceFiles({
                 </div>
 
                 {!dir ? (
-                  <div className="device__empty mono">Not listed yet.</div>
+                  <div className="instrument__empty mono">Not listed yet.</div>
                 ) : dir.status === "empty" ? (
                   // A real answer about this path, not a failure: listings cover files only, so a
                   // directory holding nothing but subdirectories reports itself empty.
-                  <div className="device__empty mono">
+                  <div className="instrument__empty mono">
                     No files here. Subdirectories aren't listed.
                   </div>
                 ) : !dir.listed ? (
@@ -158,19 +158,19 @@ export function DeviceFiles({
                     directory.
                   </div>
                 ) : dir.names.length === 0 ? (
-                  <div className="device__empty mono">Empty.</div>
+                  <div className="instrument__empty mono">Empty.</div>
                 ) : (
                   <>
-                    <div className="device__dirmeta mono">
+                    <div className="instrument__dirmeta mono">
                       {dir.names.length} files · listing {dir.listingBytes} bytes
                     </div>
                     {GROUP_ORDER.filter((g) => groups.has(g)).map((g) => (
-                      <div key={g} className="device__group">
-                        <div className="device__grouptitle">{g}</div>
-                        <ul className="device__files">
+                      <div key={g} className="instrument__group">
+                        <div className="instrument__grouptitle">{g}</div>
+                        <ul className="instrument__files">
                           {groups.get(g)!.map((name) => (
-                            <li key={name} className="device__file">
-                              <span className="device__filename mono">{name}</span>
+                            <li key={name} className="instrument__file">
+                              <span className="instrument__filename mono">{name}</span>
                               <button
                                 className="btn btn--sm"
                                 disabled={!!busy}

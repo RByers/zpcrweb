@@ -34,7 +34,7 @@ export function PlateViewer({
    * Preview variant: drop the vessel/scan-mode metadata and shrink the wells to colour-coded
    * cells, so a full 12-column plate fits a narrow column instead of scrolling sideways out of
    * it. Nothing is lost that isn't still one hover away — each cell keeps its full `title` — and
-   * the fluor chips above still name the dyes. Used by the Device view's staged run, where the
+   * the fluor chips above still name the dyes. Used by the Instrument view's staged run, where the
    * plate sits beside a protocol and the question is "is this the right plate?", not "what is in
    * well F7?".
    */

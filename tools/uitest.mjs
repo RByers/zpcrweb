@@ -38,7 +38,7 @@ const RVP_PCRD = join(REPO, "samples/20260726_S183-S185_RVP.pcrd");
 const EXAMPLE = "20260726_S183-S185_RVP.zpcr";
 /** Written by {@link makeDupe}: the example under its own name but a different size. */
 const DUPE = join(REPO, "tools/.uishot/dupe", EXAMPLE);
-/** Fixtures for the Device view's `.prcl.txt` picker — written at test time rather than
+/** Fixtures for the Instrument view's `.prcl.txt` picker — written at test time rather than
  * committed, since the point is the text form this app writes, not a captured artifact. */
 const PRCL_TXT = join(REPO, "tools/.uishot/dupe/Gradient.prcl.txt");
 const BAD_TXT = join(REPO, "tools/.uishot/dupe/not-a-protocol.txt");
@@ -1035,7 +1035,7 @@ const chipPresent = (cdp, text) =>
   );
 
 /**
- * The Device view's run staging: which loaded files make up the run that would be started.
+ * The Instrument view's run staging: which loaded files make up the run that would be started.
  *
  * All of it is state a screenshot can't judge, and the selection rules are the substance —
  * one run at a time, a `.prcl.txt`/plate file overriding half of it, a run deselected once both
@@ -1045,8 +1045,8 @@ const chipPresent = (cdp, text) =>
  * arrives as a chip and goes where it can be used, and that Start run appears only with an
  * instrument attached.
  */
-async function deviceRunChecks(chrome, origin) {
-  console.log("\ndevice run staging");
+async function instrumentRunChecks(chrome, origin) {
+  console.log("\ninstrument run staging");
   const cdp = await openPage(chrome.base, origin);
   await sleep(600);
   // Earlier checks leave their own files in IndexedDB, so start from a known empty bar rather
@@ -1074,7 +1074,7 @@ async function deviceRunChecks(chrome, origin) {
     dlLabel,
   );
 
-  await cdp.eval(`window.location.hash = "view=device", undefined`);
+  await cdp.eval(`window.location.hash = "view=instrument", undefined`);
   await waitFor(() => cdp.eval(`!!document.querySelector(".devrun")`), { what: "the run panel" });
   await sleep(300);
 
@@ -1097,10 +1097,10 @@ async function deviceRunChecks(chrome, origin) {
       };
     })()`);
 
-  // The file bar is still the file bar — the Device view just reads it as a selection.
+  // The file bar is still the file bar — the Instrument view just reads it as a selection.
   const first = await staged();
   check(
-    "the Device view keeps the app's file bar, in multi-select mode",
+    "the Instrument view keeps the app's file bar, in multi-select mode",
     first.chips.length === 1 && first.chips[0].on,
     JSON.stringify(first.chips),
   );
@@ -1145,7 +1145,7 @@ async function deviceRunChecks(chrome, origin) {
   );
 
   // Start run belongs to the instrument, not the panel, so it is absent until one is attached.
-  const startWhenIdle = await cdp.eval(`!!document.querySelector(".device__start")`);
+  const startWhenIdle = await cdp.eval(`!!document.querySelector(".instrument__start")`);
   check("Start run appears only with an instrument connected", startWhenIdle === false);
 
   // A `.prcl.txt` goes in through the ordinary load button, not a picker of its own.
@@ -1155,7 +1155,7 @@ async function deviceRunChecks(chrome, origin) {
   await waitFor(() => chipPresent(cdp, "Gradient"), { what: "the .prcl.txt chip" });
   await sleep(400);
   const loadedTab = await activeTab(cdp);
-  check("loading a .prcl.txt lands on the Device view", loadedTab === "Device", loadedTab);
+  check("loading a .prcl.txt lands on the Instrument view", loadedTab === "Instrument", loadedTab);
 
   // Loading it stages it: the headline flow is "load a protocol, see it against the run you
   // already had", so the file joins the selection rather than replacing it.
@@ -1485,7 +1485,7 @@ async function main() {
     await calibrationChecks(chrome, origin);
     await passwordChecks(chrome, origin, pw);
     await xmlViewChecks(chrome, origin, pw);
-    await deviceRunChecks(chrome, origin);
+    await instrumentRunChecks(chrome, origin);
     await experimentNameChecks(chrome, origin);
   } finally {
     chrome.stop();

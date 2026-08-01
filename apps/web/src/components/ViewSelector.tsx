@@ -2,7 +2,7 @@ import type { ViewId } from "../state/useZpcrStore";
 import {
   CalibrationIcon,
   CurvesIcon,
-  DeviceIcon,
+  InstrumentIcon,
   OverviewIcon,
   PlatesIcon,
   RawIcon,
@@ -19,7 +19,7 @@ const ALL_VIEWS: { id: ViewId; label: string; Icon: () => React.ReactElement }[]
 ];
 
 /**
- * The Device tab, kept out of {@link ALL_VIEWS} and rendered in its own group.
+ * The Instrument tab, kept out of {@link ALL_VIEWS} and rendered in its own group.
  *
  * Every other tab is a lens on the **active file**; this one talks to an instrument over USB and
  * is the only view that works — and is worth reaching — with nothing loaded at all. Grouping it
@@ -27,14 +27,14 @@ const ALL_VIEWS: { id: ViewId; label: string; Icon: () => React.ReactElement }[]
  * and the `views` restriction below exist to deny. `App` hides the file bar while it's showing,
  * for the same reason.
  */
-const DEVICE_VIEW = { id: "device" as ViewId, label: "Device", Icon: DeviceIcon };
+const INSTRUMENT_VIEW = { id: "instrument" as ViewId, label: "Instrument", Icon: InstrumentIcon };
 
 interface Props {
   value: ViewId;
   onChange: (v: ViewId) => void;
   /** Restrict the file-backed tab set, e.g. `["plates", "raw"]` for a standalone `.pltd`/`.plt.csv`
-   * entry. Defaults to every tab (a `.zpcr`/`.pcrd` run). Does not affect the Device tab, which is
-   * not file-backed. */
+   * entry. Defaults to every tab (a `.zpcr`/`.pcrd` run). Does not affect the Instrument tab,
+   * which is not file-backed. */
   views?: ViewId[];
 }
 
@@ -61,7 +61,7 @@ export function ViewSelector({ value, onChange, views }: Props) {
   return (
     <div className="viewselect" role="tablist" aria-label="View">
       {shown.length > 0 && <div className="segmented">{shown.map(tab)}</div>}
-      <div className="segmented segmented--device">{tab(DEVICE_VIEW)}</div>
+      <div className="segmented segmented--instrument">{tab(INSTRUMENT_VIEW)}</div>
     </div>
   );
 }

@@ -700,7 +700,7 @@ export function buildChart(cfg: BuildChartConfig): {
   // cycle at which the corrected curve reaches its threshold. That holds for this library's own
   // `computeCq` (a linear crossing of `correctedValues` against `threshold`, so the two
   // interpolations agree exactly), but not for a file-sourced analysis like a Biomeme run's: the
-  // device's reported Cq is not derived from its reported threshold crossing its own
+  // instrument's reported Cq is not derived from its reported threshold crossing its own
   // `baselineData` (`biomeme.md` §3), so the ring landed on the threshold line instead of the
   // curve. Interpolating `correctedValues` is exact for `computeCq` and honest for a file's Cq.
   const cqMarkers: { x: number; y: number; color: string; seriesIdx: number }[] = [];

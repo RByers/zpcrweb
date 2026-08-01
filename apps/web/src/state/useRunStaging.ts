@@ -1,5 +1,5 @@
 /**
- * Which loaded files make up the run the Device view would start.
+ * Which loaded files make up the run the Instrument view would start.
  *
  * A run needs two things — a thermal protocol and a plate map — and the app's loaded files supply
  * them in two shapes: a whole run (`.zpcr`/`.pcrd`/Biomeme) carries both, while a `.prcl.txt` or a
@@ -24,7 +24,7 @@
  *
  * **Newly loaded files join the selection.** Loading a file makes it active (`useZpcrStore`'s
  * `addFiles`), and this hook folds an active file into its slot. That is what makes the headline
- * flow work — load a `.prcl.txt`, land on the Device view, see it staged against the run you
+ * flow work — load a `.prcl.txt`, land on the Instrument view, see it staged against the run you
  * already had — without it replacing the whole selection, which is what a naive "the active file
  * is the selection" rule would do.
  */

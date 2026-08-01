@@ -19,7 +19,7 @@
  * of, rather than in the rail beside the button that would send it.
  *
  * There is no "start" button here: it lives in the rail with the other commands that actuate the
- * instrument (see `DeviceRail`), because that is what it is.
+ * instrument (see `InstrumentRail`), because that is what it is.
  */
 import { ProtocolDecoded } from "../raw/DecodedView";
 import { PlateViewer } from "../plate/PlateViewer";
@@ -50,13 +50,14 @@ function PartHead({
   );
 }
 
-export function DeviceRun({
+export function InstrumentRun({
   staged,
   name,
   onNameChange,
 }: {
   staged: StagedRun;
-  /** The run's name, as typed. Held by {@link DeviceView} — it outlives this panel's renders and
+  /** The run's name, as typed. Held by {@link InstrumentView} — it outlives this panel's renders
+   * and
    * is what a future Start run would label the run with. */
   name: string;
   onNameChange: (name: string) => void;
@@ -69,9 +70,9 @@ export function DeviceRun({
   const instrumentOnly = !!staged.runName && protocol.overridden && plate.overridden;
 
   return (
-    <section className="device__panel">
-      <div className="device__panelhead">
-        <h2 className="device__paneltitle">Run to start</h2>
+    <section className="instrument__panel">
+      <div className="instrument__panelhead">
+        <h2 className="instrument__paneltitle">Run to start</h2>
         <span className="devrun__hint mono">
           {empty
             ? "select files above"
@@ -99,7 +100,7 @@ export function DeviceRun({
       </label>
 
       {empty ? (
-        <div className="device__empty mono">
+        <div className="instrument__empty mono">
           Nothing staged. Select a run in the bar above, or a <code>.prcl.txt</code> and a{" "}
           <code>.plt.csv</code> to build one from parts.
         </div>
@@ -114,7 +115,7 @@ export function DeviceRun({
             {protocol.value ? (
               <ProtocolDecoded text={protocol.value.runDefinition} />
             ) : (
-              <div className="device__empty mono">
+              <div className="instrument__empty mono">
                 {protocol.reason ?? "No protocol selected."}
               </div>
             )}
@@ -128,7 +129,7 @@ export function DeviceRun({
             {plate.value ? (
               <PlateViewer plate={plate.value} compact />
             ) : (
-              <div className="device__empty mono">{plate.reason ?? "No plate selected."}</div>
+              <div className="instrument__empty mono">{plate.reason ?? "No plate selected."}</div>
             )}
           </div>
         </div>

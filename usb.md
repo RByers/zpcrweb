@@ -532,7 +532,7 @@ and collects the plate reads:
 8. To take the *whole* run rather than its pieces: pull every file `LISTALLFILES` reported for
    `\Storage Card\CurrentRun` and zip them unchanged — a `.zpcr` is a plain ZIP of exactly that
    directory, so no conversion is involved. `zpcrFromRunFiles` (`packages/core/src/runFolder.ts`)
-   does this, and is what the web app's Device view "Open run" button calls.
+   does this, and is what the web app's Instrument view "Open run" button calls.
 
 ## 8. Tooling
 
@@ -611,7 +611,7 @@ only by the CLI.
 **The client sends only command lines it builds itself.** `CfxDevice`'s public surface is named
 operations — `status()`, `listFiles(dir)`, `getFile(path)`, `runAction(name)` — and the primitives
 that take a command line (`send`/`command`/`tryCommand`/`sequence`) are private. There is no
-"send this string" call, and correspondingly no command prompt in the Device view and no `cmd`
+"send this string" call, and correspondingly no command prompt in the Instrument view and no `cmd`
 subcommand in the CLI; both had one, and both lost it deliberately. The reasoning is the same in
 each place: the vocabulary in §3 is what two captures happened to contain rather than a
 specification, a mistyped line is indistinguishable on the wire from an intended one, and the
@@ -635,11 +635,11 @@ Not implemented: file **upload** (`CRCSENDFILE` and the §5 GUID sequence), run 
 (`RemoteRun`/`PROCEED`), and protocol authoring — this client reads an instrument and retrieves
 files from it; it does not start runs. §6's gap is unchanged and unaffected.
 
-The Device view nonetheless **stages a run**, which is everything on the host side of starting one
+The Instrument view nonetheless **stages a run**, which is everything on the host side of starting one
 and nothing on the wire: pick the protocol and the plate from the app's loaded files — a whole run
 supplies both, a `.prcl.txt` (`prcl.md` §3.1) or a `.pltd`/`.plt.csv` overrides either half —
 review the exact directives that would be sent alongside the plate they'd run on, and stop there.
 Its **Start run** button is disabled, and will stay disabled until the commands above exist: a
 button that looks live and does nothing is worse than one that says what it is waiting for, and
 this is the one part of the app that would heat a block. The app side is documented in
-`apps/web/ARCHITECTURE.md`, "The Device view".
+`apps/web/ARCHITECTURE.md`, "The Instrument view".

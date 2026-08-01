@@ -1694,7 +1694,7 @@
   margin-bottom: 0;
 }
 
-/* Preview variant (the Device view's staged run): no metadata block, and wells shrunk to
+/* Preview variant (the Instrument view's staged run): no metadata block, and wells shrunk to
    colour-coded cells so a 96-well plate fits a column instead of scrolling out of it. The
    per-cell `title` still carries everything, so this hides detail rather than losing it. */
 .plateviewer--compact {
@@ -1901,8 +1901,8 @@
 /* Protocol steps: thermal steps numbered 1-based (GOTO targets), setup lines unnumbered. */
 /* A protocol listing: the directives as written, each with the library's reading of it beside
    it (protocol.md). The gloss sits to the right when there is room and drops under its own
-   directive when there isn't — the Device view's staged protocol is a half-width column, where
-   two columns would leave the notes wrapping one word per line. Container query, not a media
+   directive when there isn't — the Instrument view's staged protocol is a half-width column,
+   where two columns would leave the notes wrapping one word per line. Container query, not a media
    query: what matters is the panel's width, not the window's. */
 .decoded__proto {
   display: flex;
@@ -2750,15 +2750,15 @@
   opacity: 0.25;
 }
 
-/* ---- Device view ---------------------------------------------------------
+/* ---- Instrument view ---------------------------------------------------------
    A live instrument over WebUSB, not a file. Everything here is deliberately set apart from the
-   file-backed views: its tab sits in its own group (`.segmented--device`), the file bar is hidden
+   file-backed views: its tab sits in its own group (`.segmented--instrument`), the file bar is hidden
    while it shows (see `App.tsx`), and it uses magenta where the rest of the chrome uses cyan — the
    palette's second accent, already meaning "this is a different kind of thing" on the rail's
    switches. Layout is the Curves view's rail + content grid (`.curves`), so the surfaces read the
    same even though the content doesn't. */
 
-/* The tab strip is now two groups rather than one control: the file views, then Device. The gap
+/* The tab strip is now two groups rather than one control: the file views, then Instrument. The gap
    plus the separate border is the whole visual argument that the file selection doesn't apply to
    it — see `ViewSelector.tsx`. */
 .viewselect {
@@ -2766,10 +2766,10 @@
   align-items: center;
   gap: 10px;
 }
-.segmented--device {
+.segmented--instrument {
   border-color: var(--neon-magenta-dim);
 }
-.segmented--device .segmented__item.is-active {
+.segmented--instrument .segmented__item.is-active {
   background: var(--neon-magenta-dim);
   box-shadow: inset 0 -2px 0 var(--neon-magenta);
 }
@@ -2782,20 +2782,20 @@
   height: 100%;
   min-height: 0;
 }
-.app__welcomedevice {
+.app__welcomeinstrument {
   display: flex;
   justify-content: center;
   padding-bottom: 24px;
 }
 
-.device__rail {
+.instrument__rail {
   border-right-color: var(--neon-magenta-dim);
 }
 /* Protocol staging (content-sized — it bounds its own scrolling parts), then the file browser
    taking the slack, then the console. A flex column rather than a fixed-row grid because the
    lower two panels collapse: a closed <details> must shrink to its header, which no
    `grid-template-rows` track can express — the open/closed rules live on the panels below. */
-.device__content {
+.instrument__content {
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -2825,26 +2825,26 @@
 }
 
 /* The one action in a group that does the thing you came for — "Open run" beside "Reload". It
-   borrows the Device view's magenta so it reads as this view's primary action. */
+   borrows the Instrument view's magenta so it reads as this view's primary action. */
 .btn--primary {
   border-color: var(--neon-magenta);
   background: var(--neon-magenta-dim);
 }
 
 /* Connection */
-.device__connect {
+.instrument__connect {
   display: flex;
   align-items: center;
   gap: 10px;
 }
-.device__dot {
+.instrument__dot {
   width: 8px;
   height: 8px;
   border-radius: 50%;
   background: var(--ink-muted);
   flex: 0 0 auto;
 }
-.device__dot.is-on {
+.instrument__dot.is-on {
   background: var(--good);
   box-shadow: 0 0 8px var(--good);
 }
@@ -2878,37 +2878,37 @@
 .devstat__value--good {
   color: var(--good);
 }
-.device__footnote {
+.instrument__footnote {
   color: var(--ink-muted);
   margin-top: 8px;
 }
-.device__pollswitch {
+.instrument__pollswitch {
   font-size: 10px;
   letter-spacing: 0.08em;
 }
-.device__busy {
+.instrument__busy {
   color: var(--neon-cyan);
 }
 
 /* Actions. The `?` badge marks a command name this protocol was never observed using — the
    button is real, but the instrument is expected to reject it, so it must not look as settled as
    the ones beside it. */
-.device__actions {
+.instrument__actions {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
 }
-.device__action {
+.instrument__action {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   font-size: 12px;
 }
-.device__action--unverified {
+.instrument__action--unverified {
   border-style: dashed;
   color: var(--ink-2);
 }
-.device__badge {
+.instrument__badge {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -2920,24 +2920,24 @@
   font-size: 10px;
   font-weight: 700;
 }
-.device__result {
+.instrument__result {
   margin-top: 8px;
   font-size: 11px;
   padding: 5px 8px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border);
 }
-.device__result.is-ok {
+.instrument__result.is-ok {
   color: var(--good);
   background: var(--good-dim);
 }
-.device__result.is-bad {
+.instrument__result.is-bad {
   color: var(--warn);
   background: rgba(255, 165, 61, 0.12);
 }
 
 /* Panels */
-.device__panel {
+.instrument__panel {
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -2945,32 +2945,32 @@
   flex: 0 0 auto;
   border-bottom: 1px solid var(--border);
 }
-.device__panel:last-child {
+.instrument__panel:last-child {
   border-bottom: 0;
 }
 /* The two collapsible panels (`<details>`): closed, a panel is just its header, and the space
    goes to whichever is open. The file browser takes the slack; the console keeps the ~40% it
    had, so opening it doesn't swallow the browser above. */
-.device__panel--collapsible {
+.instrument__panel--collapsible {
   flex: 0 0 auto;
 }
-.device__panel--collapsible[open] {
+.instrument__panel--collapsible[open] {
   flex: 1 1 auto;
 }
-.device__panel--console[open] {
+.instrument__panel--console[open] {
   flex: 0 1 40%;
   min-height: 180px;
 }
 /* A <details>' children sit inside a `::details-content` box in browsers that have it, which
    would otherwise be a block and break the console body's `flex: 1` sizing. Where the pseudo
    isn't supported the children are flex items of the panel already, and this rule is a no-op. */
-.device__panel--collapsible[open]::details-content {
+.instrument__panel--collapsible[open]::details-content {
   display: flex;
   flex-direction: column;
   min-height: 0;
   flex: 1 1 auto;
 }
-.device__panelhead {
+.instrument__panelhead {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -2982,16 +2982,16 @@
   list-style: none;
 }
 /* Same marker suppression as `.rail__details`: the chevron in the title is the disclosure. */
-.device__panelhead::-webkit-details-marker {
+.instrument__panelhead::-webkit-details-marker {
   display: none;
 }
-.device__panel--collapsible:not([open]) > .device__panelhead {
+.instrument__panel--collapsible:not([open]) > .instrument__panelhead {
   border-bottom: 0;
 }
-.device__panel--collapsible[open] > .device__panelhead > .device__paneltitle > .rail__chevron {
+.instrument__panel--collapsible[open] > .instrument__panelhead > .instrument__paneltitle > .rail__chevron {
   transform: rotate(90deg);
 }
-.device__paneltitle {
+.instrument__paneltitle {
   margin: 0;
   font-size: 11px;
   text-transform: uppercase;
@@ -2999,26 +2999,26 @@
   color: var(--ink-muted);
   font-weight: 500;
 }
-.device__empty {
+.instrument__empty {
   padding: 14px;
   color: var(--ink-muted);
   font-size: 12px;
 }
 
 /* File browser */
-.device__dirs {
+.instrument__dirs {
   overflow-y: auto;
   padding: 12px 14px;
   display: flex;
   flex-direction: column;
   gap: 16px;
 }
-.device__dir {
+.instrument__dir {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--panel);
 }
-.device__dirhead {
+.instrument__dirhead {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -3026,52 +3026,52 @@
   padding: 8px 12px;
   border-bottom: 1px solid var(--border);
 }
-.device__dirbtns {
+.instrument__dirbtns {
   display: flex;
   align-items: center;
   gap: 6px;
   flex: none;
 }
-.device__dirname {
+.instrument__dirname {
   font-size: 13px;
   color: var(--ink);
 }
-.device__dirpath {
+.instrument__dirpath {
   display: block;
   font-size: 10px;
   color: var(--ink-muted);
 }
-.device__dirmeta {
+.instrument__dirmeta {
   padding: 6px 12px 0;
   font-size: 10px;
   color: var(--ink-muted);
 }
-.device__dir .rail__note {
+.instrument__dir .rail__note {
   padding: 10px 12px;
 }
-.device__group {
+.instrument__group {
   padding: 8px 12px;
 }
-.device__grouptitle {
+.instrument__grouptitle {
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.1em;
   color: var(--ink-muted);
   margin-bottom: 4px;
 }
-.device__files {
+.instrument__files {
   list-style: none;
   margin: 0;
   padding: 0;
 }
-.device__file {
+.instrument__file {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
   padding: 3px 0;
 }
-.device__filename {
+.instrument__filename {
   font-size: 12px;
   color: var(--ink-2);
   overflow-wrap: anywhere;
@@ -3096,7 +3096,7 @@
   min-width: 0;
   /* Each half scrolls on its own rather than the panel scrolling as a whole: a 60-step melt
      protocol beside a 96-well plate would otherwise make the shorter one unreachable. The cap is
-     generous because `.device__content` scrolls too — it only stops a long protocol burying the
+     generous because `.instrument__content` scrolls too — it only stops a long protocol burying the
      panels below, it isn't the panel's height budget. */
   max-height: 420px;
   overflow: auto;
@@ -3172,14 +3172,14 @@
 
 /* Start run sits at the head of the rail's actions, full width so it doesn't read as one more
    equal peer of "Open lid". */
-.device__start {
+.instrument__start {
   width: 100%;
   margin-bottom: 6px;
 }
 
-/* The file bar in its multi-select role (the Device view): a chip is part of the run being
+/* The file bar in its multi-select role (the Instrument view): a chip is part of the run being
    staged, so several can be on at once. Magenta rather than the file views' cyan, matching the
-   Device tab and saying that the selection means something different here. */
+   Instrument tab and saying that the selection means something different here. */
 .filebar--multi .filechip.is-active {
   border-color: var(--neon-magenta);
 }
@@ -3188,58 +3188,58 @@
 }
 
 /* Traffic console */
-.device__panel--console {
+.instrument__panel--console {
   background: var(--plane);
 }
-.device__consoleopts {
+.instrument__consoleopts {
   display: flex;
   align-items: center;
   gap: 12px;
 }
-.device__consolebody {
+.instrument__consolebody {
   flex: 1 1 auto;
   overflow-y: auto;
   padding: 8px 14px;
   font-size: 11px;
   line-height: 1.55;
 }
-.device__line {
+.instrument__line {
   display: flex;
   gap: 8px;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-.device__linetime {
+.instrument__linetime {
   color: var(--ink-muted);
   flex: 0 0 auto;
 }
-.device__linedir {
+.instrument__linedir {
   flex: 0 0 auto;
 }
-.device__line.is-out .device__linedir {
+.instrument__line.is-out .instrument__linedir {
   color: var(--neon-cyan);
 }
-.device__line.is-in .device__linedir {
+.instrument__line.is-in .instrument__linedir {
   color: var(--neon-magenta);
 }
-.device__linechan {
+.instrument__linechan {
   flex: 0 0 auto;
   color: var(--ink-muted);
 }
 /* A message the host never asked for — a channel-0/2 payload, or a channel-1 reply with no
    pending request. Worth spotting: it is what a naive per-command reader would have silently
    mistaken for an answer. */
-.device__line.is-unsolicited .device__linechan {
+.instrument__line.is-unsolicited .instrument__linechan {
   color: var(--warn);
 }
-.device__linebody {
+.instrument__linebody {
   color: var(--ink-2);
   min-width: 0;
 }
-.device__line.is-out .device__linebody {
+.instrument__line.is-out .instrument__linebody {
   color: var(--ink);
 }
-.device__linebytes {
+.instrument__linebytes {
   color: var(--ink-muted);
 }
 
@@ -3247,11 +3247,11 @@
 @media (max-width: 900px) {
   /* Stacked, the column is as tall as its content, so an open panel sizes itself rather than
      splitting a fixed height; the console keeps a bounded, scrolling body. */
-  .device__panel--collapsible[open],
-  .device__panel--console[open] {
+  .instrument__panel--collapsible[open],
+  .instrument__panel--console[open] {
     flex: 0 0 auto;
   }
-  .device__consolebody {
+  .instrument__consolebody {
     max-height: 320px;
   }
 }

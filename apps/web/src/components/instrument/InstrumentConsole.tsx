@@ -11,7 +11,8 @@
  * into it. It doesn't any more, and `CfxDevice` no longer offers a way to build one: the command
  * vocabulary is reverse-engineered (`usb.md` §3), the instrument on the other end heats a block
  * and moves a lid, and a mistyped line there is indistinguishable from an intended one. What the
- * app can ask the instrument to *do* is the fixed set of buttons in `DeviceRail`, each backed by
+ * app can ask the instrument to *do* is the fixed set of buttons in `InstrumentRail`, each
+ * backed by
  * an entry in `CFX_COMMANDS`. Watching the traffic keeps all of the debugging value the prompt
  * had; typing into it was the part with the sharp edge.
  */
@@ -34,7 +35,7 @@ function isPollLine(line: TrafficLine, prevOut: string | null): boolean {
   return prevOut !== null && POLL_COMMANDS.test(prevOut);
 }
 
-export function DeviceConsole({ device }: { device: CfxDeviceHandle }) {
+export function InstrumentConsole({ instrument }: { instrument: CfxDeviceHandle }) {
   const [hidePolls, setHidePolls] = useState(true);
   const [follow, setFollow] = useState(true);
   // Tracked because a closed panel has no scrollable body: without this the first thing seen on
@@ -46,12 +47,12 @@ export function DeviceConsole({ device }: { device: CfxDeviceHandle }) {
   // request it followed — tracked here in one pass rather than guessed at per line.
   const lines = useMemo(() => {
     let prevOut: string | null = null;
-    return device.traffic.filter((line) => {
+    return instrument.traffic.filter((line) => {
       const poll = isPollLine(line, prevOut);
       if (line.direction === "out") prevOut = line.text;
       return !(hidePolls && poll);
     });
-  }, [device.traffic, hidePolls]);
+  }, [instrument.traffic, hidePolls]);
 
   useEffect(() => {
     if (!open || !follow || !bodyRef.current) return;
@@ -62,11 +63,11 @@ export function DeviceConsole({ device }: { device: CfxDeviceHandle }) {
     // Collapsed by default: the console is for watching the protocol when something is being
     // debugged, not a thing to have open while using the view.
     <details
-      className="device__panel device__panel--console device__panel--collapsible"
+      className="instrument__panel instrument__panel--console instrument__panel--collapsible"
       onToggle={(e) => setOpen((e.currentTarget as HTMLDetailsElement).open)}
     >
-      <summary className="device__panelhead">
-        <h2 className="device__paneltitle">
+      <summary className="instrument__panelhead">
+        <h2 className="instrument__paneltitle">
           <span className="rail__chevron" aria-hidden="true">
             ▸
           </span>
@@ -75,7 +76,7 @@ export function DeviceConsole({ device }: { device: CfxDeviceHandle }) {
         {/* These act on the console, not on the panel — but they need no guard: the checkboxes
             and the button are their own activation targets, so the <summary> around them never
             sees the click as a toggle. */}
-        <div className="device__consoleopts">
+        <div className="instrument__consoleopts">
           <label className="switch">
             <input
               type="checkbox"
@@ -92,16 +93,16 @@ export function DeviceConsole({ device }: { device: CfxDeviceHandle }) {
             />
             follow
           </label>
-          <button className="btn btn--sm" onClick={device.clearTraffic}>
+          <button className="btn btn--sm" onClick={instrument.clearTraffic}>
             Clear
           </button>
         </div>
       </summary>
 
-      <div className="device__consolebody mono" ref={bodyRef}>
+      <div className="instrument__consolebody mono" ref={bodyRef}>
         {lines.length === 0 ? (
-          <div className="device__empty">
-            {device.connection === "connected"
+          <div className="instrument__empty">
+            {instrument.connection === "connected"
               ? "No traffic yet."
               : "Connect to watch the protocol."}
           </div>
@@ -110,19 +111,19 @@ export function DeviceConsole({ device }: { device: CfxDeviceHandle }) {
             <div
               key={l.id}
               className={
-                "device__line" +
+                "instrument__line" +
                 (l.direction === "out" ? " is-out" : " is-in") +
                 (l.unsolicited ? " is-unsolicited" : "")
               }
             >
-              <span className="device__linetime">{time(l.at)}</span>
-              <span className="device__linedir">{l.direction === "out" ? "→" : "←"}</span>
-              <span className="device__linechan" title={`channel ${l.channel}`}>
+              <span className="instrument__linetime">{time(l.at)}</span>
+              <span className="instrument__linedir">{l.direction === "out" ? "→" : "←"}</span>
+              <span className="instrument__linechan" title={`channel ${l.channel}`}>
                 ch{l.channel}
               </span>
-              <span className="device__linebody">
+              <span className="instrument__linebody">
                 {l.text !== null ? l.text : l.hex}
-                {l.text === null && <span className="device__linebytes"> ({l.bytes} B)</span>}
+                {l.text === null && <span className="instrument__linebytes"> ({l.bytes} B)</span>}
               </span>
             </div>
           ))
