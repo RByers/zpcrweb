@@ -5,8 +5,10 @@
  * surface — but this one is about an instrument rather than a file, which is the whole reason the
  * view sits apart in the tab strip.
  */
-import { CFX_COMMANDS, type CfxCommandName } from "@zpcrweb/core";
+import { useState } from "react";
+import { CFX_COMMANDS, type CfxCommandName, type RunPlan } from "@zpcrweb/core";
 import type { CfxDeviceHandle } from "../../state/useCfxDevice";
+import type { RunWatchState } from "../../state/useRunWatch";
 import type { StagedRun } from "../../lib/protocolSource";
 
 function Stat({ label, value, tone }: { label: string; value: string; tone?: "warn" | "good" }) {
@@ -24,19 +26,41 @@ const temp = (v: number | null | undefined, digits = 1) =>
 export function InstrumentRail({
   instrument,
   staged,
+  plan,
+  runWatch,
 }: {
   instrument: CfxDeviceHandle;
   staged: StagedRun;
+  /** The staged run as it would be sent, or null when a half is missing (`InstrumentView`). */
+  plan: RunPlan | null;
+  runWatch: RunWatchState;
 }) {
-  const { connection, info, status, busy, lastAction } = instrument;
+  const { connection, info, status, busy, lastAction, runProgress } = instrument;
   const connected = connection === "connected";
+  // What the last start did — kept so the deposit phase can report itself. A run whose files
+  // didn't copy is still a run (`usb.md` §7.4), so this is a note, never a failure.
+  const [startNote, setStartNote] = useState<string[] | null>(null);
   // What a run still needs, in the order it reads: the button says the *first* missing thing
   // rather than a generic "can't start", so the fix is always the next click.
+  const blockers = plan?.checks.filter((c) => c.severity === "error") ?? [];
   const missing = !staged.protocol.value
     ? "Select a protocol in the file bar first."
     : !staged.plate.value
       ? "Select a plate in the file bar first."
-      : null;
+      : !connected
+        ? "Connect to the instrument first."
+        : blockers.length > 0
+          ? blockers[0]!.message
+          : status?.running
+            ? "The instrument is already running something."
+            : null;
+  const canStart = !!plan && plan.startable && connected && !busy && !status?.running;
+
+  const start = async () => {
+    if (!plan) return;
+    const result = await instrument.startRun(plan);
+    setStartNote(result ? result.uploadErrors : null);
+  };
 
   return (
     <aside className="curves__rail instrument__rail">
@@ -133,23 +157,39 @@ export function InstrumentRail({
           <div className="rail__title">Actions</div>
           {/* Start run leads the actions because it is the one that runs the experiment, and
               sits with them rather than beside the staged run because it *actuates the
-              instrument* — that is what this group is. Permanently disabled for now: the library
-              has no RemoteRun/PROCEED (`usb.md` §10), and this is the one control in the app that
-              would heat a block, so it says what it is waiting for rather than looking armed. */}
+              instrument* — that is what this group is. It is the only control in the app that
+              heats a block, so it stays disabled with a reason attached until every half of the
+              run is present and every check passes. */}
           <button
             className="btn btn--primary instrument__start"
-            disabled
+            disabled={!canStart}
             title={
               missing ??
-              "Not implemented yet: starting a run needs RemoteRun and PROCEED (usb.md §3), " +
-                "which this library doesn't have."
+              `Author ${plan?.commands.length ?? 0} protocol commands, start the run and ` +
+                `upload ${plan?.uploads.length ?? 0} files to the instrument.`
             }
+            onClick={() => void start()}
           >
             Start run
           </button>
           <div className="rail__note instrument__footnote">
-            {missing ?? "Staged and ready — but this client has no run-control commands yet."}
+            {missing ??
+              `Ready: ${plan!.program.steps.length} steps. The run starts the moment this is ` +
+                "clicked — there is no second confirmation. Close the lid first."}
           </div>
+          {/* The deposit phase's report (`usb.md` §7.4). Only shown when it had something to say:
+              the files are provenance, so a problem here means the archive may open without its
+              plate map — worth knowing, and not worth an error banner over a running run. */}
+          {startNote && startNote.length > 0 && (
+            <div className="rail__note instrument__footnote">
+              The run started. Its files, though:
+              <ul className="instrument__startnote">
+                {startNote.map((line, i) => (
+                  <li key={i}>{line}</li>
+                ))}
+              </ul>
+            </div>
+          )}
           <div className="instrument__actions">
             {(Object.keys(CFX_COMMANDS) as CfxCommandName[]).map((name) => {
               const spec = CFX_COMMANDS[name];
@@ -189,6 +229,48 @@ export function InstrumentRail({
               {lastAction.ok ? " (accepted)" : " (rejected)"}
             </div>
           )}
+        </div>
+      )}
+
+      {/* What the run watcher is doing. Its own section rather than a line in Status, because it
+          is about *this app's* file list rather than about the instrument — the run keeps going
+          whether or not anything here is following it. */}
+      {connected && (
+        <div className="rail__section">
+          <div className="rail__title">
+            Current run
+            <label className="switch instrument__pollswitch">
+              <input
+                type="checkbox"
+                checked={runWatch.watching}
+                onChange={(e) => runWatch.setWatching((e.target as HTMLInputElement).checked)}
+              />
+              follow
+            </label>
+          </div>
+          {runProgress ? (
+            <>
+              <Stat
+                label="State"
+                value={
+                  runProgress.inProgress
+                    ? "in progress"
+                    : runProgress.ended
+                      ? "finished"
+                      : "no run"
+                }
+                tone={runProgress.inProgress ? "warn" : "good"}
+              />
+              <Stat label="Plate reads" value={String(runProgress.plateReads)} />
+            </>
+          ) : (
+            <div className="rail__stat">—</div>
+          )}
+          <div className="rail__note instrument__footnote">
+            {runWatch.note ??
+              "The run folder is listed every few seconds; when it changes, the run is pulled " +
+                "and kept in the file bar as a .zpcr."}
+          </div>
         </div>
       )}
 

@@ -23,6 +23,7 @@
  * There is no "start" button here: it lives in the rail with the other commands that actuate the
  * instrument (see `InstrumentRail`), because that is what it is.
  */
+import type { RunPlan } from "@zpcrweb/core";
 import { ProtocolDecoded } from "../raw/DecodedView";
 import { PlateViewer } from "../plate/PlateViewer";
 import type { StagedRun } from "../../lib/protocolSource";
@@ -52,17 +53,42 @@ function PartHead({
   );
 }
 
+/**
+ * What the plate and the protocol say about each other (`usb/runPlan.ts`).
+ *
+ * Sits between the two halves it is about, not in the rail beside the button: the fix for
+ * "channel 3 is never read" is to change one of these two files, and the message is only
+ * actionable next to them. An `error` blocks the start; a `warning` is worth reading and doesn't.
+ */
+function RunChecks({ plan }: { plan: RunPlan }) {
+  if (plan.checks.length === 0) return null;
+  return (
+    <ul className="devrun__checks">
+      {plan.checks.map((check, i) => (
+        <li key={i} className={`devrun__check devrun__check--${check.severity}`}>
+          <span className="devrun__checkicon" aria-hidden="true">
+            {check.severity === "error" ? "✕" : "!"}
+          </span>
+          <span>{check.message}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 export function InstrumentRun({
   staged,
   name,
   onNameChange,
+  plan,
 }: {
   staged: StagedRun;
   /** The run's name, as typed. Held by {@link InstrumentView} — it outlives this panel's renders
-   * and
-   * is what a future Start run would label the run with. */
+   * and is what Start run labels the run with. */
   name: string;
   onNameChange: (name: string) => void;
+  /** The staged run as it would be sent, or null when a half is missing. */
+  plan: RunPlan | null;
 }) {
   const { protocol, plate } = staged;
   const empty = !protocol.value && !plate.value && !protocol.reason && !plate.reason;
@@ -107,6 +133,8 @@ export function InstrumentRun({
           <code>.plt.csv</code> to build one from parts.
         </div>
       ) : (
+        <>
+        {plan && <RunChecks plan={plan} />}
         <div className="devrun">
           <div className="devrun__part">
             <PartHead
@@ -135,6 +163,7 @@ export function InstrumentRun({
             )}
           </div>
         </div>
+        </>
       )}
     </section>
   );

@@ -68,6 +68,8 @@ import {
   type CfxRtStatus,
   type CfxStatus,
 } from "./status.js";
+import { cfxFileCrc, cfxFileCrcSwapped, formatCfxFileCrc } from "./crc.js";
+import { CFX_RUN_REPORT_DIR, type RunPlan } from "./runPlan.js";
 import {
   CFX_CONFIGURATION,
   CFX_ENDPOINT_IN,
@@ -150,6 +152,44 @@ const LISTING_STATUS_CODES = new Map<string, CfxListingStatus>([
   ["7,0,9,0", "empty"],
   ["4,0,9,0", "missing"],
 ]);
+
+/** What one {@link CfxDevice.sendFile} upload did, including both sides' checksums. */
+export interface CfxUploadResult {
+  /** The friendly path the file was sent to. */
+  path: string;
+  /** The GUID path the device actually stored it under, or null if it named none. */
+  storedPath: string | null;
+  bytes: number;
+  /** The checksum this client computed and announced (`crc.ts`). */
+  crcSent: number;
+  /** The checksum the device computed over what it stored, or null if it reported none. */
+  crcStored: number | null;
+  /** True when the two agree — the only evidence that the bytes landed intact. */
+  verified: boolean;
+  /**
+   * The device's answer matched the *other* byte-order convention (`cfxFileCrcSwapped`).
+   *
+   * This is a measurement, not a transfer error: it means the file arrived intact and that
+   * `usb.md` §7.4's stated formula has the halves the wrong way round for an even-length file.
+   * See `crc.ts`'s module comment — only an even-length upload can produce it, and until one has
+   * been sent to real hardware nothing here knows which convention is right.
+   */
+  checksumConventionSwapped: boolean;
+}
+
+/** What one {@link CfxDevice.startRun} did. The run is going by the time this resolves. */
+export interface CfxRunStartResult {
+  /** One entry per file successfully sent in the §7.4 deposit phase. */
+  uploads: CfxUploadResult[];
+  /**
+   * Anything that went wrong *after* the run started — a file that didn't copy, or a checksum
+   * that came back under the other convention. Never a reason to consider the run failed: it is
+   * running. Surfaced so a UI can say the archive may be missing its plate map.
+   */
+  uploadErrors: string[];
+}
+
+const ENCODER = new TextEncoder();
 
 /** Throw on a non-success code, else pass the response through. */
 function checked(command: string, res: CfxResponse): CfxResponse {
@@ -290,8 +330,24 @@ export class CfxDevice {
 
   /** Write one command and await its reply. Assumes the caller holds the channel. */
   private async exchange(command: string, timeoutMs?: number): Promise<CfxMessage> {
+    return this.exchangeBytes(command, encodeCommand(command), timeoutMs);
+  }
+
+  /**
+   * As {@link exchange}, but with the payload supplied whole.
+   *
+   * Exists for `CRCSENDFILE`, the one command whose payload is not all-ASCII: a file's raw bytes
+   * follow the command text in the *same* message, and — measured byte-exactly from the capture,
+   * where the announced length is the prefix plus the file and not two more — with **no `\r\n`
+   * terminator**, unlike every text command. `command` here is the label the timeout message and
+   * the pending queue use, not something that gets encoded.
+   */
+  private async exchangeBytes(
+    command: string,
+    payload: Uint8Array,
+    timeoutMs?: number,
+  ): Promise<CfxMessage> {
     if (this.closed) throw new Error("device is closed");
-    const payload = encodeCommand(command);
     const header = { ...REQUEST_HEADER, channel: CHANNEL_ASCII };
     const frame = encodeFrame(header, payload);
     const reply = new Promise<CfxMessage>((resolve, reject) => {
@@ -323,6 +379,7 @@ export class CfxDevice {
       send: (command: string, timeoutMs?: number) => Promise<CfxMessage>;
       command: (command: string, timeoutMs?: number) => Promise<CfxResponse>;
       tryCommand: (command: string, timeoutMs?: number) => Promise<CfxResponse>;
+      sendBytes: (label: string, payload: Uint8Array, timeoutMs?: number) => Promise<CfxMessage>;
     }) => Promise<T>,
   ): Promise<T> {
     return this.hold(() =>
@@ -330,6 +387,7 @@ export class CfxDevice {
         send: (c, t) => this.exchange(c, t),
         command: async (c, t) => checked(c, parseResponse((await this.exchange(c, t)).payload)),
         tryCommand: async (c, t) => parseResponse((await this.exchange(c, t)).payload),
+        sendBytes: (l, p, t) => this.exchangeBytes(l, p, t),
       }),
     );
   }
@@ -514,6 +572,207 @@ export class CfxDevice {
   async deleteFile(path: string): Promise<void> {
     assertCommandArgument("path", path);
     await this.command(`DELFILE ${path}`);
+  }
+
+  /**
+   * Upload one file (`usb.md` §5, §7.4): the five-command cycle, checksum-verified end to end.
+   *
+   * ```
+   * DELFILE <path>                  clear any stale file at the friendly name
+   * CRCSENDFILE "<crc>*<path>",…    the bytes, prefixed by our own checksum
+   * COMPUTEFILECRC "<path>"         → the GUID the device actually stored it under
+   * GETFILESLEN + LISTALLFILES      the host re-lists
+   * GETFILECRC "<guid path>"        → the device's checksum, to compare against ours
+   * ```
+   *
+   * Details that are load-bearing and not obvious from the command names (`usb.md` §7.4):
+   *
+   * - **`DELFILE` on a file that isn't there is normal.** It answers with a `passThrough` binary
+   *   payload — `05 00 09 00`, "no such file", a third member of §5's status-code family — rather
+   *   than an error code, and three of the capture's four uploads got exactly that. A first
+   *   upload to a clean directory always does, so treating it as fatal would break the ordinary
+   *   path.
+   * - **`COMPUTEFILECRC` returns no CRC.** Despite the name, it hands back the *GUID name* the
+   *   device stored the file under (`<dir>\<guid>;0000`). That name is the only way to ask about
+   *   the stored copy, which is why the verification step needs it — and the GUID is transient,
+   *   gone from the listing by the next file's upload, so it is used immediately and not kept.
+   * - **The middle listing is a UI refresh**, not a protocol requirement — the GUID is already
+   *   known. It is kept because the `GETFILESLEN`/`LISTALLFILES` *pairing* is mandatory wherever
+   *   a listing happens (see {@link listFiles}) and this whole cycle already holds the channel.
+   *
+   * Resolves with both checksums so the caller can report a mismatch — including the
+   * even-length-file ambiguity of `crc.ts`, which this is the only place that can measure.
+   * Throws only if the instrument rejects a command outright.
+   */
+  async sendFile(path: string, bytes: Uint8Array): Promise<CfxUploadResult> {
+    assertCommandArgument("path", path);
+    const crc = cfxFileCrc(bytes);
+    const swapped = cfxFileCrcSwapped(bytes);
+    const prefix = ENCODER.encode(`CRCSENDFILE "${formatCfxFileCrc(crc)}*${path}",`);
+    const payload = new Uint8Array(prefix.length + bytes.length);
+    payload.set(prefix, 0);
+    payload.set(bytes, prefix.length);
+    const dir = path.slice(0, Math.max(0, path.lastIndexOf("\\")));
+
+    return this.sequence(async ({ command, tryCommand, sendBytes }) => {
+      // Not `command`: a missing file is the normal case on a first upload — see above.
+      await tryCommand(`DELFILE ${path}`);
+      const sent = parseResponse((await sendBytes(`CRCSENDFILE ${path}`, payload, 60_000)).payload);
+      if (!sent.ok) throw new CfxCommandError(`CRCSENDFILE ${path}`, sent);
+      const stored = await command(`COMPUTEFILECRC "${path}"`);
+      const storedPath = (stored.value ?? "").trim();
+      // `tryCommand`, because this pair is the UI refresh noted above rather than a step the
+      // upload depends on: `GETFILESLEN` answers a directory it can't measure with a binary
+      // payload (§5), which would parse as a failure and take a perfectly good upload with it.
+      await tryCommand(`GETFILESLEN ${dir}`);
+      await tryCommand(`LISTALLFILES ${dir}`);
+      // Without a GUID there is nothing to interrogate; report the upload unverified rather than
+      // inventing a path, which would ask the device about a file that doesn't exist.
+      if (storedPath === "") {
+        return {
+          path,
+          storedPath: null,
+          bytes: bytes.length,
+          crcSent: crc,
+          crcStored: null,
+          verified: false,
+          checksumConventionSwapped: false,
+        };
+      }
+      const echoed = await command(`GETFILECRC "${storedPath}"`);
+      const raw = Number(echoed.value);
+      const crcStored = Number.isFinite(raw) ? raw : null;
+      return {
+        path,
+        storedPath,
+        bytes: bytes.length,
+        crcSent: crc,
+        crcStored,
+        verified: crcStored === crc,
+        // Only possible for an even-length file, and it means the bytes are fine but our byte
+        // order isn't — see `crc.ts`. Distinguished here because a corrupt transfer and a wrong
+        // convention need completely different responses from a caller.
+        checksumConventionSwapped: crcStored !== crc && crcStored === swapped,
+      };
+    });
+  }
+
+  // ---- run control ------------------------------------------------------
+
+  /**
+   * Clear `\Storage Card\PCRunReport` of the previous run's report (`usb.md` §7.1).
+   *
+   * Worth doing rather than skipping: with the directory emptied first, the `.alf` the finished
+   * run writes is the only entry in it, so collecting it afterwards needs no name or timestamp
+   * matching. Failures are swallowed — this is housekeeping, and a run must not be blocked by it.
+   */
+  async clearRunReports(): Promise<string[]> {
+    const dir = await this.listFiles(CFX_RUN_REPORT_DIR);
+    const deleted: string[] = [];
+    for (const name of dir.names) {
+      try {
+        await this.deleteFile(`${CFX_RUN_REPORT_DIR}\\${name}`);
+        deleted.push(name);
+      } catch {
+        /* housekeeping; the run is what matters */
+      }
+    }
+    return deleted;
+  }
+
+  /**
+   * Run a protocol, start to started (`usb.md` §7).
+   *
+   * The order is the capture's, and it is **not** the one §5's upload machinery suggests. The
+   * protocol is typed in as ASCII directives and `RemoteRun` starts *that*; the file upload
+   * happens afterwards, with the run already under way, and is a **deposit rather than an
+   * instruction** (§7.4) — it is what makes the finished run folder a self-contained experiment,
+   * and nothing executes it. Uploading first would put files somewhere the starting run is about
+   * to rewrite.
+   *
+   * ```
+   * 7.1  clear the old .alf                     (optional housekeeping)
+   * 7.2  PROTOCOL 'PCRUN', the directives, END  one command each, each acked 0000
+   * 7.3  RemoteRun …                            ← the run starts HERE, nothing further required
+   *      ADDCYCLES 0                            a no-op the capture sends as ordinary setup
+   * 7.4  the files                              deposited into the run folder, after the start
+   * ```
+   *
+   * **There is no confirmation step.** An earlier reading of the capture had `PROCEED` as the
+   * "operator has closed the lid" confirmation; §7.5 measured it as *skip to the next step*,
+   * issued mid-run to cut a 3-minute denaturation short. Sending it here would silently skip the
+   * run's first step. Expect `STATUS?` to leave `IDLE` within ~10 s of `RemoteRun`, and expect
+   * the *lid* to heat first — the block sits at ambient for ~3 minutes while it does, which a
+   * caller watching block temperature will mistake for a hang.
+   *
+   * The authoring runs inside one {@link sequence}: a status poll interleaving with it is
+   * harmless, but a second caller authoring concurrently would splice two step lists into one
+   * with no way to detect it afterwards.
+   */
+  async startRun(plan: RunPlan, onProgress?: (what: string) => void): Promise<CfxRunStartResult> {
+    if (!plan.startable) {
+      throw new Error("This run plan has unresolved errors and must not be started.");
+    }
+    onProgress?.("Clearing the previous run report");
+    try {
+      await this.clearRunReports();
+    } catch {
+      /* §7.1 is housekeeping — see clearRunReports */
+    }
+    await this.sequence(async ({ command }) => {
+      for (const [i, line] of plan.commands.entries()) {
+        onProgress?.(`Sending protocol (${i + 1}/${plan.commands.length})`);
+        await command(line);
+      }
+      onProgress?.("Starting the run");
+      // The run begins on this command. Everything after it is deposit and housekeeping.
+      await command(plan.remoteRun);
+      await command("ADDCYCLES 0");
+    });
+    // Outside the sequence above: each upload is its own multi-command operation that takes the
+    // channel for itself, and nesting one inside a held channel would deadlock (see `sequence`).
+    //
+    // Failures here are reported, never thrown: by this point the run is *already going*, and
+    // aborting a started run because a provenance file didn't copy would be the wrong trade —
+    // §7.4's whole point is that a client wanting only the fluorescence can skip this phase.
+    const uploads: CfxUploadResult[] = [];
+    const uploadErrors: string[] = [];
+    for (const [i, upload] of plan.uploads.entries()) {
+      onProgress?.(`Uploading ${upload.name} (${i + 1}/${plan.uploads.length})`);
+      try {
+        const result = await this.sendFile(upload.path, upload.bytes);
+        uploads.push(result);
+        if (result.checksumConventionSwapped) {
+          uploadErrors.push(
+            `${upload.name} (${result.bytes} bytes) stored intact, but the instrument's ` +
+              `checksum ${result.crcStored} matches the swapped byte order, not the ${result.crcSent} ` +
+              "we sent. This is the even-length ambiguity in usb.md §7.4 — the file is fine.",
+          );
+        } else if (!result.verified) {
+          uploadErrors.push(
+            `${upload.name} may not have copied intact: sent ${result.crcSent}, the instrument ` +
+              `reports ${result.crcStored ?? "nothing"}.`,
+          );
+        }
+      } catch (e) {
+        uploadErrors.push(`${upload.name}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+    return { uploads, uploadErrors };
+  }
+
+  /**
+   * `CANCEL` — acknowledge a finished run, releasing the instrument back to idle (`usb.md` §7.6).
+   *
+   * Named for what it does at the *end* of a run, which is the only place this library uses it.
+   * When a protocol completes, `STATUS?` reports `IDLE` with the run's name still attached and
+   * the method still `CALC`; `CANCEL` clears that to the empty-name idle state, and the final
+   * plate read, the `ended` marker and the `.alf` report only appear in the run folder afterwards.
+   * On a run still in progress the same command aborts it — which is why nothing here sends it
+   * without checking the status first.
+   */
+  async acknowledgeRun(): Promise<CfxResponse> {
+    return this.tryCommand("CANCEL");
   }
 
   // ---- actions ----------------------------------------------------------

@@ -702,6 +702,17 @@ but it is the one the instrument agrees with, and the zero-padded 5-digit format
 not `5672`), so a client must format it that way going out even though `GETFILECRC` answers back
 unpadded.
 
+> **Which half is which is not settled, for an even-length file.** All four uploads above have an
+> **odd** byte length (17,299 / 1,821 / 8,751 / 1,291), and that is the limit of what they can
+> establish. The same four values are produced by the degenerate CRC-16 with polynomial
+> `x^16 + 1` — a register that XORs in each byte and rotates right eight times, which is a far more
+> likely thing to find behind a function named `GETFILECRC` than a hand-rolled interleaved XOR. The
+> two formulations agree on **every odd-length input** and **swap the two halves on every
+> even-length one**, so nothing in this capture distinguishes them. A client should send the
+> formula above, and treat a mismatch on an even-length file as the measurement that settles it
+> rather than as a transfer failure — `CfxDevice.sendFile` compares the instrument's answer against
+> both readings and reports which matched (§10).
+
 Three details of the cycle that only this sequence shows:
 
 - **`DELFILE` on a file that isn't there** answers with a `passThrough` binary payload (§2) of
@@ -897,7 +908,7 @@ instance, rather than a cross-checked pattern:
 
 ## 10. Implementation
 
-`packages/core/src/usb/` implements §1–§5 as an isomorphic client, entry point `CfxDevice`:
+`packages/core/src/usb/` implements §1–§7 as an isomorphic client, entry point `CfxDevice`:
 
 | File | Covers |
 |---|---|
@@ -905,7 +916,25 @@ instance, rather than a cross-checked pattern:
 | `commands.ts` | §3 — command encoding and the two response shapes, plus `CFX_COMMANDS`, the action commands a UI might offer, each tagged with whether it was actually observed, and `assertCommandArgument`, which keeps a path from injecting a second command line. |
 | `status.ts` | §3 — typed views over `*IDN?`, `STATUS?` and `RTSTATUS?`. Names only the fields whose meaning is established, and keeps the raw field array beside them for the rest. |
 | `transport.ts` | §1 — the endpoint/interface constants and `UsbDeviceLike`, the structural interface both environments satisfy. |
-| `device.ts` | §3–§5 — the read pump, the command queue, and the typed operations. |
+| `crc.ts` | §7.4 — the upload checksum, both readings of it, and the even-length ambiguity between them. |
+| `runPlan.ts` | §7.2–§7.4 as *data*: `planRun()` turns a run definition plus a plate into the exact command lines, the `RemoteRun` line and the files that would be deposited, and `checkRunPlan()` is the plate↔`PLATEREAD` compatibility check below. Pure — no device involved — which is what lets a UI review a run before any of it is sent. |
+| `device.ts` | §3–§5 and §7 — the read pump, the command queue, the typed operations, `sendFile()` (§5's upload cycle), `startRun()` (§7.1–§7.4) and `acknowledgeRun()` (§7.6). |
+
+**Starting a run is implemented, and its shape follows §7 rather than §5's.** `startRun()` clears
+the old report (§7.1), types the protocol one directive per command (§7.2), sends `RemoteRun`
+(§7.3) — after which **the run is going** — and only then deposits the files (§7.4). Two
+consequences are worth stating because they read as bugs otherwise: a failure during the deposit
+phase is *reported, never thrown*, since aborting a run that is already cycling because a
+provenance file didn't copy would be the wrong trade; and there is **no confirmation step**, since
+§7.5 measured `PROCEED` as "skip the current step" rather than the start confirmation §3 originally
+guessed. Sending it after `RemoteRun` would silently skip the run's first step.
+
+**What the client refuses to send.** `planRun()` checks the plate against the protocol's
+`PLATEREAD` scan masks (§3.1) and blocks a start whose mask omits a channel the plate carries dyes
+on. That combination is the one way a run goes wrong *silently*: it completes, reports no error,
+and produces an archive in which those dyes are flat zero — indistinguishable afterwards from a
+failed reaction. Reading channels the plate doesn't use is only a warning, since a deliberately
+broad mask costs nothing but time.
 
 **One implementation serves both a browser and Node.** node-usb ships a WebUSB implementation, so
 a browser `USBDevice` and node-usb's satisfy the same structural interface and the environments
@@ -935,21 +964,43 @@ in `commands.ts` rejects any byte outside printable ASCII before that happens �
 CR or LF would otherwise terminate the line early and frame the rest as a second, caller-chosen
 command, reintroducing the arbitrary-command channel through the back door.
 
-`CFX_COMMANDS` in `commands.ts` is the action-command catalog a UI can offer, and now also the
-complete set of things a client can make the instrument do — currently `BLOCKID 1` (flash the
-indicator), `LID OPEN`, `LID CLOSE` and `CANCEL` — each tagged with how it is known to do what it
-says. All four are `observed`; the tag exists so that a future addition that *isn't* has somewhere
-to say so, and so a UI can mark it rather than presenting a guess as a feature.
+`CFX_COMMANDS` in `commands.ts` is the action-command catalog a UI can offer: `BLOCKID 1` (flash
+the indicator), `LID OPEN`, `LID CLOSE`, `PROCEED` (skip the current step, §7.5) and `CANCEL`
+(§7.6), each tagged with how it is known to do what it says. All are `observed`; the tag exists so
+that a future addition that *isn't* has somewhere to say so, and so a UI can mark it rather than
+presenting a guess as a feature. It is no longer the *whole* of what a client can make the
+instrument do — `startRun()` and `sendFile()` build command lines of their own — but it remains
+the whole of what a client can do by pressing a button labelled with a command.
 
-Not implemented: file **upload** (`CRCSENDFILE` and the §5 GUID sequence), run control
-(`RemoteRun`/`PROCEED`), and protocol authoring — this client reads an instrument and retrieves
-files from it; it does not start runs. §6's gap is unchanged and unaffected.
+Still not implemented: §6's gap, unchanged. Nothing here drives the optical head directly, which
+`<sierra mode>` (§7.3) is precisely what makes unnecessary for running a protocol.
 
-The Instrument view nonetheless **stages a run**, which is everything on the host side of starting one
-and nothing on the wire: pick the protocol and the plate from the app's loaded files — a whole run
-supplies both, a `.prcl.txt` (`prcl.md` §3.1) or a `.pltd`/`.plt.csv` overrides either half —
-review the exact directives that would be sent alongside the plate they'd run on, and stop there.
-Its **Start run** button is disabled, and will stay disabled until the commands above exist: a
-button that looks live and does nothing is worse than one that says what it is waiting for, and
-this is the one part of the app that would heat a block. The app side is documented in
-`apps/web/ARCHITECTURE.md`, "The Instrument view".
+### 10.1 The app
+
+The Instrument view **stages a run** — pick the protocol and the plate from the app's loaded files
+(a whole run supplies both, a `.prcl.txt` (`prcl.md` §3.1) or a `.pltd`/`.plt.csv` overrides either
+half), review the exact directives that would be sent alongside the plate they'd run on — and now
+starts it. The staged pair is fed through `planRun()` on every render, so the warnings shown
+between the two halves and the state of the **Start run** button are the same object; a check that
+blocks the start says why, in the place where the file that caused it is on screen.
+
+**Following a run** is `state/useRunWatch.ts`, and it is the §7.5 rule rather than filesystem
+polling: the status poll is already running, its current-step field carries the step's command text
+verbatim, and the completed `.Plateread` appears when a `PLATEREAD` step *ends* — so the watcher
+lists the run folder on that transition. A slow periodic listing backs it up for the two cases
+§7.5 says the transition rule cannot catch (the final read, whose transition is to `IDLE`, and the
+marker files), and the §7.6 acknowledgement is issued automatically when `STATUS?` reports the
+finished-but-still-named state, because the last read and `ended` only appear after it.
+
+Each time the listing changes, the folder is pulled — **only the names not already cached**, since
+28 of a `CurrentRun`'s ~40 files are the `.Dcal` set and never change — zipped with
+`zpcrFromRunFiles` and handed to the store, which replaces the previous snapshot. The connection
+therefore lives in `App`, not in the Instrument view: a run has to keep being followed while the
+user sits in Curves watching its amplification curves arrive.
+
+**"In progress" is never stored.** A run's `begun`-without-`ended` markers (§7.5) travel inside the
+assembled archive, so `runProgressFromNames` reads the answer out of the file itself — which is why
+the file chip's glow and the Overview banner are still right after a page reload, on a copy opened
+on another machine, or with the instrument long since unplugged, and why nothing has to be told
+when a run finishes. The app side is documented in `apps/web/ARCHITECTURE.md`, "The Instrument
+view".

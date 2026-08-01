@@ -359,6 +359,29 @@
   border-color: var(--neon-cyan);
   box-shadow: 0 0 0 1px var(--neon-cyan-dim), 0 0 16px var(--neon-cyan-dim);
 }
+/* A run that is still being written to by an instrument — `begun` present, `ended` absent among
+   its own archive entries (see core's `runProgressFromNames`). The bar's chips are otherwise flat
+   against the page, so a lit background is the one thing here that says "this file is not
+   finished"; it breathes slowly rather than sitting static, because the distinction it draws is
+   that the file is *changing*. Selection and staging still win on the border, which is what those
+   two states use, so a running chip can be selected and read as both at once. */
+.filechip.is-running {
+  background: linear-gradient(180deg, rgba(34, 211, 238, 0.1), rgba(34, 211, 238, 0.04));
+  animation: filechip-running 2.4s ease-in-out infinite;
+}
+.filechip.is-running .filechip__name {
+  color: var(--neon-cyan);
+}
+@keyframes filechip-running {
+  50% {
+    background: linear-gradient(180deg, rgba(34, 211, 238, 0.2), rgba(34, 211, 238, 0.08));
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .filechip.is-running {
+    animation: none;
+  }
+}
 .filechip__main {
   display: flex;
   align-items: center;
@@ -691,6 +714,40 @@
 }
 /* The run's name, and under it when it ran and where it lives. First thing in the view, and the
    only place the name can be edited (see `OverviewView`'s ExperimentHeader). */
+/* A run still being written to by an instrument, read from its own `begun`/`ended` markers (see
+   `OverviewView`). Sits directly under the run's name because it qualifies the whole page: every
+   number below it is a partial answer that will change. */
+.overview__running {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 14px;
+  border: 1px solid var(--neon-cyan);
+  border-radius: var(--radius-sm);
+  background: rgba(34, 211, 238, 0.07);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.overview__runningdot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  margin-top: 6px;
+  border-radius: 50%;
+  background: var(--neon-cyan);
+  animation: overview-running 1.6s ease-in-out infinite;
+}
+@keyframes overview-running {
+  50% {
+    opacity: 0.25;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .overview__runningdot {
+    animation: none;
+  }
+}
+
 .overview__title {
   display: flex;
   flex-direction: column;
@@ -3263,6 +3320,49 @@
 .instrument__start {
   width: 100%;
   margin-bottom: 6px;
+}
+
+/* The deposit phase's report, when it has something to say (`usb.md` §7.4). */
+.instrument__startnote {
+  margin: 4px 0 0;
+  padding-left: 16px;
+}
+
+/* What the plate and protocol say about each other, between the two halves they're about
+   (`InstrumentRun`'s RunChecks). An error is what keeps Start disabled; a warning is advice. */
+.devrun__checks {
+  list-style: none;
+  margin: 0 0 1px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  background: var(--border);
+}
+.devrun__check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 14px;
+  background: var(--plane);
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--ink-dim);
+}
+.devrun__checkicon {
+  flex: 0 0 auto;
+  font-weight: 700;
+  line-height: 1.45;
+}
+.devrun__check--error {
+  background: rgba(255, 90, 90, 0.08);
+  color: var(--ink);
+}
+.devrun__check--error .devrun__checkicon {
+  color: var(--danger);
+}
+.devrun__check--warning .devrun__checkicon {
+  color: var(--warn);
 }
 
 /* The file bar in its multi-select role (the Instrument view). The primary selection keeps the

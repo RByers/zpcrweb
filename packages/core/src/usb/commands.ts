@@ -143,7 +143,7 @@ export interface CfxCommandSpec {
  * public way to send a command line the library didn't build. Offering a new action means adding
  * an entry here, where its provenance is recorded alongside it.
  */
-export type CfxCommandName = "indicator" | "lidOpen" | "lidClose" | "cancel";
+export type CfxCommandName = "indicator" | "lidOpen" | "lidClose" | "skipStep" | "cancel";
 
 /**
  * Annotated as a plain `Record`, deliberately — not `as const satisfies`.
@@ -180,13 +180,26 @@ export const CFX_COMMANDS: Record<CfxCommandName, CfxCommandSpec> = {
     note: "usb.md §3.",
     actuates: true,
   },
-  cancel: {
-    command: "CANCEL",
-    label: "Cancel run",
+  skipStep: {
+    command: "PROCEED",
+    label: "Skip step",
     confidence: "observed",
     note:
-      "usb.md §3 — seen once, as normal run-finished cleanup rather than a user abort, so its " +
-      "effect on a run still in progress is inferred rather than measured.",
+      "usb.md §7.5 — advances the run past the step it is currently on. Measured: sent 215 s " +
+      "into a 3-minute hold the block had only just reached temperature for, it moved the run " +
+      "to step 2 within 1.1 s. Despite the name it neither starts nor resumes anything — an " +
+      "earlier reading of the capture had it as a start confirmation, which it is not.",
+    actuates: true,
+  },
+  cancel: {
+    command: "CANCEL",
+    label: "Cancel / acknowledge run",
+    confidence: "observed",
+    note:
+      "usb.md §7.6 — two things depending on when it is sent. On a *finished* run (STATUS? " +
+      "reports IDLE but the run's name is still attached) it is the acknowledgement that " +
+      "releases the instrument, and the final plate read, the `ended` marker and the .alf " +
+      "report appear only afterwards. On a run still cycling it aborts it.",
     actuates: true,
   },
 };

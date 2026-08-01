@@ -48,6 +48,16 @@ interface Props {
    * (`ZpcrStore.modifiedIds`). Deleting one of those throws work away that exists nowhere else,
    * so its chip asks a second time first — see {@link DeleteButton}. */
   modifiedIds: Set<string>;
+  /**
+   * Runs that are still going on an instrument (`ZpcrStore.inProgressIds`). Their chips glow
+   * rather than sitting on the bar's usual black, because a file that is still growing is a
+   * different thing from one that is finished — it will have more cycles in it a minute from now.
+   *
+   * Nothing stores this. It is read from the archive's own `begun`/`ended` markers each render
+   * (see core's `runProgressFromNames`), so it goes out on its own the moment the run watcher
+   * pulls a snapshot carrying `ended`.
+   */
+  inProgressIds: Set<string>;
   /** What each file is called and when it ran, keyed by id (`ZpcrStore.experiments`). A chip
    * leads with the name and carries the timestamp underneath; the file name moves to the hover
    * card, where it is still one glance away. */
@@ -242,6 +252,7 @@ function FileChip({
   password,
   isActive,
   isModified,
+  isRunning,
   isStaged,
   onSelect,
   onRemove,
@@ -254,6 +265,8 @@ function FileChip({
   isActive: boolean;
   /** See {@link Props.modifiedIds} — what makes this chip's delete a two-step. */
   isModified: boolean;
+  /** See {@link Props.inProgressIds} — the run is still being written to. */
+  isRunning: boolean;
   isStaged: boolean;
   onSelect: (id: string) => void;
   onRemove: (id: string) => void | Promise<void>;
@@ -273,6 +286,7 @@ function FileChip({
         (isActive ? " is-active" : "") +
         (isStaged && !isActive ? " is-staged" : "") +
         (isModified ? " is-modified" : "") +
+        (isRunning ? " is-running" : "") +
         (isArmed ? " is-arming" : "")
       }
       onMouseLeave={() => setArmed(false)}
@@ -348,6 +362,7 @@ export function FileBar({
   onRemove,
   stagedIds,
   modifiedIds,
+  inProgressIds,
   experiments,
 }: Props) {
   const [password] = usePltdPassword();
@@ -376,6 +391,7 @@ export function FileBar({
           isActive={f.id === activeId}
           isStaged={stagedIds ? stagedIds.has(f.id) : false}
           isModified={modifiedIds.has(f.id)}
+          isRunning={inProgressIds.has(f.id)}
           onSelect={onSelect}
           onRemove={onRemove}
         />

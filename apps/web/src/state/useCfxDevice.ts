@@ -14,16 +14,20 @@
  * background read loop; putting it in `useState` would invite a re-render to be interpreted as a
  * new connection, and re-running `open()` on a claimed interface fails.
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  CFX_CURRENT_RUN_DIR,
   CFX_DIRECTORIES,
   CFX_USB_FILTER,
   CfxDevice,
+  runProgressFromNames,
   type CfxCommandName,
   type CfxDeviceInfo,
   type CfxDirectory,
   type CfxStatus,
   type CfxTrafficEvent,
+  type RunPlan,
+  type RunProgress,
   type UsbDeviceLike,
 } from "@zpcrweb/core";
 
@@ -86,6 +90,13 @@ export function useCfxDevice() {
   const [busy, setBusy] = useState<string | null>(null);
   const [lastAction, setLastAction] = useState<ActionResult | null>(null);
   const [polling, setPolling] = useState(true);
+  /** The last listing of `CurrentRun`, which is what the run watcher works from. */
+  const [runFolder, setRunFolder] = useState<CfxDirectory | null>(null);
+  // The latest status, reachable from a callback without making that callback depend on it —
+  // `acknowledgeFinishedRun` must check what the instrument is doing *now*, not what it was doing
+  // when the callback was created.
+  const statusRef = useRef<CfxStatus | null>(null);
+  statusRef.current = status;
 
   const onTraffic = useCallback((e: CfxTrafficEvent) => {
     setTraffic((prev) => {
@@ -243,6 +254,77 @@ export function useCfxDevice() {
     [withBusy],
   );
 
+  /**
+   * Start the staged run: pre-flight, author the protocol, `RemoteRun`, deposit the files
+   * (`usb.md` §7).
+   *
+   * Everything about *what* is sent was decided by `planRun` before this is called — see
+   * `usb/runPlan.ts`. This adds only the two things a browser session owns: a progress label
+   * while the sequence runs, and a re-read of `STATUS?` afterwards, since a run that has just
+   * started changes what the rail shows and waiting a poll period for it looks like a failure.
+   *
+   * Resolves with the deposit phase's outcome, or undefined if the start itself failed (the error
+   * banner then carries the reason). Note that the block does *not* start heating immediately —
+   * §7.3 measures ~3 minutes of lid heating first, during which nothing appears to happen.
+   */
+  const startRun = useCallback(
+    async (plan: RunPlan) => {
+      const result = await withBusy("Starting run", (d) =>
+        d.startRun(plan, (what) => setBusy(what)),
+      );
+      const d = deviceRef.current;
+      if (d) {
+        try {
+          setStatus(await d.status());
+        } catch {
+          /* the poll will catch up */
+        }
+      }
+      return result;
+    },
+    [withBusy],
+  );
+
+  /**
+   * `CANCEL` a run the instrument has finished but is still holding (`usb.md` §7.6).
+   *
+   * Guarded on the status this is *only* correct for: a completed protocol leaves `STATUS?`
+   * reporting `IDLE` with the run's name still attached, and acknowledging that releases the
+   * instrument and makes the final plate read, the `ended` marker and the `.alf` report appear.
+   * The same command sent to a run still cycling would abort it, which is why the check is here
+   * rather than trusted to the caller.
+   */
+  const acknowledgeFinishedRun = useCallback(async () => {
+    const current = statusRef.current;
+    if (!current || current.running || !current.runName) return false;
+    const res = await withBusy("Acknowledging the finished run", (d) => d.acknowledgeRun());
+    if (res) {
+      const d = deviceRef.current;
+      try {
+        if (d) setStatus(await d.status());
+      } catch {
+        /* the poll will catch up */
+      }
+    }
+    return res !== undefined;
+  }, [withBusy]);
+
+  /**
+   * Re-list `\Storage Card\CurrentRun` and report what it holds.
+   *
+   * Separate from {@link refreshDirectory} because this one is *polled* — it is how the app
+   * notices a new plate read — so it keeps its own state rather than sharing the file browser's
+   * map, and it decodes the `begun`/`ended` markers into a {@link RunProgress} on the way past.
+   */
+  const refreshRunFolder = useCallback(async () => {
+    const dir = await withBusy("Checking the run", (d) => d.listFiles(CFX_CURRENT_RUN_DIR));
+    if (dir) {
+      setRunFolder(dir);
+      setDirectories((prev) => ({ ...prev, [CFX_CURRENT_RUN_DIR]: dir }));
+    }
+    return dir;
+  }, [withBusy]);
+
   const runAction = useCallback(
     async (name: CfxCommandName, spec: { label: string; command: string }) => {
       const res = await withBusy(spec.label, (d) => d.runAction(name));
@@ -265,6 +347,13 @@ export function useCfxDevice() {
 
   const clearTraffic = useCallback(() => setTraffic([]), []);
 
+  /** What the last `CurrentRun` listing says about the run's progress — derived, never stored
+   * (see `runProgressFromNames`). Null until the folder has been listed at least once. */
+  const runProgress: RunProgress | null = useMemo(
+    () => (runFolder?.listed ? runProgressFromNames(runFolder.names) : null),
+    [runFolder],
+  );
+
   return {
     connection,
     error,
@@ -284,6 +373,11 @@ export function useCfxDevice() {
     fetchDirectoryFiles,
     runAction,
     clearTraffic,
+    startRun,
+    acknowledgeFinishedRun,
+    refreshRunFolder,
+    runFolder,
+    runProgress,
   };
 }
 

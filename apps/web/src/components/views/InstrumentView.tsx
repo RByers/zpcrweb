@@ -11,32 +11,75 @@
  * (including Start run), and the content column stacks the staged run, the file browser and the
  * traffic console.
  */
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import { planRun } from "@zpcrweb/core";
 import { InstrumentRail } from "../instrument/InstrumentRail";
 import { InstrumentRun } from "../instrument/InstrumentRun";
 import { InstrumentFiles } from "../instrument/InstrumentFiles";
 import { InstrumentConsole } from "../instrument/InstrumentConsole";
-import { useCfxDevice } from "../../state/useCfxDevice";
+import type { CfxDeviceHandle } from "../../state/useCfxDevice";
+import type { RunWatchState } from "../../state/useRunWatch";
 import type { StagedRun } from "../../lib/protocolSource";
 
 export function InstrumentView({
   onOpenRun,
   staged,
+  instrument,
+  runWatch,
 }: {
   onOpenRun: (file: File) => Promise<void> | void;
   /** The run the file bar's selection currently describes; see {@link InstrumentRun}. */
   staged: StagedRun;
+  /** The connection, owned by `App` so it outlives this view — see its comment there. */
+  instrument: CfxDeviceHandle;
+  /** The follow-the-running-run machinery, likewise owned by `App`. */
+  runWatch: RunWatchState;
 }) {
-  const instrument = useCfxDevice();
   // The name for the run being staged. Held here rather than in `InstrumentRun` so it survives that
-  // panel's re-renders and is reachable by the rail's Start run once there is one to send
-  // (`usb.md` §10) — it is part of the staged run, not of the panel that displays it.
+  // panel's re-renders, and because it is an input to the plan below — it is part of the staged
+  // run, not of the panel that displays it.
   const [experimentName, setExperimentName] = useState("");
+
+  /**
+   * The staged run reduced to exactly what would be sent — commands, files, and the checks that
+   * decide whether it may be sent at all (`usb/runPlan.ts`).
+   *
+   * Computed here, above both the panel that displays it and the rail that sends it, so the two
+   * cannot disagree: the warnings shown next to the plate are the same object the Start button
+   * consults. Null when a half is missing, which is simply "not a run yet".
+   */
+  const plan = useMemo(() => {
+    const protocol = staged.protocol.value;
+    const plate = staged.plate.value;
+    if (!protocol || !plate) return null;
+    try {
+      return planRun({
+        runDefinition: protocol.runDefinition,
+        plate,
+        name: experimentName || protocol.document.name || "",
+      });
+    } catch {
+      // A run definition this app can't parse can't be planned; the panel already renders the
+      // protocol's own decode, so there is nothing useful to add here.
+      return null;
+    }
+  }, [staged.protocol.value, staged.plate.value, experimentName]);
+
   return (
     <div className="curves instrument">
-      <InstrumentRail instrument={instrument} staged={staged} />
+      <InstrumentRail
+        instrument={instrument}
+        staged={staged}
+        plan={plan}
+        runWatch={runWatch}
+      />
       <div className="instrument__content">
-        <InstrumentRun staged={staged} name={experimentName} onNameChange={setExperimentName} />
+        <InstrumentRun
+          staged={staged}
+          name={experimentName}
+          onNameChange={setExperimentName}
+          plan={plan}
+        />
         <InstrumentFiles instrument={instrument} onOpenRun={onOpenRun} />
         <InstrumentConsole instrument={instrument} />
       </div>

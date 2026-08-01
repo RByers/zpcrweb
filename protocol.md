@@ -295,9 +295,10 @@ Three things this adds to the stored forms:
 `CANCEL`, `PAUSE`/`RESUME` — is instrument state, not protocol language, and lives in `usb.md` §3;
 the full start-to-finish sequence a run is embedded in is `usb.md` §7.
 
-> **Not implemented here.** `packages/core/src/usb/` reads an instrument and retrieves files; it
-> does not author protocols or start runs (`usb.md` §10). The Device view's protocol staging panel
-> renders exactly the directive list above and stops, with its action buttons disabled.
+> **Implemented.** `packages/core/src/usb/runPlan.ts` turns a run definition and a plate into
+> exactly the command list above — `planRun()` — and `CfxDevice.startRun()` sends it (`usb.md`
+> §10). The directive list the Instrument view displays is the same value that is transmitted, so
+> what is reviewed on screen is character-for-character what is typed at the instrument.
 
 ## 8. Differences between the carriers
 

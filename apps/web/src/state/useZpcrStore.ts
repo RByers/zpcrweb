@@ -9,6 +9,7 @@ import {
   parseRunDefinitionText,
   parseZpcr,
   parseZpcrwebSettings,
+  runProgressFromNames,
   writeZpcrwebSettings,
   type FileKind,
   type NormalizationMode,
@@ -560,6 +561,20 @@ function plateFileKind(name: string): PlateFileKind | null {
   return null;
 }
 
+/** Options for {@link ZpcrStore.addFiles}. */
+export interface AddFilesOptions {
+  /**
+   * Whether the last file added becomes the active one. Default true — dropping a file means
+   * wanting to look at it.
+   *
+   * The run watcher passes false. It re-adds the in-progress run every time a cycle completes,
+   * and each snapshot is a *new* file id (ids hash name+size, and the archive grows), so
+   * activating unconditionally would drag the user back to the running experiment every minute
+   * or two no matter what they had opened.
+   */
+  activate?: boolean;
+}
+
 export interface ZpcrStore {
   files: LoadedFile[];
   activeId: string | null;
@@ -619,7 +634,16 @@ export interface ZpcrStore {
    * every candidate was rejected (the reason is in {@link error}). A caller that only drops
    * files can ignore it; one that wants to *go* to what it just added can't, since the store's
    * own state hasn't re-rendered yet at that point. */
-  addFiles: (files: FileList | File[]) => Promise<string | null>;
+  addFiles: (files: FileList | File[], options?: AddFilesOptions) => Promise<string | null>;
+  /**
+   * Ids of the loaded runs that are still running on an instrument — `begun` present, `ended`
+   * absent among the archive's own entries (see core's `runProgressFromNames`).
+   *
+   * Derived on every render from the parsed runs, and deliberately not state: the fact lives in
+   * the file, arrives with it, and survives a reload. Nothing here has to be told when a run
+   * finishes — the next snapshot the run watcher pulls simply contains `ended`.
+   */
+  inProgressIds: Set<string>;
   /**
    * Fetch a file over HTTP and load it as if it had been dropped — the `#load=<url>` hash key's
    * implementation, and how the welcome screen's example button works. The name comes from the
@@ -823,7 +847,7 @@ export function useZpcrStore(): ZpcrStore {
   );
 
   const addFiles = useCallback(
-    async (input: FileList | File[]) => {
+    async (input: FileList | File[], options?: AddFilesOptions) => {
       // `.json`'s kind can only be known after reading its bytes (see `fileKind`), so every file
       // is read up front rather than filtered by extension first the way the other formats are.
       const candidates = Array.from(input).filter((file) => /\.(zpcr|pcrd|pltd|csv|json|txt)$/i.test(file.name));
@@ -873,7 +897,7 @@ export function useZpcrStore(): ZpcrStore {
           setError(`${file.name}: ${e instanceof Error ? e.message : String(e)}`);
         }
       }
-      if (lastId) setActiveId(lastId);
+      if (lastId && options?.activate !== false) setActiveId(lastId);
       // A `.prcl.txt` is a document first: opening one shows what the protocol *is* — the
       // annotated directive listing on Overview — rather than dropping you into the Instrument
       // view's staging panel, which is a thing you go to when you mean to start a run. Done here
@@ -1161,6 +1185,18 @@ export function useZpcrStore(): ZpcrStore {
     return ids;
   }, [settingsMap]);
 
+  /** See {@link ZpcrStore.inProgressIds} — read from each archive's own marker files. */
+  const inProgressIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const [id, run] of runs) {
+      // Only a real archive has entries to read. A `.pcrd` or a Biomeme export is a finished
+      // record by construction, and `archive.entries` is empty for the formats that have none.
+      const entries = run.zpcr?.archive.entries;
+      if (entries && runProgressFromNames(entries).inProgress) ids.add(id);
+    }
+    return ids;
+  }, [runs]);
+
   const exportBytes = useCallback(
     (id: string): Uint8Array | null => {
       const file = files.find((f) => f.id === id);
@@ -1189,6 +1225,7 @@ export function useZpcrStore(): ZpcrStore {
     activePlateFile,
     activeProtocolFile,
     modifiedIds,
+    inProgressIds,
     markDownloaded,
     attachPlate,
     settings,

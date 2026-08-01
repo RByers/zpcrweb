@@ -6,7 +6,33 @@
  * `transport.ts`'s module comment for why there is only one implementation.
  */
 export { CfxDevice } from "./device.js";
-export type { CfxDeviceOptions, CfxDirectory, CfxTrafficEvent } from "./device.js";
+export type {
+  CfxDeviceOptions,
+  CfxDirectory,
+  CfxRunStartResult,
+  CfxTrafficEvent,
+  CfxUploadResult,
+} from "./device.js";
+export {
+  cfxFileCrc,
+  cfxFileCrcIsAmbiguous,
+  cfxFileCrcSwapped,
+  formatCfxFileCrc,
+} from "./crc.js";
+export {
+  CFX_CURRENT_RUN_DIR,
+  CFX_PROTOCOL_LABEL,
+  CFX_RUN_REPORT_DIR,
+  checkRunPlan,
+  planRun,
+} from "./runPlan.js";
+export type {
+  PlanRunOptions,
+  RunCheck,
+  RunCheckSeverity,
+  RunPlan,
+  RunUpload,
+} from "./runPlan.js";
 export {
   CFX_COMMANDS,
   CFX_DIRECTORIES,

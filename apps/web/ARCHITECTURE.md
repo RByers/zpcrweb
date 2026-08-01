@@ -1775,20 +1775,88 @@ The `CfxDevice` lives in a **ref**, not state: it is a long-lived object with a 
 loop, and a re-render must not be able to look like a new connection — `open()` on an
 already-claimed interface fails.
 
+**The connection is held by `App`, not by this view.** It used to live in `InstrumentView`, which
+meant leaving the tab released the USB interface — fine while the view was the only thing that
+talked to the instrument, and wrong once a started run has to keep being followed while you sit in
+Curves watching its amplification curves arrive. The connection is a property of the session.
+
+### Starting a run
+
+`planRun()` (core, `usb/runPlan.ts`) reduces the staged pair to exactly what would be sent — the
+command lines, the `RemoteRun` line, the files to deposit — and `CfxDevice.startRun()` sends it
+(`usb.md` §7, §10). `InstrumentView` computes the plan on every render and hands the *same object*
+to both the panel and the rail, so the warnings shown between the two halves and the state of the
+Start button can never disagree.
+
+The order is `usb.md` §7's, not the one §5's upload machinery suggests: the protocol is typed in as
+ASCII directives, `RemoteRun` starts it, and the files are deposited **afterwards**, into a run
+already cycling. Two things follow that would otherwise read as bugs. There is **no confirmation
+step** — §7.5 measured `PROCEED` as "skip the current step", so sending it after `RemoteRun` would
+silently skip the run's first step — which is why the button's own footnote says the run starts on
+the click and to close the lid first. And a **deposit failure is reported, not thrown**: by then
+the run is going, and the files are provenance (they are what let the archive open later with its
+plate map intact), so the rail says the archive may be incomplete rather than pretending the run
+failed.
+
+**What blocks a start.** `checkRunPlan()` compares the plate against every `PLATEREAD` scan mask in
+the protocol. A mask omitting a channel the plate carries dyes on is an **error**, not a warning:
+that run completes, reports nothing wrong, and yields an archive in which those dyes are flat zero
+— afterwards indistinguishable from a failed reaction. The reverse (reading channels the plate
+doesn't use) costs only time and is a warning. The messages render between the protocol and the
+plate rather than in the rail, because the fix is to change one of those two files.
+
+### Following a run
+
+`state/useRunWatch.ts`, and it follows `usb.md` §7.5 rather than polling the filesystem hopefully:
+`STATUS?` is already being polled for the rail, its current-step field carries the running step's
+command text verbatim, and a completed `.Plateread` appears when a `PLATEREAD` step *ends* — so the
+watcher lists the run folder on that transition. A slow (30 s) listing backs it up for the two
+cases the transition rule structurally can't catch, both named in §7.5: the **final** read, whose
+transition is `PLATEREAD` → `IDLE`, and the marker files. When the run finishes — `STATUS?` reports
+`IDLE` with the run's name still attached — the §7.6 acknowledgement goes out automatically,
+because the last read and `ended` only appear after it. That is the one instrument-actuating
+command the app sends on its own, and `useCfxDevice` re-checks the status immediately before
+sending it, since the same `CANCEL` aborts a run still cycling.
+
+Each changed listing is pulled and zipped with `zpcrFromRunFiles`, then handed to `store.addFiles`
+— the same path a drop takes. Three economies make that affordable once a cycle:
+
+- **Only uncached names are fetched.** 28 of a `CurrentRun`'s ~40 files are the `.Dcal` set and
+  never change during a run; re-pulling them every cycle would push megabytes over a
+  64-byte-packet bulk endpoint for nothing. A cycle's update is one 22 KB plate read and a small
+  XML. (A name *disappearing* means a different run, and clears the cache.)
+- **The first listing is never pulled.** `CurrentRun` still holds the previous run when you
+  connect — finished, `ended` and all — so the first sighting only records a baseline to diff
+  against, rather than surprising the user with a 400 KB transfer and an unrequested file.
+- **The refresh doesn't steal the selection.** Every snapshot is a new file id (ids hash name+size,
+  and the archive grows), so `addFiles` takes an `activate` option: the new copy becomes active
+  only if the user was already on the one it supersedes. That is what makes the Curves view grow a
+  cycle at a time without dragging anyone back from whatever else they had open.
+
+**"In progress" is stored nowhere.** The `begun`-without-`ended` markers travel *inside* the
+assembled archive, so `runProgressFromNames` (core, `runFolder.ts`) reads the answer out of the
+file itself. `ZpcrStore.inProgressIds` derives it per render; the file chip glows and the Overview
+banner appears from that alone. Which is why both are still correct after a page reload, on a copy
+opened on a different machine, or with the instrument unplugged — and why nothing has to be
+notified when a run ends: the next snapshot simply contains `ended`.
+
 Four components, under `components/instrument/`:
 
 - **`InstrumentRail`** — the left rail, reusing the Curves view's `.rail__*` vocabulary so the two
   read as the same kind of surface. Connection, the identification block, live status, and the
   action buttons — **Start run** among them, at their head. It sits with the lid and indicator
   commands rather than beside the staged run because that is what it is: the control that actuates
-  the instrument. It is permanently disabled for now (the library has no `RemoteRun`/`PROCEED` —
-  `usb.md` §10) and names the first missing piece when a run isn't staged, so the tooltip is
-  always the next thing to do. Status fields the protocol doesn't name are either omitted or
-  footnoted rather than labelled with a guess (the sample temperature is the live example).
+  the instrument. It is disabled until every half of the run is present, the instrument is
+  connected and idle, and every check passes, and it names the **first** missing piece rather than
+  a generic refusal, so the tooltip is always the next thing to do. A *Current run* section carries
+  what the watcher is doing and a `follow` switch to stop it. Status fields the protocol doesn't
+  name are either omitted or footnoted rather than labelled with a guess (the sample temperature is
+  the live example).
 - **`InstrumentRun`** — the run that would be started, as its two halves side by side: the thermal
   protocol and the plate map, each headed by the file supplying it and badged when that file is an
   override. It renders a selection it does not own (see the staging model above), and it has no
-  start button — that belongs with the commands that actuate the instrument, in the rail.
+  start button — that belongs with the commands that actuate the instrument, in the rail. What it
+  does carry is the plan's **checks** (above), between the two halves they are about.
 
   What is shown for the protocol is the **ASCII run definition**, not a decoded step table — the
   same `ProtocolDecoded` the Raw and Overview views use, directives as they would go on the wire

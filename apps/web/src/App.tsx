@@ -1,5 +1,7 @@
-import { useMemo, useRef } from "react";
+import { useCallback, useMemo, useRef } from "react";
 import { useZpcrStore } from "./state/useZpcrStore";
+import { useCfxDevice } from "./state/useCfxDevice";
+import { useRunWatch } from "./state/useRunWatch";
 import { useRunStaging, stagingRole } from "./state/useRunStaging";
 import { EMPTY_STAGED_RUN, resolveStagedRun } from "./lib/protocolSource";
 import { usePltdPassword } from "./state/pltdPassword";
@@ -89,6 +91,33 @@ export function App() {
   // view because the file bar — which lives in this component — is the control that edits it.
   const staging = useRunStaging(store.files, store.activeId);
   const [pltdPassword, setPassword] = usePltdPassword();
+  /**
+   * The instrument connection, held here rather than inside the Instrument view.
+   *
+   * It used to live in that view, which meant leaving the view closed the USB interface — fine
+   * when the view was the only thing that talked to the instrument, and wrong now that a started
+   * run has to keep being followed while you sit in Curves watching its amplification curves come
+   * in. The connection is a property of the session, not of a tab.
+   */
+  const instrument = useCfxDevice();
+  /**
+   * Keep a `.zpcr` of the run in progress up to date in the file list.
+   *
+   * Activating the refreshed copy only when the user was already on it: every snapshot is a new
+   * file id (see `AddFilesOptions.activate`), so following unconditionally would yank the view
+   * back to the running experiment every cycle. Following it when they *are* on it is the whole
+   * point — that is what makes the Curves view grow a cycle at a time.
+   */
+  const runWatch = useRunWatch(
+    instrument,
+    useCallback(
+      async (file: File, previousId: string | null) => {
+        const wasWatchingIt = store.activeId !== null && store.activeId === previousId;
+        return store.addFiles([file], { activate: wasWatchingIt });
+      },
+      [store],
+    ),
+  );
   // Memoized, and skipped entirely off the Instrument view: resolving decodes a run's plate
   // and, for a staged `.plt.csv`, re-parses it against the run's calibration set — real work to
   // repeat on every render of a view that never looks at the result.
@@ -205,13 +234,19 @@ export function App() {
             activeId={staging.selection.runId}
             stagedIds={staging.stagedIds}
             modifiedIds={store.modifiedIds}
+            inProgressIds={store.inProgressIds}
             onSelect={selectFile}
             onRemove={store.remove}
             experiments={store.experiments}
           />
         )}
         <main className="app__main">
-          <InstrumentView onOpenRun={openRun} staged={staged} />
+          <InstrumentView
+            onOpenRun={openRun}
+            staged={staged}
+            instrument={instrument}
+            runWatch={runWatch}
+          />
         </main>
         {store.error && <div className="app__error mono">{store.error}</div>}
       </div>
@@ -281,6 +316,7 @@ export function App() {
         plateFiles={store.plateFiles}
         activeId={store.activeId}
         modifiedIds={store.modifiedIds}
+        inProgressIds={store.inProgressIds}
         onSelect={selectFile}
         onRemove={store.remove}
         experiments={store.experiments}

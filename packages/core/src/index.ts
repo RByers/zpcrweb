@@ -49,7 +49,14 @@ export {
 export { parsePltd, parsePlatesetup2, isPltdName } from "./pltd.js";
 export { plateToCsv, parsePlateCsv, isPlateCsvName, isBlankWell } from "./plateCsv.js";
 export { attachPlateToZpcr } from "./attachPlate.js";
-export { zpcrFromRunFiles, zpcrNameFromRunFiles } from "./runFolder.js";
+export {
+  zpcrFromRunFiles,
+  zpcrNameFromRunFiles,
+  runProgressFromNames,
+  RUN_BEGUN_MARKER,
+  RUN_ENDED_MARKER,
+} from "./runFolder.js";
+export type { RunProgress } from "./runFolder.js";
 export {
   parseZpcrwebSettings,
   parseZpcrwebSettingsJson,

@@ -1,5 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import { formatRunDefinitionText, type CqTableEntry, type PlateDefinition, type Zpcr } from "@zpcrweb/core";
+import {
+  formatRunDefinitionText,
+  runProgressFromNames,
+  type CqTableEntry,
+  type PlateDefinition,
+  type Zpcr,
+} from "@zpcrweb/core";
 import { ProtocolDecoded } from "../raw/DecodedView";
 import { ProtocolStepsTable } from "../raw/ProtocolSteps";
 import { DownloadIcon } from "../DownloadIcon";
@@ -65,6 +71,16 @@ export function OverviewView({
   const protocolName = protocol?.name || null;
   const lastTemp = reads.at(-1)?.blockTempC;
 
+  /**
+   * Whether this run is still running, read from the archive's own marker files: `begun` present,
+   * `ended` absent (see core's `runProgressFromNames`).
+   *
+   * Nothing about the instrument connection is consulted, and nothing is stored. A run pulled
+   * mid-cycle carries the evidence inside it, so the banner is right after a reload, right on a
+   * copy opened on another machine, and gone the moment a later snapshot arrives with `ended`.
+   */
+  const progress = useMemo(() => runProgressFromNames(zpcr.archive.entries), [zpcr]);
+
   const [password] = usePltdPassword();
   const plate = useMemo(() => zpcr.plates(password || undefined)[0]?.pltd.plate ?? null, [zpcr, password]);
   const encStatus = useMemo(() => runEncryptionStatus(run, password), [run, password]);
@@ -118,6 +134,17 @@ export function OverviewView({
         persists={namePersists}
         runStartTime={m.runStartTime}
       />
+      {progress.inProgress && (
+        <div className="overview__running">
+          <span className="overview__runningdot" aria-hidden="true" />
+          <span>
+            <strong>This run is still going.</strong> It has {progress.plateReads} plate read
+            {progress.plateReads === 1 ? "" : "s"} so far — the instrument has written its{" "}
+            <code>begun</code> marker but not <code>ended</code>. With the instrument connected and
+            following switched on, this file is replaced with a fuller one after every cycle.
+          </span>
+        </div>
+      )}
       <div className="overview__head">
         <section className="overview__tiles">
           {tiles.map((t) => (
