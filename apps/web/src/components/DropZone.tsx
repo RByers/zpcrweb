@@ -2,7 +2,7 @@ import { useCallback, useRef, useState } from "react";
 import { UploadIcon } from "./ViewIcons";
 
 interface Props {
-  onFiles: (files: FileList | File[]) => void | Promise<void>;
+  onFiles: (files: FileList | File[]) => unknown;
   /** Render the large welcome variant. */
   large?: boolean;
   /** File input `accept` attribute. Defaults to every format the app can load. */

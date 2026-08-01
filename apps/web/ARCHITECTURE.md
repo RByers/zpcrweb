@@ -1600,10 +1600,20 @@ Three components, under `components/device/`:
   action buttons. Status fields the protocol doesn't name are either omitted or footnoted rather
   than labelled with a guess (the sample temperature is the live example).
 - **`DeviceFiles`** — the instrument's storage, grouped by kind the way the Raw view groups a
-  `.zpcr`. A retrieved file is **saved to disk, not loaded into the app**: what lives on the
-  instrument are the *parts* of a run — individual `.Plateread`s, the `.Dcal` set, the
+  `.zpcr`. A *single* retrieved file is **saved to disk, not loaded into the app**: what lives on
+  the instrument are the *parts* of a run — individual `.Plateread`s, the `.Dcal` set, the
   `.pltd`/`.prcl` pair — where every format this app opens is a whole run in one container.
-  Assembling a `.zpcr` from them is a separate job, not something to fake here. When
+
+  A whole directory is different, and is what **Open run** does: a `.zpcr` *is* a ZIP of a run
+  directory (root `ARCHITECTURE.md`, "A run directory is a `.zpcr`"), so the button pulls every
+  file — sequentially, since the command channel carries one request at a time, with the busy
+  label counting them off — hands them to the library's `zpcrFromRunFiles`, and drops the result
+  into `store.addFiles`. From there it is an ordinary loaded file: the same validate → IndexedDB
+  path as a drop, under the name the run calls itself, then a switch to Overview so a successful
+  open goes somewhere. It is offered for any directory whose listing contains a `RunInfo.xml`
+  (what makes a directory a run, and what `parseZpcr` refuses an archive without) — in practice
+  `CurrentRun`. `addFiles` returns the id it left active precisely so this caller can tell a
+  rejected archive from a loaded one and stay put, with the error banner, in the first case. When
   `GETFILESLEN` answers with a status code instead of a length, the panel distinguishes the two
   the instrument actually sends (`usb.md` §5): *empty* — which `\Storage Card` is, holding only
   the two directories below it — reads as an ordinary empty listing, while *no such directory* is
@@ -1632,4 +1642,6 @@ with the real device's replies (`packages/core/test/usbDevice.test.ts`) — the 
 serialization, the atomic listing pair, and `GETFILE`'s verbatim bytes. The *browser* connect path
 can't be automated: WebUSB permission can't be granted to a headless Chrome, so `uishot`/`uitest`
 only ever see the disconnected state, and the connected UI is checked by hand or by stubbing
-`navigator.usb`.
+`navigator.usb`. **Open run**'s substance is in the library for the same reason: what a browser
+can't reach — that a run directory's files zip into an archive `parseZpcr` accepts, byte for byte
+— is covered by `packages/core/test/runFolder.test.ts`, leaving only the button wiring untested.

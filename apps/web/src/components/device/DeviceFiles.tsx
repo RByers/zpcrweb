@@ -1,15 +1,23 @@
 /**
  * Browse and retrieve the instrument's own filesystem.
  *
- * A retrieved file is saved to disk rather than loaded into the app: what lives on the instrument
- * are the *parts* of a run — individual `.Plateread`s, the `.Dcal` set, `RunInfo.xml`, the
- * `.pltd`/`.prcl` pair — where every format this app opens is a whole run in one container. Saving
- * them is the honest operation; assembling a `.zpcr` out of them is a separate job (see the note
- * in `apps/web/ARCHITECTURE.md`).
+ * A single retrieved file is saved to disk rather than loaded into the app: what lives on the
+ * instrument are the *parts* of a run — individual `.Plateread`s, the `.Dcal` set, `RunInfo.xml`,
+ * the `.pltd`/`.prcl` pair — where every format this app opens is a whole run in one container.
+ *
+ * A whole directory is a different matter, and is what **Open run** does: a `.zpcr` *is* a ZIP of
+ * a run directory, so pulling every file and zipping them (`zpcrFromRunFiles`) yields a real
+ * `.zpcr` — not a reconstruction — which then goes through exactly the same validate/persist path
+ * as a dropped file. The button is offered for any directory whose listing has a `RunInfo.xml`,
+ * which is what makes it a run rather than an arbitrary folder.
  */
-import { CFX_DIRECTORIES } from "@zpcrweb/core";
+import { useState } from "react";
+import { CFX_DIRECTORIES, zpcrFromRunFiles } from "@zpcrweb/core";
 import { downloadBytes } from "../../lib/download";
 import type { CfxDeviceHandle } from "../../state/useCfxDevice";
+
+/** The file that makes a directory a run — and the one `parseZpcr` refuses an archive without. */
+const RUNINFO_NAME = "RunInfo.xml";
 
 /** Group a flat listing the way the Raw view groups a `.zpcr`'s entries, so a 42-entry
  * `CurrentRun` reads as a handful of kinds rather than one long alphabetical wall. */
@@ -31,13 +39,36 @@ const GROUP_ORDER = [
   "Other",
 ];
 
-export function DeviceFiles({ device }: { device: CfxDeviceHandle }) {
+export function DeviceFiles({
+  device,
+  onOpenRun,
+}: {
+  device: CfxDeviceHandle;
+  /** Hand the assembled `.zpcr` to the app, exactly as if it had been dropped on the drop zone. */
+  onOpenRun: (file: File) => Promise<void> | void;
+}) {
   const { directories, busy, connection } = device;
   const connected = connection === "connected";
+  const [openError, setOpenError] = useState<string | null>(null);
 
   const retrieve = async (dir: string, name: string) => {
     const bytes = await device.fetchFile(dir, name);
     if (bytes) downloadBytes(name, bytes);
+  };
+
+  const openRun = async (dir: string, names: string[]) => {
+    setOpenError(null);
+    const files = await device.fetchDirectoryFiles(dir, names);
+    // `undefined` means the fetch itself failed, which the rail already reports.
+    if (!files) return;
+    try {
+      const { name, bytes } = zpcrFromRunFiles(files);
+      // `.slice()` for the same reason `downloadBytes` does it: a `Uint8Array` over a possibly
+      // shared buffer isn't a `BlobPart`, and a copy of a few hundred KB costs nothing here.
+      await onOpenRun(new File([bytes.slice()], name));
+    } catch (e) {
+      setOpenError(e instanceof Error ? e.message : String(e));
+    }
   };
 
   return (
@@ -48,6 +79,8 @@ export function DeviceFiles({ device }: { device: CfxDeviceHandle }) {
           Refresh all
         </button>
       </div>
+
+      {openError && <div className="rail__note">Couldn't open the run: {openError}</div>}
 
       {!connected ? (
         <div className="device__empty mono">Connect to browse the instrument's storage.</div>
@@ -61,6 +94,9 @@ export function DeviceFiles({ device }: { device: CfxDeviceHandle }) {
               if (!groups.has(g)) groups.set(g, []);
               groups.get(g)!.push(name);
             }
+            // Openable only when the listing actually holds a run: a directory of loose files
+            // would zip into an archive `parseZpcr` rejects.
+            const isRun = !!dir?.listed && dir.names.some((n) => n.toLowerCase() === RUNINFO_NAME.toLowerCase());
             return (
               <div key={d.path} className="device__dir">
                 <div className="device__dirhead">
@@ -68,13 +104,25 @@ export function DeviceFiles({ device }: { device: CfxDeviceHandle }) {
                     <span className="device__dirname">{d.label}</span>
                     <span className="device__dirpath mono">{d.path}</span>
                   </div>
-                  <button
-                    className="btn btn--sm"
-                    disabled={!!busy}
-                    onClick={() => void device.refreshDirectory(d.path)}
-                  >
-                    {dir ? "Reload" : "List"}
-                  </button>
+                  <div className="device__dirbtns">
+                    {isRun && (
+                      <button
+                        className="btn btn--sm btn--primary"
+                        disabled={!!busy}
+                        onClick={() => void openRun(d.path, dir!.names)}
+                        title={`Retrieve all ${dir!.names.length} files and open them as one .zpcr`}
+                      >
+                        Open run
+                      </button>
+                    )}
+                    <button
+                      className="btn btn--sm"
+                      disabled={!!busy}
+                      onClick={() => void device.refreshDirectory(d.path)}
+                    >
+                      {dir ? "Reload" : "List"}
+                    </button>
+                  </div>
                 </div>
 
                 {!dir ? (

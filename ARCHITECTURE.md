@@ -260,8 +260,23 @@ zero dependencies, is actively maintained, and runs identically in Node and the 
 `.zpcr` archives are small (hundreds of KB), so we decompress the **whole** archive into
 memory up front (`unzipSync`). That keeps the rest of the library synchronous and lets the
 low-level archive API serve any file instantly. `fflate` also writes zips (`zipSync`), used by
-the library's two write paths: `attachPlate.ts` (see below) and `zpcrwebSettings.ts` (see
-below), in an otherwise read-only library.
+the library's three write paths: `attachPlate.ts` (see below), `zpcrwebSettings.ts` (see below),
+and `runFolder.ts` (see [below](#a-run-directory-is-a-zpcr-runfolderts)), in an otherwise
+read-only library.
+
+## A run directory *is* a `.zpcr` (`runFolder.ts`)
+
+The instrument keeps a run in `\Storage Card\CurrentRun` as loose files — `RunInfo.xml`, the
+`Read*.Plateread` series, the `.Dcal` set, the marker files. A `.zpcr` is a plain ZIP of exactly
+those entries, so `zpcrFromRunFiles(files)` is a zip and nothing else: no conversion, no
+synthesis, and the result parses straight back through `parseZpcr` with every entry byte-for-byte
+what came off the wire (`packages/core/test/runFolder.test.ts` checks that against a committed
+sample). The archive is named after `RunInfo.xml`'s `DataFile`, which is already the name CFX
+Manager would have saved the same run under, and the call throws when `RunInfo.xml` is missing
+rather than handing back an archive `parseZpcr` would reject.
+
+This is what lets the web app's Device view open a run off a connected instrument as an ordinary
+file (see [`apps/web/ARCHITECTURE.md`](./apps/web/ARCHITECTURE.md)).
 
 ## Plate CSV + attaching a plate (`plateCsv.ts`, `attachPlate.ts`)
 

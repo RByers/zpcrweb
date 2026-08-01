@@ -49,6 +49,7 @@ export {
 export { parsePltd, parsePlatesetup2, isPltdName } from "./pltd.js";
 export { plateToCsv, parsePlateCsv, isPlateCsvName, isBlankWell } from "./plateCsv.js";
 export { attachPlateToZpcr } from "./attachPlate.js";
+export { zpcrFromRunFiles, zpcrNameFromRunFiles } from "./runFolder.js";
 export {
   parseZpcrwebSettings,
   parseZpcrwebSettingsJson,

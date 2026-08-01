@@ -423,6 +423,10 @@ and collects the plate reads:
    them, list the directory with the mandatory `GETFILESLEN` + `LISTALLFILES` pair (§5), keeping
    the two adjacent.
 7. After the run, pull the `.alf` report from `\Storage Card\PCRunReport\` the same way, if wanted.
+8. To take the *whole* run rather than its pieces: pull every file `LISTALLFILES` reported for
+   `\Storage Card\CurrentRun` and zip them unchanged — a `.zpcr` is a plain ZIP of exactly that
+   directory, so no conversion is involved. `zpcrFromRunFiles` (`packages/core/src/runFolder.ts`)
+   does this, and is what the web app's Device view "Open run" button calls.
 
 ## 8. Tooling
 

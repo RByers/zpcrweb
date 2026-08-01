@@ -2668,6 +2668,12 @@
   padding: 3px 9px;
   font-size: 12px;
 }
+/* The one action in a group that does the thing you came for — "Open run" beside "Reload". It
+   borrows the Device view's magenta so it reads as this view's primary action. */
+.btn--primary {
+  border-color: var(--neon-magenta);
+  background: var(--neon-magenta-dim);
+}
 
 /* Connection */
 .device__connect {
@@ -2827,6 +2833,12 @@
   gap: 12px;
   padding: 8px 12px;
   border-bottom: 1px solid var(--border);
+}
+.device__dirbtns {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
 }
 .device__dirname {
   font-size: 13px;

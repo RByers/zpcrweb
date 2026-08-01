@@ -12,13 +12,13 @@ import { DeviceFiles } from "../device/DeviceFiles";
 import { DeviceConsole } from "../device/DeviceConsole";
 import { useCfxDevice } from "../../state/useCfxDevice";
 
-export function DeviceView() {
+export function DeviceView({ onOpenRun }: { onOpenRun: (file: File) => Promise<void> | void }) {
   const device = useCfxDevice();
   return (
     <div className="curves device">
       <DeviceRail device={device} />
       <div className="device__content">
-        <DeviceFiles device={device} />
+        <DeviceFiles device={device} onOpenRun={onOpenRun} />
         <DeviceConsole device={device} />
       </div>
     </div>

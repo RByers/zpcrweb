@@ -213,6 +213,32 @@ export function useCfxDevice() {
     [withBusy],
   );
 
+  /**
+   * Pull every named file out of one directory, as `name → bytes`. Sequential by necessity: the
+   * command channel carries one request at a time (see `CfxDevice.sequence`), and a `CurrentRun`
+   * is ~40 files, so the busy label counts them off rather than sitting on one opaque message.
+   *
+   * A file that fails is dropped rather than failing the whole set: the caller (assembling a
+   * `.zpcr`) validates what it got, and one unreadable marker file shouldn't cost a run its
+   * plate reads.
+   */
+  const fetchDirectoryFiles = useCallback(
+    async (path: string, names: string[]) =>
+      withBusy(`Fetching ${names.length} files`, async (d) => {
+        const files: Record<string, Uint8Array> = {};
+        for (const [i, name] of names.entries()) {
+          setBusy(`Fetching ${name} (${i + 1}/${names.length})`);
+          try {
+            files[name] = await d.getFile(`${path}\\${name}`);
+          } catch {
+            /* keep going; the caller reports what's missing */
+          }
+        }
+        return files;
+      }),
+    [withBusy],
+  );
+
   const runAction = useCallback(
     async (name: CfxCommandName, spec: { label: string; command: string }) => {
       const res = await withBusy(spec.label, (d) => d.runAction(name));
@@ -256,6 +282,7 @@ export function useCfxDevice() {
     refreshDirectory,
     refreshAll,
     fetchFile,
+    fetchDirectoryFiles,
     runAction,
     sendRaw,
     clearTraffic,

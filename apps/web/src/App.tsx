@@ -86,6 +86,14 @@ export function App() {
   // it is all it takes; `loadExample` covers only the case where the hash *already* is that
   // value (a repeat click after a failed fetch), which fires no `hashchange`, so nothing would
   // otherwise happen.
+  // A run assembled off the instrument is an ordinary added file, so it takes the same
+  // `addFiles` path as a drop — and then leaves the Device view for it, since staying on a view
+  // that shows no file would make a successful open look like nothing happened. Only on success:
+  // a rejected archive leaves you where you are, with the error banner.
+  const openRun = async (file: File) => {
+    if (await store.addFiles([file])) store.setView("overview");
+  };
+
   const exampleHref = `#${formatLoadHash(EXAMPLE_FILE)}`;
   const loadExample = (e: { preventDefault: () => void }) => {
     if (window.location.hash !== exampleHref) return; // let the navigation do the work
@@ -118,7 +126,7 @@ export function App() {
           <DropZone onFiles={store.addFiles} />
         </header>
         <main className="app__main">
-          <DeviceView />
+          <DeviceView onOpenRun={openRun} />
         </main>
         {store.error && <div className="app__error mono">{store.error}</div>}
       </div>

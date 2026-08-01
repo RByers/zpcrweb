@@ -1,7 +1,7 @@
 import { DropZone } from "../DropZone";
 
 interface Props {
-  onFiles: (files: FileList | File[]) => void | Promise<void>;
+  onFiles: (files: FileList | File[]) => unknown;
   /** `#load=…` hash for the example run. A real href, so the browser offers "Copy link
    * address" on it — see `App`'s `exampleHref`. */
   exampleHref: string;

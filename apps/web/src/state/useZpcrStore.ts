@@ -550,7 +550,11 @@ export interface ZpcrStore {
   setView: (v: ViewId) => void;
   loading: boolean;
   error: string | null;
-  addFiles: (files: FileList | File[]) => Promise<void>;
+  /** Resolves to the id of the file left active — the last one that loaded — or `null` when
+   * every candidate was rejected (the reason is in {@link error}). A caller that only drops
+   * files can ignore it; one that wants to *go* to what it just added can't, since the store's
+   * own state hasn't re-rendered yet at that point. */
+  addFiles: (files: FileList | File[]) => Promise<string | null>;
   /**
    * Fetch a file over HTTP and load it as if it had been dropped — the `#load=<url>` hash key's
    * implementation, and how the welcome screen's example button works. The name comes from the
@@ -770,6 +774,7 @@ export function useZpcrStore(): ZpcrStore {
         }
       }
       if (lastId) setActiveId(lastId);
+      return lastId;
     },
     [forget],
   );
