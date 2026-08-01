@@ -107,13 +107,17 @@ export function App() {
    * file id (see `AddFilesOptions.activate`), so following unconditionally would yank the view
    * back to the running experiment every cycle. Following it when they *are* on it is the whole
    * point — that is what makes the Curves view grow a cycle at a time.
+   *
+   * A `freshStart` — the run began during this session, rather than being found already going —
+   * always activates regardless: the run the instrument just started is what someone watching it
+   * begin wants on screen, and there's no previous view of *this* run to preserve.
    */
   const runWatch = useRunWatch(
     instrument,
     useCallback(
-      async (file: File, previousId: string | null) => {
+      async (file: File, previousId: string | null, freshStart: boolean) => {
         const wasWatchingIt = store.activeId !== null && store.activeId === previousId;
-        return store.addFiles([file], { activate: wasWatchingIt, modified: true });
+        return store.addFiles([file], { activate: wasWatchingIt || freshStart, modified: true });
       },
       [store],
     ),
@@ -181,11 +185,21 @@ export function App() {
    * a bar whose only action was staging left no way to change what the rest of the app was
    * pointed at from here at all.
    */
+  /**
+   * A run happening right now, live on the instrument, owns the active file: switching away mid-
+   * run would leave `runWatch` growing a `.zpcr` nobody is looking at, and switching *to* some
+   * other file would abandon it looking like the run had stopped. The auxiliary staging chips
+   * (below) stay clickable regardless — they're what the *next* run would use, unrelated to the
+   * one in progress.
+   */
+  const activeLocked = instrument.connection === "connected" && !!instrument.status?.running;
   const selectFile = (id: string) => {
     const f = store.files.find((x) => x.id === id);
     if (!f) return;
-    if (store.view !== "instrument" || stagingRole(f.kind) === "run") store.setActive(id);
-    else staging.toggle(id);
+    if (store.view !== "instrument" || stagingRole(f.kind) === "run") {
+      if (activeLocked) return;
+      store.setActive(id);
+    } else staging.toggle(id);
   };
 
   const exampleHref = `#${formatLoadHash(EXAMPLE_FILE)}`;
@@ -235,6 +249,7 @@ export function App() {
             stagedIds={staging.stagedIds}
             modifiedIds={store.modifiedIds}
             inProgressIds={store.inProgressIds}
+            activeLocked={activeLocked}
             onSelect={selectFile}
             onRemove={store.remove}
             experiments={store.experiments}
@@ -317,6 +332,7 @@ export function App() {
         activeId={store.activeId}
         modifiedIds={store.modifiedIds}
         inProgressIds={store.inProgressIds}
+        activeLocked={activeLocked}
         onSelect={selectFile}
         onRemove={store.remove}
         experiments={store.experiments}

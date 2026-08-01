@@ -18,7 +18,11 @@
  * rule work at all. Nothing here lists on a run merely *starting*: usb.md doesn't call for it, and
  * `STATUS?`'s `running` flag already says so live without a listing — the `begun` marker is a
  * property of the archive this watcher assembles, not of what the rail shows moment to moment, so
- * it can wait for the first listing a real edge triggers anyway.
+ * it can wait for the first listing a real edge triggers anyway. That edge is watched, though,
+ * purely to tell a run *starting* from one *found* already going (a reconnect, or a page load
+ * mid-run) — the two produce an identical listing, but only the live `running` false→true
+ * transition tells them apart, which is what lets the file that transition's next listing
+ * eventually produces be selected unconditionally (see `onRun`'s `freshStart` below).
  *
  * When a listing turns out to differ from the last one, the folder is pulled and zipped into a
  * `.zpcr` exactly as the Instrument view's **Open run** button does, and handed to the store,
@@ -88,9 +92,14 @@ export function useRunWatch(
   /**
    * Hand an assembled run to the app. `previousId` is the file this one supersedes, so the caller
    * can decide whether to follow the new copy (the user was looking at it) or leave the selection
-   * alone (they were looking at something else). Returns the new file's id.
+   * alone (they were looking at something else). `freshStart` is true when this file is the
+   * result of a run that began while this session was watching — the `running` false→true edge
+   * below — as opposed to one already going when the folder was first listed (a reconnect, or a
+   * page load mid-run); the two look identical in the listing itself, so only that live edge
+   * tells them apart, and it's what the caller uses to decide whether to select the new file
+   * unconditionally. Returns the new file's id.
    */
-  onRun: (file: File, previousId: string | null) => Promise<string | null>,
+  onRun: (file: File, previousId: string | null, freshStart: boolean) => Promise<string | null>,
 ): RunWatchState {
   const [watching, setWatching] = useState(true);
   const [note, setNote] = useState<string | null>(null);
@@ -98,6 +107,9 @@ export function useRunWatch(
 
   const cache = useRef<Map<string, Uint8Array>>(new Map());
   const signature = useRef<string | null>(null);
+  // Set on the `running` false→true edge below, and consumed by the next successful `pull()` —
+  // that pull is the file this fresh start produced.
+  const freshStart = useRef(false);
   // A run being pulled must not have a second pull started on top of it: the fetch is slow (many
   // sequential commands) and both the timer and the status watcher can ask at once.
   const pulling = useRef(false);
@@ -130,9 +142,11 @@ export function useRunWatch(
         for (const [name, bytes] of Object.entries(fetched)) cache.current.set(name, bytes);
       }
       const files = Object.fromEntries(cache.current);
+      const fresh = freshStart.current;
+      freshStart.current = false;
       try {
         const { name, bytes } = zpcrFromRunFiles(files);
-        const id = await onRunRef.current(new File([bytes.slice()], name), fileIdRef.current);
+        const id = await onRunRef.current(new File([bytes.slice()], name), fileIdRef.current, fresh);
         setFileId(id);
         const reads = names.filter((n) => /\.Plateread$/i.test(n)).length;
         setNote(`Updated at ${new Date().toLocaleTimeString()} — ${reads} plate reads`);
@@ -209,6 +223,11 @@ export function useRunWatch(
   // the same reason a first listing that turns out to be that stale finished run is never pulled.
   const acknowledged = useRef<string | null>(null);
   const sawRunning = useRef(false);
+  // Tracks `status.running` purely to catch its false→true edge — see the module comment and
+  // `onRun`'s `freshStart`. Distinct from `sawRunning`, which latches true for the rest of the
+  // session (`acknowledgeFinishedRun` below needs that); this one un-latches so the next start
+  // is caught too.
+  const wasRunning = useRef(false);
   useEffect(() => {
     if (connection !== "connected" || !watching || !status) return;
     if (status.running || !status.runName) {
@@ -218,9 +237,14 @@ export function useRunWatch(
       if (status.running) {
         acknowledged.current = null;
         sawRunning.current = true;
+        if (!wasRunning.current) freshStart.current = true;
+        wasRunning.current = true;
+      } else {
+        wasRunning.current = false;
       }
       return;
     }
+    wasRunning.current = false;
     if (!sawRunning.current) return;
     if (acknowledged.current === status.runName) return;
     acknowledged.current = status.runName;
@@ -252,6 +276,8 @@ export function useRunWatch(
     lastStep.current = null;
     acknowledged.current = null;
     sawRunning.current = false;
+    wasRunning.current = false;
+    freshStart.current = false;
     cache.current.clear();
   }, [connection]);
 

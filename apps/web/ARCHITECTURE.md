@@ -1823,7 +1823,10 @@ is made — see "The first listing is never pulled" below for why that one is pu
 rather than diffed against, on the one path where it isn't a stale finished run. Nothing lists on a
 run merely *starting*: `STATUS?`'s `running` flag already says that live, and the marker files
 (`begun` etc.) are a property of the archive this watcher assembles rather than of the rail's live
-state, so they can wait for whichever real edge lists next.
+state, so they can wait for whichever real edge lists next. That flag's false→true edge is watched
+anyway, though, purely to tell a run *starting* apart from one *found* already going on connect —
+the two listings are identical, so only the live transition tells them apart — which is what the
+`freshStart` flag below rides on.
 
 Each changed listing is pulled and zipped with `zpcrFromRunFiles`, then handed to `store.addFiles`
 — the same path a drop takes. Three economies make that affordable once a cycle:
@@ -1839,10 +1842,27 @@ Each changed listing is pulled and zipped with `zpcrFromRunFiles`, then handed t
   after the run had already started, presents a first listing that is itself `begun` and not yet
   `ended`; `runProgressFromNames` tells the two cases apart, and an in-progress first sighting is
   pulled right away instead of waiting for the next transition or the 30 s backstop.
-- **The refresh doesn't steal the selection.** Every snapshot is a new file id (ids hash name+size,
-  and the archive grows), so `addFiles` takes an `activate` option: the new copy becomes active
-  only if the user was already on the one it supersedes. That is what makes the Curves view grow a
-  cycle at a time without dragging anyone back from whatever else they had open.
+- **The refresh doesn't steal the selection — except for the run's first file.** Every snapshot is
+  a new file id (ids hash name+size, and the archive grows), so `addFiles` takes an `activate`
+  option: ordinarily the new copy becomes active only if the user was already on the one it
+  supersedes, which is what makes the Curves view grow a cycle at a time without dragging anyone
+  back from whatever else they had open. But the pull that follows a run *starting* during this
+  session — the `running` false→true edge above — always activates: `useRunWatch` passes `onRun` a
+  `freshStart` flag, set on that edge and consumed by the next successful pull (typically the first
+  plate read's), and `App.tsx` ORs it into the `activate` decision. Someone watching a run start
+  wants it on screen, and there is no prior view of *that* run to preserve. (A run *found* already
+  going on connect, which looks identical in the listing, does not set the flag — only the live
+  transition does.)
+
+**While a run is in progress and the instrument is connected, the primary selection is locked.**
+`App.tsx`'s `activeLocked` (`instrument.connection === "connected" && !!instrument.status?.running`)
+blocks `selectFile` from calling `store.setActive` — a chip click that would switch away from, or
+to, some other file is a no-op — and `FileBar`/`FileChip` grey the cursor on the chips it would
+otherwise be a change to (`is-locked`). Switching away would leave this watcher growing a `.zpcr`
+nobody is looking at; switching to some other file would make the live run look stopped. The
+Instrument view's auxiliary staging chips (protocol/plate overrides) stay clickable regardless —
+they stage the *next* run, unrelated to the one in progress, and `checkRunPlan()`/`canStart` already
+keep a second run from starting on top of the first.
 
 **"In progress" is stored nowhere.** The `begun`-without-`ended` markers travel *inside* the
 assembled archive, so `runProgressFromNames` (core, `runFolder.ts`) reads the answer out of the

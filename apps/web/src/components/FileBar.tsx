@@ -58,6 +58,13 @@ interface Props {
    * pulls a snapshot carrying `ended`.
    */
   inProgressIds: Set<string>;
+  /**
+   * True while a run in progress on a connected instrument owns the primary selection — see
+   * `App.tsx`'s `activeLocked`. A click that would switch it does nothing while this is set; the
+   * auxiliary staging chips (magenta, `stagedIds`) are unaffected, since they stage the *next*
+   * run rather than touching what's live now.
+   */
+  activeLocked?: boolean;
   /** What each file is called and when it ran, keyed by id (`ZpcrStore.experiments`). A chip
    * leads with the name and carries the timestamp underneath; the file name moves to the hover
    * card, where it is still one glance away. */
@@ -254,6 +261,8 @@ function FileChip({
   isModified,
   isRunning,
   isStaged,
+  multi,
+  activeLocked,
   onSelect,
   onRemove,
 }: {
@@ -268,6 +277,10 @@ function FileChip({
   /** See {@link Props.inProgressIds} — the run is still being written to. */
   isRunning: boolean;
   isStaged: boolean;
+  /** Whether the bar is in multi-select (Instrument view) mode — see {@link Props.stagedIds}. */
+  multi: boolean;
+  /** See {@link Props.activeLocked}. */
+  activeLocked: boolean;
   onSelect: (id: string) => void;
   onRemove: (id: string) => void | Promise<void>;
 }) {
@@ -278,6 +291,11 @@ function FileChip({
   const [armed, setArmed] = useState(false);
   const isArmed = armed && isModified;
   const encStatus = fileEncryptionStatus(f, run, plateFile, password);
+  // Outside the Instrument view every chip click is a primary-selection change; inside it, only
+  // a run chip is — a protocol/plate chip stages instead (`App.tsx`'s `selectFile`), and staging
+  // isn't locked by a run in progress.
+  const isPrimaryClick = !multi || fileCategory(f.kind) === "run";
+  const clickLocked = activeLocked && isPrimaryClick && !isActive;
 
   return (
     <div
@@ -287,7 +305,8 @@ function FileChip({
         (isStaged && !isActive ? " is-staged" : "") +
         (isModified ? " is-modified" : "") +
         (isRunning ? " is-running" : "") +
-        (isArmed ? " is-arming" : "")
+        (isArmed ? " is-arming" : "") +
+        (clickLocked ? " is-locked" : "")
       }
       onMouseLeave={() => setArmed(false)}
       onKeyDown={(e) => {
@@ -299,7 +318,14 @@ function FileChip({
         className="filechip__main"
         role="tab"
         aria-selected={isActive || isStaged}
-        onClick={() => onSelect(f.id)}
+        title={
+          clickLocked
+            ? "Can't switch files while a run is in progress and connected via USB"
+            : undefined
+        }
+        onClick={() => {
+          if (!clickLocked) onSelect(f.id);
+        }}
         onMouseEnter={() => {
           const r = mainRef.current?.getBoundingClientRect();
           if (r) setCardPos({ top: r.bottom + 6, left: r.left });
@@ -363,6 +389,7 @@ export function FileBar({
   stagedIds,
   modifiedIds,
   inProgressIds,
+  activeLocked,
   experiments,
 }: Props) {
   const [password] = usePltdPassword();
@@ -392,6 +419,8 @@ export function FileBar({
           isStaged={stagedIds ? stagedIds.has(f.id) : false}
           isModified={modifiedIds.has(f.id)}
           isRunning={inProgressIds.has(f.id)}
+          multi={!!stagedIds}
+          activeLocked={!!activeLocked}
           onSelect={onSelect}
           onRemove={onRemove}
         />

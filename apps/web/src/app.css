@@ -360,6 +360,11 @@
   border-color: var(--neon-cyan);
   box-shadow: 0 0 0 1px var(--neon-cyan-dim), 0 0 16px var(--neon-cyan-dim);
 }
+/* A run in progress on a connected instrument owns the primary selection (`App.tsx`'s
+   `activeLocked`) — the chip stays fully visible (hover card and all), just not clickable. */
+.filechip.is-locked .filechip__main {
+  cursor: not-allowed;
+}
 /* A run that is still being written to by an instrument — `begun` present, `ended` absent among
    its own archive entries (see core's `runProgressFromNames`). The bar's chips are otherwise flat
    against the page, so a lit background is the one thing here that says "this file is not

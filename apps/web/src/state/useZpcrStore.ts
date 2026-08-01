@@ -567,10 +567,12 @@ export interface AddFilesOptions {
    * Whether the last file added becomes the active one. Default true — dropping a file means
    * wanting to look at it.
    *
-   * The run watcher passes false. It re-adds the in-progress run every time a cycle completes,
-   * and each snapshot is a *new* file id (ids hash name+size, and the archive grows), so
-   * activating unconditionally would drag the user back to the running experiment every minute
-   * or two no matter what they had opened.
+   * The run watcher passes false ordinarily. It re-adds the in-progress run every time a cycle
+   * completes, and each snapshot is a *new* file id (ids hash name+size, and the archive grows),
+   * so activating unconditionally would drag the user back to the running experiment every
+   * minute or two no matter what they had opened. It passes true instead for the snapshot that
+   * comes from a run *starting* in this session (`App.tsx`'s `freshStart`) — that one file the
+   * user watching it begin wants selected, superseding whatever was active before.
    */
   activate?: boolean;
   /**
