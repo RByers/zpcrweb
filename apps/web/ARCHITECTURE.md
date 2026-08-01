@@ -478,6 +478,44 @@ so every call site keeps writing one `onChange({ … })` regardless of where the
 XML rendering is a *presentation* concern (not `.zpcr`/`.pcrd` decoding), so it lives in the
 app, not the library.
 
+## The run's name
+
+The file bar and the Overview view lead with what a run is **called**, not with its file name: a
+chip is the run's name over a compact local timestamp, and the file name moves to the hover card
+and to the line under the Overview headline. A name like `20260726_S183-S185_RVP.zpcr` is three
+facts glued together (a date, a machine, a name) in a form that is wide, hard to scan, and mostly
+redundant with the tiles beside it.
+
+No format carries a name except Biomeme's (see `zpcrweb-json.md` §1.1 for the evidence), so the
+app resolves one — stored name, else the format's own, else derived from the file name —
+in `@zpcrweb/core`'s `experiment.ts`, with the app-side half (where the stored name comes from,
+how a `Date` renders) in `lib/experiment.ts`. The date is always **local**: the instrument writes
+`RunStartTime` in GMT, which is the wrong answer to "when did I run this?" by a whole day for an
+evening run west of the meridian.
+
+Two placement decisions worth keeping:
+
+- **`ZpcrStore.experiments`, not a per-view lookup.** The bar needs an identity for *every* file
+  while `store.settings` is assembled only for the active one. Resolving them all in the store
+  also means the chip shows a rename immediately, from the same live state the Overview header
+  edits, rather than after the archive's next rewrite.
+- **`experimentName` rides in `AnalysisSettings`** despite not being analysis. That interface is
+  what routes a settings key into the file rather than into IndexedDB (`ANALYSIS_KEYS`), and a
+  name belongs to the run for exactly the reasons the thresholds do. On disk it is a *top-level*
+  `zpcrweb.json` key, since it changes no reported number — `analysisSettings.ts` is the one
+  place that conversion happens.
+
+The Overview header's name field is the only place a name is edited, and clearing it is
+meaningful: the stored name is removed and the run falls back to its derived one. A derived name
+is never written back, so renaming the file on disk still renames the run. For a `.pcrd` or a
+Biomeme run there is no archive to write into, so the edit lasts the session — the field says so
+in its tooltip rather than losing it silently.
+
+The Device view has a name field too, for a run that does not exist yet: it is the one part of a
+staged run that is typed rather than selected from a file, so it sits in the "Run to start" panel
+with the protocol and plate, and is held by `DeviceView` so it outlives that panel's renders and
+is reachable by Start run once there is one to send (`usb.md` §10).
+
 ## Raw views
 
 A `.zpcr` is a real multi-file archive; a `.pcrd` is a single XML document with no inner
@@ -537,6 +575,14 @@ once a minute, so the copy embedded in the bytes this view parsed is routinely a
 (see "File-backed analysis settings" and `zpcrweb-json.md`). What's shown is byte-identical to
 what `exportBytes` writes into a downloaded copy, modulo the write-time `updatedAt` stamp.
 `RawFilesView` therefore takes `settings` alongside `zpcr`.
+
+### `StandaloneRawView` (one file, no archive)
+
+The third raw view, and the smallest: a viewer with no file list beside it, for a top-level entry
+that *is* a single file — a standalone `.pltd`/`.plt.csv`, and a Biomeme run's JSON. Same toolbar
+and Text/Hex modes as `RawFilesView`, with the text tab named for what it holds ("XML" for a
+`.pltd`'s decrypted payload, "JSON" for a Biomeme run, "Text" otherwise), and the same
+`looksLikeXml` sniffing deciding between the XML tree and the flat dump.
 
 ### `PcrdRawView` (`.pcrd`)
 
@@ -677,10 +723,17 @@ signal; see `fileKind()` in `state/useZpcrStore.ts`), and from there on almost n
 needs to know it isn't a `.zpcr`. Two real differences do surface, both because they're
 capability checks rather than format checks:
 
-- **Fewer view tabs.** `App.tsx`'s `isBiomeme` restricts `ViewSelector` to Overview/Curves/Plates
-  — Reference has no reference row to show, Calibration has no `.Dcal` set, Raw has no archive
-  (`Zpcr.archive` is honestly empty, the same "nothing here" `.pcrd` already models). The same
-  pattern `isStandalonePlate` already used for a bare `.pltd`/`.plt.csv` entry.
+- **Fewer view tabs.** `App.tsx`'s `BIOMEME_VIEWS` restricts `ViewSelector` to
+  Overview/Curves/Plates/Raw — Reference has no reference row to show and Calibration has no
+  `.Dcal` set. The same pattern `isStandalonePlate` already used for a bare `.pltd`/`.plt.csv`
+  entry. Raw *does* appear, but not through `RawFilesView`: the run has no archive to browse
+  (`Zpcr.archive` is honestly empty, the same "nothing here" `.pcrd` already models) and yet is
+  very much a file to read, so it renders through `StandaloneRawView` — the same one-file, no
+  file-list viewer a standalone `.plt.csv` gets, which labels the text tab "JSON" and shows the
+  document verbatim. Nothing is re-indented on the way to the screen; the point of a raw view is
+  the bytes as written.
+- **It names its own run** — top-level `name`, which no Bio-Rad format has an equivalent of; see
+  "The run's name" below.
 - **`Zpcr.dyeSpace`**, checked once in `useRunAnalysis` — see the next section — and
   **`WellCurve.fileAnalysis`**, read by the Curves view's file/computed toggles — see "File vs.
   computed analysis" under Curves view below.

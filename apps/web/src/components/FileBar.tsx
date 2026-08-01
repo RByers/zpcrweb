@@ -9,6 +9,7 @@ import {
   runEncryptionStatus,
   type EncryptionStatus,
 } from "../lib/encryptionStatus";
+import type { ExperimentIdentity } from "../lib/experiment";
 
 interface Props {
   files: LoadedFile[];
@@ -24,10 +25,15 @@ interface Props {
    * `onSelect` toggles membership instead of switching the view's subject.
    */
   selectedIds?: Set<string>;
+  /** What each file is called and when it ran, keyed by id (`ZpcrStore.experiments`). A chip
+   * leads with the name and carries the timestamp underneath; the file name moves to the hover
+   * card, where it is still one glance away. */
+  experiments: Map<string, ExperimentIdentity>;
 }
 
-/** Shorten `20260720_211747_CT019138_Luna_noRT.zpcr` to something legible. */
-function label(f: LoadedFile): string {
+/** Fallback chip text for a file whose identity hasn't been resolved yet (a store map still
+ * catching up with a just-added file) — the filename, minus the extension, as before. */
+function fallbackLabel(f: LoadedFile): string {
   return f.name.replace(/\.(zpcr|pcrd|pltd|plt\.csv|csv|json)$/i, "");
 }
 
@@ -68,13 +74,13 @@ function meta(f: LoadedFile, run: RunResult | undefined, plateFile: PlateFileRes
  * absolutely-positioned child, because `.filebar` scrolls horizontally (`overflow-x: auto`) and
  * would otherwise clip the card vertically too. */
 function HoverCard({
-  fileName,
+  identity,
   run,
   plateFile,
   password,
   style,
 }: {
-  fileName: string;
+  identity: ExperimentIdentity;
   run: RunResult | undefined;
   plateFile: PlateFileResult | undefined;
   password: string;
@@ -93,7 +99,10 @@ function HoverCard({
 
   return (
     <div className="filecard mono" style={style}>
-      <div className="filecard__title">{fileName}</div>
+      {/* The name leads, as it does on the chip — and the file it lives in follows, which is
+          the question the chip no longer answers on its own. */}
+      <div className="filecard__title">{identity.name}</div>
+      <div className="filecard__file">{identity.fileName}</div>
       {zpcr && (
         <dl className="filecard__dl">
           <dt>Protocol</dt>
@@ -147,6 +156,7 @@ function HoverCard({
  * clips a plain absolutely-positioned dropdown. */
 function FileChip({
   f,
+  identity,
   run,
   plateFile,
   password,
@@ -155,6 +165,7 @@ function FileChip({
   onRemove,
 }: {
   f: LoadedFile;
+  identity: ExperimentIdentity;
   run: RunResult | undefined;
   plateFile: PlateFileResult | undefined;
   password: string;
@@ -186,13 +197,19 @@ function FileChip({
         onBlur={() => setCardPos(null)}
       >
         <span className={`filechip__dot filechip__dot--${encStatus.kind}`} />
-        <span className="filechip__name mono">{label(f)}</span>
+        {/* Two lines, so the chip is a name rather than a path: the run's name, and under it a
+            compact local timestamp at a smaller, dimmer size. The full file name is in the
+            hover card. */}
+        <span className="filechip__text">
+          <span className="filechip__name mono">{identity.name}</span>
+          {identity.dateText && <span className="filechip__date mono">{identity.dateText}</span>}
+        </span>
         <span className="filechip__meta mono">{meta(f, run, plateFile)}</span>
       </button>
       {cardPos &&
         createPortal(
           <HoverCard
-            fileName={f.name}
+            identity={identity}
             run={run}
             plateFile={plateFile}
             password={password}
@@ -202,7 +219,7 @@ function FileChip({
         )}
       <button
         className="filechip__del"
-        aria-label={`Delete ${label(f)} from storage`}
+        aria-label={`Delete ${identity.name} from storage`}
         title="Delete from storage"
         onClick={(e) => {
           e.stopPropagation();
@@ -223,6 +240,7 @@ export function FileBar({
   onSelect,
   onRemove,
   selectedIds,
+  experiments,
 }: Props) {
   const [password] = usePltdPassword();
   return (
@@ -236,6 +254,14 @@ export function FileBar({
         <FileChip
           key={f.id}
           f={f}
+          identity={
+            experiments.get(f.id) ?? {
+              name: fallbackLabel(f),
+              date: null,
+              dateText: "",
+              fileName: f.name,
+            }
+          }
           run={runs.get(f.id)}
           plateFile={plateFiles.get(f.id)}
           password={password}

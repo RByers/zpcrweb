@@ -10,14 +10,24 @@ import type { LoadedFile } from "../../state/useZpcrStore";
 type Mode = "text" | "hex";
 const textDecoder = new TextDecoder("utf-8");
 
-/** The "Raw files" tab for a standalone `.pltd`/`.plt.csv` top-level entry: just this one
- * file's own bytes, no `Zpcr`/archive involved — a slimmed-down `RawFilesView`. `.pltd` needs
- * the CFX password to decrypt into XML; `.plt.csv` is already plain UTF-8 text. */
+/**
+ * The "Raw files" tab for a file that *is* one file — no `Zpcr` archive to browse, so no file
+ * list beside the viewer: a slimmed-down `RawFilesView`. Used by the standalone `.pltd`/
+ * `.plt.csv` entries and by a Biomeme run, whose whole run export is a single JSON document
+ * (`biomeme.md`).
+ *
+ * `.pltd` needs the CFX password to decrypt into XML; `.plt.csv` and the Biomeme JSON are
+ * already plain UTF-8 and are shown verbatim — the point of a raw view is the bytes as written,
+ * so nothing is re-indented or re-ordered on the way to the screen.
+ */
 export function StandaloneRawView({ file }: { file: LoadedFile }) {
   const [password, setPassword] = usePltdPassword();
   const [mode, setMode] = useState<Mode>("text");
   const [limit, setLimit] = useState(4096);
   const isPltd = file.kind === "pltd";
+  // Names the text tab for what it holds, the same way `.pltd`'s says "XML" — a Biomeme run's
+  // one entry is a JSON document, and "Text" undersells it next to the Decoded views elsewhere.
+  const textLabel = isPltd ? "XML" : file.kind === "biomeme" ? "JSON" : "Text";
 
   const pltd = useMemo(
     () => (isPltd ? parsePltd(file.bytes, password ? { password } : undefined) : null),
@@ -39,7 +49,7 @@ export function StandaloneRawView({ file }: { file: LoadedFile }) {
               disabled={isPltd && !text}
               title={isPltd ? "Decrypted XML" : ""}
             >
-              {isPltd ? "XML" : "Text"}
+              {textLabel}
             </button>
             <button
               className={"segmented__item" + (mode === "hex" ? " is-active" : "")}

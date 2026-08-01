@@ -12,6 +12,12 @@
  * makes a `.prcl.txt` and a run's embedded protocol render identically, since by then they are
  * the same thing.
  *
+ * The one thing this panel *owns* rather than renders is the run's name: unlike the protocol and
+ * the plate, it comes from neither file — no Bio-Rad format has a field for it (see
+ * `experiment.ts` in `@zpcrweb/core`), so for a run that doesn't exist yet there is nowhere to
+ * read it from and someone has to type it. It sits here, with the rest of what the run is made
+ * of, rather than in the rail beside the button that would send it.
+ *
  * There is no "start" button here: it lives in the rail with the other commands that actuate the
  * instrument (see `DeviceRail`), because that is what it is.
  */
@@ -44,7 +50,17 @@ function PartHead({
   );
 }
 
-export function DeviceRun({ staged }: { staged: StagedRun }) {
+export function DeviceRun({
+  staged,
+  name,
+  onNameChange,
+}: {
+  staged: StagedRun;
+  /** The run's name, as typed. Held by {@link DeviceView} — it outlives this panel's renders and
+   * is what a future Start run would label the run with. */
+  name: string;
+  onNameChange: (name: string) => void;
+}) {
   const { protocol, plate } = staged;
   const empty = !protocol.value && !plate.value && !protocol.reason && !plate.reason;
 
@@ -58,6 +74,23 @@ export function DeviceRun({ staged }: { staged: StagedRun }) {
             : "a run supplies both halves; a .prcl.txt or .plt.csv overrides one"}
         </span>
       </div>
+
+      {/* Shown even with nothing staged: naming the run is a thing you can do before choosing
+          its parts, and hiding the field would make the panel look like it had one job. */}
+      <label className="devrun__name">
+        <span className="devrun__namelabel">Experiment name</span>
+        <input
+          className="devrun__nameinput"
+          value={name}
+          onChange={(e) => onNameChange(e.currentTarget.value)}
+          spellCheck={false}
+          placeholder={protocol.value?.document.name || "unnamed run"}
+          title={
+            "What to call this run. The instrument's own formats have no field for a run name " +
+            "(see zpcrweb-json.md), so this is what the app records alongside the results."
+          }
+        />
+      </label>
 
       {empty ? (
         <div className="device__empty mono">

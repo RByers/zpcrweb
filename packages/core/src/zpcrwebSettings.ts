@@ -77,8 +77,23 @@ export interface ZpcrwebSettings {
   generator?: string;
   /** ISO-8601 timestamp of the last write. */
   updatedAt?: string;
+  /**
+   * What this run is called — the short label a person recognizes it by, which no Bio-Rad
+   * format has a field for (see `experiment.ts` for the evidence and the fallback chain).
+   * Top-level rather than inside {@link analysis} because it changes no reported number: it is
+   * the run's identity, not a parameter of its interpretation.
+   *
+   * Absent means "nobody has named this run", and the reader derives one from the filename —
+   * which is deliberately *not* written back here, so a file renamed on disk keeps tracking its
+   * new name instead of freezing the old one into the archive.
+   */
+  experimentName?: string;
   analysis?: ZpcrwebAnalysisSettings;
 }
+
+/** Longest name accepted on read. A name is a label, not a document; anything past this is
+ * corruption or a paste accident, and truncating silently would be worse than dropping it. */
+const MAX_EXPERIMENT_NAME = 200;
 
 const NORMALIZATION_MODES: NormalizationMode[] = ["none", "column", "global"];
 
@@ -145,6 +160,12 @@ export function parseZpcrwebSettingsJson(text: string): ZpcrwebSettings | null {
   const settings: ZpcrwebSettings = { version: finiteNumber(raw.version) ?? ZPCRWEB_SETTINGS_VERSION };
   if (typeof raw.generator === "string") settings.generator = raw.generator;
   if (typeof raw.updatedAt === "string") settings.updatedAt = raw.updatedAt;
+  if (typeof raw.experimentName === "string") {
+    // Trimmed, so trailing whitespace can't make a name that renders identically compare
+    // unequal; an empty (or whitespace-only) one is the same as none at all.
+    const name = raw.experimentName.trim();
+    if (name && name.length <= MAX_EXPERIMENT_NAME) settings.experimentName = name;
+  }
   const analysis = parseAnalysis(raw.analysis);
   if (analysis) settings.analysis = analysis;
   return settings;
@@ -192,7 +213,8 @@ export function writeZpcrwebSettings(
 }
 
 /** True once a settings document holds anything worth writing — used to avoid adding an entry
- * to a file whose analysis state is entirely default. */
+ * to a file whose analysis state is entirely default and which nobody has named. */
 export function hasZpcrwebSettings(settings: ZpcrwebSettings): boolean {
+  if (settings.experimentName) return true;
   return !!settings.analysis && Object.keys(settings.analysis).length > 0;
 }

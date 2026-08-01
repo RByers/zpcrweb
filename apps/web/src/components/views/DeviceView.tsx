@@ -11,6 +11,7 @@
  * (including Start run), and the content column stacks the staged run, the file browser and the
  * traffic console.
  */
+import { useState } from "react";
 import { DeviceRail } from "../device/DeviceRail";
 import { DeviceRun } from "../device/DeviceRun";
 import { DeviceFiles } from "../device/DeviceFiles";
@@ -27,11 +28,15 @@ export function DeviceView({
   staged: StagedRun;
 }) {
   const device = useCfxDevice();
+  // The name for the run being staged. Held here rather than in `DeviceRun` so it survives that
+  // panel's re-renders and is reachable by the rail's Start run once there is one to send
+  // (`usb.md` §10) — it is part of the staged run, not of the panel that displays it.
+  const [experimentName, setExperimentName] = useState("");
   return (
     <div className="curves device">
       <DeviceRail device={device} staged={staged} />
       <div className="device__content">
-        <DeviceRun staged={staged} />
+        <DeviceRun staged={staged} name={experimentName} onNameChange={setExperimentName} />
         <DeviceFiles device={device} onOpenRun={onOpenRun} />
         <DeviceConsole device={device} />
       </div>

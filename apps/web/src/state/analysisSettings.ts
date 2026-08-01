@@ -38,6 +38,18 @@ export const DEFAULT_THRESHOLD_MULTIPLIER = 20;
 
 /** File-backed analysis parameters, in-memory form. */
 export interface AnalysisSettings {
+  /**
+   * What the run is called (`zpcrweb.json`'s top-level `experimentName`; see `experiment.ts` in
+   * `@zpcrweb/core` for why no Bio-Rad format has a field for it). `""` means unnamed, and the
+   * app falls back to the format's own name or the filename — it is *not* written back, so
+   * renaming the file on disk still renames the run.
+   *
+   * Not analysis — it changes no number — but it is file-backed state, and this interface is
+   * how a key gets routed into the file rather than into IndexedDB (see {@link ANALYSIS_KEYS}).
+   * That is the distinction that matters here: a name belongs to the run, not to the browser
+   * that opened it, for exactly the reasons in this module's header.
+   */
+  experimentName: string;
   /** Manual per-fluorophore threshold override (RFU), keyed by threshold group — the
    * fluorophore, always (see `RunAnalysis.thresholdGroupOf`). A group with no entry uses the
    * automatic threshold (`threshold.md` §5.2). Edited in the Curves rail's "Threshold overrides"
@@ -73,6 +85,7 @@ export interface AnalysisSettings {
  * `onChange({ … })` regardless of where the value ends up being stored.
  */
 export const ANALYSIS_KEYS = [
+  "experimentName",
   "thresholdOverrides",
   "curveThresholdOverrides",
   "thresholdMultiplier",
@@ -89,6 +102,7 @@ export function isAnalysisKey(key: string): key is AnalysisKey {
 
 export function defaultAnalysisSettings(): AnalysisSettings {
   return {
+    experimentName: "",
     thresholdOverrides: new Map<string, number>(),
     curveThresholdOverrides: new Map<string, number>(),
     thresholdMultiplier: DEFAULT_THRESHOLD_MULTIPLIER,
@@ -101,9 +115,13 @@ export function defaultAnalysisSettings(): AnalysisSettings {
  * the app default, so a partial document is as usable as a complete one. */
 export function analysisFromZpcrweb(doc: ZpcrwebSettings | null | undefined): AnalysisSettings {
   const base = defaultAnalysisSettings();
+  // Top-level, not under `analysis` — and read even when the document has no analysis block at
+  // all, which is the shape a file named but never re-thresholded ends up with.
+  const experimentName = doc?.experimentName ?? base.experimentName;
   const a = doc?.analysis;
-  if (!a) return base;
+  if (!a) return { ...base, experimentName };
   return {
+    experimentName,
     thresholdOverrides: a.thresholdOverrides
       ? new Map(Object.entries(a.thresholdOverrides))
       : base.thresholdOverrides,
@@ -128,10 +146,14 @@ export function zpcrwebFromAnalysis(settings: AnalysisSettings): ZpcrwebSettings
     thresholdMultiplier: settings.thresholdMultiplier,
     calibrationNormalization: settings.calibrationNormalization,
   };
-  return {
+  const doc: ZpcrwebSettings = {
     version: ZPCRWEB_SETTINGS_VERSION,
     generator: "zpcrweb",
     updatedAt: new Date().toISOString(),
     analysis,
   };
+  // Omitted rather than written as `""`: absent is what "nobody named this run" means on disk,
+  // and it is what lets the reader fall back to the filename (see `AnalysisSettings`).
+  if (settings.experimentName.trim()) doc.experimentName = settings.experimentName.trim();
+  return doc;
 }

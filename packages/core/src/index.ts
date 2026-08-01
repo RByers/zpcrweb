@@ -83,6 +83,7 @@ export {
  * than decoding bytes, hence its own directory. Isomorphic like the rest: see
  * `usb/transport.ts` for why WebUSB and Node share a single implementation. */
 export * from "./usb/index.js";
+export { deriveExperimentName, resolveExperimentName } from "./experiment.js";
 export { zipCryptoDecrypt } from "./zipcrypto.js";
 export { inflateRaw } from "./inflate.js";
 export {

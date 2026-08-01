@@ -182,6 +182,17 @@ export type WellTable = WellReading[][][];
 export interface RunMetadata {
   /** Run identifier GUID (`Identifier` key). */
   identifier: string;
+  /**
+   * The run's own short name, when the *format* states one — **empty for `.zpcr`/`.pcrd`**,
+   * which have no such field (`RunInfo.xml`'s `SampleId`/`NickName`/`Notes` are empty on every
+   * committed sample, and `DataFile` is a filename). Only the Biomeme export fills it, from its
+   * top-level `name`.
+   *
+   * This is the format's answer, not the app's: for a run whose name was typed by a user it
+   * lives in `zpcrweb.json`, and `resolveExperimentName` (`experiment.ts`) is what picks between
+   * the two and the filename fallback.
+   */
+  experimentName: string;
   /** Data file name recorded by the instrument (`DataFile` key). */
   dataFile: string;
   /** Base (block) serial number (`BaseSerialNumber` key), e.g. `CT019138`. */

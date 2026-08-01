@@ -120,7 +120,7 @@ Cost control, when you do run it:
 npm run test:ui
 ```
 
-96 browser assertions covering what nothing else can catch: the two URL contracts — hash
+104 browser assertions covering what nothing else can catch: the two URL contracts — hash
 routing (deep links, back/forward, unknown-file and invalid-view fallbacks) and password
 handling (stripped from both URL forms, never leaked into the routing hash, an encrypted
 `.pcrd` still decrypting) — plus `#load=`, the rule that every XML view uses the shared
@@ -145,7 +145,13 @@ that one value is what makes the app reproduce CFX's own Cq) — and the Overvie
 drops out because it supplies nothing; tapping a selected override releases it; a loaded
 `.prcl.txt` joins the selection and lands on the Device view; a staged `.plt.csv` takes its
 dye→channel mapping from the run it is paired with) and Start run appears only with an
-instrument attached. A screenshot
+instrument attached — and how a run is *named*: the file bar shows an experiment name over a
+compact local timestamp rather than a file name, derived from the filename's
+`<date>_<time>_<serial>_<name>` unless the format states one (Biomeme) or somebody typed one,
+and a typed name has to survive a reload, which it can only do by reaching the archive's own
+`zpcrweb.json` (clearing it reverts to the derived name rather than blanking it) — plus a
+Biomeme run's Raw tab, which is its JSON document in the standalone (no file list) viewer.
+A screenshot
 can't show that the back button works, that a secret reached the address bar, that a hover
 put a curve back, or that eight rows are in the right order — and the core Vitest suite has no
 DOM.
@@ -154,7 +160,9 @@ Takes ~35s and needs Chrome, so it is **not** part of `npm test` — that stays 
 dependency-free. Run it when you touch `state/urlHash.ts`, `state/pltdPassword.ts`,
 `components/curves/ChipBar.tsx`, `components/curves/CurveTable.tsx`,
 `components/curves/CqRange.tsx`, `components/device/DeviceRun.tsx`, `state/useRunStaging.ts`,
-`lib/protocolSource.ts`, `state/useZpcrStore.ts`'s settings seeding or `fileKind`, or view
+`lib/protocolSource.ts`, `lib/experiment.ts` (or core's `experiment.ts`),
+`components/FileBar.tsx`, `components/views/StandaloneRawView.tsx`,
+`state/useZpcrStore.ts`'s settings seeding or `fileKind`, or view
 selection. Both
 tools share `tools/harness.mjs` (the CDP client and dev-server/Chrome plumbing); add new checks there rather than starting a third
 script. Note that rail hover ("peek") needs a real `Input.dispatchMouseEvent` — React derives
@@ -246,7 +254,7 @@ one algorithm doc, `calibration.md`, for the color-separation math built on top 
 | [`prcl.md`](./prcl.md) | The `.prcl` thermal-cycling protocol files — lid/volume settings plus the ordered step list (hold, gradient, melt, goto, plate read), in the same encrypted-ZIP container as `.pltd`/`.pcrd`. The same `protocol2` XML document `.pcrd` embeds. Implemented by `packages/core/src/prcl.ts`, entry point `parsePrcl(bytes)`; `parseProtocol2()` is reused by `pcrd.ts`; `zpcr.protocols()` decodes every `.prcl` entry in an archive. §3.1 documents `.prcl.txt`, this project's own line-per-directive text form (`formatRunDefinitionText`/`parseRunDefinitionText`) — the one representation here that isn't reverse-engineered. |
 | [`pcrd.md`](./pcrd.md) | The `.pcrd` CFX Manager saved-experiment file — the whole run (plate setup, protocol, every plate read, `RunInfo`/`runlog`, plus analysis/UI state) as one large XML document, in the same encrypted-ZIP container as `.pltd`/`.prcl`. Implemented by `packages/core/src/pcrd.ts`, entry point `parsePcrd(bytes)`, which decodes into the same `Zpcr` shape `parseZpcr` produces. |
 | [`zipcrypto.md`](./zipcrypto.md) | The single-entry ZipCrypto-encrypted ZIP container shared by `.pltd`/`.prcl` and `.pcrd`: container variants, the fixed shared password, and the decrypt → inflate pipeline. Implemented by `packages/core/src/zipcrypto.ts` + `inflate.ts`. |
-| [`zpcrweb-json.md`](./zpcrweb-json.md) | `zpcrweb.json` — the one entry this project *writes* into a `.zpcr`, holding the run's analysis parameters (thresholds, the auto-threshold multiplier, calibration normalization) so they travel with the file instead of sitting in one browser's IndexedDB. Not reverse-engineered. Implemented by `packages/core/src/zpcrwebSettings.ts`; the app side is `apps/web/src/state/analysisSettings.ts` + `analysisPersist.ts`. |
+| [`zpcrweb-json.md`](./zpcrweb-json.md) | `zpcrweb.json` — the one entry this project *writes* into a `.zpcr`, holding the run's analysis parameters (thresholds, the auto-threshold multiplier, calibration normalization) so they travel with the file instead of sitting in one browser's IndexedDB — plus §1.1's `experimentName`, what the run is *called*, which no CFX format has a field for. Not reverse-engineered. Implemented by `packages/core/src/zpcrwebSettings.ts` (+ `experiment.ts` for the name's resolution and filename derivation); the app side is `apps/web/src/state/analysisSettings.ts` + `analysisPersist.ts`. |
 | [`biomeme.md`](./biomeme.md) | Biomeme handheld device (Franklin/Two3/Three9) run-export JSON — the third input format, not a Bio-Rad format at all: no optical channels to unmix (fluorescence is per-dye already), and the device carries its own baseline/threshold/Cq alongside this library's. Self-describing JSON, not reverse-engineered. Implemented by `packages/core/src/biomeme.ts`, entry point `parseBiomeme(bytes)`, which decodes into the same `Zpcr` shape `parseZpcr`/`parsePcrd` produce. |
 | [`usb.md`](./usb.md) | The CFX96/C1000 instrument's own USB control protocol — not a file format: enumeration, the 5-byte application-layer frame, the ASCII command channel, and the file upload/download mechanism a run is loaded and read back through. Reverse-engineered from USB captures (decoded with `tools/usbpcap_decode.py`), then implemented and driven against live hardware — §10 lists what the instrument corrected. Implemented by `packages/core/src/usb/`, entry point `CfxDevice`; driven by `tools/cfx.mjs` and the web app's Device view. Reading and file retrieval only — no upload or run control. |
 | [`ARCHITECTURE.md`](./ARCHITECTURE.md) | Project-level design: isomorphic library goals, monorepo layout, input strategy. |

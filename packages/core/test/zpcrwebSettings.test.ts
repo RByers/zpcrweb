@@ -133,5 +133,16 @@ describe("parseZpcrwebSettingsJson", () => {
     expect(hasZpcrwebSettings({ version: 1 })).toBe(false);
     expect(hasZpcrwebSettings({ version: 1, analysis: {} })).toBe(false);
     expect(hasZpcrwebSettings({ version: 1, analysis: { subtractDark: false } })).toBe(true);
+    // A named run is worth an entry even with nothing but default analysis.
+    expect(hasZpcrwebSettings({ version: 1, experimentName: "S183-S185 RVP" })).toBe(true);
+  });
+
+  it("takes an experiment name, trimmed, and drops anything that isn't one", () => {
+    const name = (json: string) => parseZpcrwebSettingsJson(json)?.experimentName;
+    expect(name('{"experimentName": "  S183-S185 RVP  "}')).toBe("S183-S185 RVP");
+    expect(name('{"experimentName": "   "}')).toBeUndefined();
+    expect(name('{"experimentName": 42}')).toBeUndefined();
+    expect(name(`{"experimentName": "${"x".repeat(201)}"}`)).toBeUndefined();
+    expect(name(`{"experimentName": "${"x".repeat(200)}"}`)).toBe("x".repeat(200));
   });
 });

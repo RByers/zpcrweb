@@ -23,9 +23,12 @@ import { DeviceView } from "./components/views/DeviceView";
 import type { ViewId } from "./state/useZpcrStore";
 
 const STANDALONE_VIEWS = ["plates", "raw"] as const;
-/** A Biomeme run has no reference row, no `.Dcal` calibration files and no raw archive to
- * browse (`Zpcr.archive` is honestly empty) — those three tabs have nothing to show. */
-const BIOMEME_VIEWS = ["overview", "curves", "plates"] as const;
+/** A Biomeme run has no reference row and no `.Dcal` calibration files, so those two tabs have
+ * nothing to show. Raw stays: the run *is* one JSON document, so there is no archive to browse
+ * (`Zpcr.archive` is honestly empty) but there is very much a file to read — rendered by the
+ * same {@link StandaloneRawView} a `.plt.csv` gets, for the same reason (one text file, no
+ * container around it). */
+const BIOMEME_VIEWS = ["overview", "curves", "plates", "raw"] as const;
 /** A `.prcl.txt` is staged, not viewed — the Device view is the only place it does anything. */
 const PROTOCOL_VIEWS = ["device"] as const;
 
@@ -174,6 +177,7 @@ export function App() {
             selectedIds={staging.selectedIds}
             onSelect={staging.toggle}
             onRemove={store.remove}
+            experiments={store.experiments}
           />
         )}
         <main className="app__main">
@@ -242,6 +246,7 @@ export function App() {
         activeId={store.activeId}
         onSelect={store.setActive}
         onRemove={store.remove}
+        experiments={store.experiments}
       />
 
       <main className="app__main">
@@ -276,6 +281,18 @@ export function App() {
                 file={active}
                 run={activeRun!}
                 settings={settings}
+                identity={
+                  store.experiments.get(active.id) ?? {
+                    name: active.name,
+                    date: null,
+                    dateText: "",
+                    fileName: active.name,
+                  }
+                }
+                onRename={(name) => store.updateSettings({ experimentName: name })}
+                // Only a `.zpcr` has an archive to write `zpcrweb.json` into; see
+                // `analysisPersist.ts`'s `resolve`.
+                namePersists={active.kind === "zpcr"}
                 onDownload={() => store.exportBytes(active.id)}
               />
             )}
@@ -318,6 +335,11 @@ export function App() {
             )}
             {view === "raw" && active.kind === "zpcr" && (
               <RawFilesView key={active.id} zpcr={zpcr} settings={settings} />
+            )}
+            {/* A Biomeme run is a single JSON document rather than an archive, which is exactly
+                the shape the standalone viewer handles. */}
+            {view === "raw" && active.kind === "biomeme" && (
+              <StandaloneRawView key={active.id} file={active} />
             )}
           </>
         )}

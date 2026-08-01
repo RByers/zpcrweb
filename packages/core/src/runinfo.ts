@@ -62,6 +62,10 @@ export function parseRunInfo(xml: string): RunMetadata {
 
   return {
     identifier: raw["Identifier"] ?? "",
+    // No key in `RunInfo.xml` holds a run's short name (see `RunMetadata.experimentName`), so
+    // this is always empty here. It is left as a field rather than omitted because the *shape*
+    // is format-neutral — `biomeme.ts` builds the same `RunMetadata` and does have one.
+    experimentName: "",
     dataFile: raw["DataFile"] ?? "",
     baseSerialNumber: raw["BaseSerialNumber"] ?? "",
     blockDescription: raw["BlockDescription"] ?? "",

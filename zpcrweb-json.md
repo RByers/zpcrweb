@@ -2,7 +2,7 @@
 
 Unlike every other document in this repo, this one describes a format we **write**, not one we
 reverse-engineered. `zpcrweb.json` is an entry zpcrweb adds to a `.zpcr` archive to record the
-analysis parameters a run is being read with.
+analysis parameters a run is being read with, and the name it is known by.
 
 Implemented by `packages/core/src/zpcrwebSettings.ts`; the web app's in-memory half lives in
 `apps/web/src/state/analysisSettings.ts`, and the write-behind scheduling in
@@ -25,6 +25,32 @@ So the parameters go where the data is. A `.zpcr` is a plain ZIP (see `icff.md`'
 `RunInfo.xml` and the `.Plateread` files. Bio-Rad's tooling ignores entries it doesn't recognize,
 and `parseZpcr` only reads the ones it knows, so the addition is invisible to both.
 
+### 1.1 …and why the run's *name* lives here too
+
+The second thing in the entry is not a parameter at all: it is what the run is **called**. No
+Bio-Rad format has a field for one. `RunInfo.xml` carries `DataFile` (a filename), plus
+`SampleId`, `NickName` and `Notes` — all three empty on every committed sample — and a `.pcrd`
+names itself only by its own path (`creationFullyQualifiedName`). The instrument's convention is
+to encode the name *into* the filename, as `<date>_<time>_<serial>_<name>`, which is why
+`20260726_S183-S185_RVP.zpcr` is the run "S183-S185 RVP".
+
+That derivation (`packages/core/src/experiment.ts`) is the fallback, and it is right often
+enough to be the default. But a filename is not a name: it cannot hold a character a filesystem
+objects to, it changes when the file is copied, and it is wrong the moment someone renames the
+file. So a typed name is stored here, and it wins. The precedence, resolved by
+`resolveExperimentName`, is:
+
+| Source | Wins because |
+|---|---|
+| this entry's `experimentName` | somebody typed it |
+| `RunMetadata.experimentName` | the format itself states it — Biomeme only (`biomeme.md`), from its top-level `name` |
+| the filename | last resort, and usually right |
+
+A name is not analysis — it changes no reported number — so it sits at the top level rather than
+inside `analysis`. It is here rather than in IndexedDB for the same reason the thresholds are: a
+run's identity belongs to the run, not to the browser that happened to open it, and a name that
+did not travel with the file would be invisible to whoever it was sent to.
+
 **Display state does not go here.** Which wells are selected, which fluorophores are hidden, log
 vs. linear — none of it changes a number, all of it is one person's view onto the run, and it
 stays in IndexedDB (`apps/web/src/state/db.ts`).
@@ -44,7 +70,10 @@ hundred bytes in a ~400 KB archive.
 `.pcrd` files get **no** equivalent. A `.pcrd` is a single encrypted XML document, not an archive
 (see `pcrd.md` §1), so there is nowhere to put an entry; it does carry its own per-fluorophore
 analysis parameters (`dataAnalysisParameters`, `pcrd.md` §2.5), which we decode but do not yet
-write back. Analysis edits to a `.pcrd` are therefore live for the session and then gone.
+write back. Analysis edits to a `.pcrd` are therefore live for the session and then gone — as is
+a name typed for one, which the Overview view's field says out loud rather than losing silently.
+The same is true of a Biomeme run (`biomeme.md`), which is one JSON document; it at least names
+itself, so it starts from something better than a filename.
 
 ## 3. Schema
 
@@ -53,6 +82,7 @@ write back. Analysis edits to a `.pcrd` are therefore live for the session and t
   "version": 1,
   "generator": "zpcrweb",
   "updatedAt": "2026-07-26T14:03:11.284Z",
+  "experimentName": "S183-S185 RVP",
   "analysis": {
     "thresholdOverrides": { "FAM": 210, "Texas Red": 49 },
     "curveThresholdOverrides": { "3,2,Texas Red": 120 },
@@ -67,6 +97,7 @@ write back. Analysis edits to a `.pcrd` are therefore live for the session and t
 | `version` | number | Schema version. `1` today. |
 | `generator` | string? | Free-form provenance for a human reading the raw entry. |
 | `updatedAt` | string? | ISO-8601 timestamp of the last write. |
+| `experimentName` | string? | What the run is called (§1.1). Trimmed on read; empty, whitespace-only, non-string or longer than 200 characters is dropped, which is the same as absent. **Absent means "nobody has named this run"** and the reader derives one from the filename — a derived name is never written back, so renaming the file still renames the run. |
 | `analysis` | object? | The parameters below. Absent means "this run has no opinion". |
 | `analysis.thresholdOverrides` | `{ [fluor]: RFU }`? | Manual thresholds, keyed by **fluorophore**. Never by target — a threshold derives from baseline noise, a property of the dye and the optics, not of the biological label (`RunAnalysis.thresholdGroupOf`, `threshold.md` §5.2). Values must be > 0. |
 | `analysis.curveThresholdOverrides` | `{ "row,col,fluor": RFU }`? | The same, one curve at a time — one well's one dye, keyed by the app's `curveKey` with 0-based row/column. Outranks `thresholdOverrides`, which outranks the automatic value (`threshold.md` §5.3). Values must be > 0. |
@@ -74,7 +105,9 @@ write back. Analysis edits to a `.pcrd` are therefore live for the session and t
 | `analysis.subtractDark` | boolean? | **Retired.** Whether the LED-off `DARKDATA` was subtracted before colour separation. The stage is gone — subtracting it makes the reconstruction of the instrument's own curves 260× worse, and a constant background cannot change any reported number (`calibration.md` §4.2a). Still parsed so files carrying it load unchanged; no longer written, and nothing consumes it. |
 | `analysis.calibrationNormalization` | `"none" \| "column" \| "global"`? | Calibration matrix column normalization (`calibration.md` §3). Not exposed in the UI. |
 
-The app writes every live `analysis` field whenever the user has touched any of them, including
+`experimentName` is the one field written only when it has a value: writing a derived name back
+would freeze it, and "unnamed" has to stay expressible. The app writes every live `analysis`
+field whenever the user has touched any of them, including
 ones that equal the current default (retired fields such as `subtractDark` are read but not
 written back). The entry records *the parameters this run was analyzed
 with*; a default that shifts in a later build must not silently re-analyze an old run.

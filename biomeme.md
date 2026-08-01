@@ -42,6 +42,14 @@ Implemented by `packages/core/src/biomeme.ts`, entry point `parseBiomeme(bytes)`
 One `targets[]` entry is one (well, fluorophore) pair — the same granularity a CFX
 `WellCurve`/`CqTableEntry` is keyed at.
 
+**It is the only input format that names its own run.** Top-level `name` (e.g.
+`"2024-01-17-22220147"` — the device generates `<date>-<serial>`) becomes
+`RunMetadata.experimentName`, and the app shows it rather than deriving a name from the file
+name, which is what a `.zpcr`/`.pcrd` has to fall back on (`zpcrweb-json.md` §1.1). `date` is an
+ISO-8601 instant and becomes `runStartDate`; `protocol` is the protocol's name, not a step list —
+there is none to decode (§4). A name typed for a Biomeme run lasts the session only: the run is
+one JSON document, with no archive to hold a `zpcrweb.json`.
+
 **Wells are one row, not a grid.** A handheld device's tube positions are a single strip of
 holders, not a plate — `details.strip` is a physical fact about which sub-strip a tube sits in
 (informational, and unused for layout), but `parseBiomeme` places every well at row 0 and

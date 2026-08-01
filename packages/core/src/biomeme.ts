@@ -350,6 +350,9 @@ export function parseBiomeme(data: Uint8Array | ArrayBuffer): Zpcr {
   const runDate = run.date ? new Date(run.date) : null;
   const metadata: RunMetadata = {
     identifier: run.id ?? "",
+    // The one input format that names its own run: the device generates `<date>-<serial>`, and
+    // the app shows it instead of deriving a name from the filename (see `experiment.ts`).
+    experimentName: run.name ?? "",
     dataFile: run.name ?? "",
     baseSerialNumber: run.device ?? "",
     blockDescription: run.protocol ?? "",

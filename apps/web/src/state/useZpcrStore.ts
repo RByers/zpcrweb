@@ -35,6 +35,7 @@ import {
   type AnalysisSettings,
 } from "./analysisSettings";
 import { AnalysisPersister } from "./analysisPersist";
+import { experimentIdentity, type ExperimentIdentity } from "../lib/experiment";
 import { usePltdPassword } from "./pltdPassword";
 import { onHashChange, readHash, writeHash } from "./urlHash";
 
@@ -551,6 +552,16 @@ export interface ZpcrStore {
   plateFiles: Map<string, PlateFileResult>;
   /** `.prcl.txt` entries, id → canonical one-line run definition (`prcl.md` §3.1). */
   protocolFiles: Map<string, string>;
+  /**
+   * What each loaded file is called and when it was run, keyed by id — the file bar's chip text
+   * and the Overview view's headline (see `lib/experiment.ts`).
+   *
+   * Store-level rather than per-view because the bar needs it for *every* file while
+   * {@link ZpcrStore.settings} is assembled only for the active one. The stored name comes from
+   * the same live analysis state, so a rename shows on the chip immediately rather than after
+   * the archive's next rewrite.
+   */
+  experiments: Map<string, ExperimentIdentity>;
   activePlateFile: PlateFileResult | null;
   /**
    * Attach (or replace) a `.zpcr` run's plate: rewrites the run's own archive bytes in place
@@ -1062,6 +1073,15 @@ export function useZpcrStore(): ZpcrStore {
     }
   }, [files, runs]);
 
+  /** One identity per file — see the interface's own comment for why it lives here. */
+  const experiments = useMemo(() => {
+    const map = new Map<string, ExperimentIdentity>();
+    for (const f of files) {
+      map.set(f.id, experimentIdentity(f, runs.get(f.id), analysisMap[f.id]?.experimentName));
+    }
+    return map;
+  }, [files, runs, analysisMap]);
+
   const exportBytes = useCallback(
     (id: string): Uint8Array | null => {
       const file = files.find((f) => f.id === id);
@@ -1086,6 +1106,7 @@ export function useZpcrStore(): ZpcrStore {
     activeRun,
     plateFiles,
     protocolFiles,
+    experiments,
     activePlateFile,
     attachPlate,
     settings,

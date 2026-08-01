@@ -399,11 +399,30 @@
 .filechip.is-active .filechip__dot--locked {
   box-shadow: 0 0 8px var(--danger);
 }
+/* A chip is two stacked lines — the run's name over its date — so the bar reads as a list of
+   experiments rather than of paths, and stays narrow enough for several to fit across a phone.
+   `min-width: 0` on the column is what lets the ellipsis below actually engage inside a flex
+   parent. */
+.filechip__text {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  min-width: 0;
+}
 .filechip__name {
   font-size: 12px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  max-width: 100%;
+}
+/* Deliberately smaller and dimmer than the name: it is context, not identity. */
+.filechip__date {
+  font-size: 10px;
+  color: var(--ink-muted);
+  white-space: nowrap;
+  letter-spacing: 0.02em;
 }
 .filechip__meta {
   font-size: 11px;
@@ -421,8 +440,15 @@
   backdrop-filter: blur(4px);
 }
 .filecard__title {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--ink);
+  word-break: break-word;
+}
+/* The file the run lives in — the question the chip stopped answering when it started showing
+   the experiment name instead. */
+.filecard__file {
+  font-size: 10px;
+  color: var(--ink-muted);
   margin-bottom: 6px;
   word-break: break-all;
 }
@@ -618,6 +644,57 @@
   flex-direction: column;
   gap: 22px;
 }
+/* The run's name, and under it when it ran and where it lives. First thing in the view, and the
+   only place the name can be edited (see `OverviewView`'s ExperimentHeader). */
+.overview__title {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  /* Half the view's own `gap`, so the subtitle stays visually attached to the name above it
+     rather than floating midway between it and the tiles. */
+  margin-bottom: -11px;
+}
+/* Styled as a heading, not as a form field: no border or background until it is interacted
+   with, so the name reads as a title while still being obviously editable on hover. */
+.overview__name {
+  width: 100%;
+  max-width: 40ch;
+  padding: 2px 6px;
+  margin-left: -6px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--ink);
+  font-family: inherit;
+  font-size: clamp(20px, 3.2cqi, 28px);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  text-overflow: ellipsis;
+}
+.overview__name:hover {
+  border-color: var(--border);
+}
+.overview__name:focus {
+  outline: none;
+  background: var(--plane);
+  border-color: var(--neon-cyan);
+}
+.overview__subtitle {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 11px;
+  color: var(--ink-muted);
+}
+/* The timestamp is the more useful of the two, so it is the brighter one. */
+.overview__when {
+  color: var(--ink-2);
+}
+.overview__filename {
+  word-break: break-all;
+}
+
 /* Tiles + download button side by side, so the button reserves its own column instead of
    pushing the tiles (or anything below) down a row. */
 .overview__head {
@@ -3000,6 +3077,37 @@
      panels below, it isn't the panel's height budget. */
   max-height: 420px;
   overflow: auto;
+}
+/* The run's name — the one part of a staged run that is typed rather than selected from a file,
+   so it gets a real labelled field rather than the read-only headings the two halves use. */
+.devrun__name {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 10px 14px 0;
+}
+.devrun__namelabel {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-muted);
+  white-space: nowrap;
+}
+.devrun__nameinput {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 44ch;
+  padding: 5px 8px;
+  background: var(--plane);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 13px;
+}
+.devrun__nameinput:focus {
+  outline: none;
+  border-color: var(--neon-cyan);
 }
 .devrun__parthead {
   display: flex;

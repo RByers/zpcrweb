@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { formatRunDefinitionText, type CqTableEntry, type PlateDefinition, type Zpcr } from "@zpcrweb/core";
 import { ProtocolDecoded } from "../raw/DecodedView";
 import { ProtocolStepsTable } from "../raw/ProtocolSteps";
@@ -11,6 +11,7 @@ import { channelColor } from "../../lib/channelColors";
 import { runEncryptionStatus } from "../../lib/encryptionStatus";
 import { curveKey, useRunAnalysis } from "../../lib/runAnalysis";
 import type { FileSettings, RunResult } from "../../state/useZpcrStore";
+import type { ExperimentIdentity } from "../../lib/experiment";
 
 interface Tile {
   label: string;
@@ -28,6 +29,9 @@ export function OverviewView({
   file,
   run,
   settings,
+  identity,
+  onRename,
+  namePersists,
   onDownload,
 }: {
   zpcr: Zpcr;
@@ -44,6 +48,15 @@ export function OverviewView({
   /** Only used to feed {@link useRunAnalysis} — the plate chips' Cq tallies must be the same
    * numbers the Curves view shows, which means the same thresholds and calibration settings. */
   settings: FileSettings;
+  /** What this run is called and when it ran — the view's headline; see `lib/experiment.ts`. */
+  identity: ExperimentIdentity;
+  /** Store a new name (`zpcrweb.json`'s `experimentName`). `""` clears it, which puts the run
+   * back on its derived name. */
+  onRename: (name: string) => void;
+  /** False when the format can't carry the name to disk (`.pcrd`, Biomeme — neither has an
+   * archive to hold a `zpcrweb.json`), which the field then says out loud rather than silently
+   * losing the edit on reload. */
+  namePersists: boolean;
 }) {
   const m = zpcr.metadata;
   const reads = zpcr.reads;
@@ -93,12 +106,18 @@ export function OverviewView({
     { label: "Cycles", value: String(steps.reduce((sum, s) => sum + s.readCount, 0)) },
     { label: "Plate", value: `${m.numberPlateRows}×${m.numberPlateColumns} + ${m.numberReferenceRows} ref` },
     { label: "Protocol", value: protocolName || "—" },
-    { label: "Run start", value: m.runStartDate ? m.runStartDate.toUTCString() : m.runStartTime || "—" },
+    // No "Run start" tile: the headline above already carries it, in local time.
     { label: "Last block temp", value: lastTemp != null ? `${lastTemp.toFixed(1)} °C` : "—" },
   ];
 
   return (
     <div className="overview">
+      <ExperimentHeader
+        identity={identity}
+        onRename={onRename}
+        persists={namePersists}
+        runStartTime={m.runStartTime}
+      />
       <div className="overview__head">
         <section className="overview__tiles">
           {tiles.map((t) => (
@@ -221,6 +240,81 @@ export function OverviewView({
         </dl>
       </section>
     </div>
+  );
+}
+
+/**
+ * The view's headline: what the run is called, and — smaller and dimmer, one line below — when
+ * it ran and which file it came out of.
+ *
+ * The name is an input rather than a label because for a `.zpcr` it is genuinely editable: no
+ * Bio-Rad format has a field for it, so a run is named either by its filename or by whatever
+ * gets typed here, which is then stored in the archive's own `zpcrweb.json` and travels with the
+ * file (see `state/analysisSettings.ts`). Clearing the field is meaningful — it removes the
+ * stored name, and the run reverts to the one derived from its filename.
+ *
+ * Edits commit on blur or Enter rather than on every keystroke: each commit eventually rewrites
+ * the archive, and Escape has to be able to abandon a half-typed name.
+ */
+function ExperimentHeader({
+  identity,
+  onRename,
+  persists,
+  runStartTime,
+}: {
+  identity: ExperimentIdentity;
+  onRename: (name: string) => void;
+  persists: boolean;
+  /** The raw `RunStartTime` string, as the timestamp's tooltip — the headline renders a compact
+   * *local* time, and this is the instrument's own (GMT) wording behind it. */
+  runStartTime: string;
+}) {
+  const [draft, setDraft] = useState(identity.name);
+  // Re-seed when the resolved name changes underneath — a different file, or a rename arriving
+  // from elsewhere. Keyed on the value, so typing is never interrupted by an unrelated render.
+  useEffect(() => setDraft(identity.name), [identity.name]);
+
+  const commit = () => {
+    const next = draft.trim();
+    // Covers "cleared, and the derived name is what was showing anyway": nothing to store.
+    if (next === identity.name) return;
+    onRename(next);
+    if (!next) setDraft(identity.name);
+  };
+
+  return (
+    <header className="overview__title">
+      <input
+        className="overview__name"
+        value={draft}
+        onChange={(e) => setDraft(e.currentTarget.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") e.currentTarget.blur();
+          if (e.key === "Escape") {
+            setDraft(identity.name);
+            e.currentTarget.blur();
+          }
+        }}
+        aria-label="Experiment name"
+        spellCheck={false}
+        title={
+          persists
+            ? "The run's name — stored in the file's own zpcrweb.json, so it travels with the " +
+              "file. Clear it to go back to the name derived from the file name."
+            : "The run's name. This format has no archive to store it in, so the name lasts for " +
+              "this session only."
+        }
+      />
+      <div className="overview__subtitle mono">
+        {identity.dateText && (
+          <span className="overview__when" title={runStartTime || undefined}>
+            {identity.dateText}
+          </span>
+        )}
+        <span className="overview__filename">{identity.fileName}</span>
+      </div>
+    </header>
   );
 }
 

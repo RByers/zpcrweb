@@ -353,7 +353,10 @@ so the plate travels with the file with no separate override state to keep in sy
 The library's second write path, and the same idea one level up: a run's **analysis** parameters
 — thresholds, §5.2's auto-threshold multiplier, calibration normalization —
 belong to the run, not to whichever browser opened it, because they are what decide the Cq it
-reports. `writeZpcrwebSettings` adds them to the archive as a `zpcrweb.json` entry;
+reports. The entry carries one thing that isn't a parameter: `experimentName`, what the run is
+*called*. No CFX format has a field for one (`RunInfo.xml`'s name-ish keys are empty on every
+sample; the instrument encodes the name into the filename instead), so `experiment.ts` resolves
+stored name → the format's own → a derivation from the filename. `writeZpcrwebSettings` adds them to the archive as a `zpcrweb.json` entry;
 `parseZpcrwebSettings` reads them back through the already-decompressed `Zpcr.archive`, total and
 field-by-field so a hand-edited or newer document degrades instead of failing. Full schema and
 rationale in [`zpcrweb-json.md`](./zpcrweb-json.md); the app-side scheduling (why writes are

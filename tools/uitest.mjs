@@ -30,6 +30,9 @@ import {
 const ZPCR = join(REPO, "samples/20260720_FirstQualification.zpcr");
 const PCRD = join(REPO, "samples/20260720_Luna_noRT.pcrd");
 const PLTD = join(REPO, "samples/QuickPlate_96 wells_All Channels.pltd");
+/** The Biomeme run export — the one input format that isn't Bio-Rad's, and the one that names
+ * its own run rather than encoding the name in a filename. */
+const BIOMEME = join(REPO, "samples/biomeme-2024-01-17.json");
 /** The run whose `.pcrd` persists a hand-set FAM threshold — see {@link persistedThresholdChecks}. */
 const RVP_PCRD = join(REPO, "samples/20260726_S183-S185_RVP.pcrd");
 const EXAMPLE = "20260726_S183-S185_RVP.zpcr";
@@ -1211,7 +1214,9 @@ async function deviceRunChecks(chrome, origin) {
 
   // Only one run at a time: selecting a second replaces the first.
   await loadFile(cdp, PCRD);
-  await waitFor(() => chipPresent(cdp, "Luna_noRT"), { what: "the .pcrd chip" });
+  // `Luna.noRT`, not `Luna_noRT`: a chip shows the run's *name*, and the derivation reads the
+  // filename's `_` as the space the user typed (see `experiment.ts`).
+  await waitFor(() => chipPresent(cdp, "Luna.noRT"), { what: "the .pcrd chip" });
   await sleep(500);
   const clickRun = (pattern) =>
     cdp.eval(
@@ -1220,14 +1225,14 @@ async function deviceRunChecks(chrome, origin) {
     );
   await clickRun("/FirstQualification/");
   await sleep(300);
-  await clickRun("/Luna_noRT/");
+  await clickRun("/Luna noRT/");
   await sleep(400);
   const runs = await staged();
   const runsOn = runs.chips.filter((c) => c.on).map((c) => c.name);
   check(
     "selecting a second run replaces the first — only one can be staged",
-    runsOn.filter((n) => /FirstQualification|Luna_noRT/.test(n)).length === 1 &&
-      runsOn.some((n) => /Luna_noRT/.test(n)),
+    runsOn.filter((n) => /FirstQualification|Luna noRT/.test(n)).length === 1 &&
+      runsOn.some((n) => /Luna noRT/.test(n)),
     JSON.stringify(runsOn),
   );
 
@@ -1248,6 +1253,141 @@ async function deviceRunChecks(chrome, origin) {
   cdp.close();
 }
 
+
+/**
+ * What a run is called, and where that name comes from.
+ *
+ * The file bar stopped showing file names: a chip is now a run's *name* over its start date, and
+ * no format has a field for the former (`experiment.ts`) — so the name is derived from the
+ * filename, overridden by the format's own when it has one, and overridden again by whatever is
+ * typed into the Overview header, which is stored in the archive's `zpcrweb.json` and therefore
+ * has to survive a reload. Each of those is a silent failure otherwise: a name that renders but
+ * doesn't stick looks identical to one that does until the tab is closed.
+ *
+ * Also here because it is the same "one file, no archive" story: a Biomeme run's Raw tab, which
+ * shows the JSON document itself rather than the empty archive it has instead.
+ */
+async function experimentNameChecks(chrome, origin) {
+  console.log("\nexperiment names");
+  const cdp = await openPage(chrome.base, origin);
+  await emptyReload(cdp, origin);
+  await loadFile(cdp, join(REPO, "samples", EXAMPLE));
+  await waitFor(() => chipPresent(cdp, "S183"), { what: "the .zpcr chip" });
+  await cdp.eval(`window.location.hash = "view=overview", undefined`);
+  await tabBecomes(cdp, "Overview");
+
+  const headline = () =>
+    cdp
+      .eval(
+        `JSON.stringify({
+           name: document.querySelector(".overview__name")?.value ?? null,
+           when: document.querySelector(".overview__when")?.textContent ?? null,
+           file: document.querySelector(".overview__filename")?.textContent ?? null,
+           chip: document.querySelector(".filechip__name")?.textContent ?? null,
+           chipDate: document.querySelector(".filechip__date")?.textContent ?? null,
+         })`,
+      )
+      .then(JSON.parse);
+
+  const first = await headline();
+  check(
+    "an unnamed run is named from its filename, without the date/serial prefix",
+    first.name === "S183-S185 RVP" && first.chip === "S183-S185 RVP",
+    JSON.stringify(first),
+  );
+  // RunStartTime is `Mon, 27 Jul 2026 01:12:47 GMT`; the app renders local time, so the exact
+  // string depends on the runner's zone — what must hold is that it is compact and that the
+  // chip and the headline agree.
+  check(
+    "the run start shows as a compact local timestamp, on the chip and the headline alike",
+    /^\d{1,2}\/\d{1,2}\/\d{2} \d{1,2}:\d{2}(am|pm)$/.test(first.when ?? "") &&
+      first.chipDate === first.when,
+    JSON.stringify(first),
+  );
+  check(
+    "the file name moves below the headline rather than disappearing",
+    first.file === EXAMPLE,
+    JSON.stringify(first),
+  );
+
+  /**
+   * Type into the name field and commit it. The two halves are separate turns on purpose: the
+   * field commits on blur from the *committed* draft state, so blurring in the same tick as the
+   * input event would read the value React hasn't applied yet — which real typing never does.
+   */
+  const setName = async (value) => {
+    await cdp.eval(
+      // `focus()` first because the commit is on blur, and blurring an element that was never
+      // focused fires nothing at all — the field would keep the text and store none of it.
+      `(() => { const el = document.querySelector(".overview__name");
+         el.focus();
+         const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
+         setter.call(el, ${JSON.stringify(value)});
+         el.dispatchEvent(new Event("input", { bubbles: true })); })()`,
+    );
+    await sleep(200);
+    await cdp.eval(`document.querySelector(".overview__name").blur()`);
+  };
+
+  // Type a name: it must reach the chip, and — the part that matters — survive a reload, which
+  // it can only do by having been written into the archive's own zpcrweb.json.
+  await setName("Renamed RVP");
+  await waitFor(() => chipPresent(cdp, "Renamed RVP"), { what: "the renamed chip" });
+  const named = await headline();
+  check("a typed name replaces the derived one everywhere", named.name === "Renamed RVP", JSON.stringify(named));
+
+  // The archive rewrite is rate-limited but writes the first edit immediately
+  // (`analysisPersist.ts`), so a reload is enough — no minute of waiting.
+  await sleep(700);
+  await cdp.send("Page.navigate", { url: `${origin}#file=${EXAMPLE}&view=overview` });
+  await tabBecomes(cdp, "Overview");
+  await waitFor(async () => (await headline()).name !== null, { what: "the reloaded headline" });
+  const reloaded = await headline();
+  check(
+    "the name survives a reload — it went into the file, not this browser",
+    reloaded.name === "Renamed RVP",
+    JSON.stringify(reloaded),
+  );
+
+  // Clearing it is meaningful: the run goes back to its derived name rather than to blank.
+  await setName("  ");
+  await waitFor(() => chipPresent(cdp, "S183-S185 RVP"), { what: "the derived name to come back" });
+  const cleared = await headline();
+  check(
+    "clearing the name reverts to the derived one rather than leaving it blank",
+    cleared.name === "S183-S185 RVP",
+    JSON.stringify(cleared),
+  );
+
+  // A Biomeme run names itself, and its Raw tab is the JSON document rather than an archive.
+  await loadFile(cdp, BIOMEME);
+  await waitFor(() => chipPresent(cdp, "2024-01-17-22220147"), { what: "the Biomeme chip" });
+  check(
+    "a Biomeme run uses the name the format itself carries",
+    await chipPresent(cdp, "2024-01-17-22220147"),
+  );
+  await cdp.eval(`window.location.hash = "view=raw", undefined`);
+  await tabBecomes(cdp, "Raw files");
+  const raw = await cdp
+    .eval(
+      `JSON.stringify({
+         fname: document.querySelector(".raw__fname")?.textContent ?? null,
+         label: [...document.querySelectorAll(".segmented__item")].map(b => b.textContent.trim()),
+         body: (document.querySelector(".raw__dump")?.textContent ?? "").slice(0, 40),
+         list: document.querySelectorAll(".raw__list").length,
+       })`,
+    )
+    .then(JSON.parse);
+  check(
+    "a Biomeme run has a Raw tab showing its JSON, in the standalone (no file list) viewer",
+    raw.fname === "biomeme-2024-01-17.json" &&
+      raw.label.includes("JSON") &&
+      raw.list === 0 &&
+      /"id"\s*:/.test(raw.body),
+    JSON.stringify(raw),
+  );
+  cdp.close();
+}
 
 async function main() {
   const pw = cfxPassword();
@@ -1276,6 +1416,7 @@ async function main() {
     await passwordChecks(chrome, origin, pw);
     await xmlViewChecks(chrome, origin, pw);
     await deviceRunChecks(chrome, origin);
+    await experimentNameChecks(chrome, origin);
   } finally {
     chrome.stop();
     dev.stop();
