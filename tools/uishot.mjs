@@ -39,6 +39,7 @@ const VIEW_LABELS = {
   reference: "Reference",
   calibration: "Calibration",
   raw: "Raw files",
+  device: "Device",
   // Reached by clicking the logo, so it has no tab to go `aria-selected` — matched by the
   // rendered card instead (see the `settle` branch below).
   about: null,

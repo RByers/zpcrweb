@@ -52,6 +52,7 @@ export type ViewId =
   | "reference"
   | "calibration"
   | "raw"
+  | "device"
   | "about";
 /** Reference view only — drift relative to the factory calibration value; see `ReferenceView`. */
 export type Baseline = "raw" | "delta" | "percent";

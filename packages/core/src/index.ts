@@ -71,6 +71,10 @@ export {
   separateChannels,
   separateDyes,
 } from "./calibration.js";
+/** Live-instrument USB client (`usb.md`) — the one subsystem here that talks to hardware rather
+ * than decoding bytes, hence its own directory. Isomorphic like the rest: see
+ * `usb/transport.ts` for why WebUSB and Node share a single implementation. */
+export * from "./usb/index.js";
 export { zipCryptoDecrypt } from "./zipcrypto.js";
 export { inflateRaw } from "./inflate.js";
 export {

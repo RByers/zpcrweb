@@ -2613,3 +2613,353 @@
 .analysis__threshold-row .rail__link:disabled {
   opacity: 0.25;
 }
+
+/* ---- Device view ---------------------------------------------------------
+   A live instrument over WebUSB, not a file. Everything here is deliberately set apart from the
+   file-backed views: its tab sits in its own group (`.segmented--device`), the file bar is hidden
+   while it shows (see `App.tsx`), and it uses magenta where the rest of the chrome uses cyan — the
+   palette's second accent, already meaning "this is a different kind of thing" on the rail's
+   switches. Layout is the Curves view's rail + content grid (`.curves`), so the surfaces read the
+   same even though the content doesn't. */
+
+/* The tab strip is now two groups rather than one control: the file views, then Device. The gap
+   plus the separate border is the whole visual argument that the file selection doesn't apply to
+   it — see `ViewSelector.tsx`. */
+.viewselect {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+.segmented--device {
+  border-color: var(--neon-magenta-dim);
+}
+.segmented--device .segmented__item.is-active {
+  background: var(--neon-magenta-dim);
+  box-shadow: inset 0 -2px 0 var(--neon-magenta);
+}
+
+/* A page with the header but no file bar (`app--nofiles`) still has to fill the viewport, so it
+   gets the same two-row grid `.app` uses minus the file-bar row. */
+.app--nofiles {
+  display: grid;
+  grid-template-rows: var(--header-h) 1fr;
+  height: 100%;
+  min-height: 0;
+}
+.app__welcomedevice {
+  display: flex;
+  justify-content: center;
+  padding-bottom: 24px;
+}
+
+.device__rail {
+  border-right-color: var(--neon-magenta-dim);
+}
+.device__content {
+  display: grid;
+  grid-template-rows: 1fr minmax(180px, 40%);
+  min-width: 0;
+  min-height: 0;
+}
+
+/* Buttons: the base `button` element rule already carries the look; these only add the compact
+   size and a block-level variant the rail's stacked actions need. */
+.btn--sm {
+  padding: 3px 9px;
+  font-size: 12px;
+}
+
+/* Connection */
+.device__connect {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.device__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ink-muted);
+  flex: 0 0 auto;
+}
+.device__dot.is-on {
+  background: var(--good);
+  box-shadow: 0 0 8px var(--good);
+}
+
+/* Status/identity rows */
+.devstat {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 3px 0;
+  font-size: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.devstat:last-of-type {
+  border-bottom: 0;
+}
+.devstat__label {
+  color: var(--ink-muted);
+  white-space: nowrap;
+}
+.devstat__value {
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+.devstat__value--warn {
+  color: var(--warn);
+}
+.devstat__value--good {
+  color: var(--good);
+}
+.device__footnote {
+  color: var(--ink-muted);
+  margin-top: 8px;
+}
+.device__pollswitch {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+}
+.device__busy {
+  color: var(--neon-cyan);
+}
+
+/* Actions. The `?` badge marks a command name this protocol was never observed using — the
+   button is real, but the instrument is expected to reject it, so it must not look as settled as
+   the ones beside it. */
+.device__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.device__action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+.device__action--unverified {
+  border-style: dashed;
+  color: var(--ink-2);
+}
+.device__badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 14px;
+  height: 14px;
+  border-radius: 7px;
+  background: var(--warn);
+  color: #1a1200;
+  font-size: 10px;
+  font-weight: 700;
+}
+.device__result {
+  margin-top: 8px;
+  font-size: 11px;
+  padding: 5px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+}
+.device__result.is-ok {
+  color: var(--good);
+  background: var(--good-dim);
+}
+.device__result.is-bad {
+  color: var(--warn);
+  background: rgba(255, 165, 61, 0.12);
+}
+
+/* Panels */
+.device__panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-bottom: 1px solid var(--border);
+}
+.device__panel:last-child {
+  border-bottom: 0;
+}
+.device__panelhead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+.device__paneltitle {
+  margin: 0;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--ink-muted);
+  font-weight: 500;
+}
+.device__empty {
+  padding: 14px;
+  color: var(--ink-muted);
+  font-size: 12px;
+}
+
+/* File browser */
+.device__dirs {
+  overflow-y: auto;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.device__dir {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+.device__dirhead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.device__dirname {
+  font-size: 13px;
+  color: var(--ink);
+}
+.device__dirpath {
+  display: block;
+  font-size: 10px;
+  color: var(--ink-muted);
+}
+.device__dirmeta {
+  padding: 6px 12px 0;
+  font-size: 10px;
+  color: var(--ink-muted);
+}
+.device__dir .rail__note {
+  padding: 10px 12px;
+}
+.device__group {
+  padding: 8px 12px;
+}
+.device__grouptitle {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--ink-muted);
+  margin-bottom: 4px;
+}
+.device__files {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.device__file {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 3px 0;
+}
+.device__filename {
+  font-size: 12px;
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
+}
+
+/* Traffic console */
+.device__panel--console {
+  background: var(--plane);
+}
+.device__consoleopts {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.device__consolebody {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 8px 14px;
+  font-size: 11px;
+  line-height: 1.55;
+}
+.device__line {
+  display: flex;
+  gap: 8px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.device__linetime {
+  color: var(--ink-muted);
+  flex: 0 0 auto;
+}
+.device__linedir {
+  flex: 0 0 auto;
+}
+.device__line.is-out .device__linedir {
+  color: var(--neon-cyan);
+}
+.device__line.is-in .device__linedir {
+  color: var(--neon-magenta);
+}
+.device__linechan {
+  flex: 0 0 auto;
+  color: var(--ink-muted);
+}
+/* A message the host never asked for — a channel-0/2 payload, or a channel-1 reply with no
+   pending request. Worth spotting: it is what a naive per-command reader would have silently
+   mistaken for an answer. */
+.device__line.is-unsolicited .device__linechan {
+  color: var(--warn);
+}
+.device__linebody {
+  color: var(--ink-2);
+  min-width: 0;
+}
+.device__line.is-out .device__linebody {
+  color: var(--ink);
+}
+.device__linebytes {
+  color: var(--ink-muted);
+}
+.device__prompt {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-top: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+.device__promptmark {
+  color: var(--neon-magenta);
+}
+.device__promptinput {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--ink);
+  padding: 5px 8px;
+  font-size: 12px;
+}
+.device__promptinput:focus-visible {
+  outline: 2px solid var(--neon-magenta);
+  outline-offset: 1px;
+}
+
+/* Narrow: the rail stacks above the content, matching `.curves`' own narrow behaviour. */
+@media (max-width: 900px) {
+  .device__content {
+    grid-template-rows: auto auto;
+  }
+  .device__consolebody {
+    max-height: 320px;
+  }
+}

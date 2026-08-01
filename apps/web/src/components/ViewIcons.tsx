@@ -95,6 +95,19 @@ export function RawIcon() {
   );
 }
 
+/** Device: the instrument itself — a block with a lid line and a status indicator. Deliberately
+ * unlike the document-shaped icons beside it, since this tab is the one that isn't about a file. */
+export function DeviceIcon() {
+  return (
+    <Svg>
+      <rect x="2" y="4" width="12" height="9" rx="1" />
+      <path d="M2 7h12" />
+      <path d="M5 10.5h4" />
+      <circle cx="11.5" cy="10.5" r="1" />
+    </Svg>
+  );
+}
+
 /** Load file: an arrow rising out of an open tray. */
 export function UploadIcon() {
   return (

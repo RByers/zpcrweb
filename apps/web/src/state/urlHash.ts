@@ -33,6 +33,7 @@ const VIEW_IDS: ViewId[] = [
   "reference",
   "calibration",
   "raw",
+  "device",
   "about",
 ];
 

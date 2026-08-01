@@ -17,12 +17,25 @@ import { PcrdRawView } from "./components/views/PcrdRawView";
 import { StandalonePlateView } from "./components/views/StandalonePlateView";
 import { StandaloneRawView } from "./components/views/StandaloneRawView";
 import { AboutView } from "./components/views/AboutView";
+import { DeviceView } from "./components/views/DeviceView";
 import type { ViewId } from "./state/useZpcrStore";
 
 const STANDALONE_VIEWS = ["plates", "raw"] as const;
 /** A Biomeme run has no reference row, no `.Dcal` calibration files and no raw archive to
  * browse (`Zpcr.archive` is honestly empty) — those three tabs have nothing to show. */
 const BIOMEME_VIEWS = ["overview", "curves", "plates"] as const;
+
+/** A `.pltd`/`.plt.csv` uploaded on its own, rather than a run — it gets a restricted tab set. */
+const isStandaloneKind = (kind: string) => kind === "pltd" || kind === "csv";
+
+/** The file-backed tabs a given file kind supports, or `null` for "all of them". Shared by the
+ * normal render and the Device view's early return, which needs the same answer to draw the rest
+ * of the tab strip while it is the selected one. */
+function restrictedViewsFor(kind: string): readonly ViewId[] | null {
+  if (isStandaloneKind(kind)) return STANDALONE_VIEWS;
+  if (kind === "biomeme") return BIOMEME_VIEWS;
+  return null;
+}
 
 /**
  * The run offered on the welcome screen, served from `public/examples/` (a symlink to the
@@ -81,6 +94,34 @@ export function App() {
     return <div className="splash mono">initializing…</div>;
   }
 
+  // The Device view operates on an instrument, not a file, so it renders the same way whether or
+  // not anything is loaded — and is reachable from the welcome screen, which is where someone
+  // with a cycler and no files yet actually starts. It gets the normal header (so the tabs can
+  // take you back) but no file bar.
+  if (store.view === "device") {
+    return (
+      <div className="app app--nofiles">
+        <header className="app__header" ref={headerRef} data-fit={fit}>
+          <Logo onClick={showAbout} />
+          <div className="app__views">
+            <ViewSelector
+              value="device"
+              onChange={store.setView}
+              // With no file loaded there are no file-backed tabs to offer — only Device.
+              views={active ? restrictedViewsFor(active.kind)?.slice() : []}
+            />
+          </div>
+          <div className="app__header-spacer" />
+          <DropZone onFiles={store.addFiles} />
+        </header>
+        <main className="app__main">
+          <DeviceView />
+        </main>
+        {store.error && <div className="app__error mono">{store.error}</div>}
+      </div>
+    );
+  }
+
   if (!active || !settings) {
     // No file yet, so About *is* the welcome screen — it carries the drop target. There's no
     // previous view to go back to, hence no `onBack`.
@@ -91,15 +132,20 @@ export function App() {
           <span className="app__tag">Bio-Rad CFX qPCR viewer</span>
         </header>
         <AboutView onFiles={store.addFiles} exampleHref={exampleHref} onLoadExample={loadExample} />
+        <div className="app__welcomedevice">
+          <button className="btn" onClick={() => store.setView("device")}>
+            Connect an instrument over USB
+          </button>
+        </div>
         {store.error && <div className="app__error mono">{store.error}</div>}
       </div>
     );
   }
 
-  const isStandalonePlate = active.kind === "pltd" || active.kind === "csv";
+  const isStandalonePlate = isStandaloneKind(active.kind);
   const isBiomeme = active.kind === "biomeme";
   const zpcr = isStandalonePlate ? null : activeRun?.zpcr ?? null;
-  const restrictedViews = isStandalonePlate ? STANDALONE_VIEWS : isBiomeme ? BIOMEME_VIEWS : null;
+  const restrictedViews = restrictedViewsFor(active.kind);
   // `store.view` is global (not per-file), so switching to a restricted entry can land on a view
   // its tab set doesn't have (e.g. "raw" on a Biomeme run) — fall back to its first tab then.
   // "about" is file-independent, so it survives regardless.

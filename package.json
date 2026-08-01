@@ -14,5 +14,8 @@
     "test:ui": "node tools/uitest.mjs",
     "typecheck": "npm run typecheck -w @zpcrweb/core"
   },
-  "license": "GPL-3.0-or-later"
+  "license": "GPL-3.0-or-later",
+  "optionalDependencies": {
+    "usb": "^3.0.1"
+  }
 }
