@@ -1796,6 +1796,14 @@ command lines, the `RemoteRun` line, the files to deposit — and `CfxDevice.sta
 to both the panel and the rail, so the warnings shown between the two halves and the state of the
 Start button can never disagree.
 
+**The name typed above the staged run names the run, and nothing else.** It reaches `planRun()`
+as the run name, i.e. `RemoteRun`'s fourth operand (`usb.md` §7.3) — which is what `STATUS?` echoes
+and what the `.alf` report is filed under. The two deposited files keep the names of the things
+they *are*: the protocol's own name, and (for an overridden plate) the plate file's, else what the
+plate says about itself via `identityKey`. Protocols and plates are reused across runs and carry
+their own identities; an experiment name belongs to one run, and stamping it on both copies would
+overwrite that identity for no gain.
+
 The order is `usb.md` §7's, not the one §5's upload machinery suggests: the protocol is typed in as
 ASCII directives, `RemoteRun` starts it, and the files are deposited **afterwards**, into a run
 already cycling. Two things follow that would otherwise read as bugs. There is **no confirmation

@@ -24,6 +24,12 @@
  * on the instrument reads either one, the only question is which is more useful in the archive
  * afterwards. An encrypted `.pltd` would need a password this repository doesn't ship; a
  * `.plt.csv` is picked straight up by `zpcr.plates()`, so the run opens with its plate intact.
+ *
+ * **And each keeps its own name.** A protocol and a plate are things reused across many runs,
+ * with names of their own; an experiment name belongs to one run. So the deposited copies are
+ * called after the protocol and the plate they are (`PlanRunOptions.protocolName`/`plateName`),
+ * and the run's name travels by the channel §7.3 gives it — `RemoteRun`, `STATUS?` and the
+ * `.alf` report — rather than being stamped onto files it doesn't own.
  */
 import type { PlateDefinition } from "../pltd.js";
 import { plateToCsv } from "../plateCsv.js";
@@ -123,6 +129,23 @@ export interface PlanRunOptions {
   plate: PlateDefinition;
   /** What to call the run. Falls back to the protocol's own name, then to `zpcrweb`. */
   name?: string;
+  /**
+   * What the uploaded `.prcl.txt` is called (without the extension) — the protocol's own name,
+   * not the run's. Falls back to `protocol`. See {@link PlanRunOptions.plateName}.
+   */
+  protocolName?: string;
+  /**
+   * What the uploaded `.plt.csv` is called (without the extension) — the plate setup's own name.
+   * Falls back to the plate's {@link PlateDefinition.identityKey} (which is usually the `.pltd`
+   * file it was saved from), then to `plate`.
+   *
+   * Protocols, plates and experiments are three separate namespaces: a protocol and a plate are
+   * normally reused across many runs while an experiment name is unique to one, so naming the
+   * deposited files after the run would both lose the identity they arrived with and imply that
+   * these copies are specific to this run. The run's name reaches the folder through `RemoteRun`
+   * (§7.3) and the `.alf` report, which is where it belongs.
+   */
+  plateName?: string;
   /** `RemoteRun`'s operator field. Purely a label. */
   user?: string;
 }
@@ -144,14 +167,33 @@ export interface PlanRunOptions {
  * than an unexplained error from the USB layer.
  */
 function safeFileBase(name: string): string {
-  const cleaned = name
+  return sanitizeName(name) || "zpcrweb";
+}
+
+/** {@link safeFileBase}'s character rules, without its fallback — empty in, empty out. */
+function sanitizeName(name: string): string {
+  return name
     .trim()
     .replace(/[^\x20-\x7e]/g, "")
     // The four §7.3 operand-syntax characters, then the filename-hostile set.
     .replace(/['",;]+/g, "_")
     .replace(/[\\/:*?<>|]+/g, "_")
     .trim();
-  return cleaned || "zpcrweb";
+}
+
+/**
+ * A deposited file's name base: the same character sanitizing as {@link safeFileBase} (the path
+ * still has to survive `assertCommandArgument`), minus one trailing extension, and with its own
+ * fallback rather than the run name's.
+ *
+ * The extension goes because these names arrive already carrying one — a plate's `identityKey` is
+ * typically `Qualification_Plate_96.pltd`, and a protocol staged from a file keeps its
+ * `.prcl.txt` — and `Qualification_Plate_96.pltd.plt.csv` would be a worse name than either.
+ * Only a known one is stripped, so a plate called `S183-S185 RVP v2.1` keeps its version.
+ */
+function uploadBase(name: string | undefined, fallback: string): string {
+  const stripped = (name ?? "").replace(/\.(prcl\.txt|plt\.csv|prcl|pltd|zpcr|pcrd|csv|txt)$/i, "");
+  return sanitizeName(stripped) || fallback;
 }
 
 /** The 1-based optical channels a plate actually uses, from its fluor layers (0-based there). */
@@ -313,15 +355,20 @@ export function planRun(options: PlanRunOptions): RunPlan {
     ...splitRunDefinition(runDefinition),
   ];
 
+  // The deposited files keep the protocol's and the plate's own names, never the run's — see
+  // `PlanRunOptions.plateName` for why the three namespaces stay separate.
+  const protocolBase = uploadBase(options.protocolName, "protocol");
+  const plateBase = uploadBase(options.plateName || plate.identityKey, "plate");
+
   const uploads: RunUpload[] = [
     {
-      name: `${name}.prcl.txt`,
-      path: `${CFX_CURRENT_RUN_DIR}\\${name}.prcl.txt`,
+      name: `${protocolBase}.prcl.txt`,
+      path: `${CFX_CURRENT_RUN_DIR}\\${protocolBase}.prcl.txt`,
       bytes: new TextEncoder().encode(formatRunDefinitionText(runDefinition)),
     },
     {
-      name: `${name}.plt.csv`,
-      path: `${CFX_CURRENT_RUN_DIR}\\${name}.plt.csv`,
+      name: `${plateBase}.plt.csv`,
+      path: `${CFX_CURRENT_RUN_DIR}\\${plateBase}.plt.csv`,
       bytes: new TextEncoder().encode(plateToCsv(plate)),
     },
   ];

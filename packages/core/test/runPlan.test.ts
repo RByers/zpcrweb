@@ -163,10 +163,51 @@ describe("planRun", () => {
 
   it("uploads the protocol and plate as this project's own plaintext formats", () => {
     const uploads = plan().uploads;
-    expect(uploads.map((u) => u.name)).toEqual(["My Run_2.prcl.txt", "My Run_2.plt.csv"]);
-    expect(uploads[0]!.path).toBe("\\Storage Card\\CurrentRun\\My Run_2.prcl.txt");
     expect(new TextDecoder().decode(uploads[0]!.bytes)).toContain("PLATEREAD #h3F;");
     expect(new TextDecoder().decode(uploads[1]!.bytes)).toContain("# zpcrweb plate definition");
+  });
+
+  /**
+   * Protocols, plates and experiments are three namespaces: the first two are reused across runs
+   * and arrive with names of their own, so the deposited copies keep them and only `RemoteRun`
+   * carries the run's name.
+   */
+  it("names the uploads after the protocol and the plate, never after the run", () => {
+    const uploads = planRun({
+      runDefinition: ALL_CHANNELS,
+      plate: plateUsing([1]),
+      name: "My Run/2",
+      protocolName: "Luna noRT",
+      plateName: "S183-S185 RVP.pltd",
+    }).uploads;
+    expect(uploads.map((u) => u.name)).toEqual(["Luna noRT.prcl.txt", "S183-S185 RVP.plt.csv"]);
+    expect(uploads[0]!.path).toBe("\\Storage Card\\CurrentRun\\Luna noRT.prcl.txt");
+  });
+
+  it("falls back to the plate's own identity, then to generic names", () => {
+    const identified = planRun({
+      runDefinition: ALL_CHANNELS,
+      plate: { ...plateUsing([1]), identityKey: "Qualification_Plate_96.pltd" },
+      name: "My Run/2",
+    }).uploads;
+    expect(identified.map((u) => u.name)).toEqual([
+      "protocol.prcl.txt",
+      "Qualification_Plate_96.plt.csv",
+    ]);
+
+    const anonymous = plan().uploads;
+    expect(anonymous.map((u) => u.name)).toEqual(["protocol.prcl.txt", "plate.plt.csv"]);
+  });
+
+  it("sanitizes an upload name the way it sanitizes the run's", () => {
+    const uploads = planRun({
+      runDefinition: ALL_CHANNELS,
+      plate: plateUsing([1]),
+      protocolName: 'RVP "fast";v2/3',
+      plateName: "  ",
+    }).uploads;
+    // `";` is one run of operand-syntax characters, so it collapses to a single `_`.
+    expect(uploads.map((u) => u.name)).toEqual(["RVP _fast_v2_3.prcl.txt", "plate.plt.csv"]);
   });
 
   it("refuses to be startable when a check is an error", () => {
