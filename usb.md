@@ -987,10 +987,15 @@ blocks the start says why, in the place where the file that caused it is on scre
 **Following a run** is `state/useRunWatch.ts`, and it is the §7.5 rule rather than filesystem
 polling: the status poll is already running, its current-step field carries the step's command text
 verbatim, and the completed `.Plateread` appears when a `PLATEREAD` step *ends* — so the watcher
-lists the run folder on that transition. A slow periodic listing backs it up for the two cases
-§7.5 says the transition rule cannot catch (the final read, whose transition is to `IDLE`, and the
-marker files), and the §7.6 acknowledgement is issued automatically when `STATUS?` reports the
-finished-but-still-named state, because the last read and `ended` only appear after it.
+lists the run folder on that transition. Listing is entirely edge-triggered, never on a timer — a
+periodic listing here once made the Start-run button visibly flicker, since a `GETFILESLEN`+
+`LISTALLFILES` round trip holds the busy flag the button disables on. The two cases §7.5 says the
+transition rule alone cannot catch are each their own edge instead: the final read, whose transition
+is to `IDLE`, is caught by the §7.6 acknowledgement (issued automatically when `STATUS?` reports the
+finished-but-still-named state, because the last read and `ended` only appear after it); the marker
+files are caught by a listing on the run *starting* (`STATUS?` going from not-running to running).
+One more listing establishes a baseline on connect, since the folder may already hold a previous,
+finished run when the app arrives.
 
 Each time the listing changes, the folder is pulled — **only the names not already cached**, since
 28 of a `CurrentRun`'s ~40 files are the `.Dcal` set and never change — zipped with

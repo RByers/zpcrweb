@@ -8,11 +8,14 @@
  * already running for the rail, so this costs nothing extra and reacts within a poll period
  * instead of within a listing period.
  *
- * A slow periodic listing backs it up, because §7.5 records two things the step rule alone misses:
- * the **last** read of a run, whose transition is `PLATEREAD` → `IDLE` rather than to another
- * step and which in the reference capture only became listable after the run was acknowledged;
- * and the marker files, which arrive on their own schedule. A client is advised there to re-list
- * once at the end rather than trust the transition rule to have caught everything.
+ * Listing the folder is entirely **edge-triggered**, never on a timer: a `GETFILESLEN`+
+ * `LISTALLFILES` round trip holds `useCfxDevice`'s `busy` flag, and a periodic listing here used to
+ * flicker the Instrument rail's Start-run button (which disables while `busy`) every 30 s, even
+ * with no run in progress. Four edges cover what §7.5 says a client needs, none of them recurring:
+ * the step-transition rule above for every read but the last; the §7.6 acknowledgement (`finish`
+ * below), which is also where the **last** read — `PLATEREAD` → `IDLE` — actually becomes listable,
+ * per §7.5; a run starting, to pick up the `begun`/`calibrationfilescopied` markers promptly and
+ * set a fresh baseline; and one baseline listing on connect, below.
  *
  * When a listing turns out to differ from the last one, the folder is pulled and zipped into a
  * `.zpcr` exactly as the Instrument view's **Open run** button does, and handed to the store,
@@ -40,14 +43,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CFX_CURRENT_RUN_DIR, zpcrFromRunFiles } from "@zpcrweb/core";
 import type { CfxDeviceHandle } from "./useCfxDevice";
-
-/**
- * The backstop listing period. Deliberately slow: the step-transition rule above is what makes
- * the app react promptly, and this only exists to catch what that rule structurally cannot. A
- * plate read arrives once per cycle — a minute or two on any real protocol — so this still sees
- * every cycle even if the status poll is switched off entirely.
- */
-const WATCH_MS = 30_000;
 
 /**
  * Files whose *content* changes while the run goes on, so a cached copy goes stale.
@@ -201,10 +196,13 @@ export function useRunWatch(
   useEffect(() => {
     if (connection !== "connected" || !watching || !status) return;
     if (status.running || !status.runName) {
-      // A new run clears the latch, so the next finish is acknowledged too.
-      if (status.running) {
+      // A new run clears the latch, so the next finish is acknowledged too — and, only on that
+      // same transition (not on every poll tick while it keeps running), lists the folder once to
+      // pick up the `begun`/`calibrationfilescopied` markers and set a fresh baseline.
+      if (status.running && !sawRunning.current) {
         acknowledged.current = null;
         sawRunning.current = true;
+        void check();
       }
       return;
     }
@@ -220,19 +218,15 @@ export function useRunWatch(
     })();
   }, [connection, watching, status, acknowledgeFinishedRun, check]);
 
-  // --- the backstop listing ------------------------------------------------------------------
+  // --- the baseline listing on connect --------------------------------------------------------
+  //
+  // `check`'s `first` case never pulls — it only records what the folder already holds, so a run
+  // already mid-flight when we connect diffs against a real baseline instead of nothing. That
+  // baseline still takes one listing, so it happens once here rather than waiting on whichever of
+  // the edges above happens to fire first.
   useEffect(() => {
     if (connection !== "connected" || !watching) return;
-    let cancelled = false;
-    const tick = () => {
-      if (!cancelled) void check();
-    };
-    tick();
-    const timer = setInterval(tick, WATCH_MS);
-    return () => {
-      cancelled = true;
-      clearInterval(timer);
-    };
+    void check();
   }, [connection, watching, check]);
 
   // A disconnect ends the run's identity here: the next connection re-establishes a baseline
