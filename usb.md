@@ -205,9 +205,13 @@ order:
 
 | Command | Example response | Notes |
 |---|---|---|
-| `STATUS?` | idle: `17.04;18.3;0;0;IDLE;0;"",BLOCK,OFF;0;0.00;0.00;0.00;0.00;0.00;0;0;0;17.04;CLOSED;0;0000` — mid-run: `60.25;104.9;2;2;TEMP 95.0,10;2;"SINGLETE",CALC,ON;96;110.22;0.00;75.15;2.10;0.00;0;0;6;55.61;CLOSED;0;0000` | block temp, lid temp, two counters that both track the **cycle**, the current step text, that step's **1-based protocol step number**, run name, method, lid state, block count, elapsed... — both examples are the complete response, not truncated. The step number is the field *after* the step text — `PLATEREAD #h3F` reports `4` in a protocol where the plate read is the fourth step, which is one of the two measurements behind `protocol.md` §4. The two counters *before* the step text are not separable from each other in this capture (`protocol.md` §9) |
+| `STATUS?` | idle: `17.04;18.3;0;0;IDLE;0;"",BLOCK,OFF;0;0.00;0.00;0.00;0.00;0.00;0;0;0;17.04;CLOSED;0;0000` — mid-run: `60.25;104.9;2;2;TEMP 95.0,10;2;"SINGLETE",CALC,ON;96;110.22;0.00;75.15;2.10;0.00;0;0;6;55.61;CLOSED;0;0000` | block temp, lid temp, two counters that both track the **cycle**, the current step text, that step's **1-based protocol step number**, run descriptor, a run state code, then the timers — both examples are the complete response, not truncated. **§3.2 maps all twenty fields**, including the run's elapsed time and its time remaining. The step number is the field *after* the step text — `PLATEREAD #h3F` reports `4` in a protocol where the plate read is the fourth step, which is one of the two measurements behind `protocol.md` §4. The two counters *before* the step text are not separable from each other in this capture (`protocol.md` §9) |
 | `RTSTATUS?` | `18.31;26;;0000` | shorter status, polled alongside `STATUS?` |
 | `ERRORLIST A` | `;0000` | polled every cycle in lockstep with `STATUS?`/`RTSTATUS?` |
+
+Both status replies are decoded field by field below: **§3.2** for `STATUS?` and **§3.3** for
+`RTSTATUS?`, which is the optical head's — shuttle temperature, ambient temperature, and a fault
+list that is empty when healthy.
 
 **Protocol authoring and run control:**
 
@@ -332,6 +336,208 @@ at least *expressible*, so the byte really is a channel selection and not an enu
 > and 3) that no named configuration corresponds to. Bit 6 remains unused and unexplained. A client
 > should still preserve a recorded mask rather than synthesize one, and should not offer a
 > free-form channel picker on the strength of the bit layout alone.
+
+### 3.2 `STATUS?`'s twenty fields — and the run's time remaining
+
+`STATUS?` is the busiest reply in the protocol, and the table above only names the fields the early
+passes happened to need. Every field now has an established meaning. They are checked here against
+both captures — 507 replies spanning a complete two-cycle run in `usb-run`, 159 idle replies in
+`usb-basic`, 666 in total — and the column on the right of the table says which ones that traffic
+actually exercises, because a name is not a measurement. The headline for a client: one of these
+fields is a **live countdown of the time left in the run**, and another is a flag word that answers
+"is the block at temperature" without any temperature arithmetic.
+
+**The reply is 19 status fields plus a trailing result code**, and the 19 are a fixed record. On an
+instrument with more than one independent block the record **repeats, once per block, before the
+single trailing code** — a two-block reply is 39 semicolon-separated parts, with block 2's fields
+at index 19 + *n*. A CFX96 has one block, so its reply is always 20 parts, but a parser should key
+off the record length rather than assume it.
+
+| # | Field | Meaning | Exercised here? |
+|---|---|---|---|
+| 0 | block temp | block temperature °C | yes |
+| 1 | lid temp | lid temperature °C | yes |
+| 2 | cycle count | **number of cycles** in the running protocol | see below |
+| 3 | cycle number | **current cycle**, 1-based | yes |
+| 4 | step text | current step's command text, verbatim | yes |
+| 5 | step number | that step's 1-based number in the run definition | yes |
+| 6 | run descriptor | `"<NAME>",<method>,<lid on>` | yes |
+| 7 | **status register** | 8-bit flag word — decoded below | 5 of 256 values |
+| 8 | protocol elapsed | **total elapsed run time, s** | yes |
+| 9 | step elapsed | seconds elapsed in the current step | yes |
+| 10 | protocol estimate | **estimated protocol time, s — remaining, on this instrument** | yes |
+| 11 | ramp elapsed | seconds spent ramping toward this step's setpoint | yes |
+| 12 | hold elapsed | seconds held at setpoint in this step | yes |
+| 13 | paused | pause flag; mirrors bit 1 of field 7 | `0` throughout — never paused |
+| 14 | errors | `:`-separated block error codes; a lone `0` means none | `0` throughout — no errors |
+| 15 | step count | **number of steps in the run definition** | yes |
+| 16 | sample temp | calculated sample temperature °C | yes |
+| 17 | lid position | `OPEN`/`CLOSED`/`OPENING`/`CLOSING`/`MANUAL`/`STOP`/`ERROR`/`NONE`/`UNKNOWN` | 4 of 9 |
+| 18 | sensor | an unidentified sensor reading | `0` throughout |
+| 19 | result code | the usual `0000` | yes |
+
+Two of these were guessed wrong by earlier passes of this document and are corrected here: field 7
+is a flag word and never was a block count, and field 15 is the protocol's **step count**, not a
+"run-active flag" that happened to read `6`. The capture's protocol is
+`TEMP 95.0,180`, `TEMP 95.0,10`, `TEMP 55.0,30`, `PLATEREAD #h3F`, `GOTO 2,1`, `END` — six
+directives (§7.2), and field 15 reads exactly `6` in all 300 running samples and `0` when idle. It
+is the denominator for "step *n* of *m*", and `END` counts.
+
+**Fields 2 and 3 are a count and an index, but this capture cannot separate them** — they are
+byte-identical in all 507 running samples, both walking `0` → `1` → `2` on a protocol whose
+`GOTO 2,1` gives two passes. Field 3 is unambiguously the current cycle (it advances in step with
+the plate reads); whether field 2 is genuinely a total that coincidentally matches, or this
+firmware simply echoes the same number twice, is not decidable from one run. Read field 3 for the
+current cycle, and take the total from the protocol you authored rather than from field 2 — see
+`protocol.md` §9, which reaches the same conclusion from the other direction.
+
+#### Field 7, the status register
+
+Eight independent flags, not an enumeration:
+
+| Bit | Value | Meaning |
+|---|---|---|
+| 0 | 1 | **at target** — the block has reached the current step's setpoint |
+| 1 | 2 | **paused** (the same state field 13 reports separately) |
+| 2 | 4 | a fourth-block flag, meaningless on a CFX96 |
+| 3 | 8 | **lid preheating** |
+| 4 | 16 | **incubating** — holding a temperature outside a protocol |
+| 5 | 32 | **protocol running** |
+| 6 | 64 | **block active** |
+| 7 | 128 | **protocol cancelled** |
+
+Three coarse states are worth deriving from bits 4, 5 and 6. **Idle** is all three clear.
+**Running** is block active and protocol running set, with incubating clear. **Finished** is
+protocol running set with block active clear. Every value this capture produced decodes cleanly:
+
+```
+  0 = 0x00   idle
+104 = 0x68   protocol running + block active + lid preheating   ← the §7.3 preheat
+ 96 = 0x60   protocol running + block active                    ← ramping
+ 97 = 0x61   protocol running + block active + at target        ← at setpoint, and during a read
+ 32 = 0x20   protocol running, block no longer active           ← the §7.6 finished state
+```
+
+That last one is worth noting: the finished-but-unacknowledged state of §7.6 is not an odd corner
+the firmware backed into, it is the register's own "completion" encoding. **Bit 0 is the cleanest
+"has the block arrived" signal in the protocol** — better than comparing field 0 against a setpoint
+parsed out of field 4 — and bit 3 is the honest way to detect the preheat. The `96` that made
+"block count" tempting is a coincidence with the 96-well block; the number of blocks is 1 here, and
+`BLOCKCOUNT?` (§3) is where that number actually comes from.
+
+#### Field 16, the sample temperature
+
+**It is a modelled sample temperature, not a repeat of the setpoint.** It settles on exactly `55.00`
+and `95.00`, which invites the setpoint reading, but through a ramp it *lags* the block: block
+19.36 → 27.22 → 31.35 → 35.82 while field 16 reads 17.15 → 20.14 → 22.91 → 26.52. That is a thermal
+model of the well contents, which is what `CALC` (`protocol.md` §3.2) means — and it is why the
+public app labels it `Sample*` with a footnote rather than presenting it as a measurement.
+
+#### Fields 8–12, the four clocks
+
+Four of the five nest: field 8 times the whole protocol, field 9 the current step, and fields 11
+and 12 split that step into its ramp and its hold. Field 10 is the odd one out — an estimate rather
+than a measurement.
+
+- **Field 8, protocol elapsed** — counts up from `0.00` for the life of the run. Well behaved
+  throughout; the best input to a progress bar.
+- **Field 11, ramp elapsed** — runs while the block approaches the setpoint and freezes on arrival,
+  the same instant bit 0 of field 7 sets.
+- **Field 12, hold elapsed** — then counts up to the programmed hold: `TEMP 55.0,30` walks it from
+  0.60 to 29.98 before the step advances.
+- **Field 9, step elapsed**, is in principle the whole step, ramp included, and so should exceed
+  field 12. On this firmware it does not: across all 507 samples the two differ by at most 0.01. On
+  a CFX96 both read "time held at this setpoint", and a client should not rely on the distinction.
+
+Field 8 counts up and field 10 counts down, both in seconds, and while both are ticking their sum
+is constant — 350.88 … 350.97 across the 30 samples before `PROCEED` intervenes. That is what
+identifies field 10 as **time remaining** rather than a total, and the two ways the sum *does* move
+are exactly the caveats below: it steps down when the instrument re-plans (to ~171.5 after
+`PROCEED` cut the initial hold), and it creeps up by whatever field 10 declines to count during a
+plate read (171.48 → 185.46 over the run's two reads, so ~7 s a read here).
+
+> **One portability caveat.** Field 10 is an *estimate of the protocol's time*, and this instrument
+> transmits it already net of elapsed time. That appears to be a property of this block rather than
+> of the field — elsewhere in the product line the same position is treated as a total from which
+> elapsed time still has to be subtracted. Nothing here can test that, and a CFX96 client does not
+> need to; but do not carry the "it is remaining" reading to another instrument without re-checking
+> that field 8 + field 10 holds constant, which is a two-minute test.
+
+**So a client does not have to compute time remaining — but it cannot display field 10 raw
+either.** Three measured behaviours:
+
+- **It is frozen for the whole lid preheat.** Field 10 sat at exactly `350.76` for 168 s, from the
+  first non-idle poll until the block finally moved, while field 8 stayed at `0.00`. This is the
+  field §7.3 notes "does not tick during this phase". A naive countdown looks hung for the first
+  three minutes of every run.
+- **It does not tick through a plate read.** Across a 15.2 s `PLATEREAD #h3F` it moved 77.26 →
+  76.45. It reached `0.00` 13.8 s before the run actually ended, during the final read.
+- **It re-plans.** When `PROCEED` (§7.5) cut the 180 s initial hold short, field 10 jumped
+  314.26 → 136.91 on the very next poll — the instrument re-derives it rather than replaying a
+  fixed schedule.
+
+Once ticking it is usable but consistently optimistic: across the 117 samples where the block was
+thermally active after the `PROCEED` re-plan, `now + field 10` predicted the end of the run
+**6.5 to 21.1 s early**, never late, and the error grew as each plate read went uncounted. Whether
+that shortfall keeps compounding is **untested** — the only run captured here has two reads, and a
+45-cycle protocol has 45. If it does, a long run would under-report by minutes by the end. Round
+the display to a `mm:ss` that does not pretend to second-level precision.
+
+**Recommended display.** Show field 10 as the source of truth, formatted `mm:ss`, and handle the
+two windows where it stalls rather than trying to correct it:
+
+1. While **bit 3 of field 7** is set, show "Preheating lid" instead of a countdown — the number
+   behind it is a plan, not a clock. Test the bit rather than the whole byte: `104` is only the
+   value this run happened to produce, and any of the other flags could accompany it.
+2. During a `PLATEREAD` step, expect the countdown to hold; do not treat it as a stall, and do not
+   let it drive a "finished" state — `0.00` is not the end of the run. §7.5's step transition and
+   §7.6's `CANCEL` state are the real signals.
+3. Elapsed (field 8) is well behaved throughout and is the better input to a progress bar, since
+   the protocol's step list is already known locally and gives a denominator.
+
+A client that wants a *stable* estimate — one that does not jump when the instrument re-plans — can
+compute one from the protocol it just authored and calibrate it against the per-step wall times in
+a previous run's `.alf` (§7.6), which record ramp and plate-read costs directly. That is worth
+doing only if the drift above turns out to matter; field 10 alone is sufficient for a readout.
+
+> **What these captures do not exercise.** Every field above is named, but three are never anything
+> but `0` here, so their *format* rests on the field map rather than on observation: field 13
+> (paused — nothing in either capture pauses a run), field 14 (the `:`-separated error list —
+> nothing errors), and field 18 (the sensor reading, whose units and source are unidentified). Of
+> field 7's eight flags, four are never seen set (paused, fourth-block, incubating, cancelled), and
+> five of the nine lid positions never occur. A client should parse them as documented but treat
+> the first non-zero value it ever sees from any of them as worth logging rather than trusting.
+
+### 3.3 `RTSTATUS?` — the optical head's status
+
+The second member of the polling loop is a much smaller record: a fixed pair of temperatures
+followed by a variable-length fault list.
+
+| # | Meaning |
+|---|---|
+| 0 | **shuttle temperature °C** — the optical head's own heated shuttle |
+| 1 | **ambient temperature °C**, measured at the upper board |
+| 2 … *n*−1 | **fault entries**, one per field, `<hex code>[,<extra>]`; normally a single empty field |
+| *n* | the usual `0000` result code |
+
+So `18.31;26;;0000` is shuttle 18.31 °C, ambient 26 °C, no faults. **The empty third field is the
+healthy reading, not a truncated response** — the list is present and empty, which is why the
+response has four parts rather than three. Fault codes are hexadecimal and carry a subsystem tag in
+their high half-word, with an optional comma-separated second value for extra detail; a client that
+does not decode the subsystem should still surface the raw code. Neither capture contains a
+populated fault list, so that half of the format is documented but unobserved.
+
+**The shuttle temperature is the useful one, and it moves.** §7.3 explains the run start in terms of
+the lid preheat, but that is only half of it: over `usb-run`'s 506 samples the shuttle climbs
+**18.31 → 45.38 °C**, starting its rise inside the same preheat window the lid does and levelling
+off around 45.2 °C once the block is cycling, then decaying after the run ends. In `usb-basic`,
+where nothing runs, it sits at ambient the whole time (17.05–17.49 °C). So a client that wants to
+explain the delay before the block moves has both numbers: lid from `STATUS?` field 1, shuttle from
+`RTSTATUS?` field 0, and neither is at target when a run begins.
+
+Field 1 is a coarser measurement — an integer, drifting 22–27 over the run and 23–24 while idle,
+with no clear correlation to the thermal work. Treat it as a chassis-ambient reading, not an
+instrument of anything.
 
 ## 4. Channel 0 and channel 2 — the binary auxiliary streams (partially understood)
 
@@ -661,8 +867,10 @@ operands 4, 8 and 2. No confirmation, no second command.
 
 What follows the start is the lid: for the next ~180 s the lid temperature climbs 19 → 95 °C while
 the block sits at ambient 17 °C, and only then does the block ramp. A client that expects to see
-block temperature move immediately will think the run has hung. `STATUS?`'s step-remaining field
-does not tick during this phase either.
+block temperature move immediately will think the run has hung. `STATUS?`'s clocks do not tick
+during this phase either: elapsed (field 8) stays at `0.00` and time-remaining (field 10) holds at
+its initial plan for the full 168 s — §3.2, which is why a countdown needs a "preheating" state of
+its own.
 
 Two more commands appear here, both optional: `VOLUME?` (reading back the `VOLUME 25` just set —
 a verification, and note the instrument reverts to its own value once the run ends) and
@@ -787,8 +995,10 @@ When the protocol completes, `STATUS?` reports a state that is neither running n
 ```
 
 The step is `IDLE` and the cycle counters are 0, but the **run name is still attached** and the
-method still reads `CALC` — the instrument is holding the finished run. `CANCEL` clears it to the
-empty-name `"",BLOCK,OFF` idle of §3. So `CANCEL` here is an acknowledgement, not an abort; §3
+method still reads `CALC` — the instrument is holding the finished run. The two fields after the
+descriptor say the same thing: the state code is `32`, its run-attached bit without any of the
+thermal ones, and elapsed still reads the run's final `192.13` (§3.2). `CANCEL` clears all of it to
+the empty-name `"",BLOCK,OFF` idle of §3. So `CANCEL` here is an acknowledgement, not an abort; §3
 inferred that from the listing, and this state transition is the direct evidence. Sequence:
 
 ```
@@ -907,6 +1117,18 @@ instance, rather than a cross-checked pattern:
   so what a client should do when something goes wrong is not documented because it was never
   observed. The pre-flight burst of §7.1 is likewise "what this client sends", not a demonstrated
   requirement — none of it changes instrument state.
+- **`STATUS?`'s and `RTSTATUS?`'s quiet fields** (§3.2, §3.3) — the field maps are complete, but
+  one run on one healthy instrument exercises only part of them. Nothing paused, nothing errored,
+  no fault list was ever populated, the lid only ever took 4 of its 9 positions, and 4 of the
+  status register's 8 flags were never set. The *positions and formats* of those fields are
+  documented; what a populated error list or an unusual flag combination looks like in practice is
+  not something these captures show.
+- **`STATUS?`'s time-remaining field** (§3.2) — field 10 is measured against one run of two cycles
+  and two plate reads. That it counts down, freezes through the preheat, stalls through a read and
+  re-plans on `PROCEED` are all direct observations. What is *not* observed is whether the ~7 s
+  it fails to count per plate read accumulates across a long protocol: on a 45-cycle run that would
+  be minutes of drift, and no capture here has more than two reads to check it against. A client
+  should not build a hard deadline on it.
 - **`PLATEREAD #h<hex>`'s per-channel bits** (§3.1) — the mask's two *fields* are cross-checked
   (five runs, two configurations, three independent echoes of the value), and **bit 0 = channel 1**
   is measured directly from the one `#h81` run's all-zero channels 2–6. Bits 1–5 mapping to
@@ -923,7 +1145,7 @@ instance, rather than a cross-checked pattern:
 |---|---|
 | `frame.ts` | §2 — the 5-byte header codec, and `FrameReassembler`, which turns a direction's byte stream into complete logical messages. The only supported way to read this protocol; see §8 for the bug that parsing per packet causes. |
 | `commands.ts` | §3 — command encoding and the two response shapes, plus `CFX_COMMANDS`, the action commands a UI might offer, each tagged with whether it was actually observed, and `assertCommandArgument`, which keeps a path from injecting a second command line. |
-| `status.ts` | §3 — typed views over `*IDN?`, `STATUS?` and `RTSTATUS?`. Names only the fields whose meaning is established, and keeps the raw field array beside them for the rest. |
+| `status.ts` | §3 — typed views over `*IDN?`, `STATUS?` and `RTSTATUS?`. Names only the fields whose meaning is established, and keeps the raw field array beside them for the rest. It predates §3.2/§3.3 and so still reaches most of the record through `fields[]` — the four clocks (8–12), the status register (7), the step count (15) and `RTSTATUS?`'s shuttle temperature all now have established meanings it does not yet expose. |
 | `transport.ts` | §1 — the endpoint/interface constants and `UsbDeviceLike`, the structural interface both environments satisfy. |
 | `crc.ts` | §7.4 — the upload checksum, both readings of it, and the even-length ambiguity between them. |
 | `runPlan.ts` | §7.2–§7.4 as *data*: `planRun()` turns a run definition plus a plate into the exact command lines, the `RemoteRun` line and the files that would be deposited, and `checkRunPlan()` is the plate↔`PLATEREAD` compatibility check below. Pure — no device involved — which is what lets a UI review a run before any of it is sent. |
