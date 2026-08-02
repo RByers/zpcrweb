@@ -1092,6 +1092,17 @@ async function xmlViewChecks(chrome, origin, pw) {
       `[...document.querySelectorAll('.raw__item')]
          .find(b => b.textContent.trim() === ${JSON.stringify(entry)}).click()`,
     );
+    // Anchor on the viewer having caught up with the click before touching the mode buttons:
+    // until it has, the toolbar still describes the *previous* entry, whose mode may already be
+    // Text — which would satisfy the wait below without anything having been selected yet, and
+    // leave the check watching a viewer that then resets to this file's own default mode.
+    await waitFor(
+      () =>
+        cdp.eval(
+          `document.querySelector('.raw__fname')?.textContent.trim() === ${JSON.stringify(entry)}`,
+        ),
+      { what: `${entry} in the raw viewer` },
+    );
     await waitFor(
       () =>
         cdp.eval(

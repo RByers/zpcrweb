@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   ZPCRWEB_SETTINGS_NAME,
   formatZpcrwebSettings,
@@ -109,11 +109,18 @@ export function RawFilesView({ zpcr, settings }: { zpcr: Zpcr; settings: FileSet
   const [mode, setMode] = useState<Mode>(() => defaultMode(selected));
   const [limit, setLimit] = useState(4096);
 
-  // Reset to the file's best default mode whenever the selection changes.
-  useEffect(() => {
+  // Reset to the file's best default mode whenever the selection changes. Done *during* render
+  // (React's "adjusting state when state changes" pattern) rather than in an effect: an effect
+  // runs after the commit, so the newly selected file would first paint a frame in the previous
+  // file's mode — picking `runlog.xml` while `RunInfo.xml` was in Text mode would flash its XML
+  // before snapping back to the decoded table. React discards this render and re-runs the
+  // component immediately, so nothing intermediate reaches the DOM.
+  const [modeFor, setModeFor] = useState(selected);
+  if (modeFor !== selected) {
+    setModeFor(selected);
     setMode(defaultMode(selected));
     setLimit(4096);
-  }, [selected]);
+  }
 
   // `.pltd`/`.prcl` are usually binary (an encrypted ZIP), but their "Text" view is the
   // decrypted XML payload (or, for a plaintext `.prcl`, the raw runDefinition — see prcl.md

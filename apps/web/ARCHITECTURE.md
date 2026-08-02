@@ -810,7 +810,9 @@ default mode** (`RawFilesView.defaultMode`) with Decoded / Text / Hex always swi
 (`.xml`/`.txt`/`.alf`/`.json`/`.plt.csv`), else **Hex** (`archive.hexDump`, paginated). Text
 mode renders the collapsible XML tree whenever the content is XML (`RunInfo.xml`, `runlog.xml`,
 `GlobData.xml`, and the decrypted `.pltd`/`.prcl` payloads, which label the mode "XML") and the
-plain dump otherwise.
+plain dump otherwise. Switching files resets the mode **during render** rather than in an effect,
+so the new file never paints a frame in the old file's mode (picking `runlog.xml` from a
+`RunInfo.xml` left in Text mode used to flash its XML before snapping to the decoded table).
 
 **`zpcrweb.json` is the one synthesized entry** (its own "Analysis" group, sorted just above
 Plate setup). It is listed whether or not the loaded archive contains it, and its Text/Hex
