@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useZpcrStore } from "./state/useZpcrStore";
 import { useCfxDevice } from "./state/useCfxDevice";
 import { useRunWatch } from "./state/useRunWatch";
@@ -6,6 +6,8 @@ import { useRunStaging, stagingRole } from "./state/useRunStaging";
 import { EMPTY_STAGED_RUN, resolveStagedRun } from "./lib/protocolSource";
 import { usePltdPassword } from "./state/pltdPassword";
 import { formatLoadHash } from "./state/urlHash";
+import { cloneFileName } from "./lib/cloneName";
+import { downloadBytes } from "./lib/download";
 import { useHeaderFit } from "./state/useHeaderFit";
 import { DropZone } from "./components/DropZone";
 import { FileBar } from "./components/FileBar";
@@ -178,6 +180,52 @@ export function App() {
   const openRun = async (file: File) => {
     if (await store.addFiles([file], { modified: true })) store.setView("overview");
   };
+
+  /**
+   * The file whose Overview should open with its "Filename" row already in edit mode — set by
+   * {@link cloneActiveFile}, cleared by the panel once it has acted on it.
+   *
+   * Held by id rather than as a bare flag because the clone is added asynchronously: by the time
+   * the new file is active and its Overview renders, this is what says "*that* one was just made,
+   * so name it" — and a file the user selects some other way in the meantime doesn't inherit the
+   * request.
+   */
+  const [editNameFor, setEditNameFor] = useState<string | null>(null);
+  const clearEditName = useCallback(() => setEditNameFor(null), []);
+
+  /**
+   * Copy the active file under the next free `name (N).ext` and open the copy, ready to be
+   * renamed — the Overview toolbar's Clone button, for every file kind.
+   *
+   * It goes through `addFiles` like any other new file, so the copy is validated, persisted to
+   * IndexedDB and activated by exactly the same path a dropped file takes. The bytes are
+   * `exportBytes` rather than the loaded ones, so a run's clone carries the analysis settings
+   * currently on screen (and an edited `.prcl.txt` its edits — the store keeps `bytes` current),
+   * and it lands `modified`: the copy exists nowhere but the browser until it is saved.
+   */
+  const cloneActiveFile = useCallback(async () => {
+    const file = store.active;
+    if (!file) return;
+    const bytes = store.exportBytes(file.id) ?? file.bytes;
+    const names = new Set(store.files.map((f) => f.name));
+    const name = cloneFileName(file.name, (candidate) => names.has(candidate));
+    const id = await store.addFiles([new File([bytes.slice()], name, { lastModified: Date.now() })], {
+      modified: true,
+    });
+    if (!id) return;
+    store.setView("overview");
+    setEditNameFor(id);
+  }, [store]);
+
+  /** The Overview toolbar's Download button, for the kinds whose download *is* the file: the
+   * bytes as they'd be saved (`exportBytes`), under the file's own name. A `.zpcr` has its own
+   * wiring below, since saving it also clears the modified flag. */
+  const downloadActiveFile = useCallback(() => {
+    const file = store.active;
+    if (!file) return;
+    downloadBytes(file.name, store.exportBytes(file.id) ?? file.bytes);
+    store.markDownloaded(file.id);
+  }, [store]);
 
   /**
    * A run happening right now, live on the instrument and connected over USB — as opposed to
@@ -415,6 +463,10 @@ export function App() {
                 file={active}
                 result={store.activePlateFile}
                 onRenameFile={(name) => void store.renameFile(active.id, name)}
+                onDownload={downloadActiveFile}
+                onClone={() => void cloneActiveFile()}
+                autoEditName={editNameFor === active.id}
+                onAutoEditHandled={clearEditName}
               />
             )}
             {view === "plates" && store.activePlateFile && (
@@ -428,6 +480,10 @@ export function App() {
               <StandaloneProtocolOverview
                 file={active}
                 onRenameFile={(name) => void store.renameFile(active.id, name)}
+                onDownload={downloadActiveFile}
+                onClone={() => void cloneActiveFile()}
+                autoEditName={editNameFor === active.id}
+                onAutoEditHandled={clearEditName}
               />
             )}
             {view === "protocol" && store.activeProtocolFile !== null && (
@@ -478,6 +534,9 @@ export function App() {
                   store.markDownloaded(active.id);
                   return bytes;
                 }}
+                onClone={() => void cloneActiveFile()}
+                autoEditName={editNameFor === active.id}
+                onAutoEditHandled={clearEditName}
               />
             )}
             {view === "protocol" && (

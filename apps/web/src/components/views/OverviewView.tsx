@@ -8,8 +8,7 @@ import {
   type PlateDefinition,
   type Zpcr,
 } from "@zpcrweb/core";
-import { DownloadIcon } from "../DownloadIcon";
-import { RenameIcon } from "../RenameIcon";
+import { OverviewToolbar, useFilenameEditor } from "../OverviewFileTools";
 import { downloadBytes } from "../../lib/download";
 import { usePltdPassword } from "../../state/pltdPassword";
 import { channelColor } from "../../lib/channelColors";
@@ -40,6 +39,9 @@ export function OverviewView({
   namePersists,
   onRenameFile,
   onDownload,
+  onClone,
+  autoEditName,
+  onAutoEditHandled,
 }: {
   zpcr: Zpcr;
   /** The run's own file kind (`.zpcr`/`.pcrd`/biomeme `.json`) — feeds the "Type" row's detailed
@@ -73,6 +75,14 @@ export function OverviewView({
    * which edits the run's own name. The toolbar's Rename button turns the "Filename" row into
    * an editable field that calls this on commit. */
   onRenameFile: (name: string) => void;
+  /** Copy this run into a new `(N)`-named file and open the copy — the toolbar's Clone button;
+   * see `App.tsx`'s `cloneActiveFile`. */
+  onClone: () => void;
+  /** Open the "Filename" row for editing as soon as the view appears — how a just-cloned file
+   * arrives, with its name selected and ready to be typed over. */
+  autoEditName?: boolean;
+  /** Called once {@link autoEditName} has been acted on, so it fires once per clone. */
+  onAutoEditHandled?: () => void;
 }) {
   const m = zpcr.metadata;
   const reads = zpcr.reads;
@@ -89,22 +99,18 @@ export function OverviewView({
    */
   const progress = useMemo(() => runProgressFromNames(zpcr.archive.entries), [zpcr]);
 
-  // Toggled by the toolbar's Rename button — turns the "Filename" info row into an editable
-  // field, in place, rather than opening a separate dialog. The experiment name above it
+  // Opened by the toolbar's Edit button — turns the "Filename" info row into an editable field,
+  // in place, rather than opening a separate dialog. The experiment name above it
   // (`ExperimentHeader`) is already an always-editable input, so once this is open both of a
-  // `.zpcr`'s two names are editable at once.
-  const [renamingFile, setRenamingFile] = useState(false);
-  const [filenameDraft, setFilenameDraft] = useState(file.name);
-  useEffect(() => setFilenameDraft(file.name), [file.name]);
-  const commitFilename = () => {
-    setRenamingFile(false);
-    const next = filenameDraft.trim();
-    if (!next || next === file.name) {
-      setFilenameDraft(file.name);
-      return;
-    }
-    onRenameFile(next);
-  };
+  // `.zpcr`'s two names are editable at once. The row shows `identity.fileName` when idle, which
+  // is the resolved display name rather than the raw one being edited.
+  const filename = useFilenameEditor({
+    name: file.name,
+    display: identity.fileName,
+    onRename: onRenameFile,
+    autoEdit: autoEditName,
+    onAutoEditHandled,
+  });
 
   const [password] = usePltdPassword();
   const plate = useMemo(() => zpcr.plates(password || undefined)[0]?.pltd.plate ?? null, [zpcr, password]);
@@ -142,30 +148,7 @@ export function OverviewView({
   // "Encrypted"/"Run identity" sections below.
   const infoRows: InfoRow[] = [
     { label: "Type", value: fileKindDescription(kind) },
-    {
-      label: "Filename",
-      value: renamingFile ? (
-        <input
-          className="overview__filename-input mono"
-          value={filenameDraft}
-          autoFocus
-          onFocus={(e) => e.currentTarget.select()}
-          onChange={(e) => setFilenameDraft(e.currentTarget.value)}
-          onBlur={commitFilename}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") e.currentTarget.blur();
-            if (e.key === "Escape") {
-              setFilenameDraft(file.name);
-              setRenamingFile(false);
-            }
-          }}
-          aria-label="Filename"
-          spellCheck={false}
-        />
-      ) : (
-        identity.fileName
-      ),
-    },
+    { label: "Filename", value: filename.field },
     { label: "Last modified", value: formatCompactDateTime(new Date(file.lastModified)) },
     // Omitted rather than shown as "—": a standalone plate/protocol file has no run to date at
     // all, and a blank row would read as a missing value rather than a nonsensical question.
@@ -215,24 +198,13 @@ export function OverviewView({
           ))}
         </dl>
 
-        <div className="overview__toolbar">
-          <button
-            className="raw__download overview__renamebtn"
-            onClick={() => setRenamingFile(true)}
-            aria-label={`Rename ${file.name}`}
-            title="Rename this file"
-          >
-            <RenameIcon />
-          </button>
-          <button
-            className="raw__download overview__downloadbtn"
-            onClick={() => downloadBytes(file.name, onDownload?.() ?? file.bytes)}
-            aria-label={`Download ${file.name}`}
-            title="Download this file (including its zpcrweb.json analysis settings)"
-          >
-            <DownloadIcon />
-          </button>
-        </div>
+        <OverviewToolbar
+          name={file.name}
+          onDownload={() => downloadBytes(file.name, onDownload?.() ?? file.bytes)}
+          downloadTitle="Download this file (including its zpcrweb.json analysis settings)"
+          onEdit={filename.beginEdit}
+          onClone={onClone}
+        />
       </div>
 
       {plate && (targets.length > 0 || samples.length > 0) && (

@@ -925,16 +925,20 @@
   background: var(--plane);
   border-color: var(--neon-cyan);
 }
-/* Tiles + download button side by side, so the button reserves its own column instead of
-   pushing the tiles (or anything below) down a row. */
+/* Info table + file buttons side by side, so the buttons reserve their own column instead of
+   pushing the table (or anything below) down a row. */
 .overview__head {
   display: flex;
   align-items: flex-start;
   gap: 12px;
 }
+/* Download / edit / clone, stacked down the right of the info table (`OverviewFileTools.tsx`) —
+   a column rather than a row so the group stays one button wide however many tools it grows,
+   and reads as the panel's own toolbar rather than as a caption over the table. */
 .overview__toolbar {
   flex: 0 0 auto;
   display: flex;
+  flex-direction: column;
   gap: 6px;
 }
 /* The "Filename" row in rename mode — same editable-field look as `.overview__name`, just at
@@ -1013,6 +1017,11 @@
 @container appmain (inline-size < 560px) {
   .overview__head {
     flex-wrap: wrap;
+  }
+  /* Wrapped below the table, the button column would be a tall stack against the left edge —
+     back to a row, which is what "under the table" wants to be. */
+  .overview__toolbar {
+    flex-direction: row;
   }
   .overview__dl {
     grid-template-columns: 1fr;

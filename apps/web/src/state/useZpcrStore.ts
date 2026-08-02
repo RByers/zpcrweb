@@ -644,9 +644,10 @@ export interface ZpcrStore {
   modifiedIds: Set<string>;
   /**
    * The user has just saved this file to disk: its edits are no longer at risk, so it stops
-   * counting as modified. Called by the Overview view's download button — the one that writes the
-   * *whole* file including its `zpcrweb.json` ({@link ZpcrStore.exportBytes}), and so the only
-   * download that actually gets the edits out of the browser.
+   * counting as modified. Called by the Overview toolbar's download button, whichever kind's
+   * Overview it is — the one that writes the *whole* file ({@link ZpcrStore.exportBytes}: a
+   * `.zpcr` including its `zpcrweb.json`, an edited `.prcl.txt` including its edits), and so the
+   * only download that actually gets the edits out of the browser.
    */
   markDownloaded: (fileId: string) => void;
   /**

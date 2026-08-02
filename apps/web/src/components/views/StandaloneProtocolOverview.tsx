@@ -1,66 +1,45 @@
-import { Fragment, useEffect, useState } from "react";
+import { Fragment } from "react";
 import { fileKindDescription } from "@zpcrweb/core";
-import { RenameIcon } from "../RenameIcon";
+import { OverviewToolbar, useFilenameEditor } from "../OverviewFileTools";
 import { formatCompactDateTime } from "../../lib/experiment";
 import type { LoadedFile } from "../../state/useZpcrStore";
 
 /**
  * The Overview tab for a standalone `.prcl.txt` — just the same `Type`/`Filename`/
- * `Last modified` info-table rows every other kind's Overview leads with, plus the rename
- * control. Everything about the protocol itself — lid/volume, the step list, the annotated
+ * `Last modified` info-table rows every other kind's Overview leads with, plus the shared file
+ * toolbar. Everything about the protocol itself — lid/volume, the step list, the annotated
  * directive listing — lives on the "Protocol" tab (`StandaloneProtocolView`), so this stays a
  * minimal identity card rather than duplicating that detail.
  */
 export function StandaloneProtocolOverview({
   file,
   onRenameFile,
+  onDownload,
+  onClone,
+  autoEditName,
+  onAutoEditHandled,
 }: {
   file: LoadedFile;
   /** Rename the loaded file (`ZpcrStore.renameFile`) — a `.prcl.txt` has no separate "name" the
    * way a `.zpcr` does, so this is the only identity it has to edit. */
   onRenameFile: (name: string) => void;
+  /** The file's bytes for the toolbar's Download button — the *edited* text when the Protocol
+   * tab's editor has changed it, since the store keeps `LoadedFile.bytes` current. */
+  onDownload: () => void;
+  onClone: () => void;
+  autoEditName?: boolean;
+  onAutoEditHandled?: () => void;
 }) {
-  // Toggled by the toolbar's Rename button — turns the "Filename" info row into an editable
-  // field, in place, the same commit-on-blur/Enter/Escape-reverts pattern `OverviewView` uses.
-  const [renaming, setRenaming] = useState(false);
-  const [draft, setDraft] = useState(file.name);
-  useEffect(() => setDraft(file.name), [file.name]);
-  const commit = () => {
-    setRenaming(false);
-    const next = draft.trim();
-    if (!next || next === file.name) {
-      setDraft(file.name);
-      return;
-    }
-    onRenameFile(next);
-  };
+  const filename = useFilenameEditor({
+    name: file.name,
+    onRename: onRenameFile,
+    autoEdit: autoEditName,
+    onAutoEditHandled,
+  });
 
   const infoRows = [
     { label: "Type", value: fileKindDescription(file.kind) },
-    {
-      label: "Filename",
-      value: renaming ? (
-        <input
-          className="overview__filename-input mono"
-          value={draft}
-          autoFocus
-          onFocus={(e) => e.currentTarget.select()}
-          onChange={(e) => setDraft(e.currentTarget.value)}
-          onBlur={commit}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") e.currentTarget.blur();
-            if (e.key === "Escape") {
-              setDraft(file.name);
-              setRenaming(false);
-            }
-          }}
-          aria-label="Filename"
-          spellCheck={false}
-        />
-      ) : (
-        file.name
-      ),
-    },
+    { label: "Filename", value: filename.field },
     { label: "Last modified", value: formatCompactDateTime(new Date(file.lastModified)) },
   ];
 
@@ -75,16 +54,12 @@ export function StandaloneProtocolOverview({
             </Fragment>
           ))}
         </dl>
-        <div className="overview__toolbar">
-          <button
-            className="raw__download overview__renamebtn"
-            onClick={() => setRenaming(true)}
-            aria-label={`Rename ${file.name}`}
-            title="Rename this file"
-          >
-            <RenameIcon />
-          </button>
-        </div>
+        <OverviewToolbar
+          name={file.name}
+          onDownload={onDownload}
+          onEdit={filename.beginEdit}
+          onClone={onClone}
+        />
       </div>
     </div>
   );

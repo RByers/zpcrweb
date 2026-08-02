@@ -264,7 +264,8 @@ It enables **four** tabs, `["overview","protocol","raw","instrument"]`, because 
 things:
 
 - **Overview** (`StandaloneProtocolOverview`) — a minimal identity card: just the same
-  `Type`/`Filename`/`Last modified` info-table rows every kind's Overview leads with. All the
+  `Type`/`Filename`/`Last modified` info-table rows every kind's Overview leads with, plus the
+  shared file toolbar (download/edit/clone, see "The Overview toolbar" below). All the
   protocol's own content lives on Protocol instead, the same split a run's Overview/Protocol pair
   uses.
 - **Protocol** (`StandaloneProtocolView`) — the protocol *as a document*, and the one place it
@@ -490,7 +491,8 @@ so every call site keeps writing one `onChange({ … })` regardless of where the
 
 ## Views
 
-- **Overview** — a single info table (file identity, run metadata from `zpcr.metadata` — including
+- **Overview** — the shared file toolbar (download/edit/clone, see "The Overview toolbar" below)
+  beside a single info table (file identity, run metadata from `zpcr.metadata` — including
   a "Protocol" row with just the protocol's name, from `zpcr.protocol()`; the full thermal
   protocol lives on its own Protocol tab, see below — and an "Encrypted" row, see above) plus a
   "Plate" section listing the plate's targets and samples as chips. The Encrypted row shows
@@ -661,12 +663,38 @@ is never written back, so renaming the file on disk still renames the run. For a
 Biomeme run there is no archive to write into, so the edit lasts the session — the field says so
 in its tooltip rather than losing it silently.
 
-The Overview toolbar's Rename button is a separate control, for a separate field: it turns the
-info table's "Filename" row into an edit-in-place input (the same commit-on-blur/Enter,
-Escape-reverts pattern as the name field), and calls `ZpcrStore.renameFile`.
-`StandaloneProtocolView` and `StandalonePlateOverviewView` (a `.prcl.txt`'s and a standalone
-plate's own Overviews) offer the same button, since neither kind has a separate stored name to
-edit at all — the filename is their only identity. Renaming the *file* is a bigger operation than
+## The Overview toolbar
+
+Every Overview panel — a run's (`OverviewView`), a standalone plate's
+(`StandalonePlateOverviewView`), a `.prcl.txt`'s (`StandaloneProtocolOverview`) — carries the same
+column of buttons down the right of its info table: **download**, **edit** (the filename),
+**clone**. They act on the *file*, which is the one thing all three kinds have in common, so all
+three offer the identical set rather than each format getting whichever tool happened to be wired
+up (download used to exist only for a run, and rename only as a lone button). Both halves live in
+`components/OverviewFileTools.tsx`: `OverviewToolbar` draws the column, and `useFilenameEditor`
+owns the editable "Filename" row the Edit button opens — three copies of that
+commit-on-blur/Escape-reverts logic were what let the panels drift apart in the first place.
+
+**Clone** (`App.tsx`'s `cloneActiveFile`) copies the active file under the next free
+`name (N).ext` — incrementing an index the name already carries rather than nesting a second one,
+see `lib/cloneName.ts` — and opens the copy with its filename field focused, ready to be typed
+over. It goes through `addFiles` like any other new file, so the copy is validated, persisted and
+activated by exactly the path a dropped file takes; the bytes are `exportBytes`, so a run's clone
+carries the analysis settings currently on screen and an edited `.prcl.txt` its edits. The copy
+lands `modified`, since it exists nowhere but the browser until it is saved. The `(N)` naming is
+load-bearing rather than cosmetic: `addFiles` *replaces* a same-named file, so a clone that reused
+the name would silently eat the original.
+
+The "open it ready to be renamed" half is a request held in `App.tsx` (`editNameFor`, keyed by
+file id and cleared by the panel once acted on) rather than a flag, because the clone is added
+asynchronously — by the time the new file is active and its Overview renders, the id is what says
+*that* one was just made, and a file selected some other way meanwhile doesn't inherit the request.
+
+The Edit button is a separate control from the run-name field above it, for a separate field: it
+turns the info table's "Filename" row into an edit-in-place input (the same commit-on-blur/Enter,
+Escape-reverts pattern as the name field), and calls `ZpcrStore.renameFile`. For a `.prcl.txt` or
+a standalone plate it is the *only* identity there is to edit, neither kind having a stored name.
+Renaming the *file* is a bigger operation than
 it looks: ids hash name+size (`db.ts`'s `fileId`), so a new name means a new id, and `renameFile`
 migrates every id-keyed map (`settingsMap`, `analysisMap`, `activeId`, the analysis persister's
 pending writes) rather than just patching `LoadedFile.name` in place — the same supersede-by-id

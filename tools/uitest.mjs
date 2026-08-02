@@ -2278,6 +2278,95 @@ async function protocolEditorChecks(chrome, origin) {
 }
 
 
+/**
+ * The Overview toolbar's Clone button — a copy of the loaded file under the next free `(N)` name,
+ * opened ready to be renamed (`App.tsx`'s `cloneActiveFile`, `lib/cloneName.ts`).
+ *
+ * Every step of it is silent-failure territory: the copy goes through `addFiles`, which *replaces*
+ * a same-named file, so a naming bug doesn't error — it eats the original. And "opens it in edit
+ * mode with the field focused" is state nothing else observes: a clone that lands correctly but
+ * unfocused looks identical in a screenshot.
+ *
+ * Cloned twice on purpose, since the second clone is of a name that already carries an index —
+ * the case that has to increment (`(3)`) rather than nest (`(2) (2)`).
+ */
+async function cloneChecks(chrome, origin) {
+  console.log("\nclone");
+  const cdp = await openPage(chrome.base, origin);
+  await emptyReload(cdp, origin);
+  await loadFile(cdp, join(REPO, "samples", EXAMPLE));
+  await waitFor(() => chipPresent(cdp, "S183"), { what: "the .zpcr chip" });
+  await cdp.eval(`window.location.hash = "view=overview", undefined`);
+  await tabBecomes(cdp, "Overview");
+
+  const state = () =>
+    cdp
+      .eval(
+        `JSON.stringify((() => {
+           const dts = [...document.querySelectorAll(".overview__infotable dt")];
+           const dds = [...document.querySelectorAll(".overview__infotable dd")];
+           const i = dts.findIndex((dt) => dt.textContent.trim() === "Filename");
+           const input = document.querySelector(".overview__filename-input");
+           return {
+             // While the row is being edited it *is* the input, whose value is the name — the
+             // <dd> around it has no text of its own.
+             file: input ? input.value : i < 0 ? null : dds[i].textContent,
+             editing: !!input,
+             focused: !!input && document.activeElement === input,
+             chips: [...document.querySelectorAll(".filechip__name")].map((c) => c.textContent),
+           };
+         })())`,
+      )
+      .then(JSON.parse);
+
+  const base = EXAMPLE.replace(/\.zpcr$/, "");
+  const clone = () => cdp.eval(`document.querySelector(".overview__clonebtn").click()`);
+
+  await clone();
+  await waitFor(async () => /\(2\)/.test((await state()).file ?? ""), { what: "the cloned file's Overview" });
+  const first = await state();
+  check(
+    "Clone copies the file under a (2) name and opens the copy",
+    first.file === `${base} (2).zpcr`,
+    JSON.stringify(first),
+  );
+  check(
+    "…in edit mode, with the filename field focused and ready to type over",
+    first.editing && first.focused,
+    JSON.stringify(first),
+  );
+  check(
+    "…beside the original rather than replacing it",
+    first.chips.length === 2 && first.chips.some((c) => c === "S183-S185 RVP"),
+    JSON.stringify(first),
+  );
+
+  // Cloning the clone: the index increments rather than a second one being appended.
+  await clone();
+  await waitFor(async () => /\(3\)/.test((await state()).file ?? ""), { what: "the second clone" });
+  const second = await state();
+  check(
+    "cloning a clone increments the index instead of nesting another one",
+    second.file === `${base} (3).zpcr` && second.chips.length === 3,
+    JSON.stringify(second),
+  );
+
+  // The copy is a real loaded file, not a view-level fiction: it has to still be there after a
+  // reload, since nothing but IndexedDB holds it (it was never on disk).
+  await cdp.eval(`document.querySelector(".overview__filename-input").blur()`);
+  await sleep(300);
+  await cdp.send("Page.navigate", { url: `${origin}#file=${encodeURIComponent(`${base} (3).zpcr`)}&view=overview` });
+  await tabBecomes(cdp, "Overview");
+  await waitFor(async () => (await state()).file !== null, { what: "the reloaded clone" });
+  const reloaded = await state();
+  check(
+    "a clone survives a reload — it went into IndexedDB like any loaded file",
+    reloaded.file === `${base} (3).zpcr` && reloaded.chips.length === 3,
+    JSON.stringify(reloaded),
+  );
+  cdp.close();
+}
+
 async function main() {
   const pw = cfxPassword();
   if (!pw) {
@@ -2309,6 +2398,7 @@ async function main() {
     await experimentNameChecks(chrome, origin);
     await deleteConfirmChecks(chrome, origin);
     await protocolEditorChecks(chrome, origin);
+    await cloneChecks(chrome, origin);
   } finally {
     chrome.stop();
     dev.stop();
