@@ -133,10 +133,10 @@ describe("checkRunPlan — PLATEREAD against the plate", () => {
     expect(checks.find((c) => c.code === "no-plate-read")?.severity).toBe("error");
   });
 
-  it("warns, but does not block, when a fluor's channel is unknown", () => {
+  it("says nothing about a fluor whose channel is unknown", () => {
+    // The `Ch?` chip in the plate view already says so, and repeating it here was noise.
     const checks = checkRunPlan(parseRunDefinition(ALL_CHANNELS), plateUsing([1, undefined]));
-    expect(checks.find((c) => c.code === "channels-unknown")?.severity).toBe("warning");
-    expect(checks.some((c) => c.severity === "error")).toBe(false);
+    expect(checks.map((c) => c.code)).toEqual(["channels-idle"]);
   });
 
   it("accepts the real sample plate against the mask its own run used", () => {

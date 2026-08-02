@@ -1,9 +1,5 @@
 import { isBlankWell, type PlateDefinition } from "@zpcrweb/core";
-import {
-  FluorChannelChip,
-  UnknownChannelNote,
-  hasUnknownChannel,
-} from "../plate/FluorChannelChip";
+import { FluorChannelChip } from "../plate/FluorChannelChip";
 import { Pair } from "./Pair";
 import { SAMPLE_TYPE_META } from "../../lib/sampleType";
 import { plateDisplayName } from "../../lib/plateNames";
@@ -33,7 +29,6 @@ export function PlateTable({ plate, sourceHint }: { plate: PlateDefinition; sour
           <Pair k="Plate type" v={plate.plateType || "—"} />
           <Pair k="Std units" v={plate.standardUnits || "—"} />
         </dl>
-        {hasUnknownChannel(plate.fluors) && <UnknownChannelNote />}
         {sourceHint && <span className="decoded__hint mono">{sourceHint}</span>}
       </section>
 

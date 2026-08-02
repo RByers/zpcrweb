@@ -1834,9 +1834,9 @@ labels its columns by dye alone, so a dye no `.Dcal` covers, or any plate CSV op
 has no channel at all. Nothing is ever guessed: `channelColor(undefined)` returns `NEUTRAL_COLOR`
 and `channelLabel(undefined)` returns `UNKNOWN_CHANNEL_LABEL` (`Ch?`). One shared component,
 `components/plate/FluorChannelChip.tsx`, renders every dye chip in both the Plates and Raw views —
-dashed outline plus a `Ch?` marker and an explanatory `title` when the channel is unknown, and
-`hasUnknownChannel(plate.fluors)` gates its `UnknownChannelNote` footnote under the fluor list.
-The rest of the pipeline treats `undefined` as "not in any channel" rather than channel 0:
+dashed outline plus a `Ch?` marker and an explanatory `title` when the channel is unknown. That
+hover is the whole explanation: the fluor list carries no footnote about it, and a staged run
+raises no check for it either, since the marker already says everything a reader needs. The rest of the pipeline treats `undefined` as "not in any channel" rather than channel 0:
 `fluorCurves.ts` propagates it, and `chart.ts`'s dark-overlay `presentChannels` set filters it
 out. That only costs colouring and grouping — the color-separation solve keys off `.Dcal`
 response curves, not channel numbers.

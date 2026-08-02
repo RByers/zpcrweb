@@ -1,4 +1,4 @@
-import { channelColor, channelLabel, UNKNOWN_CHANNEL_LABEL } from "../../lib/channelColors";
+import { channelColor, channelLabel } from "../../lib/channelColors";
 
 /**
  * Why a fluor can have no optical channel, in the words the UI uses to explain it. A `.pltd`
@@ -10,11 +10,6 @@ export const UNKNOWN_CHANNEL_TITLE =
   "Optical channel unknown: this plate names the dye but not its channel, and no matching .Dcal " +
   "calibration was available to resolve it. Nothing is guessed from column order, so this dye " +
   "has no channel color or channel grouping.";
-
-/** True when any of a plate's fluors is missing its channel — drives {@link UnknownChannelNote}. */
-export function hasUnknownChannel(fluors: { channel?: number }[]): boolean {
-  return fluors.some((f) => f.channel === undefined);
-}
 
 /**
  * One `FAM Ch1` chip: the dye, its channel swatch, and its channel label — with the channel
@@ -51,17 +46,5 @@ export function FluorChannelChip({
         </>
       )}
     </span>
-  );
-}
-
-/** The footnote shown under a fluor list that contains at least one unknown channel. */
-export function UnknownChannelNote() {
-  return (
-    <p className="plate__note">
-      <b>{UNKNOWN_CHANNEL_LABEL}</b> — optical channel unknown for one or more dyes. This plate
-      names the dye but not its channel, and no matching <code>.Dcal</code> calibration was
-      available to resolve it. Channel order is never inferred from column order, so these dyes
-      have no channel colour and are left out of channel-based grouping.
-    </p>
   );
 }

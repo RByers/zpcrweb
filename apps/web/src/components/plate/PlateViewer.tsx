@@ -7,7 +7,7 @@ import {
   type WellDefinition,
 } from "@zpcrweb/core";
 import { channelColor } from "../../lib/channelColors";
-import { FluorChannelChip, UnknownChannelNote, hasUnknownChannel } from "./FluorChannelChip";
+import { FluorChannelChip } from "./FluorChannelChip";
 import { ROW_LABELS, SAMPLE_TYPE_META } from "../../lib/sampleType";
 import { plateDisplayName } from "../../lib/plateNames";
 import { useHoverCard, type HoverCardData, type HoverCardRow } from "../curves/HoverCard";
@@ -105,7 +105,6 @@ export function PlateViewer({
             <FluorChannelChip key={f.fluor} fluor={f.fluor} channel={f.channel} />
           ))}
         </div>
-        {hasUnknownChannel(plate.fluors) && <UnknownChannelNote />}
         {sourceHint && !compact && <span className="decoded__hint mono">{sourceHint}</span>}
       </section>
 

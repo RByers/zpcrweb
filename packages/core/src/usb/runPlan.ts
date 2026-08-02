@@ -94,7 +94,6 @@ export interface RunCheck {
   code:
     | "no-plate-read"
     | "channels-unread"
-    | "channels-unknown"
     | "channels-idle"
     | "flyover-multichannel"
     | "no-steps"
@@ -226,11 +225,6 @@ function plateChannels(plate: PlateDefinition): number[] {
   return [...used].sort((a, b) => a - b);
 }
 
-/** Fluors whose optical channel isn't known — a `.plt.csv` with no calibration set behind it. */
-function unmappedFluors(plate: PlateDefinition): string[] {
-  return plate.fluors.filter((f) => f.channel === undefined).map((f) => f.fluor);
-}
-
 const list = (items: (string | number)[]) => items.join(", ");
 
 /**
@@ -257,7 +251,6 @@ export function checkRunPlan(
   const checks: RunCheck[] = [];
   const reads = program.directives.filter((d) => d.verb === "PLATEREAD");
   const used = plateChannels(plate);
-  const unknown = unmappedFluors(plate);
 
   if (program.steps.length === 0) {
     checks.push({
@@ -336,19 +329,6 @@ export function checkRunPlan(
           "observed; the instrument may not accept this one.",
       });
     }
-  }
-
-  if (unknown.length > 0) {
-    checks.push({
-      severity: "warning",
-      code: "channels-unknown",
-      message:
-        `No optical channel is known for ${list(unknown)}, so the scan mask can't be checked ` +
-        "against " +
-        (unknown.length > 1 ? "those dyes" : "that dye") +
-        ". Stage the plate alongside a run from this instrument to resolve them from its " +
-        "calibration set.",
-    });
   }
 
   return checks;
