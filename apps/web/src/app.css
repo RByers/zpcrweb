@@ -127,6 +127,16 @@
   gap: 0;
   padding-inline: 9px;
 }
+/* Same square-icon collapse as above, once the load button's own label is gone (level 1+). */
+.app__header .dropzone__compact {
+  transition: gap 140ms ease;
+}
+.app__header:not([data-fit="0"]) .dropzone__compact {
+  gap: 0;
+}
+.app__header:not([data-fit="0"]) .dropzone:not(.dropzone--large) {
+  padding-inline: 9px;
+}
 /* `useHeaderFit` probes each level by writing `data-fit` and reading the layout back; a
    transition mid-probe would be measured half-finished. It also holds this through the first
    commit so the header doesn't animate in from level 0 on load. */
