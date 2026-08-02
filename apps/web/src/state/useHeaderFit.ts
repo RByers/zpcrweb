@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
 
 /**
  * How hard the header is currently squeezed. Each level drops one more piece of text, leaving
@@ -65,9 +65,18 @@ function contentWidth(header: HTMLElement) {
  *   the one label level 2 keeps. The tab strip itself is the same tabs for every file (`App.tsx`
  *   disables the ones a file has no answer for rather than dropping them), so a file switch
  *   doesn't change the header's width. Resizes are caught by a `ResizeObserver`.
+ *
+ *   Deliberately *not* the only trigger: the header itself doesn't exist yet on the welcome
+ *   screen (`App.tsx` renders `.app__brand` there, not `.app__header`), so the very first time it
+ *   mounts is a transition `deps` may not see — loading the first file lands straight on the
+ *   default view, so `store.view` never changes. A plain `useRef` would then capture `null`
+ *   forever and the header would never shrink, having never attached its `ResizeObserver`. The
+ *   callback ref below re-renders when the node itself changes, independent of `deps`, which is
+ *   what actually catches that transition.
  */
 export function useHeaderFit(deps: unknown[]) {
-  const ref = useRef<HTMLElement>(null);
+  const [node, setNode] = useState<HTMLElement | null>(null);
+  const ref = useCallback((el: HTMLElement | null) => setNode(el), []);
   const [fit, setFit] = useState(0);
   // Outside the effect on purpose: a dep change re-runs the effect, and a flag local to it would
   // re-arm the first-pass suppression below — which would silently kill the animation on exactly
@@ -75,7 +84,7 @@ export function useHeaderFit(deps: unknown[]) {
   const firstPass = useRef(true);
 
   useLayoutEffect(() => {
-    const header = ref.current;
+    const header = node;
     if (!header) return;
     let live = true;
     let raf = 0;
@@ -149,7 +158,7 @@ export function useHeaderFit(deps: unknown[]) {
       cancelAnimationFrame(raf);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, deps);
+  }, [node, ...deps]);
 
   return { ref, fit };
 }

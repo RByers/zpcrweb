@@ -298,6 +298,59 @@ async function loadChecks(chrome, origin) {
 }
 
 /**
+ * The header (`useHeaderFit.ts`) collapses its own labels via `data-fit` when they don't fit a
+ * narrow window, rather than overflowing. It measures against a callback ref, precisely because a
+ * plain `useRef` once broke this silently: the header doesn't exist yet on the welcome screen
+ * (`.app__brand` there, no tabs), so the first time it mounts — when a file loads — is a
+ * transition the effect's `deps` (just the selected view) don't see if the view happens not to
+ * change across that transition, which it doesn't on a first load. `ref.current` stayed `null`
+ * forever, the `ResizeObserver` never attached, and the header overflowed at every width. Neither
+ * Vitest (no DOM) nor `uishot.mjs` (only reports console errors, and a silently-overflowing
+ * header logs none) would have caught that.
+ */
+async function headerFitChecks(chrome, origin) {
+  console.log("\nheader fit");
+  const cdp = await openPage(chrome.base, origin);
+  await cdp.send("Emulation.setDeviceMetricsOverride", {
+    width: 480,
+    height: 700,
+    deviceScaleFactor: 1,
+    mobile: false,
+  });
+  await loadFile(cdp, ZPCR);
+  await sleep(500);
+
+  // `.app__header` itself is a plain (non-scrolling) flex row — an overflowing child paints past
+  // the box rather than growing `scrollWidth` there. `.app__views` (the tab strip) is the one
+  // header child that actually is a scroll container (`overflow-x: auto`), so an uncollapsed
+  // header shows up there as a strip too narrow to show its own tabs uncropped.
+  const narrow = await cdp.eval(`(() => {
+      const h = document.querySelector(".app__header");
+      const views = h.querySelector(".app__views");
+      return { fit: h.dataset.fit, overflow: views.scrollWidth - views.clientWidth };
+    })()`);
+  check(
+    "a too-narrow header collapses instead of overflowing",
+    narrow.fit !== "0" && narrow.overflow <= 1,
+    `data-fit=${narrow.fit} overflow=${narrow.overflow}px`,
+  );
+
+  // The same `ResizeObserver` that has to catch the very first measurement also has to catch
+  // every later resize — widening back out must un-collapse it.
+  await cdp.send("Emulation.setDeviceMetricsOverride", {
+    width: 1400,
+    height: 700,
+    deviceScaleFactor: 1,
+    mobile: false,
+  });
+  await sleep(500);
+  const wide = await cdp.eval(`document.querySelector(".app__header").dataset.fit`);
+  check("widening the window restores the full header", wide === "0", `data-fit=${wide}`);
+
+  cdp.close();
+}
+
+/**
  * The chart's right axis holds temperatures *or* LED currents, never both (see
  * `apps/web/src/lib/rightAxis.ts`). Enforced in the store, so no control can break it — but only
  * a browser can show that enabling one really does clear the other, and that each chip previews
@@ -1866,6 +1919,7 @@ async function main() {
     // First, while IndexedDB is still empty and the welcome screen is showing.
     makeDupe();
     await loadChecks(chrome, origin);
+    await headerFitChecks(chrome, origin);
     await routingChecks(chrome, origin, pw);
     await rightAxisChecks(chrome, origin);
     await tableSortChecks(chrome, origin);
