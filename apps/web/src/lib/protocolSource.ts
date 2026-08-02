@@ -62,10 +62,14 @@ function plateWithRunChannels(
 /** One half of a staged run, and where it came from. */
 export interface StagedPart<T> {
   value: T | null;
-  /** The file supplying it — a `.prcl.txt`/plate file when overridden, else the run. */
+  /** The file supplying it — a standalone `.prcl.txt`/plate file, else the run. */
   sourceName: string | null;
-  /** True when an override supplies it rather than the selected run. */
-  overridden: boolean;
+  /**
+   * True when a standalone file supplies this half rather than the selected run. That is only an
+   * *override* when there is a run to override (`runName`) — with no run selected the file is
+   * simply the one source there is, which is why the panel's badge asks for both.
+   */
+  fromFile: boolean;
   /** Why there is nothing, when `value` is null and something was selected. */
   reason: string | null;
 }
@@ -79,12 +83,12 @@ export interface StagedProtocol {
 export interface StagedRun {
   protocol: StagedPart<StagedProtocol>;
   plate: StagedPart<PlateDefinition>;
-  /** The run supplying whatever isn't overridden, when one is selected. */
+  /** The run supplying whatever a standalone file doesn't, when one is selected. */
   runName: string | null;
   /**
    * The run whose calibration set gave the staged plate its channels, when that happened. A
    * `.plt.csv` records dye names only, so this is the one thing a run still contributes when both
-   * halves are overridden — and naming it is what keeps a run chip from being lit for no reason a
+   * halves come from files of their own — and naming it is what keeps a run chip lit for a reason a
    * reader can see.
    */
   channelsFrom: string | null;
@@ -92,8 +96,8 @@ export interface StagedRun {
 
 /** Nothing staged — what every view other than Instrument gets, since none of them read it. */
 export const EMPTY_STAGED_RUN: StagedRun = {
-  protocol: { value: null, sourceName: null, overridden: false, reason: null },
-  plate: { value: null, sourceName: null, overridden: false, reason: null },
+  protocol: { value: null, sourceName: null, fromFile: false, reason: null },
+  plate: { value: null, sourceName: null, fromFile: false, reason: null },
   runName: null,
   channelsFrom: null,
 };
@@ -151,7 +155,7 @@ export function resolveStagedRun(
         ),
       },
       sourceName: name,
-      overridden: true,
+      fromFile: true,
       reason: null,
     };
   } else {
@@ -164,7 +168,7 @@ export function resolveStagedRun(
           }
         : null,
       sourceName: text ? runLabel : null,
-      overridden: false,
+      fromFile: false,
       reason: text
         ? null
         : !selection.runId
@@ -193,7 +197,7 @@ export function resolveStagedRun(
     plate = {
       value: mapped ?? result?.plate ?? null,
       sourceName: file?.name ?? null,
-      overridden: true,
+      fromFile: true,
       reason: result?.plate
         ? null
         : result?.needsPassword
@@ -208,7 +212,7 @@ export function resolveStagedRun(
     plate = {
       value: embedded,
       sourceName: embedded ? runLabel : null,
-      overridden: false,
+      fromFile: false,
       reason: embedded
         ? null
         : !selection.runId

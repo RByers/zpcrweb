@@ -1949,6 +1949,32 @@ async function instrumentRunChecks(chrome, origin) {
     /not a thermal protocol/i.test(rejected) && after === before,
     rejected,
   );
+
+  // A run built from parts alone — a `.prcl.txt` and a plate file, no run selected. Both halves
+  // come from files of their own, but with no run there is nothing for them to supersede, so
+  // neither is badged: "override" is a claim about a run, and saying it here would invite the
+  // reader to look for the run being overridden.
+  await emptyReload(cdp, origin);
+  await loadFile(cdp, PRCL_TXT);
+  await waitFor(() => chipPresent(cdp, "Gradient"), { what: "the .prcl.txt chip" });
+  await loadFile(cdp, PLTD);
+  await waitFor(() => chipPresent(cdp, "QuickPlate"), { what: "the .pltd chip" });
+  await cdp.eval(`window.location.hash = "view=instrument", undefined`);
+  await waitFor(() => cdp.eval(`!!document.querySelector(".devrun")`), { what: "the run panel" });
+  await sleep(400);
+  const noRun = await staged();
+  check(
+    "with no run selected, neither half is badged as an override",
+    !noRun.protocol.override &&
+      !noRun.plate.override &&
+      /Gradient\.prcl\.txt/.test(noRun.protocol.source ?? "") &&
+      /QuickPlate/.test(noRun.plate.source ?? ""),
+    JSON.stringify({
+      protocol: { source: noRun.protocol.source, badge: noRun.protocol.override },
+      plate: { source: noRun.plate.source, badge: noRun.plate.override },
+    }),
+  );
+
   cdp.close();
 }
 

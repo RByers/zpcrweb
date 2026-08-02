@@ -40,11 +40,14 @@ import type { RunNaming } from "../../state/useRunNaming";
 function PartHead({
   title,
   sourceName,
-  overridden,
+  overrides,
 }: {
   title: string;
   sourceName: string | null;
-  overridden: boolean;
+  /** This half comes from a file of its own *and* there is a run whose half it supersedes. A
+   * protocol and a plate staged with no run between them override nothing — they are the only
+   * sources there are. */
+  overrides: boolean;
 }) {
   return (
     <div className="devrun__parthead">
@@ -54,7 +57,7 @@ function PartHead({
           {sourceName}
           {/* Only worth saying when it *is* an override: otherwise the file name alone already
               answers "from where?", and every heading would carry a redundant badge. */}
-          {overridden && <span className="devrun__badge">override</span>}
+          {overrides && <span className="devrun__badge">override</span>}
         </span>
       )}
     </div>
@@ -115,7 +118,10 @@ export function InstrumentRun({
   // A run can be staged alongside overrides of *both* halves, in which case it supplies neither
   // — but it is still the instrument the plate's dyes were read on, which is what gives a
   // `.plt.csv` its channels. Say so, or its chip is lit for no reason a reader can see.
-  const instrumentOnly = !!staged.runName && protocol.overridden && plate.overridden;
+  // Whether a half is an *override* is a statement about the run it supersedes, so both of these
+  // need a run selected: with only a protocol and a plate staged, nothing is being overridden.
+  const hasRun = !!staged.runName;
+  const instrumentOnly = hasRun && protocol.fromFile && plate.fromFile;
 
   return (
     <section className="instrument__panel">
@@ -200,7 +206,7 @@ export function InstrumentRun({
             <PartHead
               title="Protocol"
               sourceName={protocol.sourceName}
-              overridden={protocol.overridden}
+              overrides={hasRun && protocol.fromFile}
             />
             {protocol.value ? (
               <ProtocolDecoded
@@ -216,7 +222,11 @@ export function InstrumentRun({
           </div>
 
           <div className="devrun__part">
-            <PartHead title="Plate" sourceName={plate.sourceName} overridden={plate.overridden} />
+            <PartHead
+              title="Plate"
+              sourceName={plate.sourceName}
+              overrides={hasRun && plate.fromFile}
+            />
             {staged.channelsFrom && (
               <div className="devrun__meta mono">channels from {staged.channelsFrom}</div>
             )}

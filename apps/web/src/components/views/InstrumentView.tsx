@@ -73,13 +73,13 @@ export function InstrumentView({
         // (`usb/runPlan.ts`) rather than something to paper over here.
         name: experimentName,
         // The deposited copies keep the protocol's and the plate's own names, not the run's
-        // (`runPlan.ts`). An overridden half is named by the file it came from; an overridden
-        // plate's file name beats the plate's `identityKey`, which records whatever `.pltd` it
-        // was *saved* from and can be a stale name. A half supplied by the run passes nothing —
+        // (`runPlan.ts`). A half that came from a file of its own is named by that file, whose
+        // name beats the plate's `identityKey` — that records whatever `.pltd` it was *saved*
+        // from and can be a stale name. A half supplied by the run passes nothing —
         // `staged.*.sourceName` is the run's own label there, which is exactly the name these
         // files must not take — and lets `planRun` fall back to what the plate says about itself.
         protocolName: protocol.document.name || undefined,
-        plateName: (staged.plate.overridden && staged.plate.sourceName) || undefined,
+        plateName: (staged.plate.fromFile && staged.plate.sourceName) || undefined,
       });
     } catch {
       // A run definition this app can't parse can't be planned; the panel already renders the
@@ -89,7 +89,7 @@ export function InstrumentView({
   }, [
     staged.protocol.value,
     staged.plate.value,
-    staged.plate.overridden,
+    staged.plate.fromFile,
     staged.plate.sourceName,
     experimentName,
   ]);

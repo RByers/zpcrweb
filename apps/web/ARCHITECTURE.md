@@ -2268,7 +2268,10 @@ Four components, under `components/instrument/`:
   otherwise indistinguishable and looks like a fault.
 - **`InstrumentRun`** — the run that would be started, as its two halves side by side: the thermal
   protocol and the plate map, each headed by the file supplying it and badged when that file is an
-  override. It renders a selection it does not own (see the staging model above), and it has no
+  override — which takes a run to override, so a protocol and a plate staged with no run between
+  them carry no badge: they are the only sources there are, not overrides of anything. (The
+  resolved half records `fromFile`, "a standalone file supplied this"; the panel is what pairs
+  that with a selected run to make it an override.) It renders a selection it does not own (see the staging model above), and it has no
   start button — that belongs with the commands that actuate the instrument, in the rail. What it
   does carry is the plan's **checks** (above), between the two halves they are about.
 
