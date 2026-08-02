@@ -3093,6 +3093,13 @@
   align-items: center;
   gap: 10px;
 }
+/* At the tightest collapse level the three groups' own gaps and borders are pure overhead next
+   to icon-only tabs — tightening it here (rather than for `.viewselect` generally) buys back the
+   few pixels an extra tab costs without touching any tab's own padding, so tap targets stay the
+   same size at every level. */
+.app__header[data-fit="3"] .viewselect {
+  gap: 4px;
+}
 .segmented--instrument {
   border-color: var(--neon-magenta-dim);
 }
