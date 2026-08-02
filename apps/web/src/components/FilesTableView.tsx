@@ -440,9 +440,6 @@ export function FilesTableView({
     >
       <div className="filesview__header">
         <h2 className="filesview__title">All files</h2>
-        <button className="filesview__close" onClick={onClose} aria-label="Close all files">
-          ✕
-        </button>
       </div>
       <div className="filesview__scroll">
         <table className="filesview__tbl">

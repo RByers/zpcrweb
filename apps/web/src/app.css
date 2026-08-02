@@ -710,7 +710,6 @@
 .filesview__header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   padding: 10px 16px;
   border-bottom: 1px solid var(--border);
   flex: 0 0 auto;
@@ -720,19 +719,6 @@
   font-weight: 600;
   margin: 0;
   color: var(--ink);
-}
-.filesview__close {
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--ink-muted);
-  width: 26px;
-  height: 26px;
-  font-size: 13px;
-}
-.filesview__close:hover {
-  color: var(--ink);
-  background: var(--raised-2);
 }
 .filesview__scroll {
   flex: 1 1 auto;
