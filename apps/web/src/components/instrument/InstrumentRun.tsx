@@ -33,8 +33,48 @@ import type { Ref } from "react";
 import type { CfxStatus, RunPlan } from "@zpcrweb/core";
 import { ProtocolDecoded } from "../raw/DecodedView";
 import { PlateViewer } from "../plate/PlateViewer";
+import { duration } from "./InstrumentRail";
 import type { StagedRun } from "../../lib/protocolSource";
 import type { RunNaming } from "../../state/useRunNaming";
+
+/**
+ * A run this session watched finish, shown until "Open run" or "New run" dismisses it.
+ *
+ * Sits above "Run to start" rather than replacing it: the run that just finished and the run
+ * that could be staged next are two different things, and staging doesn't wait on this banner
+ * being dismissed — `naming.experimentName` has already cleared itself by the time this appears
+ * (`state/useRunNaming.ts`), so the fields below are free to be filled in for the next run
+ * immediately.
+ */
+function RunComplete({
+  finished,
+  onOpen,
+  onNew,
+}: {
+  finished: { name: string; totalS: number; fileId: string };
+  onOpen: () => void;
+  onNew: () => void;
+}) {
+  return (
+    <section className="instrument__panel instrument__complete">
+      <div className="instrument__panelhead">
+        <h2 className="instrument__paneltitle">
+          Run complete
+          <span className="instrument__runbadge instrument__runbadge--done">{duration(finished.totalS)}</span>
+        </h2>
+        <span className="devrun__hint mono">{finished.name}</span>
+      </div>
+      <div className="instrument__completeactions">
+        <button className="btn btn--primary" onClick={onOpen}>
+          Open run
+        </button>
+        <button className="btn" onClick={onNew}>
+          New run
+        </button>
+      </div>
+    </section>
+  );
+}
 
 /** A half's heading: what it is, and which file it came from. */
 function PartHead({
@@ -94,6 +134,9 @@ export function InstrumentRun({
   plan,
   status,
   pending,
+  finished,
+  onOpenFinishedRun,
+  onNewRun,
 }: {
   staged: StagedRun;
   /** The run's name, as typed. Owned by `App` (`state/useRunNaming.ts`) — it outlives this
@@ -112,6 +155,13 @@ export function InstrumentRun({
   /** True from the click on Start run until the instrument's first status answers it — the badge
    * has to say something in that window, since the run is neither un-started nor yet running. */
   pending: boolean;
+  /** A run this session watched finish, or null (`state/useRunWatch.ts`). Drives the "Run
+   * complete" banner above the staged run. */
+  finished: { name: string; totalS: number; fileId: string } | null;
+  /** "Open run": jump to that run's curves. */
+  onOpenFinishedRun: (fileId: string) => void;
+  /** "New run": dismiss the banner and clear the name field for the next one. */
+  onNewRun: () => void;
 }) {
   const { protocol, plate } = staged;
   const empty = !protocol.value && !plate.value && !protocol.reason && !plate.reason;
@@ -124,6 +174,14 @@ export function InstrumentRun({
   const instrumentOnly = hasRun && protocol.fromFile && plate.fromFile;
 
   return (
+    <>
+    {finished && (
+      <RunComplete
+        finished={finished}
+        onOpen={() => onOpenFinishedRun(finished.fileId)}
+        onNew={onNewRun}
+      />
+    )}
     <section className="instrument__panel">
       <div className="instrument__panelhead">
         <h2 className="instrument__paneltitle">
@@ -245,5 +303,6 @@ export function InstrumentRun({
         </>
       )}
     </section>
+    </>
   );
 }

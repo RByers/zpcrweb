@@ -126,6 +126,16 @@ export interface RunWatchState {
    * about to follow is already on screen as this".
    */
   adopt: (fileId: string) => void;
+  /**
+   * Set once a run this session watched running has finished and its final `.zpcr` has been
+   * assembled: what it was called, how long it ran, and the id of that final file — everything
+   * the Instrument view's "Run complete" banner needs. Null the rest of the time, including while
+   * the §7.6 acknowledgement above is still in flight (the banner is for a run that's actually
+   * done, not merely idle-and-held).
+   */
+  finished: { name: string; totalS: number; fileId: string } | null;
+  /** Dismiss the banner — the Instrument view's "New run" button. */
+  clearFinished: () => void;
 }
 
 export function useRunWatch(
@@ -152,6 +162,9 @@ export function useRunWatch(
   const [watching, setWatching] = useState(true);
   const [note, setNote] = useState<string | null>(null);
   const [fileId, setFileId] = useState<string | null>(null);
+  const [finished, setFinished] = useState<{ name: string; totalS: number; fileId: string } | null>(
+    null,
+  );
 
   const cache = useRef<Map<string, Uint8Array>>(new Map());
   const signature = useRef<string | null>(null);
@@ -187,7 +200,7 @@ export function useRunWatch(
    * whole run: the recording was running the entire time either way.
    */
   const pull = useCallback(
-    async (names: string[], finalAssembly = false) => {
+    async (names: string[], finalAssembly = false): Promise<string | null> => {
       // A name that has *gone* means this is a different run — the instrument clears the folder
       // when one starts — so held bytes may belong to the previous one.
       const present = new Set(names);
@@ -202,7 +215,7 @@ export function useRunWatch(
       );
       if (wanted.length > 0) {
         const fetched = await fetchDirectoryFiles(CFX_CURRENT_RUN_DIR, wanted);
-        if (!fetched) return; // the fetch failed; the rail reports it, and we retry next tick
+        if (!fetched) return null; // the fetch failed; the rail reports it, and we retry next tick
         for (const [name, bytes] of Object.entries(fetched)) cache.current.set(name, bytes);
       }
       const files = Object.fromEntries(cache.current);
@@ -218,10 +231,12 @@ export function useRunWatch(
         setFileId(id);
         const reads = names.filter((n) => /\.Plateread$/i.test(n)).length;
         setNote(`Updated at ${new Date().toLocaleTimeString()} — ${reads} plate reads`);
+        return id;
       } catch (e) {
         // An incomplete folder (no RunInfo.xml yet, in the seconds after a run starts) throws
         // here. That's a "not yet", not a failure — the next check will find it.
         setNote(e instanceof Error ? e.message : String(e));
+        return null;
       }
     },
     [fetchDirectoryFiles, trafficLogForRun],
@@ -233,12 +248,12 @@ export function useRunWatch(
    * also the one that gets `finalAssembly`, embedding the USB traffic log (see `pull`).
    */
   const check = useCallback(
-    async (force = false, finalAssembly = false) => {
-      if (pulling.current) return;
+    async (force = false, finalAssembly = false): Promise<string | null> => {
+      if (pulling.current) return null;
       pulling.current = true;
       try {
         const dir = await refreshRunFolder();
-        if (!dir?.listed) return;
+        if (!dir?.listed) return null;
         const sig = signatureOf(dir.names);
         const first = signature.current === null;
         const changed = sig !== signature.current;
@@ -249,13 +264,13 @@ export function useRunWatch(
         if (first && !force) {
           if (runProgressFromNames(dir.names).inProgress) {
             setNote("Found a run already in progress — pulling its current state.");
-            await pull(dir.names);
-          } else {
-            setNote("Watching for changes to the current run.");
+            return await pull(dir.names);
           }
-          return;
+          setNote("Watching for changes to the current run.");
+          return null;
         }
-        if (changed || force) await pull(dir.names, finalAssembly);
+        if (changed || force) return await pull(dir.names, finalAssembly);
+        return null;
       } finally {
         pulling.current = false;
       }
@@ -297,6 +312,12 @@ export function useRunWatch(
   // session (`acknowledgeFinishedRun` below needs that); this one un-latches so the next start
   // is caught too.
   const wasRunning = useRef(false);
+  // The instrument's own elapsed-time counter (`CfxStatus.elapsedS`), captured while it's still
+  // running: once `status.running` goes false the field itself is no longer meaningful (it's
+  // reset for the next run), so this is the only place a completed run's total time can be read
+  // from. Held across the whole run, not just its last poll, purely so the "Run complete" banner
+  // below has a number to show.
+  const lastElapsed = useRef<number | null>(null);
   useEffect(() => {
     if (connection !== "connected" || !watching || !status) return;
     if (status.running || !status.runName) {
@@ -306,8 +327,12 @@ export function useRunWatch(
       if (status.running) {
         acknowledged.current = null;
         sawRunning.current = true;
-        if (!wasRunning.current) freshStart.current = true;
+        if (!wasRunning.current) {
+          freshStart.current = true;
+          setFinished(null); // a new run starting retires the previous one's banner
+        }
         wasRunning.current = true;
+        lastElapsed.current = status.elapsedS;
       } else {
         wasRunning.current = false;
       }
@@ -317,13 +342,16 @@ export function useRunWatch(
     if (!sawRunning.current) return;
     if (acknowledged.current === status.runName) return;
     acknowledged.current = status.runName;
+    const finishedName = status.runName;
+    const totalS = lastElapsed.current;
     void (async () => {
-      setNote(`Run "${status.runName}" finished — collecting the last read.`);
+      setNote(`Run "${finishedName}" finished — collecting the last read.`);
       await acknowledgeFinishedRun();
       // Forced: the final read and `ended` land as part of this same moment, and waiting for the
       // signature to differ would just add a round trip. This is also the run's last `.zpcr`, so
       // the USB traffic log is attached here, if "save log" asks for one (see `finalAssembly`).
-      await check(true, true);
+      const id = await check(true, true);
+      if (id) setFinished({ name: finishedName, totalS: totalS ?? 0, fileId: id });
     })();
   }, [connection, watching, status, acknowledgeFinishedRun, check]);
 
@@ -354,6 +382,7 @@ export function useRunWatch(
   // The seed is this run's first file, so the watcher treats it exactly as one of its own
   // snapshots from here on (see `RunWatchState.adopt`).
   const adopt = useCallback((id: string) => setFileId(id), []);
+  const clearFinished = useCallback(() => setFinished(null), []);
 
-  return { watching, setWatching, note, fileId, adopt };
+  return { watching, setWatching, note, fileId, adopt, finished, clearFinished };
 }

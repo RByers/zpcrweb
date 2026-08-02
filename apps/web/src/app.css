@@ -3599,6 +3599,26 @@ summary.instrument__panelhead {
   padding: 1px 6px;
   animation: instrument-busy-pulse 1.4s ease-in-out infinite;
 }
+/* The finished run's total time, beside "Run complete" — unlike `.instrument__runbadge` above
+   it isn't reporting something in progress, so it doesn't pulse. */
+.instrument__runbadge--done {
+  color: var(--good);
+  border-color: var(--good);
+  animation: none;
+}
+/* The "Run complete" banner: a run this session watched finish, above the run being staged next
+   (`InstrumentRun`'s `RunComplete`). Its own accent, distinct from the panel border below it, is
+   what keeps a glance able to tell "a run just finished" from "here's what's staged next" even
+   before reading either heading. */
+.instrument__complete {
+  border-bottom-color: var(--good);
+  background: var(--good-dim);
+}
+.instrument__completeactions {
+  display: flex;
+  gap: 8px;
+  padding: 0 14px 14px;
+}
 .instrument__empty {
   padding: 14px;
   color: var(--ink-muted);

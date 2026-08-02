@@ -37,7 +37,7 @@ const temp = (v: number | null | undefined, digits = 1) =>
 
 /** `mm:ss`, or `h:mm:ss` past an hour — deliberately not sub-second, since none of `STATUS?`'s
  * clocks warrant that precision (`usb.md` §3.2). */
-function duration(seconds: number | null | undefined): string {
+export function duration(seconds: number | null | undefined): string {
   if (seconds == null || !Number.isFinite(seconds)) return "—";
   const total = Math.max(0, Math.round(seconds));
   const h = Math.floor(total / 3600);

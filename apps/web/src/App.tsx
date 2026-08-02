@@ -392,6 +392,16 @@ export function App() {
     store.setView(view ?? (f ? enabledViewsFor(f.kind, store.runs.get(id)?.zpcr)?.[0] ?? "overview" : "overview"));
   };
 
+  /** The Instrument view's "Run complete" banner's "Open run" button: jump straight to that run's
+   * amplification curves, the same destination `selectFromTable` sends the Curves cell to. */
+  const openFinishedRun = useCallback(
+    (id: string) => {
+      store.setActive(id);
+      store.setView("curves");
+    },
+    [store],
+  );
+
   const exampleHref = `#${formatLoadHash(EXAMPLE_FILE)}`;
   const loadExample = (e: { preventDefault: () => void }) => {
     if (window.location.hash !== exampleHref) return; // let the navigation do the work
@@ -449,6 +459,7 @@ export function App() {
         <main className="app__main">
           <InstrumentView
             onOpenRun={openRun}
+            onOpenFinishedRun={openFinishedRun}
             staged={staged}
             instrument={instrument}
             runWatch={runWatch}

@@ -24,6 +24,7 @@ import type { StagedRun } from "../../lib/protocolSource";
 
 export function InstrumentView({
   onOpenRun,
+  onOpenFinishedRun,
   staged,
   instrument,
   runWatch,
@@ -32,6 +33,10 @@ export function InstrumentView({
   freeRunFileBase,
 }: {
   onOpenRun: (file: File) => Promise<void> | void;
+  /** Jump to a finished run's curves — the "Run complete" banner's "Open run" button. Distinct
+   * from `onOpenRun`: that one adds a *new* file (an offloaded archive dropped in from outside);
+   * this one just switches to a file the watcher already put in the store. */
+  onOpenFinishedRun: (fileId: string) => void;
   /** The run the file bar's selection currently describes; see {@link InstrumentRun}. */
   staged: StagedRun;
   /** The connection, owned by `App` so it outlives this view — see its comment there. */
@@ -128,6 +133,26 @@ export function InstrumentView({
   const nameRef = useRef<HTMLInputElement>(null);
   const focusName = useCallback(() => nameRef.current?.focus(), []);
 
+  /** "Open run" on the "Run complete" banner: switch to that run's curves (`App`'s
+   * `openFinishedRun`), and dismiss the banner — it's been acted on, and staying on this view
+   * afterwards would show it beside a run that's no longer the newest thing to look at. */
+  const openFinished = useCallback(
+    (fileId: string) => {
+      onOpenFinishedRun(fileId);
+      runWatch.clearFinished();
+    },
+    [onOpenFinishedRun, runWatch],
+  );
+
+  /** "New run" on the banner: dismiss it, and clear whatever's typed in the name field so the
+   * next run isn't staged under the one that just finished. The field usually clears itself
+   * already (`useRunNaming`'s own falling-edge effect), but this is what handles the run having
+   * been started from the touchscreen, or the field having been retyped after that. */
+  const newRun = useCallback(() => {
+    runWatch.clearFinished();
+    naming.setExperimentName("");
+  }, [runWatch, naming]);
+
   return (
     <div className="curves instrument">
       <InstrumentRail
@@ -146,6 +171,9 @@ export function InstrumentView({
           plan={plan}
           status={instrument.status}
           pending={instrument.runPending}
+          finished={runWatch.finished}
+          onOpenFinishedRun={openFinished}
+          onNewRun={newRun}
         />
         <InstrumentFiles instrument={instrument} onOpenRun={onOpenRun} />
         <InstrumentConsole instrument={instrument} />
