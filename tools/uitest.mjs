@@ -29,6 +29,8 @@ import {
 
 const ZPCR = join(REPO, "samples/20260720_FirstQualification.zpcr");
 const PCRD = join(REPO, "samples/20260720_Luna_noRT.pcrd");
+/** Three cycles and three plate reads — short enough that every read keeps its own number. */
+const GRADIENT_ZPCR = join(REPO, "samples/20260725_GRADIENTTEST.zpcr");
 const PLTD = join(REPO, "samples/QuickPlate_96 wells_All Channels.pltd");
 /** The Biomeme run export — the one input format that isn't Bio-Rad's, and the one that names
  * its own run rather than encoding the name in a filename. */
@@ -1268,6 +1270,86 @@ async function alfViewChecks(chrome, origin) {
     "the unexplained fourth column is not presented as a ramp time (alf.md §8)",
     !log.head.some((h) => /ramp/i.test(h)),
     log.head.join(" "),
+  );
+  cdp.close();
+}
+
+/**
+ * The thermal profile under a run's Protocol tab (`components/protocol/ThermalProfileChart.tsx`
+ * over core's `alfThermalProfile`, `alf.md` §7.6).
+ *
+ * The trace itself is on a canvas and only a screenshot can judge it; what's assertable — and
+ * what would break silently — is the read numbering. Every read is a point but only as many
+ * numbers as fit are drawn, so the invariant is that the *endpoints* survive whatever thinning
+ * happens: a plot whose last number isn't the run's read count is one that quietly lost reads.
+ * Both ends of that are exercised here, on a 3-read run where nothing is thinned and a 45-read
+ * one where most of it is. Plus: the section appears only for a run that carries a report at all.
+ */
+async function thermalProfileChecks(chrome, origin) {
+  console.log("\nthermal profile");
+  const cdp = await openPage(chrome.base, origin);
+
+  /** Load `file`, open its Protocol tab, and report what the profile section drew. */
+  const profileOf = async (file, { expectChart = true } = {}) => {
+    await emptyReload(cdp, origin);
+    await loadFile(cdp, file);
+    await cdp.eval(`window.location.hash = "view=protocol", undefined`);
+    await tabBecomes(cdp, "Protocol");
+    if (expectChart) {
+      await waitFor(() => cdp.eval(`!!document.querySelector(".thermal canvas")`), {
+        what: "the thermal profile chart",
+      });
+    }
+    return cdp
+      .eval(
+        `JSON.stringify((() => ({
+           section: !!document.querySelector(".thermal"),
+           canvas: !!document.querySelector(".thermal canvas"),
+           empty: !!document.querySelector(".thermal .chart__empty"),
+           // uPlot draws its own axes on the canvas; the only SVG text in the box is a read number.
+           labels: [...document.querySelectorAll(".thermal svg text")].map((t) => t.textContent),
+         }))())`,
+      )
+      .then(JSON.parse);
+  };
+
+  const grad = await profileOf(GRADIENT_ZPCR);
+  check(
+    "a run's Protocol tab plots what the block actually did (alf.md §7.6)",
+    grad.section && grad.canvas && !grad.empty,
+    JSON.stringify({ section: grad.section, canvas: grad.canvas, empty: grad.empty }),
+  );
+  check(
+    "every plate read is numbered when they all fit — 3 reads, 3 numbers",
+    JSON.stringify(grad.labels) === JSON.stringify(["1", "2", "3"]),
+    grad.labels.join(","),
+  );
+
+  // 45 reads in ~800 px: most numbers have to go, but the first and last never may.
+  const dense = await profileOf(ZPCR);
+  check(
+    "a dense run thins the read numbers rather than smearing them",
+    dense.labels.length > 1 && dense.labels.length < 45,
+    `${dense.labels.length} of 45 drawn`,
+  );
+  check(
+    "…keeping the first and last, so the read count stays readable off the plot (§7.5)",
+    dense.labels[0] === "1" && dense.labels[dense.labels.length - 1] === "45",
+    `${dense.labels[0]} … ${dense.labels[dense.labels.length - 1]}`,
+  );
+  check(
+    "…and numbering them in order",
+    dense.labels.every((l, i) => i === 0 || Number(l) > Number(dense.labels[i - 1])),
+    dense.labels.join(","),
+  );
+
+  // A `.pcrd` carries the run's protocol but never the instrument's report (alf.md §1), so there
+  // is nothing measured to plot — the tab keeps the protocol and drops the section entirely.
+  const pcrd = await profileOf(PCRD, { expectChart: false });
+  check(
+    "a .pcrd, which carries no run report, gets no profile section at all (alf.md §1)",
+    !pcrd.section,
+    JSON.stringify(pcrd),
   );
   cdp.close();
 }
@@ -2734,6 +2816,7 @@ async function main() {
     await passwordChecks(chrome, origin, pw);
     await xmlViewChecks(chrome, origin, pw);
     await alfViewChecks(chrome, origin);
+    await thermalProfileChecks(chrome, origin);
     await instrumentRunChecks(chrome, origin);
     await runSeedChecks(chrome, origin);
     await experimentNameChecks(chrome, origin);

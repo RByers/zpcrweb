@@ -1697,6 +1697,32 @@
   color: var(--ink-muted);
 }
 
+/* ---- Thermal profile (the .alf trace under a run's Protocol tab) ----------
+   `.chart` sizes itself to its container, and this one's container is a section of a scrolling
+   page rather than a viewport-filling grid — so it gets an explicit height, the way
+   `.reference__chart` does. Tall enough that a 95→60 cycle's two levels stay distinguishable,
+   short enough that the protocol above it is still on screen. */
+.thermal {
+  height: 300px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 6px 8px 2px;
+}
+/* The phase words in the caption above, coloured as the plot draws them — a legend that reads
+   as the sentence explaining the plot, rather than a key the reader has to map onto it. */
+.thermal__key {
+  font-weight: 600;
+}
+.thermal__key--hold {
+  color: var(--neon-cyan);
+}
+.thermal__key--ramp {
+  color: var(--warn);
+}
+.thermal__key--read {
+  color: var(--neon-magenta);
+}
+
 /* ---- Raw files view ----------------------------------------------------- */
 .raw {
   display: grid;

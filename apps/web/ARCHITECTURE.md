@@ -540,6 +540,22 @@ so every call site keeps writing one `onChange({ … })` regardless of where the
   same format independence `OverviewView` has. Split out of Overview so a run's protocol detail
   doesn't crowd the summary; `StandaloneProtocolView` (see "A protocol on its own" below) is the
   equivalent tab for a `.prcl.txt` with no run around it.
+
+  Beneath the step table, when the run carries a `.alf` report (`zpcr.runReports()`), the
+  **thermal profile as run** — `ThermalProfileChart` over core's `alfThermalProfile`
+  ([`alf.md`](../../alf.md) §7.6). The pairing is the point: the table states what was asked
+  for, the plot states what it cost, and a 30 s hold that occupied 46 s is only visible in the
+  second. It's the one section here that isn't format-independent — a `.pcrd` carries no report
+  ([`alf.md`](../../alf.md) §1), so the section simply doesn't render for one.
+
+  A **third uPlot builder** (`lib/uplot/thermalChart.ts`) for the same reason `calChart.ts` is a
+  second one: it shares neither axis with either of the others — the only plot in the app whose x
+  is wall-clock time and whose y is a setpoint rather than a reading. Ramps and holds are separate
+  series so the decomposition reads at a glance, sharing endpoint vertices so the trace still
+  looks continuous; the ramp is dashed because `took − hold` gives its *duration* and nothing
+  about its shape, and drawing a curve there would invent data the report doesn't have. Plate
+  reads all get a point, but only as many *numbers* as clear a pixel gap are drawn, first and last
+  always — thinning the labels rather than the points keeps the count on screen honest.
 - **Curves** — the centerpiece (see below).
 - **Reference** — reference row vs factory calibration (see below).
 - **Calibration** — the run's `.Dcal` pure-dye response curves (see below). Last of the analysis

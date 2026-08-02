@@ -447,7 +447,12 @@ raw bytes ─▶ fflate.unzipSync ─▶ { name: Uint8Array }
   step's *start*), the stage boundaries (where the repeat counter goes backwards) and each
   plate read's index among the archive's `.Plateread` files. Deliberately leaves the fourth
   step column uninterpreted; see [`alf.md`](./alf.md) §8. Line 2 is a run definition, so it is
-  re-delimited and handed to `runDefinition.ts` rather than parsed here.
+  re-delimited and handed to `runDefinition.ts` rather than parsed here. On top of those
+  durations, `alfThermalProfile()` assembles the run's **thermal profile** — block temperature
+  against wall-clock time, each step split into the ramp that got there (`took − hold`) and the
+  hold at it, with plate reads as numbered points; see [`alf.md`](./alf.md) §7.6. That is the
+  only measurement of ramp cost the instrument produces, and the app plots it under a run's
+  Protocol tab.
 - **`calibration.ts`** — channel→dye color separation built on top of `.Dcal` data: per-dye
   response curves, a channel×dye calibration matrix, and a solve via `linalg.ts`'s
   pseudo-inverse. The matrix's normalization mode is a conditioning choice only — the solve

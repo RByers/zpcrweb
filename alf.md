@@ -22,6 +22,8 @@ decodes every `.alf` entry in an archive, and the web app's Raw files view rende
 (`components/raw/DecodedAlf.tsx`). The decoder derives the three things the file only implies —
 per-step durations (§7.4), stage boundaries (§7.2) and plate-read indices (§7.5) — and carries
 the fourth step column through uninterpreted (§8), which is also why the app's table omits it.
+`alfThermalProfile()` builds on those to reconstruct the block-temperature-against-time trace
+(§7.6), which a run's Protocol tab plots beneath the protocol it ran.
 
 Related docs: [`protocol.md`](./protocol.md) owns the protocol language on line 2 and the step
 numbering the log uses (its Appendix A is measured from these files);
@@ -252,6 +254,48 @@ verified across all 50 archives (10, 45, 45, 101, 3, … reads each, zero mismat
 report the cheapest way to attach a wall-clock time, a cycle index and a stage to each read without
 parsing the reads themselves, and a way to notice that a read is missing.
 
+### 7.6 Reconstructing the thermal profile
+
+The one thing a run report is uniquely able to show — and the only place in the archive it can be
+got from — is **what the block temperature actually did, against wall-clock time**. Nothing in the
+file draws that curve; it falls out of §7.4's differencing plus the nominal hold on each line.
+
+For a `TEMP`/`GRAD` step at time *t* with hold *h*, occupying *took* = (next line's timestamp − *t*):
+
+```
+ramp:  t            → t + (took − h)   block travelling to this step's setpoint
+hold:  t + (took−h) → t + took         block sitting at it
+```
+
+Ramp first, because the hold cannot begin before the block arrives; `took − h` is therefore the
+time the transition cost, measured. This is the decomposition to use — **not** the fourth column,
+which is labelled a ramp time and doesn't behave like one (§8).
+
+Three rules make the trace well-formed:
+
+| Case | Rule | Why |
+|---|---|---|
+| A `Plate Read` line | the whole span is a hold at the *previous* step's temperature | a read has no setpoint of its own; `took − h` here is the ~12 s the read takes, not a ramp |
+| The **first** step | drop its ramp; the trace starts where that ramp ends | the report never records what the block was at before the run, so the ramp has no starting temperature |
+| `h > took` | clamp the ramp to zero | timestamps are whole seconds, so a 1 s overrun is rounding; more would say the log and the protocol disagree about that step |
+
+The last of those is rare and small, measured: across the committed samples exactly one step
+overruns its hold at all — the 2019 multistep run's 56.5 °C step 7, nominally 5 s inside 4 s of
+clock — so a decomposition that produced clamping *often*, or by more than a second, would be
+evidence against the rule rather than against the timestamps.
+
+A `GRAD` step has no single temperature — the block is deliberately spread across the plate's rows.
+Its midpoint is what a single line can plot; the `low;high` span from field 5 is worth carrying
+alongside so the plot can show the spread rather than implying a uniform block.
+
+Because plate-read lines are 1:1 with the archive's reads (§7.5), each read is a *numbered* point
+on this trace, which is what ties an amplification curve's cycle back to a wall-clock moment and a
+block temperature.
+
+**Implemented by** `alfThermalProfile(report)` in `packages/core/src/alf.ts`, which returns the
+segments and read points above; the web app plots them under a run's Protocol tab
+(`components/protocol/ThermalProfileChart.tsx`).
+
 ## 8. The fourth column, and why not to trust it
 
 CFX Manager's own converter calls this field `RAMPTIME`; this repo previously read it as a °C
@@ -278,7 +322,7 @@ part of the format that is genuinely unexplained.
 
 - **Ground truth for timing.** The only per-step wall-clock record the instrument produces; ramp
   and plate-read costs fall out of differencing timestamps, which is what makes run-duration
-  estimates possible without a live run.
+  estimates possible without a live run — and, assembled, the run's whole thermal profile (§7.6).
 - **What actually ran.** Line 2 is the executed protocol, with the real scan mask.
 - **Provenance.** Block and base serials, block type, operator, start/end, lid and volume settings —
   independent of `RunInfo.xml`.

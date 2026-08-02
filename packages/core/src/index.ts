@@ -124,7 +124,7 @@ export type {
   TempStepDraft,
 } from "./protocolBuilder.js";
 /** The `.alf` run report (`alf.md`) — the instrument's own per-step execution log. */
-export { parseAlf, isAlfName } from "./alf.js";
+export { parseAlf, isAlfName, alfThermalProfile } from "./alf.js";
 export type {
   AlfReport,
   AlfHeader,
@@ -132,6 +132,10 @@ export type {
   AlfStep,
   AlfSetpoint,
   AlfEntry,
+  ThermalPhase,
+  ThermalSegment,
+  ThermalRead,
+  ThermalProfile,
 } from "./alf.js";
 export { parseDcal, findDcalBlock, isDcalName, dyeChannelLookup } from "./dcal.js";
 export { parsePcrd, isPcrdName, pcrdFromBlob } from "./pcrd.js";

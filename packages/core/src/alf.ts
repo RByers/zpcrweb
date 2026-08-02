@@ -418,3 +418,196 @@ export function parseAlf(data: Uint8Array | ArrayBuffer | string): AlfReport {
     problems,
   };
 }
+
+// ---------------------------------------------------------------------------
+// The thermal profile (`alf.md` §7.6)
+// ---------------------------------------------------------------------------
+
+/** What the block was doing over one span of a {@link ThermalProfile} (`alf.md` §7.6). */
+export type ThermalPhase =
+  /** Moving to this step's setpoint: `took − hold` seconds, ending there. */
+  | "ramp"
+  /** Sitting at it: the step's nominal `hold`. */
+  | "hold"
+  /** A `Plate Read`, which has no setpoint — the block stays wherever it already was. */
+  | "read";
+
+/** One span of the reconstructed block-temperature trace. */
+export interface ThermalSegment {
+  /** Seconds since the first logged step began. */
+  startSeconds: number;
+  /** Seconds since the first logged step began. Equal to {@link startSeconds} where the log's
+   * whole-second timestamps make the span zero-length. */
+  endSeconds: number;
+  phase: ThermalPhase;
+  /** Block temperature at {@link startSeconds}. Equals {@link toC} except on a `ramp`. */
+  fromC: number;
+  /** Block temperature at {@link endSeconds}. */
+  toC: number;
+  /** For a `GRAD` step, the span the block was spread across across the plate's rows; the
+   * segment's own `fromC`/`toC` carry its midpoint, which is what one line can plot. */
+  gradient?: { lowC: number; highC: number };
+  /** The step line this span came from. */
+  step: AlfStep;
+}
+
+/** A `Plate Read` as a point on the trace, carrying the index that names its `.Plateread`. */
+export interface ThermalRead {
+  /** 1-based, i.e. {@link AlfStep.readIndex} — the archive's `Read0000N.Plateread` (§7.5). */
+  readIndex: number;
+  /** When the read began, seconds since the first logged step. */
+  atSeconds: number;
+  /** When it ended — ~12 s later in practice (§7.4). */
+  endSeconds: number;
+  /** What the block was holding at: the *previous* step's setpoint, a read having none. */
+  temperatureC: number;
+  step: AlfStep;
+}
+
+/** The block-temperature-against-time trace a run report implies (`alf.md` §7.6). */
+export interface ThermalProfile {
+  /** The trace, in time order, contiguous except where a step's setpoint was unreadable. */
+  segments: ThermalSegment[];
+  /** Every `Plate Read`, in order. */
+  reads: ThermalRead[];
+  /** Length of the run in seconds — the sentinel's timestamp, or the last segment's end. */
+  totalSeconds: number;
+  /** Lowest / highest temperature the trace reaches, gradient spans included; null when no
+   * segment was plottable at all. */
+  range: { minC: number; maxC: number } | null;
+  /**
+   * How many steps' nominal hold outran the wall time they occupied, making `took − hold`
+   * negative — clamped to a zero-length ramp. Timestamps are whole seconds (§7.4), so a 1 s
+   * overrun is rounding; more than that says the log and the protocol disagree about that step.
+   */
+  clampedSteps: number;
+}
+
+/** The one temperature a segment plots for a step: its setpoint, or a gradient's midpoint. */
+function segmentTemperature(step: AlfStep): number | null {
+  switch (step.setpoint.kind) {
+    case "temperature":
+      return step.setpoint.tempC;
+    case "gradient":
+      return (step.setpoint.lowC + step.setpoint.highC) / 2;
+    default:
+      return null;
+  }
+}
+
+/**
+ * Reconstruct what the block temperature did over the run, as a sequence of ramp and hold spans
+ * (`alf.md` §7.6).
+ *
+ * The report states no duration and no ramp anywhere. A step line carries the moment it *began*
+ * (§7.4) and its *nominal* hold, so the wall time it occupied is the next line's timestamp minus
+ * its own ({@link AlfStep.elapsedSeconds}), and what that time went on decomposes as
+ *
+ * ```
+ * ramp = took − hold   (the block travelling to this step's setpoint)
+ * hold = the step's own hold field   (the block sitting at it)
+ * ```
+ *
+ * ramp first, since the hold cannot begin before the block arrives. Both halves are derived, not
+ * read: the file's fourth column is labelled a ramp time and does not behave like one (§8), which
+ * is exactly why this differences timestamps instead.
+ *
+ * Two spans are not ramps despite running longer than their hold. A `Plate Read` has no setpoint
+ * — the block stays where the previous step left it for the ~12 s the read takes, so its whole
+ * span is emitted as a `read` at that temperature. And the **first** step's ramp is dropped: the
+ * report never says what the block was at before the run, so there is no temperature to draw that
+ * ramp from, and the trace instead begins where it ends.
+ */
+export function alfThermalProfile(report: AlfReport): ThermalProfile {
+  const segments: ThermalSegment[] = [];
+  const reads: ThermalRead[] = [];
+  let clampedSteps = 0;
+
+  const origin = report.steps.find((s) => s.startedAt)?.startedAt ?? null;
+  if (!origin) return { segments, reads, totalSeconds: 0, range: null, clampedSteps };
+  const at = (d: Date): number => Math.round((d.getTime() - origin.getTime()) / 1000);
+
+  // Where the block is now — null until the first step with a readable setpoint, which is what
+  // suppresses the leading ramp.
+  let blockC: number | null = null;
+  let end = 0;
+
+  for (const step of report.steps) {
+    if (!step.startedAt) continue;
+    const start = at(step.startedAt);
+    // A truncated report leaves its last step untimed; falling back to the nominal hold draws
+    // that step rather than stopping one short of it.
+    const took = step.elapsedSeconds ?? step.holdSeconds ?? 0;
+
+    if (step.setpoint.kind === "plateRead") {
+      if (blockC === null) continue;
+      segments.push({
+        startSeconds: start,
+        endSeconds: start + took,
+        phase: "read",
+        fromC: blockC,
+        toC: blockC,
+        step,
+      });
+      if (step.readIndex !== undefined) {
+        reads.push({
+          readIndex: step.readIndex,
+          atSeconds: start,
+          endSeconds: start + took,
+          temperatureC: blockC,
+          step,
+        });
+      }
+      end = Math.max(end, start + took);
+      continue;
+    }
+
+    const target = segmentTemperature(step);
+    if (target === null) continue;
+
+    const nominalHold = Math.max(0, step.holdSeconds ?? 0);
+    const hold = Math.min(nominalHold, took);
+    if (nominalHold > took) clampedSteps += 1;
+    const ramp = took - hold;
+
+    if (blockC !== null && ramp > 0) {
+      segments.push({
+        startSeconds: start,
+        endSeconds: start + ramp,
+        phase: "ramp",
+        fromC: blockC,
+        toC: target,
+        step,
+      });
+    }
+    segments.push({
+      startSeconds: start + ramp,
+      endSeconds: start + took,
+      phase: "hold",
+      fromC: target,
+      toC: target,
+      ...(step.setpoint.kind === "gradient"
+        ? { gradient: { lowC: step.setpoint.lowC, highC: step.setpoint.highC } }
+        : {}),
+      step,
+    });
+    blockC = target;
+    end = Math.max(end, start + took);
+  }
+
+  let minC = Infinity;
+  let maxC = -Infinity;
+  for (const s of segments) {
+    minC = Math.min(minC, s.fromC, s.toC, s.gradient?.lowC ?? Infinity);
+    maxC = Math.max(maxC, s.fromC, s.toC, s.gradient?.highC ?? -Infinity);
+  }
+
+  const sentinelAt = report.sentinel?.startedAt ? at(report.sentinel.startedAt) : null;
+  return {
+    segments,
+    reads,
+    totalSeconds: Math.max(end, sentinelAt ?? 0),
+    range: segments.length > 0 ? { minC, maxC } : null,
+    clampedSteps,
+  };
+}
