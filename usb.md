@@ -497,8 +497,9 @@ two windows where it stalls rather than trying to correct it:
 
 A client that wants a *stable* estimate — one that does not jump when the instrument re-plans — can
 compute one from the protocol it just authored and calibrate it against the per-step wall times in
-a previous run's `.alf` (§7.6), which record ramp and plate-read costs directly. That is worth
-doing only if the drift above turns out to matter; field 10 alone is sufficient for a readout.
+a previous run's `.alf` (§5.2, [`alf.md`](./alf.md)), whose per-step timestamps give ramp and
+plate-read costs directly. That is worth doing only if the drift above turns out to matter;
+field 10 alone is sufficient for a readout.
 
 > **What these captures do not exercise.** Every field above is named, but three are never anything
 > but `0` here, so their *format* rests on the field map rather than on observation: field 13
@@ -722,8 +723,8 @@ bytes) partway through the run, `Read00002.Plateread` after the second cycle, th
 report (`<timestamp>_<serial>_<run name>.alf`) from `\Storage Card\PCRunReport\` once the run had
 finished. `Read0000N.Plateread` is exactly the `.Plateread` format `plateread.md` documents — no
 new decoding needed there, this just confirms *where* and *when* those bytes come off the wire.
-`.alf` (the run-report archive CFX Manager itself opens back up as a `.pcrd`-shaped view) wasn't
-opened further here.
+The `.alf` is a run report; §5.2 covers the directory it comes from and
+[`alf.md`](./alf.md) the file itself.
 
 **A zero-byte file's `GETFILE` reply is unreliable — observed live, not in the reference
 capture.** `\Storage Card\CurrentRun`'s `begun`/`ended` markers (`runFolder.ts`) are zero-content
@@ -733,6 +734,50 @@ gives up — up to a minute per marker, stalling the fetch loop on that one name
 side of this is unconfirmed (no capture exercises it); the client-side fix is to skip the
 `GETFILE` round-trip entirely once `GETFILESIZE` answers `0`, since there is nothing to transfer
 either way (`device.ts`'s `getFile`).
+
+### 5.2 `\Storage Card\PCRunReport` — the run report, and what an `.alf` says
+
+`\Storage Card` has only two directories (§5), and this is the second one. It is not a general
+log store and it is not where a run's data lives: `\Storage Card\CurrentRun` holds the run
+(fluorescence, protocol, calibration, markers), and `PCRunReport` holds **one small text file
+summarising how the block behaved** while that run executed. In every observation it contained
+either nothing or exactly one `.alf`. **Reports persist until something deletes them**: the
+pre-run listing in §7.1 found the *previous* run's report (a `GRADIENTTEST.alf` from six days
+earlier) still sitting there, which is why §7.1 empties the directory rather than trusting the
+newest name. The new report was present when the directory was listed after the run ended;
+nothing listed it mid-run, so exactly when during the run it materialises is unmeasured — a client
+that wants certainty should clear the directory first and treat the reappearance of any entry as
+the signal.
+
+The name is `<yyyymmdd>_<hhmmss>_<serial>_<RUN NAME>.alf` — start timestamp, the base-unit serial
+`*IDN?` reports, and the run name from `RemoteRun`'s operand 4 in full (uppercased, unlike the
+8-character truncation `STATUS?` shows). Reading it needs nothing new: `GETFILESLEN` +
+`LISTALLFILES` to find the name, `GETFILESIZE` + `GETFILE` to pull it, and `DELFILE` to clear it.
+Sizes seen are small — 693 bytes for a 2-cycle run, ~7 KB for a 45-cycle one — because the file
+grows with the number of protocol steps executed, not with plate size or channel count.
+
+**The same report is also copied into `\Storage Card\CurrentRun`**, which means a client that
+takes the whole run directory (`zpcrFromRunFiles`, §7.7 step 10) already has it. Worth knowing:
+that copy has been seen in the run folder of a run started **from the instrument's own
+touchscreen**, so the report is a property of any run, not of PC-driven ones — despite the "PC" in
+the directory name. Whether a front-panel run also deposits a copy into `PCRunReport` is untested.
+
+**The file's contents are [`alf.md`](./alf.md)** — the `.alf` run report is not USB-specific (it
+travels inside every `.zpcr`), so its format lives in its own doc: a header line of run identity,
+the protocol as executed, an error summary, and one line per executed step with that step's
+setpoint, nominal hold and wall-clock start. Two things worth knowing from here: the header echoes
+back what `RemoteRun` was told (its operands 4 and 5, plus `ALPHASN?`/`BASESN?`), so it is an
+independent record of what the instrument thought it was asked to do, and the step lines'
+timestamps are the only per-step timing the instrument ever reports — §3.2 wants them for the same
+reason.
+
+**Two related names exist that this capture never exercised**, both worth trying before assuming
+they are absent: a `LASTRUNREPORT <serial>,<block letter>` command, which by its shape would answer
+with the most recent report's filename and would remove the need to list-and-guess; and a sibling
+`\Storage Card\RunReports` directory addressed the same way (`GETFILESIZE`/`GETFILE`), plausibly
+where models other than this one keep the same thing. Neither appeared on the wire here, so both
+are unconfirmed — a client should treat `PCRunReport` plus `LISTALLFILES` as the path that is known
+to work.
 
 ## 6. What's still a real gap
 
@@ -1009,10 +1054,10 @@ GETFILESIZE + GETFILE      …\<that file>               → the run report
 ```
 
 The report's name is `<yyyymmdd>_<hhmmss>_<serial>_<RUN NAME>.alf`, and because §7.1 emptied the
-directory it is the only entry. It is small (693 bytes here) and its first line is a `*`-separated
-summary — run name, user, block serials, model, start/end/elapsed times, lid temperature, volume.
-The same `.alf` is also copied into `\Storage Card\CurrentRun`, so a client taking the whole folder
-gets it either way.
+directory it is the only entry. It is small (693 bytes here); **[`alf.md`](./alf.md) decodes it** —
+a header summary line, the protocol as executed, an error summary, and one line per executed step
+with its setpoint, nominal hold and the wall-clock time that step began. The same `.alf` is also
+copied into `\Storage Card\CurrentRun`, so a client taking the whole folder gets it either way.
 
 Finally, `FRONTENDLOCKED OFF` releases the instrument's touchscreen, which was locked for the
 duration of the PC-driven session (`ON` appears in `usb-basic`, at the other end of the same

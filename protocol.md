@@ -41,7 +41,7 @@ Five carriers hold the identical grammar:
 | Carrier | What it is | Trust |
 |---|---|---|
 | `ProtocolRunDefinition.txt` in a `.zpcr` | what the instrument recorded for the run it actually performed | **canonical for a run** |
-| the `.alf` run report in a `.zpcr` | the same text again, `*`-delimited instead of `;`-delimited, followed by the instrument's step-by-step execution log (§4, Appendix A) | canonical, and the only carrier that says what *ran* |
+| the `.alf` run report in a `.zpcr` ([`alf.md`](./alf.md)) | the same text again, `*`-delimited instead of `;`-delimited, followed by the instrument's step-by-step execution log (§4, Appendix A) | canonical, and the only carrier that says what *ran* |
 | `protocol2`'s `runDefinition` attribute in a `.prcl` or `.pcrd` | the protocol as authored | canonical for the *design*, not the run |
 | a plaintext `.prcl` (`prcl.md` §1.1) and this project's `.prcl.txt` (`prcl.md` §3.1) | a protocol on its own, outside any run | as written |
 | the USB command channel (`usb.md` §3) | the same verbs, one per command frame, authoring a protocol on the instrument | live (§7) |
@@ -69,9 +69,61 @@ operands are separated by `,`. Verbs are case-insensitive; every carrier here wr
 case.
 
 - The **header** is `METHOD`, `HOTLID`, `VOLUME`, in that order, and describes the run as a whole.
+  All three are **always present**: the header is fixed-arity, not a set of optional settings —
+  see below.
 - The **step list** is the rest. Each step is one thermal or optical action, optionally followed by
   **modifiers** that attach to it.
 - `END` terminates. Everything after it is ignored.
+
+**The header is never elided.** A protocol with the lid heater turned off still writes `HOTLID`,
+and a protocol whose method needs no volume model still writes `VOLUME`. Off and unused are said
+with a `0` operand, never by omitting the directive. In CFX Manager's writer
+(`Protocol2.ToRunDefinition()`, `BioRad.WinCE.PCR.InstrumentData`) the output array is sized
+`steps + 4` and slots 0, 1, 2 are filled unconditionally with `METHOD`, `HOTLID`, `VOLUME` — there
+is no branch anywhere in it that skips one. Concretely:
+
+| Authored as | Emitted |
+|---|---|
+| lid heater on, default temperature | `HOTLID 105,30` |
+| lid heater on, user temperature *T* | `HOTLID <T>,30` |
+| **lid heater off** ("Turn lid off" in the lid dialog) | `HOTLID 0,30` — emitted, with a `0` setpoint |
+| sample volume *V* µL (thermal model in use) | `METHOD CALC` + `VOLUME <V>` |
+| **no volume model** (block-temperature control) | `METHOD BLOCK` + `VOLUME 0` — emitted, with a `0` volume |
+
+Three details of that writer are worth carrying into any encoder:
+
+- **The lid-off flag zeroes the setpoint, not the directive.** The dialog's three-way choice
+  (`ProtocolLidSettingsForm`: default / user-specified / turn off) collapses to
+  `lidTemp = useDefault ? 105 : userTemp`, then `if (shutoffLidEnabled) lidTemp = 0`, applied
+  immediately before formatting. The **second** operand is untouched by the choice and keeps its
+  own value — `ProtocolConstants.c_ShutoffLidTemperature`, `30`, in everything seen — so lid-off
+  is `HOTLID 0,30` and not `HOTLID 0,0`.
+- **"Default" always writes 105**, even on a 48- or 384-well block. The writer hardcodes
+  `c_DefaultLidTemperature96` for the default case, although `c_DefaultLidTemperature48` (100) and
+  `c_DefaultLidTemperature384` (95) exist and the lid dialog displays them. A `105` in the text
+  therefore does not prove the run was on a 96-well block.
+- **`METHOD` is derived from `VOLUME`, not chosen independently**: `volume == 0 → BLOCK`,
+  otherwise `CALC` (`ProtocolConstants.c_VolumeForBlockMethod` is `0`). The two header fields
+  cannot disagree in generated text, and `METHOD OTHER` — which `Protocol2.Method` can return
+  in-memory for an unassigned volume of `−1` — is never written into a run definition.
+
+The **reader** is more forgiving than the writer, in both implementations. CFX Manager's
+`Protocol2.UnserilizeRunDefinition()` is a `switch` over whatever directives appear; a text missing
+`HOTLID` or `VOLUME` parses fine and simply leaves the object's defaults standing (which, for a
+missing `VOLUME`, silently means `0`/`BLOCK`). `parseRunDefinition` matches that tolerance without
+inheriting the trap: a missing header directive yields `null` for `lidTemperatureC`,
+`shutoffTemperatureC`, `volumeUl` or `method`, distinguishable from a `0` that was really written.
+`ProtocolBuilder.toRunDefinition()` emits all three unconditionally, as CFX does.
+
+**Provenance.** `HOTLID 105,30` with a non-zero `VOLUME` is **measured**: every header in
+`samples/` is `METHOD CALC;HOTLID 105,30;VOLUME 20` (5 occurrences), the package fixtures and
+capture-derived tests add `VOLUME 25`, and all of them carry all three directives — as does every
+run definition hardcoded in CFX Manager's own `EstimatedTimeToComplete` self-tests. The lid-off
+and `VOLUME 0` rows are **stated**: they come from the decompiled writer above, and the only
+`METHOD BLOCK;HOTLID 0,30;VOLUME 0` in the tree is one this project's own builder constructs in
+`packages/core/test/protocolBuilder.test.ts`. No sample here was authored with the lid off, so the
+claim being relied on is the negative one — that no code path omits the directive — which the
+writer's structure establishes directly.
 
 Four directive roles, and the difference between them is what §4's numbering turns on:
 
@@ -87,8 +139,8 @@ Four directive roles, and the difference between them is what §4's numbering tu
 | Directive | Operands | What it does |
 |---|---|---|
 | `METHOD <name>` | `CALC` \| `BLOCK` \| `OTHER` | Thermal control method. `CALC` controls the *calculated sample* temperature — the instrument's model of what is in the well, driven by `VOLUME` — rather than the block itself. `BLOCK` controls block temperature directly and goes with `VOLUME 0`. `OTHER` is defined by the language but appears in no file or capture here |
-| `HOTLID <temp>,<shutoff>` | °C, °C | Heated-lid setpoint, and the block temperature below which the lid heater turns off. `<temp>` of `0` disables lid heating altogether. The pair `105,30` is the 96-well default and is what every sample here carries |
-| `VOLUME <µL>` | µL | Sample volume. Not a dispensing instruction — it feeds the thermal model `METHOD CALC` uses to infer sample temperature from block temperature. `0` means "no model", which is what `METHOD BLOCK` runs with |
+| `HOTLID <temp>,<shutoff>` | °C, °C | Heated-lid setpoint, and the block temperature below which the lid heater turns off. `<temp>` of `0` disables lid heating altogether — **a disabled lid is `HOTLID 0,30`, not a missing `HOTLID`** (§3.1). The pair `105,30` is the writer's default and is what every sample here carries |
+| `VOLUME <µL>` | µL | Sample volume. Not a dispensing instruction — it feeds the thermal model `METHOD CALC` uses to infer sample temperature from block temperature. `0` means "no model", which is what `METHOD BLOCK` runs with — and **`VOLUME 0` is written out**, the directive is never dropped for a method that ignores it (§3.1) |
 | `TEMP <°C>,<seconds>` | °C, s | Hold one temperature for a fixed time. A hold of `0` seconds is an **indefinite** hold — the shipped `BurnIn.prcl` ends on `TEMP 12.0,0`, an infinite chill |
 | `GRAD <low>,<high>,<seconds>` | °C, °C, s | Hold a temperature *gradient* across the block's rows — low temperature at one edge, high at the other, so one plate tests a range of annealing temperatures at once |
 | `MELT <start>,<end>,<increment>,<hold>,#h<mask>` | °C, °C, °C, s, scan mask | A whole melt curve as one directive. Every stored protocol here spells a melt out the long way instead (§6), so this compact form is **stated**, not measured |
@@ -393,10 +445,11 @@ and the instrument's own two accounts of its own runs settle both. Neither needs
 
 ### A.1 The `.alf` execution log
 
-Every `.zpcr` carries an `.alf` run report whose second line is the run definition (`*`-delimited,
-§8) and whose body is one line per executed step:
-`-1*<cycle>*<step>*<Δ°C>*<temperature>*<hold>*<timestamp>*…`. That `<step>` is the number this
-document defines, written by the instrument as it ran.
+Every `.zpcr` carries an `.alf` run report ([`alf.md`](./alf.md)) whose second line is the run
+definition (`*`-delimited, §8) and whose body is one line per executed step:
+`-1*<repeat>*<step>*<unresolved>*<temperature>*<hold>*<timestamp>*…`. That `<step>` is the number
+this document defines, written by the instrument as it ran. (The fourth column is labelled a ramp
+time and does not behave like one — `alf.md` §8 has the measurements; nothing here depends on it.)
 
 `samples/20190516_122922_CT019138_SHORT_QUALIF.zpcr` — a cycling loop then a melt:
 
