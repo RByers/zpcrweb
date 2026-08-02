@@ -207,7 +207,8 @@ built core first (`npm run build`).
 npm install                     # install all workspaces
 npm test                        # @zpcrweb/core Vitest suite
 npm run build                   # build the library (ESM + CJS + .d.ts)
-npm run typecheck               # typecheck the library
+npm run typecheck               # typecheck the library (core only)
+npm run typecheck -w @zpcrweb/web   # typecheck the web app
 npm run dev -w @zpcrweb/web     # web dev server → http://localhost:5173
                                 # hot-reloads packages/core edits too (aliased to src, no tsup watch)
 npm run build -w @zpcrweb/web   # web production build (typechecks first)

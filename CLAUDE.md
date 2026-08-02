@@ -21,6 +21,9 @@ committed onto worktree branches and fast-forwarded into `main`.
 
 - Create worktrees on branches forked from the local `main` branch and do development there.
 - When work is complete, rebase the branch onto `main` and verify that tests pass.
+- Typecheck too, before committing — `npm run typecheck` covers only core, so a change under
+  `apps/web` needs `npm run typecheck -w @zpcrweb/web` as well. `npm test` passes happily on
+  code that doesn't compile, which is how a type error reached `main` in the first place.
 - Then land it with `git merge --ff-only <branch>`. After doing so delete the worktree and branch.
 - If the fast-forward fails, the branch has fallen behind — rebase it again. Never reach for
   `--no-ff` or `-m` to get unstuck, and never rebase commits already reachable from `origin/main`.
