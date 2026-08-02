@@ -438,9 +438,6 @@ export function FilesTableView({
         if (e.key === "Escape") onClose();
       }}
     >
-      <div className="filesview__header">
-        <h2 className="filesview__title">All files</h2>
-      </div>
       <div className="filesview__scroll">
         <table className="filesview__tbl">
           <thead>

@@ -699,26 +699,13 @@
 }
 
 /* ---- FilesTableView ------------------------------------------------------ */
-/* Fills `<main>` in place of whatever view was showing (see `App.tsx`'s `store.view === "files"`) — a
-   header row plus a scrolling table, the same two-part shape as any other full-page view here. */
+/* Fills `<main>` in place of whatever view was showing (see `App.tsx`'s `store.view === "files"`) —
+   just a scrolling table; the "Files" tab already labels it, so there's no separate heading. */
 .filesview {
   display: flex;
   flex-direction: column;
   height: 100%;
   min-height: 0;
-}
-.filesview__header {
-  display: flex;
-  align-items: center;
-  padding: 10px 16px;
-  border-bottom: 1px solid var(--border);
-  flex: 0 0 auto;
-}
-.filesview__title {
-  font-size: 13px;
-  font-weight: 600;
-  margin: 0;
-  color: var(--ink);
 }
 .filesview__scroll {
   flex: 1 1 auto;
