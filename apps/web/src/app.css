@@ -909,14 +909,6 @@
   }
 }
 
-.overview__title {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  /* Half the view's own `gap`, so the subtitle stays visually attached to the name above it
-     rather than floating midway between it and the tiles. */
-  margin-bottom: -11px;
-}
 /* Styled as a heading, not as a form field: no border or background until it is interacted
    with, so the name reads as a title while still being obviously editable on hover. */
 .overview__name {
@@ -942,22 +934,6 @@
   background: var(--plane);
   border-color: var(--neon-cyan);
 }
-.overview__subtitle {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 10px;
-  font-size: 11px;
-  color: var(--ink-muted);
-}
-/* The timestamp is the more useful of the two, so it is the brighter one. */
-.overview__when {
-  color: var(--ink-2);
-}
-.overview__filename {
-  word-break: break-all;
-}
-
 /* Tiles + download button side by side, so the button reserves its own column instead of
    pushing the tiles (or anything below) down a row. */
 .overview__head {

@@ -139,7 +139,6 @@ export function OverviewView({
     { label: "Last block temp", value: lastTemp != null ? `${lastTemp.toFixed(1)} °C` : "—" },
     { label: "Encrypted", value: <EncryptedValue status={encStatus} /> },
     { label: "Identifier", value: m.identifier || "—" },
-    { label: "Data file", value: m.dataFile || "—" },
     // Only a `.zpcr` has inner files to count. A `.pcrd` is one XML document and gets
     // `EMPTY_ARCHIVE`, which rendered as a flatly misleading "0 files" — so the row is dropped
     // rather than answered wrongly.
@@ -150,12 +149,7 @@ export function OverviewView({
 
   return (
     <div className="overview">
-      <ExperimentHeader
-        identity={identity}
-        onRename={onRename}
-        persists={namePersists}
-        runStartTime={m.runStartTime}
-      />
+      <ExperimentHeader identity={identity} onRename={onRename} persists={namePersists} />
       {progress.inProgress && (
         <div className="overview__running">
           <span className="overview__runningdot" aria-hidden="true" />
@@ -289,8 +283,8 @@ function EncryptedValue({ status }: { status: ReturnType<typeof runEncryptionSta
 }
 
 /**
- * The view's headline: what the run is called, and — smaller and dimmer, one line below — when
- * it ran and which file it came out of.
+ * The view's headline: what the run is called. When it ran and which file it came out of are
+ * now rows of the info table below instead of a subheading here — see `infoRows`.
  *
  * The name is an input rather than a label because for a `.zpcr` it is genuinely editable: no
  * Bio-Rad format has a field for it, so a run is named either by its filename or by whatever
@@ -305,14 +299,10 @@ function ExperimentHeader({
   identity,
   onRename,
   persists,
-  runStartTime,
 }: {
   identity: ExperimentIdentity;
   onRename: (name: string) => void;
   persists: boolean;
-  /** The raw `RunStartTime` string, as the timestamp's tooltip — the headline renders a compact
-   * *local* time, and this is the instrument's own (GMT) wording behind it. */
-  runStartTime: string;
 }) {
   const [draft, setDraft] = useState(identity.name);
   // Re-seed when the resolved name changes underneath — a different file, or a rename arriving
@@ -351,14 +341,6 @@ function ExperimentHeader({
               "this session only."
         }
       />
-      <div className="overview__subtitle mono">
-        {identity.dateText && (
-          <span className="overview__when" title={runStartTime || undefined}>
-            {identity.dateText}
-          </span>
-        )}
-        <span className="overview__filename">{identity.fileName}</span>
-      </div>
     </header>
   );
 }
