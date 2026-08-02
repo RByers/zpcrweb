@@ -5,8 +5,8 @@ loads one or more files — `.zpcr`, `.pcrd`, a Biomeme run export (`.json`, see
 Biomeme" below), or a standalone plate file (`.pltd` or zpcrweb's own `.plt.csv`, see
 "Standalone plate entries and attach" below) — switches between them, and explores each through
 up to six views: Overview, Curves, Plates, Reference, Calibration, and Raw (a standalone plate
-file only gets Plates + Raw; a standalone protocol file only Overview; a Biomeme run only
-Overview, Curves and Plates — see below).
+file only gets Overview, Plates and Raw; a standalone protocol file only Overview; a Biomeme run
+only Overview, Curves and Plates — see below).
 
 ## Format independence
 
@@ -282,10 +282,14 @@ alongside `"zpcr"`/`"pcrd"`:
 - **Standalone entries** — a `.pltd` or `.plt.csv` dropped with no run selected becomes its own
   top-level file, resolved via `plateFiles`/`activePlateFile` (a `PlateFileResult`, parallel to
   `runs`/`activeRun` but with no `Zpcr` involved). `App.tsx` detects `active.kind === "pltd" |
-  "csv"` and enables only two of the tabs (`enabled={["plates","raw"]}`; the rest grey out) routing to
-  `StandalonePlateView`/`StandaloneRawView` instead of the normal `Zpcr`-gated branch
-  — both are thin, `Zpcr`-free versions of `PlatesView`/`RawFilesView` operating directly on the
-  file's own bytes. A standalone `.plt.csv` names its fluor columns by dye with no channel, and
+  "csv"` and enables only three of the tabs (`enabled={["overview","plates","raw"]}`; the rest
+  grey out) routing to `StandalonePlateOverviewView`/`StandalonePlateView`/`StandaloneRawView`
+  instead of the normal `Zpcr`-gated branch — all three are thin, `Zpcr`-free counterparts of
+  `OverviewView`/`PlatesView`/`RawFilesView` operating directly on the file's own bytes and the
+  `PlateFileResult`; Overview has no run to report on, so it's cut down to the file's own
+  identity (name, mtime), the plate setup's own facts (dimensions, vessel, encryption) and its
+  target/sample chips with no Cq tally, since there's no analysis to tally against. A standalone
+  `.plt.csv` names its fluor columns by dye with no channel, and
   carries no calibration of its own to resolve them against, so its channels are simply
   **unknown** — no `channelForFluor` is passed. Nothing is inferred from column order, and the
   mapping isn't borrowed from some other run that happens to be loaded, since that would be a

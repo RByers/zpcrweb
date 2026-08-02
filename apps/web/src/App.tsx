@@ -20,13 +20,14 @@ import { PlatesView } from "./components/views/PlatesView";
 import { RawFilesView } from "./components/views/RawFilesView";
 import { PcrdRawView } from "./components/views/PcrdRawView";
 import { StandalonePlateView } from "./components/views/StandalonePlateView";
+import { StandalonePlateOverviewView } from "./components/views/StandalonePlateOverviewView";
 import { StandaloneRawView } from "./components/views/StandaloneRawView";
 import { StandaloneProtocolView } from "./components/views/StandaloneProtocolView";
 import { AboutView } from "./components/views/AboutView";
 import { InstrumentView } from "./components/views/InstrumentView";
 import type { ViewId } from "./state/useZpcrStore";
 
-const STANDALONE_VIEWS = ["plates", "raw"] as const;
+const STANDALONE_VIEWS = ["overview", "plates", "raw"] as const;
 /** A Biomeme run has no reference row and no `.Dcal` calibration files, so those two tabs are
  * disabled. Raw stays: the run *is* one JSON document, so there is no archive to browse
  * (`Zpcr.archive` is honestly empty) but there is very much a file to read — rendered by the
@@ -38,7 +39,7 @@ const BIOMEME_VIEWS = ["overview", "curves", "plates", "raw"] as const;
  * — it has no curves, no plate and no archive to browse. */
 const PROTOCOL_VIEWS = ["overview", "instrument"] as const;
 
-/** A `.pltd`/`.plt.csv` uploaded on its own, rather than a run — only two of the tabs apply. */
+/** A `.pltd`/`.plt.csv` uploaded on its own, rather than a run — only these three tabs apply. */
 const isStandaloneKind = (kind: string) => kind === "pltd" || kind === "csv";
 
 /** The file-backed tabs a given file kind supports, or `null` for "all of them". The tabs it
@@ -405,6 +406,9 @@ export function App() {
           />
         ) : isStandalonePlate ? (
           <>
+            {view === "overview" && store.activePlateFile && (
+              <StandalonePlateOverviewView file={active} result={store.activePlateFile} />
+            )}
             {view === "plates" && store.activePlateFile && (
               <StandalonePlateView file={active} result={store.activePlateFile} />
             )}
