@@ -222,8 +222,10 @@ is different enough that the mapping isn't the field-for-field translation `.pcr
   states its own baseline-corrected curve, threshold and Cq — a second, independent analysis of
   the same measurement (`threshold.md`'s pipeline is `.zpcr`/`.pcrd`-only; nothing about it
   changes for Biomeme). `parseBiomeme` carries that on `WellCurve.fileAnalysis`
-  (`FileAnalysis` — region, baseline fit, corrected curve, threshold, Cq, end-point RFU), and it
-  is never fed into `computeCqTable` as an input — "one analysis per run" above is about *that*
+  (`FileAnalysis` — region, baseline fit, corrected curve, threshold, Cq, end-point RFU) after
+  correcting the one place the export's conventions differ from this library's: its `cq` counts
+  cycles from zero, so `parseBiomeme` shifts it `+1` at the parse boundary and nothing downstream
+  has to know (`biomeme.md` §2.1). It is never fed into `computeCqTable` as an input — "one analysis per run" above is about *that*
   pipeline's internal consistency, not a claim that a source file can't also ship its own answer.
   A consumer that wants to compare the two reads `fileAnalysis` and the library's own
   `CqTableEntry` side by side; the web app's Curves view does exactly that behind a pair of
@@ -232,7 +234,7 @@ is different enough that the mapping isn't the field-for-field translation `.pcr
 What doesn't apply to a handheld device is left honestly absent rather than faked: no `.Dcal`
 calibrations, no `.prcl` protocol steps, no per-well gain factors, no reference row. Measured
 agreement between the device's own Cq and this library's own algorithm over the committed sample
-is in `biomeme.md` §3 — the two disagree substantially (median 4.1 cycles apart where both
+is in `biomeme.md` §3 — the two disagree substantially (median 4.0 cycles apart where both
 report one), because the device's threshold is a per-*curve* value with no stated derivation
 while `computeCqTable` resolves one threshold per *fluorophore* (`threshold.md` §5.2); that's the
 motivating case for the file/computed toggle rather than a bug to close the gap on.

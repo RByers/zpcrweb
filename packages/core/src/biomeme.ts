@@ -29,7 +29,8 @@
  *   *of* the baseline, the corrected curve itself; confirmed by `rawData[i] − baselineData[i]`
  *   reconstructing a straight line over `details.backgroundLeft..backgroundRight`), `threshold`
  *   and `cq` (`0` meaning "no Cq", the device's own not-amplified sentinel — normalized to
- *   `null` here). That is a second, complete analysis of the same measurement, carried on
+ *   `null` here; a real `cq` is **0-indexed** in the file and shifted `+1` on the way in, see
+ *   `biomeme.md` §2.1). That is a second, complete analysis of the same measurement, carried on
  *   {@link WellCurve.fileAnalysis} alongside whatever this library's own pipeline computes from
  *   `rawData` — see `FileAnalysis`'s doc comment for why the two are independent rather than one
  *   feeding the other.
@@ -252,7 +253,10 @@ export function parseBiomeme(data: Uint8Array | ArrayBuffer): Zpcr {
       fit: fitLinearBaseline(cycles, raw.map((v, i) => v - (corrected[i] ?? 0)), region),
       correctedValues: corrected,
       threshold: t.threshold ?? 0,
-      cq: t.cq && t.cq > 0 ? t.cq : null,
+      // `+ 1`: the file counts cycles from zero, everything else here (and Biomeme's own app)
+      // counts from one — the sentinel test is on the raw value, before the shift. See
+      // `biomeme.md` §2.1.
+      cq: t.cq && t.cq > 0 ? t.cq + 1 : null,
       endRfu: t.endRfu ?? 0,
     };
     return {

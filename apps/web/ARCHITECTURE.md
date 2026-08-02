@@ -1552,7 +1552,9 @@ at this library's threshold against the *file's* corrected curve, which won't ne
 exactly on a crossing — an honest picture of two independent analyses compared piecewise, not a
 bug. `biomeme.md` §3 has the measured numbers motivating why this is a toggle rather than one
 pipeline reproducing the other: 19/27 curves on the committed sample agree on amplified-or-not,
-median 4.1 cycles apart where both report a Cq.
+median 4.0 cycles apart where both report a Cq. Both sides are 1-indexed by the time the toggle
+sees them — a Biomeme export's `cq` is 0-indexed and `parseBiomeme` shifts it at the parse
+boundary (`biomeme.md` §2.1), so nothing in this app compensates for it.
 
 ## Calibration view
 

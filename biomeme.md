@@ -20,7 +20,7 @@ Implemented by `packages/core/src/biomeme.ts`, entry point `parseBiomeme(bytes)`
       well,                    // wellNumber as a string, e.g. "3"
       fluorophore,              // dye name, e.g. "FAM"
       emissionColor,             // "green"/"amber"/"red" — the channel; see below
-      cq,                       // reported Cq, or 0 meaning "did not amplify"
+      cq,                       // reported Cq, 0-INDEXED (§2.1); or 0 meaning "did not amplify"
       threshold,                 // the threshold this cq was measured against
       endRfu,                    // end-point RFU
       rawData: [...],            // raw fluorescence, one value per cycle
@@ -106,11 +106,35 @@ therefore:
 `cq: 0` is the device's "did not amplify" sentinel (never a real Cq on any target observed) and
 is normalized to `null`, matching this library's own `computeCq()` convention.
 
+### 2.1 `cq` is 0-indexed — corrected on the way in
+
+**The file's `cq` counts cycles from zero.** Every other cycle number in this library — and
+Biomeme's own app and website, which report a Cq one higher than the file states for the same
+run — counts from one. `parseBiomeme` therefore stores `cq + 1` in `FileAnalysis.cq`, and
+everything downstream sees a 1-indexed Cq like every other format's. The sentinel test happens
+*before* the shift, so a non-amplifying `0` still becomes `null` rather than a Cq of 1.
+
+This is read off the file's own arithmetic rather than inferred from the field name. Interpolating
+where `baselineData` crosses the target's own `threshold` — the definition of a Cq, computed
+entirely from two fields of the same record — and expressing that crossing as a **0-based array
+index** reproduces the stated `cq` on all 19 amplified targets of the committed sample to within
+0.001 cycles. Expressed as a 1-based cycle number it is uniformly 1.000 too high. Three targets
+(well 1/ATTO-647N, 4/TexRedX, 9/TexRedX) start already above threshold as their baseline decays
+through it; using the *last* upward crossing matches those too, so the rule holds across all 19
+without a special case.
+
+> **Future:** whether `details.backgroundLeft`/`backgroundRight` share this 0-indexing is
+> **unknown** — the sample can't distinguish it. Both readings of the window are consistent with
+> §2's straight-line reconstruction to within 0.02 RFU, since shifting a 15–25-cycle baseline
+> window by one cycle barely moves the fitted line. `parseBiomeme` reads them as 1-indexed cycle
+> numbers; if a future sample settles it, fix them there.
+
 ## 3. Measured: agreement with this library's own algorithm
 
 `packages/core/test/biomeme.test.ts` runs `computeCqTable()` (`threshold.md`'s pipeline,
 unmodified) over the committed sample's curves and compares every result to the file's own
-`cq`. The two are **independent analyses of the same raw data**, not a reproduction target the
+`cq` (as corrected by §2.1 — both sides 1-indexed, so the comparison isn't carrying a constant
+one-cycle offset). The two are **independent analyses of the same raw data**, not a reproduction target the
 way `cfxExport.test.ts` is for CFX — the device states no derivation for its per-curve
 threshold beyond `baselineType: "lobf"`, while `computeCqTable` resolves one threshold per
 *fluorophore* from the group's median baseline noise (`threshold.md` §5.2). Measured over the
@@ -120,8 +144,8 @@ sample's 27 curves:
 |---|---|
 | Agree on amplified-or-not | 19 / 27 |
 | Both report a Cq | 15 / 27 |
-| Median absolute difference (both report one) | 4.1 cycles |
-| Max absolute difference | 15.5 cycles |
+| Median absolute difference (both report one) | 4.0 cycles |
+| Max absolute difference | 14.5 cycles |
 
 The divergence is large enough that neither number should be presented as "the" Cq without
 saying which algorithm produced it — the motivation for the web app's file/computed toggle

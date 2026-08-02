@@ -62,15 +62,50 @@ describe("parseBiomeme", () => {
     expect(channelOf.get("ATTO-647N")).toBe(3);
   });
 
-  it("carries the file's own Cq, normalizing the 0 sentinel to null", () => {
+  it("carries the file's own Cq, shifted off the file's 0-indexing and with the 0 sentinel nulled", () => {
     const curves = zpcr.curves();
-    // Well "4" (device wellNumber 3, sampleId 4) is the sample's TexRedX-positive well.
+    // Well "4" (device wellNumber 3, sampleId 4) is the sample's TexRedX-positive well. The file
+    // states 23.2375; the file counts cycles from zero, so the 1-indexed Cq is one more than that
+    // (`biomeme.md` §2.1).
     const amplified = curves.find((c) => c.wellLabel === "4" && c.fileAnalysis!.cq != null);
     expect(amplified).toBeDefined();
-    expect(amplified!.fileAnalysis!.cq).toBeCloseTo(23.2375, 3);
+    expect(amplified!.fileAnalysis!.cq).toBeCloseTo(24.2375, 3);
 
     const flat = curves.find((c) => c.wellLabel === "1" && c.channel === amplified!.channel);
     expect(flat!.fileAnalysis!.cq).toBeNull();
+  });
+
+  it("pins the 0-indexing of the file's Cq against the file's own threshold crossing", () => {
+    // The evidence behind the `+1` (`biomeme.md` §2.1), re-derived rather than asserted: where
+    // the file's own `baselineData` crosses the file's own `threshold` *is* the file's `cq`, when
+    // that crossing is read as a 0-based array index. Two fields of one record, no library
+    // algorithm involved. Guards against the correction being dropped or double-applied.
+    const run = JSON.parse(new TextDecoder().decode(readBiomemeBytes())) as {
+      targets: { cq: number; threshold: number; baselineData: number[] }[];
+    };
+    const amplified = run.targets.filter((t) => t.cq > 0);
+    expect(amplified).toHaveLength(19);
+    const parsedCqs = zpcr
+      .curves()
+      .map((c) => c.fileAnalysis!.cq)
+      .filter((cq): cq is number => cq != null)
+      .sort((a, b) => a - b);
+
+    const crossings: number[] = [];
+    for (const t of amplified) {
+      const b = t.baselineData;
+      // The *last* upward crossing: three targets start above threshold as their baseline decays
+      // through it, so a first-crossing scan would stop at index 0 for those (§2.1).
+      let i = -1;
+      for (let k = 1; k < b.length; k++) if (b[k - 1]! < t.threshold && b[k]! >= t.threshold) i = k;
+      expect(i).toBeGreaterThan(0);
+      const frac = (t.threshold - b[i - 1]!) / (b[i]! - b[i - 1]!);
+      const zeroIndexed = i - 1 + frac;
+      expect(zeroIndexed).toBeCloseTo(t.cq, 2); // the file's own number, 0-indexed
+      crossings.push(zeroIndexed + 1); // ...and 1-indexed is what parseBiomeme must report
+    }
+    crossings.sort((a, b) => a - b);
+    for (const [i, cq] of parsedCqs.entries()) expect(cq).toBeCloseTo(crossings[i]!, 2);
   });
 
   it("measures agreement with the file's own Cq using this library's own algorithm", () => {
@@ -80,7 +115,9 @@ describe("parseBiomeme", () => {
     // (`threshold.md` §5.2) — a deliberately different, coarser rule. This is a bound on that
     // known divergence, not a reproduction target the way `cfxExport.test.ts` is for CFX: see
     // `biomeme.md` §3 for the measured numbers this bakes in (19/27 agree on amplified-or-not,
-    // median 4.1 cycles apart where both report one).
+    // median 4.0 cycles apart where both report one). Both sides are 1-indexed here: the file's
+    // Cq has already been shifted off its 0-indexing by `parseBiomeme` (§2.1), so this compares
+    // like with like rather than folding a constant one-cycle offset into the spread.
     const curves = zpcr.curves();
     const inputs = curves.map((c) => ({
       key: `${c.row},${c.col},${c.channel}`,
@@ -101,7 +138,7 @@ describe("parseBiomeme", () => {
     diffs.sort((a, b) => a - b);
     expect(agreeCall).toBeGreaterThanOrEqual(18); // 19/27 measured
     expect(diffs.length).toBeGreaterThanOrEqual(14); // 15 measured
-    expect(diffs[Math.floor(diffs.length / 2)]).toBeLessThan(6); // median 4.1 measured
-    expect(diffs.at(-1)).toBeLessThan(20); // max 15.5 measured
+    expect(diffs[Math.floor(diffs.length / 2)]).toBeLessThan(6); // median 4.0 measured
+    expect(diffs.at(-1)).toBeLessThan(20); // max 14.5 measured
   });
 });
