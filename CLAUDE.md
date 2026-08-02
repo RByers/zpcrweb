@@ -51,6 +51,12 @@ positive for every worktree branch in this repo, not a real signal of unmerged w
 `ExitWorktree` with `action: "remove", discard_changes: true` directly, without waiting for the
 refusal first. Only treat the refusal as real if the ff-merge failed or wasn't attempted.
 
+If a worktree ever does end up branched from `origin/main` instead of local `main` (e.g.
+`.claude/settings.json`'s `worktree.baseRef` got lost, or the worktree was created some other
+way), rebase it onto local `main` before starting work on it, rather than developing on top of
+the stale base — otherwise the eventual `git merge --ff-only` will fail once `main` has moved on,
+and unwinding that after work has piled up is more disruptive than rebasing up front.
+
 ### Local secrets in a worktree
 
 `secrets.json` is gitignored (see "Secrets" below), so a fresh worktree checkout doesn't have
