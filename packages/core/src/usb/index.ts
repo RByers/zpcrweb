@@ -11,6 +11,7 @@ export type {
   CfxDirectory,
   CfxRunStartResult,
   CfxTrafficEvent,
+  CfxTransferErrorEvent,
   CfxUploadResult,
 } from "./device.js";
 export {

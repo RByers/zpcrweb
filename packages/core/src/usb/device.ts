@@ -117,9 +117,34 @@ export interface CfxTrafficEvent {
   at: number;
 }
 
+/**
+ * A `transferIn`/`transferOut` failure, handed to {@link CfxDeviceOptions.onTransferError} —
+ * whether or not the read pump goes on to recover it. Without this, a `transferIn` the retry loop
+ * swallowed left no trace anywhere a caller could see: only a `console.error` and, if the retries
+ * ran out, the unrelated {@link CfxDeviceOptions.onClose}. This is what lets a debug view show a
+ * retried-but-recovered glitch as what it was, in place among the traffic it interrupted, rather
+ * than nothing at all.
+ */
+export interface CfxTransferErrorEvent {
+  at: number;
+  direction: "out" | "in";
+  message: string;
+  /** 1-based count of consecutive failures so far, including this one. Always 1 for `"out"`:
+   * {@link CfxDevice.exchangeBytes}'s `transferOut` is never retried. */
+  attempt: number;
+  /** True when this failure ends something — the read pump giving up after
+   * {@link READ_ERROR_RETRY_LIMIT} tries or losing the device, or (always, for `"out"`) the one
+   * command this write belonged to. Never by itself a reason the *connection* tears down; that is
+   * still exactly what {@link CfxDeviceOptions.onClose} reports. */
+  fatal: boolean;
+}
+
 export interface CfxDeviceOptions {
   /** Called for every logical message in both directions, in wire order. */
   onTraffic?: (event: CfxTrafficEvent) => void;
+  /** Called for every `transferIn`/`transferOut` failure, retried or not — see
+   * {@link CfxTransferErrorEvent}. */
+  onTransferError?: (event: CfxTransferErrorEvent) => void;
   /** Called when the read pump stops — a disconnect, or an ordinary {@link CfxDevice.close}. */
   onClose?: (error: Error | null) => void;
   /** Per-command timeout. A `GETFILE` of a large plate read is still comfortably inside this. */
@@ -313,6 +338,13 @@ export class CfxDevice {
             `${this.queue.length} command(s) pending)${fatal ? " — giving up" : " — retrying"}:`,
           err,
         );
+        this.opts.onTransferError?.({
+          at: Date.now(),
+          direction: "in",
+          message: err.message,
+          attempt: consecutiveErrors,
+          fatal,
+        });
         if (fatal) {
           error = err;
           break readLoop;
@@ -397,8 +429,9 @@ export class CfxDevice {
     if (this.closed) throw new Error("device is closed");
     const header = { ...REQUEST_HEADER, channel: CHANNEL_ASCII };
     const frame = encodeFrame(header, payload);
+    let pending!: Pending;
     const reply = new Promise<CfxMessage>((resolve, reject) => {
-      const pending: Pending = { command, resolve, reject, timer: null };
+      pending = { command, resolve, reject, timer: null };
       const ms = timeoutMs ?? this.opts.timeoutMs ?? 10_000;
       pending.timer = setTimeout(() => {
         // Drop it from the queue, or every later reply would be matched to the wrong request.
@@ -409,7 +442,21 @@ export class CfxDevice {
       this.queue.push(pending);
     });
     this.emit("out", { ...header, payload, passThrough: false } as CfxMessage, false);
-    await this.usb.transferOut(CFX_ENDPOINT_OUT, frame);
+    try {
+      await this.usb.transferOut(CFX_ENDPOINT_OUT, frame);
+    } catch (e) {
+      const err = e instanceof Error ? e : new Error(String(e));
+      // Drop the pending reply: nothing will ever answer a write that never went out, and leaving
+      // it queued would mismatch the *next* command's reply against this one. `command` calls are
+      // serialized (design point 2), so `pending` is still the queue's own last entry here.
+      const i = this.queue.indexOf(pending);
+      if (i >= 0) {
+        if (pending.timer) clearTimeout(pending.timer);
+        this.queue.splice(i, 1);
+      }
+      this.opts.onTransferError?.({ at: Date.now(), direction: "out", message: err.message, attempt: 1, fatal: true });
+      throw err;
+    }
     return reply;
   }
 

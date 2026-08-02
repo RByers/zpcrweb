@@ -20,7 +20,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { DownloadIcon } from "../DownloadIcon";
 import { downloadText } from "../../lib/download";
 import { formatTrafficLog, USB_TRAFFIC_LOG_NAME } from "../../lib/usbTrafficLog";
-import type { CfxDeviceHandle, TrafficLine } from "../../state/useCfxDevice";
+import type { CfxDeviceHandle, ConsoleLine } from "../../state/useCfxDevice";
 
 const time = (ms: number) => {
   const d = new Date(ms);
@@ -33,7 +33,10 @@ const time = (ms: number) => {
  * console usable for watching anything else. */
 const POLL_COMMANDS = /^(STATUS\?|RTSTATUS\?|ERRORLIST A)/;
 
-function isPollLine(line: TrafficLine, prevOut: string | null): boolean {
+/** A transfer error is never a poll reply — it has no request/reply relationship to filter by,
+ * and it's exactly the kind of thing "hide polling" shouldn't hide. */
+function isPollLine(line: ConsoleLine, prevOut: string | null): boolean {
+  if (line.kind === "error") return false;
   if (line.direction === "out") return line.text !== null && POLL_COMMANDS.test(line.text);
   return prevOut !== null && POLL_COMMANDS.test(prevOut);
 }
@@ -52,7 +55,7 @@ export function InstrumentConsole({ instrument }: { instrument: CfxDeviceHandle 
     let prevOut: string | null = null;
     return instrument.traffic.filter((line) => {
       const poll = isPollLine(line, prevOut);
-      if (line.direction === "out") prevOut = line.text;
+      if (line.kind === "message" && line.direction === "out") prevOut = line.text;
       return !(hidePolls && poll);
     });
   }, [instrument.traffic, hidePolls]);
@@ -127,26 +130,41 @@ export function InstrumentConsole({ instrument }: { instrument: CfxDeviceHandle 
               : "Connect to watch the protocol."}
           </div>
         ) : (
-          lines.map((l) => (
-            <div
-              key={l.id}
-              className={
-                "instrument__line" +
-                (l.direction === "out" ? " is-out" : " is-in") +
-                (l.unsolicited ? " is-unsolicited" : "")
-              }
-            >
-              <span className="instrument__linetime">{time(l.at)}</span>
-              <span className="instrument__linedir">{l.direction === "out" ? "→" : "←"}</span>
-              <span className="instrument__linechan" title={`channel ${l.channel}`}>
-                ch{l.channel}
-              </span>
-              <span className="instrument__linebody">
-                {l.text !== null ? l.text : l.hex}
-                {l.text === null && <span className="instrument__linebytes"> ({l.bytes} B)</span>}
-              </span>
-            </div>
-          ))
+          lines.map((l) =>
+            l.kind === "error" ? (
+              <div
+                key={l.id}
+                className={"instrument__line is-error" + (l.fatal ? " is-fatal" : "")}
+              >
+                <span className="instrument__linetime">{time(l.at)}</span>
+                <span className="instrument__linedir">{l.direction === "out" ? "→" : "←"}</span>
+                <span className="instrument__linechan">!!</span>
+                <span className="instrument__linebody">
+                  transfer error (attempt {l.attempt}
+                  {l.fatal ? ", giving up" : ", retrying"}): {l.message}
+                </span>
+              </div>
+            ) : (
+              <div
+                key={l.id}
+                className={
+                  "instrument__line" +
+                  (l.direction === "out" ? " is-out" : " is-in") +
+                  (l.unsolicited ? " is-unsolicited" : "")
+                }
+              >
+                <span className="instrument__linetime">{time(l.at)}</span>
+                <span className="instrument__linedir">{l.direction === "out" ? "→" : "←"}</span>
+                <span className="instrument__linechan" title={`channel ${l.channel}`}>
+                  ch{l.channel}
+                </span>
+                <span className="instrument__linebody">
+                  {l.text !== null ? l.text : l.hex}
+                  {l.text === null && <span className="instrument__linebytes"> ({l.bytes} B)</span>}
+                </span>
+              </div>
+            ),
+          )
         )}
       </div>
     </details>

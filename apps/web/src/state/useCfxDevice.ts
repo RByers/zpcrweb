@@ -26,6 +26,7 @@ import {
   type CfxDirectory,
   type CfxStatus,
   type CfxTrafficEvent,
+  type CfxTransferErrorEvent,
   type RunPlan,
   type RunProgress,
   type UsbDeviceLike,
@@ -40,8 +41,9 @@ const POLL_MS = 1500;
 
 export type ConnectionState = "unsupported" | "disconnected" | "connecting" | "connected";
 
-/** One line in the debug console — a decoded message, pre-formatted for display. */
+/** One decoded message, pre-formatted for display — one kind of line in the debug console. */
 export interface TrafficLine {
+  kind: "message";
   id: number;
   at: number;
   direction: "out" | "in";
@@ -52,6 +54,22 @@ export interface TrafficLine {
   hex: string;
   bytes: number;
 }
+
+/** A `transferIn`/`transferOut` failure — the console's other kind of line, interleaved with
+ * {@link TrafficLine} in wire order so a retry shows up exactly where it interrupted the
+ * conversation. See `CfxTransferErrorEvent`'s doc comment for why this exists: a retry the pump
+ * recovered from used to leave no trace anywhere a caller could see. */
+export interface TransferErrorLine {
+  kind: "error";
+  id: number;
+  at: number;
+  direction: "out" | "in";
+  message: string;
+  attempt: number;
+  fatal: boolean;
+}
+
+export type ConsoleLine = TrafficLine | TransferErrorLine;
 
 /** The result of an action button, kept so the view can report what the instrument answered —
  * including a rejection, which for an `unverified` command is the expected outcome. */
@@ -78,11 +96,12 @@ function usbApi(): { requestDevice(o: unknown): Promise<UsbDeviceLike>; getDevic
 export function useCfxDevice() {
   const deviceRef = useRef<CfxDevice | null>(null);
   const trafficId = useRef(0);
-  // Every message this session has seen, uncapped — unlike `traffic` (bounded to TRAFFIC_LIMIT
-  // for the on-screen console) and unaffected by `clearTraffic` (which only resets the view).
-  // This is what backs the console's "download log" button and what gets embedded in a run's
-  // `.zpcr` when it finishes — both want the complete record, not the display window.
-  const fullTraffic = useRef<TrafficLine[]>([]);
+  // Every message and transfer error this session has seen, uncapped — unlike `traffic` (bounded
+  // to TRAFFIC_LIMIT for the on-screen console) and unaffected by `clearTraffic` (which only
+  // resets the view). This is what backs the console's "download log" button and what gets
+  // embedded in a run's `.zpcr` when it finishes — both want the complete record, not the display
+  // window.
+  const fullTraffic = useRef<ConsoleLine[]>([]);
 
   const [connection, setConnection] = useState<ConnectionState>(() =>
     usbApi() ? "disconnected" : "unsupported",
@@ -90,7 +109,7 @@ export function useCfxDevice() {
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<CfxDeviceInfo | null>(null);
   const [status, setStatus] = useState<CfxStatus | null>(null);
-  const [traffic, setTraffic] = useState<TrafficLine[]>([]);
+  const [traffic, setTraffic] = useState<ConsoleLine[]>([]);
   const [directories, setDirectories] = useState<Record<string, CfxDirectory>>({});
   const [busy, setBusy] = useState<string | null>(null);
   const [lastAction, setLastAction] = useState<ActionResult | null>(null);
@@ -108,23 +127,48 @@ export function useCfxDevice() {
   const statusRef = useRef<CfxStatus | null>(null);
   statusRef.current = status;
 
-  const onTraffic = useCallback((e: CfxTrafficEvent) => {
-    const line: TrafficLine = {
-      id: trafficId.current++,
-      at: e.at,
-      direction: e.direction,
-      channel: e.channel,
-      unsolicited: e.unsolicited,
-      text: e.text === null ? null : e.text.replace(/\r?\n$/, ""),
-      hex: toHex(e.payload),
-      bytes: e.payload.length,
-    };
+  /** Append one console line to both the uncapped log and the display-capped state — the one
+   * place either is written, so a message and a transfer error interleave in the single arrival
+   * order they actually happened in. */
+  const pushLine = useCallback((line: ConsoleLine) => {
     fullTraffic.current.push(line);
     setTraffic((prev) => {
       const next = prev.length >= TRAFFIC_LIMIT ? prev.slice(prev.length - TRAFFIC_LIMIT + 1) : prev;
       return [...next, line];
     });
   }, []);
+
+  const onTraffic = useCallback(
+    (e: CfxTrafficEvent) => {
+      pushLine({
+        kind: "message",
+        id: trafficId.current++,
+        at: e.at,
+        direction: e.direction,
+        channel: e.channel,
+        unsolicited: e.unsolicited,
+        text: e.text === null ? null : e.text.replace(/\r?\n$/, ""),
+        hex: toHex(e.payload),
+        bytes: e.payload.length,
+      });
+    },
+    [pushLine],
+  );
+
+  const onTransferError = useCallback(
+    (e: CfxTransferErrorEvent) => {
+      pushLine({
+        kind: "error",
+        id: trafficId.current++,
+        at: e.at,
+        direction: e.direction,
+        message: e.message,
+        attempt: e.attempt,
+        fatal: e.fatal,
+      });
+    },
+    [pushLine],
+  );
 
   // Deliberately does not touch `traffic`: the console is the one place a disconnect's cause is
   // visible after the fact (what was in flight, what the last messages before the failure were),
@@ -153,6 +197,7 @@ export function useCfxDevice() {
         (await api.requestDevice({ filters: [CFX_USB_FILTER] }));
       const device = new CfxDevice(chosen, {
         onTraffic,
+        onTransferError,
         onClose: (err) => {
           if (err) {
             // The library already logs the retries and the final failure; this adds the one
@@ -179,7 +224,7 @@ export function useCfxDevice() {
       deviceRef.current = null;
       setConnection("disconnected");
     }
-  }, [onTraffic, teardown]);
+  }, [onTraffic, onTransferError, teardown]);
 
   const disconnect = useCallback(async () => {
     const d = deviceRef.current;

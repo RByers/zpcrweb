@@ -3514,6 +3514,16 @@ summary.instrument__panelhead {
 .instrument__linebytes {
   color: var(--ink-muted);
 }
+/* A transferIn/transferOut failure — a retried one is `--warn` (the pump is expected to recover),
+   a fatal one (the read pump giving up, or a write that never went out) is `--danger`. */
+.instrument__line.is-error .instrument__linechan,
+.instrument__line.is-error .instrument__linebody {
+  color: var(--warn);
+}
+.instrument__line.is-fatal .instrument__linechan,
+.instrument__line.is-fatal .instrument__linebody {
+  color: var(--danger);
+}
 
 /* Narrow: the rail stacks above the content, matching `.curves`' own narrow behaviour. */
 @media (max-width: 900px) {

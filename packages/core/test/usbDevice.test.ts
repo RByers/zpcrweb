@@ -13,6 +13,7 @@ import {
   REQUEST_HEADER,
   decodeHeader,
   encodeFrame,
+  type CfxTransferErrorEvent,
   type UsbDeviceLike,
   type UsbInTransferResultLike,
 } from "../src/usb/index.js";
@@ -34,6 +35,8 @@ class MockInstrument implements UsbDeviceLike {
   private waiters: ((v: UsbInTransferResultLike) => void)[] = [];
   /** Errors `transferIn` throws instead of resolving, one per call, oldest first. */
   transferInFailures: Error[] = [];
+  /** Errors `transferOut` throws instead of resolving, one per call, oldest first. */
+  transferOutFailures: Error[] = [];
 
   constructor(
     private readonly replies: (cmd: string) => { payload: Uint8Array; passThrough?: boolean; channel?: number } | null,
@@ -66,6 +69,8 @@ class MockInstrument implements UsbDeviceLike {
   }
 
   async transferOut(_ep: number, data: ArrayBuffer | ArrayBufferView) {
+    const failure = this.transferOutFailures.shift();
+    if (failure) throw failure;
     const bytes = data instanceof ArrayBuffer ? new Uint8Array(data) : new Uint8Array(
       (data as ArrayBufferView).buffer,
       (data as ArrayBufferView).byteOffset,
@@ -321,13 +326,22 @@ describe("CfxDevice", () => {
     // Fewer than the retry limit — the pump should recover on its own.
     mock.transferInFailures = [new Error("A transfer error has occurred")];
     let closed: Error | null | undefined;
-    const dev = new CfxDevice(mock, { onClose: (e) => (closed = e) });
+    const transferErrors: CfxTransferErrorEvent[] = [];
+    const dev = new CfxDevice(mock, {
+      onClose: (e) => (closed = e),
+      onTransferError: (e) => transferErrors.push(e),
+    });
     await dev.open();
     const res = await dev.status();
     expect(res.running).toBe(false);
     expect(closed).toBeUndefined();
     expect(dev.isOpen).toBe(true);
     expect(errSpy).toHaveBeenCalled();
+    // The one retried failure is reported, but as recoverable — not fatal, and never reaching
+    // onClose, which is exactly the gap this event closes: a retry that worked used to leave no
+    // trace outside a console.error.
+    expect(transferErrors).toHaveLength(1);
+    expect(transferErrors[0]).toMatchObject({ direction: "in", attempt: 1, fatal: false });
     await dev.close();
     errSpy.mockRestore();
   });
@@ -338,12 +352,39 @@ describe("CfxDevice", () => {
     // More than the retry limit — every retry fails, so the pump must eventually give up.
     mock.transferInFailures = Array.from({ length: 10 }, () => new Error("A transfer error has occurred"));
     let closed: Error | null | undefined;
-    const dev = new CfxDevice(mock, { onClose: (e) => (closed = e) });
+    const transferErrors: CfxTransferErrorEvent[] = [];
+    const dev = new CfxDevice(mock, {
+      onClose: (e) => (closed = e),
+      onTransferError: (e) => transferErrors.push(e),
+    });
     await dev.open();
     const pending = dev.status();
     await expect(pending).rejects.toThrow(/transfer error/);
     expect(closed).toBeInstanceOf(Error);
     expect(dev.isOpen).toBe(false);
+    // One event per attempt, escalating attempt counts, only the last marked fatal.
+    expect(transferErrors).toHaveLength(4);
+    expect(transferErrors.map((e) => e.attempt)).toEqual([1, 2, 3, 4]);
+    expect(transferErrors.map((e) => e.fatal)).toEqual([false, false, false, true]);
     errSpy.mockRestore();
+  });
+
+  it("reports a transferOut failure and drops the stranded pending reply", async () => {
+    const mock = new MockInstrument((cmd) =>
+      cmd === "STATUS?" ? { payload: text(STATUS_IDLE) } : null,
+    );
+    mock.transferOutFailures = [new Error("The device was disconnected.")];
+    const transferErrors: CfxTransferErrorEvent[] = [];
+    const dev = new CfxDevice(mock, { onTransferError: (e) => transferErrors.push(e) });
+    await dev.open();
+    await expect(dev.status()).rejects.toThrow(/disconnected/);
+    expect(transferErrors).toEqual([
+      { at: expect.any(Number), direction: "out", message: "The device was disconnected.", attempt: 1, fatal: true },
+    ]);
+    // The channel must still work afterwards: a write that never went out must not leave a
+    // phantom entry in the reply queue for the next command's answer to be matched against.
+    const res = await dev.status();
+    expect(res.running).toBe(false);
+    await dev.close();
   });
 });
