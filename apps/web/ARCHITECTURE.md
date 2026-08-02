@@ -295,10 +295,16 @@ alongside `"zpcr"`/`"pcrd"`:
   an entry to (so: a `.zpcr`; a `.pcrd` gets the control disabled with an explanatory title, since
   it has no archive). Unlike the plain file-picker `DropZone` it replaced, it is a `<details>`
   menu (styled like `PlateDownloadButton`'s) offering every already-loaded `.pltd`/`.plt.csv`
-  `LoadedFile` by name, plus an "Upload…" row for a fresh file from disk — either path ends by
-  wrapping the chosen bytes in a `File` and calling `store.attachPlate(fileId, file)`, which
-  rewrites the run's own bytes via `attachPlateToZpcr` (see root `ARCHITECTURE.md`) and
-  re-persists them under the same file id. There is **no separate override state** — once
+  `LoadedFile` by name, plus an "Upload…" row for a fresh file from disk. When the run already
+  has a plate (`confirmReplace`), picking either doesn't attach it right away — the menu swaps
+  its list for a "replace with this?" prompt first, since attaching overwrites the current layout
+  with no undo; a run with no plate yet skips the prompt, as there's nothing to lose. The menu
+  also closes on an outside `mousedown`, like any other dismissable popover, rather than only on
+  a second click on its own toggle — worth having regardless, but especially so once it can be
+  showing a destructive confirmation. Either path ends by wrapping the chosen bytes in a `File`
+  and calling `store.attachPlate(fileId, file)`, which rewrites the run's own bytes via
+  `attachPlateToZpcr` (see root `ARCHITECTURE.md`) and re-persists them under the same file id.
+  There is **no separate override state** — once
   attached, the plate is just part of the run's `.zpcr` bytes, so `zpcr.plates()` picks it up the
   same way it would an originally-embedded `.pltd`, and `CurvesView`'s
   `zpcr.plates(pltdPassword)[0]` labeling updates with no code path of its own to keep in sync.

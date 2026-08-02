@@ -49,6 +49,7 @@ export function PlatesView({
       onSelect={(f) => void attachPlate(fileId, new File([f.bytes.slice()], f.name))}
       onUpload={(file) => void attachPlate(fileId, file)}
       compactLabel={entries.length === 0 ? "attach plate" : "replace plate"}
+      confirmReplace={entries.length > 0}
       disabled={!hasArchive}
       disabledTitle="This run has no file archive to attach a plate to"
     />
