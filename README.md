@@ -243,7 +243,7 @@ It walks the requested views and writes **one labelled contact-sheet PNG** —
 console errors, uncaught exceptions and failed page loads, which catch breakage a screenshot
 can't show.
 
-**`tools/uitest.mjs` (`npm run test:ui`) — assert it.** 185 browser assertions covering what
+**`tools/uitest.mjs` (`npm run test:ui`) — assert it.** 188 browser assertions covering what
 nothing else can catch: the two URL contracts — hash routing (deep links, back/forward,
 unknown-file and invalid-view fallbacks) and password handling (stripped from both URL forms,
 never leaked into the routing hash, an encrypted `.pcrd` still decrypting) — plus `#load=`, the

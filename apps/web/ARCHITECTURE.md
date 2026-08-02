@@ -550,11 +550,13 @@ so every call site keeps writing one `onChange({ … })` regardless of where the
 
   A **third uPlot builder** (`lib/uplot/thermalChart.ts`) for the same reason `calChart.ts` is a
   second one: it shares neither axis with either of the others — the only plot in the app whose x
-  is wall-clock time and whose y is a setpoint rather than a reading. Ramps and holds are separate
-  series so the decomposition reads at a glance, sharing endpoint vertices so the trace still
-  looks continuous; the ramp is dashed because `took − hold` gives its *duration* and nothing
-  about its shape, and drawing a curve there would invent data the report doesn't have. Plate
-  reads all get a point, but only as many *numbers* as clear a pixel gap are drawn, first and last
+  is wall-clock time and whose y is a setpoint rather than a reading. The trace is **one solid
+  line**: ramps and holds were separate series once, dashed against solid, and it read as two
+  competing traces rather than one temperature over time — the split is already in the geometry,
+  a ramp being the sloped part and a hold the flat part, so the phase survives only in the
+  tooltip. Straight segments throughout, because `took − hold` gives a ramp's *duration* and
+  nothing about its shape, and curving it would invent data the report doesn't have. Plate reads
+  all get a point, but only as many *numbers* as clear a pixel gap are drawn, first and last
   always — thinning the labels rather than the points keeps the count on screen honest.
 - **Curves** — the centerpiece (see below).
 - **Reference** — reference row vs factory calibration (see below).

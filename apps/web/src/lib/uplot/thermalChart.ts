@@ -11,8 +11,13 @@
  * **Nothing here is interpolated or smoothed.** Core's decomposition emits two vertices per span
  * (`alf.md` §7.6), and the straight lines uPlot draws between them are exactly the claim being
  * made: the block moved to the setpoint over `took − hold`, then sat there. A real ramp is a
- * curve, and the report does not record its shape — drawing one would invent data. The ramp is
- * drawn dashed partly to say so.
+ * curve, and the report does not record its shape — drawing one would invent data.
+ *
+ * **One line, not two.** Ramps and holds were once separate series, dashed against solid, to
+ * make the decomposition explicit. It read as two competing traces rather than one temperature
+ * over time, which is the opposite of what the plot is for — the split is already visible in the
+ * geometry, since a ramp is the sloped part and a hold the flat part. So the trace is a single
+ * solid line, and the phase survives only in the tooltip, where it costs nothing to say.
  */
 
 import uPlot from "uplot";
@@ -20,12 +25,8 @@ import type { ThermalProfile, ThermalSegment } from "@zpcrweb/core";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
-/** The block sitting at a setpoint — the protocol's own time, and the bulk of the trace. */
-const HOLD_COLOR = "#22d3ee";
-/** The block travelling between setpoints. Dashed, because `took − hold` gives the ramp's
- * *duration* and nothing at all about its shape (`alf.md` §7.6). */
-const RAMP_COLOR = "#ffa53d";
-const RAMP_DASH = [4, 3];
+/** The block temperature itself — one line, ramps and holds alike (see the note above). */
+const TRACE_COLOR = "#22d3ee";
 /** Plate reads — the numbered points, coloured apart from the trace they sit on. */
 const READ_COLOR = "#ff4fa3";
 /** A `GRAD` step's row-to-row span, above and below the midpoint the trace plots. */
@@ -83,8 +84,8 @@ function timeSplits(min: number, max: number, targetTicks: number): number[] {
 /** One x position on the plot, and what the profile says is happening there. */
 interface Vertex {
   x: number;
-  hold: number | null;
-  ramp: number | null;
+  /** Block temperature — the single trace, whatever phase produced it. */
+  temp: number;
   gradLow: number | null;
   gradHigh: number | null;
   read: number | null;
@@ -93,30 +94,28 @@ interface Vertex {
 }
 
 /**
- * Turn the profile's spans into plot vertices.
- *
- * Ramps and holds go into **separate series** so the two read apart at a glance — which is the
- * whole point of decomposing them — and they stay visually continuous because a span's end
- * vertex and the next span's start vertex carry the same value at the same time. A `read` span
- * rides in the hold series: the block genuinely is holding through it, and the numbered point is
- * what marks it as a read.
+ * Turn the profile's spans into plot vertices — two per span, which is all a straight-line
+ * segment needs. Every one feeds the same series: a span's end vertex and the next span's start
+ * vertex carry the same value at the same moment, so the whole run is one unbroken line whose
+ * slopes are the ramps and whose flats are the holds.
  */
 function vertices(profile: ThermalProfile): Vertex[] {
   const out: Vertex[] = [];
   const readAt = new Map<number, number>();
   for (const r of profile.reads) readAt.set(r.atSeconds, r.readIndex);
 
-  const push = (t: number, seg: ThermalSegment, v: number, isRamp: boolean, isStart: boolean) => {
+  const push = (t: number, seg: ThermalSegment, v: number, isStart: boolean) => {
     const readIndex = isStart ? readAt.get(t) : undefined;
     // Strictly increasing x, per EPSILON above.
     const last = out[out.length - 1];
     const x = last && t <= last.x ? last.x + EPSILON : t;
+    // A gradient's spread belongs to the hold it was held at, not to the ramp into it.
+    const spread = seg.gradient && seg.phase !== "ramp" ? seg.gradient : null;
     out.push({
       x,
-      hold: isRamp ? null : v,
-      ramp: isRamp ? v : null,
-      gradLow: seg.gradient && !isRamp ? seg.gradient.lowC : null,
-      gradHigh: seg.gradient && !isRamp ? seg.gradient.highC : null,
+      temp: v,
+      gradLow: spread ? spread.lowC : null,
+      gradHigh: spread ? spread.highC : null,
       read: readIndex !== undefined ? v : null,
       segment: seg,
       ...(readIndex !== undefined ? { readIndex } : {}),
@@ -124,9 +123,8 @@ function vertices(profile: ThermalProfile): Vertex[] {
   };
 
   for (const seg of profile.segments) {
-    const isRamp = seg.phase === "ramp";
-    push(seg.startSeconds, seg, seg.fromC, isRamp, true);
-    push(seg.endSeconds, seg, seg.toC, isRamp, false);
+    push(seg.startSeconds, seg, seg.fromC, true);
+    push(seg.endSeconds, seg, seg.toC, false);
   }
   return out;
 }
@@ -142,8 +140,7 @@ export function buildThermalChart(cfg: BuildThermalChartConfig): {
 
   const data: uPlot.AlignedData = [
     verts.map((v) => v.x),
-    verts.map((v) => v.hold),
-    verts.map((v) => v.ramp),
+    verts.map((v) => v.temp),
     verts.map((v) => v.gradLow),
     verts.map((v) => v.gradHigh),
     verts.map((v) => v.read),
@@ -154,14 +151,7 @@ export function buildThermalChart(cfg: BuildThermalChartConfig): {
     height: cfg.height,
     series: [
       { label: "t" },
-      { label: "hold", stroke: HOLD_COLOR, width: 2, points: { show: false } },
-      {
-        label: "ramp",
-        stroke: RAMP_COLOR,
-        width: 1.5,
-        dash: RAMP_DASH,
-        points: { show: false },
-      },
+      { label: "block", stroke: TRACE_COLOR, width: 2, points: { show: false } },
       // The gradient's low and high rows, shown only where a GRAD step is running.
       {
         label: "gradient low",
@@ -317,14 +307,13 @@ function readLabelPlugin(
           return;
         }
         const v = verts[idx];
-        const value = v?.hold ?? v?.ramp;
-        if (!v || value == null) {
+        if (!v) {
           onHover(null);
           return;
         }
         onHover({
           atSeconds: Math.round(v.x),
-          temperatureC: value,
+          temperatureC: v.temp,
           segment: v.segment,
           ...(v.readIndex !== undefined ? { readIndex: v.readIndex } : {}),
           left,

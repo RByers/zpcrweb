@@ -13,9 +13,9 @@ import {
  *
  * This is the run's *measured* thermal history, not its protocol — the step list above it says a
  * 30 s hold at 60 °C, and this says that step really occupied 46 s, 16 of which the block spent
- * getting there. So ramps are drawn as their own dashed segments (`took − hold`) against solid
- * holds, which is the only place that cost is visible, and each plate read is a numbered point
- * tying a cycle to a moment and a temperature.
+ * getting there. One solid line: the ramp is the sloped part and the hold the flat part, which
+ * shows the same decomposition without splitting the temperature into two competing traces. Each
+ * plate read is a numbered point, tying a cycle to a moment and a temperature.
  *
  * Same uPlot lifecycle as `CalChart`: rebuild on data change, `ResizeObserver` for sizing, and
  * the shared `.chart` CSS.
@@ -130,9 +130,13 @@ const PHASE_LABEL = {
   read: "Plate read",
 } as const;
 
-/** Matches the stroke each phase is drawn in — see `thermalChart.ts`. */
+/**
+ * The trace is one line in one colour (see `thermalChart.ts`), so the swatch only distinguishes
+ * the plate reads, which are drawn as their own points; ramp and hold are the same line and get
+ * the same colour, with the tooltip's label carrying the difference.
+ */
 const PHASE_COLOR = {
-  ramp: "#ffa53d",
+  ramp: "#22d3ee",
   hold: "#22d3ee",
   read: "#ff4fa3",
 } as const;

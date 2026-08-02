@@ -1740,16 +1740,11 @@
   border-radius: var(--radius);
   padding: 6px 8px 2px;
 }
-/* The phase words in the caption above, coloured as the plot draws them — a legend that reads
-   as the sentence explaining the plot, rather than a key the reader has to map onto it. */
+/* "Plate reads" in the caption above, coloured as the plot draws them — a legend that reads as
+   the sentence explaining the plot, rather than a key the reader has to map onto it. Only the
+   reads need one: the trace itself is a single line, so nothing about it has to be decoded. */
 .thermal__key {
   font-weight: 600;
-}
-.thermal__key--hold {
-  color: var(--neon-cyan);
-}
-.thermal__key--ramp {
-  color: var(--warn);
 }
 .thermal__key--read {
   color: var(--neon-magenta);

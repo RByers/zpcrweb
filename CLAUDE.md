@@ -138,6 +138,24 @@ for clarity first. What that means here, and what to preserve when editing one:
 - **Number sections and reference them from the code** (`threshold.md` §5.2), which is how a
   constant in a source file stays tied to its justification.
 
+## Writing user-visible text
+
+**Never cite a repo file from the UI.** No `alf.md §7.6`, no `threshold.md §5`, no source
+filenames — not in body copy, headings, tooltips, empty states or error messages. The person
+reading the app has a thermocycler and a run that matters to them; they do not have this
+repository, so a section number is a dead end that makes the app look like it is talking to its
+own authors. Say the thing instead: *"the `.alf` run report stored with this run"*, not
+*"the run report (alf.md §7.6)"*.
+
+File **extensions** and instrument-facing names are fine and often the clearest thing to say —
+`.alf`, `.Plateread`, `.prcl.txt`, `PLATEREAD` — because those are the user's own files and their
+instrument's own vocabulary, not ours.
+
+The provenance the citation was carrying is still worth keeping: put it in a code comment beside
+the text, where whoever maintains the component will find it, and let the format doc go on being
+the authority. That is the same split the docs themselves use — rule in the main text, derivation
+in an appendix.
+
 ## Secrets
 
 Local-only secrets (the CFX file decryption password) live in `secrets.json`, which is gitignored
