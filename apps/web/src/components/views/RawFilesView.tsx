@@ -30,7 +30,10 @@ function group(name: string): string {
   if (/\.pltd$/i.test(name) || /\.plt\.csv$/i.test(name)) return "Plate setup";
   if (/\.prcl$/i.test(name)) return "Protocol";
   if (/\.Dcal$/i.test(name)) return "Calibration";
-  if (/\.(xml|txt|alf)$/i.test(name)) return "Metadata";
+  // `.log` is `usb-traffic.log`, the wire transcript this app records for a run it drove itself
+  // (see `lib/usbTrafficLog.ts`) — not instrument output, but the same kind of thing as the rest
+  // of Metadata: a plain-text account of what happened, alongside `RunInfo.xml` and the `.alf`.
+  if (/\.(xml|txt|alf|log)$/i.test(name)) return "Metadata";
   return "Other";
 }
 
@@ -44,11 +47,14 @@ const GROUP_ORDER = [
   "Other",
 ];
 // `.plt.csv` is zpcrweb's own plate CSV format (see `plateCsv.ts`) — plain UTF-8 text, no
-// decryption needed, unlike `.pltd`/`.prcl`. `zpcrweb.json` is likewise our own (see
-// `zpcrweb-json.md`).
-const TEXTUAL = /\.(xml|txt|alf|json|plt\.csv)$/i;
+// decryption needed, unlike `.pltd`/`.prcl`. `zpcrweb.json` and `usb-traffic.log` are likewise our
+// own (see `zpcrweb-json.md` and `lib/usbTrafficLog.ts`).
+const TEXTUAL = /\.(xml|txt|alf|json|log|plt\.csv)$/i;
 
-/** Best default mode for a file: decoded if a decoder exists, else text for text, else hex. */
+/** Best default mode for a file: decoded if a decoder exists, else text for text, else hex. There
+ * is no decoder for `usb-traffic.log`: it is one already-formatted line per message, written by
+ * this app, so "text" *is* its decoded form and re-parsing it back into a table would only lose
+ * the hex payloads that are the point of keeping it. */
 function defaultMode(name: string): Mode {
   if (decodedKind(name)) return "decoded";
   if (TEXTUAL.test(name)) return "text";

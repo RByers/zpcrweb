@@ -167,7 +167,7 @@ export function useRunWatch(
   const fileIdRef = useRef<string | null>(null);
   fileIdRef.current = fileId;
 
-  const { connection, status, refreshRunFolder, fetchDirectoryFiles, acknowledgeFinishedRun, fullTraffic } =
+  const { connection, status, refreshRunFolder, fetchDirectoryFiles, acknowledgeFinishedRun, recordedTraffic } =
     instrument;
 
   /**
@@ -175,9 +175,11 @@ export function useRunWatch(
    *
    * `finalAssembly` marks the end-of-run pass (see `check`), and does two things: it re-reads the
    * `REFETCH_AT_END` files, whose cached copies are as old as the moment they were first seen, and
-   * it adds the session's complete USB traffic log as an extra entry. Both belong to this pass
-   * only — every intermediate `.zpcr` a run produces stays exactly what's on the instrument, and
-   * the log is a one-time addition once there's nothing left to supersede it.
+   * it adds the session's recorded USB traffic log as an extra entry — if any was recorded, since
+   * the console's "record" switch is off unless someone asked for a log, and an empty buffer adds
+   * no entry at all. Both belong to this pass only — every intermediate `.zpcr` a run produces
+   * stays exactly what's on the instrument, and the log is a one-time addition once there's
+   * nothing left to supersede it.
    */
   const pull = useCallback(
     async (names: string[], finalAssembly = false) => {
@@ -200,7 +202,7 @@ export function useRunWatch(
       }
       const files = Object.fromEntries(cache.current);
       if (finalAssembly) {
-        const log = formatTrafficLog(fullTraffic.current);
+        const log = formatTrafficLog(recordedTraffic.current);
         if (log !== "") files[USB_TRAFFIC_LOG_NAME] = new TextEncoder().encode(log);
       }
       const fresh = freshStart.current;
@@ -217,7 +219,7 @@ export function useRunWatch(
         setNote(e instanceof Error ? e.message : String(e));
       }
     },
-    [fetchDirectoryFiles, fullTraffic],
+    [fetchDirectoryFiles, recordedTraffic],
   );
 
   /**
@@ -315,7 +317,7 @@ export function useRunWatch(
       await acknowledgeFinishedRun();
       // Forced: the final read and `ended` land as part of this same moment, and waiting for the
       // signature to differ would just add a round trip. This is also the run's last `.zpcr`, so
-      // the USB traffic log is embedded here (see `pull`'s `finalAssembly`).
+      // any recorded USB traffic log is embedded here (see `pull`'s `finalAssembly`).
       await check(true, true);
     })();
   }, [connection, watching, status, acknowledgeFinishedRun, check]);
