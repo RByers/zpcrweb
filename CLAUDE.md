@@ -16,15 +16,21 @@ reverse-engineered format-doc index, the UI tooling, and the web app's URL-hash 
 
 ## Git workflow
 
-**No pull requests in this repo, and history is always linear** — no merge commits, ever. Work is
-committed onto worktree branches and fast-forwarded into `main`.
+**No pull requests in this repo, and history is always linear** — no merge commits, ever. Development
+is done locally, with worktrees branched from local `main`, and fast-forwarded into `main` when done.
+The operator does manual testing and pushes upstream to deploy live when good, never the agent.
 
 - Create worktrees on branches forked from the local `main` branch and do development there.
+- After a worktree is created, double check that it's up to date with local `main` and rebase if
+  necessary to prevent working on stale code.
+- Copy the local `secrets.json` into the worktree after creation. It's .gitignored to keep
+  secrets out of the repo, but necessary for passing some tests.
 - When work is complete, rebase the branch onto `main` and verify that tests pass.
 - Typecheck too, before committing — `npm run typecheck` covers only core, so a change under
   `apps/web` needs `npm run typecheck -w @zpcrweb/web` as well. `npm test` passes happily on
   code that doesn't compile, which is how a type error reached `main` in the first place.
 - Then land it with `git merge --ff-only <branch>`. After doing so delete the worktree and branch.
+- Then land it with `git merge --ff-only <branch>`, then delete the worktree and branch.
 - If the fast-forward fails, the branch has fallen behind — rebase it again. Never reach for
   `--no-ff` or `-m` to get unstuck, and never rebase commits already reachable from `origin/main`.
 - Don't open PRs, and don't create branches on `origin`. Pushing `main` to `origin` is a deploy
@@ -33,42 +39,6 @@ committed onto worktree branches and fast-forwarded into `main`.
 - History before `034a68a` (2026-07-24) still contains 14 merge commits from the old merge-based
   flow. Leave them alone: rewriting them would rewrite 100+ already-pushed commits for purely
   cosmetic gain.
-
-### Worktree base ref
-
-`origin` here is a personal deploy target, not a shared upstream — `main` is pushed only after a
-round of manual testing (see above), so between deploys `origin/main` lags behind local `main`,
-sometimes by a lot. `.claude/settings.json` sets `worktree.baseRef` to `"head"` so `EnterWorktree`
-branches from local `HEAD` (i.e. local `main`, when that's checked out) instead of the default
-`"fresh"` behavior, which branches from `origin/<default-branch>`. Without this, a new worktree
-ends up dozens of commits behind local `main`; merging it back is still a clean fast-forward, but
-`ExitWorktree`'s cleanup then refuses to delete the worktree branch, since from its point of view
-it looks like a branch with many commits not yet reachable from `main` (Git only sees that
-`origin/main` isn't an ancestor of `main` — it doesn't check whether those commits are old history
-that's actually already merged into `main`). If you ever see a new worktree start dozens of commits
-behind local `main`, check that `.claude/settings.json` hasn't been lost.
-
-This means `ExitWorktree`'s "N commits, confirm before discarding" refusal is a structural false
-positive for every worktree branch in this repo, not a real signal of unmerged work — once
-`git merge --ff-only <branch>` has actually succeeded onto local `main`, it's safe to call
-`ExitWorktree` with `action: "remove", discard_changes: true` directly, without waiting for the
-refusal first. Only treat the refusal as real if the ff-merge failed or wasn't attempted.
-
-If a worktree ever does end up branched from `origin/main` instead of local `main` (e.g.
-`.claude/settings.json`'s `worktree.baseRef` got lost, or the worktree was created some other
-way), rebase it onto local `main` before starting work on it, rather than developing on top of
-the stale base — otherwise the eventual `git merge --ff-only` will fail once `main` has moved on,
-and unwinding that after work has piled up is more disruptive than rebasing up front.
-
-### Local secrets in a worktree
-
-`secrets.json` is gitignored (see "Secrets" below), so a fresh worktree checkout doesn't have
-one even though the main checkout does — a worktree is a separate working directory, and
-gitignored files aren't part of what Git copies into it. Copy it in right after creating the
-worktree (`cp /Users/rbagent/code/zpcrweb/secrets.json <worktree>/secrets.json`) whenever the
-work might touch encryption-dependent code paths — `npm test`'s `describe.skipIf(!PW)` blocks
-and `tools/uitest.mjs`/`tools/zpcr.mjs`'s password fallback silently degrade without it, which
-can look like a passing run that actually skipped real coverage.
 
 ### Local git config
 
