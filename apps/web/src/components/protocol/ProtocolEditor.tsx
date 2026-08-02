@@ -411,10 +411,16 @@ export function ProtocolEditor({
         <div className="decoded__hint mono protoedit__note">Not editable: {loadError}</div>
       )}
 
-      {canEdit && builder ? (
+      {/* The same listing in both modes, inert until Edit is pressed — not a different rendering
+          that happens to look similar. Reading and editing then have identical geometry: the +/−
+          gutter is reserved, empty, while reading, so pressing Edit lights the rows up where they
+          already are instead of reflowing the program sideways. A protocol with no builder behind
+          it has no groups to draw, and falls back to the plain listing. */}
+      {builder ? (
         <EditableListing
           builder={builder}
           program={program}
+          interactive={canEdit}
           onOpen={openAt}
           onRemove={removeStep}
           openTarget={open}
@@ -457,95 +463,145 @@ export function ProtocolEditor({
   );
 }
 
+type Directive = ReturnType<typeof parseRunDefinition>["directives"][number];
+
+/** One editable thing, and the consecutive directives that spell it out. */
+interface Group {
+  key: number;
+  directives: Directive[];
+  /** The form this group opens, or `null` for `END`, which is the editor's own and not editable. */
+  target: OpenTarget | null;
+  /** The step this group *is*, for the delete button; `null` for the header and for `END`. */
+  stepIndex: number | null;
+  /** Where this group's + inserts, or `null` where there is no + (the header). */
+  insertAt: number | null;
+}
+
+/**
+ * Fold the directive list into the things a person edits.
+ *
+ * The rules are the grammar's (`protocol.md` §3.2): the header directives lead the file, a
+ * directive that carries a step number opens a step, and one that doesn't is a modifier on the
+ * step above it. `END` is last and stands alone — it can't be edited or deleted, and its + is the
+ * only way to append past the final step.
+ */
+function groupDirectives(
+  program: ReturnType<typeof parseRunDefinition>,
+  stepCount: number,
+): Group[] {
+  const groups: Group[] = [];
+  let current: Group | null = null;
+  for (const d of program.directives) {
+    const isHeader = d.verb === "METHOD" || d.verb === "HOTLID" || d.verb === "VOLUME";
+    const isEnd = d.verb === "END";
+    // A header directive joins an open header; a modifier — anything with no step number of its
+    // own — joins the step above it. Everything else starts a group.
+    const continues =
+      current !== null &&
+      !isEnd &&
+      (isHeader ? current.target?.kind === "header" : d.stepNumber === undefined);
+    if (continues && current) {
+      current.directives.push(d);
+      continue;
+    }
+    const stepIndex = d.stepNumber !== undefined ? d.stepNumber - 1 : null;
+    current = {
+      key: d.index,
+      directives: [d],
+      target: isEnd ? null : isHeader ? { kind: "header" } : { kind: "step", index: stepIndex ?? 0 },
+      stepIndex: isEnd || isHeader ? null : stepIndex,
+      insertAt: isHeader ? null : isEnd ? stepCount : (stepIndex ?? 0) + 1,
+    };
+    groups.push(current);
+  }
+  return groups;
+}
+
 /** The first step kind that can go at `index` — only `GOTO` is ever unavailable there. */
 function firstInsertableKind(builder: ProtocolBuilder, index: number): ProtocolStepKind {
   return PROTOCOL_STEP_KINDS.find((k) => builder.canInsert(k, index)) ?? "temp";
 }
 
 /**
- * The directive listing, in edit mode: the same rows {@link ProtocolDecoded} draws, each a button
- * that opens its form, with insert/delete beside it.
+ * The directive listing: the same lines {@link ProtocolDecoded} draws, and — once `interactive` —
+ * a click target that opens each group's form, with insert/delete in a gutter to the left of the
+ * step numbers, so that form has the width of the panel to lay itself out in rather than opening
+ * hard against the right edge (see the `.protoedit__line` rules).
  *
- * Rows come from a decode of the builder's own text, so a modifier (`INC`, `RATE`, …) appears on
- * its own line as it does in the file, while *editing* it means editing the step it rides on
- * (`protocol.md` §3.2) — which is what clicking one does.
+ * The listing is drawn by this component in both modes, so reading and editing have identical
+ * geometry: the gutter is reserved while reading, and Edit lights up rows already in place.
+ *
+ * Lines come from a decode of the builder's own text, so a modifier (`BEEP`, `INC`, `RATE`, …)
+ * appears on its own line as it does in the file — but **the unit of editing is not the line, it
+ * is the thing the line belongs to**, and the listing is grouped to match: `METHOD`/`HOTLID`/
+ * `VOLUME` are one settings form (`HeaderForm`), and a step is its directive plus whichever
+ * modifiers ride on it (`protocol.md` §3.2), all edited by the one `StepForm`.
+ *
+ * So a group is drawn as a run of lines inside a *single* click target with a *single* +/− pair:
+ * one highlight rather than three lit at once, one delete that removes the step and its modifiers
+ * together, and a form that — anchored off the target's bottom edge — opens below the whole group
+ * rather than through the middle of it.
  */
 function EditableListing({
   builder,
   program,
+  interactive,
   onOpen,
   onRemove,
   openTarget,
 }: {
   builder: ProtocolBuilder;
   program: ReturnType<typeof parseRunDefinition>;
+  /** False while the protocol is only being read: same rows, same metrics, nothing to click. */
+  interactive: boolean;
   onOpen: (target: OpenTarget, event: { currentTarget: HTMLElement }) => void;
   onRemove: (index: number) => void;
   openTarget: OpenTarget | null;
 }) {
-  // A modifier belongs to the step above it; the header's three directives all edit the header.
-  let ownerStepIndex = -1;
+  const groups = groupDirectives(program, builder.stepCount);
 
   return (
     <div className="decoded protoedit">
       <div className="decoded__proto mono">
-        {program.directives.map((d) => {
-          if (d.stepNumber !== undefined) ownerStepIndex = d.stepNumber - 1;
-          // Captured per row: `ownerStepIndex` is a running value across the map, so a handler
-          // that read it at click time would act on whatever row happened to be last.
-          const stepIndex = ownerStepIndex;
-          const isHeader = d.verb === "METHOD" || d.verb === "HOTLID" || d.verb === "VOLUME";
-          const isEnd = d.verb === "END";
-          const target: OpenTarget | null = isEnd
-            ? null
-            : isHeader
-              ? { kind: "header" }
-              : { kind: "step", index: stepIndex };
-          // Judged from this row's own target, so END — which trails the last step and shares
-          // its running index — never lights up with it.
+        {groups.map((group) => {
           const isOpen =
-            target === null
-              ? false
-              : target.kind === "header"
-                ? openTarget?.kind === "header"
-                : openTarget?.kind === "step" && openTarget.index === target.index;
-          // The insert point: below this row's step, or — on END — at the very end, which is the
-          // only way to append and the reason END carries a + of its own.
-          const insertAt = isEnd ? builder.stepCount : stepIndex + 1;
+            group.target !== null &&
+            (group.target.kind === "header"
+              ? openTarget?.kind === "header"
+              : openTarget?.kind === "step" && openTarget.index === group.target.index);
+          // Captured per group: a handler reading a running value at click time would act on
+          // whichever group happened to be last.
+          const { stepIndex, insertAt } = group;
+          const target = interactive ? group.target : null;
+          const lines = group.directives.map((d) => (
+            <span key={d.index} className="decoded__protoline">
+              <span className="decoded__protonum">{d.stepNumber ?? ""}</span>
+              <span className="decoded__prototext">{d.text};</span>
+              <span className="decoded__protonote">{d.description}</span>
+            </span>
+          ));
           return (
             <div
-              key={d.index}
-              className={"decoded__protoline protoedit__line" + (isOpen ? " is-open" : "")}
+              key={group.key}
+              className={"protoedit__line" + (isOpen ? " is-open" : "")}
             >
-              <span className="decoded__protonum">{d.stepNumber ?? ""}</span>
-              {target ? (
-                <button
-                  type="button"
-                  className="protoedit__rowbtn"
-                  onClick={(e) => onOpen(target, e)}
-                >
-                  <span className="decoded__prototext">{d.text};</span>
-                  <span className="decoded__protonote">{d.description}</span>
-                </button>
-              ) : (
-                <span className="protoedit__rowbtn is-inert">
-                  <span className="decoded__prototext">{d.text};</span>
-                  <span className="decoded__protonote">{d.description}</span>
-                </span>
-              )}
               <span className="protoedit__rowtools">
-                {!isHeader && (
+                {interactive && insertAt !== null && (
                   <button
                     type="button"
                     className="protoedit__iconbtn"
-                    title={isEnd ? "Add a step at the end" : `Add a step after step ${insertAt}`}
+                    title={
+                      stepIndex === null
+                        ? "Add a step at the end"
+                        : `Add a step after step ${insertAt}`
+                    }
                     aria-label="Add a step below"
                     onClick={(e) => onOpen({ kind: "insert", index: insertAt }, e)}
                   >
                     +
                   </button>
                 )}
-                {!isHeader && !isEnd && (
+                {interactive && stepIndex !== null && (
                   <button
                     type="button"
                     className="protoedit__iconbtn protoedit__iconbtn--del"
@@ -557,14 +613,28 @@ function EditableListing({
                   </button>
                 )}
               </span>
+              {target ? (
+                <button
+                  type="button"
+                  className="protoedit__rowbtn"
+                  onClick={(e) => onOpen(target, e)}
+                >
+                  {lines}
+                </button>
+              ) : (
+                <span className="protoedit__rowbtn is-inert">{lines}</span>
+              )}
             </div>
           );
         })}
       </div>
-      <div className="protoedit__legend mono">
-        {builder.stepCount} step{builder.stepCount === 1 ? "" : "s"} · steps renumber themselves ·
-        END is written by the editor and can&apos;t be moved or removed
-      </div>
+      {/* Below the listing, so showing it only in edit mode moves nothing that was already read. */}
+      {interactive && (
+        <div className="protoedit__legend mono">
+          {builder.stepCount} step{builder.stepCount === 1 ? "" : "s"} · steps renumber themselves ·
+          END is written by the editor and can&apos;t be moved or removed
+        </div>
+      )}
     </div>
   );
 }

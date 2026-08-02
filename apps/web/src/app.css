@@ -3775,22 +3775,38 @@ summary.instrument__panelhead {
 }
 
 /* ── Protocol editor (`components/protocol/`) ────────────────────────────────────────────────
-   The editable form of the directive listing above. It reuses `.decoded__proto*` for the rows
-   themselves — what is on screen in edit mode is the same decode of the same text, so it must
-   look the same — and adds only the affordances: a click target per row, the +/− pair beside it,
-   and the popover form. */
-.protoedit__line {
-  grid-template-columns: 2.2em 1fr max-content;
+   The Protocol view's own listing, drawn by `EditableListing` in both modes — reading it and
+   editing it are the same rows with the same metrics, so pressing Edit lights up what is already
+   on screen instead of reflowing it. The lines themselves are `.decoded__proto*`, unchanged: what
+   is listed is the same decode of the same text either way.
+
+   What the editor adds is a click target per *group* — the header's three directives, or a step
+   with the modifiers riding on it — and, in a gutter to their left, that group's +/− pair. The
+   gutter is on the left because the rows are as wide as their reading: a trailing pair sat against
+   the right edge of the panel, where the popover it opens has nowhere to lay its fields out. Its
+   width is fixed (two icon buttons and the gap between them) rather than content-sized, because
+   each group is its own grid — a `max-content` track would come out narrower on the groups with
+   only a + (END), none at all (the header), or none yet (reading), and the program text would step
+   in and out as those changed. */
+.protoedit {
+  /* Two 22px icon buttons and the 4px between them. */
+  --protoedit-gutter: 48px;
 }
-/* The row's own click target. A real button, so the whole line is keyboard-reachable in order,
-   but styled as the line of text it is — the affordance is the hover, not a box. */
-.protoedit__rowbtn {
+.protoedit__line {
   display: grid;
-  /* Narrow: the directive with its reading beneath, as the read-only listing does. Wide: the two
-     side by side, on the same 14em first column, so switching into edit mode doesn't reflow. */
-  grid-template-columns: 1fr;
+  grid-template-columns: var(--protoedit-gutter) 1fr;
   gap: 2px 12px;
-  align-items: baseline;
+  align-items: start;
+  border-radius: var(--radius-sm);
+}
+/* The group's click target. A real button, so each group is keyboard-reachable in order, but
+   styled as the lines of text it is — the affordance is the hover, not a box. It stacks whole
+   `.decoded__protoline` grids, which is what keeps the step numbers, directives and readings on
+   the same columns as the listing everywhere else in the app. */
+.protoedit__rowbtn {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
   width: 100%;
   padding: 2px 6px;
   margin: 0;
@@ -3806,23 +3822,12 @@ summary.instrument__panelhead {
   border-color: var(--border-strong);
   background: var(--raised);
 }
-/* END and anything else with no form behind it: same metrics, no affordance. */
-.protoedit__rowbtn.is-inert {
+/* END, and every group while the protocol is only being read: same metrics, no affordance. */
+.protoedit__rowbtn.is-inert,
+.protoedit__rowbtn.is-inert:hover {
   cursor: default;
-  display: grid;
-}
-@container (min-width: 560px) {
-  .protoedit__rowbtn {
-    grid-template-columns: minmax(14em, max-content) 1fr;
-  }
-}
-/* The row button is a grid of its own, one column narrower than the listing's (it sits *inside*
-   the step-number column's sibling), so the reading's `grid-column: 3` from the read-only rules
-   would land it in an implicit fourth track against the right edge. Put it back beside the
-   directive, which is where it sits when the same row isn't editable. */
-.protoedit__rowbtn .decoded__protonote,
-.protoedit__rowbtn .decoded__protoscan {
-  grid-column: auto;
+  border-color: transparent;
+  background: transparent;
 }
 .protoedit__line.is-open .protoedit__rowbtn {
   border-color: var(--neon-cyan);
@@ -3871,7 +3876,11 @@ summary.instrument__panelhead {
   position: fixed;
   margin: 0;
   padding: 10px 12px 12px;
-  max-width: min(28rem, calc(100vw - 24px));
+  /* Wide enough for the longest control it holds — the step-kind select, whose options carry a
+     verb *and* a phrase ("PLATEREAD — read the plate") — so a field is never cut off; capped at
+     the viewport, since `StepPopover` only slides the box back inside, it can't shrink it. */
+  width: max-content;
+  max-width: min(40rem, calc(100vw - 24px));
   border: 1px solid var(--border-strong);
   border-radius: var(--radius);
   background: var(--raised);
@@ -3923,7 +3932,9 @@ summary.instrument__panelhead {
    they are a fact about the directive rather than a value (`protocol.md` §3.3). */
 .stepform__line {
   display: grid;
-  grid-template-columns: 8.5em 7.5em 1fr;
+  /* The control track grows to whatever it holds — a `<select>` is as wide as its widest option —
+     rather than being pinned at 7.5em, which left the longer menus spilling over the units. */
+  grid-template-columns: 8.5em minmax(7.5em, max-content) 1fr;
   gap: 2px 8px;
   align-items: center;
   font-size: 12px;
@@ -3946,8 +3957,8 @@ summary.instrument__panelhead {
 }
 .stepform__select {
   width: auto;
-  min-width: 100%;
-  max-width: 16em;
+  min-width: 7.5em;
+  max-width: 24em;
 }
 .stepform__line.is-invalid .stepform__input {
   border-color: var(--danger);

@@ -2109,6 +2109,27 @@ async function protocolEditorChecks(chrome, origin) {
     cdp.eval(`(() => { const b = document.querySelector(".stepform__ok");
        if (b) b.click(); return !!b; })()`);
   const formOpen = () => cdp.eval(`!!document.querySelector(".stepform__popover")`);
+  /** Put the open form away between checks. `hidePopover()` rather than a click: the *dismissal*
+   *  has its own check below, and driving it by hand here would make every check after it depend
+   *  on where the popover happened to land. Guarded, because React may already have taken the
+   *  element out of the top layer, and `hidePopover()` on a non-popover throws. */
+  const closeForm = async () => {
+    if (!(await formOpen())) return;
+    // Wait for it to actually be in the top layer first: the element renders one frame before the
+    // effect that calls `showPopover`, and hiding a popover that isn't up yet does nothing.
+    await waitFor(() => cdp.eval(`!!document.querySelector(".stepform__popover:popover-open")`), {
+      what: "the form to finish opening",
+    });
+    await cdp.eval(`(() => { const p = document.querySelector(".stepform__popover:popover-open");
+       if (p) p.hidePopover(); })()`);
+    await waitFor(async () => !(await formOpen()), { what: "the form to close" });
+  };
+  /** Each group of directives as drawn: the lines inside one click target, and its +/− pair. */
+  const groups = () =>
+    cdp.eval(`JSON.stringify([...document.querySelectorAll(".protoedit__line")].map((g) => ({
+      lines: [...g.querySelectorAll(".decoded__prototext")].map((t) => t.textContent.trim()),
+      tools: [...g.querySelectorAll(".protoedit__iconbtn")].map((b) => b.textContent.trim()),
+    })))`).then(JSON.parse);
 
   const before = await program();
   check(
@@ -2117,12 +2138,30 @@ async function protocolEditorChecks(chrome, origin) {
     JSON.stringify({ btn: await editBtn(), before }),
   );
 
-  // Nothing is clickable until Edit is pressed — reading a protocol must stay reading it.
-  check("…and no row is clickable before Edit is pressed", (await clickRow("TEMP")) === false);
+  // Nothing is clickable until Edit is pressed — reading a protocol must stay reading it. The rows
+  // are the *same* rows either way, so what says "not yet" is that clicking one opens nothing.
+  await clickRow("TEMP");
+  await sleep(200);
+  check("…and no row opens a form before Edit is pressed", (await formOpen()) === false);
+
+  /** Where each directive's text sits, to the pixel — the geometry Edit must not disturb. */
+  const textLefts = () =>
+    cdp.eval(`JSON.stringify([...document.querySelectorAll(".decoded__prototext")]
+      .map((t) => Math.round(t.getBoundingClientRect().left)))`).then(JSON.parse);
+  const readingLefts = await textLefts();
 
   await clickButton("Edit");
   await waitFor(async () => (await editBtn())?.label === "Done", { what: "edit mode" });
   check("Edit turns into Done", (await editBtn())?.label === "Done");
+
+  // Reading and editing are the same listing, so the program must not shift when the +/− buttons
+  // appear: their gutter is reserved while reading.
+  const editingLefts = await textLefts();
+  check(
+    "…and the program doesn't move when the editing controls appear",
+    JSON.stringify(readingLefts) === JSON.stringify(editingLefts) && readingLefts.length > 0,
+    JSON.stringify({ reading: readingLefts.slice(0, 4), editing: editingLefts.slice(0, 4) }),
+  );
 
   // A row's form is verb-specific: a TEMP gets Temperature and Duration with their units fixed
   // beside them, never the raw operand string.
@@ -2241,6 +2280,71 @@ async function protocolEditorChecks(chrome, origin) {
       !gotoTargets.some((t) => /GOTO/.test(t)),
     JSON.stringify(gotoTargets),
   );
+  // METHOD/HOTLID/VOLUME are three directives but one form, so they are one click target: one
+  // highlight rather than three lit at once, and the form opens *below* all three rather than
+  // through the middle of them.
+  await closeForm();
+  const headerBlock = await cdp
+    .eval(`(() => {
+      const group = document.querySelector(".protoedit__line");
+      const texts = [...group.querySelectorAll(".decoded__prototext")].map((t) => t.textContent.trim());
+      const btn = group.querySelector(".protoedit__rowbtn");
+      if (btn) btn.click();
+      return JSON.stringify({ targets: group.querySelectorAll(".protoedit__rowbtn").length, texts }); })()`)
+    .then(JSON.parse);
+  await waitFor(formOpen, { what: "the protocol settings form" });
+  const headerGeom = await cdp
+    .eval(`(() => {
+      const b = document.querySelector(".protoedit__line .protoedit__rowbtn").getBoundingClientRect();
+      const p = document.querySelector(".stepform__popover").getBoundingClientRect();
+      const lit = document.querySelectorAll(".protoedit__line.is-open").length;
+      const sel = [...document.querySelectorAll(".stepform__popover select")]
+        .every((s) => s.getBoundingClientRect().right <= p.right);
+      return JSON.stringify({ below: p.top >= b.bottom, lit, sel }); })()`)
+    .then(JSON.parse);
+  check(
+    "the header's three directives are one click target, not three",
+    headerBlock.targets === 1 &&
+      headerBlock.texts.join(" ") === "METHOD CALC; HOTLID 105,30; VOLUME 20;" &&
+      headerGeom.lit === 1,
+    JSON.stringify({ ...headerBlock, lit: headerGeom.lit }),
+  );
+  check(
+    "…and its form opens below all three, with no control spilling out of the popover",
+    headerGeom.below && headerGeom.sel,
+    JSON.stringify(headerGeom),
+  );
+  check(
+    "the settings form edits the header, not a step",
+    (await formLines()).map((l) => l.label).join(", ") ===
+      "Method, Lid temperature, Lid off below, Sample volume",
+    JSON.stringify((await formLines()).map((l) => l.label)),
+  );
+
+  // A modifier is a line of its own in the file but not a step: `BEEP` rides on the TEMP above it
+  // (`protocol.md` §3.2), so the two are one group — one click target, one +/− pair, and a delete
+  // that takes the modifier with the step rather than orphaning it.
+  await closeForm();
+  await clickRow("TEMP 95.0,60");
+  await waitFor(formOpen, { what: "the TEMP form" });
+  await cdp.eval(`(() => { const l = [...document.querySelectorAll(".stepform__line")]
+     .find((x) => x.querySelector(".stepform__label").textContent.trim() === "Beep");
+     const c = l && l.querySelector("input[type=checkbox]");
+     if (c && !c.checked) c.click(); return !!c; })()`);
+  await commitForm();
+  await waitFor(async () => /BEEP/.test(await program()), { what: "the BEEP modifier" });
+  const beeped = (await groups()).find((g) => g.lines.includes("BEEP;"));
+  check(
+    "a step and the modifier riding on it are one group, with one +/− pair",
+    beeped?.lines.join(" ") === "TEMP 95.0,60; BEEP;" && beeped?.tools.join("") === "+−",
+    JSON.stringify(beeped),
+  );
+
+  // Back to the GOTO's form, which the light-dismiss check below needs open with a dirty field.
+  await closeForm();
+  await clickRow("GOTO");
+  await waitFor(formOpen, { what: "the GOTO form" });
+
   // Clicking away closes the form without applying it. That is the *browser's* light dismiss (the
   // form is a native `popover`), so it needs a real pointer press — a synthesized `click()` never
   // reaches the dismiss machinery, the same way a synthesized `mouseover` never opens a rail peek.

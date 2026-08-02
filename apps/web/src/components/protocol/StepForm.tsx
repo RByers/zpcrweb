@@ -79,6 +79,9 @@ function NumberLine({
       <input
         type="number"
         className="stepform__input mono"
+        // Chrome will otherwise offer a saved phone number for a bare numeric field — these hold
+        // temperatures and hold times, and nothing here is ever a remembered value.
+        autoComplete="off"
         step={step}
         value={value === undefined ? "" : String(value)}
         placeholder={placeholder ?? (optional ? "none" : "")}

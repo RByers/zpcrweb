@@ -298,13 +298,23 @@ to edit one. A `.prcl.txt` is the portable, authorable form, so this is where au
   has no validity rules of its own — the fields, their units and their limits all come from
   `validateStepDraft`/`PROTOCOL_LIMITS`.
 - **The listing is a decode of the builder's own output**, not a second rendering of the model,
-  so what is on screen is the text that would be sent. A modifier (`INC`, `RATE`, …) therefore
-  appears on its own line as it does in the file, while *editing* it means editing the step it
-  rides on — clicking a modifier row opens the owning step's form.
-- **The row form is a native `popover`** (`StepForm.tsx`), which is where Escape, light dismiss
-  and top-layer stacking come from rather than a document-level listener. It is positioned from
-  the row's own rect, since anchor positioning isn't broadly supported yet, and pulled back
-  inside the viewport (flipped above the row if need be) once it is up. Enter commits, ✓ commits,
+  so what is on screen is the text that would be sent. A modifier (`BEEP`, `INC`, `RATE`, …)
+  therefore appears on its own line as it does in the file, while *editing* it means editing the
+  step it rides on.
+- **The unit of editing is the group, not the line** (`groupDirectives`). `METHOD`/`HOTLID`/
+  `VOLUME` are one settings form, and a step is its directive plus the modifiers riding on it, so
+  each group is drawn as a run of lines inside a single click target with a single +/− pair: one
+  highlight rather than three lit at once, a delete that takes a step's modifiers with it, and a
+  form that opens below the whole group. The pair sits in a fixed-width gutter to the *left* of
+  the step numbers — on the right it sat against the panel edge, leaving the popover it opens
+  nowhere to lay its fields out.
+- **Reading and editing are the same listing** (`EditableListing`, `interactive={false}` while
+  reading), with the gutter reserved and empty until Edit is pressed. Pressing it lights up rows
+  that are already where they will stay, rather than reflowing the program sideways.
+- **The group's form is a native `popover`** (`StepForm.tsx`), which is where Escape, light
+  dismiss and top-layer stacking come from rather than a document-level listener. It is positioned
+  from the group's own rect, since anchor positioning isn't broadly supported yet, and pulled back
+  inside the viewport (flipped above the group if need be) once it is up. Enter commits, ✓ commits,
   clicking away discards.
 - **Done is not Save.** Edits are written to the file as they are made, via
   `ZpcrStore.setProtocolText` — the Edit/Done button only switches the listing between reading
