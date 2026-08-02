@@ -35,6 +35,14 @@
  * own filenames and nothing else — no Bio-Rad format has a field for what a run is *called*
  * (`experiment.ts`) — so a named run also deposits a `zpcrweb.json` saying so, and the archive
  * assembled from the folder states its own name from then on.
+ *
+ * **A fourth restores a marker CFX Manager's own runs get for free.** `usb.md` §7.5 measures the
+ * instrument writing `ProtocolName.txt` into the run folder itself as a run finishes. Observed in
+ * practice: a run started here through `RemoteRun` never gets that write, even though a
+ * touchscreen- or CFX Manager-started one does — so a run this app starts would otherwise open
+ * with no way to say what protocol it ran, unlike one pulled from either of those. A named
+ * protocol also deposits its own `ProtocolName.txt`, which closes that gap the same way the third
+ * file closes the missing-run-name one.
  */
 import type { PlateDefinition } from "../pltd.js";
 import {
@@ -67,6 +75,10 @@ export const CFX_RUN_REPORT_DIR = "\\Storage Card\\PCRunReport";
  * rather than improved on — nothing here knows what else the firmware would accept.
  */
 export const CFX_PROTOCOL_LABEL = "PCRUN";
+
+/** The marker file the instrument writes for itself, that a `RemoteRun`-started run must deposit
+ * instead — see the module comment's fourth file. */
+export const PROTOCOL_NAME_TXT = "ProtocolName.txt";
 
 /** `METHOD`'s operand when the run definition carries none. `CALC` in every file and capture. */
 const DEFAULT_METHOD = "CALC";
@@ -367,12 +379,27 @@ export function planRun(options: PlanRunOptions): RunPlan {
       path: `${CFX_CURRENT_RUN_DIR}\\${protocolBase}.prcl.txt`,
       bytes: new TextEncoder().encode(formatRunDefinitionText(runDefinition)),
     },
-    {
-      name: `${plateBase}.plt.csv`,
-      path: `${CFX_CURRENT_RUN_DIR}\\${plateBase}.plt.csv`,
-      bytes: new TextEncoder().encode(plateToCsv(plate)),
-    },
   ];
+
+  // The instrument writes this itself for a touchscreen- or CFX Manager-started run, but not for
+  // one started here (see the module comment's fourth file), so it is deposited as plain text
+  // under the protocol's own name — unsanitized, since it is file *content* rather than a name.
+  // Only when there is a name: an unnamed protocol has nothing to say, same reasoning as the
+  // run-name deposit below.
+  const protocolName = (options.protocolName ?? "").trim();
+  if (protocolName) {
+    uploads.push({
+      name: PROTOCOL_NAME_TXT,
+      path: `${CFX_CURRENT_RUN_DIR}\\${PROTOCOL_NAME_TXT}`,
+      bytes: new TextEncoder().encode(protocolName),
+    });
+  }
+
+  uploads.push({
+    name: `${plateBase}.plt.csv`,
+    path: `${CFX_CURRENT_RUN_DIR}\\${plateBase}.plt.csv`,
+    bytes: new TextEncoder().encode(plateToCsv(plate)),
+  });
 
   // The run's *name* rides along too, as a `zpcrweb.json` (`zpcrwebSettings.ts`) — the one field
   // of it that is known before a single cycle has run. Nothing on the instrument reads the entry;

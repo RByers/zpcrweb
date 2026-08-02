@@ -50,14 +50,12 @@ export interface RunSeedOptions {
   fileBaseName?: string;
   /** The protocol's run-definition text, exactly as sent (`protocol.md`). */
   runDefinition: string;
-  /** The protocol's own name, for `ProtocolName.txt`. Omitted when the protocol has none. */
-  protocolName?: string;
   /**
    * The plan this run is being started from ({@link planRun}). Its uploads are copied in verbatim
-   * — the plate `.plt.csv` and the `zpcrweb.json` carrying the name — rather than re-derived, so
-   * the seed holds byte-for-byte what is being deposited in the run folder, under the same names.
-   * The `.prcl.txt` upload is left out: an archive states its protocol as
-   * `ProtocolRunDefinition.txt`, which is what the instrument will write there itself.
+   * — the plate `.plt.csv`, the `ProtocolName.txt` and the `zpcrweb.json` carrying the name —
+   * rather than re-derived, so the seed holds byte-for-byte what is being deposited in the run
+   * folder, under the same names. The `.prcl.txt` upload is left out: an archive states its
+   * protocol as `ProtocolRunDefinition.txt`, which is what the instrument will write there itself.
    */
   plan: RunPlan;
   /** When the run started; the file's date. Defaults to now, which is what a click means. */
@@ -65,7 +63,6 @@ export interface RunSeedOptions {
 }
 
 const PROTOCOL_NAME = "ProtocolRunDefinition.txt";
-const PROTOCOL_NAME_TXT = "ProtocolName.txt";
 
 /**
  * Build the seed `.zpcr` for a run being started. See the module comment for what it contains and
@@ -86,7 +83,6 @@ export function zpcrSeedArchive(options: RunSeedOptions): { name: string; bytes:
     if (/\.prcl\.txt$/i.test(upload.name)) continue;
     files[upload.name] = upload.bytes;
   }
-  if (options.protocolName) files[PROTOCOL_NAME_TXT] = encoder.encode(options.protocolName);
 
   const base = options.fileBaseName?.trim() || runFileBaseName(experimentName, options.startedAt);
   return {

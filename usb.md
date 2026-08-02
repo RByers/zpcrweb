@@ -966,21 +966,29 @@ read the fluorescence can skip this phase entirely**; a client that wants the ru
 a complete experiment should not.
 
 **What this project deposits instead** (`packages/core/src/usb/runPlan.ts`, `planRun()`): the same
-idea, three files, none of them encrypted.
+idea, four files, none of them encrypted.
 
 | # | File | What it is |
 |---|---|---|
 | 1 | `<protocol>.prcl.txt` | the protocol as the plaintext run definition of `prcl.md` §3.1 |
-| 2 | `<plate>.plt.csv` | the plate map as this project's plate CSV |
-| 3 | `zpcrweb.json` | what the run is *called* (`zpcrweb-json.md`), written only when it has a name |
+| 2 | `ProtocolName.txt` | the protocol's own name, written only when it has one |
+| 3 | `<plate>.plt.csv` | the plate map as this project's plate CSV |
+| 4 | `zpcrweb.json` | what the run is *called* (`zpcrweb-json.md`), written only when it has a name |
 
-The first two are named after the protocol and the plate themselves, not after the run: those are
-reused across runs and arrive with names of their own. The third exists because operand 4 of §7.3
-is the only channel a run's name has, and it reaches nothing but the instrument's composed
-filenames — no field of `RunInfo.xml` records what a run is called. Depositing the name means the
-`.zpcr` the folder becomes states it, so it survives a reload, a rename on disk, or another
-machine. `RunInfo.xml` and `GlobData.xml` are not written: the instrument writes its own
+The first and third are named after the protocol and the plate themselves, not after the run:
+those are reused across runs and arrive with names of their own. The fourth exists because operand
+4 of §7.3 is the only channel a run's name has, and it reaches nothing but the instrument's
+composed filenames — no field of `RunInfo.xml` records what a run is called. Depositing the name
+means the `.zpcr` the folder becomes states it, so it survives a reload, a rename on disk, or
+another machine. `RunInfo.xml` and `GlobData.xml` are not written: the instrument writes its own
 `RunInfo.xml`, and the host inventory describes a PC application this isn't.
+
+`ProtocolName.txt`'s own name is fixed rather than derived, because the instrument writes an entry
+by that exact name itself — §7.5 measures it appearing in the run folder as a touchscreen- or CFX
+Manager-started run finishes. Observed in practice: a run started here through `RemoteRun` never
+gets that write, so without depositing one, a `.zpcr` this project starts would have no way to say
+what protocol it ran while one from either of those would. Depositing it here closes that gap
+rather than working around it downstream.
 
 **The upload checksum is not a CRC** — it is a byte-interleaved XOR, and it reproduces all four
 uploads exactly:

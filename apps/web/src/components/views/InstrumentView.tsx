@@ -117,7 +117,6 @@ export function InstrumentView({
       experimentName,
       fileBaseName,
       runDefinition: protocol.runDefinition,
-      protocolName: protocol.document.name || undefined,
       plan,
     });
     naming.begin({ experimentName, fileName: fileBaseName });

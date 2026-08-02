@@ -194,10 +194,28 @@ describe("planRun", () => {
     }).uploads;
     expect(uploads.map((u) => u.name)).toEqual([
       "Luna noRT.prcl.txt",
+      "ProtocolName.txt",
       "S183-S185 RVP.plt.csv",
       "zpcrweb.json",
     ]);
     expect(uploads[0]!.path).toBe("\\Storage Card\\CurrentRun\\Luna noRT.prcl.txt");
+  });
+
+  /** The instrument writes this itself for a touchscreen- or CFX Manager-started run but not for
+   * one started here, so it is deposited plainly — as content, unsanitized, unlike a filename. */
+  it("deposits the protocol's own name as ProtocolName.txt, only when there is one", () => {
+    const named = planRun({
+      runDefinition: ALL_CHANNELS,
+      plate: plateUsing([1]),
+      name: "My Run/2",
+      protocolName: "Luna noRT",
+    }).uploads;
+    const marker = named.find((u) => u.name === "ProtocolName.txt");
+    expect(marker?.path).toBe("\\Storage Card\\CurrentRun\\ProtocolName.txt");
+    expect(new TextDecoder().decode(marker!.bytes)).toBe("Luna noRT");
+
+    const anonymous = plan().uploads;
+    expect(anonymous.some((u) => u.name === "ProtocolName.txt")).toBe(false);
   });
 
   /** The one place the run's own name is deposited: what the archive will say it is called. */
@@ -246,7 +264,11 @@ describe("planRun", () => {
       plateName: "  ",
     }).uploads;
     // `";` is one run of operand-syntax characters, so it collapses to a single `_`.
-    expect(uploads.map((u) => u.name)).toEqual(["RVP _fast_v2_3.prcl.txt", "plate.plt.csv"]);
+    expect(uploads.map((u) => u.name)).toEqual([
+      "RVP _fast_v2_3.prcl.txt",
+      "ProtocolName.txt",
+      "plate.plt.csv",
+    ]);
   });
 
   it("refuses to be startable when a check is an error", () => {

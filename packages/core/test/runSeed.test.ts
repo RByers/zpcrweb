@@ -30,7 +30,6 @@ const seed = (name = "First Qualification", fileBaseName?: string) =>
     experimentName: name,
     fileBaseName,
     runDefinition: PROTOCOL,
-    protocolName: "Luna noRT",
     plan: planRun({
       runDefinition: PROTOCOL,
       plate,
