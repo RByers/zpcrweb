@@ -2202,7 +2202,7 @@ async function protocolEditorChecks(chrome, origin) {
 
   // Insert renumbers everything below it, and the GOTO that pointed past the insertion follows
   // its step rather than its number (`ProtocolBuilder.withInsertedStep`).
-  await rowTool("TEMP 95.0,60", ".protoedit__iconbtn");
+  await rowTool("TEMP 95.0,60", ".protoedit__iconbtn--ins");
   await waitFor(formOpen, { what: "the new-step form" });
   await setField("Temperature", "50");
   await setField("Duration", "120");
@@ -2260,9 +2260,24 @@ async function protocolEditorChecks(chrome, origin) {
       last: l === [...document.querySelectorAll(".protoedit__line")].pop(),
     }); })()`).then(JSON.parse);
   check(
-    "END can't be edited or deleted, only appended before — and stays last",
-    endTools.clickable === false && endTools.del === false && endTools.add === true && endTools.last === true,
+    "END can't be edited, deleted, or inserted at — and stays last",
+    endTools.clickable === false && endTools.del === false && endTools.add === false && endTools.last === true,
     JSON.stringify(endTools),
+  );
+  // Every + straddles the boundary below its own group, so there is exactly one per gap: the last
+  // step's is what appends past it (which is why END has none), and no two sit on the same gap.
+  const insertSpots = await cdp.eval(`JSON.stringify([...document.querySelectorAll(".protoedit__line")]
+    .map((g) => {
+      const ins = g.querySelector(".protoedit__iconbtn--ins");
+      if (!ins) return null;
+      const box = g.querySelector(".protoedit__rowbtn").getBoundingClientRect();
+      const b = ins.getBoundingClientRect();
+      return Math.round(b.top + b.height / 2 - box.bottom);
+    }).filter((v) => v !== null))`).then(JSON.parse);
+  check(
+    "every + sits on the boundary below its own group",
+    insertSpots.length > 0 && insertSpots.every((d) => Math.abs(d) <= 3),
+    JSON.stringify(insertSpots),
   );
 
   // A GOTO offers only the steps it may legally return to, described rather than numbered.
@@ -2364,6 +2379,29 @@ async function protocolEditorChecks(chrome, origin) {
     "clicking elsewhere closes the form without applying it",
     (await program()) === beforeDismiss,
     await program(),
+  );
+
+  // The header block's + is the only way to get a step *before* step 1 — the whole reason it
+  // carries one. It inserts at the top and renumbers everything after it, GOTO included.
+  const beforeFirst = (await lines()).filter((l) => l.num);
+  await rowTool("METHOD", ".protoedit__iconbtn--ins");
+  await waitFor(formOpen, { what: "the new-first-step form" });
+  const newFirstTitle = await cdp.eval(
+    `(document.querySelector(".stepform__title") || {}).textContent || ""`,
+  );
+  await setField("Temperature", "42");
+  await setField("Duration", "15");
+  await commitForm();
+  await waitFor(async () => /TEMP 42\.0,15;/.test(await program()), { what: "the new first step" });
+  const withFirst = (await lines()).filter((l) => l.num);
+  check(
+    "the header block's + inserts a new step 1, renumbering the rest",
+    newFirstTitle.trim() === "New step 1" &&
+      withFirst[0]?.text === "TEMP 42.0,15;" &&
+      withFirst[0]?.num === "1" &&
+      withFirst[1]?.text === beforeFirst[0]?.text &&
+      withFirst[1]?.num === "2",
+    JSON.stringify({ title: newFirstTitle, was: beforeFirst.slice(0, 2), now: withFirst.slice(0, 2) }),
   );
 
   // Finally: a protocol this editor can't represent gets no editor at all. The Gradient fixture's

@@ -308,6 +308,12 @@ to edit one. A `.prcl.txt` is the portable, authorable form, so this is where au
   form that opens below the whole group. The pair sits in a fixed-width gutter to the *left* of
   the step numbers — on the right it sat against the panel edge, leaving the popover it opens
   nowhere to lay its fields out.
+- **− marks a group; + marks the gap below it.** They act on different things, so they sit at
+  different heights: − beside the group's first line, + pushed to the group's bottom edge and
+  raised half its own height so it straddles the boundary the new step would land on. Read that
+  way, every boundary carries exactly one + — the header block's is what puts a step *before*
+  step 1, the last step's is what appends past it, and `END` carries none, since a + of its own
+  would be a second button for the gap the last step's already fills.
 - **Reading and editing are the same listing** (`EditableListing`, `interactive={false}` while
   reading), with the gutter reserved and empty until Edit is pressed. Pressing it lights up rows
   that are already where they will stay, rather than reflowing the program sideways.

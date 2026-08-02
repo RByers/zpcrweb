@@ -473,7 +473,7 @@ interface Group {
   target: OpenTarget | null;
   /** The step this group *is*, for the delete button; `null` for the header and for `END`. */
   stepIndex: number | null;
-  /** Where this group's + inserts, or `null` where there is no + (the header). */
+  /** Where this group's + inserts, or `null` where there is no + (`END`). */
   insertAt: number | null;
 }
 
@@ -482,13 +482,13 @@ interface Group {
  *
  * The rules are the grammar's (`protocol.md` §3.2): the header directives lead the file, a
  * directive that carries a step number opens a step, and one that doesn't is a modifier on the
- * step above it. `END` is last and stands alone — it can't be edited or deleted, and its + is the
- * only way to append past the final step.
+ * step above it. `END` is last and stands alone — it can't be edited or deleted, and it carries no
+ * + either: appending past the final step is what the last step's own + does, so a second button
+ * for the same insertion would be one gap with two ways to fill it. Every *other* group gets a +
+ * that inserts directly below it, the header's included — that one is the only way to put a step
+ * before what is currently step 1.
  */
-function groupDirectives(
-  program: ReturnType<typeof parseRunDefinition>,
-  stepCount: number,
-): Group[] {
+function groupDirectives(program: ReturnType<typeof parseRunDefinition>): Group[] {
   const groups: Group[] = [];
   let current: Group | null = null;
   for (const d of program.directives) {
@@ -510,7 +510,7 @@ function groupDirectives(
       directives: [d],
       target: isEnd ? null : isHeader ? { kind: "header" } : { kind: "step", index: stepIndex ?? 0 },
       stepIndex: isEnd || isHeader ? null : stepIndex,
-      insertAt: isHeader ? null : isEnd ? stepCount : (stepIndex ?? 0) + 1,
+      insertAt: isEnd ? null : isHeader ? 0 : (stepIndex ?? 0) + 1,
     };
     groups.push(current);
   }
@@ -558,7 +558,7 @@ function EditableListing({
   onRemove: (index: number) => void;
   openTarget: OpenTarget | null;
 }) {
-  const groups = groupDirectives(program, builder.stepCount);
+  const groups = groupDirectives(program);
 
   return (
     <div className="decoded protoedit">
@@ -589,10 +589,10 @@ function EditableListing({
                 {interactive && insertAt !== null && (
                   <button
                     type="button"
-                    className="protoedit__iconbtn"
+                    className="protoedit__iconbtn protoedit__iconbtn--ins"
                     title={
-                      stepIndex === null
-                        ? "Add a step at the end"
+                      insertAt === 0
+                        ? "Add a step before step 1"
                         : `Add a step after step ${insertAt}`
                     }
                     aria-label="Add a step below"

@@ -3786,8 +3786,15 @@ summary.instrument__panelhead {
    the right edge of the panel, where the popover it opens has nowhere to lay its fields out. Its
    width is fixed (two icon buttons and the gap between them) rather than content-sized, because
    each group is its own grid — a `max-content` track would come out narrower on the groups with
-   only a + (END), none at all (the header), or none yet (reading), and the program text would step
-   in and out as those changed. */
+   only a + (the header), none at all (END), or none yet (reading), and the program text would step
+   in and out as those changed.
+
+   The two buttons of a pair sit at different heights, because they act on different things. − acts
+   on *this* group, so it lines up with the group's first line. + acts on the *gap below* it, so it
+   is pushed to the group's bottom edge and pulled up by half its own height, leaving it straddling
+   the boundary between the two groups the new step would land between — which is also why the
+   header carries one and END doesn't: every boundary gets exactly one +, including the one above
+   step 1, and none is left over after the last step. */
 .protoedit {
   /* Two 22px icon buttons and the 4px between them. */
   --protoedit-gutter: 48px;
@@ -3836,7 +3843,11 @@ summary.instrument__panelhead {
 .protoedit__rowtools {
   display: flex;
   gap: 4px;
-  align-items: center;
+  /* − at the group's first line; the + below takes itself to the other end. Stretched over the
+     whole group (the row's own `align-items: start` would otherwise shrink it to the buttons)
+     so "the other end" means the group's bottom, however many lines it has. */
+  align-items: start;
+  align-self: stretch;
 }
 .protoedit__iconbtn {
   width: 22px;
@@ -3851,6 +3862,15 @@ summary.instrument__panelhead {
   font-size: 14px;
   line-height: 1;
   cursor: pointer;
+}
+/* Straddle the boundary below the group: to the bottom of the group's box, then down by half the
+   button (`translateY(50%)`) plus half the 3px between one group's box and the next, so the
+   button's centre lands on the gap's centre rather than on the box's edge. It overhangs into the
+   next group's row, which nothing clips and nothing else occupies — the gutter beside a group's
+   first line belongs to −. */
+.protoedit__iconbtn--ins {
+  align-self: end;
+  transform: translateY(calc(50% + 1.5px));
 }
 .protoedit__iconbtn:hover {
   border-color: var(--neon-cyan);
