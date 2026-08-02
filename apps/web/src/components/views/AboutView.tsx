@@ -24,6 +24,9 @@ export function AboutView({ onFiles, exampleHref, onLoadExample, onBack }: Props
         <p className="about__line about__privacy">
           All run data processed locally, nothing leaves your device
         </p>
+        <p className="about__line about__warning">
+          Unofficial and likely buggy, use at your own risk
+        </p>
 
         <DropZone onFiles={onFiles} large />
         <a className="about__example mono" href={exampleHref} onClick={onLoadExample}>

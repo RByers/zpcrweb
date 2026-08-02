@@ -125,6 +125,27 @@ function usbApi(): { requestDevice(o: unknown): Promise<UsbDeviceLike>; getDevic
   return nav.usb ?? null;
 }
 
+/** Set once the user has clicked through {@link connect}'s unofficial-software warning — read
+ * before every connect attempt so the prompt shows exactly once per browser, not once per
+ * session. */
+const USB_WARNING_ACK_KEY = "zpcr:usbWarningAck";
+
+function usbWarningAcknowledged(): boolean {
+  try {
+    return localStorage.getItem(USB_WARNING_ACK_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function ackUsbWarning(): void {
+  try {
+    localStorage.setItem(USB_WARNING_ACK_KEY, "1");
+  } catch {
+    /* ignore storage failures (private mode, etc.) — the prompt just reappears next time */
+  }
+}
+
 export function useCfxDevice() {
   const deviceRef = useRef<CfxDevice | null>(null);
   const trafficId = useRef(0);
@@ -290,6 +311,14 @@ export function useCfxDevice() {
   const connect = useCallback(async () => {
     const api = usbApi();
     if (!api) return;
+    if (!usbWarningAcknowledged()) {
+      const ok = window.confirm(
+        "This software is unofficial and likely contains bugs. Are you sure you want to " +
+          "connect to your instrument?",
+      );
+      if (!ok) return;
+      ackUsbWarning();
+    }
     setError(null);
     setConnection("connecting");
     try {

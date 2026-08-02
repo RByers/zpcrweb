@@ -197,6 +197,9 @@
 .about__privacy {
   color: var(--ink-muted);
 }
+.about__warning {
+  color: var(--warn);
+}
 /* Inside the card the drop zone provides its own spacing, so it drops the standalone margins. */
 .about__card .dropzone--large {
   justify-self: stretch;
