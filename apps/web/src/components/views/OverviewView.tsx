@@ -1,7 +1,6 @@
 import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   fileKindDescription,
-  formatRunDefinitionText,
   plateTargets,
   runProgressFromNames,
   type CqTableEntry,
@@ -9,18 +8,14 @@ import {
   type PlateDefinition,
   type Zpcr,
 } from "@zpcrweb/core";
-import { ProtocolDecoded } from "../raw/DecodedView";
-import { ProtocolStepsTable } from "../raw/ProtocolSteps";
 import { DownloadIcon } from "../DownloadIcon";
-import { CloneIcon } from "../CloneIcon";
 import { RenameIcon } from "../RenameIcon";
-import { downloadBytes, downloadText } from "../../lib/download";
-import { protocolFileBase } from "../../lib/protocolSource";
+import { downloadBytes } from "../../lib/download";
 import { usePltdPassword } from "../../state/pltdPassword";
 import { channelColor } from "../../lib/channelColors";
 import { runEncryptionStatus } from "../../lib/encryptionStatus";
 import { curveKey, useRunAnalysis } from "../../lib/runAnalysis";
-import type { AddFilesOptions, FileSettings, RunResult } from "../../state/useZpcrStore";
+import type { FileSettings, RunResult } from "../../state/useZpcrStore";
 import { formatCompactDateTime, type ExperimentIdentity } from "../../lib/experiment";
 
 interface InfoRow {
@@ -45,7 +40,6 @@ export function OverviewView({
   namePersists,
   onRenameFile,
   onDownload,
-  addFiles,
 }: {
   zpcr: Zpcr;
   /** The run's own file kind (`.zpcr`/`.pcrd`/biomeme `.json`) — feeds the "Type" row's detailed
@@ -79,14 +73,10 @@ export function OverviewView({
    * which edits the run's own name. The toolbar's Rename button turns the "Filename" row into
    * an editable field that calls this on commit. */
   onRenameFile: (name: string) => void;
-  /** Adds the cloned `.prcl.txt` to the file list — see the protocol block's Clone button. */
-  addFiles: (files: FileList | File[], options?: AddFilesOptions) => Promise<string | null>;
 }) {
   const m = zpcr.metadata;
   const reads = zpcr.reads;
-  const protocolText = zpcr.protocolText || null;
-  const protocol = zpcr.protocol();
-  const protocolName = protocol?.name || null;
+  const protocolName = zpcr.protocol()?.name || null;
   const lastTemp = reads.at(-1)?.blockTempC;
 
   /**
@@ -244,55 +234,6 @@ export function OverviewView({
           </button>
         </div>
       </div>
-
-      {(protocol?.steps || protocolText) && (
-        <section className="overview__block">
-          <div className="overview__blockhead">
-            <h2 className="overview__h">Thermal protocol</h2>
-            {/* The ASCII run definition, not the `.prcl` — see the button's own title. Offered
-                only when the run carries that text form at all; a run whose protocol is
-                structured-only would have nothing to write. */}
-            {protocolText && (
-              <div className="overview__blocktools">
-                <button
-                  className="raw__download"
-                  onClick={() =>
-                    downloadText(
-                      `${protocolFileBase(protocolName, file.name)}.prcl.txt`,
-                      formatRunDefinitionText(protocolText),
-                    )
-                  }
-                  aria-label="Download the thermal protocol as .prcl.txt"
-                  title={
-                    "Download the ASCII run definition as .prcl.txt — one directive per line. " +
-                    "This is the form the instrument itself records, and what the Instrument view " +
-                    "loads to stage a protocol for a new run."
-                  }
-                >
-                  <DownloadIcon />
-                </button>
-                <button
-                  className="raw__download"
-                  onClick={() => {
-                    const name = `${protocolFileBase(protocolName, file.name)}.prcl.txt`;
-                    const text = formatRunDefinitionText(protocolText);
-                    void addFiles([new File([new TextEncoder().encode(text)], name)]);
-                  }}
-                  aria-label="Clone the thermal protocol into an independent .prcl.txt file"
-                  title="Extract this protocol into its own .prcl.txt file, kept alongside your other files"
-                >
-                  <CloneIcon />
-                </button>
-              </div>
-            )}
-          </div>
-          {protocol?.steps ? (
-            <ProtocolStepsTable steps={protocol.steps} />
-          ) : (
-            <ProtocolDecoded text={protocolText!} />
-          )}
-        </section>
-      )}
 
       {plate && (targets.length > 0 || samples.length > 0) && (
         <section className="overview__block">

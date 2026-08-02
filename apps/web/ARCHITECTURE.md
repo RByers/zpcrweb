@@ -4,9 +4,10 @@ The web app (`@zpcrweb/web`) is a browser UI over [`@zpcrweb/core`](../../packag
 loads one or more files — `.zpcr`, `.pcrd`, a Biomeme run export (`.json`, see "A third format:
 Biomeme" below), or a standalone plate file (`.pltd` or zpcrweb's own `.plt.csv`, see
 "Standalone plate entries and attach" below) — switches between them, and explores each through
-up to six views: Overview, Curves, Plates, Reference, Calibration, and Raw (a standalone plate
-file only gets Overview, Plates and Raw; a standalone protocol file only Overview; a Biomeme run
-only Overview, Curves and Plates — see below).
+up to seven views: Overview, Protocol, Curves, Plates, Reference, Calibration, and Raw (a
+standalone plate file only gets Overview, Plates and Raw; a standalone protocol file only
+Overview, Protocol and Raw; a Biomeme run only Overview, Protocol, Curves, Plates and Raw — see
+below).
 
 ## Format independence
 
@@ -45,13 +46,13 @@ itself an encrypted container", not the `PcrdContainer` it used to be, so `Overv
 [`ARCHITECTURE.md`](../../ARCHITECTURE.md#two-input-formats-one-output-shape)), so most of the
 app is format-agnostic:
 
-- `OverviewView`, `CurvesView`, and `ReferenceView` take a plain `Zpcr` — they don't know or
-  care whether it came from a `.zpcr` archive or a decoded `.pcrd` document. `OverviewView`'s
-  "Protocol" row and thermal-protocol block read `zpcr.protocol()` (a real accessor on `Zpcr`,
-  not a by-name file lookup), so both the name and — when the format provides one — the step
-  table work identically either way; when there's no step list it falls back to
-  `zpcr.protocolText` rendered through the same annotated `ProtocolDecoded` listing the Raw view
-  uses (see below). `OverviewView` additionally takes the raw `RunResult` (not derivable from
+- `OverviewView`, `ProtocolView`, `CurvesView`, and `ReferenceView` take a plain `Zpcr` — they
+  don't know or care whether it came from a `.zpcr` archive or a decoded `.pcrd` document.
+  `OverviewView`'s "Protocol" row and `ProtocolView`'s thermal-protocol block both read
+  `zpcr.protocol()` (a real accessor on `Zpcr`, not a by-name file lookup), so both the name and —
+  when the format provides one — the step table work identically either way; when there's no step
+  list it falls back to `zpcr.protocolText` rendered through the same annotated `ProtocolDecoded`
+  listing the Raw view uses (see below). `OverviewView` additionally takes the raw `RunResult` (not derivable from
   `Zpcr` alone) for its "Encrypted" block, but only for the format-neutral
   `RunResult.selfEncrypted` flag: set for an encrypted `.pcrd`, clear otherwise, in which case
   the status comes from any embedded `.pltd`/`.prcl` entry's `container.encrypted` (via
@@ -259,13 +260,19 @@ resolved via `protocolFiles`/`activeProtocolFile` — a plain string, the canoni
 definition, since unlike a run or a plate it needs no password and cannot fail to decode (the
 store's `fileKind` only admits bytes that already parsed).
 
-It enables **two** tabs, `["overview","instrument"]`, because it is two things:
+It enables **four** tabs, `["overview","protocol","raw","instrument"]`, because it is several
+things:
 
-- **Overview** (`StandaloneProtocolView`) — the protocol *as a document*: the same info table
-  every kind's Overview leads with (file identity, then the settings its header directives
-  carry), then the same annotated `ProtocolDecoded` listing a run's Overview uses. Everything
-  shown is `parseRunDefinition`'s (`protocol.md`) plus the file's own name/mtime; the view picks
-  rows out of the decoded program and counts directives, and reads nothing out of the text.
+- **Overview** (`StandaloneProtocolOverview`) — a minimal identity card: just the same
+  `Type`/`Filename`/`Last modified` info-table rows every kind's Overview leads with. All the
+  protocol's own content lives on Protocol instead, the same split a run's Overview/Protocol pair
+  uses.
+- **Protocol** (`StandaloneProtocolView`) — the protocol *as a document*: stat tiles for the
+  settings its header directives carry, then the same annotated `ProtocolDecoded` listing a run's
+  Protocol tab uses. Everything shown is `parseRunDefinition`'s (`protocol.md`); the view picks
+  tiles out of the decoded program and counts directives, and reads nothing out of the text.
+- **Raw** (`StandaloneRawView`, shared with `.pltd`/`.plt.csv`/Biomeme) — the file's own bytes
+  verbatim, since a `.prcl.txt` is already plain UTF-8 text with nothing to decrypt.
 - **Instrument** — the protocol *as an input*, staged against a plate (see "The Instrument view").
 
 Enabling Overview is what removed the old special case in `App.tsx`, where a `.prcl.txt` selected
@@ -327,7 +334,7 @@ alongside `"zpcr"`/`"pcrd"`:
   sibling "Clone" button: same `plateToCsv` encode, but the resulting bytes are wrapped in a
   `.plt.csv` `File` and handed to `store.addFiles` instead of triggering a download — extracting
   the run's plate into its own independent `LoadedFile`, which is what populates the "Attach"
-  menu above with something to pick besides an upload. The Overview view's "Thermal protocol"
+  menu above with something to pick besides an upload. `ProtocolView`'s "Thermal protocol"
   block has the same pair of buttons for a run's `protocolText`, download vs. clone to a
   `.prcl.txt` `addFiles` call — there is no equivalent "replace this run's protocol" control,
   since (per "A protocol on its own") a protocol override is expressed through run staging, not
@@ -447,8 +454,9 @@ so every call site keeps writing one `onChange({ … })` regardless of where the
 
 ## Views
 
-- **Overview** — a single info table (file identity, run metadata from `zpcr.metadata`, and an
-  "Encrypted" row, see above) beside the thermal protocol text (`zpcr.protocolText`) and a
+- **Overview** — a single info table (file identity, run metadata from `zpcr.metadata` — including
+  a "Protocol" row with just the protocol's name, from `zpcr.protocol()`; the full thermal
+  protocol lives on its own Protocol tab, see below — and an "Encrypted" row, see above) plus a
   "Plate" section listing the plate's targets and samples as chips. The Encrypted row shows
   green "No" when nothing in the file is encrypted, orange "Yes" with the password used when
   encrypted content was successfully decrypted, or red "Yes" when it wasn't. The file bar's
@@ -465,6 +473,14 @@ so every call site keeps writing one `onChange({ … })` regardless of where the
   thresholds and calibration options change the Cq table. Unloaded wells are skipped, and the
   chips render bare (name only) whenever the Cq table is empty: an uncalibrated run, or a plate
   still behind the password prompt.
+- **Protocol** (`components/views/ProtocolView.tsx`) — the thermal protocol itself: the
+  structured step table (`ProtocolStepsTable`) when the format provides one, otherwise the
+  annotated `ProtocolDecoded` listing of `zpcr.protocolText`, plus the download/clone-to-`.prcl.txt`
+  buttons described under `PlateDownloadButton` above. Reads only `zpcr.protocol()`/
+  `zpcr.protocolText`, so it works identically for a `.zpcr`, a `.pcrd` or a Biomeme run — the
+  same format independence `OverviewView` has. Split out of Overview so a run's protocol detail
+  doesn't crowd the summary; `StandaloneProtocolView` (see "A protocol on its own" below) is the
+  equivalent tab for a `.prcl.txt` with no run around it.
 - **Curves** — the centerpiece (see below).
 - **Reference** — reference row vs factory calibration (see below).
 - **Calibration** — the run's `.Dcal` pure-dye response curves (see below). Last of the analysis
@@ -556,7 +572,7 @@ so every call site keeps writing one `onChange({ … })` regardless of where the
   step 2 (TEMP 95.0,10) — 45 passes in total"). It renders `parseRunDefinition()`'s directives
   and **parses nothing itself**: the verbs, the step numbering `GOTO` counts in, and the
   `PLATEREAD` scan mask are all core's, per [`protocol.md`](../../protocol.md). Takes plain
-  `text`, so `OverviewView` and the Instrument view's staged protocol reuse it unchanged — the
+  `text`, so `ProtocolView` and the Instrument view's staged protocol reuse it unchanged — the
   latter with `annotated={false}`, which drops the reading column and leaves the program itself
   (plus the scan mask's channels and sweep mode, on a sub-line — a packed operand no text says).
 - **`.prcl`** → `DecodedProtocol` (`components/raw/DecodedProtocol.tsx`), which decrypts the
@@ -564,7 +580,7 @@ so every call site keeps writing one `onChange({ … })` regardless of where the
   a settings panel (lid/shutoff/volume/real-time — flags the text grammar has no directive for)
   plus a numbered step table via the shared `ProtocolStepsTable` +
   `describeProtocolStep` (`components/raw/ProtocolSteps.tsx`, core) — reused verbatim by
-  `PcrdRawView`'s **Protocol** node and `OverviewView`'s thermal-protocol block, so all three
+  `PcrdRawView`'s **Protocol** node and `ProtocolView`'s thermal-protocol block, so all three
   format the same `ProtocolStep[]` identically (GOTO-target-friendly numbering, a `●` read
   marker). Falls back to `ProtocolDecoded` on `runDefinition` for the plaintext `.prcl` variant
   (`prcl.md` §1.1), which carries no XML step list — and *without* the settings panel, since
@@ -846,7 +862,7 @@ needs to know it isn't a `.zpcr`. Two real differences do surface, both because 
 capability checks rather than format checks:
 
 - **Fewer live view tabs.** `App.tsx`'s `BIOMEME_VIEWS` enables only
-  Overview/Curves/Plates/Raw — Reference has no reference row to show and Calibration has no
+  Overview/Protocol/Curves/Plates/Raw — Reference has no reference row to show and Calibration has no
   `.Dcal` set. The same pattern `isStandalonePlate` already used for a bare `.pltd`/`.plt.csv`
   entry. Raw *does* appear, but not through `RawFilesView`: the run has no archive to browse
   (`Zpcr.archive` is honestly empty, the same "nothing here" `.pcrd` already models) and yet is

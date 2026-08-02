@@ -960,8 +960,8 @@ async function passwordChecks(chrome, origin, pw) {
     .then(JSON.parse);
   check(
     "a locked run keeps the tab strip, with every file tab disabled",
-    lockedStrip.length === 8 &&
-      lockedStrip.filter((t) => t.off).length === 6 &&
+    lockedStrip.length === 9 &&
+      lockedStrip.filter((t) => t.off).length === 7 &&
       !lockedStrip.find((t) => t.label === "Instrument").off &&
       !lockedStrip.find((t) => t.label === "Files").off,
     JSON.stringify(lockedStrip),
@@ -1162,28 +1162,28 @@ async function instrumentRunChecks(chrome, origin) {
   await loadFile(cdp, ZPCR);
   await sleep(800);
   await cdp.eval(
-    `window.location.hash = "file=20260720_FirstQualification.zpcr&view=overview", undefined`,
+    `window.location.hash = "file=20260720_FirstQualification.zpcr&view=protocol", undefined`,
   );
   await waitFor(() => cdp.eval(`!!document.querySelector(".overview__blockhead")`), {
-    what: "the overview protocol section",
+    what: "the Protocol tab's thermal protocol section",
   });
 
-  // Overview is where a `.prcl.txt` comes from in the first place — the button is beside the
-  // protocol section's heading, not the archive download at the top of the page.
+  // The Protocol tab is where a `.prcl.txt` comes from in the first place — the button is beside
+  // the protocol section's heading, not the archive download on Overview.
   const dlLabel = await cdp.eval(
     `(document.querySelector(".overview__blockhead .raw__download") || {})
        .getAttribute?.("aria-label") ?? "missing"`,
   );
   check(
-    "Overview offers the thermal protocol as a .prcl.txt download",
+    "The Protocol tab offers the thermal protocol as a .prcl.txt download",
     /\.prcl\.txt/.test(dlLabel),
     dlLabel,
   );
 
-  // Overview is also where the *reading* of the protocol lives (`protocol.md`) — the per-directive
-  // gloss that makes an ASCII program reviewable without knowing the language. Checked here rather
-  // than by screenshot because the point is that the decode is present and paired with the right
-  // line. The Instrument view deliberately doesn't repeat it (see below).
+  // The Protocol tab is also where the *reading* of the protocol lives (`protocol.md`) — the
+  // per-directive gloss that makes an ASCII program reviewable without knowing the language.
+  // Checked here rather than by screenshot because the point is that the decode is present and
+  // paired with the right line. The Instrument view deliberately doesn't repeat it (see below).
   const notes = await cdp.eval(`(() => {
     const lines = [...document.querySelectorAll(".overview__block .decoded__protoline")].map((l) => ({
       num: l.querySelector(".decoded__protonum").textContent.trim(),
@@ -1196,7 +1196,7 @@ async function instrumentRunChecks(chrome, origin) {
   const read = notes.lines.find((l) => l.text.startsWith("PLATEREAD"));
   const goto = notes.lines.find((l) => l.text.startsWith("GOTO"));
   check(
-    "every directive on Overview is annotated with what it does",
+    "every directive on the Protocol tab is annotated with what it does",
     notes.annotated && /Heated lid at 105/.test(hotlid?.note ?? "") && hotlid.num === "",
     JSON.stringify(hotlid),
   );
@@ -1315,37 +1315,50 @@ async function instrumentRunChecks(chrome, origin) {
     )
     .then(JSON.parse);
   check(
-    "a .prcl.txt enables Overview and Instrument (and the file-independent Files tab), nothing else",
-    protoTabs.filter((t) => !t.off).map((t) => t.label).join(",") === "Files,Overview,Instrument",
+    "a .prcl.txt enables Overview, Protocol, Raw and Instrument (and the file-independent Files tab), nothing else",
+    protoTabs.filter((t) => !t.off).map((t) => t.label).join(",") ===
+      "Files,Overview,Protocol,Raw,Instrument",
     JSON.stringify(protoTabs.filter((t) => !t.off).map((t) => t.label)),
   );
 
-  const protoOverviewTab = await tabBecomes(cdp, "Overview");
-  const protoOverview = await cdp.eval(`(() => {
-    const dl = document.querySelector(".overview__infotable");
-    const info = {};
-    if (dl) {
-      const dts = [...dl.querySelectorAll("dt")];
-      const dds = [...dl.querySelectorAll("dd")];
-      dts.forEach((dt, i) => { info[dt.textContent.trim()] = dds[i].textContent.trim(); });
-    }
-    return {
-      info,
-      lines: [...document.querySelectorAll(".decoded__protoline")].map((l) => ({
-        num: l.querySelector(".decoded__protonum").textContent.trim(),
-        text: l.querySelector(".decoded__prototext").textContent.trim(),
-        note: l.querySelector(".decoded__protonote").textContent.trim(),
-      })),
-    };
-  })()`);
+  // Overview itself, for a protocol file, is a minimal identity card (the same info table every
+  // other kind's Overview leads with) — the protocol's own detail lives on the Protocol tab.
+  const infoTable = () =>
+    cdp.eval(`(() => {
+      const dl = document.querySelector(".overview__infotable");
+      const info = {};
+      if (dl) {
+        const dts = [...dl.querySelectorAll("dt")];
+        const dds = [...dl.querySelectorAll("dd")];
+        dts.forEach((dt, i) => { info[dt.textContent.trim()] = dds[i].textContent.trim(); });
+      }
+      return info;
+    })()`);
+  const overviewInfo = await infoTable();
   check(
-    "…and its Overview reports the protocol's own settings, from the decode not the text",
-    protoOverviewTab === "Overview" &&
-      protoOverview.info.Lid === "105 °C" &&
-      protoOverview.info.Volume === "25 µL" &&
-      protoOverview.info.Steps === "3" &&
-      /all 6 channels/.test(protoOverview.info.Scan ?? ""),
-    JSON.stringify(protoOverview.info),
+    "…and its Overview shows just the file identity, nothing decoded",
+    Object.keys(overviewInfo).join(",") === "Type,Filename,Last modified" &&
+      /Gradient/.test(overviewInfo.Filename ?? ""),
+    JSON.stringify(overviewInfo),
+  );
+
+  await clickTab(cdp, "Protocol");
+  const protoTab = await tabBecomes(cdp, "Protocol");
+  const protoInfo = await infoTable();
+  const protoLines = await cdp.eval(`[...document.querySelectorAll(".decoded__protoline")].map((l) => ({
+    num: l.querySelector(".decoded__protonum").textContent.trim(),
+    text: l.querySelector(".decoded__prototext").textContent.trim(),
+    note: l.querySelector(".decoded__protonote").textContent.trim(),
+  }))`);
+  const protoOverview = { tiles: protoInfo, lines: protoLines };
+  check(
+    "…and its Protocol tab reports the protocol's own settings, from the decode not the text",
+    protoTab === "Protocol" &&
+      protoOverview.tiles.Lid === "105 °C" &&
+      protoOverview.tiles.Volume === "25 µL" &&
+      protoOverview.tiles.Steps === "3" &&
+      /all 6 channels/.test(protoOverview.tiles.Scan ?? ""),
+    JSON.stringify(protoOverview.tiles),
   );
   const grad = protoOverview.lines.find((l) => l.text.startsWith("GRAD"));
   const strayGoto = protoOverview.lines.find((l) => l.text.startsWith("GOTO"));
@@ -1826,7 +1839,7 @@ async function experimentNameChecks(chrome, origin) {
     JSON.stringify(raw),
   );
 
-  // The tab strip is static: the same eight tabs whatever the file is, with the ones this file
+  // The tab strip is static: the same nine tabs whatever the file is, with the ones this file
   // has no answer for *disabled* rather than removed (`ViewSelector`'s `enabled` prop). Only a
   // browser can show this — it is a claim about two different files' headers being the same
   // shape, and the failure it guards against (tabs appearing and disappearing under the pointer
@@ -1841,12 +1854,12 @@ async function experimentNameChecks(chrome, origin) {
   const offLabels = (s) => s.filter((t) => t.off).map((t) => t.label);
   const bio = await strip();
   check(
-    "a Biomeme run keeps all eight tabs, greying out the two it can't answer",
-    bio.length === 8 && offLabels(bio).join(",") === "Reference,Calibration",
+    "a Biomeme run keeps all nine tabs, greying out the two it can't answer",
+    bio.length === 9 && offLabels(bio).join(",") === "Reference,Calibration",
     JSON.stringify(bio),
   );
 
-  // Back to the .zpcr loaded above: the same eight tabs, none of them off — so the strip's shape
+  // Back to the .zpcr loaded above: the same nine tabs, none of them off — so the strip's shape
   // really is file-independent, and the greying above is about capability rather than layout.
   await cdp.eval(
     `(() => { [...document.querySelectorAll(".filechip__main")]
@@ -1859,7 +1872,7 @@ async function experimentNameChecks(chrome, origin) {
   const run = await strip();
   check(
     "switching back to a .zpcr re-enables them in place, with the strip unchanged",
-    run.length === 8 && run.map((t) => t.label).join(",") === bio.map((t) => t.label).join(","),
+    run.length === 9 && run.map((t) => t.label).join(",") === bio.map((t) => t.label).join(","),
     JSON.stringify(run),
   );
   cdp.close();

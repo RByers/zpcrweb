@@ -60,6 +60,7 @@ type PlateFileKind = "pltd" | "csv";
  * — isn't a lens on the active file, so it sits in its own group there rather than the main one. */
 export type ViewId =
   | "overview"
+  | "protocol"
   | "curves"
   | "plates"
   | "reference"

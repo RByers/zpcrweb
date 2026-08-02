@@ -22,7 +22,9 @@ import { PcrdRawView } from "./components/views/PcrdRawView";
 import { StandalonePlateView } from "./components/views/StandalonePlateView";
 import { StandalonePlateOverviewView } from "./components/views/StandalonePlateOverviewView";
 import { StandaloneRawView } from "./components/views/StandaloneRawView";
+import { StandaloneProtocolOverview } from "./components/views/StandaloneProtocolOverview";
 import { StandaloneProtocolView } from "./components/views/StandaloneProtocolView";
+import { ProtocolView } from "./components/views/ProtocolView";
 import { AboutView } from "./components/views/AboutView";
 import { InstrumentView } from "./components/views/InstrumentView";
 import type { ViewId } from "./state/useZpcrStore";
@@ -33,11 +35,13 @@ const STANDALONE_VIEWS = ["overview", "plates", "raw"] as const;
  * (`Zpcr.archive` is honestly empty) but there is very much a file to read — rendered by the
  * same {@link StandaloneRawView} a `.plt.csv` gets, for the same reason (one text file, no
  * container around it). */
-const BIOMEME_VIEWS = ["overview", "curves", "plates", "raw"] as const;
-/** A `.prcl.txt` is two things: a document to read (Overview, the annotated directive listing
- * of `protocol.md`) and an input to a run (Instrument, where it is staged). Nothing else applies
- * — it has no curves, no plate and no archive to browse. */
-const PROTOCOL_VIEWS = ["overview", "instrument"] as const;
+const BIOMEME_VIEWS = ["overview", "protocol", "curves", "plates", "raw"] as const;
+/** A `.prcl.txt` is a document to read (Protocol, the annotated directive listing of
+ * `protocol.md`), a file to inspect verbatim (Raw — it's plain text, so this is the same view a
+ * `.plt.csv` gets) and an input to a run (Instrument, where it is staged). Overview stays minimal
+ * — just the filename, per {@link StandaloneProtocolOverview} — since Protocol is where the
+ * content actually lives. It has no curves and no plate. */
+const PROTOCOL_VIEWS = ["overview", "protocol", "raw", "instrument"] as const;
 
 /** A `.pltd`/`.plt.csv` uploaded on its own, rather than a run — only these three tabs apply. */
 const isStandaloneKind = (kind: string) => kind === "pltd" || kind === "csv";
@@ -65,7 +69,7 @@ const EXAMPLE_FILE = "examples/20260726_S183-S185_RVP.zpcr";
 
 /** The wordmark, doubling as the link to the About page. Split so a narrow header can drop the
  * "//web" tail (see `.app__logo-rest` in `app.css` and `useHeaderFit`) and keep "zpcr" — the
- * full mark plus the seven view tabs plus the load button don't fit across a phone in portrait. */
+ * full mark plus the eight view tabs plus the load button don't fit across a phone in portrait. */
 function Logo({ onClick }: { onClick: () => void }) {
   return (
     <button
@@ -419,13 +423,18 @@ export function App() {
             {view === "raw" && <StandaloneRawView key={active.id} file={active} />}
           </>
         ) : isStandaloneProtocol ? (
-          store.activeProtocolFile !== null && (
-            <StandaloneProtocolView
-              file={active}
-              runDefinition={store.activeProtocolFile}
-              onRenameFile={(name) => void store.renameFile(active.id, name)}
-            />
-          )
+          <>
+            {view === "overview" && (
+              <StandaloneProtocolOverview
+                file={active}
+                onRenameFile={(name) => void store.renameFile(active.id, name)}
+              />
+            )}
+            {view === "protocol" && store.activeProtocolFile !== null && (
+              <StandaloneProtocolView file={active} runDefinition={store.activeProtocolFile} />
+            )}
+            {view === "raw" && <StandaloneRawView key={active.id} file={active} />}
+          </>
         ) : !zpcr ? (
           <div className="app__gate">
             {activeRun?.needsPassword && (
@@ -464,8 +473,10 @@ export function App() {
                   store.markDownloaded(active.id);
                   return bytes;
                 }}
-                addFiles={store.addFiles}
               />
+            )}
+            {view === "protocol" && (
+              <ProtocolView zpcr={zpcr} file={active} addFiles={store.addFiles} />
             )}
             {view === "curves" && (
               <CurvesView

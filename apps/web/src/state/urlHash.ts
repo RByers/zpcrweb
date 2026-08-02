@@ -28,6 +28,7 @@ import type { ViewId } from "./useZpcrStore";
 
 const VIEW_IDS: ViewId[] = [
   "overview",
+  "protocol",
   "curves",
   "plates",
   "reference",

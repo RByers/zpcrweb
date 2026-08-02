@@ -34,11 +34,12 @@ import {
 
 const VIEW_LABELS = {
   overview: "Overview",
+  protocol: "Protocol",
   curves: "Curves",
   plates: "Plates",
   reference: "Reference",
   calibration: "Calibration",
-  raw: "Raw files",
+  raw: "Raw",
   instrument: "Instrument",
   // Reached by clicking the logo, so it has no tab to go `aria-selected` — matched by the
   // rendered card instead (see the `settle` branch below).

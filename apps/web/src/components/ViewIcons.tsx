@@ -35,6 +35,16 @@ export function OverviewIcon() {
   );
 }
 
+/** Protocol: a thermal-cycling step profile — a stepped waveform, not a smooth curve, to read
+ * apart from {@link CurvesIcon} at a glance. */
+export function ProtocolIcon() {
+  return (
+    <Svg>
+      <path d="M2 11.5h2V7.5h2v4h2V4.5h2v7h2V6h2" />
+    </Svg>
+  );
+}
+
 /** Curves: an amplification sigmoid rising off the baseline, on a pair of axes. */
 export function CurvesIcon() {
   return (

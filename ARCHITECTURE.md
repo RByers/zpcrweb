@@ -141,7 +141,7 @@ than let that difference leak into every consumer, `parsePcrd` decodes straight 
 - **`Zpcr.protocolText`** — the thermal protocol's one-line program, sourced from the real
   `ProtocolRunDefinition.txt` file (`.zpcr`) or the `protocol2` element's `runDefinition`
   attribute (`.pcrd`) — the one piece of `.pcrd` data that needed lifting into a proper `Zpcr`
-  field (rather than a fake archive entry) because a real `.zpcr` consumer (`OverviewView`)
+  field (rather than a fake archive entry) because a real `.zpcr` consumer (`ProtocolView`)
   already depended on reading it by name.
 - **`Zpcr.protocol()`** — a typed `ProtocolDocument` (name, lid/volume settings, and — when
   available — the ordered step list), to whatever fidelity each format allows without a

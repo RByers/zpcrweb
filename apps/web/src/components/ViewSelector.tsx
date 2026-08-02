@@ -6,12 +6,14 @@ import {
   InstrumentIcon,
   OverviewIcon,
   PlatesIcon,
+  ProtocolIcon,
   RawIcon,
   ReferenceIcon,
 } from "./ViewIcons";
 
 const ALL_VIEWS: { id: ViewId; label: string; Icon: () => React.ReactElement }[] = [
   { id: "overview", label: "Overview", Icon: OverviewIcon },
+  { id: "protocol", label: "Protocol", Icon: ProtocolIcon },
   { id: "curves", label: "Curves", Icon: CurvesIcon },
   { id: "plates", label: "Plates", Icon: PlatesIcon },
   { id: "reference", label: "Reference", Icon: ReferenceIcon },
@@ -45,7 +47,7 @@ interface Props {
   /** Which file-backed tabs the active file supports, e.g. `["plates", "raw"]` for a standalone
    * `.pltd`/`.plt.csv` entry. Defaults to every tab (a `.zpcr`/`.pcrd` run).
    *
-   * **The tab strip is the same six tabs whatever the answer is** — a file the tab doesn't apply
+   * **The tab strip is the same seven tabs whatever the answer is** — a file the tab doesn't apply
    * to disables it rather than removing it. A tab set that changed shape per file moved every
    * other tab under the pointer each time the selection changed, and hid the fact that the strip
    * is the app's fixed set of lenses rather than a per-file menu. Greying out says "not for this
