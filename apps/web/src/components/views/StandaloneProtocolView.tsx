@@ -63,8 +63,8 @@ export function StandaloneProtocolView({
           <h2 className="overview__h">Thermal protocol</h2>
         </div>
         <span className="decoded__hint mono">
-          {file.name} — the ASCII run definition (prcl.md §3.1), the form an instrument records
-          and the form this app would send. Stage it against a plate on the Instrument tab.
+          {file.name} — the pure text run definition. Stage it against a plate on the Instrument
+          tab.
         </span>
         <ProtocolDecoded text={runDefinition} />
       </section>
