@@ -1030,6 +1030,22 @@
   color: var(--ink-2);
   word-break: break-all;
 }
+/* The file/run info table beside the download button, in the slot `.overview__tiles` used to
+   fill — same sizing, but a two-column label/value list (see `.overview__dl`) rather than a
+   grid of tiles, since it now carries filename/mtime/run-date and the encryption + archive
+   identity fields alongside the run facts. */
+.overview__infotable {
+  flex: 1;
+  min-width: 0;
+  grid-template-columns: max-content 1fr;
+  column-gap: 18px;
+  row-gap: 6px;
+  padding: 12px 14px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 13px;
+}
 /* Phone: tiles shrink to a narrower minimum, the head wraps instead of squeezing the tiles
    against the download button, and the definition list drops to one column so long values get
    their own line instead of being crushed into a sliver next to the label column. */

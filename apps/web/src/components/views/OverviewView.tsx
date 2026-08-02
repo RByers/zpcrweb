@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   formatRunDefinitionText,
   plateTargets,
@@ -18,11 +18,11 @@ import { channelColor } from "../../lib/channelColors";
 import { runEncryptionStatus } from "../../lib/encryptionStatus";
 import { curveKey, useRunAnalysis } from "../../lib/runAnalysis";
 import type { AddFilesOptions, FileSettings, RunResult } from "../../state/useZpcrStore";
-import type { ExperimentIdentity } from "../../lib/experiment";
+import { formatCompactDateTime, type ExperimentIdentity } from "../../lib/experiment";
 
-interface Tile {
+interface InfoRow {
   label: string;
-  value: string;
+  value: ReactNode;
 }
 
 /** Positive/negative curve tally behind one plate chip — see {@link chipCounts}. */
@@ -44,8 +44,9 @@ export function OverviewView({
 }: {
   zpcr: Zpcr;
   /** The active run's own name/bytes — downloaded verbatim, so this is also how a `.zpcr`
-   * attached via the Plates view's upload control gets back onto disk (see `PlatesView`). */
-  file: { name: string; bytes: Uint8Array };
+   * attached via the Plates view's upload control gets back onto disk (see `PlatesView`). Also
+   * carries the source file's own `lastModified` (its OS mtime), shown in the info table. */
+  file: { name: string; bytes: Uint8Array; lastModified: number };
   /** Bytes for the download button: the loaded archive plus the run's current analysis settings
    * as its `zpcrweb.json` entry (`ZpcrStore.exportBytes`), so the copy that leaves the browser
    * carries the thresholds it was read with. Falls back to `file.bytes` when absent. */
@@ -115,7 +116,16 @@ export function OverviewView({
     [plateSamples, bySample],
   );
 
-  const tiles: Tile[] = [
+  // One combined info table under the name: file identity (name, mtime, run date) followed by
+  // the run's own facts (block/serial/channels/…) and, at the end, the encryption status and
+  // archive identity — everything that used to be split across the tiles grid and two separate
+  // "Encrypted"/"Run identity" sections below.
+  const infoRows: InfoRow[] = [
+    { label: "Filename", value: identity.fileName },
+    { label: "Last modified", value: formatCompactDateTime(new Date(file.lastModified)) },
+    // Omitted rather than shown as "—": a standalone plate/protocol file has no run to date at
+    // all, and a blank row would read as a missing value rather than a nonsensical question.
+    ...(identity.dateText ? [{ label: "Run date", value: identity.dateText }] : []),
     { label: "Block", value: m.blockDescription || "—" },
     { label: "Base serial", value: m.baseSerialNumber || "—" },
     { label: "Channels", value: `${m.channelCount} (mask ${m.scanMask})` },
@@ -126,8 +136,16 @@ export function OverviewView({
     { label: "Cycles", value: String(steps.reduce((sum, s) => sum + s.readCount, 0)) },
     { label: "Plate", value: `${m.numberPlateRows}×${m.numberPlateColumns} + ${m.numberReferenceRows} ref` },
     { label: "Protocol", value: protocolName || "—" },
-    // No "Run start" tile: the headline above already carries it, in local time.
     { label: "Last block temp", value: lastTemp != null ? `${lastTemp.toFixed(1)} °C` : "—" },
+    { label: "Encrypted", value: <EncryptedValue status={encStatus} /> },
+    { label: "Identifier", value: m.identifier || "—" },
+    { label: "Data file", value: m.dataFile || "—" },
+    // Only a `.zpcr` has inner files to count. A `.pcrd` is one XML document and gets
+    // `EMPTY_ARCHIVE`, which rendered as a flatly misleading "0 files" — so the row is dropped
+    // rather than answered wrongly.
+    ...(zpcr.archive.entries.length > 0
+      ? [{ label: "Archive entries", value: `${zpcr.archive.entries.length} files` }]
+      : []),
   ];
 
   return (
@@ -150,14 +168,14 @@ export function OverviewView({
         </div>
       )}
       <div className="overview__head">
-        <section className="overview__tiles">
-          {tiles.map((t) => (
-            <div className="tile" key={t.label}>
-              <div className="tile__label">{t.label}</div>
-              <div className="tile__value mono">{t.value}</div>
-            </div>
+        <dl className="overview__dl overview__infotable mono">
+          {infoRows.map((r) => (
+            <Fragment key={r.label}>
+              <dt>{r.label}</dt>
+              <dd>{r.value}</dd>
+            </Fragment>
           ))}
-        </section>
+        </dl>
 
         <div className="overview__toolbar">
           <button
@@ -222,7 +240,7 @@ export function OverviewView({
 
       {plate && (targets.length > 0 || samples.length > 0) && (
         <section className="overview__block">
-          <h2 className="overview__h">Plate</h2>
+          <h2 className="overview__h">Plate{plate.identityKey ? `: ${plate.identityKey}` : ""}</h2>
           <div className="overview__platelists">
             {targets.length > 0 && (
               <div className="overview__platelist">
@@ -252,40 +270,22 @@ export function OverviewView({
           </div>
         </section>
       )}
-
-      <section className="overview__block">
-        <h2 className="overview__h">Encrypted</h2>
-        {encStatus.kind === "none" && <div className="overview__enc overview__enc--none">No</div>}
-        {encStatus.kind === "decrypted" && (
-          <div className="overview__enc overview__enc--decrypted">
-            Yes
-            <div className="overview__enc-password mono">password: {encStatus.password}</div>
-          </div>
-        )}
-        {encStatus.kind === "locked" && <div className="overview__enc overview__enc--locked">Yes</div>}
-      </section>
-
-      <section className="overview__block">
-        <h2 className="overview__h">Run identity</h2>
-        <dl className="overview__dl mono">
-          <dt>Identifier</dt>
-          <dd>{m.identifier || "—"}</dd>
-          <dt>Data file</dt>
-          <dd>{m.dataFile || "—"}</dd>
-          {/* Only a `.zpcr` has inner files to count. A `.pcrd` is one XML document and gets
-              `EMPTY_ARCHIVE`, which rendered as a flatly misleading "0 files" — so the row is
-              dropped rather than answered wrongly. This is the one place Overview notices the
-              archive at all; everything else it shows is decoded run data. */}
-          {zpcr.archive.entries.length > 0 && (
-            <>
-              <dt>Archive entries</dt>
-              <dd>{zpcr.archive.entries.length} files</dd>
-            </>
-          )}
-        </dl>
-      </section>
     </div>
   );
+}
+
+/** The "Encrypted" row's value, in the same wording/colors the section used to render on its
+ * own — just now one row of {@link OverviewView}'s info table instead of a whole section. */
+function EncryptedValue({ status }: { status: ReturnType<typeof runEncryptionStatus> }) {
+  if (status.kind === "none") return <span className="overview__enc overview__enc--none">No</span>;
+  if (status.kind === "decrypted")
+    return (
+      <span className="overview__enc overview__enc--decrypted">
+        Yes
+        <span className="overview__enc-password mono"> (password: {status.password})</span>
+      </span>
+    );
+  return <span className="overview__enc overview__enc--locked">Yes</span>;
 }
 
 /**
