@@ -101,13 +101,14 @@ function fileEncryptionStatus(
   return runEncryptionStatus(run, password);
 }
 
-/** A standalone plate file's well count — `24w` — rendered as the chip's second line, in the
- * same slot and style as a run's date (`identity.dateText`): the two are mutually exclusive
+/** A standalone plate file's well count — `24 wells` — rendered as the chip's second line, in
+ * the same slot and style as a run's date (`identity.dateText`): the two are mutually exclusive
  * (a `.pltd`/`.csv` carries no run date), so they share `filechip__date` rather than each
  * getting their own rule. */
 function wellsText(f: LoadedFile, plateFile: PlateFileResult | undefined): string {
   if ((f.kind === "pltd" || f.kind === "csv") && plateFile?.plate) {
-    return `${plateFile.plate.wells.filter((w) => w.loaded).length}w`;
+    const n = plateFile.plate.wells.filter((w) => w.loaded).length;
+    return `${n} well${n === 1 ? "" : "s"}`;
   }
   return "";
 }
