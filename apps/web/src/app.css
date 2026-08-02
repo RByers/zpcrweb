@@ -3367,11 +3367,15 @@
   color: var(--ink);
 }
 /* Which of STATUS?'s status-register bits are currently set (usb.md §3.2 field 7) — a compact
-   badge row rather than another label/value pair, since more than one can be true at once. */
+   badge row rather than another label/value pair, since more than one can be true at once. This
+   row stays mounted even with no flags set, so its min-height (one badge's worth) holds the
+   space instead of letting the Actions section's buttons below shift as bits flip. */
 .instrument__flags {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 4px;
+  min-height: 26px;
   padding: 4px 0;
 }
 .instrument__flag {

@@ -289,6 +289,16 @@ export function InstrumentRail({
                 </div>
               )}
               {status.running && <LiveThermalChart samples={liveThermal} />}
+              {/* Reserved row, always mounted so its height doesn't come and go with the flags
+                  themselves — otherwise everything below (temperatures, Actions' Stop/Pause/Start
+                  buttons) shifts up and down as status bits flip. */}
+              <div className="instrument__flags">
+                {STATUS_FLAG_LABELS.filter(([key]) => status.flags[key]).map(([key, label]) => (
+                  <span key={key} className="instrument__flag">
+                    {label}
+                  </span>
+                ))}
+              </div>
               <Stat label="Block" value={temp(status.blockTempC, 2)} />
               <Stat label="Sample*" value={temp(status.sampleTempC, 2)} />
               <Stat label="Lid heater" value={temp(status.lidTempC)} />
@@ -311,15 +321,6 @@ export function InstrumentRail({
               <Stat label="Run" value={status.runName || "(none)"} />
               {status.errors.length > 0 && (
                 <Stat label="Errors" value={status.errors.join(", ")} tone="warn" />
-              )}
-              {STATUS_FLAG_LABELS.filter(([key]) => status.flags[key]).length > 0 && (
-                <div className="instrument__flags">
-                  {STATUS_FLAG_LABELS.filter(([key]) => status.flags[key]).map(([key, label]) => (
-                    <span key={key} className="instrument__flag">
-                      {label}
-                    </span>
-                  ))}
-                </div>
               )}
               {rtStatus && (
                 <>
