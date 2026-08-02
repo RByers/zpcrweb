@@ -161,6 +161,14 @@ than let that difference leak into every consumer, `parsePcrd` decodes straight 
   gets the same treatment from `describeProtocolStep()`, and `parseScanMask()` decodes the
   `PLATEREAD` operand (`usb.md` §3.1) for the text form, `.Plateread`'s `CHANNELMASK` and
   `RunInfo.xml`'s `ScanMask` alike.
+- **`ProtocolBuilder`** (`protocolBuilder.ts`, [`protocol.md`](./protocol.md) §10) — the same
+  language in the other direction: a protocol as a header plus typed steps, immutable, and the
+  library's only writer of directive text. It exists so an editor can be built without one
+  existing anywhere near the grammar — `END`'s position, the step numbering and a `GOTO`'s
+  target are properties of the representation rather than rules a UI has to remember to enforce,
+  and reading is strict (it refuses anything it couldn't write back unchanged) precisely so a
+  protocol nobody fully understands is never silently rewritten. The web app's protocol editor
+  is built on it and touches no text at all.
 - **`Zpcr.plates()`** — a `.pcrd` embeds exactly one plate (`plateSetup2`), already decrypted
   along with the rest of the document. `pcrd.ts` reuses `pltd.ts`'s `parsePlatesetup2` (the
   same `<platesetup2>`/`<plateSetup2>` schema, differing only in root-tag case) and wraps it in

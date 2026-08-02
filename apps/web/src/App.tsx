@@ -431,7 +431,12 @@ export function App() {
               />
             )}
             {view === "protocol" && store.activeProtocolFile !== null && (
-              <StandaloneProtocolView file={active} runDefinition={store.activeProtocolFile} />
+              <StandaloneProtocolView
+                key={active.id}
+                file={active}
+                runDefinition={store.activeProtocolFile}
+                onChangeProtocol={(text) => store.setProtocolText(active.id, text)}
+              />
             )}
             {view === "raw" && <StandaloneRawView key={active.id} file={active} />}
           </>

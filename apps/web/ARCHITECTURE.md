@@ -267,10 +267,12 @@ things:
   `Type`/`Filename`/`Last modified` info-table rows every kind's Overview leads with. All the
   protocol's own content lives on Protocol instead, the same split a run's Overview/Protocol pair
   uses.
-- **Protocol** (`StandaloneProtocolView`) — the protocol *as a document*: stat tiles for the
-  settings its header directives carry, then the same annotated `ProtocolDecoded` listing a run's
-  Protocol tab uses. Everything shown is `parseRunDefinition`'s (`protocol.md`); the view picks
-  tiles out of the decoded program and counts directives, and reads nothing out of the text.
+- **Protocol** (`StandaloneProtocolView`) — the protocol *as a document*, and the one place it
+  can be **edited**: stat tiles for the settings its header directives carry, then the same
+  annotated `ProtocolDecoded` listing a run's Protocol tab uses, behind an Edit button
+  (`components/protocol/`, see "Editing a protocol" below). Everything shown is
+  `parseRunDefinition`'s (`protocol.md`); the view picks tiles out of the decoded program and
+  counts directives, and reads nothing out of the text.
 - **Raw** (`StandaloneRawView`, shared with `.pltd`/`.plt.csv`/Biomeme) — the file's own bytes
   verbatim, since a `.prcl.txt` is already plain UTF-8 text with nothing to decrypt.
 - **Instrument** — the protocol *as an input*, staged against a plate (see "The Instrument view").
@@ -280,6 +282,37 @@ on any tab was forced into the Instrument view because it had no file-backed vie
 now falls back like every other file, to the first tab its kind enables — and **loading one lands
 on Overview** (`addFiles`), because opening a protocol is asking what it is; Instrument is where
 you go when you mean to start a run.
+
+### Editing a protocol (`components/protocol/`)
+
+Only a `.prcl.txt` gets an editor, and only on its own Protocol tab. Every other carrier of the
+same text (`protocol.md` §2) is a record of a run that already happened — there is no honest way
+to edit one. A `.prcl.txt` is the portable, authorable form, so this is where authoring belongs.
+
+- **The editor never touches text.** `ProtocolEditor` edits core's `ProtocolBuilder`
+  (`protocol.md` §10), which owns serialization, step numbering, `END`'s position and what a
+  legal `GOTO` target is. There is no free-text mode: a protocol is typed at the instrument
+  directive by directive (§7), so a file that can hold something the grammar doesn't is a file
+  that fails halfway through a run being set up. The consequence for this layer is that the UI
+  has no validity rules of its own — the fields, their units and their limits all come from
+  `validateStepDraft`/`PROTOCOL_LIMITS`.
+- **The listing is a decode of the builder's own output**, not a second rendering of the model,
+  so what is on screen is the text that would be sent. A modifier (`INC`, `RATE`, …) therefore
+  appears on its own line as it does in the file, while *editing* it means editing the step it
+  rides on — clicking a modifier row opens the owning step's form.
+- **The row form is a native `popover`** (`StepForm.tsx`), which is where Escape, light dismiss
+  and top-layer stacking come from rather than a document-level listener. It is positioned from
+  the row's own rect, since anchor positioning isn't broadly supported yet, and pulled back
+  inside the viewport (flipped above the row if need be) once it is up. Enter commits, ✓ commits,
+  clicking away discards.
+- **Done is not Save.** Edits are written to the file as they are made, via
+  `ZpcrStore.setProtocolText` — the Edit/Done button only switches the listing between reading
+  and editing. Undo/redo (buttons, Ctrl-Z/Ctrl-Y) are a stack of run definitions held by the
+  editor; the stack restarts when the file changes underneath it, judged against the *whole*
+  stack rather than the last value emitted, because effects run after their render and a prop
+  routinely lags one edit behind.
+- **A protocol the builder can't represent gets no editor**, with the reason on the disabled
+  button. Refusing is the honest answer: the alternative is rewriting bytes we didn't understand.
 
 ## Standalone plate entries and attach
 
@@ -432,7 +465,10 @@ so every call site keeps writing one `onChange({ … })` regardless of where the
   then written into it.
 - **Writing** is rate-limited to one archive rewrite per file per minute, plus a flush on active-
   file change, `visibilitychange` → `hidden`, and `pagehide` (`state/analysisPersist.ts`; the
-  first edit to an idle file writes immediately). The rewritten bytes go to IndexedDB only —
+  first edit to an idle file writes immediately). The scheduling itself is
+  `state/writeThrottle.ts`, shared with protocol edits (`setProtocolText`, which uses the same
+  policy on a 2-second window — a `.prcl.txt` is a few hundred bytes, not a re-zipped archive);
+  `analysisPersist.ts` keeps only what is specific to `zpcrweb.json`. The rewritten bytes go to IndexedDB only —
   never back into `files` state, where they would re-parse the run and rebuild every derived
   value on each save. `size` is deliberately left at the loaded file's size so `fileId()` still
   dedupes a re-add of the same file.

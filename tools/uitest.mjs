@@ -42,6 +42,12 @@ const DUPE = join(REPO, "tools/.uishot/dupe", EXAMPLE);
  * committed, since the point is the text form this app writes, not a captured artifact. */
 const PRCL_TXT = join(REPO, "tools/.uishot/dupe/Gradient.prcl.txt");
 const BAD_TXT = join(REPO, "tools/.uishot/dupe/not-a-protocol.txt");
+/** A protocol the editor can actually hold — the Gradient fixture above deliberately can't be
+ * represented (its `GOTO 4,39` names a step that doesn't exist), which is its own check. */
+const EDITABLE_TXT = join(REPO, "tools/.uishot/dupe/Cycling.prcl.txt");
+const EDITABLE_TXT_BODY =
+  "[ProtocolRunDefinition version 06.00]\nMETHOD CALC;\nHOTLID 105,30;\nVOLUME 20;\n" +
+  "TEMP 95.0,60;\nTEMP 95.0,10;\nTEMP 60.0,30;\nPLATEREAD #h3F;\nGOTO 2,39;\nEND;\n";
 /** A plate CSV naming its dyes and nothing else — the format records no channels, so the only
  * way these get one is the run they are staged with (`Zpcr.channelForDye`). */
 const PLATE_CSV = join(REPO, "tools/.uishot/dupe/Staged.plt.csv");
@@ -2032,6 +2038,246 @@ async function deleteConfirmChecks(chrome, origin) {
 }
 
 
+/**
+ * The protocol editor (`components/protocol/`, `protocol.md` §10).
+ *
+ * What a screenshot can't show and the core suite can't reach: that a click on a row opens a
+ * form for *that* directive, that committing it rewrites the file (not just the view), that the
+ * +/− pair renumbers the program around a GOTO, that undo/redo walk the same history the buttons
+ * do, and that a protocol the builder can't represent is refused an editor rather than silently
+ * rewritten. The serialization itself is core's and is asserted there
+ * (`test/protocolBuilder.test.ts`) — these are the checks about the *interaction*.
+ */
+async function protocolEditorChecks(chrome, origin) {
+  console.log("\nprotocol editor");
+  const cdp = await openPage(chrome.base, origin);
+  await emptyReload(cdp, origin);
+  mkdirSync(dirname(EDITABLE_TXT), { recursive: true });
+  writeFileSync(EDITABLE_TXT, EDITABLE_TXT_BODY);
+  writeFileSync(PRCL_TXT, PRCL_TXT_BODY);
+  await loadFile(cdp, EDITABLE_TXT);
+  await waitFor(() => chipPresent(cdp, "Cycling"), { what: "the editable .prcl.txt chip" });
+  await clickTab(cdp, "Protocol");
+  await tabBecomes(cdp, "Protocol");
+
+  /** Every directive as listed, in order — the same rows in both modes. */
+  const lines = () =>
+    cdp.eval(`[...document.querySelectorAll(".decoded__protoline")].map((l) => ({
+      num: l.querySelector(".decoded__protonum").textContent.trim(),
+      text: l.querySelector(".decoded__prototext").textContent.trim(),
+    }))`);
+  const program = async () => (await lines()).map((l) => l.text).join(" ");
+  const editBtn = () =>
+    cdp.eval(`(() => { const b = [...document.querySelectorAll(".overview__blocktools button")]
+        .find((x) => /^(Edit|Done)$/.test(x.textContent.trim()));
+       return b ? JSON.stringify({ label: b.textContent.trim(), off: b.disabled, why: b.title }) : "null"; })()`)
+      .then((v) => (v === "null" ? null : JSON.parse(v)));
+  const clickButton = (label) =>
+    cdp.eval(`(() => { const b = [...document.querySelectorAll(".overview__blocktools button")]
+        .find((x) => x.textContent.trim().startsWith(${JSON.stringify(label)}));
+       if (b) b.click(); return !!b; })()`);
+  /** Click the row whose directive text starts with `prefix`. */
+  const clickRow = (prefix) =>
+    cdp.eval(`(() => { const l = [...document.querySelectorAll(".protoedit__line")]
+        .find((x) => x.querySelector(".decoded__prototext").textContent.trim().startsWith(${JSON.stringify(prefix)}));
+       const b = l && l.querySelector(".protoedit__rowbtn");
+       if (b) b.click(); return !!b; })()`);
+  const rowTool = (prefix, cls) =>
+    cdp.eval(`(() => { const l = [...document.querySelectorAll(".protoedit__line")]
+        .find((x) => x.querySelector(".decoded__prototext").textContent.trim().startsWith(${JSON.stringify(prefix)}));
+       const b = l && l.querySelector(${JSON.stringify(cls)});
+       if (b) b.click(); return !!b; })()`);
+  /** The open form's labelled lines — label, current value, and the units beside it. */
+  const formLines = () =>
+    cdp.eval(`[...document.querySelectorAll(".stepform__popover .stepform__line")].map((l) => ({
+      label: l.querySelector(".stepform__label").textContent.trim(),
+      value: (l.querySelector("input, select") || {}).value ?? null,
+      units: l.querySelector(".stepform__units").textContent.trim(),
+    }))`);
+  const setField = (label, value) =>
+    cdp.eval(`(() => {
+      const line = [...document.querySelectorAll(".stepform__popover .stepform__line")]
+        .find((l) => l.querySelector(".stepform__label").textContent.trim() === ${JSON.stringify(label)});
+      const el = line && line.querySelector("input, select");
+      if (!el) return false;
+      const proto = el.tagName === "SELECT" ? HTMLSelectElement.prototype : HTMLInputElement.prototype;
+      Object.getOwnPropertyDescriptor(proto, "value").set.call(el, ${JSON.stringify(String(value))});
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+      return true; })()`);
+  const commitForm = () =>
+    cdp.eval(`(() => { const b = document.querySelector(".stepform__ok");
+       if (b) b.click(); return !!b; })()`);
+  const formOpen = () => cdp.eval(`!!document.querySelector(".stepform__popover")`);
+
+  const before = await program();
+  check(
+    "a .prcl.txt's Protocol tab lists the program and offers an Edit button",
+    (await editBtn())?.label === "Edit" && (await editBtn())?.off === false && /GOTO 2,39;/.test(before),
+    JSON.stringify({ btn: await editBtn(), before }),
+  );
+
+  // Nothing is clickable until Edit is pressed — reading a protocol must stay reading it.
+  check("…and no row is clickable before Edit is pressed", (await clickRow("TEMP")) === false);
+
+  await clickButton("Edit");
+  await waitFor(async () => (await editBtn())?.label === "Done", { what: "edit mode" });
+  check("Edit turns into Done", (await editBtn())?.label === "Done");
+
+  // A row's form is verb-specific: a TEMP gets Temperature and Duration with their units fixed
+  // beside them, never the raw operand string.
+  await clickRow("TEMP 60.0,30");
+  await waitFor(formOpen, { what: "the step form" });
+  const tempForm = await formLines();
+  check(
+    "clicking a TEMP row opens a Temperature/Duration form with units shown, not text",
+    tempForm.some((l) => l.label === "Temperature" && l.value === "60" && l.units === "°C") &&
+      tempForm.some((l) => l.label === "Duration" && l.value === "30" && /seconds/.test(l.units)),
+    JSON.stringify(tempForm),
+  );
+
+  await setField("Temperature", "58");
+  await commitForm();
+  await waitFor(async () => /TEMP 58\.0,30;/.test(await program()), { what: "the edited step" });
+  check("committing the form rewrites that directive", /TEMP 58\.0,30;/.test(await program()));
+  check("…and closes the form", (await formOpen()) === false);
+
+  // The edit is in the *file*, not just the view: reload from IndexedDB and it's still there.
+  await cdp.send("Page.reload", {});
+  await sleep(600);
+  await waitFor(() => chipPresent(cdp, "Cycling"), { what: "the chip after reload" });
+  await clickTab(cdp, "Protocol");
+  await tabBecomes(cdp, "Protocol");
+  check(
+    "an edit is written to the file as it's made, with no Done required",
+    /TEMP 58\.0,30;/.test(await program()),
+    await program(),
+  );
+
+  await clickButton("Edit");
+  await waitFor(async () => (await editBtn())?.label === "Done", { what: "edit mode again" });
+  // Undo reaches back to the file as this editing session found it — the reload above ended the
+  // previous session's history, which is the point of restarting it when the file changes
+  // underneath the editor.
+  const baseline = await program();
+
+  // Insert renumbers everything below it, and the GOTO that pointed past the insertion follows
+  // its step rather than its number (`ProtocolBuilder.withInsertedStep`).
+  await rowTool("TEMP 95.0,60", ".protoedit__iconbtn");
+  await waitFor(formOpen, { what: "the new-step form" });
+  await setField("Temperature", "50");
+  await setField("Duration", "120");
+  await commitForm();
+  await waitFor(async () => /TEMP 50\.0,120;/.test(await program()), { what: "the inserted step" });
+  const inserted = await lines();
+  check(
+    "+ inserts a step below, renumbering the rest and repointing the GOTO",
+    inserted.map((l) => l.text).join(" ").includes("TEMP 95.0,60; TEMP 50.0,120;") &&
+      inserted.some((l) => l.text === "GOTO 3,39;") &&
+      inserted.filter((l) => l.num).map((l) => l.num).join(",") === "1,2,3,4,5,6",
+    JSON.stringify(inserted),
+  );
+
+  // Delete puts it back, and the GOTO comes back with it.
+  await rowTool("TEMP 50.0,120", ".protoedit__iconbtn--del");
+  await waitFor(async () => !/TEMP 50\.0,120/.test(await program()), { what: "the step to go" });
+  check("− deletes a step and renumbers back", /GOTO 2,39;/.test(await program()), await program());
+
+  // Undo/redo walk the same history — three edits back to the file as loaded.
+  await clickButton("↶ Undo");
+  await waitFor(async () => /TEMP 50\.0,120/.test(await program()), { what: "the undone delete" });
+  check("Undo restores the deleted step", /TEMP 50\.0,120;/.test(await program()));
+  await clickButton("↷ Redo");
+  await waitFor(async () => !/TEMP 50\.0,120/.test(await program()), { what: "the redone delete" });
+  check("Redo removes it again", !/TEMP 50\.0,120/.test(await program()));
+  await clickButton("↶ Undo");
+  await waitFor(async () => (await program()) !== baseline, { what: "the first undo" });
+  await clickButton("↶ Undo");
+  await waitFor(async () => (await program()) === baseline, { what: "the session's first state" });
+  check(
+    "Undo walks all the way back to where this editing session started",
+    (await program()) === baseline && baseline !== before,
+    JSON.stringify({ now: await program(), baseline, before }),
+  );
+
+  // Ctrl-Y redoes from the keyboard, the same history the buttons walk.
+  await cdp.send("Input.dispatchKeyEvent", {
+    type: "keyDown", key: "y", code: "KeyY", windowsVirtualKeyCode: 89, modifiers: 2,
+  });
+  await cdp.send("Input.dispatchKeyEvent", {
+    type: "keyUp", key: "y", code: "KeyY", windowsVirtualKeyCode: 89, modifiers: 2,
+  });
+  await waitFor(async () => (await program()) !== baseline, { what: "the keyboard redo" });
+  check("Ctrl-Y redoes", (await program()) !== baseline, await program());
+
+  // END is a row like any other to look at, and nothing at all to edit: no form, no delete.
+  const endTools = await cdp.eval(`(() => {
+    const l = [...document.querySelectorAll(".protoedit__line")]
+      .find((x) => x.querySelector(".decoded__prototext").textContent.trim().startsWith("END"));
+    return JSON.stringify({
+      clickable: !!(l && l.querySelector(".protoedit__rowbtn:not(.is-inert)")),
+      add: !!(l && l.querySelector(".protoedit__iconbtn:not(.protoedit__iconbtn--del)")),
+      del: !!(l && l.querySelector(".protoedit__iconbtn--del")),
+      last: l === [...document.querySelectorAll(".protoedit__line")].pop(),
+    }); })()`).then(JSON.parse);
+  check(
+    "END can't be edited or deleted, only appended before — and stays last",
+    endTools.clickable === false && endTools.del === false && endTools.add === true && endTools.last === true,
+    JSON.stringify(endTools),
+  );
+
+  // A GOTO offers only the steps it may legally return to, described rather than numbered.
+  await clickRow("GOTO");
+  await waitFor(formOpen, { what: "the GOTO form" });
+  const gotoTargets = await cdp.eval(`(() => {
+    const line = [...document.querySelectorAll(".stepform__popover .stepform__line")]
+      .find((l) => l.querySelector(".stepform__label").textContent.trim() === "Return to");
+    return JSON.stringify([...line.querySelectorAll("option")].map((o) => o.textContent.trim())); })()`)
+    .then(JSON.parse);
+  check(
+    "a GOTO may only target an earlier step, offered by what it returns to",
+    gotoTargets.length > 0 &&
+      gotoTargets.every((t) => /^Step \d+ — (TEMP|GRAD|MELT|PLATEREAD)/.test(t)) &&
+      !gotoTargets.some((t) => /GOTO/.test(t)),
+    JSON.stringify(gotoTargets),
+  );
+  // Clicking away closes the form without applying it. That is the *browser's* light dismiss (the
+  // form is a native `popover`), so it needs a real pointer press — a synthesized `click()` never
+  // reaches the dismiss machinery, the same way a synthesized `mouseover` never opens a rail peek.
+  const beforeDismiss = await program();
+  await setField("Repeats", "7");
+  const spot = await cdp
+    .eval(`(() => { const r = document.querySelector(".overview__h").getBoundingClientRect();
+       return JSON.stringify({ x: Math.round(r.left + 4), y: Math.round(r.top + r.height / 2) }); })()`)
+    .then(JSON.parse);
+  for (const type of ["mousePressed", "mouseReleased"]) {
+    await cdp.send("Input.dispatchMouseEvent", {
+      type, x: spot.x, y: spot.y, button: "left", buttons: 1, clickCount: 1,
+    });
+  }
+  await waitFor(async () => !(await formOpen()), { what: "the form to light-dismiss" });
+  check(
+    "clicking elsewhere closes the form without applying it",
+    (await program()) === beforeDismiss,
+    await program(),
+  );
+
+  // Finally: a protocol this editor can't represent gets no editor at all. The Gradient fixture's
+  // `GOTO 4,39` names a step that doesn't exist, so the builder refuses it — and says why.
+  await loadFile(cdp, PRCL_TXT);
+  await waitFor(() => chipPresent(cdp, "Gradient"), { what: "the unrepresentable .prcl.txt" });
+  await clickTab(cdp, "Protocol");
+  await tabBecomes(cdp, "Protocol");
+  const refused = await editBtn();
+  check(
+    "a protocol the builder can't represent is refused an editor, with a reason",
+    refused?.off === true && /can't be edited/.test(refused?.why ?? ""),
+    JSON.stringify(refused),
+  );
+  cdp.close();
+}
+
+
 async function main() {
   const pw = cfxPassword();
   if (!pw) {
@@ -2062,6 +2308,7 @@ async function main() {
     await instrumentRunChecks(chrome, origin);
     await experimentNameChecks(chrome, origin);
     await deleteConfirmChecks(chrome, origin);
+    await protocolEditorChecks(chrome, origin);
   } finally {
     chrome.stop();
     dev.stop();

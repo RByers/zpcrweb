@@ -236,7 +236,9 @@ END;
 ```
 
 The line breaks are presentational only — the grammar is `;`-delimited and ignores whitespace — so
-this is the same protocol as the one-liner, just readable and diffable. Keeping the header means
+this is the same protocol as the one-liner, just readable and diffable. It is also the only
+protocol form this project *edits*: the web app's protocol editor writes a `.prcl.txt` through
+`ProtocolBuilder` (`protocol.md` §10) on every change. Keeping the header means
 the file **is a valid plaintext `.prcl`** rather than a listing of one: `parsePrcl` reads it back
 with no new code path.
 

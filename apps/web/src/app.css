@@ -3764,3 +3764,190 @@ summary.instrument__panelhead {
     max-height: 320px;
   }
 }
+
+/* ── Protocol editor (`components/protocol/`) ────────────────────────────────────────────────
+   The editable form of the directive listing above. It reuses `.decoded__proto*` for the rows
+   themselves — what is on screen in edit mode is the same decode of the same text, so it must
+   look the same — and adds only the affordances: a click target per row, the +/− pair beside it,
+   and the popover form. */
+.protoedit__line {
+  grid-template-columns: 2.2em 1fr max-content;
+}
+/* The row's own click target. A real button, so the whole line is keyboard-reachable in order,
+   but styled as the line of text it is — the affordance is the hover, not a box. */
+.protoedit__rowbtn {
+  display: grid;
+  /* Narrow: the directive with its reading beneath, as the read-only listing does. Wide: the two
+     side by side, on the same 14em first column, so switching into edit mode doesn't reflow. */
+  grid-template-columns: 1fr;
+  gap: 2px 12px;
+  align-items: baseline;
+  width: 100%;
+  padding: 2px 6px;
+  margin: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.protoedit__rowbtn:hover {
+  border-color: var(--border-strong);
+  background: var(--raised);
+}
+/* END and anything else with no form behind it: same metrics, no affordance. */
+.protoedit__rowbtn.is-inert {
+  cursor: default;
+  display: grid;
+}
+@container (min-width: 560px) {
+  .protoedit__rowbtn {
+    grid-template-columns: minmax(14em, max-content) 1fr;
+  }
+}
+/* The row button is a grid of its own, one column narrower than the listing's (it sits *inside*
+   the step-number column's sibling), so the reading's `grid-column: 3` from the read-only rules
+   would land it in an implicit fourth track against the right edge. Put it back beside the
+   directive, which is where it sits when the same row isn't editable. */
+.protoedit__rowbtn .decoded__protonote,
+.protoedit__rowbtn .decoded__protoscan {
+  grid-column: auto;
+}
+.protoedit__line.is-open .protoedit__rowbtn {
+  border-color: var(--neon-cyan);
+  background: var(--neon-cyan-dim);
+}
+.protoedit__rowtools {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+.protoedit__iconbtn {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ink-2);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+.protoedit__iconbtn:hover {
+  border-color: var(--neon-cyan);
+  color: var(--neon-cyan);
+}
+.protoedit__iconbtn--del:hover {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+.protoedit__legend {
+  margin-top: 10px;
+  font-size: 10px;
+  color: var(--ink-muted);
+}
+.protoedit__note {
+  color: var(--warn);
+}
+
+/* The per-row form, in a native popover (top layer, Escape and light dismiss are the browser's —
+   see `ProtocolEditor`'s `StepPopover`). Positioned from the row's own rect, since anchor
+   positioning isn't broadly supported yet. */
+.stepform__popover {
+  position: fixed;
+  margin: 0;
+  padding: 10px 12px 12px;
+  max-width: min(28rem, calc(100vw - 24px));
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--raised);
+  color: var(--ink);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+  overflow: visible;
+}
+.stepform__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.stepform__title {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--neon-cyan);
+}
+/* The commit control. Enter does the same thing from any field, so this is a second door rather
+   than the only one — but it's the one that says the popup is a change you make, not a live edit. */
+.stepform__ok {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--good);
+  border-radius: var(--radius-sm);
+  background: var(--good-dim);
+  color: var(--good);
+  cursor: pointer;
+}
+.stepform__ok:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  border-color: var(--border);
+  background: transparent;
+  color: var(--ink-muted);
+}
+.stepform {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+/* One operand per line: label, control, then the units — which are shown, never edited, because
+   they are a fact about the directive rather than a value (`protocol.md` §3.3). */
+.stepform__line {
+  display: grid;
+  grid-template-columns: 8.5em 7.5em 1fr;
+  gap: 2px 8px;
+  align-items: center;
+  font-size: 12px;
+}
+.stepform__label {
+  color: var(--ink-2);
+}
+.stepform__units {
+  font-size: 11px;
+  color: var(--ink-muted);
+}
+.stepform__input {
+  width: 100%;
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  color: var(--ink);
+  font-size: 12px;
+}
+.stepform__select {
+  width: auto;
+  min-width: 100%;
+  max-width: 16em;
+}
+.stepform__line.is-invalid .stepform__input {
+  border-color: var(--danger);
+}
+.stepform__error {
+  grid-column: 2 / -1;
+  font-size: 11px;
+  color: var(--danger);
+}
+.stepform__check {
+  justify-self: start;
+}

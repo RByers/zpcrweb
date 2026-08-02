@@ -342,6 +342,50 @@ the older runs and not for the 2026 ones.)
   sample targets a step in the middle of a melt's four. A file that did would be ambiguous against
   the XML's single `MeltCurveStep`.
 
+## 10. Writing a protocol: the builder
+
+Everything above reads. Authoring one needs the inverse, and the constraint that shapes it is
+that there is no such thing as a *slightly* wrong protocol: a directive is typed at the
+instrument one command at a time (§7) and a malformed one fails at that command, halfway through
+authoring. So the editable form here is not text at all.
+
+**Implemented by `packages/core/src/protocolBuilder.ts`**, entry point `ProtocolBuilder`. It
+holds a protocol as the §3.1 header plus an ordered list of typed steps, and is the only writer
+of directive text (`toRunDefinition()`, `toDirectives()`). Three of the language's rules stop
+being rules to check and become facts about the representation:
+
+| Rule | How the model makes it true |
+|---|---|
+| `END` terminates, and nothing follows it (§3.1) | `END` is not a step and has no representation; it is emitted last, always. There is no edit that removes or moves it |
+| Step numbers count steps, not modifiers (§4) | A step's number *is* its position — modifiers ride as fields of the step they modify, so inserting or deleting renumbers everything downstream with no bookkeeping |
+| A `GOTO` names an earlier step (§3.2) | Targets are repaired across every structural edit, so a loop keeps pointing at the step it pointed at; `legalGotoTargets(i)` is what may be offered |
+
+Every mutator (`withStep`, `withInsertedStep`, `withoutStep`, `withHeader`) returns a **new**
+builder rather than mutating, which is what lets an editor keep a plain array of them as an undo
+stack.
+
+**Reading is strict, and deliberately narrower than §3.** `fromRunDefinition()` throws for
+anything it could not write back unchanged — an unknown verb, a modifier on a step kind that
+§3.5 forbids it on, a non-numeric operand, directives after `END`, or a scan mask outside the
+four combinations of §5's two measured configurations (all six channels or channel 1;
+step-and-repeat or flyover). This is narrower than what `parseRunDefinition` accepts on purpose:
+the tolerant reader exists so a partly-understood protocol still *displays*, and a protocol that
+can't be represented exactly should be shown rather than silently rewritten. `tryFromRunDefinition()`
+returns the reason instead of throwing, which is how a caller decides whether to offer editing at
+all.
+
+Two restrictions are **this library's own**, not the language's, and are marked as such because
+they are the ones a future measurement could lift: a `GOTO` may not target another `GOTO` (no
+observed protocol does, and it has no defined meaning here), and an arbitrary channel subset is
+not offered as a scan mask (§9's first bullet — only the two whole configurations have ever been
+seen accepted). Everything else it enforces is §3.5's stated limits, surfaced per operand through
+`validateStepDraft`/`validateProtocolHeader` so an editor can put the bound beside the field.
+
+> **Implemented.** The web app's Protocol view edits a standalone `.prcl.txt` through this class
+> and nothing else — `apps/web/src/components/protocol/`. It never touches protocol text, which
+> is why "the file can't end up holding something the instrument would reject" is a property of
+> the API rather than of the UI.
+
 ## Appendix A: how the step numbering was measured
 
 §4's rule has two halves — that `PLATEREAD` and `GOTO` are counted, and that `INC`/`RATE` are not —

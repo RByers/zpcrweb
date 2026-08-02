@@ -1,6 +1,6 @@
 import { Fragment, useMemo } from "react";
 import { parseRunDefinition } from "@zpcrweb/core";
-import { ProtocolDecoded } from "../raw/DecodedView";
+import { ProtocolEditor } from "../protocol/ProtocolEditor";
 import type { LoadedFile } from "../../state/useZpcrStore";
 
 /**
@@ -19,13 +19,21 @@ import type { LoadedFile } from "../../state/useZpcrStore";
  *
  * Everything shown is `parseRunDefinition`'s (core): this component picks rows out of the
  * decoded program and counts directives, but reads nothing out of the text itself.
+ *
+ * It is also the one place a protocol can be *changed*. A `.prcl.txt` is this project's own
+ * portable protocol form (`prcl.md` §3.1) — a file you'd author, not just read — so the listing
+ * doubles as an editor ({@link ProtocolEditor}), and only here: every other carrier of the same
+ * text is a record of a run that happened, which there would be no honest way to edit.
  */
 export function StandaloneProtocolView({
   file,
   runDefinition,
+  onChangeProtocol,
 }: {
   file: LoadedFile;
   runDefinition: string;
+  /** Persist an edited protocol back into the file — the store's `setProtocolText`. */
+  onChangeProtocol: (runDefinition: string) => void;
 }) {
   const program = useMemo(() => parseRunDefinition(runDefinition), [runDefinition]);
   const reads = program.directives.filter((d) => d.verb === "PLATEREAD").length;
@@ -61,16 +69,11 @@ export function StandaloneProtocolView({
         </dl>
       </div>
 
-      <section className="overview__block">
-        <div className="overview__blockhead">
-          <h2 className="overview__h">Thermal protocol</h2>
-        </div>
-        <span className="decoded__hint mono">
-          {file.name} — the pure text run definition. Stage it against a plate on the Instrument
-          tab.
-        </span>
-        <ProtocolDecoded text={runDefinition} />
-      </section>
+      <ProtocolEditor
+        runDefinition={runDefinition}
+        onChange={onChangeProtocol}
+        fileName={file.name}
+      />
     </div>
   );
 }

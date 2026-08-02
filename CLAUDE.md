@@ -175,7 +175,9 @@ touch `state/urlHash.ts`, `state/useHeaderFit.ts`, `state/pltdPassword.ts`,
 `enabledViewsFor`/`selectFile`, core's `runDefinition.ts`, `components/raw/DecodedView.tsx`'s
 `ProtocolDecoded`, `components/views/StandaloneProtocolView.tsx`, `components/FileBar.tsx`,
 `components/FileIcons.tsx` (or core's `fileKind.ts`), `components/views/StandaloneRawView.tsx`,
-`state/useZpcrStore.ts`'s `modifiedIds`/`markDownloaded`, its settings seeding or `fileKind`, or
+`components/protocol/` (the protocol editor) or core's `protocolBuilder.ts`,
+`state/writeThrottle.ts`, `state/useZpcrStore.ts`'s
+`modifiedIds`/`markDownloaded`/`setProtocolText`, its settings seeding or `fileKind`, or
 view selection.
 
 Both tools share `tools/harness.mjs` (the CDP client and dev-server/Chrome plumbing); **add new

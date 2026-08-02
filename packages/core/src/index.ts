@@ -87,6 +87,40 @@ export {
   SCAN_MASK_CHANNELS,
   SCAN_MASK_FLYOVER_BIT,
 } from "./runDefinition.js";
+/** The editable counterpart of `runDefinition.ts` — see `protocol.md` §10. */
+export {
+  ProtocolBuilder,
+  ProtocolBuilderError,
+  defaultProtocolHeader,
+  defaultScanSelection,
+  defaultStepDraft,
+  describeScanSelection,
+  scanSelectionFromMask,
+  scanSelectionToMask,
+  validateProtocolHeader,
+  validateStepDraft,
+  MAX_PROTOCOL_STEPS,
+  PROTOCOL_LIMITS,
+  PROTOCOL_METHODS,
+  PROTOCOL_STEP_KINDS,
+  SCAN_CHANNEL_CHOICES,
+  STEP_MODIFIERS,
+} from "./protocolBuilder.js";
+export type {
+  GotoStepDraft,
+  GradStepDraft,
+  MeltStepDraft,
+  PlateReadStepDraft,
+  ProtocolHeaderDraft,
+  ProtocolIssue,
+  ProtocolLimit,
+  ProtocolMethod,
+  ProtocolStepDraft,
+  ProtocolStepKind,
+  ScanChannelChoice,
+  ScanSelection,
+  TempStepDraft,
+} from "./protocolBuilder.js";
 export { parseDcal, findDcalBlock, isDcalName, dyeChannelLookup } from "./dcal.js";
 export { parsePcrd, isPcrdName, pcrdFromBlob } from "./pcrd.js";
 export { parseBiomeme, isBiomemeJson } from "./biomeme.js";
