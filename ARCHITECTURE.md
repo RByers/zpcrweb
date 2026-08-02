@@ -520,6 +520,13 @@ Wells are addressed as `(channel, row, col)`:
   for the raw message log). Needs the optional `usb` dependency and a built core. Every subcommand
   is a named `CfxDevice` operation; there is no "send this command line" escape hatch, in the CLI
   or the library (`usb.md` §10).
+- **`tools/zpcr.ts`** (`node_modules/.bin/vite-node tools/zpcr.ts <file> results`) — prints a run's
+  results table (the Curves view's Table mode / CSV download) to stdout. A plain-Node rerun of
+  `apps/web/src/lib/runAnalysis.ts`'s `useRunAnalysis` with the `useMemo`s stripped — it imports
+  that module's React-free sibling files directly rather than `runAnalysis.ts` itself, since a
+  React hook call outside a component throws. Run via `vite-node` (already a transitive dependency
+  here) rather than plain `node`, since it needs to load `apps/web/src/lib/*.ts` with no build
+  step; needs a built core the same way `cfx.mjs` does.
 - **Vitest** for tests — isomorphic, fast, and ready for a future browser-mode test run.
 - **tsup** for builds — emits dual ESM + CJS plus `.d.ts` from a single entry point. The web app
   deliberately does not consume this output (see [Why the web app imports core's
