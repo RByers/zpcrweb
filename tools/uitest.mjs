@@ -1373,9 +1373,12 @@ async function instrumentRunChecks(chrome, origin) {
   );
 
   // A `.prcl.txt` has no separate "name" the way a `.zpcr` does — the info table's Filename row
-  // is its only identity, so that's what `StandaloneProtocolView`'s own Rename button edits.
-  // Renamed and renamed straight back, since the chip label the rest of this block clicks on is
-  // derived from this same filename.
+  // is its only identity, so that's what `StandaloneProtocolOverview`'s own Rename button edits
+  // (Overview is the minimal identity card; Protocol, where the check above just left the page,
+  // has no Filename row of its own). Renamed and renamed straight back, since the chip label the
+  // rest of this block clicks on is derived from this same filename.
+  await clickTab(cdp, "Overview");
+  await tabBecomes(cdp, "Overview");
   const protoFilename = () =>
     cdp.eval(`(() => {
       const dts = [...document.querySelectorAll(".overview__infotable dt")];
