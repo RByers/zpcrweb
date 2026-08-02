@@ -51,6 +51,16 @@ positive for every worktree branch in this repo, not a real signal of unmerged w
 `ExitWorktree` with `action: "remove", discard_changes: true` directly, without waiting for the
 refusal first. Only treat the refusal as real if the ff-merge failed or wasn't attempted.
 
+### Local secrets in a worktree
+
+`secrets.json` is gitignored (see "Secrets" below), so a fresh worktree checkout doesn't have
+one even though the main checkout does — a worktree is a separate working directory, and
+gitignored files aren't part of what Git copies into it. Copy it in right after creating the
+worktree (`cp /Users/rbagent/code/zpcrweb/secrets.json <worktree>/secrets.json`) whenever the
+work might touch encryption-dependent code paths — `npm test`'s `describe.skipIf(!PW)` blocks
+and `tools/uitest.mjs`/`tools/zpcr.mjs`'s password fallback silently degrade without it, which
+can look like a passing run that actually skipped real coverage.
+
 ### Local git config
 
 The linear-history workflow above is enforced by repo-local git config (`.git/config`, so it is
