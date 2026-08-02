@@ -184,6 +184,40 @@ describe("usb traffic log — round trip", () => {
     expect(() => parseUsbTrafficLog(bytes("not a log"))).toThrow(/ZUSBLOG1/);
   });
 
+  it("elides a long response's hex and text, but never a request's", () => {
+    const rec = new UsbTrafficRecorder();
+    const bigText = "OK " + "x".repeat(100) + "\n";
+    const bigPayload = bytes(bigText);
+    rec.message({
+      at: T0,
+      direction: "out",
+      channel: 1,
+      payload: bigPayload,
+      text: bigText,
+      unsolicited: false,
+      poll: false,
+    });
+    rec.message({
+      at: T0 + 1,
+      direction: "in",
+      channel: 1,
+      payload: bigPayload,
+      text: bigText,
+      unsolicited: false,
+      poll: false,
+    });
+    const [out, inLine] = formatUsbTrafficBytes(rec.bytes()).split("\n");
+    const trimmedLen = bigText.trim().length;
+    expect(out).toContain(`[${bigPayload.length}B]`);
+    expect(out).not.toContain("elided");
+    expect(out).toContain(bigText.trim());
+    expect(inLine).toContain(`[${bigPayload.length}B]`);
+    // Both the hex and the decoded text are shortened, not just one — the hex elision note comes
+    // before `text=`, the text elision note inside its quoted value.
+    expect(inLine).toContain(`+${bigPayload.length - 64} more elided) text=`);
+    expect(inLine).toContain(`+${trimmedLen - 64} more elided)"`);
+  });
+
   it("knows both names a log is stored under", () => {
     expect(isUsbTrafficName("usb-traffic.bin")).toBe(true);
     expect(isUsbTrafficName("usb-traffic.log")).toBe(true); // pre-binary `.zpcr` files

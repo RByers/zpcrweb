@@ -464,6 +464,20 @@ function toHex(bytes: Uint8Array): string {
   return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join(" ");
 }
 
+/** A response's hex (in bytes) or decoded text (in characters) beyond this is elided — a
+ * `GETFILE` reply's ~50 KB plate read would otherwise turn "one line per record" into one line
+ * the size of a screen's scrollback. Requests aren't elided: everything the client sends is a
+ * short command, so the cutoff only ever bites the replies it's aimed at. */
+const MAX_RESPONSE_PREVIEW = 64;
+
+/** `s`, or its first {@link MAX_RESPONSE_PREVIEW} units plus how many were left out — used for
+ * both the hex (units = bytes) and the decoded text (units = characters) of a long response. */
+function elide(s: string, total: number): string {
+  return total <= MAX_RESPONSE_PREVIEW
+    ? s
+    : `${s} … (+${total - MAX_RESPONSE_PREVIEW} more elided)`;
+}
+
 /**
  * Render records as one line each, in wire order — the form the console's download button writes
  * and the Raw files view shows, and the only text form of a log there is.
@@ -472,7 +486,10 @@ function toHex(bytes: Uint8Array): string {
  * shown decoded as `text=...`: the decode is a best-effort guess ({@link usbTrafficText}, latin1,
  * "every byte printable or not") and a trailing `\r`/`\n` is trimmed from it, so for a payload
  * this is meant to help *decode*, the raw bytes are the ground truth and the text is a convenience
- * alongside them, never a replacement for them.
+ * alongside them, never a replacement for them. A response longer than {@link MAX_RESPONSE_PREVIEW}
+ * has its hex and text previewed rather than spelled out in full — the byte count at the front of
+ * the line still says how much was left out, and the complete bytes are always still in the
+ * archived record, only this rendering of them is shortened.
  */
 export function formatUsbTrafficLog(records: readonly UsbTrafficRecord[]): string {
   const rows = records.map((l) => {
@@ -486,8 +503,21 @@ export function formatUsbTrafficLog(records: readonly UsbTrafficRecord[]): strin
     }
     const dir = l.direction === "out" ? "->" : "<-";
     const flag = l.unsolicited ? " (unsolicited)" : "";
-    const text = l.text !== null ? ` text=${JSON.stringify(l.text.replace(/\r?\n$/, ""))}` : "";
-    return `${at} ${dir} ch${l.channel}${flag} [${l.payload.length}B] ${toHex(l.payload)}${text}`;
+    const long = l.direction === "in" && l.payload.length > MAX_RESPONSE_PREVIEW;
+    const hex = long
+      ? elide(toHex(l.payload.subarray(0, MAX_RESPONSE_PREVIEW)), l.payload.length)
+      : toHex(l.payload);
+    const text =
+      l.text !== null
+        ? (() => {
+            const trimmed = l.text.replace(/\r?\n$/, "");
+            const shown = long
+              ? elide(trimmed.slice(0, MAX_RESPONSE_PREVIEW), trimmed.length)
+              : trimmed;
+            return ` text=${JSON.stringify(shown)}`;
+          })()
+        : "";
+    return `${at} ${dir} ch${l.channel}${flag} [${l.payload.length}B] ${hex}${text}`;
   });
   return rows.length === 0 ? "" : rows.join("\n") + "\n";
 }
