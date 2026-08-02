@@ -34,6 +34,13 @@
  * **Newly loaded override files join the selection.** Loading a `.prcl.txt` or a plate file folds
  * it into its slot, which is what makes the headline flow work — load a `.prcl.txt`, read it on
  * its Overview, then switch to Instrument and find it already staged against the run you had.
+ *
+ * **The run can still be released, deliberately, via `deselectRun`.** Clicking the chip that is
+ * *already* the primary run (`App`'s `selectFile`) doesn't leave the bar with nothing named — it
+ * promotes whichever override is staged (protocol first, else plate) to primary instead, so the
+ * bar always has something to point at. With neither override staged there is nothing to promote
+ * to, so `deselectRun` is a no-op rather than reaching the empty selection the module comment
+ * above warns against.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fileCategory, type FileCategory, type FileKind } from "@zpcrweb/core";
@@ -76,16 +83,25 @@ export function useRunStaging(files: LoadedFile[], activeId: string | null) {
   // The run the primary selection implies. Read from `activeId` rather than stored, so the run
   // this view would start and the file the rest of the app is showing can never disagree.
   const lastRunId = useRef<string | null>(null);
+  // Set by `deselectRun` below, and only by it: a deliberate release of the run slot, which must
+  // survive the primary selection moving to some non-run file (that is the whole point of it) —
+  // so it can't be read off `activeId` the way everything else here is. Cleared the moment a run
+  // becomes primary again, by any route, which is what lets a later run selection un-stick it.
+  const [released, setReleased] = useState(false);
   const runId = useMemo(() => {
     const active = files.find((f) => f.id === activeId);
     if (active && stagingRole(active.kind) === "run") return active.id;
+    if (released) return null;
     // Looking at a standalone plate doesn't retract the run — fall back to the last one that was
     // primary, and failing that to the first run loaded, so the view opens on something.
     if (files.some((f) => f.id === lastRunId.current)) return lastRunId.current;
     return files.find((f) => stagingRole(f.kind) === "run")?.id ?? null;
-  }, [files, activeId]);
+  }, [files, activeId, released]);
   useEffect(() => {
-    lastRunId.current = runId;
+    if (runId) {
+      lastRunId.current = runId;
+      setReleased(false);
+    }
   }, [runId]);
 
   // Overrides pointing at a file that's gone (the chip's ✕, or a same-name replacement) would
@@ -127,16 +143,28 @@ export function useRunStaging(files: LoadedFile[], activeId: string | null) {
     });
   }, [files, activeId]);
 
-  /** Toggle an override on or off. A run is not an override — selecting one is a change of
-   * primary selection, which `App` routes to the store instead — so this ignores it. */
+  /**
+   * Toggle an override on or off. A run is not an override — selecting one is a change of
+   * primary selection, which `App` routes to the store instead — so this ignores it.
+   *
+   * With the run slot released (`deselectRun`), one of the two overrides is standing in as the
+   * primary selection (`App`'s `stagingActiveId`) — so turning off the *last* one left would reach
+   * the empty selection this hook otherwise refuses. Guarded here rather than left to `App`,
+   * since this is the same invariant `deselectRun` enforces and belongs with it.
+   */
   const toggle = useCallback(
     (id: string) => {
       const file = files.find((f) => f.id === id);
       const slot = file && SLOT[stagingRole(file.kind)];
       if (!slot) return;
-      setOverrides((prev) => ({ ...prev, [slot]: prev[slot] === id ? null : id }));
+      setOverrides((prev) => {
+        const turningOff = prev[slot] === id;
+        const next = { ...prev, [slot]: turningOff ? null : id };
+        if (!runId && turningOff && !next.protocolId && !next.plateId) return prev;
+        return next;
+      });
     },
-    [files],
+    [files, runId],
   );
 
   /** The auxiliary files currently staged — what the file bar draws in magenta. The run isn't
@@ -147,7 +175,24 @@ export function useRunStaging(files: LoadedFile[], activeId: string | null) {
     [selection],
   );
 
-  return { selection, stagedIds, toggle };
+  /**
+   * Release the run slot, for a click on the chip that already holds it (`App`'s `selectFile`).
+   *
+   * Returns the file that should become the new primary selection — the staged protocol, else the
+   * staged plate — or `null` when there is neither, in which case nothing changes: the module
+   * comment's rejected "all three deselectable" design is exactly the empty-selection state this
+   * refusal exists to avoid. The caller is what actually moves `activeId` (`useZpcrStore.setActive`
+   * lives outside this hook); this only clears the run and hands back where to point next.
+   */
+  const deselectRun = useCallback(() => {
+    if (!selection.runId) return null;
+    const fallback = selection.protocolId ?? selection.plateId;
+    if (!fallback) return null;
+    setReleased(true);
+    return fallback;
+  }, [selection]);
+
+  return { selection, stagedIds, toggle, deselectRun };
 }
 
 export type RunStaging = ReturnType<typeof useRunStaging>;

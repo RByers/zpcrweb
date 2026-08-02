@@ -1964,23 +1964,33 @@ is the whole point — it is the app's file list doing a second job, not a copy 
 **One chip is always the primary selection**, in the app's ordinary cyan. Everywhere else that is
 `activeId`, the file every view is pointed at; here — a view that shows no file — it is the run
 being staged, which is what the bar has to name even when a just-loaded `.prcl.txt` is the active
-file. It is not a toggle — the app
-always has one file selected — so selecting another run *switches* it. The **auxiliary** chips are
-the plate and protocol files staged over it (`stagedIds`, magenta, matching the Instrument tab):
-those do toggle, and each supersedes half of the run. Making all three symmetric toggles, as an
-earlier version did, read as three equal switches when only two of them are, and let the selection
-empty out entirely — leaving the view with nothing named while the rest of the app was still
-pointed at a file.
+file. Selecting another run *switches* it rather than toggling it, the same as everywhere else. The
+**auxiliary** chips are the plate and protocol files staged over it (`stagedIds`, magenta, matching
+the Instrument tab): those do toggle, and each supersedes half of the run. Making all three
+symmetric toggles, as an earlier version did, read as three equal switches when only two of them
+are — a click on the run chip is not "toggle the run off", it is "release the run in favor of
+whatever is staged", and the two read differently.
+
+**Tapping the chip that already holds the primary slot releases it** (`deselectRun`), rather than
+doing nothing — but it never empties the bar out: it promotes whichever override is staged
+(protocol first, else plate) to primary in its place, and refuses when there is nothing staged to
+promote to, since that is exactly the empty selection the rejected all-toggles design used to
+reach. The released run stays *released* — not merely off-screen — until a run is chosen as
+primary again by any route, which is what lets the promoted file's own overrides keep toggling
+without the run reasserting itself; releasing the last remaining override in turn hands the
+primary slot to the other one, guarded the same way. See `state/useRunStaging.ts`'s `released` and
+`App.tsx`'s `selectFile`/`stagingActiveId`.
 
 **The staging model** lives in `state/useRunStaging.ts`, held by `App` because the bar that edits
 it does. A selection is **three slots** — a run, a protocol override, a plate override — since a
 `.zpcr`/`.pcrd` carries both halves while a `.prcl.txt` or `.pltd`/`.plt.csv` carries exactly one.
 The run slot is *derived* from the primary selection rather than stored, so the run this view
 would start and the file the rest of the app is showing can never disagree (with the last run to
-hold it remembered, for while you are looking at a standalone plate). The two override slots hold
-at most one file each, selecting replaces whatever held the slot, and tapping a selected file
-releases it. `lib/protocolSource.ts` turns a selection into the two resolved halves, each carrying
-the file it came from and, when empty, why.
+hold it remembered, for while you are looking at a standalone plate — unless it was deliberately
+released, above). The two override slots hold at most one file each, selecting replaces whatever
+held the slot, and tapping a selected file releases it (refused when doing so would leave the bar
+with nothing staged and no run to fall back to either). `lib/protocolSource.ts` turns a selection
+into the two resolved halves, each carrying the file it came from and, when empty, why.
 
 **A run stays selected even when both halves are overridden**, where it supplies neither. It is
 still the instrument: its `.Dcal` set is what gives a staged `.plt.csv` its dye→channel mapping

@@ -1547,6 +1547,23 @@ async function instrumentRunChecks(chrome, origin) {
     JSON.stringify({ proto: first.protocol.source, plate: first.plate.source }),
   );
 
+  // With nothing staged to promote, tapping the primary run chip is a no-op: releasing it would
+  // reach the empty selection `useRunStaging.ts`'s module comment says was rejected, so
+  // `deselectRun` refuses (see `App.tsx`'s `selectFile`).
+  await cdp.eval(
+    `(() => { [...document.querySelectorAll(".filechip__main")]
+        .find((b) => /FirstQualification/.test(b.textContent)).click(); })()`,
+  );
+  await sleep(300);
+  const afterNoOpTap = await staged();
+  check(
+    "tapping the primary run with nothing staged to fall back to leaves it selected",
+    afterNoOpTap.chips.length === 1 &&
+      afterNoOpTap.chips[0].primary &&
+      /METHOD CALC/.test(afterNoOpTap.protocol.text),
+    JSON.stringify(afterNoOpTap.chips),
+  );
+
   // The staged protocol is the program and nothing else: no per-directive gloss. It shares this
   // panel's width with a plate map, and what the language *means* is a question Overview answers
   // (checked above) — here the question is what would be sent, so every line is still numbered
@@ -1792,8 +1809,7 @@ async function instrumentRunChecks(chrome, origin) {
     JSON.stringify({ proto: both.protocol.override, plate: both.plate.override }),
   );
 
-  // Tapping a staged override releases its slot. The run is not one of those: it is the app's
-  // primary selection, which is never empty (`useRunStaging.ts`).
+  // Tapping a staged override releases its slot.
   const tap = (pattern) =>
     cdp.eval(
       `(() => { [...document.querySelectorAll(".filechip__main")]
@@ -1808,13 +1824,33 @@ async function instrumentRunChecks(chrome, origin) {
       off.chips.filter((c) => c.on).length === 2,
     JSON.stringify(off.chips.filter((c) => c.on).map((c) => c.name)),
   );
+  // Tapping the run *itself*, though, is not an override toggle: it holds the app's primary
+  // selection. But a tap on the chip that already holds that slot releases it rather than doing
+  // nothing — promoting whichever override is staged (protocol first, else plate — here just the
+  // plate, since the protocol override was just released above) to primary in its place, so the
+  // bar is never left with nothing to point at (`useRunStaging.ts`'s `deselectRun`).
+  await tap("/FirstQualification/");
+  await sleep(300);
+  const released = await staged();
+  const releasedRunChip = released.chips.find((c) => /FirstQualification/.test(c.name));
+  const promotedPlateChip = released.chips.find((c) => /QuickPlate/.test(c.name));
+  check(
+    "tapping the selected run releases it, promoting the staged plate to primary",
+    !releasedRunChip.on &&
+      promotedPlateChip.primary &&
+      !released.protocol.override &&
+      !released.plate.override,
+    JSON.stringify(released.chips),
+  );
+  // The run is still a run-kind chip, just no longer the one holding the slot — tapping it again
+  // reselects it as primary the ordinary way, and the plate resumes being an override over it.
   await tap("/FirstQualification/");
   await sleep(300);
   const stillRun = await staged();
   const runChip = stillRun.chips.find((c) => /FirstQualification/.test(c.name));
   const plateChip = stillRun.chips.find((c) => /QuickPlate/.test(c.name));
   check(
-    "tapping the selected run leaves it selected — the primary selection is never empty",
+    "tapping the run chip again reselects it as primary",
     runChip.primary && /METHOD CALC/.test(stillRun.protocol.text) && !stillRun.protocol.override,
     JSON.stringify(stillRun.chips),
   );

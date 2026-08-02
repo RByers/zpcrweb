@@ -338,11 +338,21 @@ export function App() {
    * claim the plate or protocol *this* run is using is something other than what it actually is —
    * both are confusing in the same way, so both are refused. The effect below is what keeps the
    * run pinned there on arrival; this only has to refuse the escape.
+   *
+   * A click on the run chip while it already holds the slot is the one case that doesn't switch
+   * or toggle: it releases the run (`staging.deselectRun`), handing back whichever override was
+   * staged to take over as primary — or `null`, when there's nothing staged to promote, in which
+   * case the click does nothing rather than leaving the bar pointed at nothing at all.
    */
   const selectFile = (id: string) => {
     const f = store.files.find((x) => x.id === id);
     if (!f) return;
     if (store.view === "instrument" && runActive) return;
+    if (store.view === "instrument" && stagingRole(f.kind) === "run" && id === staging.selection.runId) {
+      const fallback = staging.deselectRun();
+      if (fallback) store.setActive(fallback);
+      return;
+    }
     if (store.view !== "instrument" || stagingRole(f.kind) === "run") store.setActive(id);
     else staging.toggle(id);
   };
@@ -445,7 +455,14 @@ export function App() {
             // The cyan chip here is the *run being staged*, not `store.activeId`: this view shows
             // no file, and a protocol loaded into it is the active file while the run is what the
             // bar has to name. Selecting one makes it active too (see `selectFile`).
-            activeId={staging.selection.runId}
+            //
+            // With the run slot released (a click on it while already primary — see
+            // `staging.deselectRun`), there is no run to hold that slot, so whichever override is
+            // staged takes over as the cyan chip instead — protocol first, else plate. Recomputed
+            // live rather than fixed at the moment of release, so un-staging that override in turn
+            // (still guarded against reaching an empty selection, see `staging.toggle`) hands the
+            // slot on to the other one rather than leaving the bar stale.
+            activeId={staging.selection.runId ?? staging.selection.protocolId ?? staging.selection.plateId}
             stagedIds={staging.stagedIds}
             modifiedIds={store.modifiedIds}
             inProgressIds={store.inProgressIds}
