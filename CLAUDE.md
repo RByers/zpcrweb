@@ -97,6 +97,12 @@ in `.git/rr-cache`; leave it as-is.
   the same commit as the decoder change.**
 - Renumbering a doc's sections means updating everything that cites them in the same commit:
   `grep -rn '<doc>.md'` finds the references, and bare `§N` mentions in nearby prose too.
+- A directory of standalone, independently-usable pieces (currently `tools/`) gets its own
+  `README.md` indexing what each one is for — one row per file, short enough to scan, pointing
+  into the file's own header comment for detail rather than duplicating it. Add the new entry in
+  the same commit that adds the file, and update the row in the same commit that changes what a
+  file does. The root `README.md` links to it rather than re-listing the contents, the same way
+  it points at `ARCHITECTURE.md` and the format docs instead of inlining them.
 
 ### Writing documentation
 

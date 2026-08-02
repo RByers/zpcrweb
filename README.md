@@ -75,6 +75,7 @@ This is an npm-workspaces monorepo:
 | `packages/core` | `@zpcrweb/core` — the isomorphic parsing library |
 | `apps/web` | `@zpcrweb/web` — the React web app ([architecture](./apps/web/ARCHITECTURE.md)) |
 | `samples/` | a committed sample `.zpcr` used by the test suite |
+| `tools/` | standalone CLIs and browser-automation scripts ([index](./tools/README.md)) |
 
 ## `@zpcrweb/core`
 
@@ -176,6 +177,20 @@ secret**: fragments are never sent to the server, so they can't reach access log
 `Referer` header — `?cfxPassword=` would reach all three. The app strips the password from the
 address bar the moment it reads it, so a URL copied afterwards can be shared safely. The legacy
 `?cfxPassword=` query form still works but is deprecated; don't write new links with it.
+
+## Tools
+
+Standalone scripts in [`tools/`](./tools/README.md) — a CLI for the results table, live-instrument
+access over USB, and browser-automation checks for the web app:
+
+```sh
+node tools/zpcr.mjs samples/20260720_FirstQualification.zpcr results   # results table as CSV
+node tools/cfx.mjs info                                                # talk to a live instrument
+node tools/uishot.mjs                                                  # screenshot the web app
+```
+
+See [`tools/README.md`](./tools/README.md) for what each script does; `zpcr.mjs`/`cfx.mjs` need a
+built core first (`npm run build`).
 
 ## Development
 
