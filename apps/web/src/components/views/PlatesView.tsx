@@ -2,9 +2,10 @@ import { useMemo, useState } from "react";
 import { isPltdName, type Zpcr } from "@zpcrweb/core";
 import { PlateViewer } from "../plate/PlateViewer";
 import { PlateDownloadButton } from "../plate/PlateDownloadButton";
+import { AttachPlateMenu } from "../plate/AttachPlateMenu";
 import { PasswordPrompt } from "../PasswordPrompt";
-import { DropZone } from "../DropZone";
 import { usePltdPassword } from "../../state/pltdPassword";
+import type { AddFilesOptions, LoadedFile } from "../../state/useZpcrStore";
 
 /**
  * Visual plate viewer for every plate file attached to the run — one per `.pltd`/`.plt.csv`
@@ -20,10 +21,17 @@ export function PlatesView({
   zpcr,
   fileId,
   attachPlate,
+  files,
+  addFiles,
 }: {
   zpcr: Zpcr;
   fileId: string;
   attachPlate: (fileId: string, file: File) => Promise<void>;
+  /** Every loaded file, so "replace plate" can offer already-loaded `.pltd`/`.plt.csv` files
+   * instead of only a fresh upload. */
+  files: LoadedFile[];
+  /** Adds a cloned `.plt.csv` to the file list — see `PlateDownloadButton`'s `onClone`. */
+  addFiles: (files: FileList | File[], options?: AddFilesOptions) => Promise<string | null>;
 }) {
   const [password, setPassword] = usePltdPassword();
   // Asked as a capability, not as a format: attaching a plate means writing an entry into the
@@ -36,12 +44,10 @@ export function PlatesView({
   const [selected, setSelected] = useState(0);
 
   const attachControl = (
-    <DropZone
-      onFiles={(files) => {
-        const file = Array.from(files)[0];
-        if (file) void attachPlate(fileId, file);
-      }}
-      accept=".pltd,.csv,.plt.csv"
+    <AttachPlateMenu
+      files={files}
+      onSelect={(f) => void attachPlate(fileId, new File([f.bytes.slice()], f.name))}
+      onUpload={(file) => void attachPlate(fileId, file)}
       compactLabel={entries.length === 0 ? "attach plate" : "replace plate"}
       disabled={!hasArchive}
       disabledTitle="This run has no file archive to attach a plate to"
@@ -66,7 +72,7 @@ export function PlatesView({
   const toolbar = (
     <div className="plateview__toolbar">
       {attachControl}
-      <PlateDownloadButton plate={pltd.plate} pltd={pltdBytes} />
+      <PlateDownloadButton plate={pltd.plate} pltd={pltdBytes} onClone={(file) => void addFiles([file])} />
     </div>
   );
   const showsViewer = !pltd.error && !pltd.needsPassword && !!pltd.plate;

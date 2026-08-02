@@ -10,13 +10,14 @@ import {
 import { ProtocolDecoded } from "../raw/DecodedView";
 import { ProtocolStepsTable } from "../raw/ProtocolSteps";
 import { DownloadIcon } from "../DownloadIcon";
+import { CloneIcon } from "../CloneIcon";
 import { downloadBytes, downloadText } from "../../lib/download";
 import { protocolFileBase } from "../../lib/protocolSource";
 import { usePltdPassword } from "../../state/pltdPassword";
 import { channelColor } from "../../lib/channelColors";
 import { runEncryptionStatus } from "../../lib/encryptionStatus";
 import { curveKey, useRunAnalysis } from "../../lib/runAnalysis";
-import type { FileSettings, RunResult } from "../../state/useZpcrStore";
+import type { AddFilesOptions, FileSettings, RunResult } from "../../state/useZpcrStore";
 import type { ExperimentIdentity } from "../../lib/experiment";
 
 interface Tile {
@@ -39,6 +40,7 @@ export function OverviewView({
   onRename,
   namePersists,
   onDownload,
+  addFiles,
 }: {
   zpcr: Zpcr;
   /** The active run's own name/bytes — downloaded verbatim, so this is also how a `.zpcr`
@@ -63,6 +65,8 @@ export function OverviewView({
    * archive to hold a `zpcrweb.json`), which the field then says out loud rather than silently
    * losing the edit on reload. */
   namePersists: boolean;
+  /** Adds the cloned `.prcl.txt` to the file list — see the protocol block's Clone button. */
+  addFiles: (files: FileList | File[], options?: AddFilesOptions) => Promise<string | null>;
 }) {
   const m = zpcr.metadata;
   const reads = zpcr.reads;
@@ -175,23 +179,37 @@ export function OverviewView({
                 only when the run carries that text form at all; a run whose protocol is
                 structured-only would have nothing to write. */}
             {protocolText && (
-              <button
-                className="raw__download"
-                onClick={() =>
-                  downloadText(
-                    `${protocolFileBase(protocolName, file.name)}.prcl.txt`,
-                    formatRunDefinitionText(protocolText),
-                  )
-                }
-                aria-label="Download the thermal protocol as .prcl.txt"
-                title={
-                  "Download the ASCII run definition as .prcl.txt — one directive per line. " +
-                  "This is the form the instrument itself records, and what the Instrument view " +
-                  "loads to stage a protocol for a new run."
-                }
-              >
-                <DownloadIcon />
-              </button>
+              <>
+                <button
+                  className="raw__download"
+                  onClick={() =>
+                    downloadText(
+                      `${protocolFileBase(protocolName, file.name)}.prcl.txt`,
+                      formatRunDefinitionText(protocolText),
+                    )
+                  }
+                  aria-label="Download the thermal protocol as .prcl.txt"
+                  title={
+                    "Download the ASCII run definition as .prcl.txt — one directive per line. " +
+                    "This is the form the instrument itself records, and what the Instrument view " +
+                    "loads to stage a protocol for a new run."
+                  }
+                >
+                  <DownloadIcon />
+                </button>
+                <button
+                  className="raw__download"
+                  onClick={() => {
+                    const name = `${protocolFileBase(protocolName, file.name)}.prcl.txt`;
+                    const text = formatRunDefinitionText(protocolText);
+                    void addFiles([new File([new TextEncoder().encode(text)], name)]);
+                  }}
+                  aria-label="Clone the thermal protocol into an independent .prcl.txt file"
+                  title="Extract this protocol into its own .prcl.txt file, kept alongside your other files"
+                >
+                  <CloneIcon />
+                </button>
+              </>
             )}
           </div>
           {protocol?.steps ? (

@@ -4,6 +4,7 @@ import { plateToCsv } from "@zpcrweb/core";
 import { downloadBytes, downloadText } from "../../lib/download";
 import { stripPlateExt } from "../../lib/plateNames";
 import { DownloadIcon } from "../DownloadIcon";
+import { CloneIcon } from "../CloneIcon";
 
 /** Sanitize a plate name / entry name into a safe file basename. */
 function sanitize(s: string): string {
@@ -16,6 +17,11 @@ interface Props {
    * (non-CSV) `.pltd` file — enables the "Download .pltd" option. Absent for a `.plt.csv`-
    * sourced plate or a `.pcrd`'s embedded plate (no raw bytes exist for either). */
   pltd?: { name: string; bytes: Uint8Array };
+  /** Extract this plate into an independent `.plt.csv` file, added to the app's own file list
+   * (rather than saved to disk) — the "Clone" button. Same `plateToCsv` encode as "Download
+   * .plt.csv"; the caller adds the resulting `File` via `addFiles`. Omitted (no Clone button)
+   * where the plate is already its own file, e.g. `StandalonePlateView`. */
+  onClone?: (file: File) => void;
 }
 
 /**
@@ -24,7 +30,7 @@ interface Props {
  * files view's single-format download button (`raw__download`), extended with a small
  * `<details>` menu since there are two choices here.
  */
-export function PlateDownloadButton({ plate, pltd }: Props) {
+export function PlateDownloadButton({ plate, pltd, onClone }: Props) {
   const detailsRef = useRef<HTMLDetailsElement>(null);
   const canDownload = !!pltd || !!plate;
   if (!canDownload) return null;
@@ -40,33 +46,48 @@ export function PlateDownloadButton({ plate, pltd }: Props) {
   };
 
   return (
-    <details className="dlmenu" ref={detailsRef}>
-      <summary className="raw__download" aria-label="Download plate">
-        <DownloadIcon />
-      </summary>
-      <div className="dlmenu__list">
+    <>
+      <details className="dlmenu" ref={detailsRef}>
+        <summary className="raw__download" aria-label="Download plate">
+          <DownloadIcon />
+        </summary>
+        <div className="dlmenu__list">
+          <button
+            className="dlmenu__item mono"
+            disabled={!pltd}
+            title={pltd ? "" : "No .pltd bytes for this plate (it's a .plt.csv or an embedded .pcrd plate)"}
+            onClick={() => {
+              if (pltd) downloadBytes(pltd.name, pltd.bytes);
+              close();
+            }}
+          >
+            Download .pltd
+          </button>
+          <button
+            className="dlmenu__item mono"
+            disabled={!plate}
+            onClick={() => {
+              if (plate) downloadText(csvName, plateToCsv(plate), "text/csv");
+              close();
+            }}
+          >
+            Download .plt.csv
+          </button>
+        </div>
+      </details>
+      {onClone && (
         <button
-          className="dlmenu__item mono"
-          disabled={!pltd}
-          title={pltd ? "" : "No .pltd bytes for this plate (it's a .plt.csv or an embedded .pcrd plate)"}
-          onClick={() => {
-            if (pltd) downloadBytes(pltd.name, pltd.bytes);
-            close();
-          }}
-        >
-          Download .pltd
-        </button>
-        <button
-          className="dlmenu__item mono"
+          className="raw__download"
           disabled={!plate}
           onClick={() => {
-            if (plate) downloadText(csvName, plateToCsv(plate), "text/csv");
-            close();
+            if (plate) onClone(new File([new TextEncoder().encode(plateToCsv(plate))], csvName));
           }}
+          aria-label="Clone plate into an independent .plt.csv file"
+          title="Extract this plate into its own .plt.csv file, kept alongside your other files"
         >
-          Download .plt.csv
+          <CloneIcon />
         </button>
-      </div>
-    </details>
+      )}
+    </>
   );
 }

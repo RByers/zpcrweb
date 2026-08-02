@@ -412,6 +412,7 @@ export function App() {
                   store.markDownloaded(active.id);
                   return bytes;
                 }}
+                addFiles={store.addFiles}
               />
             )}
             {view === "curves" && (
@@ -441,6 +442,8 @@ export function App() {
                 zpcr={zpcr}
                 fileId={active.id}
                 attachPlate={store.attachPlate}
+                files={store.files}
+                addFiles={store.addFiles}
               />
             )}
             {view === "raw" && active.kind === "pcrd" && (

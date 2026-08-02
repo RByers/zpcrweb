@@ -290,23 +290,36 @@ alongside `"zpcr"`/`"pcrd"`:
   mapping isn't borrowed from some other run that happens to be loaded, since that would be a
   guess about a different instrument's optics. The UI says so explicitly instead (see
   `FluorChannelChip`, below).
-- **Attach (replace a run's plate)** — `PlatesView`'s upload control, enabled only for a run
-  that has a file archive to add an entry to (so: a `.zpcr`; a `.pcrd` gets the control disabled
-  with an explanatory title, since it has no archive) —
-  calls `store.attachPlate(fileId, file)`, which rewrites the run's own bytes via
-  `attachPlateToZpcr` (see root `ARCHITECTURE.md`) and re-persists them under the same file id.
-  There is **no separate override state** — once attached, the plate is just part of the run's
-  `.zpcr` bytes, so `zpcr.plates()` picks it up the same way it would an originally-embedded
-  `.pltd`, and `CurvesView`'s `zpcr.plates(pltdPassword)[0]` labeling updates with no code path
-  of its own to keep in sync. This is also how "download the run with its attached plate" works
-  — `FileBar`'s per-chip download button just downloads `LoadedFile.bytes` as-is, which already
-  includes anything attached.
+- **Attach (replace a run's plate)** — `PlatesView`'s `AttachPlateMenu`
+  (`components/plate/AttachPlateMenu.tsx`), enabled only for a run that has a file archive to add
+  an entry to (so: a `.zpcr`; a `.pcrd` gets the control disabled with an explanatory title, since
+  it has no archive). Unlike the plain file-picker `DropZone` it replaced, it is a `<details>`
+  menu (styled like `PlateDownloadButton`'s) offering every already-loaded `.pltd`/`.plt.csv`
+  `LoadedFile` by name, plus an "Upload…" row for a fresh file from disk — either path ends by
+  wrapping the chosen bytes in a `File` and calling `store.attachPlate(fileId, file)`, which
+  rewrites the run's own bytes via `attachPlateToZpcr` (see root `ARCHITECTURE.md`) and
+  re-persists them under the same file id. There is **no separate override state** — once
+  attached, the plate is just part of the run's `.zpcr` bytes, so `zpcr.plates()` picks it up the
+  same way it would an originally-embedded `.pltd`, and `CurvesView`'s
+  `zpcr.plates(pltdPassword)[0]` labeling updates with no code path of its own to keep in sync.
+  This is also how "download the run with its attached plate" works — `FileBar`'s per-chip
+  download button just downloads `LoadedFile.bytes` as-is, which already includes anything
+  attached.
 - **`PlateDownloadButton`** (`components/plate/PlateDownloadButton.tsx`) is the two-option
   download menu (`.pltd` / `.plt.csv`) shared by `PlatesView` and `StandalonePlateView`: "Download
   .pltd" is only enabled when real `.pltd` bytes exist (a real archive entry, or a standalone
   `.pltd` upload) — never for a `.plt.csv`-sourced plate or a `.pcrd`'s embedded plate, neither of
   which has raw `.pltd` bytes to hand back. "Download .plt.csv" is always available, serialized
-  from the current `PlateDefinition` via `plateToCsv`.
+  from the current `PlateDefinition` via `plateToCsv`. `PlatesView` (not `StandalonePlateView`,
+  where the plate is already its own file) also passes an `onClone` handler, rendered as a
+  sibling "Clone" button: same `plateToCsv` encode, but the resulting bytes are wrapped in a
+  `.plt.csv` `File` and handed to `store.addFiles` instead of triggering a download — extracting
+  the run's plate into its own independent `LoadedFile`, which is what populates the "Attach"
+  menu above with something to pick besides an upload. The Overview view's "Thermal protocol"
+  block has the same pair of buttons for a run's `protocolText`, download vs. clone to a
+  `.prcl.txt` `addFiles` call — there is no equivalent "replace this run's protocol" control,
+  since (per "A protocol on its own") a protocol override is expressed through run staging, not
+  by rewriting the run's own bytes the way a plate attach does.
 
 ## State & persistence
 
