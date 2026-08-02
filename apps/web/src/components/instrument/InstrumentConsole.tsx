@@ -7,10 +7,12 @@
  * `packages/core/src/usb/frame.ts`). Channel is shown on every line because a reply that arrives
  * on channel 2 rather than 1 is precisely the thing that would otherwise be invisible.
  *
- * **Watching and recording are separate.** What scrolls past here is a capped, poll-filtered
- * window that costs nothing to leave open. Keeping it — the uncapped transcript that the download
- * button writes and that a run's `.zpcr` carries as `usb-traffic.log` — happens only while
- * "record" is switched on, and it is off by default (see `useCfxDevice`'s `setRecording`).
+ * **Watching, recording and saving are three things.** What scrolls past here is a capped,
+ * poll-filtered window. The *recording* behind it is unconditional and complete — core's
+ * `UsbTrafficRecorder` (`usb-traffic.md`), which is what the download button writes out as text —
+ * so a problem noticed after the fact is still recoverable. The only choice on offer is "save
+ * log": whether a finished run's `.zpcr` carries that record, since that copy is the one that
+ * outlives the session (see `useCfxDevice`'s `setSaveLog`).
  *
  * **Read-only, deliberately.** This panel used to carry a prompt that sent whatever was typed
  * into it. It doesn't any more, and `CfxDevice` no longer offers a way to build one: the command
@@ -24,7 +26,7 @@
 import { useEffect, useRef, useState } from "react";
 import { DownloadIcon } from "../DownloadIcon";
 import { downloadText } from "../../lib/download";
-import { formatTrafficLog, USB_TRAFFIC_LOG_NAME } from "../../lib/usbTrafficLog";
+import { USB_TRAFFIC_TEXT_NAME } from "@zpcrweb/core";
 import type { CfxDeviceHandle } from "../../state/useCfxDevice";
 
 const time = (ms: number) => {
@@ -51,12 +53,11 @@ export function InstrumentConsole({ instrument }: { instrument: CfxDeviceHandle 
     bodyRef.current.scrollTop = bodyRef.current.scrollHeight;
   }, [instrument.traffic, follow, open]);
 
-  // Reads `recordedTraffic` — the uncapped, un-`clearTraffic`-affected record — not the
-  // display-only `traffic`/`lines`, since the point of this button is a complete log for decoding,
-  // not a copy of whatever the console happens to be showing. Nothing is there until "record" has
-  // been switched on, which is what disables the button below.
-  const downloadLog = () =>
-    downloadText(USB_TRAFFIC_LOG_NAME, formatTrafficLog(instrument.recordedTraffic.current));
+  // Writes the session's whole recording — not the display-only `traffic`/`lines`, since the point
+  // of this button is a complete log for decoding, not a copy of whatever the console happens to
+  // be showing. Text, not the stored records: a downloaded log is for reading, and the Raw files
+  // view renders the archived copy the same way (`formatUsbTrafficLog`, one line per message).
+  const downloadLog = () => downloadText(USB_TRAFFIC_TEXT_NAME, instrument.trafficLogText());
 
   return (
     // Collapsed by default: the console is for watching the protocol when something is being
@@ -76,15 +77,18 @@ export function InstrumentConsole({ instrument }: { instrument: CfxDeviceHandle 
             and the button are their own activation targets, so the <summary> around them never
             sees the click as a toggle. */}
         <div className="instrument__consoleopts">
-          {/* Off by default, and deliberately the only control here that changes what is *kept*:
-              the two beside it only change what is shown. See `setRecording`. */}
-          <label className="switch" title="Capture every message into a log, saved with the run">
+          {/* The only control here that changes what is *kept* — the rest change what is shown,
+              and the recording itself is always running. See `setSaveLog`. */}
+          <label
+            className="switch"
+            title="Attach the recorded USB traffic log to this run's .zpcr file"
+          >
             <input
               type="checkbox"
-              checked={instrument.recording}
-              onChange={(e) => instrument.setRecording((e.target as HTMLInputElement).checked)}
+              checked={instrument.saveLog}
+              onChange={(e) => instrument.setSaveLog((e.target as HTMLInputElement).checked)}
             />
-            record
+            save log
           </label>
           <label className="switch">
             <input
@@ -108,17 +112,13 @@ export function InstrumentConsole({ instrument }: { instrument: CfxDeviceHandle 
           <button
             className="raw__download"
             onClick={downloadLog}
-            // `hasRecording`, not `recordedTraffic.current.length`: the log is a ref, so reading
-            // its length during render can't re-enable the button on its own — and now that hidden
-            // polls cause no re-render, a recorded session that has only ever polled would leave
-            // it stuck disabled over a log that is anything but empty.
-            disabled={!instrument.hasRecording}
+            // `hasTraffic`, not the recorder's own length: the recorder is a ref, so reading it
+            // during render can't re-enable the button on its own — and now that hidden polls
+            // cause no re-render, a session that has only ever polled would leave it stuck
+            // disabled over a log that is anything but empty.
+            disabled={!instrument.hasTraffic}
             aria-label="Download USB traffic log"
-            title={
-              instrument.hasRecording
-                ? "Download the recorded USB traffic log"
-                : "Nothing recorded — switch on “record” to capture the traffic"
-            }
+            title="Download the complete USB traffic log, as text"
           >
             <DownloadIcon />
           </button>

@@ -1,8 +1,11 @@
 import { useMemo, useRef, useState } from "react";
 import {
+  USB_TRAFFIC_TEXT_NAME,
   ZPCRWEB_SETTINGS_NAME,
+  formatUsbTrafficBytes,
   formatZpcrwebSettings,
   hexDump,
+  isUsbTrafficName,
   parsePltd,
   parsePrcl,
   type Zpcr,
@@ -30,10 +33,11 @@ function group(name: string): string {
   if (/\.pltd$/i.test(name) || /\.plt\.csv$/i.test(name)) return "Plate setup";
   if (/\.prcl$/i.test(name)) return "Protocol";
   if (/\.Dcal$/i.test(name)) return "Calibration";
-  // `.log` is `usb-traffic.log`, the wire transcript this app records for a run it drove itself
-  // (see `lib/usbTrafficLog.ts`) — not instrument output, but the same kind of thing as the rest
-  // of Metadata: a plain-text account of what happened, alongside `RunInfo.xml` and the `.alf`.
-  if (/\.(xml|txt|alf|log)$/i.test(name)) return "Metadata";
+  // The USB traffic log — `usb-traffic.bin`, or the plain-text `usb-traffic.log` of a `.zpcr`
+  // written before the binary format (`usb-traffic.md`). Not instrument output, but the same kind
+  // of thing as the rest of Metadata: an account of what happened, beside `RunInfo.xml`/`.alf`.
+  if (isUsbTrafficName(name)) return "Metadata";
+  if (/\.(xml|txt|alf)$/i.test(name)) return "Metadata";
   return "Other";
 }
 
@@ -47,17 +51,19 @@ const GROUP_ORDER = [
   "Other",
 ];
 // `.plt.csv` is zpcrweb's own plate CSV format (see `plateCsv.ts`) — plain UTF-8 text, no
-// decryption needed, unlike `.pltd`/`.prcl`. `zpcrweb.json` and `usb-traffic.log` are likewise our
-// own (see `zpcrweb-json.md` and `lib/usbTrafficLog.ts`).
+// decryption needed, unlike `.pltd`/`.prcl`. `zpcrweb.json` is likewise our own (`zpcrweb-json.md`),
+// as is `usb-traffic.log`, the plain-text log older `.zpcr` files carry.
 const TEXTUAL = /\.(xml|txt|alf|json|log|plt\.csv)$/i;
 
-/** Best default mode for a file: decoded if a decoder exists, else text for text, else hex. There
- * is no decoder for `usb-traffic.log`: it is one already-formatted line per message, written by
- * this app, so "text" *is* its decoded form and re-parsing it back into a table would only lose
- * the hex payloads that are the point of keeping it. */
+/** Best default mode for a file: decoded if a decoder exists, else text for text, else hex.
+ *
+ * `usb-traffic.bin` is the one entry that is binary and yet opens in **Text**: its stored form is
+ * records, and the text is what a reader wants — this view is where that rendering happens
+ * (`formatUsbTrafficBytes`, `usb-traffic.md` §4). It gets no *Decoded* mode, because the text
+ * already is the decode: one line per message, with the payload bytes on it. */
 function defaultMode(name: string): Mode {
   if (decodedKind(name)) return "decoded";
-  if (TEXTUAL.test(name)) return "text";
+  if (TEXTUAL.test(name) || isUsbTrafficName(name)) return "text";
   return "hex";
 }
 
@@ -134,7 +140,11 @@ export function RawFilesView({ zpcr, settings }: { zpcr: Zpcr; settings: FileSet
   const isPltd = /\.pltd$/i.test(selected);
   const isPrcl = /\.prcl$/i.test(selected);
   const isSettings = selected === ZPCRWEB_SETTINGS_NAME;
-  const isTextual = TEXTUAL.test(selected) || isPltd || isPrcl;
+  // The binary traffic log: textual in the sense that matters here (there is a text rendering of
+  // it), just one this view generates rather than reads. The plain-text `usb-traffic.log` of an
+  // older `.zpcr` is already covered by TEXTUAL and needs none of this.
+  const isTrafficLog = isUsbTrafficName(selected) && !TEXTUAL.test(selected);
+  const isTextual = TEXTUAL.test(selected) || isPltd || isPrcl || isTrafficLog;
   const hasDecoded = decodedKind(selected) !== null;
   const size = !selected ? 0 : isSettings ? settingsBytes.length : zpcr.archive.bytes(selected).length;
 
@@ -144,9 +154,22 @@ export function RawFilesView({ zpcr, settings }: { zpcr: Zpcr; settings: FileSet
     if (isSettings) {
       return mode === "text" ? settingsText : hexDump(settingsBytes, { maxBytes: limit });
     }
+    if (mode === "text" && isTrafficLog) return formatUsbTrafficBytes(zpcr.archive.bytes(selected));
     if (mode === "text" && isTextual) return zpcr.archive.text(selected);
     return zpcr.archive.hexDump(selected, { maxBytes: limit });
-  }, [zpcr, selected, mode, limit, isTextual, isPltd, isPrcl, isSettings, settingsText, settingsBytes]);
+  }, [
+    zpcr,
+    selected,
+    mode,
+    limit,
+    isTextual,
+    isTrafficLog,
+    isPltd,
+    isPrcl,
+    isSettings,
+    settingsText,
+    settingsBytes,
+  ]);
 
   // What "Text"/"XML" mode is currently showing, for the download button — re-derives the
   // decrypted payload independently of <PlateXml>/<ProtocolXml> (same pattern those components
@@ -170,6 +193,7 @@ export function RawFilesView({ zpcr, settings }: { zpcr: Zpcr; settings: FileSet
     return null;
   }, [mode, selected, isPltd, isPrcl, isSettings, isTextual, zpcr, password, rawBody, settingsText]);
 
+
   const decodedRef = useRef<HTMLDivElement>(null);
   const canDownload = mode === "decoded" ? hasDecoded : textDownload !== null;
 
@@ -183,7 +207,13 @@ export function RawFilesView({ zpcr, settings }: { zpcr: Zpcr; settings: FileSet
       if (!decodedRef.current) return;
       downloadText(`${baseName(selected)}.csv`, decodedToCsv(decodedRef.current), "text/csv");
     } else if (textDownload) {
-      const name = isPltd || isPrcl ? `${baseName(selected)}.${textDownload.ext}` : selected;
+      // The traffic log downloads under the name its text form has everywhere else — the console's
+      // own button writes exactly the same file (`USB_TRAFFIC_TEXT_NAME`), not `usb-traffic.bin`.
+      const name = isTrafficLog
+        ? USB_TRAFFIC_TEXT_NAME
+        : isPltd || isPrcl
+          ? `${baseName(selected)}.${textDownload.ext}`
+          : selected;
       const mime =
         textDownload.ext === "xml"
           ? "application/xml"
@@ -231,7 +261,15 @@ export function RawFilesView({ zpcr, settings }: { zpcr: Zpcr; settings: FileSet
               className={"segmented__item" + (mode === "text" ? " is-active" : "")}
               onClick={() => setMode("text")}
               disabled={!isTextual}
-              title={isPltd || isPrcl ? "Decrypted XML" : isTextual ? "" : "Binary file — hex only"}
+              title={
+                isPltd || isPrcl
+                  ? "Decrypted XML"
+                  : isTrafficLog
+                    ? "The recorded messages, one line each"
+                    : isTextual
+                      ? ""
+                      : "Binary file — hex only"
+              }
             >
               {isPltd || isPrcl ? "XML" : "Text"}
             </button>

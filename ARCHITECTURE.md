@@ -10,8 +10,8 @@ gets its own top-level `*.md` doc — [`plateread.md`](./plateread.md), [`dcal.m
 [`pltd.md`](./pltd.md), [`pcrd.md`](./pcrd.md), [`icff.md`](./icff.md). The one non-format
 exception is [`calibration.md`](./calibration.md), which documents the channel→dye
 color-separation algorithm built on top of `.Dcal` rather than a byte layout, and
-[`zpcrweb-json.md`](./zpcrweb-json.md), which documents the one entry we *write* into a `.zpcr`
-rather than one we decode. Each doc is
+[`zpcrweb-json.md`](./zpcrweb-json.md) and [`usb-traffic.md`](./usb-traffic.md), which document
+the two entries we *write* into a `.zpcr` rather than ones we decode. Each doc is
 self-contained and ends with a pointer to the `packages/core/src` module that implements it, so
 the doc is always the entry point for understanding *and* changing a decoder. See
 [`README.md`](./README.md) for the full doc ↔ code table.
@@ -310,6 +310,14 @@ which is already the name Manager would have saved it under.
 
 This is what lets the web app's Instrument view open a run off a connected instrument as an ordinary
 file (see [`apps/web/ARCHITECTURE.md`](./apps/web/ARCHITECTURE.md)).
+
+One entry in such an archive did not come off the instrument: `usb-traffic.bin`, the log of the
+conversation that produced the run (`usbTraffic.ts`, [`usb-traffic.md`](./usb-traffic.md)). It is
+stored as binary records rather than the text it renders to — an hour of the status poll is 237 KB
+of records against 1.3 MB of text, and ~1 KB against ~41 KB once the ZIP has deflated either — which
+is what makes keeping a session's whole wire log with the run cost single-digit KB. The app records
+one always and attaches it only when asked; `formatUsbTrafficLog` is the single text rendering, used
+by both the console's download button and the Raw files view.
 
 ### Did the run finish? Count its reads (`runCompleteness`)
 

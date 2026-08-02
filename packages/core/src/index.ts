@@ -159,6 +159,24 @@ export {
  * than decoding bytes, hence its own directory. Isomorphic like the rest: see
  * `usb/transport.ts` for why WebUSB and Node share a single implementation. */
 export * from "./usb/index.js";
+/** The USB traffic log this app records for a run it drove itself (`usb-traffic.md`). */
+export {
+  UsbTrafficRecorder,
+  USB_TRAFFIC_LOG_NAME,
+  USB_TRAFFIC_TEXT_NAME,
+  formatUsbTrafficLog,
+  formatUsbTrafficBytes,
+  isUsbTrafficLog,
+  isUsbTrafficName,
+  parseUsbTrafficLog,
+  usbTrafficText,
+} from "./usbTraffic.js";
+export type {
+  UsbTrafficRecord,
+  UsbTrafficMessage,
+  UsbTrafficError,
+  UsbTrafficGap,
+} from "./usbTraffic.js";
 export {
   deriveExperimentName,
   nextFreeRunFileBase,

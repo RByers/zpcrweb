@@ -6,14 +6,17 @@
  * session* adds on top: obtaining the device through `navigator.usb`, a poll timer, a bounded
  * traffic log for the debug console, and the React state the view renders.
  *
- * The traffic log is kept in two forms, and the difference matters: `recordedTraffic` is an
- * uncapped ref holding every line captured *while recording is on*, and is what gets downloaded or
- * embedded in a run's `.zpcr`; `traffic` is the display window — capped, cleared by
- * `clearTraffic`, and with poll chatter withheld while `hidePolls` is set, so an idle instrument
- * produces no React updates at all (see {@link pushLine}).
+ * The traffic log is kept in two forms, and the difference matters. The **recording** is core's
+ * `UsbTrafficRecorder` (`usb-traffic.md`) — every message and transfer error of the session, as
+ * compact binary records, always on, and what the console downloads or a run's `.zpcr` carries.
+ * `traffic` is the **display window** — capped, cleared by `clearTraffic`, and with poll chatter
+ * withheld while `hidePolls` is set, so an idle instrument produces no React updates at all (see
+ * {@link pushLine}).
  *
- * Recording is **off by default** (see {@link useCfxDevice.setRecording}): watching the console is
- * the common case, keeping a complete uncapped transcript of a multi-hour session is not.
+ * Recording is unconditional because the records are cheap: an hour of the status poll is ~237 KB
+ * of them, against 1.3 MB of the text the same hour renders to. What is a *choice* is whether the
+ * log is attached to the run's file — {@link useCfxDevice.setSaveLog} — since that is the copy
+ * that outlives the session and takes up disk.
  *
  * Everything it exposes is a *named* operation — status, listings, file fetches, and `runAction`
  * over the fixed `CFX_COMMANDS` table. There is no "send this line" call, here or in the library
@@ -26,6 +29,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   CFX_CURRENT_RUN_DIR,
+  UsbTrafficRecorder,
+  formatUsbTrafficBytes,
   CFX_DIRECTORIES,
   CFX_USB_FILTER,
   CfxDevice,
@@ -123,19 +128,20 @@ function usbApi(): { requestDevice(o: unknown): Promise<UsbDeviceLike>; getDevic
 export function useCfxDevice() {
   const deviceRef = useRef<CfxDevice | null>(null);
   const trafficId = useRef(0);
-  // Every message and transfer error captured while recording was on, uncapped — unlike `traffic`
-  // (bounded to TRAFFIC_LIMIT for the on-screen console) and unaffected by `clearTraffic` (which
-  // only resets the view). This is what backs the console's "download log" button and what gets
-  // embedded in a run's `.zpcr` when it finishes — both want the complete record, not the display
-  // window. Empty unless `recording` has been switched on, which it isn't by default.
-  const recordedTraffic = useRef<ConsoleLine[]>([]);
+  // The session's complete record, as binary items (core's `UsbTrafficRecorder`, `usb-traffic.md`)
+  // rather than console lines: it is unbounded in time, so it is stored in the form that costs
+  // ~16 bytes per message instead of the ~85-byte line one renders to. Unaffected by
+  // `clearTraffic`, which resets the view only. This is what the console's download button writes
+  // and what a run's `.zpcr` carries — both want the complete record, not the display window.
+  const recorder = useRef(new UsbTrafficRecorder());
   // Whether the last outbound *message* was a poll query, which is how an inbound reply is
   // classified: it carries no copy of the request it answers.
   const lastOutWasPoll = useRef(false);
   // The lines `setHidePolls` rebuilds the display from, capped at REBUILD_LIMIT and reset by
   // `clearTraffic` — so a rebuild honours the last clear without tracking an offset into anything.
-  // Separate from `recordedTraffic` because un-hiding polls has to work on a session nobody is
-  // recording, which is every session by default.
+  // Kept as console lines rather than re-read from the recorder: rebuilding is a click, the window
+  // it feeds is small and bounded, and decoding a session-long record to recover the last few
+  // hundred lines would be work proportional to the whole session.
   const rebuildFrom = useRef<ConsoleLine[]>([]);
 
   const [connection, setConnection] = useState<ConnectionState>(() =>
@@ -156,16 +162,14 @@ export function useCfxDevice() {
   // Read by `pushLine`, which is a stable callback wired into the device and so can't close over
   // the state; `setHidePolls` keeps the two in step.
   const hidePollsRef = useRef(true);
-  /** Whether arriving lines are appended to {@link recordedTraffic}. Off by default — see
-   * {@link setRecording}. */
-  const [recording, setRecordingState] = useState(false);
-  // Read by `pushLine` for the same reason as `hidePollsRef`: it is a stable callback wired into
-  // the device, so it can't close over the state.
-  const recordingRef = useRef(false);
-  /** True once any line has been *recorded*. A plain boolean rather than a count so it re-renders
-   * exactly once per recording — the console's download button needs to know the log is non-empty,
-   * and `recordedTraffic` is a ref that can't announce itself. */
-  const [hasRecording, setHasRecording] = useState(false);
+  /** Whether a finished run's `.zpcr` gets the recorded log attached — see {@link setSaveLog}. */
+  const [saveLog, setSaveLogState] = useState(false);
+  // Read by `trafficLogForRun`, which must stay a stable callback for the run watcher's sake.
+  const saveLogRef = useRef(false);
+  /** True once anything at all has been recorded. A plain boolean rather than a count so it
+   * re-renders exactly once, ever — the console's download button needs to know the log is
+   * non-empty, and the recorder is a ref that can't announce itself. */
+  const [hasTraffic, setHasTraffic] = useState(false);
   /**
    * Set the instant Start run is clicked, cleared by the first `STATUS?` that comes back after the
    * start sequence has run — see {@link useCfxDevice.startRun}.
@@ -184,23 +188,19 @@ export function useCfxDevice() {
   runPendingRef.current = runPending;
 
   /**
-   * Append one console line to the recording (when one is running) and the rebuild buffer, and —
-   * unless it's poll traffic being hidden — to the display-capped state. The one place any of them
-   * is written, so a message and a transfer error interleave in the single arrival order they
-   * actually happened in.
+   * Append one console line to the rebuild buffer and — unless it's poll traffic being hidden — to
+   * the display-capped state. Called from the same two handlers that feed the recorder, so a
+   * message and a transfer error interleave in the single arrival order they actually happened in.
    *
    * The `hidePolls` check is **here**, not in the console's render, and that placement is the
    * whole point of the flag. Filtering at render time still put every poll line into React state,
    * so a 1.5 s poll re-rendered the panel and re-ran its follow-scroll six times a minute for
    * lines that were then thrown away — visible as a flash on an otherwise idle console. Hidden
-   * polls now cause no state update at all, while a running recording still takes them, so the
-   * downloaded log and the copy embedded in a run's `.zpcr` remain complete either way.
+   * polls now cause no state update at all, while the recorder still takes them, so the downloaded
+   * log and the copy embedded in a run's `.zpcr` remain complete either way.
    */
   const pushLine = useCallback((line: ConsoleLine) => {
-    if (recordingRef.current) {
-      recordedTraffic.current.push(line);
-      setHasRecording(true);
-    }
+    setHasTraffic(true);
     rebuildFrom.current.push(line);
     if (rebuildFrom.current.length > REBUILD_LIMIT) {
       rebuildFrom.current = rebuildFrom.current.slice(rebuildFrom.current.length - REBUILD_LIMIT);
@@ -224,6 +224,19 @@ export function useCfxDevice() {
   const onTraffic = useCallback(
     (e: CfxTrafficEvent) => {
       const text = e.text === null ? null : e.text.replace(/\r?\n$/, "");
+      const poll = classifyPoll(e.direction, text);
+      // The recorder takes the event as the device reported it — `e.text`, not the trimmed `text`
+      // above, since what it stores is "did the device offer a decode at all" and the trailing
+      // newline is a display nicety re-applied at format time.
+      recorder.current.message({
+        at: e.at,
+        direction: e.direction,
+        channel: e.channel,
+        payload: e.payload,
+        text: e.text,
+        unsolicited: e.unsolicited,
+        poll,
+      });
       pushLine({
         kind: "message",
         id: trafficId.current++,
@@ -234,7 +247,7 @@ export function useCfxDevice() {
         text,
         hex: toHex(e.payload),
         bytes: e.payload.length,
-        poll: classifyPoll(e.direction, text),
+        poll,
       });
     },
     [pushLine, classifyPoll],
@@ -242,6 +255,7 @@ export function useCfxDevice() {
 
   const onTransferError = useCallback(
     (e: CfxTransferErrorEvent) => {
+      recorder.current.error(e);
       pushLine({
         kind: "error",
         id: trafficId.current++,
@@ -600,24 +614,42 @@ export function useCfxDevice() {
   }, []);
 
   /**
-   * Start or stop recording — nothing more than whether arriving lines are appended to
-   * {@link recordedTraffic}.
+   * Choose whether a finished run's `.zpcr` carries the recorded log.
    *
-   * Off by default. The console is the everyday use of this panel and it costs nothing to leave
-   * open; keeping an uncapped transcript of every message of a multi-hour run is a thing to ask
-   * for. Turning it on mid-run is therefore normal, and is why this only gates the append: the
-   * lines already recorded stay, so stopping and restarting resumes the same log rather than
-   * discarding it. What was on screen while recording was off is *not* backfilled — the recording
-   * is what was captured, and a log with a silent gap in the middle would be worse than one that
-   * plainly starts where it started.
+   * Recording itself is not a choice — it always happens, so the console's download button always
+   * has a complete session behind it and a problem noticed after the fact is still recoverable.
+   * What this decides is the copy that *persists*: the entry attached to the run's file, which
+   * outlives the session and takes up disk wherever that file goes.
    *
-   * A run's `.zpcr` embeds the log only when the buffer is non-empty (see `useRunWatch`'s `pull`),
-   * so a never-recorded session simply carries no `usb-traffic.log` entry.
+   * Off by default, and read at the moment the log is attached rather than while recording, so
+   * switching it on part-way through a run still saves the whole run — including everything that
+   * happened before the switch was touched. Switching it off before the run ends leaves the file
+   * without the entry entirely; nothing is half-saved.
    */
-  const setRecording = useCallback((on: boolean) => {
-    recordingRef.current = on;
-    setRecordingState(on);
+  const setSaveLog = useCallback((on: boolean) => {
+    saveLogRef.current = on;
+    setSaveLogState(on);
   }, []);
+
+  /**
+   * The log to attach to a run's `.zpcr`, or null for "attach nothing" — the one place both
+   * conditions are decided, so the run watcher doesn't have to know either of them.
+   *
+   * Null when {@link setSaveLog} is off, and null for an empty recording: a session that saw no
+   * traffic (the run was watched but the instrument was driven by someone else, say) is worth no
+   * entry rather than an 8-byte header nobody can learn anything from.
+   */
+  const trafficLogForRun = useCallback(
+    () => (saveLogRef.current && !recorder.current.isEmpty ? recorder.current.bytes() : null),
+    [],
+  );
+
+  /** The whole session's log as text, for the console's download button — always available, since
+   * recording is unconditional. */
+  const trafficLogText = useCallback(
+    () => formatUsbTrafficBytes(recorder.current.bytes()),
+    [],
+  );
 
   /**
    * Turn poll suppression on or off, and rebuild the console's display list from
@@ -651,10 +683,11 @@ export function useCfxDevice() {
     status,
     rtStatus,
     traffic,
-    recordedTraffic,
-    hasRecording,
-    recording,
-    setRecording,
+    hasTraffic,
+    saveLog,
+    setSaveLog,
+    trafficLogForRun,
+    trafficLogText,
     hidePolls,
     setHidePolls,
     directories,

@@ -825,19 +825,22 @@ Unchanged in spirit from before `.pcrd` support: groups `zpcr.archive.entries` (
 Analysis / Plate setup / Plate reads / Calibration / Other). Each file opens in its **best
 default mode** (`RawFilesView.defaultMode`) with Decoded / Text / Hex always switchable: a typed
 **Decoded** view where one exists (`DecodedView.tsx`, above), else **Text** for textual files
-(`.xml`/`.txt`/`.alf`/`.json`/`.log`/`.plt.csv`), else **Hex** (`archive.hexDump`, paginated). Text
+(`.xml`/`.txt`/`.alf`/`.json`/`.log`/`.plt.csv`, plus the traffic log below), else **Hex**
+(`archive.hexDump`, paginated). Text
 mode renders the collapsible XML tree whenever the content is XML (`RunInfo.xml`, `runlog.xml`,
 `GlobData.xml`, and the decrypted `.pltd`/`.prcl` payloads, which label the mode "XML") and the
 plain dump otherwise. Switching files resets the mode **during render** rather than in an effect,
 so the new file never paints a frame in the old file's mode (picking `runlog.xml` from a
 `RunInfo.xml` left in Text mode used to flash its XML before snapping to the decoded table).
 
-**`usb-traffic.log`** — the wire transcript the Instrument view records for a run it drove itself
-(see "The Instrument view") — groups under **Metadata** and opens in **Text**. It is the only entry
-that never came off the instrument, but it is the same kind of thing as the rest of that group: a
-plain-text account of what happened, beside `RunInfo.xml` and the `.alf`. No decoder, deliberately —
-it is already one formatted line per message, and re-parsing it into a table would only cost the hex
-payloads that are the reason to keep it.
+**`usb-traffic.bin`** — the wire log the Instrument view records for a run it drove itself (see
+"The Instrument view") — groups under **Metadata** and opens in **Text**, the one entry that is
+binary and yet does. Its stored form is records (`usb-traffic.md`); the text is what a reader wants,
+and **this view is where that rendering happens** (`formatUsbTrafficBytes`), which is also why it
+downloads under the text name `usb-traffic.log` rather than the entry's own. There is no *Decoded*
+mode because the text already is the decode — one line per message with the payload bytes on it —
+and no XML tree, since it isn't XML. A `.zpcr` written before the binary format carries a plain-text
+`usb-traffic.log` instead, which needs none of this and reads as ordinary text.
 
 **`zpcrweb.json` is the one synthesized entry** (its own "Analysis" group, sorted just above
 Plate setup). It is listed whether or not the loaded archive contains it, and its Text/Hex
@@ -1939,8 +1942,8 @@ knows about the protocol comes from `@zpcrweb/core`'s `CfxDevice` (see the root
 [`ARCHITECTURE.md`](../../ARCHITECTURE.md#talking-to-an-instrument-not-a-file-srcusb) and
 [`usb.md`](../../usb.md)), per the standing rule that logic lives in the library — the app side is
 `state/useCfxDevice.ts`, which owns only what a browser session adds: obtaining the instrument through
-`navigator.usb`, a poll timer, a bounded traffic log (plus an uncapped one while recording), and
-the React state the components render.
+`navigator.usb`, a poll timer, the traffic recording and its bounded display window, and the React
+state the components render.
 
 **Why it is set apart in the chrome.** Every other tab is a lens on the active file, and the file
 bar underneath says which one. This tab isn't:
@@ -2327,26 +2330,26 @@ Four components, under `components/instrument/`:
   lines a minute into React state only for the render to discard them — a re-render and a
   follow-scroll per poll, visible as a flash on an idle console. A poll reply carries no copy of
   its request, so each line is classified on arrival (`poll: boolean`) against the outbound
-  message before it, which is the one point where the answer is cheap. A running recording still
-  takes every line either way, so the downloaded log and the copy embedded in a run's `.zpcr` are
-  complete regardless of the toggle. Toggling it rebuilds the display list from `rebuildFrom` — a
-  capped record kept whether or not anyone is recording, necessarily separate from the recording
-  itself since hidden lines were never in `traffic` to un-hide and un-hiding has to work in the
-  default session where nothing is being recorded. `Clear` empties that record, which is how the
-  rebuild honours it without tracking an offset.
+  message before it, which is the one point where the answer is cheap. The recording below takes
+  every line either way, so the downloaded log and the copy embedded in a run's `.zpcr` are
+  complete regardless of the toggle. Toggling it rebuilds the display list from `rebuildFrom`, a
+  capped buffer of console lines kept for exactly this — hidden lines were never in `traffic` to
+  un-hide, and decoding the session-long recording to recover the last few hundred of them would
+  be work proportional to the whole session for a window of 400. `Clear` empties that buffer,
+  which is how the rebuild honours it without tracking an offset.
 
-  **"record" is the only switch here that changes what is *kept*, and it is off by default.**
-  `hide polling`, `follow` and `Clear` all act on the display; `record` gates the append into
-  `useCfxDevice`'s uncapped `recordedTraffic`, which is what the download button writes and what a
-  finished run's `.zpcr` carries as `usb-traffic.log` (`useRunWatch`'s `finalAssembly` embeds it
-  **iff the buffer is non-empty**, so a session nobody recorded simply has no such entry). Off by
-  default because the console is cheap to leave open and an uncapped transcript of a multi-hour run
-  is not — keeping one is a thing to ask for. Toggling it mid-run does *exactly* that append gate
-  and nothing else: lines already recorded stay, so stopping and restarting resumes the same log,
-  and what went past while it was off is not backfilled — a log that plainly starts where it
-  started beats one with a silent gap in the middle. In the Raw files view the resulting entry
-  lists under **Metadata** and opens in text mode, since it is already one formatted line per
-  message and has no decoder to offer.
+  **Recording is unconditional; "save log" decides only what is *kept*.** Every message and
+  transfer error goes into core's `UsbTrafficRecorder` (`usb-traffic.md`) for the whole session,
+  regardless of the display toggles, so the download button always has the complete conversation
+  behind it and a problem noticed after the fact is still recoverable. That is affordable because
+  the recorder stores *records*, not the text they render to — payload bytes plus the three facts
+  about a message that aren't in them — at ~16 bytes per message against an ~85-byte line. The
+  console's `save log` switch (off by default) decides one thing: whether the finished run's
+  `.zpcr` carries that log, which is the copy that outlives the session. `useCfxDevice`'s
+  `trafficLogForRun()` is where both conditions live — the switch, and "the recording isn't
+  empty" — so `useRunWatch` just asks for bytes or nothing. It is read at the moment of
+  attachment, at the end of the run, so switching it on part-way through still saves the *whole*
+  run, and switching it off leaves the file without the entry rather than with half of one.
 
   **Read-only, deliberately.** It used to carry a prompt that sent whatever was typed into it;
   that is gone, and the library no longer offers the call it was built on (`usb.md` §10). The

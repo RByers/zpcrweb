@@ -58,8 +58,12 @@
  * `finish` below for why it is both safe and necessary.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { CFX_CURRENT_RUN_DIR, runProgressFromNames, zpcrFromRunFiles } from "@zpcrweb/core";
-import { formatTrafficLog, USB_TRAFFIC_LOG_NAME } from "../lib/usbTrafficLog";
+import {
+  CFX_CURRENT_RUN_DIR,
+  USB_TRAFFIC_LOG_NAME,
+  runProgressFromNames,
+  zpcrFromRunFiles,
+} from "@zpcrweb/core";
 import type { CfxDeviceHandle } from "./useCfxDevice";
 
 /**
@@ -167,7 +171,7 @@ export function useRunWatch(
   const fileIdRef = useRef<string | null>(null);
   fileIdRef.current = fileId;
 
-  const { connection, status, refreshRunFolder, fetchDirectoryFiles, acknowledgeFinishedRun, recordedTraffic } =
+  const { connection, status, refreshRunFolder, fetchDirectoryFiles, acknowledgeFinishedRun, trafficLogForRun } =
     instrument;
 
   /**
@@ -175,11 +179,12 @@ export function useRunWatch(
    *
    * `finalAssembly` marks the end-of-run pass (see `check`), and does two things: it re-reads the
    * `REFETCH_AT_END` files, whose cached copies are as old as the moment they were first seen, and
-   * it adds the session's recorded USB traffic log as an extra entry — if any was recorded, since
-   * the console's "record" switch is off unless someone asked for a log, and an empty buffer adds
-   * no entry at all. Both belong to this pass only — every intermediate `.zpcr` a run produces
-   * stays exactly what's on the instrument, and the log is a one-time addition once there's
-   * nothing left to supersede it.
+   * it adds the session's USB traffic log as an extra entry, when the console's "save log" switch
+   * asks for one (`trafficLogForRun` decides; see `useCfxDevice.setSaveLog`). Both belong to this
+   * pass only — every intermediate `.zpcr` a run produces stays exactly what's on the instrument,
+   * and the log is a one-time addition once there's nothing left to supersede it. Reading the
+   * switch *here*, at the end, is also what lets someone turn it on mid-run and still get the
+   * whole run: the recording was running the entire time either way.
    */
   const pull = useCallback(
     async (names: string[], finalAssembly = false) => {
@@ -202,8 +207,8 @@ export function useRunWatch(
       }
       const files = Object.fromEntries(cache.current);
       if (finalAssembly) {
-        const log = formatTrafficLog(recordedTraffic.current);
-        if (log !== "") files[USB_TRAFFIC_LOG_NAME] = new TextEncoder().encode(log);
+        const log = trafficLogForRun();
+        if (log) files[USB_TRAFFIC_LOG_NAME] = log;
       }
       const fresh = freshStart.current;
       freshStart.current = false;
@@ -219,7 +224,7 @@ export function useRunWatch(
         setNote(e instanceof Error ? e.message : String(e));
       }
     },
-    [fetchDirectoryFiles, recordedTraffic],
+    [fetchDirectoryFiles, trafficLogForRun],
   );
 
   /**
@@ -317,7 +322,7 @@ export function useRunWatch(
       await acknowledgeFinishedRun();
       // Forced: the final read and `ended` land as part of this same moment, and waiting for the
       // signature to differ would just add a round trip. This is also the run's last `.zpcr`, so
-      // any recorded USB traffic log is embedded here (see `pull`'s `finalAssembly`).
+      // the USB traffic log is attached here, if "save log" asks for one (see `finalAssembly`).
       await check(true, true);
     })();
   }, [connection, watching, status, acknowledgeFinishedRun, check]);
