@@ -428,6 +428,7 @@ export function App() {
             {view === "overview" && (
               <OverviewView
                 zpcr={zpcr}
+                kind={active.kind}
                 file={active}
                 run={activeRun!}
                 settings={settings}

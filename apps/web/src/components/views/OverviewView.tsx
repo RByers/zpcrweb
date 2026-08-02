@@ -1,9 +1,11 @@
 import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
+  fileKindDescription,
   formatRunDefinitionText,
   plateTargets,
   runProgressFromNames,
   type CqTableEntry,
+  type FileKind,
   type PlateDefinition,
   type Zpcr,
 } from "@zpcrweb/core";
@@ -33,6 +35,7 @@ interface Counts {
 
 export function OverviewView({
   zpcr,
+  kind,
   file,
   run,
   settings,
@@ -43,6 +46,10 @@ export function OverviewView({
   addFiles,
 }: {
   zpcr: Zpcr;
+  /** The run's own file kind (`.zpcr`/`.pcrd`/biomeme `.json`) — feeds the "Type" row's detailed
+   * description (`fileKindDescription`), the library's own wording rather than something re-derived
+   * here. */
+  kind: FileKind;
   /** The active run's own name/bytes — downloaded verbatim, so this is also how a `.zpcr`
    * attached via the Plates view's upload control gets back onto disk (see `PlatesView`). Also
    * carries the source file's own `lastModified` (its OS mtime), shown in the info table. */
@@ -121,6 +128,7 @@ export function OverviewView({
   // archive identity — everything that used to be split across the tiles grid and two separate
   // "Encrypted"/"Run identity" sections below.
   const infoRows: InfoRow[] = [
+    { label: "Type", value: fileKindDescription(kind) },
     { label: "Filename", value: identity.fileName },
     { label: "Last modified", value: formatCompactDateTime(new Date(file.lastModified)) },
     // Omitted rather than shown as "—": a standalone plate/protocol file has no run to date at

@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { parseRunDefinition } from "@zpcrweb/core";
+import { fileKindDescription, parseRunDefinition } from "@zpcrweb/core";
 import { ProtocolDecoded } from "../raw/DecodedView";
 import type { LoadedFile } from "../../state/useZpcrStore";
 
@@ -28,6 +28,7 @@ export function StandaloneProtocolView({
   const reads = program.directives.filter((d) => d.verb === "PLATEREAD").length;
 
   const tiles = [
+    { label: "Type", value: fileKindDescription(file.kind) },
     { label: "Method", value: program.method ?? "—" },
     {
       label: "Lid",

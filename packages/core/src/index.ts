@@ -90,7 +90,7 @@ export {
 export { parseDcal, findDcalBlock, isDcalName, dyeChannelLookup } from "./dcal.js";
 export { parsePcrd, isPcrdName, pcrdFromBlob } from "./pcrd.js";
 export { parseBiomeme, isBiomemeJson } from "./biomeme.js";
-export { fileCategory } from "./fileKind.js";
+export { fileCategory, fileKindDescription } from "./fileKind.js";
 export {
   buildDyeResponseCurve,
   buildDyeReadingCurves,

@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import type { FileKind } from "@zpcrweb/core";
 import type { LoadedFile, PlateFileResult, RunResult } from "../state/useZpcrStore";
 import { usePltdPassword } from "../state/pltdPassword";
 import { channelColor } from "../lib/channelColors";
@@ -9,7 +10,7 @@ import {
   type EncryptionStatus,
 } from "../lib/encryptionStatus";
 import type { ExperimentIdentity } from "../lib/experiment";
-import { fileCategory, plateTargets, type FileCategory } from "@zpcrweb/core";
+import { fileCategory, fileKindDescription, plateTargets, type FileCategory } from "@zpcrweb/core";
 import { FileKindIcon } from "./FileIcons";
 
 /** Tooltip wording for the chip icon — its shape, then its colour. */
@@ -121,12 +122,14 @@ function meta(f: LoadedFile, run: RunResult | undefined, plateFile: PlateFileRes
  * absolutely-positioned child, because `.filebar` scrolls horizontally (`overflow-x: auto`) and
  * would otherwise clip the card vertically too. */
 function HoverCard({
+  kind,
   identity,
   run,
   plateFile,
   password,
   style,
 }: {
+  kind: FileKind;
   identity: ExperimentIdentity;
   run: RunResult | undefined;
   plateFile: PlateFileResult | undefined;
@@ -150,6 +153,7 @@ function HoverCard({
           the question the chip no longer answers on its own. */}
       <div className="filecard__title">{identity.name}</div>
       <div className="filecard__file">{identity.fileName}</div>
+      <div className="filecard__type">{fileKindDescription(kind)}</div>
       {zpcr && (
         <dl className="filecard__dl">
           <dt>Protocol</dt>
@@ -324,6 +328,7 @@ function FileChip({
       {cardPos &&
         createPortal(
           <HoverCard
+            kind={f.kind}
             identity={identity}
             run={run}
             plateFile={plateFile}

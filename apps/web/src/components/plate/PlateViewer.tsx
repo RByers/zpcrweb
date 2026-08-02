@@ -1,5 +1,11 @@
 import type { CSSProperties, ReactNode } from "react";
-import type { PlateDefinition, PlateFluor, WellDefinition } from "@zpcrweb/core";
+import {
+  fileKindDescription,
+  type FileKind,
+  type PlateDefinition,
+  type PlateFluor,
+  type WellDefinition,
+} from "@zpcrweb/core";
 import { channelColor } from "../../lib/channelColors";
 import { FluorChannelChip, UnknownChannelNote, hasUnknownChannel } from "./FluorChannelChip";
 import { ROW_LABELS, SAMPLE_TYPE_META } from "../../lib/sampleType";
@@ -23,11 +29,18 @@ import { Pair } from "../raw/Pair";
  */
 export function PlateViewer({
   plate,
+  kind,
   sourceHint,
   toolbar,
   compact,
 }: {
   plate: PlateDefinition;
+  /** The standalone file's own kind (`pltd` or `csv`) — only passed by
+   * `StandalonePlateView`, whose plate *is* a top-level file with a kind of its own. The "Plates"
+   * tab of a run has no such prop: its plate is a piece of the run's archive, not a file in its
+   * own right, so there is nothing to describe that the run's own "Type" row (`OverviewView`)
+   * doesn't already say. */
+  kind?: FileKind;
   sourceHint?: string;
   /** The view's attach/download controls, rendered on the heading line rather than above it —
    * see `.plateviewer__head`. Parents keep their own copy for the no-plate branches. */
@@ -80,6 +93,7 @@ export function PlateViewer({
         </div>
         {!compact && (
           <dl className="decoded__dl mono">
+            {kind && <Pair k="Type" v={fileKindDescription(kind)} />}
             <Pair k="Vessel" v={plate.plateName || "—"} />
             <Pair k="Scan mode" v={plate.scanMode || "—"} />
             <Pair k="Plate type" v={plate.plateType || "—"} />

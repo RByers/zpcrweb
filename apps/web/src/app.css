@@ -488,6 +488,14 @@
   margin-bottom: 6px;
   word-break: break-all;
 }
+/* The library's own detailed type description (`fileKindDescription`) — e.g. "Plate: Bio-Rad
+   format" — the one place format detail replaces what used to be a bare tooltip on the type
+   column/chip icon. */
+.filecard__type {
+  font-size: 10px;
+  color: var(--ink-muted);
+  margin-bottom: 8px;
+}
 .filecard__dl {
   display: grid;
   grid-template-columns: auto 1fr;

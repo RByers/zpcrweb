@@ -13,9 +13,9 @@
  *   wholesale — this is the one place a file is actually removed from IndexedDB, for every file,
  *   not only a modified one. See {@link DeleteButton}.
  *
- * A row's hover card (see {@link RowHoverCard}) mirrors the file bar's own — same targets/samples
- * chips — but leaves out whatever the table's columns already say (name, date, protocol, plate),
- * showing only what neither does: the run's cycle count.
+ * A row's hover card (see {@link RowHoverCard}) mirrors the file bar's own — same detailed type
+ * description and targets/samples chips — but leaves out whatever the table's columns already say
+ * (name, date, protocol, plate), showing only what neither does: the run's cycle count.
  *
  * Clicking a row anywhere else selects that file (which also turns its checkbox back on — see
  * `useZpcrStore`'s `setActive`) and closes this view, landing on the file's own first enabled
@@ -23,7 +23,7 @@
  */
 import { useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { fileCategory, plateTargets, type FileKind, type PlateDefinition } from "@zpcrweb/core";
+import { fileKindDescription, plateTargets, type FileKind, type PlateDefinition } from "@zpcrweb/core";
 import type { LoadedFile, PlateFileResult, RunResult, ViewId } from "../state/useZpcrStore";
 import type { ExperimentIdentity } from "../lib/experiment";
 import { formatCompactDateTime } from "../lib/experiment";
@@ -49,12 +49,6 @@ interface Props {
   onDelete: (id: string) => void | Promise<void>;
   onClose: () => void;
 }
-
-const CATEGORY_TEXT: Record<string, string> = {
-  run: "Run",
-  plate: "Plate map",
-  protocol: "Thermal protocol",
-};
 
 /** The extension a kind is actually decoded as — independent of what the source file was named.
  * A `.csv` uploaded as `myplate.csv` is still a `.plt.csv` by content (`fileKind`'s content
@@ -176,17 +170,20 @@ function SortArrow({ state }: { state: "asc" | "desc" | null }) {
 }
 
 /**
- * A row's hover card: the same targets/samples chips as the file bar's own (`FileBar.tsx`'s
- * `HoverCard`), plus the run's cycle count — everything else that card shows (the run's name,
- * protocol, file name) already has its own table column here, so repeating it would just be
- * noise. Portalled to a fixed screen position for the same reason the bar's version is: the
- * table's own scroll container (`.filesview__scroll`) would otherwise clip it.
+ * A row's hover card: the file's detailed type description, then the same targets/samples chips
+ * as the file bar's own (`FileBar.tsx`'s `HoverCard`), plus the run's cycle count — everything
+ * else that card shows (the run's name, protocol, file name) already has its own table column
+ * here, so repeating it would just be noise. Portalled to a fixed screen position for the same
+ * reason the bar's version is: the table's own scroll container (`.filesview__scroll`) would
+ * otherwise clip it.
  */
 function RowHoverCard({
+  kind,
   cycles,
   plate,
   style,
 }: {
+  kind: FileKind;
   cycles: number | undefined;
   plate: PlateDefinition | null;
   style: React.CSSProperties;
@@ -195,6 +192,7 @@ function RowHoverCard({
   const samples = plate?.samples ?? [];
   return (
     <div className="filecard mono" style={style}>
+      <div className="filecard__type">{fileKindDescription(kind)}</div>
       {cycles != null && (
         <dl className="filecard__dl">
           <dt>Cycles</dt>
@@ -303,7 +301,6 @@ function FilesRow({
 }) {
   const rowRef = useRef<HTMLTableRowElement>(null);
   const [cardPos, setCardPos] = useState<{ top: number; left: number } | null>(null);
-  const hasCard = r.cycles != null || !!r.plate;
 
   return (
     <tr
@@ -311,7 +308,6 @@ function FilesRow({
       className={"filesview__row" + (isActive ? " is-active" : "")}
       onClick={() => onSelectFile(r.id)}
       onMouseEnter={() => {
-        if (!hasCard) return;
         const rect = rowRef.current?.getBoundingClientRect();
         if (rect) setCardPos({ top: rect.bottom + 4, left: rect.left });
       }}
@@ -326,7 +322,7 @@ function FilesRow({
           onChange={(e) => onSetVisible(r.id, e.target.checked)}
         />
       </td>
-      <td className="filesview__typecol" title={CATEGORY_TEXT[fileCategory(r.kind)]}>
+      <td className="filesview__typecol">
         <span className="filesview__kind">
           <FileKindIcon kind={r.kind} />
         </span>
@@ -337,6 +333,7 @@ function FilesRow({
         {cardPos &&
           createPortal(
             <RowHoverCard
+              kind={r.kind}
               cycles={r.cycles}
               plate={r.plate}
               style={{ position: "fixed", top: cardPos.top, left: cardPos.left, zIndex: 50 }}

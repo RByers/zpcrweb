@@ -34,3 +34,29 @@ const CATEGORY: Record<FileKind, FileCategory> = {
 export function fileCategory(kind: FileKind): FileCategory {
   return CATEGORY[kind];
 }
+
+const CATEGORY_LABEL: Record<FileCategory, string> = {
+  run: "Run",
+  plate: "Plate",
+  protocol: "Protocol",
+};
+
+/** What each encoding actually is, in a few words — the second half of {@link fileKindDescription},
+ * kept separate from the category label so that label can be reused on its own (chip/table
+ * tooltips) without repeating the sentence. */
+const DESCRIPTION: Record<FileKind, string> = {
+  zpcr: "Bio-Rad CFX instrument raw output",
+  pcrd: "Bio-Rad CFX Manager saved experiment",
+  biomeme: "biomeme json results",
+  pltd: "Bio-Rad format",
+  csv: "zpcrweb comma-separated values",
+  prcl: "Bio-Rad CFX thermal-cycling protocol",
+};
+
+/** A one-line, human-facing description of a file's format — `"<Category>: <what it is>"`, e.g.
+ * `"Plate: Bio-Rad format"` for a `.pltd` or `"Plate: zpcrweb comma-separated values"` for its
+ * `.plt.csv` counterpart. The UI shows this verbatim (hover cards, the file overview's first
+ * row) rather than re-deriving wording per kind, so a new encoding only needs an entry here. */
+export function fileKindDescription(kind: FileKind): string {
+  return `${CATEGORY_LABEL[CATEGORY[kind]]}: ${DESCRIPTION[kind]}`;
+}

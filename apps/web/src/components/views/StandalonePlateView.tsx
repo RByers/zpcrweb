@@ -30,7 +30,7 @@ export function StandalonePlateView({ file, result }: { file: LoadedFile; result
         ) : !result.plate ? (
           <div className="decoded__na mono">No plate decoded.</div>
         ) : (
-          <PlateViewer plate={result.plate} sourceHint={file.name} toolbar={toolbar} />
+          <PlateViewer plate={result.plate} kind={file.kind} sourceHint={file.name} toolbar={toolbar} />
         )}
       </section>
     </div>

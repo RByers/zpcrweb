@@ -120,7 +120,8 @@ from, so a file's icon and the slot it claims in the Instrument view can't drift
 replaced a plain colored dot, which carried the encryption half alone; a protocol chip's "proto"
 badge went with it, the icon now being what tells the two override kinds apart at a glance.
 
-Each chip's hover card (protocol name, cycle count, and the plate's target/sample lists — the
+Each chip's hover card (the file's detailed type description — `fileKindDescription()`,
+`fileKind.ts` — plus protocol name, cycle count, and the plate's target/sample lists, the
 same lists `OverviewView` shows in its "Plate" section, via `@zpcrweb/core`'s shared
 `plateTargets()` helper) renders through a `createPortal` into `document.body` at a `position: fixed` spot
 computed from the chip's `getBoundingClientRect()` on hover/focus, rather than as a normal
