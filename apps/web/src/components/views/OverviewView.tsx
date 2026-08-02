@@ -179,7 +179,7 @@ export function OverviewView({
                 only when the run carries that text form at all; a run whose protocol is
                 structured-only would have nothing to write. */}
             {protocolText && (
-              <>
+              <div className="overview__blocktools">
                 <button
                   className="raw__download"
                   onClick={() =>
@@ -209,7 +209,7 @@ export function OverviewView({
                 >
                   <CloneIcon />
                 </button>
-              </>
+              </div>
             )}
           </div>
           {protocol?.steps ? (

@@ -1016,13 +1016,21 @@
   color: var(--neon-cyan);
   margin: 0 0 8px;
 }
-/* A section heading with its own download button beside it (the thermal protocol's .prcl.txt).
-   The heading keeps its bottom margin, so the row aligns with sections that have no button. */
+/* A section heading with its own download/clone buttons beside it (the thermal protocol's
+   .prcl.txt). The heading keeps its bottom margin, so the row aligns with sections that have no
+   buttons. */
 .overview__blockhead {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
   gap: 12px;
+}
+/* Groups the buttons as one flex child of `.overview__blockhead` so `space-between` puts only
+   two things in the row — the heading and this group — instead of spacing each button out on
+   its own and stranding one in the middle. */
+.overview__blocktools {
+  display: flex;
+  gap: 6px;
 }
 .overview__dl {
   display: grid;
