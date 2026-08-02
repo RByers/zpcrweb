@@ -77,10 +77,9 @@ case.
 
 **The header is never elided.** A protocol with the lid heater turned off still writes `HOTLID`,
 and a protocol whose method needs no volume model still writes `VOLUME`. Off and unused are said
-with a `0` operand, never by omitting the directive. In CFX Manager's writer
-(`Protocol2.ToRunDefinition()`, `BioRad.WinCE.PCR.InstrumentData`) the output array is sized
-`steps + 4` and slots 0, 1, 2 are filled unconditionally with `METHOD`, `HOTLID`, `VOLUME` — there
-is no branch anywhere in it that skips one. Concretely:
+with a `0` operand, never by omitting the directive. Generated text always opens with exactly these
+three directives, in this order — `METHOD`, `HOTLID`, `VOLUME` — before the first step, with no
+setting that suppresses any of them. Concretely:
 
 | Authored as | Emitted |
 |---|---|
@@ -90,40 +89,37 @@ is no branch anywhere in it that skips one. Concretely:
 | sample volume *V* µL (thermal model in use) | `METHOD CALC` + `VOLUME <V>` |
 | **no volume model** (block-temperature control) | `METHOD BLOCK` + `VOLUME 0` — emitted, with a `0` volume |
 
-Three details of that writer are worth carrying into any encoder:
+Three details of the header's encoding are worth carrying into any encoder:
 
-- **The lid-off flag zeroes the setpoint, not the directive.** The dialog's three-way choice
-  (`ProtocolLidSettingsForm`: default / user-specified / turn off) collapses to
-  `lidTemp = useDefault ? 105 : userTemp`, then `if (shutoffLidEnabled) lidTemp = 0`, applied
-  immediately before formatting. The **second** operand is untouched by the choice and keeps its
-  own value — `ProtocolConstants.c_ShutoffLidTemperature`, `30`, in everything seen — so lid-off
-  is `HOTLID 0,30` and not `HOTLID 0,0`.
-- **"Default" always writes 105**, even on a 48- or 384-well block. The writer hardcodes
-  `c_DefaultLidTemperature96` for the default case, although `c_DefaultLidTemperature48` (100) and
-  `c_DefaultLidTemperature384` (95) exist and the lid dialog displays them. A `105` in the text
-  therefore does not prove the run was on a 96-well block.
-- **`METHOD` is derived from `VOLUME`, not chosen independently**: `volume == 0 → BLOCK`,
-  otherwise `CALC` (`ProtocolConstants.c_VolumeForBlockMethod` is `0`). The two header fields
-  cannot disagree in generated text, and `METHOD OTHER` — which `Protocol2.Method` can return
-  in-memory for an unassigned volume of `−1` — is never written into a run definition.
+- **Turning the lid heater off zeroes the setpoint, not the directive.** The three authoring
+  choices — default temperature, a user temperature, or lid off — all resolve to a value in the
+  *first* operand, and "off" is that value being `0`. The **second** operand is independent of the
+  choice and keeps its own value, `30` in everything seen, so lid-off is `HOTLID 0,30` and never
+  `HOTLID 0,0`.
+- **"Default" always writes 105**, even on a 48- or 384-well block, although 100 and 95 are the
+  defaults those blocks are described with elsewhere. A `105` in the text therefore does not prove
+  the run was on a 96-well block.
+- **`METHOD` is a function of `VOLUME`, not an independent choice**: a volume of `0` means `BLOCK`,
+  any other volume means `CALC`. The two header fields cannot disagree in generated text, and a
+  third method name, `OTHER` — which exists as an in-memory state for a volume that was never
+  assigned — is never written into a run definition.
 
-The **reader** is more forgiving than the writer, in both implementations. CFX Manager's
-`Protocol2.UnserilizeRunDefinition()` is a `switch` over whatever directives appear; a text missing
-`HOTLID` or `VOLUME` parses fine and simply leaves the object's defaults standing (which, for a
-missing `VOLUME`, silently means `0`/`BLOCK`). `parseRunDefinition` matches that tolerance without
-inheriting the trap: a missing header directive yields `null` for `lidTemperatureC`,
-`shutoffTemperatureC`, `volumeUl` or `method`, distinguishable from a `0` that was really written.
-`ProtocolBuilder.toRunDefinition()` emits all three unconditionally, as CFX does.
+The **reader** is more forgiving than the writer, in both implementations. CFX Manager accepts
+whatever directives appear: a text missing `HOTLID` or `VOLUME` parses fine and leaves its defaults
+standing, which for a missing `VOLUME` silently means `0`/`BLOCK`. `parseRunDefinition` matches that
+tolerance without inheriting the trap: a missing header directive yields `null` for
+`lidTemperatureC`, `shutoffTemperatureC`, `volumeUl` or `method`, distinguishable from a `0` that
+was really written. `ProtocolBuilder.toRunDefinition()` emits all three unconditionally, as CFX
+does.
 
 **Provenance.** `HOTLID 105,30` with a non-zero `VOLUME` is **measured**: every header in
-`samples/` is `METHOD CALC;HOTLID 105,30;VOLUME 20` (5 occurrences), the package fixtures and
-capture-derived tests add `VOLUME 25`, and all of them carry all three directives — as does every
-run definition hardcoded in CFX Manager's own `EstimatedTimeToComplete` self-tests. The lid-off
-and `VOLUME 0` rows are **stated**: they come from the decompiled writer above, and the only
-`METHOD BLOCK;HOTLID 0,30;VOLUME 0` in the tree is one this project's own builder constructs in
-`packages/core/test/protocolBuilder.test.ts`. No sample here was authored with the lid off, so the
-claim being relied on is the negative one — that no code path omits the directive — which the
-writer's structure establishes directly.
+`samples/` is `METHOD CALC;HOTLID 105,30;VOLUME 20` (5 occurrences), and the package fixtures and
+capture-derived tests add `VOLUME 25` — all of them carrying all three directives. The lid-off and
+`VOLUME 0` rows are **stated**, not observed: no sample here was authored with the lid off, and the
+only `METHOD BLOCK;HOTLID 0,30;VOLUME 0` in the tree is one this project's own builder constructs
+in `packages/core/test/protocolBuilder.test.ts`. The claim being relied on for those two rows is
+the negative one — that nothing suppresses a header directive — so treat them as the documented
+rule awaiting a sample, and if you ever hold a lid-off run definition, check it.
 
 Four directive roles, and the difference between them is what §4's numbering turns on:
 

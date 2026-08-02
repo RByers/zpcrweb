@@ -227,7 +227,7 @@ list that is empty when healthy.
 | `ADDCYCLES <n>` | extends the running protocol's loop; the capture sends `ADDCYCLES 0`, a no-op, as ordinary run setup |
 | `RemoteRun "<block>","<lid on>","<remote start>","<name>","<user>","<sample ID>","<sierra mode>","<method>"` | e.g. `RemoteRun "A","True","False","singletest","admin","","True","CALC"` — starts the authored protocol, carrying what the protocol text cannot (`protocol.md` §7). **§7.3 defines all eight operands** — notably `<remote start>` (start from the instrument's own touchscreen instead of now) and `<sierra mode>` (the instrument runs the protocol *and* its own optics autonomously, which is why §6's optical protocol never has to be spoken) |
 | `PROCEED` | **skips to the next step** of a running protocol. Not a start or a resume: it was sent 215 s into a run, while a 3-minute hold still had time left, and the very next `STATUS?` was on the following step — §7.5 |
-| `CANCEL` | **acknowledges a finished run**, clearing the run name the instrument keeps holding after the protocol ends; §7.6 has the `STATUS?` transition that shows this, and the run's final `Read0000N.Plateread` is picked up after it. It is presumably also the abort, but nothing here aborts a run in progress |
+| `CANCEL` | **ends a run — finished or in progress.** On a finished run it is the acknowledgement: it clears the run name the instrument keeps holding after the protocol ends, and the run's final `Read0000N.Plateread` is picked up after it (§7.6 has the `STATUS?` transition). It is also the only abort in the language — **§7.8 is how to stop a run in progress cleanly**, including what neither capture exercises |
 | `LID OPEN` / `LID CLOSE` | motorised lid control. In `usb-basic` the operator opened and then closed the lid, and the pair appears in exactly that order. Note CFX Manager emits `LID OPEN` **three times** for one open (t=…010.7, …018.5, …026.5) and `LID CLOSE` once — the repeat looks like the UI re-asserting while the lid travels, not three separate requests. `usb-run` has three `LID OPEN` and no `LID CLOSE`, matching an operator who opened it to load a plate and closed it at the touchscreen instead |
 | `FRONTENDLOCKED ON`/`OFF` | `ON` appears once in `usb-basic`; `OFF` once, at the very end of `usb-run` |
 | `TESTMODE <n>` | e.g. `TESTMODE 3`, issued at the very start of both captures |
@@ -368,7 +368,7 @@ off the record length rather than assume it.
 | 10 | protocol estimate | **estimated protocol time, s — remaining, on this instrument** | yes |
 | 11 | ramp elapsed | seconds spent ramping toward this step's setpoint | yes |
 | 12 | hold elapsed | seconds held at setpoint in this step | yes |
-| 13 | paused | pause flag; mirrors bit 1 of field 7 | `0` throughout — never paused |
+| 13 | paused | a dedicated pause flag, alongside bit 1 of field 7 — **read the bit, not this** (§7.9) | `0` throughout — never paused |
 | 14 | errors | `:`-separated block error codes; a lone `0` means none | `0` throughout — no errors |
 | 15 | step count | **number of steps in the run definition** | yes |
 | 16 | sample temp | calculated sample temperature °C | yes |
@@ -398,7 +398,7 @@ Eight independent flags, not an enumeration:
 | Bit | Value | Meaning |
 |---|---|---|
 | 0 | 1 | **at target** — the block has reached the current step's setpoint |
-| 1 | 2 | **paused** (the same state field 13 reports separately) |
+| 1 | 2 | **paused** — the pause indicator to use; field 13 nominally reports the same state, but see §7.9 |
 | 2 | 4 | a fourth-block flag, meaningless on a CFX96 |
 | 3 | 8 | **lid preheating** |
 | 4 | 16 | **incubating** — holding a temperature outside a protocol |
@@ -813,6 +813,9 @@ Six phases, and the shape is not what §5's upload machinery suggests:
 | 5. Watch | poll `STATUS?`; pull each `Read0000N.Plateread` as its step completes | 7.5 |
 | 6. Finish | acknowledge the finished run with `CANCEL`; pull the last read and the report | 7.6 |
 
+A seventh path leaves the same way early: **§7.8, stopping a run in progress** — the same `CANCEL`,
+with different rules about when to send it and what is left to collect.
+
 Throughout all six, the §3 polling loop — `STATUS?`, `ERRORLIST A`, `RTSTATUS?`, about once a
 second — never stops. Everything below is interleaved into it, not substituted for it.
 
@@ -1045,6 +1048,16 @@ while `STATUS?` was reporting step 1 — `TEMP 95.0,180`, a 3-minute hold the bl
 step 2. It did not start the run (§7.3 shows the run started at `RemoteRun`) and there was nothing
 paused to resume. The operator was cutting the initial denaturation short.
 
+**Skipping out of a loop takes more than one `PROCEED`.** Inside a `GOTO` loop a single skip only
+advances one step of one pass, so leaving the loop means issuing `PROCEED` repeatedly, watching the
+cycle and step counters (`CNUMBER?`/`SNUMBER?`, which can be sent as one `;`-joined line and answer
+as one `;`-separated reply) until the step index passes the loop's closing `GOTO`. There is also a
+two-token `STATUS PAUSE` / `STATUS UNPAUSE` form — distinct from the `STATUS?` query — used to
+bracket that burst, apparently so the run's own bookkeeping does not race the host's step changes.
+Neither capture contains either form, so their exact effect is unverified; the bracketing pattern
+is noted here because a client that drives steps by hand mid-run will likely need it, and because
+`STATUS` with an operand is otherwise easy to mistake for a typo.
+
 ### 7.6 Finishing
 
 When the protocol completes, `STATUS?` reports a state that is neither running nor truly idle:
@@ -1118,6 +1131,213 @@ plate reads:
     directory, so no conversion is involved. `zpcrFromRunFiles` (`packages/core/src/runFolder.ts`)
     does this, and is what the web app's Instrument view "Open run" button calls.
 
+A client that also offers a **Stop** button needs one more step, §7.8.
+
+### 7.8 Cancelling a run in progress
+
+> **Evidence strength, stated up front.** Neither capture aborts a run — the one run in `usb-run`
+> ran to completion. What follows is derived from three things that *are* solid: the command
+> vocabulary contains no second abort verb; the status register has a dedicated **protocol
+> cancelled** bit (§3.2, field 7 bit 7) that a normal completion never sets; and `CANCEL`'s effect
+> on a *finished* run was measured (§7.6) — it clears the held run identity and returns the
+> instrument to the empty-name idle. The **sequence and the collection rules below are what a
+> client should do**; the specific claim that has not been watched on the wire is `CANCEL`
+> interrupting a *thermally active* protocol. Treat the step-by-step as a specification to verify,
+> not as a transcript.
+
+**The command is `CANCEL`, and there is no other.** The run-control group is `RemoteRun`, `PAUSE`,
+`RESUME`, `PROCEED`, `CANCEL` — nothing else in the language ends a protocol, and the register bit
+named for a cancelled protocol is the state it is expected to produce. `CANCEL` is a pure action
+command: the reply is the bare `0000`, no semicolon (§3).
+
+Cancelling is therefore the *same* command as acknowledging a finished run (§7.6). The difference
+is entirely in what surrounds it — what you wait for before sending it, and what is left to collect
+afterwards.
+
+**1. Don't cancel into a plate read.** While `STATUS?`'s current-step field reads
+`PLATEREAD #h<mask>`, the optics are mid-scan and the `Read0000N.Plateread` file **does not exist
+yet** — it appears when that step ends (§7.5). Cancelling there loses that read, and possibly
+leaves a partial file. A clean stop waits for the step field to change; a read step is seconds, not
+minutes, so the wait is short. If the user wants it stopped *now*, cancel anyway and treat the
+in-flight read as lost — but say so, rather than silently returning a run with a missing cycle.
+
+**2. Clear any pause first.** If field 13 is set, or bit 1 of the status register is, the run is
+paused. Send `RESUME`, confirm the flag clears on the next poll, then cancel. Whether `CANCEL`
+alone ends a paused run is untested — resuming first costs one command and one poll and removes
+the question. (Ending a paused run *without* resuming it first is exactly the case where an
+untested path would bite: the block is holding, not cycling, and it is the state a stop button is
+most likely to be pressed in.)
+
+**3. Send `CANCEL`.** Expect `0000`.
+
+**4. Wait for idle in `STATUS?`, not for a fixed delay.** The target is the empty-name idle of §3:
+
+```
+…;0;0;IDLE;0;"",BLOCK,OFF;0;0.00;0.00;0.00;0.00;0.00;0;0;0;<temp>;CLOSED;0;0000
+```
+
+— step `IDLE`, both cycle counters `0`, the run descriptor back to `"",BLOCK,OFF`, and the status
+register `0`. A **`128`** (protocol cancelled) observed on the way is the abort being
+acknowledged, and it is the one signal that distinguishes "the run I stopped" from "the run that
+finished while I was deciding". The block does **not** have to reach any temperature first — the
+thermal state simply stops being driven — but do not re-arm the instrument on a timer: poll until
+the descriptor is empty. Allow generously before declaring it stuck; the desktop software gives
+the wind-down minutes, not seconds, and a stop issued during a read has to let the optics finish
+before anything else happens.
+
+**5. `ERRORS?` and `ERRORLIST A` once, after.** A user-initiated stop is not a fault, so both
+should stay clean (`0;0000` and `;0000`). A non-zero here is the instrument complaining about
+something *else*, and it is worth surfacing separately rather than folding into "run cancelled".
+
+**6. Collect what the run did produce — the folder is a normal run folder.** Re-list
+`\Storage Card\CurrentRun` with the mandatory adjacent `GETFILESLEN` + `LISTALLFILES` (§5), and
+pull every `Read0000N.Plateread` not already taken. Reads that completed before the cancel are
+whole, ordinary files; a cancelled run is simply a run with **fewer reads than its protocol
+implies**, which is why the read count — not any flag in the fluorescence data — is what tells a
+reader the run was short. `ended` should be present in the listing, the same marker a completed run
+gets: it means "no longer in progress", not "completed successfully".
+
+**7. Pull the `.alf` — it is where "this run was aborted" is actually recorded.** From
+`\Storage Card\PCRunReport\`, exactly as in §7.6. In it, the error line's **user-aborted flag reads
+`True`** (`alf.md` §6, line 3 field 4) and the per-step lines stop at the last step that executed.
+That flag is the durable, offline-readable evidence; `STATUS?`'s cancelled bit is gone the moment
+the instrument goes idle.
+
+Three origins produce that record, and they are recorded distinctly: a stop from the **host**, a
+stop from the instrument's **own touchscreen**, and a stop the **instrument itself** initiated
+(fatal error, or its own cancel path). **A client must not assume its own `CANCEL` explains every
+early end it sees** — an operator standing at the instrument can stop the run, and a client that
+only ever polls `STATUS?` will observe the run vanish with no command of its own to blame it on.
+Report an unexplained early idle as "the run ended early" and let the `.alf` say why.
+
+**8. `FRONTENDLOCKED OFF` if you locked it** (§7.6) — a stopped run releases the touchscreen the
+same as a finished one.
+
+**9. The partial run zips like any other.** `\Storage Card\CurrentRun` after a cancel holds
+`begun`, `ended`, the reads that happened, `ProtocolName.txt`, the calibration files and whatever
+was deposited in §7.4 — a plain ZIP of that directory is a valid `.zpcr` describing a short run.
+Nothing about the container marks it partial; the read count and the report's abort flag do.
+
+**What does *not* need undoing.** A run started the §7.3 way has the instrument managing its own
+fans and shuttle heater, so a host that never touched them has nothing to restore. A host that
+*did* take those over on the binary auxiliary channels (§4) owns the tail of the run, cancelled or
+not: return fan control to automatic with its on/off temperature thresholds, and switch the shuttle
+heater off. That pairing — fans to auto, shuttle heat off, then read the block's error list — is
+the end-of-run cleanup regardless of how the run ended.
+
+**Cancelling before the run starts is not this.** Between authoring (§7.2) and `RemoteRun` (§7.3)
+nothing is running: don't send `RemoteRun`. The authored protocol sits on the instrument inertly
+and the next `PROTOCOL '<name>'` overwrites it. The same is true of a run armed with
+`<remote start>` set — it is waiting for someone to press start at the touchscreen and has not
+begun.
+
+**An `INCUBATE` hold is a separate case.** Bit 4 of the status register is a temperature being
+held outside any protocol. `CANCEL` is the natural reading of the vocabulary there too, but that
+is an inference from grouping, not a measurement, and it is a different state from a running
+protocol — verify it before relying on it.
+
+### 7.9 Pausing and resuming
+
+> **Evidence strength.** As with §7.8, neither capture pauses a run: field 13 and status-register
+> bit 1 are `0` in all 666 replies. The commands and the state bit are established; **the
+> transitions are not measured.** Two things below are firmer than the rest and worth separating
+> out: the warning about `STATUS PAUSE` (a different mechanism that will not pause a run), and the
+> fact that a remote-start-armed run *reports itself paused* — that one explains a state a client
+> will meet on its very first run and should not be treated as a fault.
+
+**Three commands, all aimed at the thermal block:** `PAUSE` suspends the running protocol, `RESUME`
+continues it, and `PAUSE?` asks whether it is suspended. They sit in the same run-control group as
+`PROCEED` and `CANCEL` (§3). By the response-shape rule, `PAUSE` and `RESUME` are actions and
+should answer the bare `0000` while `PAUSE?` answers `<value>;0000` — but neither capture contains
+any of the three, so unlike the commands listed in §3 this is the rule applied, not a byte-for-byte
+observation.
+
+Both are **no-ops when no protocol is running.** There is nothing to suspend outside a run, and a
+client should gate its own Pause button on the running state rather than expect an error back.
+
+#### Reading the pause state
+
+There are two places a paused run shows up, and they are not equally trustworthy:
+
+| Source | Use it? |
+|---|---|
+| **Status register bit 1** (`2`), §3.2 field 7 | **Yes — this is the pause indicator.** It is the one a working client should poll |
+| `STATUS?` **field 13** | Not on its own. It is a dedicated pause field in the record, but it has never been observed non-zero, and nothing establishes that it tracks bit 1 in practice |
+| `PAUSE?` | A direct query for the same state. Useful as a one-shot confirmation after sending `PAUSE`; redundant if you are already polling `STATUS?` at 1 Hz |
+
+The safe reading is **bit 1 OR field 13** — treat either as paused — while trusting bit 1 for
+anything that must be right. If the two are ever seen to disagree, that is new information worth
+recording, not a state to act on: this document cannot say which one leads. The natural assumption
+that field 13 simply mirrors the bit is exactly that, an assumption; it is flagged here rather than
+stated in §3.2 because a client that polls only field 13 would show a paused run as running.
+
+#### What a pause does to the run's bookkeeping
+
+The one durable, offline-checkable consequence is in the run report: **each step line carries both
+a "was paused" flag and a "time paused" count** (`alf.md` §7, fields 8 and 9). Paused time is
+therefore *accounted separately from the hold* rather than silently swallowed by it — a 30 s hold
+paused for 90 s is not logged as a 120 s hold. Those two fields are `False` and `0` in all 6,205
+step lines of this project's whole sample corpus, which is worth saying plainly: **nobody has ever
+paused a run that produced a file in this repo.** A paused run is the way to see them take another
+value, and a client that pauses runs should expect them and check what they contain.
+
+What the captures cannot settle, and a client should not assume:
+
+- Whether the **total elapsed** clock (field 8) keeps running while paused, or freezes with the
+  step clocks. The report's separate paused-time accounting suggests the step-level clocks stop;
+  field 8's behaviour is a different question and is untested.
+- Whether the **remaining-time estimate** (field 10) stops counting down. If it does not, a long
+  pause will drive the countdown to zero while the run still has steps left — worth defending
+  against in any UI that shows it (§3.2 already warns that field 10 hits `0.00` before the end of
+  a *normal* run).
+- Whether a pause is honoured **mid-ramp** or deferred until the block reaches setpoint.
+- How long the block will hold its current temperature while paused, and whether anything times
+  the pause out.
+
+#### Do not pause into a plate read
+
+The same rule as §7.8's first step, for the same reason: while the current-step field reads
+`PLATEREAD #h<mask>` the optics are mid-scan and the file does not exist yet. Wait for the step to
+change. There is no evidence that a pause is even honoured during a read.
+
+#### `PAUSE` is not `STATUS PAUSE`
+
+These are two unrelated mechanisms whose names collide, and confusing them is the likeliest mistake
+in this whole area:
+
+- **`PAUSE`** suspends the *run*. It is in the command vocabulary and pairs with `RESUME`.
+- **`STATUS PAUSE` / `STATUS UNPAUSE`** (§7.5) is a two-token form of the status command used to
+  bracket a burst of host-driven step changes. It is **not** in the command vocabulary, it pairs
+  with `STATUS UNPAUSE`, and there is no reason to think it stops the protocol. A client that sends
+  it intending to pause a run will most likely get `0000` back and a run that keeps cycling.
+
+If you want the run suspended, send `PAUSE` and confirm bit 1.
+
+#### The armed run reports itself paused
+
+**A run started with `<remote start>` set (§7.3) sits in the paused state until someone presses
+Start at the instrument's touchscreen.** This is the single most useful thing in this section,
+because a client will meet it immediately: `RemoteRun` returns `0000`, the run does not begin, and
+the status register shows paused. That is not a fault and not a pause the client issued — it is
+"armed, waiting for a human".
+
+The two are indistinguishable from the status reply alone. **The host tells them apart by
+remembering what it asked for:** if it set remote start and has not yet seen the run leave the
+paused state, the run is waiting to be started. The intended way out is the operator pressing Start
+on the instrument; whether `RESUME` also releases an armed run is untested, and a client should not
+rely on it. A client that does not want this state should leave `<remote start>` clear, in which
+case `RemoteRun` starts the run immediately (§7.3, measured).
+
+#### Pause and the other run-control verbs
+
+- **Before cancelling a paused run, resume it** — §7.8 step 2.
+- **`PROCEED` is not `RESUME`.** It skips to the next step (§7.5); it is not the way out of a
+  pause, and there was nothing paused when the capture used it.
+- **An indefinite hold is not a pause.** A `TEMP <°C>,0` step holds forever by design
+  (`protocol.md` §3.2) and is reported as an ordinary running step — pause bit clear, block active,
+  a step text whose hold operand is `0`. The way out of one is `PROCEED`, not `RESUME`, and a
+  client showing "paused" for it would be lying to the user.
+
 ## 8. Tooling
 
 `tools/usbpcap_decode.py` decodes a USBPcap-format `.pcapng` capture: the outer USBPcap capture
@@ -1157,6 +1377,16 @@ instance, rather than a cross-checked pattern:
   nonzero handle) is ever opened is unconfirmed.
 - **`ALPHAID?` → `4`** (§3) — one instrument, one observed value; the general ID→name mapping for
   other block/head types isn't in this capture.
+- **Pausing** (§7.9) — `PAUSE`, `RESUME` and `PAUSE?` appear in neither capture, and the pause
+  indicators are `0` in all 666 status replies. The commands and the state bit are established;
+  every transition, every effect on the clocks, and the relationship between field 13 and
+  register bit 1 are not. The armed-run-reports-paused behaviour is the firmest claim there and is
+  still not one this capture pair shows directly.
+- **Cancelling a *running* protocol** (§7.8) — `CANCEL` was measured only on an already-finished
+  run. That it also aborts a thermally active one rests on the vocabulary having no other abort and
+  on the status register's dedicated cancelled bit, not on a capture. The `128` transition, the
+  behaviour of `CANCEL` on a paused run and on an `INCUBATE` hold, and whether a read interrupted
+  mid-scan leaves a partial file behind are all unobserved.
 - **`GETPOS?`, `TESTMODE`, `SETAPILOGLEVEL`** (§3) — recorded with their literal observed
   values; the capture doesn't say more about what any of them mean than the command name itself
   suggests. (`BLOCKID` was in this list until the operator's own account of `usb-basic` — flash,
