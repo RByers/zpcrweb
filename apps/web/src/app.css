@@ -3051,6 +3051,51 @@
 .devstat__value--good {
   color: var(--good);
 }
+/* The two headline clocks — elapsed and estimated time remaining. Bigger and side-by-side, ahead
+   of the plain temperature/step `.devstat` rows, since these are what an operator actually glances
+   at mid-run. */
+.instrument__timers {
+  display: flex;
+  gap: 8px;
+  margin: 6px 0 8px;
+}
+.instrument__timer {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2, transparent);
+}
+.instrument__timer__label {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--ink-muted);
+}
+.instrument__timer__value {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 18px;
+  color: var(--ink);
+}
+/* Which of STATUS?'s status-register bits are currently set (usb.md §3.2 field 7) — a compact
+   badge row rather than another label/value pair, since more than one can be true at once. */
+.instrument__flags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px 0;
+}
+.instrument__flag {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--neon-cyan-dim);
+  color: var(--neon-cyan);
+  background: var(--neon-cyan-dim);
+}
 .instrument__footnote {
   color: var(--ink-muted);
   margin-top: 8px;

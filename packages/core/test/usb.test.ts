@@ -7,6 +7,7 @@ import {
   encodeFrame,
   parseIdentity,
   parseResponse,
+  parseRtStatus,
   parseStatus,
 } from "../src/usb/index.js";
 
@@ -140,24 +141,98 @@ describe("parseStatus", () => {
     expect(s.lidTempC).toBe(23.8);
     expect(s.cycle).toBe(0);
     expect(s.stepText).toBe("IDLE");
+    expect(s.stepNumber).toBe(0);
     expect(s.runName).toBe("");
     expect(s.method).toBe("BLOCK");
     expect(s.realTime).toBe(false);
     expect(s.lid).toBe("CLOSED");
     expect(s.running).toBe(false);
+    expect(s.phase).toBe("idle");
+    expect(s.flags.raw).toBe(0);
+    expect(s.errors).toEqual([]);
   });
 
   it("reads a run in progress (usb.md §3)", () => {
     const s = of("60.25;104.9;2;2;TEMP 95.0,10;2;\"SINGLETE\",CALC,ON;96;110.22;0.00;75.15;2.10;0.00;0;0;6;55.61;CLOSED;0;0000");
     expect(s.blockTempC).toBe(60.25);
+    expect(s.cycleCount).toBe(2);
     expect(s.cycle).toBe(2);
-    expect(s.step).toBe(2);
     expect(s.stepText).toBe("TEMP 95.0,10");
+    expect(s.stepNumber).toBe(2);
     expect(s.runName).toBe("SINGLETE");
     expect(s.method).toBe("CALC");
     expect(s.realTime).toBe(true);
     expect(s.sampleTempC).toBe(55.61);
     expect(s.running).toBe(true);
+    // 96 = 0x60 = protocol running + block active (usb.md §3.2's "ramping" example).
+    expect(s.flags).toMatchObject({
+      atTarget: false,
+      protocolRunning: true,
+      blockActive: true,
+      lidPreheating: false,
+      incubating: false,
+    });
+    expect(s.phase).toBe("running");
+    expect(s.elapsedS).toBe(110.22);
+    expect(s.stepElapsedS).toBe(0);
+    expect(s.remainingS).toBe(75.15);
+    expect(s.rampElapsedS).toBe(2.1);
+    expect(s.holdElapsedS).toBe(0);
+    expect(s.stepCount).toBe(6);
+  });
+
+  it("decodes the status register's flag bits (usb.md §3.2)", () => {
+    const withFlags = (n: number) =>
+      of(`0;0;0;0;IDLE;0;"",BLOCK,OFF;${n};0;0;0;0;0;0;0;0;0;CLOSED;0;0000`).flags;
+    expect(withFlags(0)).toMatchObject({ atTarget: false, paused: false, blockActive: false });
+    expect(withFlags(0x68)).toMatchObject({
+      protocolRunning: true,
+      blockActive: true,
+      lidPreheating: true,
+    });
+    expect(withFlags(0x61)).toMatchObject({ protocolRunning: true, blockActive: true, atTarget: true });
+    expect(withFlags(0x20)).toMatchObject({ protocolRunning: true, blockActive: false });
+  });
+
+  it("derives the coarse run phase from the flag register", () => {
+    const phaseOf = (n: number) =>
+      of(`0;0;0;0;IDLE;0;"",BLOCK,OFF;${n};0;0;0;0;0;0;0;0;0;CLOSED;0;0000`).phase;
+    expect(phaseOf(0)).toBe("idle");
+    expect(phaseOf(0x60)).toBe("running");
+    expect(phaseOf(0x20)).toBe("finished");
+  });
+
+  it("splits the `:`-separated error list, treating a lone 0 as none", () => {
+    expect(of("0;0;0;0;IDLE;0;\"\",BLOCK,OFF;0;0;0;0;0;0;0;0;0;0;CLOSED;0;0000").errors).toEqual([]);
+    expect(
+      of("0;0;0;0;IDLE;0;\"\",BLOCK,OFF;0;0;0;0;0;0;0;12:34;0;0;CLOSED;0;0000").errors,
+    ).toEqual(["12", "34"]);
+  });
+
+  it("recognizes every named lid position, and falls back to UNKNOWN", () => {
+    const lidOf = (v: string) =>
+      of(`0;0;0;0;IDLE;0;"",BLOCK,OFF;0;0;0;0;0;0;0;0;0;0;${v};0;0000`).lid;
+    expect(lidOf("OPENING")).toBe("OPENING");
+    expect(lidOf("MANUAL")).toBe("MANUAL");
+    expect(lidOf("WEIRD")).toBe("UNKNOWN");
+  });
+});
+
+describe("parseRtStatus", () => {
+  const of = (s: string) => parseRtStatus(parseResponse(new TextEncoder().encode(s)));
+
+  it("reads a healthy reply with no faults (usb.md §3.3)", () => {
+    const s = of("18.31;26;;0000");
+    expect(s.shuttleTempC).toBe(18.31);
+    expect(s.ambientTempC).toBe(26);
+    expect(s.faults).toEqual([]);
+  });
+
+  it("parses a fault entry's hex code and optional extra value", () => {
+    const s = of("18.31;26;A1B2;0000");
+    expect(s.faults).toEqual([{ code: "A1B2" }]);
+    const s2 = of("18.31;26;A1B2,7;0000");
+    expect(s2.faults).toEqual([{ code: "A1B2", extra: "7" }]);
   });
 });
 

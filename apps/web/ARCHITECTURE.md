@@ -1938,7 +1938,12 @@ Four components, under `components/instrument/`:
   after a click (above), where the next thing to do is wait. A *Current run* section carries
   what the watcher is doing and a `follow` switch to stop it. Status fields the protocol doesn't
   name are either omitted or footnoted rather than labelled with a guess (the sample temperature is
-  the live example).
+  the live example). While a run is going, elapsed and estimated-remaining (`usb.md` §3.2 fields 8
+  and 10) lead the section as a pair of larger timers — remaining is labelled and tooltipped as an
+  estimate rather than corrected for what it doesn't count (plate reads, lid preheat), per that
+  section's own caveats — with the step/ramp/hold clocks, the decoded status-register flags (e.g.
+  "Preheating lid"), and `RTSTATUS?`'s shuttle/ambient temperatures filling out the rest of the
+  section as ordinary stat rows.
 - **`InstrumentRun`** — the run that would be started, as its two halves side by side: the thermal
   protocol and the plate map, each headed by the file supplying it and badged when that file is an
   override. It renders a selection it does not own (see the staging model above), and it has no

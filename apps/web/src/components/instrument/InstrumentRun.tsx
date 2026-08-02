@@ -163,7 +163,7 @@ export function InstrumentRun({
               <ProtocolDecoded
                 text={protocol.value.runDefinition}
                 annotated={false}
-                activeStepNumber={status?.running ? status.step : null}
+                activeStepNumber={status?.running ? status.stepNumber : null}
               />
             ) : (
               <div className="instrument__empty mono">

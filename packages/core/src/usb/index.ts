@@ -60,9 +60,12 @@ export type { CfxFrameHeader, CfxMessage } from "./frame.js";
 export { parseIdentity, parseRtStatus, parseStatus } from "./status.js";
 export type {
   CfxDeviceInfo,
+  CfxFault,
   CfxIdentity,
   CfxRtStatus,
+  CfxRunPhase,
   CfxStatus,
+  CfxStatusFlags,
   LidState,
 } from "./status.js";
 export {

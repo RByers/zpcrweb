@@ -6,14 +6,24 @@
  * view sits apart in the tab strip.
  */
 import { useEffect, useState } from "react";
-import { CFX_COMMANDS, type CfxCommandName, type RunPlan } from "@zpcrweb/core";
+import { CFX_COMMANDS, type CfxCommandName, type CfxStatusFlags, type RunPlan } from "@zpcrweb/core";
 import type { CfxDeviceHandle } from "../../state/useCfxDevice";
 import type { RunWatchState } from "../../state/useRunWatch";
 import type { StagedRun } from "../../lib/protocolSource";
 
-function Stat({ label, value, tone }: { label: string; value: string; tone?: "warn" | "good" }) {
+function Stat({
+  label,
+  value,
+  tone,
+  title,
+}: {
+  label: string;
+  value: string;
+  tone?: "warn" | "good";
+  title?: string;
+}) {
   return (
-    <div className="devstat">
+    <div className="devstat" title={title}>
       <span className="devstat__label">{label}</span>
       <span className={"devstat__value" + (tone ? ` devstat__value--${tone}` : "")}>{value}</span>
     </div>
@@ -22,6 +32,31 @@ function Stat({ label, value, tone }: { label: string; value: string; tone?: "wa
 
 const temp = (v: number | null | undefined, digits = 1) =>
   v == null ? "—" : `${v.toFixed(digits)} °C`;
+
+/** `mm:ss`, or `h:mm:ss` past an hour — deliberately not sub-second, since none of `STATUS?`'s
+ * clocks warrant that precision (`usb.md` §3.2). */
+function duration(seconds: number | null | undefined): string {
+  if (seconds == null || !Number.isFinite(seconds)) return "—";
+  const total = Math.max(0, Math.round(seconds));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  const mm = h > 0 ? String(m).padStart(2, "0") : String(m);
+  const ss = String(s).padStart(2, "0");
+  return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
+}
+
+const REMAINING_TITLE =
+  "The instrument's own estimate, not a precise countdown: it doesn't count time spent on a " +
+  "plate read or on the initial lid heat, so it tends to run a bit optimistic as a run goes on.";
+
+const STATUS_FLAG_LABELS: [key: keyof CfxStatusFlags, label: string][] = [
+  ["lidPreheating", "Preheating lid"],
+  ["incubating", "Incubating"],
+  ["atTarget", "At target"],
+  ["paused", "Paused"],
+  ["cancelled", "Cancelled"],
+];
 
 export function InstrumentRail({
   instrument,
@@ -35,7 +70,7 @@ export function InstrumentRail({
   plan: RunPlan | null;
   runWatch: RunWatchState;
 }) {
-  const { connection, info, status, busy, lastAction, runProgress, runPending } = instrument;
+  const { connection, info, status, rtStatus, busy, lastAction, runProgress, runPending } = instrument;
   const connected = connection === "connected";
   // What the last start did — kept so the deposit phase can report itself. A run whose files
   // didn't copy is still a run (`usb.md` §7.4), so this is a note, never a failure.
@@ -178,15 +213,67 @@ export function InstrumentRail({
                 value={runPending ? "Run pending" : status.running ? status.stepText : "Idle"}
                 tone={runPending || status.running ? "warn" : "good"}
               />
+              {/* Elapsed/remaining lead the section, ahead of temperatures — they're what an
+                  operator glances at during a run. Remaining is an estimate (usb.md §3.2's field
+                  10 doesn't count plate-read or lid-preheat time), never corrected for that here,
+                  just labelled so via the tooltip. */}
+              {status.running && (
+                <div className="instrument__timers">
+                  <div className="instrument__timer">
+                    <span className="instrument__timer__label">Elapsed</span>
+                    <span className="instrument__timer__value">{duration(status.elapsedS)}</span>
+                  </div>
+                  <div className="instrument__timer" title={REMAINING_TITLE}>
+                    <span className="instrument__timer__label">Remaining (est.)</span>
+                    <span className="instrument__timer__value">{duration(status.remainingS)}</span>
+                  </div>
+                </div>
+              )}
               <Stat label="Block" value={temp(status.blockTempC, 2)} />
               <Stat label="Sample*" value={temp(status.sampleTempC, 2)} />
               <Stat label="Lid heater" value={temp(status.lidTempC)} />
               <Stat label="Lid" value={status.lid} />
               <Stat
-                label="Cycle / step"
-                value={`${status.cycle ?? "—"} / ${status.step ?? "—"}`}
+                label="Cycle"
+                value={`${status.cycle ?? "—"}${status.cycleCount != null && status.cycleCount !== status.cycle ? ` / ${status.cycleCount}` : ""}`}
               />
+              <Stat
+                label="Step"
+                value={`${status.stepNumber ?? "—"} / ${status.stepCount ?? "—"}`}
+              />
+              {status.running && (
+                <>
+                  <Stat label="Step elapsed" value={duration(status.stepElapsedS)} />
+                  <Stat label="Ramp elapsed" value={duration(status.rampElapsedS)} />
+                  <Stat label="Hold elapsed" value={duration(status.holdElapsedS)} />
+                </>
+              )}
               <Stat label="Run" value={status.runName || "(none)"} />
+              {status.errors.length > 0 && (
+                <Stat label="Errors" value={status.errors.join(", ")} tone="warn" />
+              )}
+              {STATUS_FLAG_LABELS.filter(([key]) => status.flags[key]).length > 0 && (
+                <div className="instrument__flags">
+                  {STATUS_FLAG_LABELS.filter(([key]) => status.flags[key]).map(([key, label]) => (
+                    <span key={key} className="instrument__flag">
+                      {label}
+                    </span>
+                  ))}
+                </div>
+              )}
+              {rtStatus && (
+                <>
+                  <Stat label="Shuttle" value={temp(rtStatus.shuttleTempC, 2)} />
+                  <Stat label="Ambient" value={temp(rtStatus.ambientTempC, 0)} />
+                  {rtStatus.faults.length > 0 && (
+                    <Stat
+                      label="Optical faults"
+                      value={rtStatus.faults.map((f) => f.code + (f.extra ? `,${f.extra}` : "")).join(" ")}
+                      tone="warn"
+                    />
+                  )}
+                </>
+              )}
               <div className="rail__note instrument__footnote">
                 * The sample temperature is inferred: it tracks the block and lags it on a ramp,
                 but nothing in the protocol names this field.

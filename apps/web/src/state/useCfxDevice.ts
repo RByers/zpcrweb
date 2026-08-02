@@ -24,6 +24,7 @@ import {
   type CfxCommandName,
   type CfxDeviceInfo,
   type CfxDirectory,
+  type CfxRtStatus,
   type CfxStatus,
   type CfxTrafficEvent,
   type CfxTransferErrorEvent,
@@ -109,6 +110,7 @@ export function useCfxDevice() {
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<CfxDeviceInfo | null>(null);
   const [status, setStatus] = useState<CfxStatus | null>(null);
+  const [rtStatus, setRtStatus] = useState<CfxRtStatus | null>(null);
   const [traffic, setTraffic] = useState<ConsoleLine[]>([]);
   const [directories, setDirectories] = useState<Record<string, CfxDirectory>>({});
   const [busy, setBusy] = useState<string | null>(null);
@@ -178,6 +180,7 @@ export function useCfxDevice() {
     setConnection("disconnected");
     setInfo(null);
     setStatus(null);
+    setRtStatus(null);
     setRunPending(false);
     setDirectories({});
     setBusy(null);
@@ -214,6 +217,11 @@ export function useCfxDevice() {
       setConnection("connected");
       setInfo(await device.deviceInfo());
       setStatus(await device.status());
+      try {
+        setRtStatus(await device.rtStatus());
+      } catch {
+        /* the poll will catch up */
+      }
     } catch (e) {
       // requestDevice() rejects when the user dismisses the picker — not an error worth shouting.
       const msg = e instanceof Error ? e.message : String(e);
@@ -249,6 +257,13 @@ export function useCfxDevice() {
         // already retries and, if it can't recover, fires `onClose` on its own — but log it so a
         // string of these leading up to a disconnect shows up in the same console as the cause.
         console.warn("[useCfxDevice] status poll failed:", e);
+      }
+      if (cancelled || busy) return;
+      try {
+        const rt = await d.rtStatus();
+        if (!cancelled) setRtStatus(rt);
+      } catch (e) {
+        console.warn("[useCfxDevice] rtStatus poll failed:", e);
       }
     };
     const timer = setInterval(tick, POLL_MS);
@@ -452,6 +467,7 @@ export function useCfxDevice() {
     error,
     info,
     status,
+    rtStatus,
     traffic,
     fullTraffic,
     directories,
