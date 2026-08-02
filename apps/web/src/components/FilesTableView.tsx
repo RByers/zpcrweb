@@ -13,16 +13,22 @@
  *   wholesale — this is the one place a file is actually removed from IndexedDB, for every file,
  *   not only a modified one. See {@link DeleteButton}.
  *
+ * A row's hover card (see {@link RowHoverCard}) mirrors the file bar's own — same targets/samples
+ * chips — but leaves out whatever the table's columns already say (name, date, protocol, plate),
+ * showing only what neither does: the run's cycle count.
+ *
  * Clicking a row anywhere else selects that file (which also turns its checkbox back on — see
  * `useZpcrStore`'s `setActive`) and closes this view, landing on the file's own first enabled
  * tab — the same "click a file, go look at it" the bar has always done.
  */
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { fileCategory, plateTargets, type FileKind, type PlateDefinition } from "@zpcrweb/core";
-import type { LoadedFile, PlateFileResult, RunResult } from "../state/useZpcrStore";
+import type { LoadedFile, PlateFileResult, RunResult, ViewId } from "../state/useZpcrStore";
 import type { ExperimentIdentity } from "../lib/experiment";
 import { formatCompactDateTime } from "../lib/experiment";
 import { plateDisplayName } from "../lib/plateNames";
+import { channelColor } from "../lib/channelColors";
 import { usePltdPassword } from "../state/pltdPassword";
 import { FileKindIcon } from "./FileIcons";
 import { TrashIcon } from "./TrashIcon";
@@ -31,13 +37,14 @@ interface Props {
   files: LoadedFile[];
   runs: Map<string, RunResult>;
   plateFiles: Map<string, PlateFileResult>;
-  protocolFiles: Map<string, string>;
   experiments: Map<string, ExperimentIdentity>;
   activeId: string | null;
   hiddenIds: Set<string>;
   modifiedIds: Set<string>;
-  /** Select this file, close the table, and land on its own view — see `App.tsx`'s wiring. */
-  onSelectFile: (id: string) => void;
+  /** Select this file, close the table, and land on its own view — see `App.tsx`'s wiring.
+   * `view`, when given, overrides the file's usual first-enabled-tab landing spot — the Plate
+   * cell uses it to go straight to the Plates view rather than Overview. */
+  onSelectFile: (id: string, view?: ViewId) => void;
   onSetVisible: (id: string, visible: boolean) => void;
   onDelete: (id: string) => void | Promise<void>;
   onClose: () => void;
@@ -49,13 +56,18 @@ const CATEGORY_TEXT: Record<string, string> = {
   protocol: "Thermal protocol",
 };
 
-/** Join up to `max` names with commas, collapsing the rest to a `"+N more"` tail — keeps the
- * description column to roughly a line regardless of how many targets/samples a plate carries. */
-function joinTrunc(names: string[], max = 6): string {
-  if (names.length === 0) return "";
-  if (names.length <= max) return names.join(", ");
-  return `${names.slice(0, max).join(", ")}, +${names.length - max} more`;
-}
+/** The extension a kind is actually decoded as — independent of what the source file was named.
+ * A `.csv` uploaded as `myplate.csv` is still a `.plt.csv` by content (`fileKind`'s content
+ * sniffing), and a `.txt` is only ever admitted once it parses as a run definition, so this is
+ * the kind's own canonical extension, not `r.fileName`'s. */
+const EXTENSION_TEXT: Record<FileKind, string> = {
+  zpcr: "zpcr",
+  pcrd: "pcrd",
+  biomeme: "json",
+  pltd: "pltd",
+  csv: "plt.csv",
+  prcl: "prcl.txt",
+};
 
 /** The plate behind a row, resolved the same way the file bar's hover card does: a standalone
  * `.pltd`/`.csv`'s own parse, or the first plate a run's own archive carries. */
@@ -68,23 +80,6 @@ function plateFor(
   if (f.kind === "pltd" || f.kind === "csv") return plateFile?.plate ?? null;
   if (f.kind === "prcl") return null;
   return run?.zpcr?.plates(password || undefined)[0]?.pltd.plate ?? null;
-}
-
-/** One line summarizing what a file actually contains — targets and samples for anything with a
- * plate, the run definition text for a standalone thermal protocol. */
-function describeRow(f: LoadedFile, plate: PlateDefinition | null, protocolText: string | undefined): string {
-  if (plate) {
-    const targets = plateTargets(plate).map((t) => t.name);
-    const samples = plate.samples;
-    const parts: string[] = [];
-    if (targets.length) parts.push(`Targets: ${joinTrunc(targets)}`);
-    if (samples.length) parts.push(`Samples: ${joinTrunc(samples)}`);
-    return parts.join(" · ") || "—";
-  }
-  if (f.kind === "prcl" && protocolText) {
-    return protocolText.length > 140 ? `${protocolText.slice(0, 140)}…` : protocolText;
-  }
-  return "—";
 }
 
 /** `12.3 kB` under 1000 kB, `1.24 MB` above — the same threshold a file manager uses, so a run
@@ -105,22 +100,22 @@ interface Row {
   size: number;
   protocol: string;
   plateName: string;
-  description: string;
+  cycles: number | undefined;
+  plate: PlateDefinition | null;
   lastModified: number;
   modified: boolean;
   visible: boolean;
 }
 
 type SortKey =
+  | "type"
   | "fileName"
   | "experimentName"
   | "date"
   | "size"
   | "protocol"
   | "plateName"
-  | "description"
-  | "lastModified"
-  | "modified";
+  | "lastModified";
 
 interface Column {
   key: SortKey;
@@ -129,19 +124,20 @@ interface Column {
 }
 
 const COLUMNS: readonly Column[] = [
+  { key: "type", label: "Type" },
   { key: "experimentName", label: "Name" },
   { key: "fileName", label: "File" },
   { key: "date", label: "Date" },
   { key: "size", label: "Size", numeric: true },
   { key: "protocol", label: "Protocol" },
   { key: "plateName", label: "Plate" },
-  { key: "description", label: "Contents" },
   { key: "lastModified", label: "File modified" },
-  { key: "modified", label: "Unsaved" },
 ];
 
 function sortValue(r: Row, key: SortKey): string | number {
   switch (key) {
+    case "type":
+      return EXTENSION_TEXT[r.kind];
     case "fileName":
       return r.fileName;
     case "experimentName":
@@ -154,12 +150,8 @@ function sortValue(r: Row, key: SortKey): string | number {
       return r.protocol;
     case "plateName":
       return r.plateName;
-    case "description":
-      return r.description;
     case "lastModified":
       return r.lastModified;
-    case "modified":
-      return r.modified ? 1 : 0;
   }
 }
 
@@ -184,10 +176,77 @@ function SortArrow({ state }: { state: "asc" | "desc" | null }) {
 }
 
 /**
- * The row's delete control: ✕ deletes on the first click for an untouched file, or arms (a red
- * waste bin) for one with unsaved edits, exactly like the old file-bar delete this replaced (see
- * `FileBar.tsx`'s former `DeleteButton`) — moved here rather than duplicated, since it's now the
- * only delete in the app.
+ * A row's hover card: the same targets/samples chips as the file bar's own (`FileBar.tsx`'s
+ * `HoverCard`), plus the run's cycle count — everything else that card shows (the run's name,
+ * protocol, file name) already has its own table column here, so repeating it would just be
+ * noise. Portalled to a fixed screen position for the same reason the bar's version is: the
+ * table's own scroll container (`.filesview__scroll`) would otherwise clip it.
+ */
+function RowHoverCard({
+  cycles,
+  plate,
+  style,
+}: {
+  cycles: number | undefined;
+  plate: PlateDefinition | null;
+  style: React.CSSProperties;
+}) {
+  const targets = plate ? plateTargets(plate) : [];
+  const samples = plate?.samples ?? [];
+  return (
+    <div className="filecard mono" style={style}>
+      {cycles != null && (
+        <dl className="filecard__dl">
+          <dt>Cycles</dt>
+          <dd>{cycles}</dd>
+        </dl>
+      )}
+      {plate && (
+        <>
+          <div className="filecard__section">
+            <div className="filecard__label">Targets</div>
+            {targets.length ? (
+              <div className="filecard__chips">
+                {targets.map((t) => (
+                  <span
+                    key={t.name}
+                    className="filecard__chip"
+                    style={t.channel != null ? { color: channelColor(t.channel) } : undefined}
+                  >
+                    {t.name}
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <div className="filecard__empty">none</div>
+            )}
+          </div>
+          <div className="filecard__section">
+            <div className="filecard__label">Samples</div>
+            {samples.length ? (
+              <div className="filecard__chips">
+                {samples.map((s) => (
+                  <span key={s} className="filecard__chip">
+                    {s}
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <div className="filecard__empty">none</div>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The row's delete control: ✕ always arms first (a red waste bin), regardless of whether the
+ * file carries unsaved edits — the click after that is the one that deletes. Unlike the old
+ * file-bar delete this replaced (`FileBar.tsx`'s former `DeleteButton`, which let an untouched
+ * file go on the first click), this is the *only* delete in the app now, so it always asks twice
+ * rather than making that depend on a state the person clicking may not have noticed.
  */
 function DeleteButton({
   name,
@@ -199,32 +258,125 @@ function DeleteButton({
   onDelete: () => void;
 }) {
   const [armed, setArmed] = useState(false);
-  const isArmed = armed && modified;
   return (
     <button
-      className={"ftbl__del" + (isArmed ? " is-armed" : "")}
+      className={"ftbl__del" + (armed ? " is-armed" : "")}
       aria-label={
-        isArmed
-          ? `Confirm deleting ${name} — its unsaved changes will be lost`
+        armed
+          ? `Confirm deleting ${name}${modified ? " — its unsaved changes will be lost" : ""}`
           : `Delete ${name} from storage`
       }
       title={
-        isArmed
-          ? "Click again to delete. This file has changes that aren't on disk — download it first to keep them."
-          : modified
-            ? "Delete from storage — this file has changes that aren't on disk, so it will ask again"
-            : "Delete from storage"
+        armed
+          ? modified
+            ? "Click again to delete. This file has changes that aren't on disk — download it first to keep them."
+            : "Click again to delete"
+          : "Delete from storage"
       }
       onMouseLeave={() => setArmed(false)}
       onClick={(e) => {
         e.stopPropagation();
-        if (isArmed) onDelete();
-        else if (modified) setArmed(true);
-        else onDelete();
+        if (armed) onDelete();
+        else setArmed(true);
       }}
     >
-      {isArmed ? <TrashIcon /> : "✕"}
+      {armed ? <TrashIcon /> : "✕"}
     </button>
+  );
+}
+
+/** One row plus its hover card — a component of its own (rather than inline in the table map)
+ * because the card needs its own ref/position state, the same reason `FileBar.tsx` splits
+ * `FileChip` out of `FileBar`. */
+function FilesRow({
+  r,
+  isActive,
+  onSelectFile,
+  onSetVisible,
+  onDelete,
+}: {
+  r: Row;
+  isActive: boolean;
+  onSelectFile: (id: string, view?: ViewId) => void;
+  onSetVisible: (id: string, visible: boolean) => void;
+  onDelete: (id: string) => void | Promise<void>;
+}) {
+  const rowRef = useRef<HTMLTableRowElement>(null);
+  const [cardPos, setCardPos] = useState<{ top: number; left: number } | null>(null);
+  const hasCard = r.cycles != null || !!r.plate;
+
+  return (
+    <tr
+      ref={rowRef}
+      className={"filesview__row" + (isActive ? " is-active" : "")}
+      onClick={() => onSelectFile(r.id)}
+      onMouseEnter={() => {
+        if (!hasCard) return;
+        const rect = rowRef.current?.getBoundingClientRect();
+        if (rect) setCardPos({ top: rect.bottom + 4, left: rect.left });
+      }}
+      onMouseLeave={() => setCardPos(null)}
+    >
+      <td className="filesview__checkcol">
+        <input
+          type="checkbox"
+          checked={r.visible}
+          aria-label={`Show ${r.experimentName} in the file bar`}
+          onClick={(e) => e.stopPropagation()}
+          onChange={(e) => onSetVisible(r.id, e.target.checked)}
+        />
+      </td>
+      <td className="filesview__typecol" title={CATEGORY_TEXT[fileCategory(r.kind)]}>
+        <span className="filesview__kind">
+          <FileKindIcon kind={r.kind} />
+        </span>
+        <span className="mono">{EXTENSION_TEXT[r.kind]}</span>
+      </td>
+      <td>
+        {r.experimentName}
+        {cardPos &&
+          createPortal(
+            <RowHoverCard
+              cycles={r.cycles}
+              plate={r.plate}
+              style={{ position: "fixed", top: cardPos.top, left: cardPos.left, zIndex: 50 }}
+            />,
+            document.body,
+          )}
+      </td>
+      <td className="mono filesview__filename" title={r.fileName}>
+        {r.fileName}
+      </td>
+      <td className="mono">{r.dateText || "—"}</td>
+      <td className="mono atbl__num">{formatSize(r.size)}</td>
+      <td>{r.protocol}</td>
+      <td>
+        {r.plate ? (
+          <button
+            type="button"
+            className="filesview__platelink"
+            onClick={(e) => {
+              e.stopPropagation();
+              onSelectFile(r.id, "plates");
+            }}
+            title="Open the Plates view"
+          >
+            {r.plateName}
+          </button>
+        ) : (
+          r.plateName
+        )}
+      </td>
+      <td className="mono">
+        {formatCompactDateTime(new Date(r.lastModified))}
+        {r.modified && (
+          <span className="filesview__moddot" title="Edited since it was loaded, not yet downloaded" />
+        )}
+      </td>
+      <td className="filesview__delcol">
+        <DeleteButton name={r.experimentName} modified={r.modified} onDelete={() => void onDelete(r.id)} />
+      </td>
+    </tr>
   );
 }
 
@@ -232,7 +384,6 @@ export function FilesTableView({
   files,
   runs,
   plateFiles,
-  protocolFiles,
   experiments,
   activeId,
   hiddenIds,
@@ -262,13 +413,14 @@ export function FilesTableView({
         size: f.size,
         protocol: run?.zpcr?.protocol()?.name || "—",
         plateName: plate ? plateDisplayName(plate) : "—",
-        description: describeRow(f, plate, protocolFiles.get(f.id)),
+        cycles: run?.zpcr?.reads.length,
+        plate,
         lastModified: f.lastModified,
         modified: modifiedIds.has(f.id),
         visible: !hiddenIds.has(f.id),
       };
     });
-  }, [files, runs, plateFiles, protocolFiles, experiments, password, modifiedIds, hiddenIds]);
+  }, [files, runs, plateFiles, experiments, password, modifiedIds, hiddenIds]);
 
   const sorted = useMemo(() => sortRows(rows, sortKey, dir), [rows, sortKey, dir]);
 
@@ -299,7 +451,7 @@ export function FilesTableView({
         <table className="filesview__tbl">
           <thead>
             <tr>
-              <th className="filesview__checkcol" aria-label="Shown in file bar" />
+              <th className="filesview__checkcol">Show</th>
               {COLUMNS.map((c) => {
                 const state = c.key === sortKey ? (dir === 1 ? "asc" : "desc") : null;
                 return (
@@ -325,61 +477,23 @@ export function FilesTableView({
           </thead>
           <tbody>
             {sorted.map((r) => (
-              <tr
+              <FilesRow
                 key={r.id}
-                className={"filesview__row" + (r.id === activeId ? " is-active" : "")}
-                onClick={() => onSelectFile(r.id)}
-              >
-                <td className="filesview__checkcol">
-                  <input
-                    type="checkbox"
-                    checked={r.visible}
-                    aria-label={`Show ${r.experimentName} in the file bar`}
-                    onClick={(e) => e.stopPropagation()}
-                    onChange={(e) => onSetVisible(r.id, e.target.checked)}
-                  />
-                </td>
-                <td>
-                  <span
-                    className="filesview__kind"
-                    title={CATEGORY_TEXT[fileCategory(r.kind)]}
-                  >
-                    <FileKindIcon kind={r.kind} />
-                  </span>
-                  {r.experimentName}
-                </td>
-                <td className="mono filesview__filename" title={r.fileName}>
-                  {r.fileName}
-                </td>
-                <td className="mono">{r.dateText || "—"}</td>
-                <td className="mono atbl__num">{formatSize(r.size)}</td>
-                <td>{r.protocol}</td>
-                <td>{r.plateName}</td>
-                <td className="filesview__desc" title={r.description}>
-                  {r.description}
-                </td>
-                <td className="mono">{formatCompactDateTime(new Date(r.lastModified))}</td>
-                <td>
-                  {r.modified && (
-                    <span className="filesview__moddot" title="Edited since it was loaded, not yet downloaded" />
-                  )}
-                </td>
-                <td className="filesview__delcol">
-                  <DeleteButton
-                    name={r.experimentName}
-                    modified={r.modified}
-                    onDelete={() => void onDelete(r.id)}
-                  />
-                </td>
-              </tr>
+                r={r}
+                isActive={r.id === activeId}
+                onSelectFile={onSelectFile}
+                onSetVisible={onSetVisible}
+                onDelete={onDelete}
+              />
             ))}
           </tbody>
           <tfoot>
             <tr className="filesview__totals">
-              {/* checkbox column + every data column but the last (Unsaved) + delete column */}
+              {/* checkbox column + every data column but the last (File modified) */}
               <td colSpan={COLUMNS.length}>
                 {files.length} file{files.length === 1 ? "" : "s"} · {formatSize(totalSize)} total
               </td>
+              {/* the last data column (File modified) + the delete column */}
               <td colSpan={2} />
             </tr>
           </tfoot>

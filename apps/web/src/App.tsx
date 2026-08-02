@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useZpcrStore } from "./state/useZpcrStore";
 import { useCfxDevice } from "./state/useCfxDevice";
 import { useRunWatch } from "./state/useRunWatch";
@@ -151,11 +151,13 @@ export function App() {
       store.experiments,
     ],
   );
-  // Where "← back" on the About page returns to, so opening About and leaving again is a no-op.
+  // Where "← back" on the About page (and the Files table's own ✕) return to, so opening either
+  // and leaving again is a no-op.
   const lastView = useRef<ViewId>("curves");
-  if (store.view !== "about") lastView.current = store.view;
+  if (store.view !== "about" && store.view !== "files") lastView.current = store.view;
   const showAbout = () => store.setView("about");
   const leaveAbout = () => store.setView(lastView.current);
+  const leaveFiles = () => store.setView(lastView.current);
 
   // The example goes through the `#load=` hash key rather than calling `addUrl` directly, so
   // the in-app affordance and an external deep link are the same code path. `AboutView` renders
@@ -223,36 +225,24 @@ export function App() {
     if (store.activeId !== runWatch.fileId) store.setActive(runWatch.fileId);
   }, [store.view]);
 
-  // The full files table (`FilesTableView.tsx`) — toggled from the bar's own left edge, so it
-  // lives here rather than in the store: it's a layer over `<main>`, the same kind of thing
-  // `store.view` already is, but not worth making a `ViewId` since it isn't file-backed and has
-  // no URL of its own.
-  const [filesViewOpen, setFilesViewOpen] = useState(false);
-  // Deleting the last row in the table (or the last chip) empties `store.files`, which sends the
-  // app to the welcome screen — a branch that renders no `<main>` at all, so there's no closing
-  // this from inside the table itself. Without this, the stale `true` would reopen the table over
-  // whatever gets loaded next, instead of that file's own view.
-  useEffect(() => {
-    if (store.files.length === 0) setFilesViewOpen(false);
-  }, [store.files.length]);
   // What the bar actually shows: a file taken off it (`FileSettings.visible`) stays loaded and
-  // in the table, just not here.
+  // in the full files table (the "Files" tab, `FilesTableView.tsx`), just not here.
   const visibleFiles = useMemo(
     () => store.files.filter((f) => !store.hiddenIds.has(f.id)),
     [store.files, store.hiddenIds],
   );
   /**
-   * A row in the full files table: close the table, select the file (which also turns its
-   * checkbox back on — see `useZpcrStore`'s `setActive`), and land on its own first enabled tab,
-   * the same "click a file, go look at it" a bar chip has always done. Falls back to "overview"
-   * for a file with no restricted set (an ordinary run), since that tab isn't in the tuple for
-   * those — see `enabledViewsFor`.
+   * A row in the full files table: select the file (which also turns its checkbox back on — see
+   * `useZpcrStore`'s `setActive`, and leaves the Files tab since `store.view` changes under it),
+   * and land on its own first enabled tab, the same "click a file, go look at it" a bar chip has
+   * always done. Falls back to "overview" for a file with no restricted set (an ordinary run),
+   * since that tab isn't in the tuple for those — see `enabledViewsFor`. `view`, when given (the
+   * Plate cell's own link), overrides that landing spot instead of guessing at it.
    */
-  const selectFromTable = (id: string) => {
-    setFilesViewOpen(false);
+  const selectFromTable = (id: string, view?: ViewId) => {
     const f = store.files.find((x) => x.id === id);
     store.setActive(id);
-    store.setView(f ? enabledViewsFor(f.kind)?.[0] ?? "overview" : "overview");
+    store.setView(view ?? (f ? enabledViewsFor(f.kind)?.[0] ?? "overview" : "overview"));
   };
 
   const exampleHref = `#${formatLoadHash(EXAMPLE_FILE)}`;
@@ -306,34 +296,15 @@ export function App() {
             onSelect={selectFile}
             onHide={(id) => store.setVisible(id, false)}
             experiments={store.experiments}
-            filesViewOpen={filesViewOpen}
-            onToggleFilesView={() => setFilesViewOpen((v) => !v)}
           />
         )}
         <main className="app__main">
-          {filesViewOpen ? (
-            <FilesTableView
-              files={store.files}
-              runs={store.runs}
-              plateFiles={store.plateFiles}
-              protocolFiles={store.protocolFiles}
-              experiments={store.experiments}
-              activeId={store.activeId}
-              hiddenIds={store.hiddenIds}
-              modifiedIds={store.modifiedIds}
-              onSelectFile={selectFromTable}
-              onSetVisible={store.setVisible}
-              onDelete={store.remove}
-              onClose={() => setFilesViewOpen(false)}
-            />
-          ) : (
-            <InstrumentView
-              onOpenRun={openRun}
-              staged={staged}
-              instrument={instrument}
-              runWatch={runWatch}
-            />
-          )}
+          <InstrumentView
+            onOpenRun={openRun}
+            staged={staged}
+            instrument={instrument}
+            runWatch={runWatch}
+          />
         </main>
         {store.error && <div className="app__error mono">{store.error}</div>}
       </div>
@@ -369,10 +340,11 @@ export function App() {
   // `store.view` is global (not per-file), so switching entries can land on a view this file has
   // no answer for (e.g. "calibration" on a Biomeme run) — fall back to its first enabled tab
   // then. The tab is drawn either way, just disabled, so this is about where the *content* goes.
-  // "about" is file-independent, so it survives regardless.
+  // "about" and "files" are both file-independent, so they survive regardless.
   const view =
     enabledViews &&
     store.view !== "about" &&
+    store.view !== "files" &&
     !(enabledViews as readonly ViewId[]).includes(store.view)
       ? enabledViews[0]
       : store.view;
@@ -407,17 +379,14 @@ export function App() {
         onSelect={selectFile}
         onHide={(id) => store.setVisible(id, false)}
         experiments={store.experiments}
-        filesViewOpen={filesViewOpen}
-        onToggleFilesView={() => setFilesViewOpen((v) => !v)}
       />
 
       <main className="app__main">
-        {filesViewOpen ? (
+        {view === "files" ? (
           <FilesTableView
             files={store.files}
             runs={store.runs}
             plateFiles={store.plateFiles}
-            protocolFiles={store.protocolFiles}
             experiments={store.experiments}
             activeId={store.activeId}
             hiddenIds={store.hiddenIds}
@@ -425,7 +394,7 @@ export function App() {
             onSelectFile={selectFromTable}
             onSetVisible={store.setVisible}
             onDelete={store.remove}
-            onClose={() => setFilesViewOpen(false)}
+            onClose={leaveFiles}
           />
         ) : view === "about" ? (
           <AboutView

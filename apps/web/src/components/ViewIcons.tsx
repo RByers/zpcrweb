@@ -109,6 +109,19 @@ export function InstrumentIcon() {
   );
 }
 
+/** Files: a floppy disk — every file loaded into the browser, as a table (`FilesTableView.tsx`).
+ * Deliberately unlike the document-shaped icons beside it, the same way {@link InstrumentIcon} is
+ * — this tab isn't a lens on the active file either, it's a lens on the whole set of them. */
+export function FilesIcon() {
+  return (
+    <Svg>
+      <path d="M2.5 2h9L13.5 4v9a.5.5 0 0 1-.5.5H3a.5.5 0 0 1-.5-.5V2.5a.5.5 0 0 1 .5-.5z" />
+      <path d="M4.5 2v3.5h5V2" />
+      <rect x="4.7" y="9" width="6.6" height="4.5" rx="0.3" />
+    </Svg>
+  );
+}
+
 /** Load file: an arrow rising out of an open tray. */
 export function UploadIcon() {
   return (

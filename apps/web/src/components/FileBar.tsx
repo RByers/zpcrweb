@@ -11,7 +11,6 @@ import {
 import type { ExperimentIdentity } from "../lib/experiment";
 import { fileCategory, plateTargets, type FileCategory } from "@zpcrweb/core";
 import { FileKindIcon } from "./FileIcons";
-import { FilesViewIcon } from "./FilesViewIcon";
 
 /** Tooltip wording for the chip icon — its shape, then its colour. */
 const CATEGORY_TEXT: Record<FileCategory, string> = {
@@ -36,20 +35,11 @@ interface Props {
   onSelect: (id: string) => void;
   /**
    * A chip's ✕: take this file off the bar (`FileSettings.visible = false`), nothing more — the
-   * file stays loaded, in IndexedDB, and in the full files table (`FilesTableView.tsx`), where
-   * an actual delete now lives. There is no confirm here any more, because there is nothing at
-   * risk: the file is one click away in the table, or one click of {@link Props.onToggleFilesView}
-   * and a checkbox away from being back on the bar.
+   * file stays loaded, in IndexedDB, and in the full files table (the "Files" tab,
+   * `FilesTableView.tsx`). There is no confirm here any more, because there is nothing at risk:
+   * the file is one click of that tab and a checkbox away from being back on the bar.
    */
   onHide: (id: string) => void;
-  /** Whether the full files table is currently showing — drives the toggle button's pressed
-   * state; `undefined` where the button isn't offered (see {@link onToggleFilesView}). */
-  filesViewOpen?: boolean;
-  /** Opens/closes the full files table (see `FilesTableView.tsx`), replacing `<main>`. The
-   * button that calls this sits at the bar's own left edge — omit both this and
-   * {@link filesViewOpen} to leave it out, which no current call site does, but keeps the two
-   * props' meaning paired rather than one implying the other. */
-  onToggleFilesView?: () => void;
   /**
    * The *auxiliary* files staged alongside the primary one, for the Instrument view: a plate or
    * protocol file overriding half of the run being assembled (see `useRunStaging.ts`). They are
@@ -347,22 +337,6 @@ function FileChip({
   );
 }
 
-/** The toggle at the bar's left edge that opens/closes the full files table. A separate button
- * from any chip, so it reads as chrome for the bar rather than one more file. */
-function FilesViewToggle({ open, onToggle }: { open: boolean; onToggle: () => void }) {
-  return (
-    <button
-      className={"filebar__toggle" + (open ? " is-open" : "")}
-      aria-label={open ? "Close all files" : "Show all files"}
-      aria-pressed={open}
-      title={open ? "Close all files" : "Show all files"}
-      onClick={onToggle}
-    >
-      <FilesViewIcon />
-    </button>
-  );
-}
-
 export function FileBar({
   files,
   runs,
@@ -375,46 +349,39 @@ export function FileBar({
   inProgressIds,
   activeLocked,
   experiments,
-  filesViewOpen,
-  onToggleFilesView,
 }: Props) {
   const [password] = usePltdPassword();
   return (
-    <div className="filebar-row">
-      {onToggleFilesView && (
-        <FilesViewToggle open={!!filesViewOpen} onToggle={onToggleFilesView} />
-      )}
-      <div
-        className={"filebar" + (stagedIds ? " filebar--multi" : "")}
-        role="tablist"
-        aria-label={stagedIds ? "Files for the run to start" : "Loaded files"}
-        aria-multiselectable={stagedIds ? true : undefined}
-      >
-        {files.map((f) => (
-          <FileChip
-            key={f.id}
-            f={f}
-            identity={
-              experiments.get(f.id) ?? {
-                name: fallbackLabel(f),
-                date: null,
-                dateText: "",
-                fileName: f.name,
-              }
+    <div
+      className={"filebar" + (stagedIds ? " filebar--multi" : "")}
+      role="tablist"
+      aria-label={stagedIds ? "Files for the run to start" : "Loaded files"}
+      aria-multiselectable={stagedIds ? true : undefined}
+    >
+      {files.map((f) => (
+        <FileChip
+          key={f.id}
+          f={f}
+          identity={
+            experiments.get(f.id) ?? {
+              name: fallbackLabel(f),
+              date: null,
+              dateText: "",
+              fileName: f.name,
             }
-            run={runs.get(f.id)}
-            plateFile={plateFiles.get(f.id)}
-            password={password}
-            isActive={f.id === activeId}
-            isStaged={stagedIds ? stagedIds.has(f.id) : false}
-            isModified={modifiedIds.has(f.id)}
-            isRunning={inProgressIds.has(f.id)}
-            activeLocked={!!activeLocked}
-            onSelect={onSelect}
-            onHide={onHide}
-          />
-        ))}
-      </div>
+          }
+          run={runs.get(f.id)}
+          plateFile={plateFiles.get(f.id)}
+          password={password}
+          isActive={f.id === activeId}
+          isStaged={stagedIds ? stagedIds.has(f.id) : false}
+          isModified={modifiedIds.has(f.id)}
+          isRunning={inProgressIds.has(f.id)}
+          activeLocked={!!activeLocked}
+          onSelect={onSelect}
+          onHide={onHide}
+        />
+      ))}
     </div>
   );
 }

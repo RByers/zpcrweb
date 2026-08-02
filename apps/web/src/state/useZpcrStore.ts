@@ -55,7 +55,9 @@ export type { FileKind };
 type PlateFileKind = "pltd" | "csv";
 
 /** `"about"` is not a tab in {@link ViewSelector} — it's reached by clicking the logo — but it
- * is a view like any other, so it's linkable (`#view=about`) and works with back/forward. */
+ * is a view like any other, so it's linkable (`#view=about`) and works with back/forward.
+ * `"files"` (the full files table, `FilesTableView.tsx`) is a real tab, but — like `"instrument"`
+ * — isn't a lens on the active file, so it sits in its own group there rather than the main one. */
 export type ViewId =
   | "overview"
   | "curves"
@@ -64,6 +66,7 @@ export type ViewId =
   | "calibration"
   | "raw"
   | "instrument"
+  | "files"
   | "about";
 /** Reference view only — drift relative to the factory calibration value; see `ReferenceView`. */
 export type Baseline = "raw" | "delta" | "percent";

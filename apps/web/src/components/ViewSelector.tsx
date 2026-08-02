@@ -2,6 +2,7 @@ import type { ViewId } from "../state/useZpcrStore";
 import {
   CalibrationIcon,
   CurvesIcon,
+  FilesIcon,
   InstrumentIcon,
   OverviewIcon,
   PlatesIcon,
@@ -15,8 +16,17 @@ const ALL_VIEWS: { id: ViewId; label: string; Icon: () => React.ReactElement }[]
   { id: "plates", label: "Plates", Icon: PlatesIcon },
   { id: "reference", label: "Reference", Icon: ReferenceIcon },
   { id: "calibration", label: "Calibration", Icon: CalibrationIcon },
-  { id: "raw", label: "Raw files", Icon: RawIcon },
+  { id: "raw", label: "Raw", Icon: RawIcon },
 ];
+
+/**
+ * The Files tab, kept out of {@link ALL_VIEWS} and rendered in its own group, first — the same
+ * treatment {@link INSTRUMENT_VIEW} gets, and for the same reason: it isn't a lens on the active
+ * file, it's a lens on every loaded file, so grouping it with the rest would say the file
+ * selection applies to it. Green (`--good`) rather than Instrument's magenta, so the two
+ * "different kind of tab" groups still read as different from each other, not just from the rest.
+ */
+const FILES_VIEW = { id: "files" as ViewId, label: "Files", Icon: FilesIcon };
 
 /**
  * The Instrument tab, kept out of {@link ALL_VIEWS} and rendered in its own group.
@@ -67,6 +77,7 @@ export function ViewSelector({ value, onChange, enabled }: Props) {
 
   return (
     <div className="viewselect" role="tablist" aria-label="View">
+      <div className="segmented segmented--files">{tab(FILES_VIEW)}</div>
       <div className="segmented">
         {ALL_VIEWS.map((v) => tab(v, !!enabled && !enabled.includes(v.id)))}
       </div>

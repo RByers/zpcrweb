@@ -690,41 +690,8 @@
   color: #fff;
 }
 
-/* The bar itself plus the toggle that opens the full files table (`FilesTableView.tsx`) at its
-   left edge — a row so the toggle sits flush against the bar rather than floating above it. */
-.filebar-row {
-  display: flex;
-  align-items: stretch;
-  min-width: 0;
-  border-bottom: 1px solid var(--border);
-  background: var(--plane);
-}
-.filebar-row .filebar {
-  flex: 1 1 auto;
-  border-bottom: 0;
-}
-.filebar__toggle {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex: 0 0 auto;
-  width: 34px;
-  border: 0;
-  border-right: 1px solid var(--border);
-  background: transparent;
-  color: var(--ink-muted);
-}
-.filebar__toggle:hover {
-  color: var(--ink);
-  background: var(--raised-2);
-}
-.filebar__toggle.is-open {
-  color: var(--neon-cyan);
-  background: color-mix(in srgb, var(--neon-cyan) 12%, transparent);
-}
-
 /* ---- FilesTableView ------------------------------------------------------ */
-/* Fills `<main>` in place of whatever view was showing (see `App.tsx`'s `filesViewOpen`) — a
+/* Fills `<main>` in place of whatever view was showing (see `App.tsx`'s `store.view === "files"`) — a
    header row plus a scrolling table, the same two-part shape as any other full-page view here. */
 .filesview {
   display: flex;
@@ -768,18 +735,21 @@
 .filesview__tbl {
   width: 100%;
   border-collapse: collapse;
-  font-size: 12px;
+  font-size: 11px;
 }
 .filesview__tbl thead th {
-  padding: 0;
+  padding: 0 6px;
   position: sticky;
   top: 0;
   background: var(--panel);
   z-index: 1;
   border-bottom: 1px solid var(--border);
+  font-size: 10px;
+  color: var(--ink-muted);
+  font-weight: 600;
 }
 .filesview__tbl td {
-  padding: 7px 10px;
+  padding: 5px 8px;
   border-bottom: 1px solid var(--border);
   vertical-align: middle;
 }
@@ -792,10 +762,14 @@
 .filesview__row.is-active {
   background: color-mix(in srgb, var(--neon-cyan) 10%, transparent);
 }
+.filesview__typecol {
+  white-space: nowrap;
+  color: var(--ink-muted);
+}
 .filesview__kind {
   display: inline-flex;
   color: var(--ink-muted);
-  margin-right: 6px;
+  margin-right: 4px;
   vertical-align: middle;
 }
 .filesview__filename {
@@ -805,12 +779,19 @@
   white-space: nowrap;
   color: var(--ink-muted);
 }
-.filesview__desc {
-  max-width: 32ch;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--ink-2);
+.filesview__platelink {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.filesview__platelink:hover {
+  color: var(--neon-cyan);
 }
 .filesview__checkcol {
   width: 30px;
@@ -822,9 +803,11 @@
 }
 .filesview__moddot {
   display: inline-block;
+  margin-left: 6px;
   width: 7px;
   height: 7px;
   border-radius: 50%;
+  vertical-align: middle;
   background: var(--warn);
 }
 .filesview__empty {
@@ -3119,9 +3102,9 @@
    switches. Layout is the Curves view's rail + content grid (`.curves`), so the surfaces read the
    same even though the content doesn't. */
 
-/* The tab strip is now two groups rather than one control: the file views, then Instrument. The gap
-   plus the separate border is the whole visual argument that the file selection doesn't apply to
-   it — see `ViewSelector.tsx`. */
+/* The tab strip is now three groups rather than one control: Files, then the file views, then
+   Instrument. The gaps plus the separate borders are the whole visual argument that the file
+   selection doesn't apply to the two on the ends — see `ViewSelector.tsx`. */
 .viewselect {
   display: inline-flex;
   align-items: center;
@@ -3133,6 +3116,16 @@
 .segmented--instrument .segmented__item.is-active {
   background: var(--neon-magenta-dim);
   box-shadow: inset 0 -2px 0 var(--neon-magenta);
+}
+/* Files (`FilesTableView.tsx`): the same "different kind of tab" treatment as Instrument above,
+   sharing every rule but the colour — green (`--good`) rather than magenta, so the two groups
+   read as distinct from each other as well as from the file-backed block between them. */
+.segmented--files {
+  border-color: var(--good-dim);
+}
+.segmented--files .segmented__item.is-active {
+  background: var(--good-dim);
+  box-shadow: inset 0 -2px 0 var(--good);
 }
 
 /* A page with the header but no file bar (`app--nofiles`) still has to fill the viewport, so it

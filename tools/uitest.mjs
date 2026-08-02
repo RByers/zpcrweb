@@ -94,6 +94,14 @@ async function tabBecomes(cdp, label, timeout = 8000) {
   return seen;
 }
 
+/** Click a `.viewselect` tab by its visible label — the Files/Instrument tabs (their own
+ * `.segmented--*` groups, `ViewSelector.tsx`) as well as the main strip's. Scoped to `.viewselect`
+ * rather than every `[role="tab"]` in the page, since a file chip is one too. */
+const clickTab = (cdp, label) =>
+  cdp.eval(`(() => { const t = [...document.querySelectorAll('.viewselect [role="tab"]')]
+      .find((b) => b.textContent.trim() === ${JSON.stringify(label)});
+      t?.click(); })()`);
+
 /**
  * The Calibration view's default selection. A run ships a `.Dcal` for every dye Bio-Rad sells on
  * both tube types (28 files in the samples here), and the view is only useful because it starts
@@ -401,16 +409,18 @@ async function persistedThresholdChecks(chrome, origin, pw) {
   // beyond the shared fixture clean it up.
   //
   // A chip's own ✕ only hides now (`FileBar.tsx`'s `HideButton`) — an actual delete lives in the
-  // full files table (`FilesTableView.tsx`), so cleanup goes there instead. ZPCR (the shared
-  // fixture, kept loaded across checks) is in there too by this point, so the RVP row has to be
-  // picked out by name rather than just grabbing the first ✕. This check only reads the seeded
-  // threshold, never edits anything, so the file is still unmodified and its row's ✕ deletes on
-  // the first click, same as the chip's used to.
-  await cdp.eval(`(() => { document.querySelector(".filebar__toggle")?.click(); })()`);
+  // full files table (the "Files" tab, `FilesTableView.tsx`), so cleanup goes there instead. ZPCR
+  // (the shared fixture, kept loaded across checks) is in there too by this point, so the RVP row
+  // has to be picked out by name rather than just grabbing the first ✕. Every table row's ✕
+  // always arms before it deletes, modified or not, so this takes two clicks.
+  await clickTab(cdp, "Files");
   await waitFor(() => cdp.eval(`!!document.querySelector(".filesview__row")`), { what: "the files table" });
-  await cdp.eval(`(() => { const row = [...document.querySelectorAll(".filesview__row")]
+  const clickRvpDelete = () =>
+    cdp.eval(`(() => { const row = [...document.querySelectorAll(".filesview__row")]
       .find((r) => /RVP/.test(r.textContent));
       row?.querySelector(".ftbl__del")?.click(); })()`);
+  await clickRvpDelete();
+  await clickRvpDelete();
   await waitFor(
     () => cdp.eval(`![...document.querySelectorAll(".filesview__row")].some((r) => /RVP/.test(r.textContent))`),
     { what: "the RVP .pcrd to be deleted" },
@@ -897,9 +907,10 @@ async function passwordChecks(chrome, origin, pw) {
     .then(JSON.parse);
   check(
     "a locked run keeps the tab strip, with every file tab disabled",
-    lockedStrip.length === 7 &&
+    lockedStrip.length === 8 &&
       lockedStrip.filter((t) => t.off).length === 6 &&
-      !lockedStrip.find((t) => t.label === "Instrument").off,
+      !lockedStrip.find((t) => t.label === "Instrument").off &&
+      !lockedStrip.find((t) => t.label === "Files").off,
     JSON.stringify(lockedStrip),
   );
   locked.close();
@@ -1050,7 +1061,7 @@ async function xmlViewChecks(chrome, origin, pw) {
   await emptyReload(solo, url);
   await loadFile(solo, PLTD);
   await solo.eval(`window.location.hash = "view=raw", undefined`);
-  await tabBecomes(solo, "Raw files");
+  await tabBecomes(solo, "Raw");
   // Anchor on the viewer actually showing this file before reading its shape.
   await waitFor(
     () =>
@@ -1251,8 +1262,8 @@ async function instrumentRunChecks(chrome, origin) {
     )
     .then(JSON.parse);
   check(
-    "a .prcl.txt enables Overview and Instrument, and nothing else",
-    protoTabs.filter((t) => !t.off).map((t) => t.label).join(",") === "Overview,Instrument",
+    "a .prcl.txt enables Overview and Instrument (and the file-independent Files tab), nothing else",
+    protoTabs.filter((t) => !t.off).map((t) => t.label).join(",") === "Files,Overview,Instrument",
     JSON.stringify(protoTabs.filter((t) => !t.off).map((t) => t.label)),
   );
 
@@ -1628,7 +1639,7 @@ async function experimentNameChecks(chrome, origin) {
     await chipPresent(cdp, "2024-01-17-22220147"),
   );
   await cdp.eval(`window.location.hash = "view=raw", undefined`);
-  await tabBecomes(cdp, "Raw files");
+  await tabBecomes(cdp, "Raw");
   const raw = await cdp
     .eval(
       `JSON.stringify({
@@ -1648,7 +1659,7 @@ async function experimentNameChecks(chrome, origin) {
     JSON.stringify(raw),
   );
 
-  // The tab strip is static: the same seven tabs whatever the file is, with the ones this file
+  // The tab strip is static: the same eight tabs whatever the file is, with the ones this file
   // has no answer for *disabled* rather than removed (`ViewSelector`'s `enabled` prop). Only a
   // browser can show this — it is a claim about two different files' headers being the same
   // shape, and the failure it guards against (tabs appearing and disappearing under the pointer
@@ -1663,12 +1674,12 @@ async function experimentNameChecks(chrome, origin) {
   const offLabels = (s) => s.filter((t) => t.off).map((t) => t.label);
   const bio = await strip();
   check(
-    "a Biomeme run keeps all seven tabs, greying out the two it can't answer",
-    bio.length === 7 && offLabels(bio).join(",") === "Reference,Calibration",
+    "a Biomeme run keeps all eight tabs, greying out the two it can't answer",
+    bio.length === 8 && offLabels(bio).join(",") === "Reference,Calibration",
     JSON.stringify(bio),
   );
 
-  // Back to the .zpcr loaded above: the same seven tabs, none of them off — so the strip's shape
+  // Back to the .zpcr loaded above: the same eight tabs, none of them off — so the strip's shape
   // really is file-independent, and the greying above is about capability rather than layout.
   await cdp.eval(
     `(() => { [...document.querySelectorAll(".filechip__main")]
@@ -1681,7 +1692,7 @@ async function experimentNameChecks(chrome, origin) {
   const run = await strip();
   check(
     "switching back to a .zpcr re-enables them in place, with the strip unchanged",
-    run.length === 7 && run.map((t) => t.label).join(",") === bio.map((t) => t.label).join(","),
+    run.length === 8 && run.map((t) => t.label).join(",") === bio.map((t) => t.label).join(","),
     JSON.stringify(run),
   );
   cdp.close();
@@ -1692,15 +1703,15 @@ async function experimentNameChecks(chrome, origin) {
  *
  * A chip's ✕ only ever hides now (`FileSettings.visible`) — the file stays loaded, in IndexedDB,
  * and in the full files table opened from the bar's own toggle. The table is where a file is
- * actually deleted: an untouched file's ✕ goes on the first click, the same as the chip used to;
- * once its *content* has been edited (a threshold moved, the run renamed) the browser holds the
- * only copy in that form, so the same ✕ arms first and the click after it is the one that
- * deletes. The bar still wears the "unsaved" dot on a modified chip — that part didn't move.
+ * actually deleted, and its ✕ always arms first (a red waste bin) regardless of whether the file
+ * carries edits — the click after that is the one that deletes. The bar still wears the "unsaved"
+ * dot on a modified chip — that part didn't move.
  *
  * All of it is state a screenshot can't judge: whether hiding really left the file in IndexedDB
  * (a reload not bringing it back would be a real delete in disguise), whether the modified flag
- * outlived a reload (it must — the stale copy is the one on disk), whether the first click on an
- * edited row's ✕ really didn't delete, or whether downloading the file put it back to disposable.
+ * outlived a reload (it must — the stale copy is the one on disk), whether the first click on the
+ * ✕ really didn't delete, or whether downloading the file left it any easier to delete (it
+ * shouldn't — every row asks twice alike).
  */
 async function deleteConfirmChecks(chrome, origin) {
   console.log("\ndelete confirmation");
@@ -1712,7 +1723,7 @@ async function deleteConfirmChecks(chrome, origin) {
   const chips = () => cdp.eval(`document.querySelectorAll(".filebar .filechip").length`);
   const clickHide = () =>
     cdp.eval(`(() => { document.querySelector(".filebar .filechip__del").click(); })()`);
-  const openTable = () => cdp.eval(`(() => { document.querySelector(".filebar__toggle").click(); })()`);
+  const openTable = () => clickTab(cdp, "Files");
   const tableRows = () => cdp.eval(`document.querySelectorAll(".filesview__row").length`);
   const clickTableCheckbox = () =>
     cdp.eval(`(() => { document.querySelector(".filesview__checkcol input").click(); })()`);
@@ -1760,10 +1771,18 @@ async function deleteConfirmChecks(chrome, origin) {
   await waitFor(async () => (await chips()) === 1, { what: "the chip to come back" });
   check("re-checking the table row shows the chip again", (await chips()) === 1);
 
-  // An unedited file's table ✕ deletes on the first click, same as the old chip control did.
+  // Even an unedited file's table ✕ arms first — every row asks twice, not just a modified one.
+  await clickTableDelete();
+  const untouchedArmed = await tableDel();
+  await waitFor(async () => (await tableRows()) === 1, { what: "the row to still be there" });
+  check(
+    "an unedited file's table ✕ arms instead of deleting on the first click",
+    untouchedArmed.armed && (await tableRows()) === 1,
+    JSON.stringify(untouchedArmed),
+  );
   await clickTableDelete();
   await waitFor(async () => (await tableRows()) === 0, { what: "the unedited file to delete" });
-  check("an unedited file's table row deletes on one click", (await tableRows()) === 0);
+  check("…and the second click deletes it", (await tableRows()) === 0);
   await cdp.eval(`(() => { document.querySelector(".filesview__close")?.click(); })()`);
 
   // Now edit one: a rename is the cheapest thing that changes what a download would contain.
@@ -1803,7 +1822,8 @@ async function deleteConfirmChecks(chrome, origin) {
   check("the second click deletes", (await tableRows()) === 0);
   await cdp.eval(`(() => { document.querySelector(".filesview__close")?.click(); })()`);
 
-  // Download it: the edits are on disk now, so the row goes back to deleting on one click.
+  // Download it: the edits are on disk now, but the ✕ still asks twice — that never depended on
+  // the modified flag in the first place.
   await loadFile(cdp, join(REPO, "samples", EXAMPLE));
   await waitFor(() => chipPresent(cdp, "S183"), { what: "the .zpcr chip once more" });
   await cdp.eval(`window.location.hash = "view=overview", undefined`);
@@ -1816,8 +1836,15 @@ async function deleteConfirmChecks(chrome, origin) {
   await openTable();
   await waitFor(async () => (await tableRows()) === 1, { what: "the saved file's table row" });
   await clickTableDelete();
-  await waitFor(async () => (await tableRows()) === 0, { what: "the one-click delete" });
-  check("…so its table row deletes on one click again", (await tableRows()) === 0);
+  const savedArmed = await tableDel();
+  check(
+    "…and its ✕ still arms first, rather than deleting on one click now that it's saved",
+    savedArmed.armed && (await tableRows()) === 1,
+    JSON.stringify(savedArmed),
+  );
+  await clickTableDelete();
+  await waitFor(async () => (await tableRows()) === 0, { what: "the confirmed delete" });
+  check("…so the second click deletes it", (await tableRows()) === 0);
   cdp.close();
 }
 
