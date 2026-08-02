@@ -296,7 +296,11 @@ describe("parseAlf — the committed samples", () => {
     const first = alf.steps.find((s) => s.readIndex === 1)!;
     // Both clocks as seconds-of-day; the file's is GMT, the report's is instrument-local, so
     // only the sub-minute part is comparable — which is exactly the lead being measured.
-    const fileStamp = new Date(zpcr.reads[0]!.timestamp);
+    // A read's `timestamp` is best-effort (`types.ts`), so assert this sample has one rather
+    // than letting a missing DATETIME reach `new Date` and fail as an unexplained NaN.
+    const stamp = zpcr.reads[0]!.timestamp;
+    expect(stamp).toBeDefined();
+    const fileStamp = new Date(stamp!);
     const lead =
       ((fileStamp.getUTCSeconds() - first.startedAt!.getSeconds() + 60) % 60) +
       60 * ((fileStamp.getUTCMinutes() - first.startedAt!.getMinutes() + 60) % 60);
