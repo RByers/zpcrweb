@@ -1,93 +1,57 @@
-import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
-import {
-  fileKindDescription,
-  plateTargets,
-  runProgressFromNames,
-  type CqTableEntry,
-  type FileKind,
-  type PlateDefinition,
-  type Zpcr,
-} from "@zpcrweb/core";
-import { OverviewToolbar, useFilenameEditor } from "../OverviewFileTools";
-import { downloadBytes } from "../../lib/download";
+import { useEffect, useMemo, useState } from "react";
+import { runProgressFromNames, type FileKind, type Zpcr } from "@zpcrweb/core";
+import { OverviewPanel, type InfoRow, type OverviewPanelProps } from "./OverviewPanel";
+import { OverviewPlateSection } from "./OverviewPlateSection";
 import { usePltdPassword } from "../../state/pltdPassword";
-import { channelColor } from "../../lib/channelColors";
 import { runEncryptionStatus } from "../../lib/encryptionStatus";
-import { curveKey, useRunAnalysis } from "../../lib/runAnalysis";
+import { useRunAnalysis } from "../../lib/runAnalysis";
 import type { FileSettings, RunResult } from "../../state/useZpcrStore";
-import { formatCompactDateTime, type ExperimentIdentity } from "../../lib/experiment";
+import type { ExperimentIdentity } from "../../lib/experiment";
 
-interface InfoRow {
-  label: string;
-  value: ReactNode;
-}
-
-/** Positive/negative curve tally behind one plate chip — see {@link chipCounts}. */
-interface Counts {
-  pos: number;
-  neg: number;
-}
-
+/**
+ * The Overview tab for a run (`.zpcr`/`.pcrd`/Biomeme `.json`).
+ *
+ * The shared {@link OverviewPanel} plus the three things a run adds to it: its editable name as
+ * the headline, the "still going" banner, and the run's own facts appended to the info table —
+ * then its plate's chips below, tallied against the run's Cq table.
+ */
 export function OverviewView({
   zpcr,
-  kind,
   file,
   run,
   settings,
   identity,
   onRename,
   namePersists,
-  onRenameFile,
-  onDownload,
-  onClone,
-  autoEditName,
-  onAutoEditHandled,
+  ...tools
 }: {
   zpcr: Zpcr;
-  /** The run's own file kind (`.zpcr`/`.pcrd`/biomeme `.json`) — feeds the "Type" row's detailed
-   * description (`fileKindDescription`), the library's own wording rather than something re-derived
-   * here. */
-  kind: FileKind;
-  /** The active run's own name/bytes — downloaded verbatim, so this is also how a `.zpcr`
-   * attached via the Plates view's upload control gets back onto disk (see `PlatesView`). Also
-   * carries the source file's own `lastModified` (its OS mtime), shown in the info table. */
-  file: { name: string; bytes: Uint8Array; lastModified: number };
-  /** Bytes for the download button: the loaded archive plus the run's current analysis settings
-   * as its `zpcrweb.json` entry (`ZpcrStore.exportBytes`), so the copy that leaves the browser
-   * carries the thresholds it was read with. Falls back to `file.bytes` when absent. */
-  onDownload?: () => Uint8Array | null;
+  /** The active run's own name/kind/mtime. The bytes aren't needed here — saving the file is
+   * `App.tsx`'s `downloadActiveFile`, the same one every other kind's Overview uses. */
+  file: { name: string; kind: FileKind; lastModified: number };
   /** The same run result the app resolved `zpcr` from — carries the `selfEncrypted` flag that
    * `zpcr` alone doesn't expose. Format-neutral: see {@link runEncryptionStatus}. */
   run: RunResult;
   /** Only used to feed {@link useRunAnalysis} — the plate chips' Cq tallies must be the same
    * numbers the Curves view shows, which means the same thresholds and calibration settings. */
   settings: FileSettings;
-  /** What this run is called and when it ran — the view's headline; see `lib/experiment.ts`. */
+  /** What this run is called and when it ran — the panel's headline; see `lib/experiment.ts`. */
   identity: ExperimentIdentity;
   /** Store a new name (`zpcrweb.json`'s `experimentName`). `""` clears it, which puts the run
-   * back on its derived name. */
+   * back on its derived name. Distinct from {@link OverviewPanelProps.onRenameFile}, which
+   * renames the file itself. */
   onRename: (name: string) => void;
   /** False when the format can't carry the name to disk (`.pcrd`, Biomeme — neither has an
    * archive to hold a `zpcrweb.json`), which the field then says out loud rather than silently
    * losing the edit on reload. */
   namePersists: boolean;
-  /** Rename the loaded file itself (`ZpcrStore.renameFile`) — distinct from {@link onRename},
-   * which edits the run's own name. The toolbar's Rename button turns the "Filename" row into
-   * an editable field that calls this on commit. */
-  onRenameFile: (name: string) => void;
-  /** Copy this run into a new `(N)`-named file and open the copy — the toolbar's Clone button;
-   * see `App.tsx`'s `cloneActiveFile`. */
-  onClone: () => void;
-  /** Open the "Filename" row for editing as soon as the view appears — how a just-cloned file
-   * arrives, with its name selected and ready to be typed over. */
-  autoEditName?: boolean;
-  /** Called once {@link autoEditName} has been acted on, so it fires once per clone. */
-  onAutoEditHandled?: () => void;
-}) {
+} & Pick<
+  OverviewPanelProps,
+  "onRenameFile" | "onDownload" | "onClone" | "autoEditName" | "onAutoEditHandled"
+>) {
   const m = zpcr.metadata;
-  const reads = zpcr.reads;
   const protocolName = zpcr.protocol()?.name || null;
-  const lastTemp = reads.at(-1)?.blockTempC;
+  const lastTemp = zpcr.reads.at(-1)?.blockTempC;
 
   /**
    * Whether this run is still running, read from the archive's own marker files: `begun` present,
@@ -99,24 +63,9 @@ export function OverviewView({
    */
   const progress = useMemo(() => runProgressFromNames(zpcr.archive.entries), [zpcr]);
 
-  // Opened by the toolbar's Edit button — turns the "Filename" info row into an editable field,
-  // in place, rather than opening a separate dialog. The experiment name above it
-  // (`ExperimentHeader`) is already an always-editable input, so once this is open both of a
-  // `.zpcr`'s two names are editable at once. The row shows `identity.fileName` when idle, which
-  // is the resolved display name rather than the raw one being edited.
-  const filename = useFilenameEditor({
-    name: file.name,
-    display: identity.fileName,
-    onRename: onRenameFile,
-    autoEdit: autoEditName,
-    onAutoEditHandled,
-  });
-
   const [password] = usePltdPassword();
   const plate = useMemo(() => zpcr.plates(password || undefined)[0]?.pltd.plate ?? null, [zpcr, password]);
   const encStatus = useMemo(() => runEncryptionStatus(run, password), [run, password]);
-  const plateTargetList = useMemo(() => (plate ? plateTargets(plate) : []), [plate]);
-  const plateSamples = plate?.samples ?? [];
 
   // The run's Cq table, so each chip can say how many of its curves amplified. Read from the same
   // `useRunAnalysis` the Curves view uses (over the same first step) rather than tallied here, so
@@ -127,31 +76,12 @@ export function OverviewView({
       ? settings.step
       : (steps[0]?.step ?? undefined);
   const analysis = useRunAnalysis(zpcr, settings, password, activeStep);
-  const { byTarget, bySample } = useMemo(
-    () => chipCounts(plate, analysis.cqTable),
-    [plate, analysis.cqTable],
-  );
 
-  // Most-amplified first, so the chips that carry the run's signal lead each list.
-  const targets = useMemo(
-    () => byCountsDesc(plateTargetList, (t) => byTarget.get(t.name)),
-    [plateTargetList, byTarget],
-  );
-  const samples = useMemo(
-    () => byCountsDesc(plateSamples, (s) => bySample.get(s)),
-    [plateSamples, bySample],
-  );
-
-  // One combined info table under the name: file identity (name, mtime, run date) followed by
-  // the run's own facts (block/serial/channels/…) and, at the end, the encryption status and
-  // archive identity — everything that used to be split across the tiles grid and two separate
-  // "Encrypted"/"Run identity" sections below.
-  const infoRows: InfoRow[] = [
-    { label: "Type", value: fileKindDescription(kind) },
-    { label: "Filename", value: filename.field },
-    { label: "Last modified", value: formatCompactDateTime(new Date(file.lastModified)) },
-    // Omitted rather than shown as "—": a standalone plate/protocol file has no run to date at
-    // all, and a blank row would read as a missing value rather than a nonsensical question.
+  // Appended to the panel's own file-identity rows: the run's facts (block/serial/channels/…)
+  // and, at the end, the encryption status and archive identity.
+  const rows: InfoRow[] = [
+    // Omitted rather than shown as "—": a standalone plate/protocol file has no run date at all,
+    // and a blank row would read as a missing value rather than a nonsensical question.
     ...(identity.dateText ? [{ label: "Run date", value: identity.dateText }] : []),
     { label: "Block", value: m.blockDescription || "—" },
     { label: "Base serial", value: m.baseSerialNumber || "—" },
@@ -175,76 +105,23 @@ export function OverviewView({
   ];
 
   return (
-    <div className="overview">
-      <ExperimentHeader identity={identity} onRename={onRename} persists={namePersists} />
-      {progress.inProgress && (
-        <div className="overview__running">
-          <span className="overview__runningdot" aria-hidden="true" />
-          <span>
-            <strong>This run is still going.</strong> It has {progress.plateReads} plate read
-            {progress.plateReads === 1 ? "" : "s"} so far — the instrument has written its{" "}
-            <code>begun</code> marker but not <code>ended</code>. With the instrument connected and
-            following switched on, this file is replaced with a fuller one after every cycle.
-          </span>
-        </div>
-      )}
-      <div className="overview__head">
-        <dl className="overview__dl overview__infotable mono">
-          {infoRows.map((r) => (
-            <Fragment key={r.label}>
-              <dt>{r.label}</dt>
-              <dd>{r.value}</dd>
-            </Fragment>
-          ))}
-        </dl>
-
-        <OverviewToolbar
-          name={file.name}
-          onDownload={() => downloadBytes(file.name, onDownload?.() ?? file.bytes)}
-          downloadTitle="Download this file (including its zpcrweb.json analysis settings)"
-          onEdit={filename.beginEdit}
-          onClone={onClone}
-        />
-      </div>
-
-      {plate && (targets.length > 0 || samples.length > 0) && (
-        <section className="overview__block">
-          <h2 className="overview__h">Plate{plate.identityKey ? `: ${plate.identityKey}` : ""}</h2>
-          <div className="overview__platelists">
-            {targets.length > 0 && (
-              <div className="overview__platelist">
-                <div className="overview__platelist-h">Targets</div>
-                <div className="filecard__chips">
-                  {targets.map((t) => (
-                    <CountChip
-                      key={t.name}
-                      name={t.name}
-                      counts={byTarget.get(t.name)}
-                      color={t.channel != null ? channelColor(t.channel) : undefined}
-                    />
-                  ))}
-                </div>
-              </div>
-            )}
-            {samples.length > 0 && (
-              <div className="overview__platelist">
-                <div className="overview__platelist-h">Samples</div>
-                <div className="filecard__chips">
-                  {samples.map((s) => (
-                    <CountChip key={s} name={s} counts={bySample.get(s)} />
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        </section>
-      )}
-    </div>
+    <OverviewPanel
+      file={file}
+      // The idle "Filename" row shows the resolved display name, not the raw one being edited.
+      fileNameDisplay={identity.fileName}
+      rows={rows}
+      downloadTitle="Download this file (including its zpcrweb.json analysis settings)"
+      header={<ExperimentHeader identity={identity} onRename={onRename} persists={namePersists} />}
+      banner={progress.inProgress ? <RunningBanner plateReads={progress.plateReads} /> : undefined}
+      {...tools}
+    >
+      <OverviewPlateSection plate={plate} cqTable={analysis.cqTable} />
+    </OverviewPanel>
   );
 }
 
 /** The "Encrypted" row's value, in the same wording/colors the section used to render on its
- * own — just now one row of {@link OverviewView}'s info table instead of a whole section. */
+ * own — just now one row of the info table instead of a whole section. */
 function EncryptedValue({ status }: { status: ReturnType<typeof runEncryptionStatus> }) {
   if (status.kind === "none") return <span className="overview__enc overview__enc--none">No</span>;
   if (status.kind === "decrypted")
@@ -257,9 +134,24 @@ function EncryptedValue({ status }: { status: ReturnType<typeof runEncryptionSta
   return <span className="overview__enc overview__enc--locked">Yes</span>;
 }
 
+/** A run whose archive says it hasn't finished — see {@link OverviewView}'s `progress`. */
+function RunningBanner({ plateReads }: { plateReads: number }) {
+  return (
+    <div className="overview__running">
+      <span className="overview__runningdot" aria-hidden="true" />
+      <span>
+        <strong>This run is still going.</strong> It has {plateReads} plate read
+        {plateReads === 1 ? "" : "s"} so far — the instrument has written its <code>begun</code>{" "}
+        marker but not <code>ended</code>. With the instrument connected and following switched on,
+        this file is replaced with a fuller one after every cycle.
+      </span>
+    </div>
+  );
+}
+
 /**
- * The view's headline: what the run is called. When it ran and which file it came out of are
- * now rows of the info table below instead of a subheading here — see `infoRows`.
+ * The panel's headline: what the run is called. When it ran and which file it came out of are
+ * rows of the info table below instead of a subheading here — see `rows`.
  *
  * The name is an input rather than a label because for a `.zpcr` it is genuinely editable: no
  * Bio-Rad format has a field for it, so a run is named either by its filename or by whatever
@@ -317,91 +209,5 @@ function ExperimentHeader({
         }
       />
     </header>
-  );
-}
-
-/**
- * Positive (Cq found) and negative (no Cq) curve counts per target and per sample, over the
- * loaded well/fluor pairs — the same population the Curves view's table lists.
- *
- * Counted per *curve*, not per well: a duplexed well contributes one curve to each of its dyes,
- * so a sample's positives and negatives can exceed its well count. Wells the plate never loaded
- * are skipped — they have no measurement to call either way.
- *
- * The tallies come out empty when the Cq table is (an uncalibrated run, or a plate still behind
- * the password prompt), which shows the chips bare, exactly as before.
- */
-function chipCounts(
-  plate: PlateDefinition | null,
-  cqTable: Map<string, CqTableEntry>,
-): { byTarget: Map<string, Counts>; bySample: Map<string, Counts> } {
-  const byTarget = new Map<string, Counts>();
-  const bySample = new Map<string, Counts>();
-  if (!plate || cqTable.size === 0) return { byTarget, bySample };
-  const bump = (m: Map<string, Counts>, key: string, positive: boolean) => {
-    const c = m.get(key) ?? { pos: 0, neg: 0 };
-    if (positive) c.pos++;
-    else c.neg++;
-    m.set(key, c);
-  };
-  for (const w of plate.wells) {
-    if (!w.loaded) continue;
-    for (const wf of w.fluors) {
-      const entry = cqTable.get(curveKey(w.row, w.col, wf.fluor));
-      if (!entry) continue;
-      const positive = entry.cq != null;
-      if (wf.target) bump(byTarget, wf.target, positive);
-      if (w.sample) bump(bySample, w.sample, positive);
-    }
-  }
-  return { byTarget, bySample };
-}
-
-/**
- * Orders chips by positive curves descending, then by total curves descending — the tally
- * {@link CountChip} already shows, so the list reads top-to-bottom in the same order as the
- * numbers on the chips. Items with no counts at all (an uncalibrated run, or a name whose wells
- * were never loaded) sort to the end at 0/0, and ties keep the plate's own order, since `sort`
- * is stable.
- */
-function byCountsDesc<T>(items: readonly T[], counts: (item: T) => Counts | undefined): T[] {
-  const pos = (item: T) => counts(item)?.pos ?? 0;
-  const total = (item: T) => {
-    const c = counts(item);
-    return c ? c.pos + c.neg : 0;
-  };
-  return [...items].sort((a, b) => pos(b) - pos(a) || total(b) - total(a));
-}
-
-/**
- * A plate chip carrying its positive/negative tally: the two counts either side of a small track
- * whose filled portion is the positive fraction, so a column of chips can be scanned for "mostly
- * amplified" vs "mostly flat" without reading the digits. Falls back to a plain name chip when
- * there's nothing to count.
- */
-function CountChip({ name, counts, color }: { name: string; counts?: Counts; color?: string }) {
-  const style = color ? { color } : undefined;
-  if (!counts || counts.pos + counts.neg === 0) {
-    return (
-      <span className="filecard__chip" style={style}>
-        {name}
-      </span>
-    );
-  }
-  const total = counts.pos + counts.neg;
-  const pct = (counts.pos / total) * 100;
-  return (
-    <span
-      className="filecard__chip chipcount"
-      style={style}
-      title={`${counts.pos} positive (Cq), ${counts.neg} negative (no Cq) of ${total} curves`}
-    >
-      <span className="chipcount__name">{name}</span>
-      <span className="chipcount__pos mono">{counts.pos}</span>
-      <span className="chipcount__bar" aria-hidden="true">
-        <span className="chipcount__fill" style={{ width: `${pct}%` }} />
-      </span>
-      <span className="chipcount__neg mono">{counts.neg}</span>
-    </span>
   );
 }

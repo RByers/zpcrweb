@@ -123,7 +123,7 @@ badge went with it, the icon now being what tells the two override kinds apart a
 
 Each chip's hover card (the file's detailed type description — `fileKindDescription()`,
 `fileKind.ts` — plus protocol name, cycle count, and the plate's target/sample lists, the
-same lists `OverviewView` shows in its "Plate" section, via `@zpcrweb/core`'s shared
+same lists `OverviewPlateSection` shows in an Overview's "Plate" section, via `@zpcrweb/core`'s shared
 `plateTargets()` helper) renders through a `createPortal` into `document.body` at a `position: fixed` spot
 computed from the chip's `getBoundingClientRect()` on hover/focus, rather than as a normal
 absolutely-positioned child of the chip. `.filebar` scrolls horizontally
@@ -263,11 +263,10 @@ store's `fileKind` only admits bytes that already parsed).
 It enables **four** tabs, `["overview","protocol","raw","instrument"]`, because it is several
 things:
 
-- **Overview** (`StandaloneProtocolOverview`) — a minimal identity card: just the same
-  `Type`/`Filename`/`Last modified` info-table rows every kind's Overview leads with, plus the
-  shared file toolbar (download/edit/clone, see "The Overview toolbar" below). All the
-  protocol's own content lives on Protocol instead, the same split a run's Overview/Protocol pair
-  uses.
+- **Overview** (`StandaloneProtocolOverview`) — the shared `OverviewPanel` with no slots filled
+  at all (see "One Overview panel" below): the `Type`/`Filename`/`Last modified` identity card and
+  the download/edit/clone toolbar, and nothing else. All the protocol's own content lives on
+  Protocol instead, the same split a run's Overview/Protocol pair uses.
 - **Protocol** (`StandaloneProtocolView`) — the protocol *as a document*, and the one place it
   can be **edited**: stat tiles for the settings its header directives carry, then the same
   annotated `ProtocolDecoded` listing a run's Protocol tab uses, behind an Edit button
@@ -342,11 +341,11 @@ alongside `"zpcr"`/`"pcrd"`:
   `runs`/`activeRun` but with no `Zpcr` involved). `App.tsx` detects `active.kind === "pltd" |
   "csv"` and enables only three of the tabs (`enabled={["overview","plates","raw"]}`; the rest
   grey out) routing to `StandalonePlateOverviewView`/`StandalonePlateView`/`StandaloneRawView`
-  instead of the normal `Zpcr`-gated branch — all three are thin, `Zpcr`-free counterparts of
-  `OverviewView`/`PlatesView`/`RawFilesView` operating directly on the file's own bytes and the
-  `PlateFileResult`; Overview has no run to report on, so it's cut down to the file's own
-  identity (name, mtime), the plate setup's own facts (dimensions, vessel, encryption) and its
-  target/sample chips with no Cq tally, since there's no analysis to tally against. A standalone
+  instead of the normal `Zpcr`-gated branch — `PlatesView`/`RawFilesView` get thin, `Zpcr`-free
+  counterparts operating directly on the file's own bytes and the `PlateFileResult`, while Overview
+  is the *same* `OverviewPanel` a run uses (see "One Overview panel" below), given the plate
+  setup's own rows (dimensions, vessel, encryption) and its target/sample chips. It has no run to
+  report on, so no Cq tally comes with those chips — there's no analysis to tally against. A standalone
   `.plt.csv` names its fluor columns by dye with no channel, and
   carries no calibration of its own to resolve them against, so its channels are simply
   **unknown** — no `channelForFluor` is passed. Nothing is inferred from column order, and the
@@ -679,17 +678,43 @@ is never written back, so renaming the file on disk still renames the run. For a
 Biomeme run there is no archive to write into, so the edit lasts the session — the field says so
 in its tooltip rather than losing it silently.
 
-## The Overview toolbar
+## One Overview panel
 
-Every Overview panel — a run's (`OverviewView`), a standalone plate's
-(`StandalonePlateOverviewView`), a `.prcl.txt`'s (`StandaloneProtocolOverview`) — carries the same
-column of buttons down the right of its info table: **download**, **edit** (the filename),
-**clone**. They act on the *file*, which is the one thing all three kinds have in common, so all
-three offer the identical set rather than each format getting whichever tool happened to be wired
-up (download used to exist only for a run, and rename only as a lone button). Both halves live in
-`components/OverviewFileTools.tsx`: `OverviewToolbar` draws the column, and `useFilenameEditor`
-owns the editable "Filename" row the Edit button opens — three copies of that
-commit-on-blur/Escape-reverts logic were what let the panels drift apart in the first place.
+There is **one** Overview component, `components/views/OverviewPanel.tsx`, not one per file kind.
+What an Overview *is* — what the file is, what it's called, and the tools to save/rename/copy it —
+is the same question for a run, a standalone plate and a standalone protocol alike, and three
+panels answering it separately is exactly how they drifted: download existed only for a run, the
+rename control only as a lone button, and each kind kept its own copy of the info table and the
+edit-in-place filename logic.
+
+The panel owns everything shared and unconditional: the `Type`/`Filename`/`Last modified` rows
+every kind leads with, the filename's edit-in-place behaviour (`useFilenameEditor` — commit on
+blur/Enter, Escape reverts) including the auto-open a fresh clone arrives with, and the
+**download / edit / clone** button column down the right of the info table (`OverviewToolbar`).
+Those buttons act on the *file*, which is the one thing every kind has in common, so every kind
+gets the identical set — there is no longer anywhere for one to have a tool another lacks.
+
+A kind varies it through four optional slots and nothing else:
+
+| Slot | What it's for | Who passes one |
+|------|---------------|----------------|
+| `rows` | info-table rows appended after the three shared ones | a run (block/serial/channels/…), a plate (dimensions, vessel, encryption) |
+| `header` | above the table | a run's editable experiment-name headline |
+| `banner` | under the header | a run's "still going" notice |
+| `children` | sections below the table | plate chips; a plate's password prompt |
+
+So the three views are now thin: `OverviewView` computes the run's rows and passes all four slots,
+`StandalonePlateOverviewView` passes rows and children, and `StandaloneProtocolOverview` is a
+one-line pass-through — a protocol file has nothing of its own to add, so the bare panel *is* its
+Overview. Each takes the panel's file-tool props straight through via
+`Pick<OverviewPanelProps, …>` rather than redeclaring them, so a new tool reaches every kind at
+once.
+
+The plate's target/sample chips are likewise one component, `OverviewPlateSection`, used by both
+the run and the standalone-plate panels. A standalone plate simply passes no `cqTable`: `CountChip`
+already falls back to a plain name chip with no tally, and the count-descending sort is a stable
+no-op when everything counts 0/0, leaving the plate's own order. Keeping the two apart is what let
+the run's chips gain colours and tallies the plate's never got.
 
 **Clone** (`App.tsx`'s `cloneActiveFile`) copies the active file under the next free
 `name (N).ext` — incrementing an index the name already carries rather than nesting a second one,

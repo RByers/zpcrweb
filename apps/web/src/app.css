@@ -932,7 +932,7 @@
   align-items: flex-start;
   gap: 12px;
 }
-/* Download / edit / clone, stacked down the right of the info table (`OverviewFileTools.tsx`) —
+/* Download / edit / clone, stacked down the right of the info table (`views/OverviewPanel.tsx`) —
    a column rather than a row so the group stays one button wide however many tools it grows,
    and reads as the panel's own toolbar rather than as a caption over the table. */
 .overview__toolbar {

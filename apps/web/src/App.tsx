@@ -225,9 +225,14 @@ export function App() {
     setEditNameFor(id);
   }, [store]);
 
-  /** The Overview toolbar's Download button, for the kinds whose download *is* the file: the
-   * bytes as they'd be saved (`exportBytes`), under the file's own name. A `.zpcr` has its own
-   * wiring below, since saving it also clears the modified flag. */
+  /**
+   * The Overview toolbar's Download button, for every kind: the bytes as they'd be saved
+   * (`exportBytes` — a `.zpcr` including its `zpcrweb.json`, an edited `.prcl.txt` including its
+   * edits), under the file's own name.
+   *
+   * Saving the file to disk is also what un-modifies it: the copy leaving the browser is the one
+   * carrying the edits, so the chip's delete stops asking twice.
+   */
   const downloadActiveFile = useCallback(() => {
     const file = store.active;
     if (!file) return;
@@ -519,7 +524,6 @@ export function App() {
             {view === "overview" && (
               <OverviewView
                 zpcr={zpcr}
-                kind={active.kind}
                 file={active}
                 run={activeRun!}
                 settings={settings}
@@ -536,13 +540,7 @@ export function App() {
                 // `analysisPersist.ts`'s `resolve`.
                 namePersists={active.kind === "zpcr"}
                 onRenameFile={(name) => void store.renameFile(active.id, name)}
-                // Saving the file to disk is what un-modifies it: the copy leaving the browser
-                // is the one carrying the edits, so the chip's delete stops asking twice.
-                onDownload={() => {
-                  const bytes = store.exportBytes(active.id);
-                  store.markDownloaded(active.id);
-                  return bytes;
-                }}
+                onDownload={downloadActiveFile}
                 onClone={() => void cloneActiveFile()}
                 autoEditName={editNameFor === active.id}
                 onAutoEditHandled={clearEditName}
