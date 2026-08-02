@@ -75,9 +75,9 @@ export function InstrumentView({
         // The deposited copies keep the protocol's and the plate's own names, not the run's
         // (`runPlan.ts`). A half that came from a file of its own is named by that file, whose
         // name beats the plate's `identityKey` — that records whatever `.pltd` it was *saved*
-        // from and can be a stale name. A half supplied by the run passes nothing —
-        // `staged.*.sourceName` is the run's own label there, which is exactly the name these
-        // files must not take — and lets `planRun` fall back to what the plate says about itself.
+        // from and can be a stale name. A half supplied by the run passes nothing — the `fromFile`
+        // guard is what matters here, not `sourceName`'s value for that case — and lets `planRun`
+        // fall back to what the plate says about itself.
         protocolName: protocol.document.name || undefined,
         plateName: (staged.plate.fromFile && staged.plate.sourceName) || undefined,
       });

@@ -211,7 +211,10 @@ export function resolveStagedRun(
     const embedded = zpcr?.plates(password || undefined)[0]?.pltd.plate ?? null;
     plate = {
       value: embedded,
-      sourceName: embedded ? runLabel : null,
+      // The plate's own identity (the same field the Overview's plate section reads), not the
+      // run's label: the protocol half already says the run's name, so repeating it here would
+      // make the two halves look identical instead of naming what each one actually is.
+      sourceName: embedded?.identityKey ?? null,
       fromFile: false,
       reason: embedded
         ? null
