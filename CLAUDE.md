@@ -171,7 +171,8 @@ It takes ~35s and needs Chrome, so it is deliberately **not** part of `npm test`
 touch `state/urlHash.ts`, `state/useHeaderFit.ts`, `state/pltdPassword.ts`,
 `components/curves/ChipBar.tsx`, `components/curves/CurveTable.tsx`, `components/curves/CqRange.tsx`,
 `components/instrument/InstrumentRun.tsx`, `state/useRunStaging.ts`, `state/useRunNaming.ts`,
-`components/instrument/InstrumentRail.tsx`, `lib/protocolSource.ts`,
+`components/instrument/InstrumentRail.tsx`, `state/useCfxDevice.ts`'s `cancelRun`/`setRunPaused`
+(or core's `usb/device.ts` `cancelRun`), `lib/protocolSource.ts`,
 `lib/experiment.ts` (or core's `experiment.ts`), `components/ViewSelector.tsx` or `App.tsx`'s
 `enabledViewsFor`/`selectFile`, core's `runDefinition.ts`, `components/raw/DecodedView.tsx`'s
 `ProtocolDecoded`, `components/views/StandaloneProtocolView.tsx`, `components/FileBar.tsx`,
@@ -180,6 +181,8 @@ touch `state/urlHash.ts`, `state/useHeaderFit.ts`, `state/pltdPassword.ts`,
 `components/raw/DecodedAlf.tsx`, `components/protocol/ThermalProfileChart.tsx`,
 `lib/uplot/thermalChart.ts`, `components/views/ProtocolView.tsx` or core's `alf.ts`,
 `components/views/OverviewPanel.tsx`, `components/views/OverviewPlateSection.tsx`,
+`components/views/OverviewView.tsx`'s completeness banner or core's `runCompleteness`/
+`expectedPlateReads`,
 `lib/cloneName.ts` or `App.tsx`'s `cloneActiveFile`,
 core's `runSeed.ts` or `App.tsx`'s `runViews`, `state/useRunWatch.ts`,
 `state/writeThrottle.ts`, `state/useZpcrStore.ts`'s

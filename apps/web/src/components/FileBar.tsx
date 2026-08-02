@@ -64,6 +64,14 @@ interface Props {
    */
   inProgressIds: Set<string>;
   /**
+   * Runs that stopped short of their protocol (`ZpcrStore.incompleteIds`). Their chips say
+   * **Incomplete** in red where the run's date would go — the date is the least load-bearing
+   * thing on a chip, and "this run didn't finish" is the most, so the one takes the other's slot
+   * rather than making the chip taller. See core's `runCompleteness` for why a read count is
+   * what says this.
+   */
+  incompleteIds: Set<string>;
+  /**
    * True while a run in progress on a connected instrument owns the whole bar — passed only by
    * the Instrument view's bar (see `App.tsx`'s `runActive`/`selectFile`), since that's the one
    * place a chip click could otherwise show something other than what the instrument is actually
@@ -256,6 +264,7 @@ function FileChip({
   isActive,
   isModified,
   isRunning,
+  isIncomplete,
   isStaged,
   activeLocked,
   onSelect,
@@ -271,6 +280,8 @@ function FileChip({
   isModified: boolean;
   /** See {@link Props.inProgressIds} — the run is still being written to. */
   isRunning: boolean;
+  /** See {@link Props.incompleteIds} — the run ended without finishing its protocol. */
+  isIncomplete: boolean;
   isStaged: boolean;
   /** See {@link Props.activeLocked}. */
   activeLocked: boolean;
@@ -335,7 +346,13 @@ function FileChip({
             is in the hover card. */}
         <span className="filechip__text">
           <span className="filechip__name mono">{identity.name}</span>
-          {identity.dateText && <span className="filechip__date mono">{identity.dateText}</span>}
+          {/* Incomplete displaces the date rather than joining it: a run that didn't finish is
+              the thing to notice about it, and when it ran is still in the hover card. */}
+          {isIncomplete ? (
+            <span className="filechip__date filechip__date--incomplete mono">Incomplete</span>
+          ) : (
+            identity.dateText && <span className="filechip__date mono">{identity.dateText}</span>
+          )}
           {wellsText(f, plateFile) && (
             <span className="filechip__date mono">{wellsText(f, plateFile)}</span>
           )}
@@ -369,6 +386,7 @@ export function FileBar({
   stagedIds,
   modifiedIds,
   inProgressIds,
+  incompleteIds,
   activeLocked,
   experiments,
 }: Props) {
@@ -399,6 +417,7 @@ export function FileBar({
           isStaged={stagedIds ? stagedIds.has(f.id) : false}
           isModified={modifiedIds.has(f.id)}
           isRunning={inProgressIds.has(f.id)}
+          isIncomplete={incompleteIds.has(f.id)}
           activeLocked={!!activeLocked}
           onSelect={onSelect}
           onHide={onHide}

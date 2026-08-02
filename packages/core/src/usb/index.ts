@@ -7,6 +7,8 @@
  */
 export { CfxDevice } from "./device.js";
 export type {
+  CfxCancelOptions,
+  CfxCancelResult,
   CfxDeviceOptions,
   CfxDirectory,
   CfxRunStartResult,
@@ -55,7 +57,7 @@ export {
   encodeFrame,
 } from "./frame.js";
 export type { CfxFrameHeader, CfxMessage } from "./frame.js";
-export { parseIdentity, parseRtStatus, parseStatus } from "./status.js";
+export { parseIdentity, parseRtStatus, parseStatus, isPaused } from "./status.js";
 export type {
   CfxDeviceInfo,
   CfxFault,

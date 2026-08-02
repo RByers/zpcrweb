@@ -66,6 +66,80 @@ const PRCL_TXT_BODY =
  * and no calibration set (`core/runSeed.ts`). */
 const SEED_ZPCR = join(REPO, "tools/.uishot/dupe/20260802-Seeded_Run.zpcr");
 
+/** A real run with its last two plate reads removed — the shape a cancelled run's archive has,
+ * since nothing else in the files marks an abort (`usb.md` §7.8). Built rather than committed:
+ * the point is the comparison, not a captured artifact. */
+const SHORT_ZPCR = join(REPO, "tools/.uishot/dupe/20260725-Cut_Short.zpcr");
+
+/** Write {@link SHORT_ZPCR} by deleting plate reads from a committed sample's own files. */
+async function makeShortRun() {
+  const { zpcrFromRunFiles, unzipArchive } = await import("../packages/core/dist/index.js");
+  const files = unzipArchive(
+    new Uint8Array(readFileSync(join(REPO, "samples/20260725_GRADIENTTEST.zpcr"))),
+  );
+  const reads = Object.keys(files)
+    .filter((n) => /\.Plateread$/i.test(n))
+    .sort();
+  for (const name of reads.slice(-2)) delete files[name];
+  const { bytes } = zpcrFromRunFiles(files, { fileName: "20260725-Cut_Short" });
+  mkdirSync(dirname(SHORT_ZPCR), { recursive: true });
+  writeFileSync(SHORT_ZPCR, Buffer.from(bytes));
+}
+
+/**
+ * A run that stopped short of its protocol says so, in the two places that matter.
+ *
+ * The archive is a genuine 3-read gradient run with two reads deleted, so the app has to reach
+ * the verdict the way it does in the wild — by counting `GOTO` loops in the protocol and
+ * comparing (`runCompleteness`), with nothing in the file to tell it. The chip's assertion is
+ * that **Incomplete** takes the date's slot rather than sitting beside it.
+ */
+async function incompleteRunChecks(chrome, origin) {
+  console.log("\na run that stopped short");
+  await makeShortRun();
+  const cdp = await openPage(chrome.base, origin);
+  await emptyReload(cdp, origin);
+  await loadFile(cdp, SHORT_ZPCR);
+  await waitFor(() => chipPresent(cdp, "Cut Short"), { what: "the short run's chip" });
+
+  const chip = await cdp
+    .eval(
+      `JSON.stringify([...document.querySelectorAll(".filechip__date")].map((e) => ({
+         text: e.textContent.trim(),
+         incomplete: e.classList.contains("filechip__date--incomplete"),
+       })))`,
+    )
+    .then(JSON.parse);
+  check(
+    "the chip says Incomplete, in red, in place of the run's date",
+    chip.length === 1 && chip[0].incomplete && /incomplete/i.test(chip[0].text),
+    JSON.stringify(chip),
+  );
+
+  await cdp.eval(`window.location.hash = "view=overview", undefined`);
+  await tabBecomes(cdp, "Overview");
+  await waitFor(
+    async () =>
+      !!(await cdp.eval(`document.querySelector(".overview__incomplete")?.textContent ?? ""`)),
+    { what: "the Overview's incomplete banner" },
+  );
+  const banner = await cdp.eval(
+    `document.querySelector(".overview__incomplete")?.textContent?.trim() ?? ""`,
+  );
+  check(
+    "the Overview banner states the arithmetic — 3 reads asked for, 1 present",
+    /3 plate reads/.test(banner) && /holds 1/.test(banner),
+    JSON.stringify(banner.slice(0, 160)),
+  );
+
+  // The complete original must not be accused: same protocol, all its reads.
+  await loadFile(cdp, join(REPO, "samples/20260725_GRADIENTTEST.zpcr"));
+  await waitFor(() => chipPresent(cdp, "GRADIENTTEST"), { what: "the complete run's chip" });
+  const flagged = await cdp.eval(`document.querySelectorAll(".filechip__date--incomplete").length`);
+  check("the complete run beside it is not flagged", flagged === 1, `${flagged} flagged chips`);
+  cdp.close();
+}
+
 /** Write {@link SEED_ZPCR}. Built rather than committed: the point is what the app writes when a
  * run starts, not a captured artifact — and it is the only run file with nothing to plot. */
 async function makeSeed() {
@@ -2819,6 +2893,7 @@ async function main() {
     await thermalProfileChecks(chrome, origin);
     await instrumentRunChecks(chrome, origin);
     await runSeedChecks(chrome, origin);
+    await incompleteRunChecks(chrome, origin);
     await experimentNameChecks(chrome, origin);
     await deleteConfirmChecks(chrome, origin);
     await protocolEditorChecks(chrome, origin);

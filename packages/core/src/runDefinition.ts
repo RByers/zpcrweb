@@ -609,3 +609,73 @@ function describeMethod(method: string): string {
       return method ? `Thermal control method ${method}` : "Thermal control method";
   }
 }
+
+// ---------------------------------------------------------------------------
+// Execution counting
+// ---------------------------------------------------------------------------
+
+/**
+ * A safety valve for {@link expectedPlateReads}: a malformed `GOTO` (one that jumps forward, or
+ * back onto itself) can describe a loop that never terminates, and this function is called on
+ * protocol text that came off an instrument rather than out of the editor. Well above any real
+ * protocol — the largest in this project's corpus executes a few hundred steps.
+ */
+const MAX_SIMULATED_STEPS = 1_000_000;
+
+/**
+ * How many plate reads a protocol *should* produce, by executing its `GOTO` loops on paper.
+ *
+ * This is the number an archive's `Read0000N.Plateread` count is compared against to decide that
+ * a run stopped short (`runFolder.ts`'s `runCompleteness`, `usb.md` §7.8 step 6): a cancelled run
+ * is not marked as such anywhere in its own files, so "fewer reads than the protocol asked for"
+ * is what says it. It follows that being *wrong* here mislabels an honest run, so the function
+ * answers `null` — "can't say" — rather than guessing, in three cases:
+ *
+ * - **No `PLATEREAD` at all.** A thermal-only protocol produces no reads by design and nothing
+ *   about it can be short.
+ * - **A compact `MELT` directive.** One directive stands for a whole melt curve and its read
+ *   count follows from operands this project has never seen an instance of (`protocol.md` §3.2
+ *   marks the form *stated*, not measured), so any number here would be invented. Protocols that
+ *   spell a melt out the long way (§6) are an ordinary `PLATEREAD` inside a `GOTO` loop and are
+ *   counted exactly.
+ * - **A loop that doesn't terminate** within {@link MAX_SIMULATED_STEPS}.
+ *
+ * `ADDCYCLES` is *not* a reason to answer `null`: it can only extend a loop, so a run that used
+ * it produces *more* reads than this, and more is never reported as short.
+ *
+ * The simulation is the one `protocol.md` §4 describes — step numbers are 1-based and count only
+ * steps, `GOTO <step>,<repeats>` runs its body `repeats + 1` times, and an inner loop's counter
+ * resets when it is exhausted so that an enclosing loop re-entering it gets its full count again.
+ */
+export function expectedPlateReads(runDefinition: string): number | null {
+  const { steps, directives } = parseRunDefinition(runDefinition);
+  if (directives.some((d) => d.verb === "MELT")) return null;
+  if (!steps.some((d) => d.verb === "PLATEREAD")) return null;
+
+  /** Passes already taken through each `GOTO`, keyed by that `GOTO`'s own step number. */
+  const taken = new Map<number, number>();
+  let reads = 0;
+  let pc = 0;
+  for (let executed = 0; pc < steps.length; executed++) {
+    if (executed >= MAX_SIMULATED_STEPS) return null;
+    const step = steps[pc]!;
+    if (step.verb === "PLATEREAD") reads++;
+    if (step.verb === "GOTO" && Number.isFinite(step.repeats) && step.repeats > 0) {
+      const self = step.stepNumber!;
+      const already = taken.get(self) ?? 0;
+      if (already < step.repeats) {
+        taken.set(self, already + 1);
+        // `targetStep` is 1-based and indexes `steps`, which holds exactly the numbered
+        // directives in order — so step *n* is `steps[n - 1]`.
+        const target = step.targetStep - 1;
+        if (!Number.isInteger(target) || target < 0 || target >= steps.length) return null;
+        pc = target;
+        continue;
+      }
+      // Exhausted: forget it, so an enclosing loop that comes back round re-runs it in full.
+      taken.delete(self);
+    }
+    pc++;
+  }
+  return reads;
+}

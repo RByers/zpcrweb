@@ -10,6 +10,7 @@ import {
   parseRunDefinitionText,
   parseZpcr,
   parseZpcrwebSettings,
+  runCompleteness,
   runProgressFromNames,
   wellKey,
   writeZpcrwebSettings,
@@ -720,6 +721,16 @@ export interface ZpcrStore {
    */
   inProgressIds: Set<string>;
   /**
+   * Ids of the loaded runs that stopped short — over, but holding fewer plate reads than their
+   * protocol asked for (see core's `runCompleteness`).
+   *
+   * This is how a cancelled run is recognised, and it is a comparison rather than a flag because
+   * a flag doesn't exist: an aborted run's `ended` marker and `.alf` report are byte-identical in
+   * shape to a completed one's (`usb.md` §7.8, `alf.md` §6). Derived per render for the same
+   * reason {@link inProgressIds} is — the answer is already in the file.
+   */
+  incompleteIds: Set<string>;
+  /**
    * Fetch a file over HTTP and load it as if it had been dropped — the `#load=<url>` hash key's
    * implementation, and how the welcome screen's example button works. The name comes from the
    * URL's last path segment (see {@link fileNameFromUrl}).
@@ -1414,6 +1425,15 @@ export function useZpcrStore(): ZpcrStore {
     return ids;
   }, [runs]);
 
+  /** See {@link ZpcrStore.incompleteIds} — the protocol's own read count, against the archive's. */
+  const incompleteIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const [id, run] of runs) {
+      if (run.zpcr && runCompleteness(run.zpcr).incomplete) ids.add(id);
+    }
+    return ids;
+  }, [runs]);
+
   const exportBytes = useCallback(
     (id: string): Uint8Array | null => {
       const file = files.find((f) => f.id === id);
@@ -1445,6 +1465,7 @@ export function useZpcrStore(): ZpcrStore {
     hiddenIds,
     setVisible,
     inProgressIds,
+    incompleteIds,
     markDownloaded,
     attachPlate,
     renameFile,

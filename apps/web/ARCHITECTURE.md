@@ -2217,6 +2217,15 @@ banner appears from that alone. Which is why both are still correct after a page
 opened on a different machine, or with the instrument unplugged — and why nothing has to be
 notified when a run ends: the next snapshot simply contains `ended`.
 
+**"Incomplete" is derived the same way, from the read count.** A run that was *cancelled* looks
+exactly like one that finished — same `ended` marker, same clean `.alf` — so `ZpcrStore`
+`incompleteIds` asks core's `runCompleteness` whether the archive holds fewer plate reads than its
+protocol implies (see the root `ARCHITECTURE.md`). The file chip then shows a red **Incomplete**
+*in place of* the run's date — the date is the least load-bearing thing on a chip and this is the
+most — and the Overview grows a banner stating the arithmetic it is accusing on, since the app
+cannot tell a cancel from an instrument-initiated stop. The two states are mutually exclusive: a
+run still in progress is unfinished, not incomplete, and the in-progress banner wins.
+
 Four components, under `components/instrument/`:
 
 - **`InstrumentRail`** — the left rail, reusing the Curves view's `.rail__*` vocabulary so the two
@@ -2235,6 +2244,23 @@ Four components, under `components/instrument/`:
   section's own caveats — with the step/ramp/hold clocks, the decoded status-register flags (e.g.
   "Preheating lid"), and `RTSTATUS?`'s shuttle/ambient temperatures filling out the rest of the
   section as ordinary stat rows.
+
+  **Stop and Pause are not action-grid buttons**, and they appear only while there is a run to act
+  on. Both are stateful operations rather than one word on the wire, which is why core keeps them
+  out of `CFX_COMMANDS` and gives each a named `CfxDevice` method (see `usb/commands.ts`). Stop
+  drives `CfxDevice.cancelRun`, i.e. the whole of `usb.md` §7.8 — it lets a plate read in flight
+  finish so the cycle isn't thrown away, resumes a paused run first, and above all *keeps
+  watching*: a `CANCEL` sent in the measured ~6 s between `RemoteRun` and the block actually
+  starting is answered `0000` and ignored, so a fire-and-forget button reports success over a run
+  that goes on cycling. `useCfxDevice` supplies the two things only the browser session knows —
+  `runPending`, which is how the cancel recognises that window at all, and an `onStatus` callback,
+  since `withBusy` stands the status poll down for the duration of an operation the user is
+  especially keen to watch. The stop deliberately stops at §7.6's finished state and leaves the
+  acknowledgement to `useRunWatch`, so the partial run is still collected and filed by the one
+  component that owns that. Pause toggles to **Resume** off the status register's pause bit
+  (`isPaused`, which per §7.9 accepts either indicator); the rail also explains that a run armed
+  to start from the touchscreen reports itself paused in the same way, because that state is
+  otherwise indistinguishable and looks like a fault.
 - **`InstrumentRun`** — the run that would be started, as its two halves side by side: the thermal
   protocol and the plate map, each headed by the file supplying it and badged when that file is an
   override. It renders a selection it does not own (see the staging model above), and it has no

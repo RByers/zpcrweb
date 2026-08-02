@@ -13,6 +13,8 @@
 
 import { zipSync } from "fflate";
 import { runFileBaseName } from "./experiment.js";
+import { expectedPlateReads } from "./runDefinition.js";
+import type { Zpcr } from "./types.js";
 import { parseRunInfo, parseRunInfoRaw } from "./runinfo.js";
 import { parseZpcrwebSettingsJson, ZPCRWEB_SETTINGS_NAME } from "./zpcrwebSettings.js";
 
@@ -64,6 +66,54 @@ export function runProgressFromNames(names: readonly string[]): RunProgress {
     ended,
     inProgress: begun && !ended,
     plateReads: names.filter((n) => /\.Plateread$/i.test(n)).length,
+  };
+}
+
+/**
+ * Whether a run did everything its protocol asked for — see {@link runCompleteness}.
+ */
+export interface RunCompleteness {
+  /** Plate reads the protocol implies, or null when that can't be answered honestly. */
+  expected: number | null;
+  /** Plate reads the run actually produced. */
+  actual: number;
+  /** The run is over, and produced fewer reads than the protocol implies. */
+  incomplete: boolean;
+}
+
+/**
+ * Did this run finish its protocol, or stop short?
+ *
+ * **Nothing in a run's own files says it was cancelled.** Measured against a run aborted over USB
+ * mid-protocol: the `ended` marker is written exactly as for a normal finish, and the `.alf` run
+ * report's user-aborted flag stays `False` with the sentinel line still reading
+ * `Protocol completed.` (`alf.md` §6, `usb.md` §7.8). The one durable, format-independent
+ * signature left is the one `usb.md` §7.8 step 6 names: **a cancelled run is a run with fewer
+ * plate reads than its protocol implies.** So that is what this compares, and it is a comparison
+ * rather than a flag on purpose — it works on any run, from any source, including one this app
+ * never watched.
+ *
+ * Three ways it deliberately declines to accuse:
+ *
+ * - **A run still in progress is not incomplete**, it is unfinished. `begun` without `ended` is
+ *   already its own state ({@link RunProgress.inProgress}) and the app says so separately.
+ * - **A protocol whose read count can't be predicted** yields `expected: null` and never
+ *   `incomplete` — see {@link expectedPlateReads} for the three cases.
+ * - **More reads than expected is not incomplete.** `ADDCYCLES` extends a running protocol's loop
+ *   (`usb.md` §3), so over-delivery is ordinary.
+ *
+ * A format with no marker files — a `.pcrd` or a Biomeme export, whose `archive.entries` is empty
+ * — is a finished record by construction, so it is judged on the read count alone. That is what
+ * lets a run cancelled in CFX Manager and saved as a `.pcrd` be recognised too.
+ */
+export function runCompleteness(zpcr: Zpcr): RunCompleteness {
+  const actual = zpcr.reads.length;
+  const progress = runProgressFromNames(zpcr.archive.entries);
+  const expected = zpcr.protocolText ? expectedPlateReads(zpcr.protocolText) : null;
+  return {
+    expected,
+    actual,
+    incomplete: !progress.inProgress && expected !== null && actual < expected,
   };
 }
 

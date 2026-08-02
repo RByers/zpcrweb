@@ -15,6 +15,12 @@ messages before parsing anything — see §8 for why that reassembly step matter
 byte offset below was checked against the raw pcapng bytes, not assumed; §9 collects the handful
 of claims that rest on a single observation rather than a cross-checked pattern.
 
+A third source has since been added: **`usb-cancel`**, this project's own traffic log of a run it
+started and then aborted from the host (a `.zpcr`'s `usb-traffic.log` entry, written by the web
+app's Instrument view rather than by USBPcap, so it is decoded messages rather than raw packets).
+It is the only capture of a run that did not complete, and §7.8 is measured from it — including
+one correction to what that section previously asserted.
+
 **This protocol is now implemented, and the implementation has been driven against live
 hardware** — see §10. Talking to the same CT019138 confirmed §1's descriptors, §2's framing and
 every query in §3 unchanged, and corrected four things the captures alone could not settle:
@@ -27,8 +33,8 @@ rather than the sanity check it looked like (§5), what the header's `passThroug
 sequence a run is made of — pre-flight, authoring, start, file deposit, plate-read collection,
 finish — in the order it actually goes out. Reading it changes two things a reader of §5 alone
 would get wrong: the uploaded `.prcl`/`.pltd` are not what starts a run (they arrive after it is
-already running), and `PROCEED`/`CANCEL` are "skip a step" and "acknowledge the finished run", not
-"start" and "abort".
+already running), and `PROCEED` is "skip a step", not "start". `CANCEL` is both the abort and the
+acknowledgement of a finished run, and getting a running run stopped takes one of each — §7.8.
 
 ## 1. Device identity and topology
 
@@ -227,7 +233,7 @@ list that is empty when healthy.
 | `ADDCYCLES <n>` | extends the running protocol's loop; the capture sends `ADDCYCLES 0`, a no-op, as ordinary run setup |
 | `RemoteRun "<block>","<lid on>","<remote start>","<name>","<user>","<sample ID>","<sierra mode>","<method>"` | e.g. `RemoteRun "A","True","False","singletest","admin","","True","CALC"` — starts the authored protocol, carrying what the protocol text cannot (`protocol.md` §7). **§7.3 defines all eight operands** — notably `<remote start>` (start from the instrument's own touchscreen instead of now) and `<sierra mode>` (the instrument runs the protocol *and* its own optics autonomously, which is why §6's optical protocol never has to be spoken) |
 | `PROCEED` | **skips to the next step** of a running protocol. Not a start or a resume: it was sent 215 s into a run, while a 3-minute hold still had time left, and the very next `STATUS?` was on the following step — §7.5 |
-| `CANCEL` | **ends a run — finished or in progress.** On a finished run it is the acknowledgement: it clears the run name the instrument keeps holding after the protocol ends, and the run's final `Read0000N.Plateread` is picked up after it (§7.6 has the `STATUS?` transition). It is also the only abort in the language — **§7.8 is how to stop a run in progress cleanly**, including what neither capture exercises |
+| `CANCEL` | **ends a run — finished or in progress.** On a finished run it is the acknowledgement: it clears the run name the instrument keeps holding after the protocol ends, and the run's final `Read0000N.Plateread` is picked up after it (§7.6 has the `STATUS?` transition). It is also the only abort in the language — **§7.8 is how to stop a run in progress cleanly**, now measured against a live abort, and note that stopping a running run takes *two* of these (the abort, then the acknowledgement) |
 | `LID OPEN` / `LID CLOSE` | motorised lid control. In `usb-basic` the operator opened and then closed the lid, and the pair appears in exactly that order. Note CFX Manager emits `LID OPEN` **three times** for one open (t=…010.7, …018.5, …026.5) and `LID CLOSE` once — the repeat looks like the UI re-asserting while the lid travels, not three separate requests. `usb-run` has three `LID OPEN` and no `LID CLOSE`, matching an operator who opened it to load a plate and closed it at the touchscreen instead |
 | `FRONTENDLOCKED ON`/`OFF` | `ON` appears once in `usb-basic`; `OFF` once, at the very end of `usb-run` |
 | `TESTMODE <n>` | e.g. `TESTMODE 3`, issued at the very start of both captures |
@@ -404,7 +410,7 @@ Eight independent flags, not an enumeration:
 | 4 | 16 | **incubating** — holding a temperature outside a protocol |
 | 5 | 32 | **protocol running** |
 | 6 | 64 | **block active** |
-| 7 | 128 | **protocol cancelled** |
+| 7 | 128 | **protocol cancelled** — **measured** (§7.8): set on top of the finished state when the run was aborted rather than allowed to complete |
 
 Three coarse states are worth deriving from bits 4, 5 and 6. **Idle** is all three clear.
 **Running** is block active and protocol running set, with incubating clear. **Finished** is
@@ -416,10 +422,17 @@ protocol running set with block active clear. Every value this capture produced 
  96 = 0x60   protocol running + block active                    ← ramping
  97 = 0x61   protocol running + block active + at target        ← at setpoint, and during a read
  32 = 0x20   protocol running, block no longer active           ← the §7.6 finished state
+160 = 0xA0   the same, plus protocol cancelled                   ← the §7.8 aborted state
 ```
 
-That last one is worth noting: the finished-but-unacknowledged state of §7.6 is not an odd corner
-the firmware backed into, it is the register's own "completion" encoding. **Bit 0 is the cleanest
+The last two are worth noting. The finished-but-unacknowledged state of §7.6 is not an odd corner
+the firmware backed into, it is the register's own "completion" encoding — and `160` is that same
+encoding with bit 7 added, which is **the one place in the whole system that says a run was
+aborted**. Nothing in the run's files records it: an aborted run writes the same `ended` marker as
+a completed one and its `.alf` report reads clean (§7.8 step 7). The bit is also gone as soon as
+the instrument returns to the empty-name idle, so a client that wants to know must be watching at
+the time. Measured on a live CFX96: a run cancelled during its second thermal step went `96` →
+`160`, against the `32` a normal completion gives. **Bit 0 is the cleanest
 "has the block arrived" signal in the protocol** — better than comparing field 0 against a setpoint
 parsed out of field 4 — and bit 3 is the honest way to detect the preheat. The `96` that made
 "block count" tempting is a coincidence with the 96-well block; the number of blocks is 1 here, and
@@ -505,7 +518,8 @@ field 10 alone is sufficient for a readout.
 > but `0` here, so their *format* rests on the field map rather than on observation: field 13
 > (paused — nothing in either capture pauses a run), field 14 (the `:`-separated error list —
 > nothing errors), and field 18 (the sensor reading, whose units and source are unidentified). Of
-> field 7's eight flags, four are never seen set (paused, fourth-block, incubating, cancelled), and
+> field 7's eight flags, three are never seen set (paused, fourth-block, incubating) — **bit 7,
+> protocol cancelled, is no longer among them**: §7.8's aborted run sets it — and
 > five of the nine lid positions never occur. A client should parse them as documented but treat
 > the first non-zero value it ever sees from any of them as worth logging rather than trusting.
 
@@ -1135,15 +1149,25 @@ A client that also offers a **Stop** button needs one more step, §7.8.
 
 ### 7.8 Cancelling a run in progress
 
-> **Evidence strength, stated up front.** Neither capture aborts a run — the one run in `usb-run`
-> ran to completion. What follows is derived from three things that *are* solid: the command
-> vocabulary contains no second abort verb; the status register has a dedicated **protocol
-> cancelled** bit (§3.2, field 7 bit 7) that a normal completion never sets; and `CANCEL`'s effect
-> on a *finished* run was measured (§7.6) — it clears the held run identity and returns the
-> instrument to the empty-name idle. The **sequence and the collection rules below are what a
-> client should do**; the specific claim that has not been watched on the wire is `CANCEL`
-> interrupting a *thermally active* protocol. Treat the step-by-step as a specification to verify,
-> not as a transcript.
+> **Evidence strength, stated up front.** This section was written as a specification to verify,
+> and has since been **measured against a live CFX96** — a two-cycle run aborted from the host
+> during its second thermal step, captured in full (`usb-cancel`, see the Provenance note at the top). What
+> the measurement changed:
+>
+> - **`CANCEL` does abort a thermally active protocol.** Confirmed. The run stopped 2.6 s after
+>   the command, and the status register went `96` → `160`, i.e. the finished encoding plus bit 7
+>   (§3.2). That bit had never been observed set before.
+> - **A `CANCEL` sent in the start window is accepted and ignored** — new, and the single most
+>   consequential thing here. It is now step 0 below.
+> - **Step 7 was wrong.** The `.alf` report's user-aborted flag reads `False` on a genuinely
+>   aborted run, and its sentinel line still says `Protocol completed.` The report is *not* where
+>   the abort is recorded — nothing in the run's files is. Step 7 has been rewritten and step 6's
+>   read-count rule is now the only durable evidence.
+> - **A full stop takes two `CANCEL`s**, not one: the abort, then §7.6's acknowledgement.
+>
+> Still unmeasured: `CANCEL` on a *paused* run and on an `INCUBATE` hold, and whether a read
+> interrupted mid-scan leaves a partial file behind. Step 1 exists so the last of those stays
+> hypothetical.
 
 **The command is `CANCEL`, and there is no other.** The run-control group is `RemoteRun`, `PAUSE`,
 `RESUME`, `PROCEED`, `CANCEL` — nothing else in the language ends a protocol, and the register bit
@@ -1153,6 +1177,19 @@ command: the reply is the bare `0000`, no semicolon (§3).
 Cancelling is therefore the *same* command as acknowledging a finished run (§7.6). The difference
 is entirely in what surrounds it — what you wait for before sending it, and what is left to collect
 afterwards.
+
+**0. A run that has been *asked for* may not be running yet — and a cancel there does nothing.**
+Measured: `RemoteRun` was accepted at t=0.0 s and `STATUS?` went on reporting the empty idle
+(register `0`) until t=6.1 s, when the block began its first ramp. A `CANCEL` sent at t=4.5 s,
+inside that window, was answered `0000` — and the run started anyway 1.6 s later and cycled on.
+The reply says nothing; there was simply no protocol running for it to end.
+
+This is the failure mode a Stop button is *most* likely to hit, because the window sits exactly
+where an operator realises they have started the wrong run. A host cannot detect the window from
+`STATUS?` — an armed-but-not-started run and a genuinely idle instrument are the same reply — so
+**it has to remember that it asked for a run**, and keep watching until either the run appears (and
+can then be cancelled for real) or enough time passes that it clearly never will. ~6 s is the one
+measured figure; allow several times that. `CfxDevice.cancelRun`'s `expectStart` is this rule.
 
 **1. Don't cancel into a plate read.** While `STATUS?`'s current-step field reads
 `PLATEREAD #h<mask>`, the optics are mid-scan and the `Read0000N.Plateread` file **does not exist
@@ -1177,13 +1214,27 @@ most likely to be pressed in.)
 ```
 
 — step `IDLE`, both cycle counters `0`, the run descriptor back to `"",BLOCK,OFF`, and the status
-register `0`. A **`128`** (protocol cancelled) observed on the way is the abort being
-acknowledged, and it is the one signal that distinguishes "the run I stopped" from "the run that
-finished while I was deciding". The block does **not** have to reach any temperature first — the
-thermal state simply stops being driven — but do not re-arm the instrument on a timer: poll until
-the descriptor is empty. Allow generously before declaring it stuck; the desktop software gives
-the wind-down minutes, not seconds, and a stop issued during a read has to let the optics finish
-before anything else happens.
+register `0`.
+
+**Getting there takes two `CANCEL`s.** Measured: the first one stops the protocol and leaves the
+instrument in §7.6's *finished* state — `IDLE`, cycle counters `0`, but **the run name still
+attached** and the register reading `160`. That is the abort; the `ended` marker and the `.alf`
+report are not in the run folder yet. The second `CANCEL` is §7.6's ordinary acknowledgement,
+after which they appear. A client that already implements §7.6 should therefore stop here and let
+its existing end-of-run path take over — otherwise the acknowledgement has two owners and the
+final read can be collected twice or not at all. (`CfxDevice.cancelRun` stops here for exactly
+that reason; `useRunWatch` does the rest.)
+
+The register value on the way through is **`160`**, not `128` — bit 7 arrives *on top of* the
+finished state's bit 5, and it is the one signal that distinguishes "the run I stopped" from "the
+run that finished while I was deciding". Catch it live or not at all: it is gone once the
+instrument reaches the empty-name idle, and it is written nowhere.
+
+The block does **not** have to reach any temperature first — the thermal state simply stops being
+driven — but do not re-arm the instrument on a timer: poll until the descriptor is empty. Allow
+generously before declaring it stuck; the desktop software gives the wind-down minutes, not
+seconds, and a stop issued during a read has to let the optics finish before anything else
+happens.
 
 **5. `ERRORS?` and `ERRORLIST A` once, after.** A user-initiated stop is not a fault, so both
 should stay clean (`0;0000` and `;0000`). A non-zero here is the instrument complaining about
@@ -1194,21 +1245,31 @@ something *else*, and it is worth surfacing separately rather than folding into 
 pull every `Read0000N.Plateread` not already taken. Reads that completed before the cancel are
 whole, ordinary files; a cancelled run is simply a run with **fewer reads than its protocol
 implies**, which is why the read count — not any flag in the fluorescence data — is what tells a
-reader the run was short. `ended` should be present in the listing, the same marker a completed run
-gets: it means "no longer in progress", not "completed successfully".
+reader the run was short. `ended` **is** present in the listing — confirmed on the aborted run —
+the same marker a completed run gets: it means "no longer in progress", not "completed
+successfully". It appears only after the §7.6 acknowledgement of step 4, alongside the `.alf`.
 
-**7. Pull the `.alf` — it is where "this run was aborted" is actually recorded.** From
-`\Storage Card\PCRunReport\`, exactly as in §7.6. In it, the error line's **user-aborted flag reads
-`True`** (`alf.md` §6, line 3 field 4) and the per-step lines stop at the last step that executed.
-That flag is the durable, offline-readable evidence; `STATUS?`'s cancelled bit is gone the moment
-the instrument goes idle.
+**7. Pull the `.alf`, but do not expect it to say the run was aborted.** From
+`\Storage Card\PCRunReport\`, exactly as in §7.6 — it is worth having for its per-step timings,
+which stop at the last step that executed.
 
-Three origins produce that record, and they are recorded distinctly: a stop from the **host**, a
-stop from the instrument's **own touchscreen**, and a stop the **instrument itself** initiated
-(fatal error, or its own cancel path). **A client must not assume its own `CANCEL` explains every
-early end it sees** — an operator standing at the instrument can stop the run, and a client that
-only ever polls `STATUS?` will observe the run vanish with no command of its own to blame it on.
-Report an unexplained early idle as "the run ended early" and let the `.alf` say why.
+**It does not record the abort.** This section previously claimed the error line's user-aborted
+flag reads `True` (`alf.md` §6, line 3 field 4); measured on a genuinely aborted run, **it reads
+`False`**, the summary text is the ordinary ` No errors reported. `, and the sentinel line says
+`Protocol completed.` — with a timestamp equal to the moment of the cancel rather than of any
+completion. The whole line is byte-identical to a clean run's. What that flag *is* for remains
+unknown; a stop from the instrument's own touchscreen, or one the instrument initiated itself
+after a fault, may well set it, and neither has been captured. Read it if it is `True`; do not
+read `False` as "this run finished".
+
+So the durable evidence is **step 6's read count and nothing else**. This project's reader
+implements exactly that comparison (`runCompleteness` in `packages/core/src/runFolder.ts`): a run
+whose archive holds fewer `Read0000N.Plateread` files than its own protocol implies stopped short.
+
+**A client must not assume its own `CANCEL` explains every early end it sees** — an operator
+standing at the instrument can stop the run, and a client that only ever polls `STATUS?` will
+observe the run vanish with no command of its own to blame it on. Report an unexplained early end
+as "the run ended early", because that is genuinely all that can be known offline.
 
 **8. `FRONTENDLOCKED OFF` if you locked it** (§7.6) — a stopped run releases the touchscreen the
 same as a finished one.
@@ -1382,11 +1443,12 @@ instance, rather than a cross-checked pattern:
   every transition, every effect on the clocks, and the relationship between field 13 and
   register bit 1 are not. The armed-run-reports-paused behaviour is the firmest claim there and is
   still not one this capture pair shows directly.
-- **Cancelling a *running* protocol** (§7.8) — `CANCEL` was measured only on an already-finished
-  run. That it also aborts a thermally active one rests on the vocabulary having no other abort and
-  on the status register's dedicated cancelled bit, not on a capture. The `128` transition, the
-  behaviour of `CANCEL` on a paused run and on an `INCUBATE` hold, and whether a read interrupted
-  mid-scan leaves a partial file behind are all unobserved.
+- **Cancelling a *running* protocol** (§7.8) — **now measured**, and the entry that used to sit
+  here was wrong in one respect worth keeping visible: the `.alf` report's user-aborted flag reads
+  `False` on a genuinely aborted run, so what *does* set it is still unknown (a stop at the
+  touchscreen and an instrument-initiated stop are both uncaptured). Also still unobserved:
+  `CANCEL` on a paused run and on an `INCUBATE` hold, and whether a read interrupted mid-scan
+  leaves a partial file behind.
 - **`GETPOS?`, `TESTMODE`, `SETAPILOGLEVEL`** (§3) — recorded with their literal observed
   values; the capture doesn't say more about what any of them mean than the command name itself
   suggests. (`BLOCKID` was in this list until the operator's own account of `usb-basic` — flash,

@@ -437,6 +437,7 @@ export function App() {
             stagedIds={staging.stagedIds}
             modifiedIds={store.modifiedIds}
             inProgressIds={store.inProgressIds}
+            incompleteIds={store.incompleteIds}
             activeLocked={runActive}
             onSelect={selectFile}
             onHide={(id) => store.setVisible(id, false)}
@@ -524,6 +525,7 @@ export function App() {
         activeId={store.activeId}
         modifiedIds={store.modifiedIds}
         inProgressIds={store.inProgressIds}
+            incompleteIds={store.incompleteIds}
         onSelect={selectFile}
         onHide={(id) => store.setVisible(id, false)}
         experiments={store.experiments}

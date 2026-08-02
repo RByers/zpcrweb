@@ -474,6 +474,15 @@
   font-size: 11px;
   color: var(--ink-muted);
 }
+/* A run that ended without finishing its protocol, in the slot the date would have used (see
+   `FileBar`'s FileChip). Loud where the date is quiet — this is the one thing about the chip
+   that changes what its numbers mean. */
+.filechip__date--incomplete {
+  color: var(--danger);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
 .filecard {
   pointer-events: none;
   min-width: 220px;
@@ -898,6 +907,29 @@
   .overview__runningdot {
     animation: none;
   }
+}
+
+/* A run that stopped short of its protocol (see `OverviewView`'s IncompleteBanner). Same shape as
+   the running banner and the opposite colour: that one says "wait", this one says "read this
+   with care". Nothing animates — the state is final. */
+.overview__incomplete {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 14px;
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 90, 90, 0.08);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.overview__incompletemark {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  margin-top: 6px;
+  border-radius: 50%;
+  background: var(--danger);
 }
 
 /* Styled as a heading, not as a form field: no border or background until it is interacted
@@ -3399,6 +3431,27 @@
   50% {
     opacity: 0.35;
   }
+}
+
+/* Stop and Pause, shown only while there is a run to act on (see `InstrumentRail`). They sit
+   above the generic action grid because they act on *this* run rather than on the instrument in
+   general, and Stop is tinted like a destructive action because it is one. */
+.instrument__runcontrols {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.instrument__runcontrols .btn {
+  flex: 1 1 auto;
+  font-size: 12px;
+}
+.instrument__stop {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+.instrument__stop:not(:disabled):hover {
+  background: rgba(255, 90, 90, 0.12);
 }
 
 /* Actions. The `?` badge marks a command name this protocol was never observed using — the

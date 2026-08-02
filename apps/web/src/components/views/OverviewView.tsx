@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { runProgressFromNames, type FileKind, type Zpcr } from "@zpcrweb/core";
+import { runCompleteness, runProgressFromNames, type FileKind, type Zpcr } from "@zpcrweb/core";
 import { OverviewPanel, type InfoRow, type OverviewPanelProps } from "./OverviewPanel";
 import { OverviewPlateSection } from "./OverviewPlateSection";
 import { usePltdPassword } from "../../state/pltdPassword";
@@ -62,6 +62,12 @@ export function OverviewView({
    * copy opened on another machine, and gone the moment a later snapshot arrives with `ended`.
    */
   const progress = useMemo(() => runProgressFromNames(zpcr.archive.entries), [zpcr]);
+  /**
+   * Whether this run stopped short — over, but with fewer plate reads than its protocol asked
+   * for (see core's `runCompleteness`). Read from the file for the same reasons `progress` is,
+   * and mutually exclusive with it: a run still going is not incomplete, it is unfinished.
+   */
+  const completeness = useMemo(() => runCompleteness(zpcr), [zpcr]);
 
   const [password] = usePltdPassword();
   const plate = useMemo(() => zpcr.plates(password || undefined)[0]?.pltd.plate ?? null, [zpcr, password]);
@@ -112,7 +118,13 @@ export function OverviewView({
       rows={rows}
       downloadTitle="Download this file (including its zpcrweb.json analysis settings)"
       header={<ExperimentHeader identity={identity} onRename={onRename} persists={namePersists} />}
-      banner={progress.inProgress ? <RunningBanner plateReads={progress.plateReads} /> : undefined}
+      banner={
+        progress.inProgress ? (
+          <RunningBanner plateReads={progress.plateReads} />
+        ) : completeness.incomplete ? (
+          <IncompleteBanner expected={completeness.expected!} actual={completeness.actual} />
+        ) : undefined
+      }
       {...tools}
     >
       <OverviewPlateSection plate={plate} cqTable={analysis.cqTable} />
@@ -144,6 +156,31 @@ function RunningBanner({ plateReads }: { plateReads: number }) {
         {plateReads === 1 ? "" : "s"} so far — the instrument has written its <code>begun</code>{" "}
         marker but not <code>ended</code>. With the instrument connected and following switched on,
         this file is replaced with a fuller one after every cycle.
+      </span>
+    </div>
+  );
+}
+
+/**
+ * A run that ended without finishing its protocol — see {@link OverviewView}'s `completeness`.
+ *
+ * Worth saying at this length rather than as a word, because the file itself looks normal: an
+ * aborted run writes the same `ended` marker as a completed one and its `.alf` report still says
+ * `Protocol completed.` with the user-aborted flag clear (`usb.md` §7.8, `alf.md` §6). The read
+ * count is the only thing that gives it away, so the banner shows the arithmetic it is accusing
+ * on — and names the one innocent explanation, since the app cannot tell the two apart.
+ */
+function IncompleteBanner({ expected, actual }: { expected: number; actual: number }) {
+  return (
+    <div className="overview__incomplete">
+      <span className="overview__incompletemark" aria-hidden="true" />
+      <span>
+        <strong>This run is incomplete.</strong> Its protocol calls for {expected} plate read
+        {expected === 1 ? "" : "s"} and the archive holds {actual} — so the run ended{" "}
+        {expected - actual === 1 ? "one cycle" : `${expected - actual} cycles`} early. Nothing in
+        a run's files records an abort, so this is inferred from the count: usually it means the
+        run was cancelled, and it can also mean the instrument stopped on its own. Whatever cycles
+        are here are ordinary, complete reads.
       </span>
     </div>
   );

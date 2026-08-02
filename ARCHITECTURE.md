@@ -311,6 +311,26 @@ which is already the name Manager would have saved it under.
 This is what lets the web app's Instrument view open a run off a connected instrument as an ordinary
 file (see [`apps/web/ARCHITECTURE.md`](./apps/web/ARCHITECTURE.md)).
 
+### Did the run finish? Count its reads (`runCompleteness`)
+
+The same module answers a question the files never state outright. **A cancelled run is not marked
+as cancelled anywhere**: it writes the same `ended` marker as a completed one, and its `.alf` run
+report's user-aborted flag stays `False` with the sentinel still reading `Protocol completed.`
+(measured — [`usb.md`](./usb.md) §7.8, [`alf.md`](./alf.md) §6). The one live signal, `STATUS?`'s
+cancelled bit, never reaches a file.
+
+What is left is arithmetic: a run that stopped short holds **fewer `Read*.Plateread` files than
+its own protocol asks for**. `expectedPlateReads` (`runDefinition.ts`) gets that number by walking
+the protocol's `GOTO` loops on paper, and `runCompleteness(zpcr)` compares it with what the
+archive holds. Being wrong here mislabels an honest run, so it answers `null` — never
+"incomplete" — for a protocol with no `PLATEREAD`, one using the compact `MELT` form whose read
+count this project has never observed, or a loop that doesn't terminate; a run still in progress
+is unfinished rather than incomplete; and *more* reads than expected is ordinary (`ADDCYCLES`).
+Every committed sample matches exactly, which is what
+`packages/core/test/runCompleteness.test.ts` asserts. Because it is a comparison rather than a
+stored flag, it works on any run from any source — including a `.pcrd`, which has no markers at
+all and is judged on the read count alone.
+
 ### The run's file exists before the run produces anything (`runSeed.ts`)
 
 Assembling a `.zpcr` backwards from what the instrument has written leaves a window — a lid

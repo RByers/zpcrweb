@@ -50,14 +50,18 @@ export {
 export { parsePltd, parsePlatesetup2, isPltdName } from "./pltd.js";
 export { plateToCsv, parsePlateCsv, isPlateCsvName, isBlankWell } from "./plateCsv.js";
 export { attachPlateToZpcr } from "./attachPlate.js";
+/** The inverse of `zpcrFromRunFiles` — a `.zpcr`'s entries as the loose run-directory files it is
+ * a ZIP of. Exported so a caller can take an archive apart and put it back together. */
+export { unzipArchive } from "./archive.js";
 export {
   zpcrFromRunFiles,
   zpcrNameFromRunFiles,
   runProgressFromNames,
+  runCompleteness,
   RUN_BEGUN_MARKER,
   RUN_ENDED_MARKER,
 } from "./runFolder.js";
-export type { RunProgress, RunFolderNaming } from "./runFolder.js";
+export type { RunProgress, RunCompleteness, RunFolderNaming } from "./runFolder.js";
 export { zpcrSeedArchive } from "./runSeed.js";
 export type { RunSeedOptions } from "./runSeed.js";
 export {
@@ -80,6 +84,7 @@ export {
 } from "./prcl.js";
 export {
   parseRunDefinition,
+  expectedPlateReads,
   splitRunDefinition,
   isRunDefinitionVerb,
   parseScanMask,

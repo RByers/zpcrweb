@@ -60,6 +60,7 @@ import {
   type CfxResponse,
 } from "./commands.js";
 import {
+  isPaused,
   parseIdentity,
   parseRtStatus,
   parseStatus,
@@ -222,6 +223,65 @@ export interface CfxRunStartResult {
    * running. Surfaced so a UI can say the archive may be missing its plate map.
    */
   uploadErrors: string[];
+}
+
+/** How {@link CfxDevice.cancelRun} should behave — every field has a sensible default. */
+export interface CfxCancelOptions {
+  /**
+   * True when a run has been asked for but may not have appeared in `STATUS?` yet — the app's
+   * "run pending" state. Without it a cancel issued in the start window (see
+   * {@link CfxDevice.cancelRun} point 3) finds nothing running and returns having done nothing,
+   * which is precisely the failure this guards. Default false.
+   */
+  expectStart?: boolean;
+  /** Stop *now*, accepting the loss of a plate read in flight (`usb.md` §7.8 step 1). */
+  force?: boolean;
+  /** How long to leave between a command and the `STATUS?` that checks it. Default 500 ms. */
+  pollMs?: number;
+  /** How long to let a plate read in flight finish before cancelling anyway. Default 30 s. */
+  readWaitMs?: number;
+  /** Overall budget before giving up and reporting `timedOut`. Default 60 s. */
+  timeoutMs?: number;
+  /** How long a run asked for may take to appear, with `expectStart`. Default 20 s — the one
+   * measured start window was ~6 s (`usb.md` §7.3). */
+  startWindowMs?: number;
+  /** Called with every `STATUS?` this reads, so a caller whose own poll is paused stays live. */
+  onStatus?: (status: CfxStatus) => void;
+}
+
+/** What {@link CfxDevice.cancelRun} did, and what the instrument said about it. */
+export interface CfxCancelResult {
+  /** The state the run was in when the stop was asked for. */
+  startedFrom: "running" | "paused" | "finished" | "idle";
+  /** True once `STATUS?` no longer reports a running protocol — the point of the exercise. */
+  stopped: boolean;
+  /** How many `CANCEL`s it took. More than one means the first didn't land — see point 3. */
+  attempts: number;
+  /** True if a paused run had to be resumed first (`usb.md` §7.8 step 2). */
+  resumed: boolean;
+  /** True if a plate read in flight was allowed to finish first (step 1). */
+  waitedForRead: boolean;
+  /**
+   * True if the status register's **protocol cancelled** bit was seen set (`usb.md` §3.2, field 7
+   * bit 7). This is the instrument confirming *this* run was aborted rather than having finished
+   * on its own, and it is the only place that distinction is ever made — it survives nowhere in
+   * the run's files (see `runFolder.ts`'s `runCompleteness`).
+   */
+  sawCancelledFlag: boolean;
+  /** The last status read. */
+  status: CfxStatus;
+  /** `ERRORLIST A` afterwards (step 5). A user-initiated stop is not a fault, so this should be
+   * empty; anything in it is about something else. */
+  errors: string[];
+  /** True if the budget ran out with the protocol still running. */
+  timedOut: boolean;
+  /** Human-readable account of anything non-obvious that happened, for the UI to show. */
+  notes: string[];
+}
+
+/** True when `STATUS?`'s current-step text is a plate read (`usb.md` §7.5's live echo of §3.1). */
+function isPlateReadStep(stepText: string): boolean {
+  return /^PLATEREAD\b/i.test(stepText.trim());
 }
 
 const ENCODER = new TextEncoder();
@@ -850,6 +910,162 @@ export class CfxDevice {
    */
   async acknowledgeRun(): Promise<CfxResponse> {
     return this.tryCommand("CANCEL");
+  }
+
+  /** `PAUSE` — suspend the running protocol (`usb.md` §7.9). A no-op when nothing is running. */
+  async pauseRun(): Promise<CfxResponse> {
+    return this.tryCommand("PAUSE");
+  }
+
+  /** `RESUME` — continue a suspended protocol (`usb.md` §7.9). A no-op when nothing is paused. */
+  async resumeRun(): Promise<CfxResponse> {
+    return this.tryCommand("RESUME");
+  }
+
+  /**
+   * Stop a run in progress, properly — `usb.md` §7.8.
+   *
+   * The command itself is one word, and sending it is the easy part. What this adds is the four
+   * things §7.8 requires around it, each of which is a way a naive `CANCEL` goes wrong:
+   *
+   * 1. **It doesn't cancel into a plate read.** While the current step is `PLATEREAD` the optics
+   *    are mid-scan and that cycle's file does not exist yet (§7.5), so cancelling there throws
+   *    the read away. A read is seconds; this waits for the step to change, up to
+   *    {@link CfxCancelOptions.readWaitMs}, and `force` skips the wait for a caller who means now.
+   * 2. **It resumes a paused run first** (§7.8 step 2) — whether `CANCEL` ends a paused run is
+   *    untested, and a stop button is most likely to be pressed in exactly that state.
+   * 3. **It survives the start window.** Measured on a live instrument: between `RemoteRun` and
+   *    the block actually starting there are ~6 s during which `STATUS?` still reports the empty
+   *    idle, and a `CANCEL` sent in that window is answered `0000` and *ignored* — the run then
+   *    starts anyway. A fire-and-forget button therefore reports success and leaves a run
+   *    cycling, which is the bug this method exists for. Given `expectStart`, it keeps watching
+   *    for the run to appear and cancels it for real when it does.
+   * 4. **It confirms against `STATUS?`, not against the reply.** The reply to `CANCEL` is `0000`
+   *    whether or not anything stopped.
+   *
+   * **Where it stops.** At the state §7.6 calls a finished run — not running, run name still
+   * held. Acknowledging *that* is the existing end-of-run path's job (see {@link acknowledgeRun}),
+   * because the acknowledgement is also what makes the final read, the `ended` marker and the
+   * `.alf` report appear, and having two owners of that collection is how a run loses its last
+   * cycle. So this deviates from §7.8 step 4's "poll until the descriptor is empty" on purpose:
+   * a client without a §7.6 path should keep going, and this one hands over instead.
+   *
+   * The status is re-read throughout and handed to {@link CfxCancelOptions.onStatus}, since a
+   * caller's own poll is typically standing back while this holds the command channel.
+   */
+  async cancelRun(options: CfxCancelOptions = {}): Promise<CfxCancelResult> {
+    const {
+      expectStart = false,
+      force = false,
+      pollMs = 500,
+      readWaitMs = 30_000,
+      timeoutMs = 60_000,
+      startWindowMs = 20_000,
+      onStatus,
+    } = options;
+
+    const notes: string[] = [];
+    const started = Date.now();
+    let attempts = 0;
+    let sawRunning = false;
+    let sawCancelledFlag = false;
+    let resumed = false;
+    let waitedForRead = false;
+
+    const look = async (): Promise<CfxStatus> => {
+      const s = await this.status();
+      if (s.flags.cancelled) sawCancelledFlag = true;
+      if (s.phase === "running") sawRunning = true;
+      onStatus?.(s);
+      return s;
+    };
+
+    let status = await look();
+    const startedFrom: CfxCancelResult["startedFrom"] = isPaused(status)
+      ? "paused"
+      : status.phase === "running"
+        ? "running"
+        : status.runName
+          ? "finished"
+          : "idle";
+
+    for (;;) {
+      const elapsed = Date.now() - started;
+      // §7.8 step 4 warns against declaring it stuck early — the desktop software allows minutes.
+      // This is a backstop against looping forever, not a verdict; the caller gets `timedOut` and
+      // whatever the last status said.
+      if (elapsed >= timeoutMs) break;
+
+      if (status.phase === "running") {
+        // §7.8 step 1 — a read in flight is a cycle about to become a file.
+        if (isPlateReadStep(status.stepText) && !force && elapsed < readWaitMs) {
+          if (!waitedForRead) {
+            waitedForRead = true;
+            notes.push("Waiting for the plate read in progress to finish before stopping.");
+          }
+          await delay(pollMs);
+          status = await look();
+          continue;
+        }
+        // §7.8 step 2 — clear a pause before cancelling.
+        if (isPaused(status) && !resumed) {
+          resumed = true;
+          notes.push("The run was paused; resumed it first so the cancel lands on a running run.");
+          await this.resumeRun();
+          await delay(pollMs);
+          status = await look();
+          continue;
+        }
+        await this.acknowledgeRun();
+        attempts++;
+        await delay(pollMs);
+        status = await look();
+        continue;
+      }
+
+      // Not running. Holding a run name is §7.6's finished state — the goal.
+      if (status.runName !== "" || sawRunning) break;
+
+      // Nothing is running and nothing is held. Either there was never anything to cancel, or
+      // this is the start window of point 3 and the run is about to appear.
+      if (expectStart && elapsed < startWindowMs) {
+        if (attempts === 0) {
+          // Harmless if the run never starts, and it stops one that is already past the window.
+          await this.acknowledgeRun();
+          attempts++;
+          notes.push("A run was starting; watching for it to begin so the cancel can take hold.");
+        }
+        await delay(pollMs);
+        status = await look();
+        continue;
+      }
+
+      break;
+    }
+
+    const stopped = status.phase !== "running";
+    if (!stopped) notes.push("The instrument is still reporting a running protocol.");
+    // §7.8 step 5 — a user-initiated stop is not a fault, so anything here is about something
+    // else and is worth reporting separately rather than folding into "run cancelled".
+    let errors: string[] = [];
+    try {
+      errors = await this.errorList();
+    } catch {
+      /* the error list is a courtesy here; a stop that worked is still a stop */
+    }
+
+    return {
+      startedFrom,
+      stopped,
+      attempts,
+      resumed,
+      waitedForRead,
+      sawCancelledFlag,
+      status,
+      errors,
+      notes,
+      timedOut: !stopped && Date.now() - started >= timeoutMs,
+    };
   }
 
   // ---- actions ----------------------------------------------------------

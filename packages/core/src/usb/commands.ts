@@ -142,12 +142,20 @@ export interface CfxCommandSpec {
  * The action commands a client might reasonably offer as a button, with their provenance.
  *
  * Queries are not listed here — they are ordinary calls on {@link CfxDevice} and their results are
- * typed. This list exists for the ones that *do* something, and it is the *whole* of what a client
- * can make the instrument do: `CfxDevice.runAction` takes a name from this table, and there is no
- * public way to send a command line the library didn't build. Offering a new action means adding
- * an entry here, where its provenance is recorded alongside it.
+ * typed. This list exists for the ones that *do* something and are complete in one command:
+ * `CfxDevice.runAction` takes a name from this table, and there is no public way to send a command
+ * line the library didn't build. Offering a new action means adding an entry here, where its
+ * provenance is recorded alongside it.
+ *
+ * **`CANCEL`, `PAUSE` and `RESUME` are deliberately absent.** Each of them is a named method on
+ * {@link CfxDevice} instead, because none of the three is complete in one command. `CANCEL` sent
+ * and forgotten is the measured bug `usb.md` §7.8 exists for — in the start window it is answered
+ * `0000` and ignored, so a button wired straight to it reports success over a run that goes on
+ * cycling — and §7.8 has four more rules around it besides. `PAUSE`/`RESUME` are two halves of one
+ * state a caller has to read back (§7.9). A generic button that fires a word and prints the result
+ * code is right for a lid and wrong for these.
  */
-export type CfxCommandName = "indicator" | "lidOpen" | "lidClose" | "skipStep" | "cancel";
+export type CfxCommandName = "indicator" | "lidOpen" | "lidClose" | "skipStep";
 
 /**
  * Annotated as a plain `Record`, deliberately — not `as const satisfies`.
@@ -193,19 +201,6 @@ export const CFX_COMMANDS: Record<CfxCommandName, CfxCommandSpec> = {
       "into a 3-minute hold the block had only just reached temperature for, it moved the run " +
       "to step 2 within 1.1 s. Despite the name it neither starts nor resumes anything — an " +
       "earlier reading of the capture had it as a start confirmation, which it is not.",
-    actuates: true,
-  },
-  cancel: {
-    command: "CANCEL",
-    label: "Cancel run",
-    confidence: "observed",
-    note:
-      "usb.md §7.6 — two things depending on when it is sent. On a *finished* run (STATUS? " +
-      "reports IDLE but the run's name is still attached) it is the acknowledgement that " +
-      "releases the instrument, and the final plate read, the `ended` marker and the .alf " +
-      "report appear only afterwards. On a run still cycling it aborts it. The label names only " +
-      "the abort: acknowledging a finished run is bookkeeping a client should do for itself (see " +
-      "`CfxDevice.acknowledgeRun`), not a decision to put in front of an operator.",
     actuates: true,
   },
 };

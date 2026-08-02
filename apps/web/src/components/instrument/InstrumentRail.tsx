@@ -6,7 +6,7 @@
  * view sits apart in the tab strip.
  */
 import { useEffect, useState } from "react";
-import { CFX_COMMANDS, type CfxCommandName, type CfxStatusFlags, type RunPlan } from "@zpcrweb/core";
+import { CFX_COMMANDS, isPaused, type CfxCommandName, type CfxStatusFlags, type RunPlan } from "@zpcrweb/core";
 import type { CfxDeviceHandle } from "../../state/useCfxDevice";
 import type { RunWatchState } from "../../state/useRunWatch";
 import type { StagedRun } from "../../lib/protocolSource";
@@ -136,6 +136,37 @@ export function InstrumentRail({
     !runPending &&
     !!busy &&
     !busyLingering;
+
+  // A run is *this rail's business* whenever the instrument is doing one or is about to — which
+  // is not the same as `status.running`. The start window (`usb.md` §7.3) is precisely the gap
+  // where a run exists and `STATUS?` still says idle, and it is where a cancel is most often
+  // wanted and least likely to work, so `runPending` counts. So does §7.6's finished-but-held
+  // state, where Stop is what releases the instrument.
+  const paused = !!status && isPaused(status);
+  const runUnderway = !!status?.running || runPending;
+  const showRunControls = connected && (runUnderway || !!status?.runName);
+  // What the last stop reported, so a cancel that had to wait for a plate read, resume a pause or
+  // take two attempts says so rather than just appearing to have taken a long time.
+  const [stopNote, setStopNote] = useState<string[] | null>(null);
+
+  const stop = async () => {
+    setStopNote(null);
+    const res = await instrument.cancelRun();
+    if (!res) return;
+    const notes = [...res.notes];
+    if (res.attempts > 1) {
+      notes.push(
+        `It took ${res.attempts} attempts — the first was accepted and ignored, which is what ` +
+          "happens to a cancel sent before the run has really begun.",
+      );
+    }
+    if (res.timedOut) notes.push("The instrument is still reporting a running protocol.");
+    else if (res.stopped && res.sawCancelledFlag) {
+      notes.push("The instrument confirmed the abort (status register bit 7).");
+    }
+    if (res.errors.length > 0) notes.push(`Instrument errors: ${res.errors.join(", ")}`);
+    setStopNote(notes.length > 0 ? notes : null);
+  };
 
   const start = async () => {
     // Belt and braces: the button is clickable while `promptForName`, and nothing but its own
@@ -350,6 +381,56 @@ export function InstrumentRail({
               The run started. Its files, though:
               <ul className="instrument__startnote">
                 {startNote.map((line, i) => (
+                  <li key={i}>{line}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {/* Stop and Pause are not in the generic action grid below, and that is the point.
+              Both are stateful operations rather than one word on the wire (`usb/commands.ts`
+              says why): Stop drives `usb.md` §7.8's whole sequence and Pause is one half of a
+              state read back from the status register, so each needs its own label, its own
+              enabled rule and its own report. They appear only while there is a run to act on. */}
+          {showRunControls && (
+            <div className="instrument__runcontrols">
+              <button
+                className="btn instrument__stop"
+                disabled={!!busy}
+                title={
+                  "Stop the run in progress. Waits for a plate read in flight to finish, so the " +
+                  "cycle already under way isn't thrown away (usb.md §7.8)."
+                }
+                onClick={() => void stop()}
+              >
+                {busy === "Stopping the run" ? "Stopping…" : "Stop run"}
+              </button>
+              <button
+                className="btn"
+                disabled={!!busy || !status?.running}
+                title={
+                  status?.running
+                    ? paused
+                      ? "Continue the suspended protocol (RESUME)."
+                      : "Suspend the running protocol (PAUSE). The block holds where it is."
+                    : "There is no running protocol to pause."
+                }
+                onClick={() => void instrument.setRunPaused(!paused)}
+              >
+                {paused ? "Resume run" : "Pause run"}
+              </button>
+            </div>
+          )}
+          {showRunControls && paused && (
+            <div className="rail__note instrument__footnote">
+              This run is paused — the block is holding its current temperature. A run armed to
+              start from the instrument's own touchscreen reports itself paused in the same way
+              (<code>usb.md</code> §7.9), so if this run has not begun yet, press Start there.
+            </div>
+          )}
+          {stopNote && stopNote.length > 0 && (
+            <div className="rail__note instrument__footnote">
+              <ul className="instrument__startnote">
+                {stopNote.map((line, i) => (
                   <li key={i}>{line}</li>
                 ))}
               </ul>

@@ -178,6 +178,10 @@ export function useCfxDevice() {
   // when the callback was created.
   const statusRef = useRef<CfxStatus | null>(null);
   statusRef.current = status;
+  // Likewise for `cancelRun`, which needs to know whether a start was asked for at the moment the
+  // stop button was pressed — that is the window where `STATUS?` hasn't caught up yet.
+  const runPendingRef = useRef(false);
+  runPendingRef.current = runPending;
 
   /**
    * Append one console line to the recording (when one is running) and the rebuild buffer, and —
@@ -501,6 +505,57 @@ export function useCfxDevice() {
   }, [withBusy]);
 
   /**
+   * Stop the run in progress — `usb.md` §7.8, driven by `CfxDevice.cancelRun`.
+   *
+   * Everything about *how* to stop safely lives in core; this adds the two things a browser
+   * session owns. First, `expectStart`: the app knows a run has been asked for
+   * ({@link runPending}) seconds before `STATUS?` will admit it, and that window is exactly where
+   * a plain `CANCEL` is accepted and ignored — so the local fact is what lets the cancel wait for
+   * the run it is meant to stop. Second, `onStatus`: `withBusy` stands the status poll down for
+   * the duration, and a cancel can legitimately take a while (a plate read in flight is allowed
+   * to finish), so the rail would otherwise freeze on a stale reading through the one operation
+   * the user is most anxious to watch.
+   *
+   * Deliberately stops at §7.6's finished state rather than driving all the way to the empty-name
+   * idle: the acknowledgement is what makes the last read, `ended` and the `.alf` appear, and
+   * `useRunWatch` already owns that so the partial run still gets collected and filed.
+   */
+  const cancelRun = useCallback(
+    async (options: { force?: boolean } = {}) => {
+      const wasPending = runPendingRef.current;
+      const res = await withBusy("Stopping the run", (d) =>
+        d.cancelRun({
+          expectStart: wasPending || statusRef.current?.running === true,
+          force: options.force,
+          onStatus: (s) => setStatus(s),
+        }),
+      );
+      return res;
+    },
+    [withBusy],
+  );
+
+  /** `PAUSE`/`RESUME` — suspend or continue the running protocol (`usb.md` §7.9). */
+  const setRunPaused = useCallback(
+    async (paused: boolean) => {
+      const res = await withBusy(paused ? "Pausing the run" : "Resuming the run", (d) =>
+        paused ? d.pauseRun() : d.resumeRun(),
+      );
+      if (res) {
+        // The pause bit is the whole feedback this has; don't make the user wait a poll for it.
+        const d = deviceRef.current;
+        try {
+          if (d) setStatus(await d.status());
+        } catch {
+          /* the poll will catch up */
+        }
+      }
+      return res;
+    },
+    [withBusy],
+  );
+
+  /**
    * Re-list `\Storage Card\CurrentRun` and report what it holds.
    *
    * Separate from {@link refreshDirectory} because this one is *polled* — it is how the app
@@ -617,6 +672,8 @@ export function useCfxDevice() {
     runAction,
     clearTraffic,
     startRun,
+    cancelRun,
+    setRunPaused,
     acknowledgeFinishedRun,
     refreshRunFolder,
     runFolder,

@@ -10,7 +10,9 @@ log: the only artifact in which the instrument, rather than the PC, says what ra
 > **Status:** structurally complete — every line, every field, and the numbering rules are
 > established against 48 runs. Two things are *not* resolved: the fourth step-line column (§7,
 > labelled a ramp time but rarely behaving like one) and the encodings the error line uses when
-> something goes wrong (§6) — every sample in the corpus is a clean, completed run.
+> something goes wrong (§6). On that second point one thing *is* now settled, and it is a negative
+> result worth knowing before trusting this file: **a run aborted over USB produces a report whose
+> error line is indistinguishable from a completed run's** — see §6.
 >
 > **Corpus:** 47 distinct `.alf` files carried by 50 `.zpcr` archives (2019-05-16 → 2026-07-26,
 > one CFX96, base `CT019138`, block `RN050773`), plus one pulled off the wire in the `usb-run`
@@ -163,14 +165,28 @@ Eight fields:
 | 7 | emulation mode | `None` | |
 | 8 | critical error occurred | `False` | |
 
-**All 47 archived runs and the captured one are clean**: every field above is identical in every
-sample. So the *shape* is certain and the *failure encodings are not* — how a code list renders
-with codes in it, what an aborted run's summary text says, and whether field 5 is redundant with a
-non-empty field 2 are all unknown. A reader should test flags for the literal `True` and treat
-anything else as false, and should not assume field 2 stays parseable as an integer.
+**Every run in the corpus is clean**: every field above is identical in every sample. So the
+*shape* is certain and the *failure encodings are not* — how a code list renders with codes in it,
+and whether field 5 is redundant with a non-empty field 2, are unknown. A reader should test flags
+for the literal `True` and treat anything else as false, and should not assume field 2 stays
+parseable as an integer.
 
-The flags are the natural place to look before trusting a run's data: a report saying
-`power failed` or `user aborted` describes a run whose later cycles may not mean what they seem.
+> **Do not read a clean error line as "this run completed."** Measured against a run aborted from
+> the host partway through its second thermal step (`usb.md` §7.8): **field 4, user aborted, reads
+> `False`**, the summary text is the ordinary ` No errors reported. `, and the sentinel line (§7.3)
+> still says `Protocol completed.` The whole report is byte-identical in shape to a clean run's —
+> the only trace of the abort is that the step log stops early. So the flags are a *one-way*
+> signal: `True` means something went wrong, `False` means nothing more than "this file doesn't
+> say otherwise".
+>
+> What *does* set field 4 is therefore still open. A stop from the instrument's own touchscreen and
+> an instrument-initiated stop after a fault are both plausible and neither has been captured; the
+> flag may exist for a mechanism the USB abort simply doesn't go through.
+>
+> **To tell whether a run finished, count its plate reads** against what its protocol asks for —
+> `usb.md` §7.8 step 6, implemented by `runCompleteness` in `packages/core/src/runFolder.ts`. That
+> is the only durable evidence a run stopped short. The one live signal, `STATUS?`'s cancelled bit
+> (`usb.md` §3.2), never reaches a file.
 
 ## 7. Lines 4+ — the executed-step log
 
@@ -223,7 +239,12 @@ The last line is always `-1*0*0*.00*0*0*<timestamp> <phrase>*False*0*` — repea
 temperature and hold both the literal `0`, and the timestamp field carrying a trailing phrase. In
 all 48 reports the phrase is `Protocol completed.` and the timestamp equals the header's end time.
 A parser should detect the end of the log by `step == 0` rather than by matching the phrase, and
-should expect other phrases for runs that didn't complete (none are in the corpus).
+should expect other phrases for runs that didn't complete.
+
+**A run that didn't complete still says `Protocol completed.`** — measured on a USB abort
+(`usb.md` §7.8), where the phrase is unchanged and the timestamp is the moment of the cancel. The
+phrase is not a verdict; only the step log's early stop gives the abort away, and §6 says how to
+read that.
 
 ### 7.4 Timestamps mark the *start* of a step
 

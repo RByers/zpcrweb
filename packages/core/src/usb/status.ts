@@ -60,7 +60,8 @@ export interface CfxStatusFlags {
   /** Bit 0 — the block has reached the current step's setpoint. The cleanest "has it arrived"
    * signal in the protocol, better than comparing the block temp against a parsed setpoint. */
   atTarget: boolean;
-  /** Bit 1 — paused. Mirrors field 13. */
+  /** Bit 1 — paused. The pause indicator to use; field 13 nominally reports the same state, but
+   * see `usb.md` §7.9 and {@link isPaused}. */
   paused: boolean;
   /** Bit 2 — a fourth-block flag, meaningless on a CFX96 (one block). */
   fourthBlock: boolean;
@@ -73,7 +74,12 @@ export interface CfxStatusFlags {
   protocolRunning: boolean;
   /** Bit 6 — block active. */
   blockActive: boolean;
-  /** Bit 7 — protocol cancelled. */
+  /**
+   * Bit 7 — protocol cancelled. **Measured**: a run aborted over USB reported `160`
+   * (`0x80 | 0x20`) where a normal completion reports `32`, so this bit is exactly what tells
+   * "the run I stopped" from "the run that finished while I was deciding" (`usb.md` §3.2, §7.8).
+   * It lives only in the status register — nothing in the run's own files records the abort.
+   */
   cancelled: boolean;
   /** The raw byte value, 0–255. */
   raw: number;
@@ -160,7 +166,12 @@ export interface CfxStatus {
   rampElapsedS: number | null;
   /** Field 12 — seconds held at setpoint in this step. */
   holdElapsedS: number | null;
-  /** Field 13 — paused flag; mirrors `flags.paused`. */
+  /**
+   * Field 13 — a dedicated pause field. **Don't read this on its own** (`usb.md` §7.9): it is
+   * nominally the same state as `flags.paused` but has never been observed non-zero, and nothing
+   * establishes that it tracks the bit in practice. Use {@link isPaused}, which is §7.9's safe
+   * reading — either source counts.
+   */
   paused: boolean;
   /** Field 14 — `:`-separated block error codes, empty when there are none. */
   errors: string[];
@@ -235,6 +246,24 @@ export function parseStatus(res: CfxResponse): CfxStatus {
     fields: f,
     raw: res.raw,
   };
+}
+
+/**
+ * Is this run suspended? `usb.md` §7.9's safe reading: **status-register bit 1 or field 13**,
+ * either one.
+ *
+ * Bit 1 is the indicator a client should trust — it is the one §3.2 names — but field 13 is a
+ * dedicated pause field in the same record and neither has ever been observed set, so nothing
+ * here can say which leads if they disagree. Treating either as paused is the reading that can't
+ * show a paused run as running, which is the error that matters: a stop button pressed on a
+ * paused run takes a different path (§7.8 step 2).
+ *
+ * Note that an *armed* run — one started with `<remote start>` set, waiting for someone to press
+ * Start at the touchscreen — also reports itself paused (§7.9), and is indistinguishable from
+ * this at the wire. A caller tells the two apart by remembering what it asked for.
+ */
+export function isPaused(status: CfxStatus): boolean {
+  return status.flags.paused || status.paused;
 }
 
 /** One entry of `RTSTATUS?`'s fault list (`usb.md` §3.3) — a hex code with an optional
