@@ -12,7 +12,9 @@
  */
 
 import { zipSync } from "fflate";
-import { parseRunInfoRaw } from "./runinfo.js";
+import { runFileBaseName } from "./experiment.js";
+import { parseRunInfo, parseRunInfoRaw } from "./runinfo.js";
+import { parseZpcrwebSettingsJson, ZPCRWEB_SETTINGS_NAME } from "./zpcrwebSettings.js";
 
 const RUNINFO_NAME = "RunInfo.xml";
 const textDecoder = new TextDecoder("utf-8");
@@ -72,15 +74,55 @@ function baseName(path: string): string {
   return cut < 0 ? path : path.slice(cut + 1);
 }
 
+/** What a caller knows about the run being assembled that the folder itself cannot say. */
+export interface RunFolderNaming {
+  /**
+   * The run's name as the app currently holds it. Only used to confirm that {@link fileName}
+   * describes *this* run — see {@link zpcrNameFromRunFiles}.
+   */
+  experimentName?: string;
+  /** The file base name the user chose for this run (no extension). */
+  fileName?: string;
+}
+
+/** Strip a `.zpcr` extension and any path, so a caller may pass either form. */
+function fileBase(name: string): string {
+  return baseName(name.trim()).replace(/\.zpcr$/i, "");
+}
+
 /**
- * The name the run calls itself: `RunInfo.xml`'s `DataFile`, which is already the `.zpcr` name
- * CFX Manager would save this run under (e.g. `20260720_211747_CT019138_Luna_noRT.zpcr`) — so a
- * run pulled off the instrument lands under the same name as the same run exported by hand.
- * Falls back to `CurrentRun.zpcr` when the field is absent or empty.
+ * What to call the `.zpcr` this folder becomes, in three rungs.
+ *
+ * 1. **The name the user chose**, `naming.fileName` — but only for a run this app started and is
+ *    still staging, which is what the `zpcrweb.json` deposited into the run folder
+ *    (`usb/runPlan.ts`) attests: nothing else writes that entry there, and its `experimentName`
+ *    matching `naming.experimentName` is what says the staged run and the folder are the same
+ *    run rather than a new name typed over a run still finishing.
+ * 2. **The deposited name**, `<YYYYMMDD>-<name>` via {@link runFileBaseName} — the same
+ *    derivation the Instrument view offers as its default, so a browser reloaded mid-run (which
+ *    forgets what was typed) still lands the file under the name the run was started with.
+ *    Dated from the run's own `RunStartTime` when that parses, so the name says when the run
+ *    happened rather than when it was pulled.
+ * 3. **The name the run calls itself**: `RunInfo.xml`'s `DataFile`, already the `.zpcr` name CFX
+ *    Manager would save this run under (e.g. `20260720_211747_CT019138_Luna_noRT.zpcr`), so a run
+ *    started at the touchscreen or by Manager lands under the same name as the same run exported
+ *    by hand. Falls back to `CurrentRun.zpcr` when the field is absent or empty.
  */
-export function zpcrNameFromRunFiles(files: Record<string, Uint8Array>): string {
+export function zpcrNameFromRunFiles(
+  files: Record<string, Uint8Array>,
+  naming?: RunFolderNaming,
+): string {
   const runInfo = files[RUNINFO_NAME];
   if (runInfo === undefined) return "CurrentRun.zpcr";
+
+  const deposited = depositedName(files);
+  if (deposited) {
+    const chosen = fileBase(naming?.fileName ?? "");
+    if (chosen && naming?.experimentName?.trim() === deposited) return `${chosen}.zpcr`;
+    const derived = runFileBaseName(deposited, runStartDate(runInfo));
+    if (derived) return `${derived}.zpcr`;
+  }
+
   let dataFile = "";
   try {
     dataFile = parseRunInfoRaw(textDecoder.decode(runInfo))["DataFile"] ?? "";
@@ -92,6 +134,26 @@ export function zpcrNameFromRunFiles(files: Record<string, Uint8Array>): string 
   return /\.zpcr$/i.test(name) ? name : `${name}.zpcr`;
 }
 
+/** The run name this app deposited into the folder when it started the run, or `""`. */
+function depositedName(files: Record<string, Uint8Array>): string {
+  const settings = files[ZPCRWEB_SETTINGS_NAME];
+  if (settings === undefined) return "";
+  try {
+    return parseZpcrwebSettingsJson(textDecoder.decode(settings))?.experimentName ?? "";
+  } catch {
+    return "";
+  }
+}
+
+/** When the run started, for the derived name's date stamp; today when the field won't parse. */
+function runStartDate(runInfo: Uint8Array): Date {
+  try {
+    return parseRunInfo(textDecoder.decode(runInfo)).runStartDate ?? new Date();
+  } catch {
+    return new Date();
+  }
+}
+
 /**
  * Zip a run directory's files into `.zpcr` bytes, named after the run (see
  * {@link zpcrNameFromRunFiles}). The result parses straight back through `parseZpcr`.
@@ -100,12 +162,15 @@ export function zpcrNameFromRunFiles(files: Record<string, Uint8Array>): string 
  * reject the result anyway, so failing here names the actual problem — an incomplete set of
  * files — rather than handing back an archive that cannot be opened.
  */
-export function zpcrFromRunFiles(files: Record<string, Uint8Array>): {
+export function zpcrFromRunFiles(
+  files: Record<string, Uint8Array>,
+  naming?: RunFolderNaming,
+): {
   name: string;
   bytes: Uint8Array;
 } {
   if (files[RUNINFO_NAME] === undefined) {
     throw new Error(`Can't assemble a .zpcr: no ${RUNINFO_NAME} among the run's files`);
   }
-  return { name: zpcrNameFromRunFiles(files), bytes: zipSync(files) };
+  return { name: zpcrNameFromRunFiles(files, naming), bytes: zipSync(files) };
 }

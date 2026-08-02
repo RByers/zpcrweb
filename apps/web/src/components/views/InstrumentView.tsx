@@ -11,7 +11,7 @@
  * (including Start run), and the content column stacks the staged run, the file browser and the
  * traffic console.
  */
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { planRun } from "@zpcrweb/core";
 import { InstrumentRail } from "../instrument/InstrumentRail";
 import { InstrumentRun } from "../instrument/InstrumentRun";
@@ -19,6 +19,7 @@ import { InstrumentFiles } from "../instrument/InstrumentFiles";
 import { InstrumentConsole } from "../instrument/InstrumentConsole";
 import type { CfxDeviceHandle } from "../../state/useCfxDevice";
 import type { RunWatchState } from "../../state/useRunWatch";
+import type { RunNaming } from "../../state/useRunNaming";
 import type { StagedRun } from "../../lib/protocolSource";
 
 export function InstrumentView({
@@ -26,6 +27,7 @@ export function InstrumentView({
   staged,
   instrument,
   runWatch,
+  naming,
 }: {
   onOpenRun: (file: File) => Promise<void> | void;
   /** The run the file bar's selection currently describes; see {@link InstrumentRun}. */
@@ -34,11 +36,14 @@ export function InstrumentView({
   instrument: CfxDeviceHandle;
   /** The follow-the-running-run machinery, likewise owned by `App`. */
   runWatch: RunWatchState;
+  /**
+   * What the run being staged is called, and what its file will be called
+   * (`state/useRunNaming.ts`). Owned by `App` for the same reason the two above are: the run
+   * watcher reads it, and it must survive leaving this view.
+   */
+  naming: RunNaming;
 }) {
-  // The name for the run being staged. Held here rather than in `InstrumentRun` so it survives that
-  // panel's re-renders, and because it is an input to the plan below — it is part of the staged
-  // run, not of the panel that displays it.
-  const [experimentName, setExperimentName] = useState("");
+  const { experimentName } = naming;
 
   /**
    * The staged run reduced to exactly what would be sent — commands, files, and the checks that
@@ -90,8 +95,7 @@ export function InstrumentView({
       <div className="instrument__content">
         <InstrumentRun
           staged={staged}
-          name={experimentName}
-          onNameChange={setExperimentName}
+          naming={naming}
           plan={plan}
           status={instrument.status}
           pending={instrument.runPending}

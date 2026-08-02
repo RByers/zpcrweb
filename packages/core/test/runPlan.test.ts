@@ -192,8 +192,30 @@ describe("planRun", () => {
       protocolName: "Luna noRT",
       plateName: "S183-S185 RVP.pltd",
     }).uploads;
-    expect(uploads.map((u) => u.name)).toEqual(["Luna noRT.prcl.txt", "S183-S185 RVP.plt.csv"]);
+    expect(uploads.map((u) => u.name)).toEqual([
+      "Luna noRT.prcl.txt",
+      "S183-S185 RVP.plt.csv",
+      "zpcrweb.json",
+    ]);
     expect(uploads[0]!.path).toBe("\\Storage Card\\CurrentRun\\Luna noRT.prcl.txt");
+  });
+
+  /** The one place the run's own name is deposited: what the archive will say it is called. */
+  it("deposits the run's name as a zpcrweb.json, unsanitized and only when there is one", () => {
+    const named = planRun({
+      runDefinition: ALL_CHANNELS,
+      plate: plateUsing([1]),
+      name: "S183-S185 RVP",
+    }).uploads;
+    const settings = named.find((u) => u.name === "zpcrweb.json");
+    expect(settings?.path).toBe("\\Storage Card\\CurrentRun\\zpcrweb.json");
+    expect(JSON.parse(new TextDecoder().decode(settings!.bytes))).toMatchObject({
+      version: 1,
+      experimentName: "S183-S185 RVP",
+    });
+
+    const unnamed = planRun({ runDefinition: ALL_CHANNELS, plate: plateUsing([1]) }).uploads;
+    expect(unnamed.some((u) => u.name === "zpcrweb.json")).toBe(false);
   });
 
   it("falls back to the plate's own identity, then to generic names", () => {
@@ -205,10 +227,15 @@ describe("planRun", () => {
     expect(identified.map((u) => u.name)).toEqual([
       "protocol.prcl.txt",
       "Qualification_Plate_96.plt.csv",
+      "zpcrweb.json",
     ]);
 
     const anonymous = plan().uploads;
-    expect(anonymous.map((u) => u.name)).toEqual(["protocol.prcl.txt", "plate.plt.csv"]);
+    expect(anonymous.map((u) => u.name)).toEqual([
+      "protocol.prcl.txt",
+      "plate.plt.csv",
+      "zpcrweb.json",
+    ]);
   });
 
   it("sanitizes an upload name the way it sanitizes the run's", () => {

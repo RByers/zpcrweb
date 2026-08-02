@@ -26,7 +26,9 @@
  *
  * When a listing turns out to differ from the last one, the folder is pulled and zipped into a
  * `.zpcr` exactly as the Instrument view's **Open run** button does, and handed to the store,
- * which replaces the previous snapshot under the same name.
+ * which replaces the previous snapshot under the same name. What that name is comes from
+ * `runFolder.ts`: the file name typed in the Instrument view for a run this app started, and
+ * otherwise whatever the run itself says it is called.
  *
  * Three things make that affordable enough to do every cycle:
  *
@@ -125,6 +127,13 @@ export function useRunWatch(
    * unconditionally. Returns the new file's id.
    */
   onRun: (file: File, previousId: string | null, freshStart: boolean) => Promise<string | null>,
+  /**
+   * What the Instrument view's two name fields currently hold (`state/useRunNaming.ts`). Only the
+   * archive's *name* depends on it, and only for a run this app started and is still staging —
+   * `zpcrFromRunFiles` decides that from the `zpcrweb.json` in the folder, so a run started at
+   * the touchscreen keeps the name the instrument gave it whatever is typed here.
+   */
+  naming?: { experimentName: string; fileName: string },
 ): RunWatchState {
   const [watching, setWatching] = useState(true);
   const [note, setNote] = useState<string | null>(null);
@@ -142,6 +151,9 @@ export function useRunWatch(
   // that, so they read the latest through refs.
   const onRunRef = useRef(onRun);
   onRunRef.current = onRun;
+  // Likewise read through a ref: a keystroke in the name field must not restart the poll.
+  const namingRef = useRef(naming);
+  namingRef.current = naming;
   const fileIdRef = useRef<string | null>(null);
   fileIdRef.current = fileId;
 
@@ -184,7 +196,7 @@ export function useRunWatch(
       const fresh = freshStart.current;
       freshStart.current = false;
       try {
-        const { name, bytes } = zpcrFromRunFiles(files);
+        const { name, bytes } = zpcrFromRunFiles(files, namingRef.current);
         const id = await onRunRef.current(new File([bytes.slice()], name), fileIdRef.current, fresh);
         setFileId(id);
         const reads = names.filter((n) => /\.Plateread$/i.test(n)).length;

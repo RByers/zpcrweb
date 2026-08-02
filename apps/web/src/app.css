@@ -3563,8 +3563,9 @@ summary.instrument__panelhead {
   max-height: 420px;
   overflow: auto;
 }
-/* The run's name — the one part of a staged run that is typed rather than selected from a file,
-   so it gets a real labelled field rather than the read-only headings the two halves use. */
+/* The run's name and its file's name — the two parts of a staged run that are typed rather than
+   selected from a file, so they get real labelled fields rather than the read-only headings the
+   two halves use. Stacked, with a fixed label column so the inputs line up under each other. */
 .devrun__name {
   display: flex;
   align-items: baseline;
@@ -3572,11 +3573,19 @@ summary.instrument__panelhead {
   padding: 10px 14px 0;
 }
 .devrun__namelabel {
+  flex: 0 0 auto;
+  min-width: 13ch;
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: var(--ink-muted);
   white-space: nowrap;
+}
+/* The extension the app adds, shown next to the field so the name reads as a whole file name
+   without the field having to accept (or validate) the suffix itself. */
+.devrun__nameext {
+  font-size: 11px;
+  color: var(--ink-muted);
 }
 .devrun__nameinput {
   flex: 1 1 auto;

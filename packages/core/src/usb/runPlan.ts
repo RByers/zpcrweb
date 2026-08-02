@@ -30,8 +30,18 @@
  * called after the protocol and the plate they are (`PlanRunOptions.protocolName`/`plateName`),
  * and the run's name travels by the channel §7.3 gives it — `RemoteRun`, `STATUS?` and the
  * `.alf` report — rather than being stamped onto files it doesn't own.
+ *
+ * **A third file carries the name itself.** `RemoteRun`'s name operand reaches the instrument's
+ * own filenames and nothing else — no Bio-Rad format has a field for what a run is *called*
+ * (`experiment.ts`) — so a named run also deposits a `zpcrweb.json` saying so, and the archive
+ * assembled from the folder states its own name from then on.
  */
 import type { PlateDefinition } from "../pltd.js";
+import {
+  formatZpcrwebSettings,
+  ZPCRWEB_SETTINGS_NAME,
+  ZPCRWEB_SETTINGS_VERSION,
+} from "../zpcrwebSettings.js";
 import { plateToCsv } from "../plateCsv.js";
 import { formatRunDefinitionText } from "../prcl.js";
 import {
@@ -372,6 +382,33 @@ export function planRun(options: PlanRunOptions): RunPlan {
       bytes: new TextEncoder().encode(plateToCsv(plate)),
     },
   ];
+
+  // The run's *name* rides along too, as a `zpcrweb.json` (`zpcrwebSettings.ts`) — the one field
+  // of it that is known before a single cycle has run. Nothing on the instrument reads the entry;
+  // its job is to be in the folder when the folder is pulled back, so the archive states what the
+  // run is called instead of leaving it to be guessed from a filename the firmware composed. That
+  // makes the name survive a browser reload, a different machine, or a rename on disk — the same
+  // reason a name typed in Overview is written into the archive rather than kept in IndexedDB.
+  //
+  // Only when there is a name: an unnamed run has nothing to say, and an entry asserting the
+  // protocol's name as the experiment's would be worse than none (`experiment.ts` would then
+  // stop deriving one).
+  const experimentName = (options.name ?? "").trim();
+  if (experimentName) {
+    // No `updatedAt`: `planRun` is pure — same inputs, same bytes — and a timestamp here would
+    // also be the plan's build time rather than the run's, which `RunInfo.xml` already records.
+    const settings = formatZpcrwebSettings({
+      version: ZPCRWEB_SETTINGS_VERSION,
+      generator: "zpcrweb",
+      experimentName,
+    });
+    uploads.push({
+      name: ZPCRWEB_SETTINGS_NAME,
+      path: `${CFX_CURRENT_RUN_DIR}\\${ZPCRWEB_SETTINGS_NAME}`,
+      bytes: new TextEncoder().encode(settings),
+    });
+  }
+
   for (const upload of uploads) assertCommandArgument("upload path", upload.path);
 
   // Eight positional operands, defined one by one in `usb.md` §7.3. Sent exactly as the capture

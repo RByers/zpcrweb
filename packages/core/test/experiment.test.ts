@@ -8,6 +8,7 @@ import {
   parseZpcr,
   parseZpcrwebSettingsJson,
   resolveExperimentName,
+  runFileBaseName,
 } from "../src/index.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -43,6 +44,28 @@ describe("deriveExperimentName", () => {
     expect(deriveExperimentName("20260726.zpcr")).toBe("20260726");
     expect(deriveExperimentName("20260726_211747.zpcr")).toBe("20260726_211747");
     expect(deriveExperimentName("")).toBe("");
+  });
+
+  it("reads back the dash-joined date this project writes", () => {
+    expect(deriveExperimentName("20260802-S183-S185_RVP.zpcr")).toBe("S183-S185 RVP");
+  });
+});
+
+describe("runFileBaseName", () => {
+  const aug2 = new Date(2026, 7, 2, 9, 30);
+
+  it("dates the name and writes spaces as underscores", () => {
+    expect(runFileBaseName("S183-S185 RVP", aug2)).toBe("20260802-S183-S185_RVP");
+    expect(runFileBaseName("  Luna   noRT  ", aug2)).toBe("20260802-Luna_noRT");
+  });
+
+  it("round-trips through deriveExperimentName", () => {
+    expect(deriveExperimentName(`${runFileBaseName("Luna noRT", aug2)}.zpcr`)).toBe("Luna noRT");
+  });
+
+  it("replaces what a filename or a RemoteRun operand can't carry, and answers nothing with ''", () => {
+    expect(runFileBaseName('RVP "fast"/v2', aug2)).toBe("20260802-RVP_fast_v2");
+    expect(runFileBaseName("   ")).toBe("");
   });
 });
 

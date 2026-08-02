@@ -888,7 +888,7 @@ Eight positional operands, comma-separated, each quoted:
 | 1 | `<block>` | `A` or `B` | which block. A base unit carries at most two, lettered `A` and `B`; `BLOCKCOUNT?` says how many exist, and a CFX96 has one, so `"A"`. This is the same letter `ERRORLIST A` takes |
 | 2 | `<lid on>` | `True`/`False` | **run the heated lid.** `HOTLID` (§7.2) sets its temperature; this decides whether it is used at all. `STATUS?`'s run descriptor echoes it as the third element — `"SINGLETE",CALC,ON` while running, flipping to `OFF` when the run ends and the lid heater is released |
 | 3 | `<remote start>` | `True`/`False` | **start it at the instrument, not from here.** `False` (this capture) means run *now* — measured below. `True` is the language's "prepare the run and wait for someone to press start on the instrument's own touchscreen", the front panel's counterpart to the host's start; it is what a client declines by sending `False` |
-| 4 | `<run name>` | string | the run's name, and the only place it is given — `PROTOCOL`'s operand is not it (§7.2). It reaches `STATUS?` (uppercased and truncated to 8 characters: `singletest` → `"SINGLETE"`) and the report's filename in full (`…_SINGLETEST.alf`), so keep it to characters that are safe in a filename |
+| 4 | `<run name>` | string | the run's name, and the only place it is given — `PROTOCOL`'s operand is not it (§7.2). It reaches `STATUS?` (uppercased and truncated to 8 characters: `singletest` → `"SINGLETE"`) and the report's filename in full (`…_SINGLETEST.alf`), so keep it to characters that are safe in a filename. Filenames are *all* it reaches: nothing in the run's own metadata records it, which is why this project also deposits it as a `zpcrweb.json` (§7.4) |
 | 5 | `<user>` | string | the operator, recorded in the run report. Free text; `admin` here |
 | 6 | `<sample ID>` | string | free-text sample/plate identifier, empty in this capture |
 | 7 | `<sierra mode>` | `True`/`False` | **run autonomously.** `True` — the instrument owns the whole run, driving its own optics at each `PLATEREAD` step and writing each `Read0000N.Plateread` to its own storage, which is why the host never speaks to the optical head (§6) and why the run survives the host going away: everything it produced is on the instrument to be collected whenever. `False` is the non-autonomous mode, in which the optical head is *not* the instrument's own business — and driving it is the gap §6 describes, so a client has no reason to ask for it |
@@ -947,6 +947,23 @@ later zipped into a `.zpcr` (§7.6), the archive reopens with everything the PC 
 `GlobData.xml` is provenance in the same spirit. **A client that only wants to run a protocol and
 read the fluorescence can skip this phase entirely**; a client that wants the run to open later as
 a complete experiment should not.
+
+**What this project deposits instead** (`packages/core/src/usb/runPlan.ts`, `planRun()`): the same
+idea, three files, none of them encrypted.
+
+| # | File | What it is |
+|---|---|---|
+| 1 | `<protocol>.prcl.txt` | the protocol as the plaintext run definition of `prcl.md` §3.1 |
+| 2 | `<plate>.plt.csv` | the plate map as this project's plate CSV |
+| 3 | `zpcrweb.json` | what the run is *called* (`zpcrweb-json.md`), written only when it has a name |
+
+The first two are named after the protocol and the plate themselves, not after the run: those are
+reused across runs and arrive with names of their own. The third exists because operand 4 of §7.3
+is the only channel a run's name has, and it reaches nothing but the instrument's composed
+filenames — no field of `RunInfo.xml` records what a run is called. Depositing the name means the
+`.zpcr` the folder becomes states it, so it survives a reload, a rename on disk, or another
+machine. `RunInfo.xml` and `GlobData.xml` are not written: the instrument writes its own
+`RunInfo.xml`, and the host inventory describes a PC application this isn't.
 
 **The upload checksum is not a CRC** — it is a byte-interleaved XOR, and it reproduces all four
 uploads exactly:
@@ -1088,7 +1105,8 @@ plate reads:
    first.
 7. Optionally deposit `GlobData.xml`/`.pltd`/`RunInfo.xml`/`.prcl` into
    `\Storage Card\CurrentRun\` (§7.4) if the finished run should be a complete experiment rather
-   than just fluorescence. Skip it otherwise.
+   than just fluorescence — or this project's plaintext equivalents, plus a `zpcrweb.json` naming
+   the run. Skip it otherwise.
 8. Watch `STATUS?` (§7.5). Each time the current step leaves a `PLATEREAD`, list the run directory
    with the mandatory `GETFILESLEN`+`LISTALLFILES` pair (§5, keep the two adjacent) and pull the
    new `Read0000N.Plateread` with `GETFILESIZE`+`GETFILE`. Decode with the existing

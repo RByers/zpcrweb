@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useZpcrStore } from "./state/useZpcrStore";
 import { useCfxDevice } from "./state/useCfxDevice";
 import { useRunWatch } from "./state/useRunWatch";
+import { useRunNaming } from "./state/useRunNaming";
 import { useRunStaging, stagingRole } from "./state/useRunStaging";
 import { EMPTY_STAGED_RUN, resolveStagedRun } from "./lib/protocolSource";
 import { usePltdPassword } from "./state/pltdPassword";
@@ -120,6 +121,12 @@ export function App() {
    * always activates regardless: the run the instrument just started is what someone watching it
    * begin wants on screen, and there's no previous view of *this* run to preserve.
    */
+  /**
+   * The two names the Instrument view collects for the run it would start. Held here rather than
+   * in the view because the run watcher below needs the file name — and because leaving the
+   * Instrument view for a moment must not forget what was typed.
+   */
+  const runNaming = useRunNaming();
   const runWatch = useRunWatch(
     instrument,
     useCallback(
@@ -129,6 +136,7 @@ export function App() {
       },
       [store],
     ),
+    runNaming,
   );
   // Memoized, and skipped entirely off the Instrument view: resolving decodes a run's plate
   // and, for a staged `.plt.csv`, re-parses it against the run's calibration set — real work to
@@ -357,6 +365,7 @@ export function App() {
             staged={staged}
             instrument={instrument}
             runWatch={runWatch}
+            naming={runNaming}
           />
         </main>
         {store.error && <div className="app__error mono">{store.error}</div>}

@@ -295,9 +295,16 @@ The instrument keeps a run in `\Storage Card\CurrentRun` as loose files — `Run
 those entries, so `zpcrFromRunFiles(files)` is a zip and nothing else: no conversion, no
 synthesis, and the result parses straight back through `parseZpcr` with every entry byte-for-byte
 what came off the wire (`packages/core/test/runFolder.test.ts` checks that against a committed
-sample). The archive is named after `RunInfo.xml`'s `DataFile`, which is already the name CFX
-Manager would have saved the same run under, and the call throws when `RunInfo.xml` is missing
-rather than handing back an archive `parseZpcr` would reject.
+sample). The call throws when `RunInfo.xml` is missing rather than handing back an archive
+`parseZpcr` would reject.
+
+Naming the archive takes three rungs, in `zpcrNameFromRunFiles`. A run *this app started* has its
+own `zpcrweb.json` in the folder (`usb/runPlan.ts` deposits it — nothing else writes one there),
+and that both states the run's name and identifies the folder as ours: such a run takes the file
+name its caller chose, if that caller is still staging the same run, and otherwise
+`<YYYYMMDD>-<name>` via `experiment.ts`'s `runFileBaseName`, dated from the run's own start. Any
+other run — one begun at the touchscreen, or by CFX Manager — keeps `RunInfo.xml`'s `DataFile`,
+which is already the name Manager would have saved it under.
 
 This is what lets the web app's Instrument view open a run off a connected instrument as an ordinary
 file (see [`apps/web/ARCHITECTURE.md`](./apps/web/ARCHITECTURE.md)).
@@ -380,7 +387,9 @@ belong to the run, not to whichever browser opened it, because they are what dec
 reports. The entry carries one thing that isn't a parameter: `experimentName`, what the run is
 *called*. No CFX format has a field for one (`RunInfo.xml`'s name-ish keys are empty on every
 sample; the instrument encodes the name into the filename instead), so `experiment.ts` resolves
-stored name → the format's own → a derivation from the filename. `writeZpcrwebSettings` adds them to the archive as a `zpcrweb.json` entry;
+stored name → the format's own → a derivation from the filename (`deriveExperimentName`, whose
+inverse `runFileBaseName` composes the filename a named run should be saved under).
+`writeZpcrwebSettings` adds them to the archive as a `zpcrweb.json` entry;
 `parseZpcrwebSettings` reads them back through the already-decompressed `Zpcr.archive`, total and
 field-by-field so a hand-edited or newer document degrades instead of failing. Full schema and
 rationale in [`zpcrweb-json.md`](./zpcrweb-json.md); the app-side scheduling (why writes are

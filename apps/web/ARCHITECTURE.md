@@ -1942,13 +1942,31 @@ command lines, the `RemoteRun` line, the files to deposit — and `CfxDevice.sta
 to both the panel and the rail, so the warnings shown between the two halves and the state of the
 Start button can never disagree.
 
-**The name typed above the staged run names the run, and nothing else.** It reaches `planRun()`
-as the run name, i.e. `RemoteRun`'s fourth operand (`usb.md` §7.3) — which is what `STATUS?` echoes
-and what the `.alf` report is filed under. The two deposited files keep the names of the things
-they *are*: the protocol's own name, and (for an overridden plate) the plate file's, else what the
-plate says about itself via `identityKey`. Protocols and plates are reused across runs and carry
-their own identities; an experiment name belongs to one run, and stamping it on both copies would
-overwrite that identity for no gain.
+**Two names are typed above the staged run, and they go to different places**
+(`state/useRunNaming.ts`, held by `App` because the run watcher needs one of them and both must
+survive leaving the view).
+
+The **experiment name** is the run's identity. It reaches `planRun()` as the run name, i.e.
+`RemoteRun`'s fourth operand (`usb.md` §7.3) — what `STATUS?` echoes and what the `.alf` report is
+filed under — *and* it is deposited into the run folder as a `zpcrweb.json` carrying nothing but
+`experimentName` (§7.4, `zpcrweb-json.md` §7). That second channel is the load-bearing one: the
+operand reaches the instrument's composed filenames and nothing else, and no field of
+`RunInfo.xml` records what a run is called, so without the deposit a name typed here would be gone
+by the time the run's archive came back. With it, the pulled `.zpcr` states its own name through
+the ordinary seeding path, and keeps it across a reload, a rename, or another machine.
+
+The **file name** never leaves the browser: it is what the `.zpcr` this app assembles is called.
+It exists because the instrument's own naming (`<date>_<time>_<serial>_<NAME>`, or `<date>_<NAME>`
+from the touchscreen) is not addressable over USB, which is how a run named here used to arrive in
+the file bar named after its protocol. It is offered as `<YYYYMMDD>-<name with spaces as
+underscores>` (core's `runFileBaseName`) and follows the experiment name until it is typed over;
+clearing it resumes following.
+
+The two **deposited** files keep the names of the things they *are*: the protocol's own name, and
+(for an overridden plate) the plate file's, else what the plate says about itself via
+`identityKey`. Protocols and plates are reused across runs and carry their own identities; an
+experiment name belongs to one run, and stamping it on both copies would overwrite that identity
+for no gain.
 
 The order is `usb.md` §7's, not the one §5's upload machinery suggests: the protocol is typed in as
 ASCII directives, `RemoteRun` starts it, and the files are deposited **afterwards**, into a run
@@ -2007,7 +2025,19 @@ the two listings are identical, so only the live transition tells them apart —
 `freshStart` flag below rides on.
 
 Each changed listing is pulled and zipped with `zpcrFromRunFiles`, then handed to `store.addFiles`
-— the same path a drop takes. Three economies make that affordable once a cycle:
+— the same path a drop takes.
+
+**What the snapshot is called** is decided by `core`'s `runFolder.ts`, in three rungs: the file
+name typed in the Instrument view, then `<YYYYMMDD>-<experiment name>` derived from the folder's
+own deposited `zpcrweb.json`, then `RunInfo.xml`'s `DataFile` as before. The first two apply only
+to a folder carrying that deposit — i.e. a run *this app started* — so a run begun at the
+touchscreen keeps the name the instrument gave it no matter what is typed here, and the first rung
+additionally requires the deposited name to still match what is staged, so a name typed for the
+*next* run cannot rename the one still finishing. The second rung is what a reloaded browser falls
+back to, and it dates the name from the run's own `RunStartTime` rather than from the moment of
+the pull.
+
+Three economies make the once-a-cycle refresh affordable:
 
 - **Only uncached names are fetched.** 28 of a `CurrentRun`'s ~40 files are the `.Dcal` set and
   never change during a run; re-pulling them every cycle would push megabytes over a

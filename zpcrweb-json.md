@@ -168,3 +168,32 @@ its content from live state via `formatZpcrwebSettings(zpcrwebFromAnalysis(setti
 serializer the writer uses, and lists the entry even for a file whose archive has none. It is
 byte-identical to what a download would contain except for `updatedAt`, which is stamped at write
 time.
+
+## 7. The other writer: deposited at the start of a run
+
+One document is written before any of the above applies — before the run it describes has any
+data at all. When the Instrument view starts a run over USB, `planRun()`
+(`packages/core/src/usb/runPlan.ts`) deposits a `zpcrweb.json` into the instrument's run folder
+alongside the protocol and the plate (`usb.md` §7.4), carrying `experimentName` and nothing else.
+
+It is there because `RemoteRun`'s name operand (`usb.md` §7.3) reaches the instrument's *composed
+filenames* and nothing else — no field of `RunInfo.xml` records what a run is called — so without
+this the name typed before a run would be lost the moment the run's archive was pulled back, and
+§1.1's fallback would derive a name from a filename the firmware composed out of the protocol's
+name. With it, the archive assembled from that folder states its own name, and does so even if
+the browser is reloaded, the app is reopened on another machine, or the file is renamed.
+
+Three properties keep it from colliding with §5–§6:
+
+- **Name only.** No `analysis` — there is nothing to analyze yet — and no `updatedAt`, so
+  `planRun` stays pure (same run, same bytes).
+- **Only when named.** An unnamed run deposits nothing, which is §3's "absent means nobody has
+  named this run", not an empty-string name.
+- **Read exactly like any other.** The pulled archive goes through `addFiles` and the ordinary
+  seeding path, so from the app's point of view it is simply a file that arrived already named.
+  It is then the app's live state, and §5–§6 apply unchanged from there.
+
+The deposited name has one further use on the way back in: it is what tells
+`zpcrNameFromRunFiles` (`packages/core/src/runFolder.ts`) that a run folder belongs to a run
+*this app started*, and so may be named from the Instrument view's file-name field rather than
+from `RunInfo.xml`'s `DataFile`. Nothing else writes the entry into a run folder.

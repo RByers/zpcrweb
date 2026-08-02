@@ -49,13 +49,16 @@ function stripExtension(fileName: string): string {
  * segment, since a real name could look like one and there is no way to tell them apart without
  * the run to compare against.
  *
+ * A leading date may also be joined by a dash — `20260802-S183-S185_RVP` — which is the form
+ * {@link runFileBaseName} writes, and is read back the same way.
+ *
  * Returns the whole base name when stripping would leave nothing, so a file called
  * `20260726.zpcr` is "20260726" rather than blank.
  */
 export function deriveExperimentName(fileName: string, opts?: { serial?: string }): string {
   const base = stripExtension(fileName.split(/[/\\]/).pop() ?? fileName).trim();
   if (!base) return "";
-  const parts = base.split("_");
+  const parts = base.replace(/^(\d{8})-/, "$1_").split("_");
   let i = 0;
   if (/^\d{8}$/.test(parts[i] ?? "")) {
     i++;
@@ -65,6 +68,42 @@ export function deriveExperimentName(fileName: string, opts?: { serial?: string 
   if (serial && (parts[i] ?? "").toLowerCase() === serial) i++;
   const rest = parts.slice(i).filter((p) => p !== "");
   return rest.length > 0 ? rest.join(" ") : base;
+}
+
+/**
+ * The inverse of {@link deriveExperimentName}: the file base name a run of this name should be
+ * saved under, `<YYYYMMDD>-<name, spaces as underscores>` — so "S183-S185 RVP" run on 2 Aug 2026
+ * becomes `20260802-S183-S185_RVP`.
+ *
+ * The date is the run's **local** date, matching how the app renders every other run timestamp
+ * (`lib/experiment.ts`), so the name a person sees offered is the day they are having. The
+ * separator between date and name is a dash rather than the instrument's own underscore because
+ * `_` is what a space becomes inside the name, so a dash keeps the two parts distinguishable by
+ * eye; {@link deriveExperimentName} strips a leading date under either separator, so the two
+ * functions round-trip.
+ *
+ * Characters a filesystem or a `RemoteRun` operand would object to are replaced (the same set as
+ * `usb/runPlan.ts`); an empty name yields `""`, which callers turn into their own fallback.
+ */
+export function runFileBaseName(experimentName: string, date: Date = new Date()): string {
+  const name = experimentName
+    .trim()
+    .replace(/\s+/g, "_")
+    .replace(/[^\x20-\x7e]/g, "")
+    .replace(/['",;]+/g, "_")
+    .replace(/[\\/:*?<>|]+/g, "_")
+    // Two adjacent replacements (`RVP "fast"` → `RVP__fast_`) read as a typo rather than as a
+    // name, so runs of underscores collapse. Nothing reads them back individually — a `_` is a
+    // space to `deriveExperimentName` however many there were.
+    .replace(/_{2,}/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .trim();
+  if (!name) return "";
+  const stamp =
+    `${date.getFullYear()}` +
+    `${String(date.getMonth() + 1).padStart(2, "0")}` +
+    `${String(date.getDate()).padStart(2, "0")}`;
+  return `${stamp}-${name}`;
 }
 
 /**

@@ -57,7 +57,7 @@ export {
   RUN_BEGUN_MARKER,
   RUN_ENDED_MARKER,
 } from "./runFolder.js";
-export type { RunProgress } from "./runFolder.js";
+export type { RunProgress, RunFolderNaming } from "./runFolder.js";
 export {
   parseZpcrwebSettings,
   parseZpcrwebSettingsJson,
@@ -138,7 +138,7 @@ export {
  * than decoding bytes, hence its own directory. Isomorphic like the rest: see
  * `usb/transport.ts` for why WebUSB and Node share a single implementation. */
 export * from "./usb/index.js";
-export { deriveExperimentName, resolveExperimentName } from "./experiment.js";
+export { deriveExperimentName, resolveExperimentName, runFileBaseName } from "./experiment.js";
 export { zipCryptoDecrypt } from "./zipcrypto.js";
 export { inflateRaw } from "./inflate.js";
 export {
