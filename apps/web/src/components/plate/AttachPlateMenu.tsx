@@ -99,7 +99,7 @@ export function AttachPlateMenu({
           <span className="dropzone__compact-label">{compactLabel}</span>
         </span>
       </summary>
-      <div className="dlmenu__list">
+      <div className="dlmenu__list dlmenu__list--wide">
         {pending ? (
           <>
             <div className="dlmenu__confirm mono">

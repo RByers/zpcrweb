@@ -1921,6 +1921,12 @@
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
   overflow: hidden;
 }
+/* AttachPlateMenu's list, not PlateDownloadButton's: its rows are file names (a run's own or a
+   sample's export can run long), where the default width just wraps them across several lines. */
+.dlmenu__list--wide {
+  min-width: 320px;
+  max-width: min(560px, 90vw);
+}
 .dlmenu__item {
   border: 0;
   border-radius: 0;
@@ -1930,6 +1936,9 @@
   font-size: 12px;
   color: var(--ink-2);
   cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .dlmenu__item:hover:not(:disabled) {
   background: var(--raised);
