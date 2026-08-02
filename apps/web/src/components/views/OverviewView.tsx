@@ -13,6 +13,7 @@ import { ProtocolDecoded } from "../raw/DecodedView";
 import { ProtocolStepsTable } from "../raw/ProtocolSteps";
 import { DownloadIcon } from "../DownloadIcon";
 import { CloneIcon } from "../CloneIcon";
+import { RenameIcon } from "../RenameIcon";
 import { downloadBytes, downloadText } from "../../lib/download";
 import { protocolFileBase } from "../../lib/protocolSource";
 import { usePltdPassword } from "../../state/pltdPassword";
@@ -42,6 +43,7 @@ export function OverviewView({
   identity,
   onRename,
   namePersists,
+  onRenameFile,
   onDownload,
   addFiles,
 }: {
@@ -73,6 +75,10 @@ export function OverviewView({
    * archive to hold a `zpcrweb.json`), which the field then says out loud rather than silently
    * losing the edit on reload. */
   namePersists: boolean;
+  /** Rename the loaded file itself (`ZpcrStore.renameFile`) — distinct from {@link onRename},
+   * which edits the run's own name. The toolbar's Rename button turns the "Filename" row into
+   * an editable field that calls this on commit. */
+  onRenameFile: (name: string) => void;
   /** Adds the cloned `.prcl.txt` to the file list — see the protocol block's Clone button. */
   addFiles: (files: FileList | File[], options?: AddFilesOptions) => Promise<string | null>;
 }) {
@@ -92,6 +98,23 @@ export function OverviewView({
    * copy opened on another machine, and gone the moment a later snapshot arrives with `ended`.
    */
   const progress = useMemo(() => runProgressFromNames(zpcr.archive.entries), [zpcr]);
+
+  // Toggled by the toolbar's Rename button — turns the "Filename" info row into an editable
+  // field, in place, rather than opening a separate dialog. The experiment name above it
+  // (`ExperimentHeader`) is already an always-editable input, so once this is open both of a
+  // `.zpcr`'s two names are editable at once.
+  const [renamingFile, setRenamingFile] = useState(false);
+  const [filenameDraft, setFilenameDraft] = useState(file.name);
+  useEffect(() => setFilenameDraft(file.name), [file.name]);
+  const commitFilename = () => {
+    setRenamingFile(false);
+    const next = filenameDraft.trim();
+    if (!next || next === file.name) {
+      setFilenameDraft(file.name);
+      return;
+    }
+    onRenameFile(next);
+  };
 
   const [password] = usePltdPassword();
   const plate = useMemo(() => zpcr.plates(password || undefined)[0]?.pltd.plate ?? null, [zpcr, password]);
@@ -129,7 +152,30 @@ export function OverviewView({
   // "Encrypted"/"Run identity" sections below.
   const infoRows: InfoRow[] = [
     { label: "Type", value: fileKindDescription(kind) },
-    { label: "Filename", value: identity.fileName },
+    {
+      label: "Filename",
+      value: renamingFile ? (
+        <input
+          className="overview__filename-input mono"
+          value={filenameDraft}
+          autoFocus
+          onFocus={(e) => e.currentTarget.select()}
+          onChange={(e) => setFilenameDraft(e.currentTarget.value)}
+          onBlur={commitFilename}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") e.currentTarget.blur();
+            if (e.key === "Escape") {
+              setFilenameDraft(file.name);
+              setRenamingFile(false);
+            }
+          }}
+          aria-label="Filename"
+          spellCheck={false}
+        />
+      ) : (
+        identity.fileName
+      ),
+    },
     { label: "Last modified", value: formatCompactDateTime(new Date(file.lastModified)) },
     // Omitted rather than shown as "—": a standalone plate/protocol file has no run to date at
     // all, and a blank row would read as a missing value rather than a nonsensical question.
@@ -181,7 +227,15 @@ export function OverviewView({
 
         <div className="overview__toolbar">
           <button
-            className="raw__download"
+            className="raw__download overview__renamebtn"
+            onClick={() => setRenamingFile(true)}
+            aria-label={`Rename ${file.name}`}
+            title="Rename this file"
+          >
+            <RenameIcon />
+          </button>
+          <button
+            className="raw__download overview__downloadbtn"
             onClick={() => downloadBytes(file.name, onDownload?.() ?? file.bytes)}
             aria-label={`Download ${file.name}`}
             title="Download this file (including its zpcrweb.json analysis settings)"

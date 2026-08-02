@@ -1,6 +1,7 @@
-import { Fragment, useMemo } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { fileKindDescription, plateTargets } from "@zpcrweb/core";
 import { PasswordPrompt } from "../PasswordPrompt";
+import { RenameIcon } from "../RenameIcon";
 import { usePltdPassword } from "../../state/pltdPassword";
 import { channelColor } from "../../lib/channelColors";
 import { formatCompactDateTime } from "../../lib/experiment";
@@ -16,18 +17,60 @@ import type { LoadedFile, PlateFileResult } from "../../state/useZpcrStore";
 export function StandalonePlateOverviewView({
   file,
   result,
+  onRenameFile,
 }: {
   file: LoadedFile;
   result: PlateFileResult;
+  /** Rename the loaded file (`ZpcrStore.renameFile`) — a standalone plate has no separate "name"
+   * the way a `.zpcr` does, so this is the only identity it has to edit. */
+  onRenameFile: (name: string) => void;
 }) {
   const [, setPassword] = usePltdPassword();
   const plate = result.plate;
   const targets = useMemo(() => (plate ? plateTargets(plate) : []), [plate]);
   const samples = plate?.samples ?? [];
 
+  // Toggled by the toolbar's Rename button — turns the "Filename" info row into an editable
+  // field, in place, the same commit-on-blur/Enter/Escape-reverts pattern `OverviewView` uses.
+  const [renaming, setRenaming] = useState(false);
+  const [draft, setDraft] = useState(file.name);
+  useEffect(() => setDraft(file.name), [file.name]);
+  const commit = () => {
+    setRenaming(false);
+    const next = draft.trim();
+    if (!next || next === file.name) {
+      setDraft(file.name);
+      return;
+    }
+    onRenameFile(next);
+  };
+
   const infoRows = [
     { label: "Type", value: fileKindDescription(file.kind) },
-    { label: "Filename", value: file.name },
+    {
+      label: "Filename",
+      value: renaming ? (
+        <input
+          className="overview__filename-input mono"
+          value={draft}
+          autoFocus
+          onFocus={(e) => e.currentTarget.select()}
+          onChange={(e) => setDraft(e.currentTarget.value)}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") e.currentTarget.blur();
+            if (e.key === "Escape") {
+              setDraft(file.name);
+              setRenaming(false);
+            }
+          }}
+          aria-label="Filename"
+          spellCheck={false}
+        />
+      ) : (
+        file.name
+      ),
+    },
     { label: "Last modified", value: formatCompactDateTime(new Date(file.lastModified)) },
     ...(plate
       ? [
@@ -51,6 +94,16 @@ export function StandalonePlateOverviewView({
             </Fragment>
           ))}
         </dl>
+        <div className="overview__toolbar">
+          <button
+            className="raw__download overview__renamebtn"
+            onClick={() => setRenaming(true)}
+            aria-label={`Rename ${file.name}`}
+            title="Rename this file"
+          >
+            <RenameIcon />
+          </button>
+        </div>
       </div>
 
       {(result.needsPassword || result.error) && (

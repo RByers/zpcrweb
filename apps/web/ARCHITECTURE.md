@@ -603,11 +603,24 @@ Two placement decisions worth keeping:
   `zpcrweb.json` key, since it changes no reported number — `analysisSettings.ts` is the one
   place that conversion happens.
 
-The Overview header's name field is the only place a name is edited, and clearing it is
+The Overview header's name field is where a run's *name* is edited, and clearing it is
 meaningful: the stored name is removed and the run falls back to its derived one. A derived name
 is never written back, so renaming the file on disk still renames the run. For a `.pcrd` or a
 Biomeme run there is no archive to write into, so the edit lasts the session — the field says so
 in its tooltip rather than losing it silently.
+
+The Overview toolbar's Rename button is a separate control, for a separate field: it turns the
+info table's "Filename" row into an edit-in-place input (the same commit-on-blur/Enter,
+Escape-reverts pattern as the name field), and calls `ZpcrStore.renameFile`.
+`StandaloneProtocolView` and `StandalonePlateOverviewView` (a `.prcl.txt`'s and a standalone
+plate's own Overviews) offer the same button, since neither kind has a separate stored name to
+edit at all — the filename is their only identity. Renaming the *file* is a bigger operation than
+it looks: ids hash name+size (`db.ts`'s `fileId`), so a new name means a new id, and `renameFile`
+migrates every id-keyed map (`settingsMap`, `analysisMap`, `activeId`, the analysis persister's
+pending writes) rather than just patching `LoadedFile.name` in place — the same supersede-by-id
+logic `addFiles` uses for a same-named re-upload handles a rename that collides with an
+already-loaded file. It marks the file `modified`, since a download now writes different
+bytes-under-a-name than what's on disk under the old one.
 
 The Instrument view has a name field too, for a run that does not exist yet: it is the one part of a
 staged run that is typed rather than selected from a file, so it sits in the "Run to start" panel

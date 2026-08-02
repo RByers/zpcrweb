@@ -1359,6 +1359,44 @@ async function instrumentRunChecks(chrome, origin) {
     `${grad.note} | ${strayGoto.note}`,
   );
 
+  // A `.prcl.txt` has no separate "name" the way a `.zpcr` does — the info table's Filename row
+  // is its only identity, so that's what `StandaloneProtocolView`'s own Rename button edits.
+  // Renamed and renamed straight back, since the chip label the rest of this block clicks on is
+  // derived from this same filename.
+  const protoFilename = () =>
+    cdp.eval(`(() => {
+      const dts = [...document.querySelectorAll(".overview__infotable dt")];
+      const dds = [...document.querySelectorAll(".overview__infotable dd")];
+      const i = dts.findIndex((dt) => dt.textContent.trim() === "Filename");
+      return i < 0 ? null : dds[i].textContent;
+    })()`);
+  const renameProto = async (value) => {
+    await cdp.eval(`document.querySelector(".overview__renamebtn").click()`);
+    await sleep(50);
+    await cdp.eval(
+      `(() => { const el = document.querySelector(".overview__filename-input");
+         el.focus();
+         const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
+         setter.call(el, ${JSON.stringify(value)});
+         el.dispatchEvent(new Event("input", { bubbles: true })); })()`,
+    );
+    await sleep(200);
+    await cdp.eval(`document.querySelector(".overview__filename-input").blur()`);
+  };
+  await renameProto("Gradient-renamed.prcl.txt");
+  await waitFor(async () => (await protoFilename()) === "Gradient-renamed.prcl.txt", {
+    what: "the protocol file's renamed Filename row",
+  });
+  check(
+    "a .prcl.txt's filename can be renamed too, from its own Rename button",
+    (await protoFilename()) === "Gradient-renamed.prcl.txt",
+    await protoFilename(),
+  );
+  await renameProto("Gradient.prcl.txt");
+  await waitFor(async () => (await protoFilename()) === "Gradient.prcl.txt", {
+    what: "the protocol file's name restored",
+  });
+
   // Back where the rest of this block expects to be.
   await cdp.eval(`(() => [...document.querySelectorAll('.viewselect [role="tab"]')]
       .find((b) => b.textContent.trim() === "Instrument").click())()`);
@@ -1604,6 +1642,26 @@ async function setExperimentName(cdp, value) {
 }
 
 /**
+ * Rename the loaded file itself: open the Filename row's editable field (the toolbar's Rename
+ * button) and commit a new value — the other identity a `.zpcr` carries, distinct from
+ * {@link setExperimentName}'s stored run name. Ids hash name+size, so this is also what exercises
+ * {@link ZpcrStore.renameFile}'s id migration.
+ */
+async function renameFile(cdp, value) {
+  await cdp.eval(`document.querySelector(".overview__renamebtn").click()`);
+  await sleep(50);
+  await cdp.eval(
+    `(() => { const el = document.querySelector(".overview__filename-input");
+       el.focus();
+       const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
+       setter.call(el, ${JSON.stringify(value)});
+       el.dispatchEvent(new Event("input", { bubbles: true })); })()`,
+  );
+  await sleep(200);
+  await cdp.eval(`document.querySelector(".overview__filename-input").blur()`);
+}
+
+/**
  * What a run is called, and where that name comes from.
  *
  * The file bar stopped showing file names: a chip is now a run's *name* over its start date, and
@@ -1625,6 +1683,9 @@ async function experimentNameChecks(chrome, origin) {
   await cdp.eval(`window.location.hash = "view=overview", undefined`);
   await tabBecomes(cdp, "Overview");
 
+  // "Run date" and "Filename" are rows of the info table now, not their own headline elements
+  // (see `OverviewView`'s `infoRows`) — found by label rather than a dedicated class, since the
+  // table has no per-row classes to hang a selector on.
   const headline = () =>
     cdp
       .eval(
@@ -1699,6 +1760,43 @@ async function experimentNameChecks(chrome, origin) {
     cleared.name === "S183-S185 RVP",
     JSON.stringify(cleared),
   );
+
+  // Renaming the file itself is a different field from the run name above: it edits
+  // `LoadedFile.name` (and, since ids hash name+size, the file's id) rather than the archive's
+  // stored `experimentName`. A *stored* name (as opposed to the derived one `cleared` left
+  // showing, which is itself computed from the filename and so would change right along with
+  // it) is the only way to prove the two stayed independent.
+  await setName("Stored RVP");
+  await waitFor(() => chipPresent(cdp, "Stored RVP"), { what: "the re-stored name" });
+  const renamedName = EXAMPLE.replace(/\.zpcr$/, "-renamed.zpcr");
+  await renameFile(cdp, renamedName);
+  // Unlike the run-name checks above, the chip text (the run's *name*) doesn't change here, so
+  // it can't be what's waited on — the Filename row itself is the only observable that moves.
+  await waitFor(async () => (await headline()).file === renamedName, { what: "the Filename row to update" });
+  const renamed = await headline();
+  check(
+    "renaming the file updates the Filename row",
+    renamed.file === renamedName,
+    JSON.stringify(renamed),
+  );
+  check(
+    "…without touching the run's own stored name",
+    renamed.name === "Stored RVP",
+    JSON.stringify(renamed),
+  );
+  await sleep(300); // the rename's IndexedDB writes are async (`ZpcrStore.renameFile`)
+  await cdp.send("Page.navigate", { url: `${origin}#file=${renamedName}&view=overview` });
+  await tabBecomes(cdp, "Overview");
+  const reloadedRename = await headline();
+  check(
+    "the renamed file — and its new id — survive a reload",
+    reloadedRename.file === renamedName && reloadedRename.name === "Stored RVP",
+    JSON.stringify(reloadedRename),
+  );
+  // Clear the stored name again so the chip goes back to containing "S183" — the substring the
+  // rest of this function's chip clicks below still key off.
+  await setName("");
+  await waitFor(() => chipPresent(cdp, "S183"), { what: "the derived name to come back" });
 
   // A Biomeme run names itself, and its Raw tab is the JSON document rather than an archive.
   await loadFile(cdp, BIOMEME);
@@ -1899,7 +1997,7 @@ async function deleteConfirmChecks(chrome, origin) {
   await tabBecomes(cdp, "Overview");
   await setExperimentName(cdp, "Saved RVP");
   await waitFor(async () => (await chip()).modified === true, { what: "the modified flag" });
-  await cdp.eval(`(() => { document.querySelector(".overview__toolbar .raw__download").click(); })()`);
+  await cdp.eval(`(() => { document.querySelector(".overview__toolbar .overview__downloadbtn").click(); })()`);
   await waitFor(async () => (await chip()).modified === false, { what: "the flag to clear" });
   check("downloading the file clears the modified state", (await chip()).modified === false);
   await openTable();

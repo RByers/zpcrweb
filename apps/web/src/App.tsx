@@ -407,7 +407,11 @@ export function App() {
         ) : isStandalonePlate ? (
           <>
             {view === "overview" && store.activePlateFile && (
-              <StandalonePlateOverviewView file={active} result={store.activePlateFile} />
+              <StandalonePlateOverviewView
+                file={active}
+                result={store.activePlateFile}
+                onRenameFile={(name) => void store.renameFile(active.id, name)}
+              />
             )}
             {view === "plates" && store.activePlateFile && (
               <StandalonePlateView file={active} result={store.activePlateFile} />
@@ -416,7 +420,11 @@ export function App() {
           </>
         ) : isStandaloneProtocol ? (
           store.activeProtocolFile !== null && (
-            <StandaloneProtocolView file={active} runDefinition={store.activeProtocolFile} />
+            <StandaloneProtocolView
+              file={active}
+              runDefinition={store.activeProtocolFile}
+              onRenameFile={(name) => void store.renameFile(active.id, name)}
+            />
           )
         ) : !zpcr ? (
           <div className="app__gate">
@@ -448,6 +456,7 @@ export function App() {
                 // Only a `.zpcr` has an archive to write `zpcrweb.json` into; see
                 // `analysisPersist.ts`'s `resolve`.
                 namePersists={active.kind === "zpcr"}
+                onRenameFile={(name) => void store.renameFile(active.id, name)}
                 // Saving the file to disk is what un-modifies it: the copy leaving the browser
                 // is the one carrying the edits, so the chip's delete stops asking twice.
                 onDownload={() => {

@@ -924,6 +924,25 @@
 }
 .overview__toolbar {
   flex: 0 0 auto;
+  display: flex;
+  gap: 6px;
+}
+/* The "Filename" row in rename mode — same editable-field look as `.overview__name`, just at
+   the info table's own (smaller, monospace) type size instead of the headline's. */
+.overview__filename-input {
+  width: 100%;
+  max-width: 40ch;
+  padding: 1px 4px;
+  margin: -1px -4px;
+  background: var(--plane);
+  border: 1px solid var(--neon-cyan);
+  border-radius: var(--radius-sm);
+  color: var(--ink);
+  font-family: inherit;
+  font-size: inherit;
+}
+.overview__filename-input:focus {
+  outline: none;
 }
 .overview__h {
   font-size: 13px;

@@ -660,6 +660,18 @@ export interface ZpcrStore {
    * otherwise (a `.pcrd` has no real archive to attach an entry to).
    */
   attachPlate: (fileId: string, file: File) => Promise<void>;
+  /**
+   * Rename a loaded file — what the Overview view's rename control calls. `newName` becomes
+   * {@link LoadedFile.name}; bytes and content are untouched. A no-op for an empty name or one
+   * that's already current.
+   *
+   * Ids hash name+size ({@link fileId}), so this necessarily gives the file a new id: every
+   * id-keyed map (`settingsMap`, `analysisMap`, `activeId`) is migrated, and a name+size that
+   * collides with an already-loaded file supersedes it, the same way re-uploading a same-named
+   * file does in {@link ZpcrStore.addFiles}. Marks the file {@link FileSettings.modified}, since
+   * a download now writes different bytes-under-a-name than what's on disk under the old one.
+   */
+  renameFile: (fileId: string, newName: string) => Promise<void>;
   settings: FileSettings | null;
   /** Selected top-level view (Overview/Curves/…) — global across all loaded files, not
    * per-file, so switching files doesn't reset it. */
@@ -1076,6 +1088,50 @@ export function useZpcrStore(): ZpcrStore {
     [files, setModifiedFlag],
   );
 
+  const renameFile = useCallback(
+    async (id: string, rawName: string) => {
+      const name = rawName.trim();
+      const file = filesRef.current.find((f) => f.id === id);
+      if (!file || !name || name === file.name) return;
+      const newId = fileId(name, file.size);
+      // Flush any pending archive rewrite for the old id first — once the rename lands, the
+      // persister's `resolve` can no longer find a file under `id` and would silently drop it.
+      await persister.current!.flush(id);
+      // Renaming onto a name (+size) that collides with an already-loaded file supersedes it,
+      // the same way `addFiles` handles a same-named re-upload.
+      for (const old of filesRef.current.filter((f) => f.id === newId)) await forget(old.id);
+      await putFile({
+        id: newId,
+        name,
+        size: file.size,
+        addedAt: file.addedAt,
+        bytes: file.bytes.slice().buffer,
+        kind: file.kind,
+        lastModified: file.lastModified,
+      });
+      await deleteFile(id);
+      setFiles((prev) => prev.map((f) => (f.id === id ? { ...f, id: newId, name } : f)));
+      setSettingsMap((prev) => {
+        const { [id]: current, ...rest } = prev;
+        const next = { ...(current ?? defaultSettings()), modified: true };
+        void putSettings(toStored(newId, next));
+        return { ...rest, [newId]: next };
+      });
+      setAnalysisMap((prev) => {
+        const { [id]: moved, ...rest } = prev;
+        if (moved === undefined) return prev;
+        analysisRef.current = { ...rest, [newId]: moved };
+        return analysisRef.current;
+      });
+      if (seeded.current.delete(id)) seeded.current.add(newId);
+      persister.current!.forget(id);
+      window.clearTimeout(saveTimers.current[id]);
+      delete saveTimers.current[id];
+      setActiveId((cur) => (cur === id ? newId : cur));
+    },
+    [forget],
+  );
+
   // One flat object per file, assembled from the two stores. The analysis half wins, so a
   // display record written before the split (whose analysis fields `fromStored` now ignores)
   // can't shadow what the file says.
@@ -1308,6 +1364,7 @@ export function useZpcrStore(): ZpcrStore {
     inProgressIds,
     markDownloaded,
     attachPlate,
+    renameFile,
     settings,
     view,
     setView,
