@@ -115,13 +115,15 @@ export function InstrumentRail({
   const promptForName = !unstaged && blockers.some((c) => c.code === "no-experiment-name");
   const canStart =
     !!plan && plan.startable && connected && !busy && !runPending && !status?.running;
-  // The USB command channel carries one request at a time, so Start run has to become
-  // *un-clickable* the instant any other command is in flight — but a lid or indicator command
-  // round-trips fast enough that dimming the button for that whole window reads as a flash
-  // rather than a state change. Delay only the dimmed *look* by a beat; `canStart` above (and so
-  // the real `disabled` attribute) never waits, so the race this guards against still can't happen.
-  // A pending run is the exception — that dims immediately, because there the change of state *is*
-  // the feedback for the click, and it will not be over in a beat.
+  // The USB command channel carries one request at a time, so every button that only *this* rail
+  // can queue behind (Start, Stop, Pause/Resume) has to become *un-clickable* the instant any
+  // other command is in flight — but a lid or indicator command round-trips fast enough that
+  // dimming a button for that whole window reads as a flash rather than a state change, and that
+  // was as true of clicking Pause/Resume itself (which is exactly such a round trip) as of Start.
+  // Delay only the dimmed *look* by a beat; each button's real `disabled` attribute never waits,
+  // so the race this guards against still can't happen. A pending run is the exception for Start —
+  // that dims immediately, because there the change of state *is* the feedback for the click, and
+  // it will not be over in a beat.
   const [busyLingering, setBusyLingering] = useState(false);
   useEffect(() => {
     if (!busy) {
@@ -131,14 +133,11 @@ export function InstrumentRail({
     const t = window.setTimeout(() => setBusyLingering(true), 150);
     return () => window.clearTimeout(t);
   }, [busy]);
+  // True for the brief, purely-transient window where `busy` is set but hasn't lasted long enough
+  // to be worth showing as disabled — see the comment above.
+  const busyBriefly = !!busy && !busyLingering;
   const startLooksArmed =
-    !!plan &&
-    plan.startable &&
-    connected &&
-    !status?.running &&
-    !runPending &&
-    !!busy &&
-    !busyLingering;
+    !!plan && plan.startable && connected && !status?.running && !runPending && busyBriefly;
 
   // A run is *this rail's business* whenever the instrument is doing one or is about to — which
   // is not the same as `status.running`. The start window (`usb.md` §7.3) is precisely the gap
@@ -399,7 +398,9 @@ export function InstrumentRail({
           {showRunControls && (
             <div className="instrument__runcontrols">
               <button
-                className="btn instrument__stop"
+                className={
+                  "btn instrument__stop" + (busyBriefly ? " instrument__stop--armed" : "")
+                }
                 disabled={!!busy}
                 title={
                   "Stop the run in progress. Waits for a plate read in flight to finish, so the " +
@@ -410,7 +411,9 @@ export function InstrumentRail({
                 {busy === "Stopping the run" ? "Stopping…" : "Stop run"}
               </button>
               <button
-                className="btn"
+                className={
+                  "btn instrument__pause" + (busyBriefly ? " instrument__pause--armed" : "")
+                }
                 disabled={!!busy || !status?.running}
                 title={
                   status?.running

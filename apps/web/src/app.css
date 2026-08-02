@@ -3449,6 +3449,24 @@
 .instrument__stop:not(:disabled):hover {
   background: rgba(255, 90, 90, 0.12);
 }
+/* Stop and Pause/Resume queue behind the same single-outstanding USB command channel Start does,
+   including behind each other and behind a lid/indicator action — and clicking Pause/Resume is
+   itself exactly the kind of fast round trip that would otherwise flash the `:disabled` look on
+   and off. Same fix as `.instrument__start--armed:disabled`: `InstrumentRail` adds these classes
+   only for that brief, purely-transient window, so the button keeps its normal look instead of
+   dimming and undimming within a beat. */
+.instrument__stop--armed:disabled {
+  opacity: 1;
+  cursor: default;
+  border-color: var(--danger) !important;
+  background: transparent !important;
+}
+.instrument__pause--armed:disabled {
+  opacity: 1;
+  cursor: default;
+  border-color: var(--border) !important;
+  background: transparent !important;
+}
 
 /* Actions. The `?` badge marks a command name this protocol was never observed using — the
    button is real, but the instrument is expected to reject it, so it must not look as settled as
