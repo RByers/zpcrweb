@@ -1321,24 +1321,31 @@ async function instrumentRunChecks(chrome, origin) {
   );
 
   const protoOverviewTab = await tabBecomes(cdp, "Overview");
-  const protoOverview = await cdp.eval(`(() => ({
-    tiles: Object.fromEntries([...document.querySelectorAll(".overview__tiles .tile")]
-      .map((t) => [t.querySelector(".tile__label").textContent.trim(),
-                   t.querySelector(".tile__value").textContent.trim()])),
-    lines: [...document.querySelectorAll(".decoded__protoline")].map((l) => ({
-      num: l.querySelector(".decoded__protonum").textContent.trim(),
-      text: l.querySelector(".decoded__prototext").textContent.trim(),
-      note: l.querySelector(".decoded__protonote").textContent.trim(),
-    })),
-  }))()`);
+  const protoOverview = await cdp.eval(`(() => {
+    const dl = document.querySelector(".overview__infotable");
+    const info = {};
+    if (dl) {
+      const dts = [...dl.querySelectorAll("dt")];
+      const dds = [...dl.querySelectorAll("dd")];
+      dts.forEach((dt, i) => { info[dt.textContent.trim()] = dds[i].textContent.trim(); });
+    }
+    return {
+      info,
+      lines: [...document.querySelectorAll(".decoded__protoline")].map((l) => ({
+        num: l.querySelector(".decoded__protonum").textContent.trim(),
+        text: l.querySelector(".decoded__prototext").textContent.trim(),
+        note: l.querySelector(".decoded__protonote").textContent.trim(),
+      })),
+    };
+  })()`);
   check(
     "…and its Overview reports the protocol's own settings, from the decode not the text",
     protoOverviewTab === "Overview" &&
-      protoOverview.tiles.Lid === "105 °C" &&
-      protoOverview.tiles.Volume === "25 µL" &&
-      protoOverview.tiles.Steps === "3" &&
-      /all 6 channels/.test(protoOverview.tiles.Scan ?? ""),
-    JSON.stringify(protoOverview.tiles),
+      protoOverview.info.Lid === "105 °C" &&
+      protoOverview.info.Volume === "25 µL" &&
+      protoOverview.info.Steps === "3" &&
+      /all 6 channels/.test(protoOverview.info.Scan ?? ""),
+    JSON.stringify(protoOverview.info),
   );
   const grad = protoOverview.lines.find((l) => l.text.startsWith("GRAD"));
   const strayGoto = protoOverview.lines.find((l) => l.text.startsWith("GOTO"));
@@ -1621,13 +1628,22 @@ async function experimentNameChecks(chrome, origin) {
   const headline = () =>
     cdp
       .eval(
-        `JSON.stringify({
-           name: document.querySelector(".overview__name")?.value ?? null,
-           when: document.querySelector(".overview__when")?.textContent ?? null,
-           file: document.querySelector(".overview__filename")?.textContent ?? null,
-           chip: document.querySelector(".filechip__name")?.textContent ?? null,
-           chipDate: document.querySelector(".filechip__date")?.textContent ?? null,
-         })`,
+        `JSON.stringify((() => {
+           const dl = document.querySelector(".overview__infotable");
+           const info = {};
+           if (dl) {
+             const dts = [...dl.querySelectorAll("dt")];
+             const dds = [...dl.querySelectorAll("dd")];
+             dts.forEach((dt, i) => { info[dt.textContent.trim()] = dds[i].textContent.trim(); });
+           }
+           return {
+             name: document.querySelector(".overview__name")?.value ?? null,
+             when: info["Run date"] ?? null,
+             file: info["Filename"] ?? null,
+             chip: document.querySelector(".filechip__name")?.textContent ?? null,
+             chipDate: document.querySelector(".filechip__date")?.textContent ?? null,
+           };
+         })())`,
       )
       .then(JSON.parse);
 

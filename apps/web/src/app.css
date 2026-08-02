@@ -925,30 +925,6 @@
 .overview__toolbar {
   flex: 0 0 auto;
 }
-.overview__tiles {
-  flex: 1;
-  min-width: 0;
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
-  gap: 12px;
-}
-.tile {
-  padding: 12px 14px;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-}
-.tile__label {
-  color: var(--ink-muted);
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-}
-.tile__value {
-  margin-top: 4px;
-  font-size: 16px;
-  color: var(--ink);
-}
 .overview__h {
   font-size: 13px;
   text-transform: uppercase;
@@ -987,10 +963,9 @@
   color: var(--ink-2);
   word-break: break-all;
 }
-/* The file/run info table beside the download button, in the slot `.overview__tiles` used to
-   fill — same sizing, but a two-column label/value list (see `.overview__dl`) rather than a
-   grid of tiles, since it now carries filename/mtime/run-date and the encryption + archive
-   identity fields alongside the run facts. */
+/* The file/run info table every Overview leads with, beside the download button when there is
+   one — a two-column label/value list (see `.overview__dl`) carrying filename/mtime and the
+   kind-specific facts (run date, encryption, archive identity, plate/protocol details, …). */
 .overview__infotable {
   flex: 1;
   min-width: 0;
@@ -1003,15 +978,12 @@
   border-radius: var(--radius);
   font-size: 13px;
 }
-/* Phone: tiles shrink to a narrower minimum, the head wraps instead of squeezing the tiles
-   against the download button, and the definition list drops to one column so long values get
-   their own line instead of being crushed into a sliver next to the label column. */
+/* Phone: the head wraps instead of squeezing the info table against the download button, and
+   the definition list drops to one column so long values get their own line instead of being
+   crushed into a sliver next to the label column. */
 @container appmain (inline-size < 560px) {
   .overview__head {
     flex-wrap: wrap;
-  }
-  .overview__tiles {
-    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
   }
   .overview__dl {
     grid-template-columns: 1fr;

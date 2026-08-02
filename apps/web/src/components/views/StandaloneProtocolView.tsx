@@ -1,6 +1,7 @@
-import { useMemo } from "react";
+import { Fragment, useMemo } from "react";
 import { fileKindDescription, parseRunDefinition } from "@zpcrweb/core";
 import { ProtocolDecoded } from "../raw/DecodedView";
+import { formatCompactDateTime } from "../../lib/experiment";
 import type { LoadedFile } from "../../state/useZpcrStore";
 
 /**
@@ -11,11 +12,13 @@ import type { LoadedFile } from "../../state/useZpcrStore";
  * dropped you on the Instrument view whatever tab you were on. But it is a document in its own
  * right — the thing you'd want to read before sending it to an instrument, or after pulling it
  * off one — and reading it is exactly what the annotated listing makes possible. So the same
- * {@link ProtocolDecoded} a run's Overview uses renders it here, under the same stat tiles a run
- * gets, and Instrument stays where it is *used*.
+ * {@link ProtocolDecoded} a run's Overview uses renders it here, under the same info table every
+ * other kind's Overview leads with (`OverviewView`, `StandalonePlateOverviewView`), and
+ * Instrument stays where it is *used*.
  *
- * Everything shown is `parseRunDefinition`'s (core): this component picks tiles out of the
- * decoded program and counts directives, but reads nothing out of the text itself.
+ * Everything shown is `parseRunDefinition`'s (core) plus the file's own name/mtime: this
+ * component picks rows out of the decoded program and counts directives, but reads nothing out
+ * of the text itself.
  */
 export function StandaloneProtocolView({
   file,
@@ -27,8 +30,10 @@ export function StandaloneProtocolView({
   const program = useMemo(() => parseRunDefinition(runDefinition), [runDefinition]);
   const reads = program.directives.filter((d) => d.verb === "PLATEREAD").length;
 
-  const tiles = [
+  const infoRows = [
     { label: "Type", value: fileKindDescription(file.kind) },
+    { label: "Filename", value: file.name },
+    { label: "Last modified", value: formatCompactDateTime(new Date(file.lastModified)) },
     { label: "Method", value: program.method ?? "—" },
     {
       label: "Lid",
@@ -49,14 +54,14 @@ export function StandaloneProtocolView({
   return (
     <div className="overview">
       <div className="overview__head">
-        <section className="overview__tiles">
-          {tiles.map((t) => (
-            <div className="tile" key={t.label}>
-              <div className="tile__label">{t.label}</div>
-              <div className="tile__value mono">{t.value}</div>
-            </div>
+        <dl className="overview__dl overview__infotable mono">
+          {infoRows.map((r) => (
+            <Fragment key={r.label}>
+              <dt>{r.label}</dt>
+              <dd>{r.value}</dd>
+            </Fragment>
           ))}
-        </section>
+        </dl>
       </div>
 
       <section className="overview__block">

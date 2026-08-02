@@ -47,7 +47,7 @@ app is format-agnostic:
 
 - `OverviewView`, `CurvesView`, and `ReferenceView` take a plain `Zpcr` — they don't know or
   care whether it came from a `.zpcr` archive or a decoded `.pcrd` document. `OverviewView`'s
-  protocol tile and thermal-protocol block read `zpcr.protocol()` (a real accessor on `Zpcr`,
+  "Protocol" row and thermal-protocol block read `zpcr.protocol()` (a real accessor on `Zpcr`,
   not a by-name file lookup), so both the name and — when the format provides one — the step
   table work identically either way; when there's no step list it falls back to
   `zpcr.protocolText` rendered through the same annotated `ProtocolDecoded` listing the Raw view
@@ -261,10 +261,11 @@ store's `fileKind` only admits bytes that already parsed).
 
 It enables **two** tabs, `["overview","instrument"]`, because it is two things:
 
-- **Overview** (`StandaloneProtocolView`) — the protocol *as a document*: stat tiles for the
-  settings its header directives carry, then the same annotated `ProtocolDecoded` listing a run's
-  Overview uses. Everything shown is `parseRunDefinition`'s (`protocol.md`); the view picks tiles
-  out of the decoded program and counts directives, and reads nothing out of the text.
+- **Overview** (`StandaloneProtocolView`) — the protocol *as a document*: the same info table
+  every kind's Overview leads with (file identity, then the settings its header directives
+  carry), then the same annotated `ProtocolDecoded` listing a run's Overview uses. Everything
+  shown is `parseRunDefinition`'s (`protocol.md`) plus the file's own name/mtime; the view picks
+  rows out of the decoded program and counts directives, and reads nothing out of the text.
 - **Instrument** — the protocol *as an input*, staged against a plate (see "The Instrument view").
 
 Enabling Overview is what removed the old special case in `App.tsx`, where a `.prcl.txt` selected
@@ -446,9 +447,9 @@ so every call site keeps writing one `onChange({ … })` regardless of where the
 
 ## Views
 
-- **Overview** — run metadata as stat tiles + the thermal protocol text, read from
-  `zpcr.metadata` and `zpcr.protocolText`, a "Plate" section listing the plate's targets and
-  samples as chips, plus an "Encrypted" block (see above) showing
+- **Overview** — a single info table (file identity, run metadata from `zpcr.metadata`, and an
+  "Encrypted" row, see above) beside the thermal protocol text (`zpcr.protocolText`) and a
+  "Plate" section listing the plate's targets and samples as chips. The Encrypted row shows
   green "No" when nothing in the file is encrypted, orange "Yes" with the password used when
   encrypted content was successfully decrypted, or red "Yes" when it wasn't. The file bar's
   per-chip icon (`components/FileBar.tsx`) mirrors the same three states/colors, computed the
@@ -579,9 +580,9 @@ app, not the library.
 
 The file bar and the Overview view lead with what a run is **called**, not with its file name: a
 chip is the run's name over a compact local timestamp, and the file name moves to the hover card
-and to the line under the Overview headline. A name like `20260726_S183-S185_RVP.zpcr` is three
-facts glued together (a date, a machine, a name) in a form that is wide, hard to scan, and mostly
-redundant with the tiles beside it.
+and to a "Filename" row of the Overview's info table. A name like `20260726_S183-S185_RVP.zpcr`
+is three facts glued together (a date, a machine, a name) in a form that is wide, hard to scan,
+and mostly redundant with the rest of the table.
 
 No format carries a name except Biomeme's (see `zpcrweb-json.md` §1.1 for the evidence), so the
 app resolves one — stored name, else the format's own, else derived from the file name —
@@ -1665,8 +1666,8 @@ response curves, not channel numbers.
   palette, fonts). `app.css` holds layout + component styles.
 - Layout is **container-query driven** (`app__main` is the query container): the Curves rail
   sits beside the chart on wide screens and stacks above it under ~720px (a tighter step at
-  ~560px trims padding and drops Overview's tiles and definition lists to one column); the Raw
-  list collapses similarly. Fluid type/padding via `clamp()`/`cqi`; chart cells use
+  ~560px trims padding and drops Overview's info table and definition lists to one column); the
+  Raw list collapses similarly. Fluid type/padding via `clamp()`/`cqi`; chart cells use
   `min-inline-size: 0` and overflow guards so the page never scrolls horizontally.
 - The **app shell** is the one place that can't rely on container queries, because it *is* what
   sizes the container: `.app__header` is a non-wrapping flex row, so the view-tab strip's
