@@ -44,7 +44,7 @@ for baseline/threshold/Cq.
 |-----|--------|
 | [`icff.md`](./icff.md) | "ICFF" — the small index container format underlying both `.Plateread` and `.Dcal`: a trailing footer points at an index of `[name, offset, length]` entries. Implemented by `packages/core/src/icff.ts`; locate the index via the footer, not by scanning for a known field name. |
 | [`plateread.md`](./plateread.md) | The `.Plateread` files inside a `.zpcr` — one per plate read (PCR cycle), holding the 6-channel × 108-well raw fluorescence table plus cycle number, block temperature and timestamp. **Mixed endianness:** metadata (version words, ICFF index) is big-endian; the WELLDATA/DARKDATA float arrays are little-endian. Implemented by `packages/core/src/plateread.ts`. |
-| [`alf.md`](./alf.md) | The `.alf` run report the instrument writes at the end of every run — carried inside every `.zpcr` and fetchable over USB (`usb.md` §5.2). A `*`-delimited text file: run identity, the protocol as executed, an error summary, and one line per executed step with its setpoint, nominal hold and the wall-clock time that step began. The only per-step timing record the instrument produces, and 1:1 with the archive's `.Plateread` files. Not implemented by `packages/core` — documentation only. |
+| [`alf.md`](./alf.md) | The `.alf` run report the instrument writes at the end of every run — carried inside every `.zpcr` and fetchable over USB (`usb.md` §5.2). A `*`-delimited text file: run identity, the protocol as executed, an error summary, and one line per executed step with its setpoint, nominal hold and the wall-clock time that step began. The only per-step timing record the instrument produces, and 1:1 with the archive's `.Plateread` files. Implemented by `packages/core/src/alf.ts`, entry point `parseAlf(bytes)`; `zpcr.runReports()` decodes every `.alf` entry in an archive. |
 | [`dcal.md`](./dcal.md) | The `.Dcal` pure-dye calibration files — per-dye, per-plate-type fluorescence response across all 6 channels at 4 block temperatures, plus a matching empty-plate baseline; the only in-archive source of the channel→dye mapping (`PRIMARYCHANNEL`). Unencrypted ICFF container. Implemented by `packages/core/src/dcal.ts`, entry point `parseDcal(bytes)`; `zpcr.calibrations()` decodes every `.Dcal` entry in an archive. |
 | [`calibration.md`](./calibration.md) | Channel→dye color separation — the algorithm that turns raw per-channel readings plus `.Dcal` calibration data into per-dye concentration estimates. Not a file format doc. Implemented by `packages/core/src/calibration.ts` (linear algebra in `linalg.ts`), entry points `separateDyes()` (one-shot) and the individual `buildDyeResponseCurve`/`buildCalibrationMatrix`/`preprocessChannelReadings`/`separateChannels` stages. |
 | [`threshold.md`](./threshold.md) | Baseline, threshold and Cq — how a per-dye amplification curve becomes a quantification cycle, or a reported non-amplification: baseline region selection, subtraction, threshold determination, the crossing rule, end-point RFU, and the app's controls over them. Not a file format doc. §1 states the problem; §3–§7 are the shipped algorithm, implemented by `packages/core/src/baseline.ts` (§3–§4, §7), `packages/core/src/threshold.ts` (§5–§6, entry point `computeCq()`) and `packages/core/src/analysis.ts` (`computeCqTable()`, the per-run entry point); §10 separates what is deliberately unimplemented from what is still unknown. **Appendix A is the measurement against CFX Manager's own exported results** for a committed sample — the Cq stage exactly (`packages/core/test/cfxExport.test.ts`), the baseline stage to within a cycle of window; Appendix B records the alternatives tried and how noisy curves broke them. |
@@ -90,6 +90,8 @@ This is an npm-workspaces monorepo:
 - Parses `RunInfo.xml` into typed run metadata (grid size, scan mask → channel count,
   serials, start time, …), with the full raw key/value map preserved.
 - Pivots the per-cycle data into **well-centric amplification curves** ready to plot.
+- Decodes the `.alf` **run report** — the instrument's own log of what actually ran, one record
+  per executed step, with the wall-clock time it began (and, derived from that, how long it took).
 - Exposes a **low-level archive API** (`entries`, `bytes`, `text`, `hexDump`) so any file —
   even ones we don't fully parse yet — can be inspected.
 
@@ -135,6 +137,7 @@ const zpcr = await zpcrFromBlob(file);
 | `Zpcr.darkCurves(step)` | Per-channel dark (LED-off) background across cycles |
 | `Zpcr.temperatureCurves(step)` | Per-field `TemperatureCurve[]` (°C per cycle) |
 | `Zpcr.ledCurves(step)` | Per-channel `LedCurve[]` — LED drive current (DAC counts per cycle) |
+| `Zpcr.runReports()` | The archive's `.alf` run reports — the instrument's own per-step execution log |
 | `Zpcr.archive` | Low-level `entries` / `bytes` / `text` / `hexDump` access |
 
 See [`ARCHITECTURE.md`](./ARCHITECTURE.md) for design details and
@@ -234,7 +237,7 @@ It walks the requested views and writes **one labelled contact-sheet PNG** —
 console errors, uncaught exceptions and failed page loads, which catch breakage a screenshot
 can't show.
 
-**`tools/uitest.mjs` (`npm run test:ui`) — assert it.** 130 browser assertions covering what
+**`tools/uitest.mjs` (`npm run test:ui`) — assert it.** 174 browser assertions covering what
 nothing else can catch: the two URL contracts — hash routing (deep links, back/forward,
 unknown-file and invalid-view fallbacks) and password handling (stripped from both URL forms,
 never leaked into the routing hash, an encrypted `.pcrd` still decrypting) — plus `#load=`, the
@@ -273,6 +276,11 @@ filename's `<date>_<time>_<serial>_<name>` unless the format states one (Biomeme
 typed one, and a typed name has to survive a reload, which it can only do by reaching the
 archive's own `zpcrweb.json` (clearing it reverts to the derived name rather than blanking it) —
 plus a Biomeme run's Raw tab, which is its JSON document in the standalone (no file list) viewer —
+and the `.alf` run report's decoded view, whose three most useful columns are things the file
+never states: a step's wall-clock duration (differenced timestamps, so a 10 s hold reads as the
+~22 s it occupied), its stage, and its plate read's index — which is asserted to be 1:1 with the
+archive's own `.Plateread` entries, a claim spanning two file types that nothing else checks —
+
 and what happens when a file with unsaved edits is deleted — an edited file (a rename is enough)
 wears a dot and its ✕ arms into a waste bin that takes a second click, Escape disarms it, neither
 state widens the chip, the flag survives a reload, and downloading the file puts it back to

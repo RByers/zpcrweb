@@ -1140,6 +1140,101 @@ async function xmlViewChecks(chrome, origin, pw) {
   solo.close();
 }
 
+/**
+ * The `.alf` run report's decoded view (`alf.md`, `components/raw/DecodedAlf.tsx`).
+ *
+ * A screenshot shows the table; what it can't show is that the numbers in it are the *derived*
+ * ones rather than fields copied out of the file, which is the whole reason the view exists:
+ *
+ * - the plate-read count matches the archive's own `.Plateread` entries (§7.5 — the check that
+ *   would catch a missing read, and the one claim that spans two file types at once);
+ * - "took" is the next step's start minus this one's (§7.4), so a 10 s hold reads as the ~20 s
+ *   it really occupied — a column equal to the hold column would mean the derivation was lost;
+ * - the fourth column of the file (§8) is *absent*, deliberately, and a future edit that helpfully
+ *   adds it back should fail here rather than ship a number nobody can interpret.
+ */
+async function alfViewChecks(chrome, origin) {
+  console.log("\n.alf run report");
+  const cdp = await openPage(chrome.base, origin);
+  await emptyReload(cdp, origin);
+  await loadFile(cdp, ZPCR);
+  await cdp.eval(`window.location.hash = "view=raw", undefined`);
+  await tabBecomes(cdp, "Raw");
+
+  // Pick the `.alf` out of the file list by extension — its name carries the run's timestamp.
+  await waitFor(
+    () =>
+      cdp.eval(
+        `!!([...document.querySelectorAll('.raw__item')].find(b => /\\.alf$/i.test(b.textContent.trim())))`,
+      ),
+    { what: "the .alf entry in the file list" },
+  );
+  const plateReads = await cdp.eval(
+    `[...document.querySelectorAll('.raw__item')].filter(b => /\\.Plateread$/i.test(b.textContent.trim())).length`,
+  );
+  await cdp.eval(
+    `[...document.querySelectorAll('.raw__item')].find(b => /\\.alf$/i.test(b.textContent.trim())).click()`,
+  );
+  await waitFor(() => cdp.eval(`!!document.querySelector('.decoded__alf tbody tr')`), {
+    what: "the decoded execution log",
+  });
+
+  const log = await cdp
+    .eval(
+      `JSON.stringify((() => {
+         // The headings are uppercased by CSS, not in the markup — match on the real text.
+         const head = [...document.querySelectorAll('.decoded__alf thead th')].map(t => t.textContent.trim());
+         const rows = [...document.querySelectorAll('.decoded__alf tbody tr')].map(r =>
+           [...r.querySelectorAll('td')].map(c => c.textContent.trim()));
+         const col = (name) => head.findIndex(h => h.toLowerCase() === name.toLowerCase());
+         const cell = (r, name) => r[col(name)];
+         const steps = rows.filter(r => r.length === head.length);
+         return {
+           head,
+           mode: document.querySelector('.raw__modes .segmented__item.is-active')?.textContent.trim(),
+           reads: steps.filter(r => cell(r, "READ") !== "").length,
+           lastRead: steps.filter(r => cell(r, "READ") !== "").map(r => cell(r, "READ")).pop(),
+           // A 10 s hold in this run's cycling loop, and what it actually occupied.
+           tenSecond: steps.filter(r => cell(r, "HOLD") === "0:10").map(r => cell(r, "TOOK")),
+           stages: [...new Set(steps.map(r => cell(r, "STAGE")))].length,
+         };
+       })())`,
+    )
+    .then(JSON.parse);
+
+  check(
+    "a .alf opens on its decoded run report, not a hex dump",
+    log.mode === "Decoded",
+    log.mode,
+  );
+  check(
+    "the execution log's plate reads are 1:1 with the archive's .Plateread files (alf.md §7.5)",
+    log.reads === plateReads && log.lastRead === String(plateReads),
+    `${log.reads} logged / ${plateReads} files, last index ${log.lastRead}`,
+  );
+  // A 10 s hold never occupies *less* than 10 s, and mostly occupies more — the surplus is the
+  // ramp, which exists in this column only because it is differenced timestamps rather than a
+  // copy of the file's hold field. Not "always more": this run's first pass holds 95 °C right
+  // after a 60 s hold at 95 °C, so there is no ramp to pay for and it comes to exactly 0:10.
+  const holds = log.tenSecond.map((t) => {
+    const [m, s] = t.split(":");
+    return Number(m) * 60 + Number(s);
+  });
+  check(
+    "a step's duration is measured from the next step's start, not read off the hold (alf.md §7.4)",
+    holds.length > 0 &&
+      holds.every((s) => s >= 10) &&
+      holds.filter((s) => s > 10).length > holds.length / 2,
+    `${holds.length} ten-second holds, took ${[...new Set(log.tenSecond)].sort().join(", ")}`,
+  );
+  check(
+    "the unexplained fourth column is not presented as a ramp time (alf.md §8)",
+    !log.head.some((h) => /ramp/i.test(h)),
+    log.head.join(" "),
+  );
+  cdp.close();
+}
+
 /** True once a chip whose label matches `text` is in the file bar. */
 const chipPresent = (cdp, text) =>
   cdp.eval(
@@ -2536,6 +2631,7 @@ async function main() {
     await calibrationChecks(chrome, origin);
     await passwordChecks(chrome, origin, pw);
     await xmlViewChecks(chrome, origin, pw);
+    await alfViewChecks(chrome, origin);
     await instrumentRunChecks(chrome, origin);
     await experimentNameChecks(chrome, origin);
     await deleteConfirmChecks(chrome, origin);

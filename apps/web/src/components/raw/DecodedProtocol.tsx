@@ -87,25 +87,36 @@ export function ProtocolDetail({
         <h3 className="decoded__h">{protocol.name || "Protocol"}</h3>
         {protocol.steps && (
           <dl className="decoded__dl mono">
+            {/* `shutoffLidEnabled` is "the lid heater is off", not "shut off below X" —
+                `protocol.md` §3.1, and the reason these are one row rather than two: the
+                setpoint and the flag are the same fact, said twice. */}
             <Pair
               k="Lid"
               v={
-                Number.isFinite(protocol.lidTemperatureC)
-                  ? `${protocol.lidTemperatureC}°C${protocol.useDefaultLidTemperature ? " (default)" : ""}`
+                protocol.shutoffLidEnabled || protocol.lidTemperatureC === 0
+                  ? "off"
+                  : Number.isFinite(protocol.lidTemperatureC)
+                    ? `${protocol.lidTemperatureC}°C${protocol.useDefaultLidTemperature ? " (default)" : ""}`
+                    : "—"
+              }
+            />
+            <Pair
+              k="Idles below"
+              v={
+                Number.isFinite(protocol.shutoffTemperatureC)
+                  ? `${protocol.shutoffTemperatureC}°C`
                   : "—"
               }
             />
             <Pair
-              k="Shutoff"
-              v={
-                protocol.shutoffLidEnabled && Number.isFinite(protocol.shutoffTemperatureC)
-                  ? `below ${protocol.shutoffTemperatureC}°C`
-                  : "disabled"
-              }
-            />
-            <Pair
               k="Volume"
-              v={Number.isFinite(protocol.volumeUl) ? `${protocol.volumeUl} µL` : "—"}
+              v={
+                protocol.volumeUl === 0
+                  ? "none (block control)"
+                  : Number.isFinite(protocol.volumeUl)
+                    ? `${protocol.volumeUl} µL`
+                    : "—"
+              }
             />
             <Pair k="Real-time" v={protocol.isRealTime ? "yes" : "no"} />
           </dl>

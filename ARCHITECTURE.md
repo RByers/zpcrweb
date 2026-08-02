@@ -424,6 +424,13 @@ raw bytes ─▶ fflate.unzipSync ─▶ { name: Uint8Array }
   empty-plate baseline, also on top of the ICFF index. Also exports `dyeChannelLookup`, the
   one place dye→channel matching (`PRIMARYCHANNEL`, case- and whitespace-insensitive) is
   implemented — see the plate CSV format above. See [`dcal.md`](./dcal.md).
+- **`alf.ts`** — decodes the `.alf` run report (`zpcr.runReports()`): the instrument's own
+  execution log, one record per *executed* step. Derives what the file only implies — a step's
+  wall-clock duration (the next line's timestamp minus its own, since the timestamp is the
+  step's *start*), the stage boundaries (where the repeat counter goes backwards) and each
+  plate read's index among the archive's `.Plateread` files. Deliberately leaves the fourth
+  step column uninterpreted; see [`alf.md`](./alf.md) §8. Line 2 is a run definition, so it is
+  re-delimited and handed to `runDefinition.ts` rather than parsed here.
 - **`calibration.ts`** — channel→dye color separation built on top of `.Dcal` data: per-dye
   response curves, a channel×dye calibration matrix, and a solve via `linalg.ts`'s
   pseudo-inverse. The matrix's normalization mode is a conditioning choice only — the solve
@@ -521,8 +528,10 @@ Both are provided because they serve different consumers:
 
 ## Low-level archive API
 
-Full visualizers for every remaining `.zpcr` file type (protocol, `.alf`, `runlog.xml`) are
-future work. Until then, `Zpcr.archive` lets the UI show the raw `bytes`, decoded `text`, or a
+Every `.zpcr` entry that carries structure now has a typed decoder and a visualizer — the last
+was the `.alf` run report (`alf.ts`); what's left is one-line text like `ProtocolName.txt`, which
+needs none. The low-level facade stays regardless: `Zpcr.archive` lets the UI show the raw
+`bytes`, decoded `text`, or a
 canonical `hexDump` of any real archive entry. This means the app can present *something*
 useful for every file from day one, and new typed parsers can be layered in without changing
 the low-level contract. This is `.zpcr`-only — a `.pcrd`'s `archive` is empty by design (see

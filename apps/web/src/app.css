@@ -2193,6 +2193,38 @@
 .decoded__empty {
   color: var(--ink-muted);
 }
+/* Something the reader should not skim past: a set error flag in a `.alf` run report, or a line
+   the decoder couldn't make sense of. `--danger`, not a neon accent — this is a state, not
+   chrome. A clear flag stays muted, so the line reads as quiet-unless-it-isn't. */
+.decoded__alarm {
+  color: var(--danger);
+}
+
+/* The `.alf` execution log (alf.md §7). The directive column is prose-ish and left-aligned like
+   the first column; everything else is a number and stays right-aligned by `.decoded__tbl`. */
+.decoded__alf td:nth-child(4) {
+  text-align: left;
+}
+/* The log is one row per step execution — 136 for a 45-cycle run, thousands for a long one — so
+   the column headings have to stay put as it scrolls, or "0:13" in the sixth column stops
+   meaning anything. Sticks to `.raw__decoded`, the scrolling ancestor. */
+.decoded__alf thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--plane);
+}
+/* A stage boundary — where the repeat count went backwards (alf.md §7.2), the only marker the
+   file has for one. A rule above the row, not a colour on it: the rows themselves are all the
+   same kind of thing. */
+.decoded__alfstage td {
+  border-top: 1px solid var(--neon-cyan-dim);
+}
+.decoded__alfend td {
+  color: var(--ink-muted);
+  border-top: 1px solid var(--border);
+  text-align: left;
+}
 
 /* Protocol steps: thermal steps numbered 1-based (GOTO targets), setup lines unnumbered. */
 /* A protocol listing: the directives as written, each with the library's reading of it beside

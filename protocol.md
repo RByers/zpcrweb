@@ -364,6 +364,10 @@ Every difference observed across the five carriers of §2, so nothing here gets 
 | `.prcl.txt` (this project's) | `;` + newline | `END;` | as written |
 | USB command channel | none — one command per directive | `END` command | the mask being requested |
 
+Only one of these differences reaches `parseRunDefinition`, which reads the `;` form: `alf.ts`
+re-delimits line 2 from `*` to `;` before handing it over (`alf.md` §5), so the run report is
+decoded by the same grammar as every other carrier rather than by a second parser.
+
 The terminator is the one that surprises: **`END` and `END;` both occur in recorded
 `ProtocolRunDefinition.txt` files**, across the same instrument. Three of the five committed
 samples end bare, two end with the semicolon; the `.alf` copy of the very same protocol ends bare

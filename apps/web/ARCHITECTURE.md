@@ -639,6 +639,15 @@ so every call site keeps writing one `onChange({ … })` regardless of where the
   (`prcl.md` §1.1), which carries no XML step list — and *without* the settings panel, since
   there the lid and volume are directives the annotated listing already explains, so showing
   them twice would be two views of one line.
+- **`.alf`** → `DecodedAlfFile` (`components/raw/DecodedAlf.tsx`) — the instrument's own run
+  report ([`alf.md`](../../alf.md)): run identity, the error summary's flags, the protocol as
+  *executed* (through the same `ProtocolDecoded`), and the execution log as one row per step.
+  The three columns that aren't fields in the file are what earn the view — **Took** (the next
+  step's start minus this one's, §7.4, the only measurable ramp cost), **Stage** (§7.2) and
+  **Read** (its index among the archive's `.Plateread` files, §7.5) — plus the directive text,
+  joined back on from line 2 of the same file so a bare step number reads as a step. The
+  fourth step column is left out on purpose: `alf.md` §8 rules out both readings of it, and
+  Text mode is one click away for anyone who wants the bytes.
 - **other `.xml`** (e.g. `runlog.xml`) → the shared collapsible `XmlTreeFromString`
   (`lib/xmlTree.tsx` — see "Raw views" below).
 

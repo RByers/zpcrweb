@@ -386,8 +386,14 @@ export function parseRunDefinition(runDefinition: string): RunDefinitionProgram 
           lidTemperatureC,
           shutoffTemperatureC,
           description:
-            `Heated lid at ${degrees(lidTemperatureC)} °C` +
-            (Number.isFinite(shutoffTemperatureC)
+            // `HOTLID 0,30` is a *disabled* lid heater, not a 0 °C setpoint: the directive is
+            // never omitted, so off is said with a zero operand while the second operand keeps
+            // its constant `30` (`protocol.md` §3.1). Reading it as "heated lid at 0 °C" would
+            // describe the one case the number isn't a temperature.
+            (lidTemperatureC === 0
+              ? "Heated lid off"
+              : `Heated lid at ${degrees(lidTemperatureC)} °C`) +
+            (lidTemperatureC !== 0 && Number.isFinite(shutoffTemperatureC)
               ? `, off below ${degrees(shutoffTemperatureC)} °C`
               : ""),
         });
@@ -399,7 +405,12 @@ export function parseRunDefinition(runDefinition: string): RunDefinitionProgram 
           ...base,
           verb: "VOLUME",
           volumeUl,
-          description: `Sample volume ${degrees(volumeUl)} µL — sets the thermal model`,
+          // `VOLUME 0` is "no thermal model" — the directive is written out even for a method
+          // that ignores it, and `METHOD` is derived from it (`protocol.md` §3.1).
+          description:
+            volumeUl === 0
+              ? "No sample volume — block temperature is controlled directly (METHOD BLOCK)"
+              : `Sample volume ${degrees(volumeUl)} µL — sets the thermal model`,
         });
         break;
       }

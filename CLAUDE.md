@@ -176,6 +176,7 @@ touch `state/urlHash.ts`, `state/useHeaderFit.ts`, `state/pltdPassword.ts`,
 `ProtocolDecoded`, `components/views/StandaloneProtocolView.tsx`, `components/FileBar.tsx`,
 `components/FileIcons.tsx` (or core's `fileKind.ts`), `components/views/StandaloneRawView.tsx`,
 `components/protocol/` (the protocol editor) or core's `protocolBuilder.ts`,
+`components/raw/DecodedAlf.tsx` or core's `alf.ts`,
 `components/views/OverviewPanel.tsx`, `components/views/OverviewPlateSection.tsx`,
 `lib/cloneName.ts` or `App.tsx`'s `cloneActiveFile`,
 `state/writeThrottle.ts`, `state/useZpcrStore.ts`'s

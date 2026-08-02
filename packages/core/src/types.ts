@@ -312,6 +312,8 @@ export interface WellCurve {
 // Re-exported so the Zpcr interface can reference them without a circular import.
 import type { RefWellCal, RefCalComparison } from "./refcal.js";
 export type { RefWellCal, RefCalComparison } from "./refcal.js";
+import type { AlfEntry } from "./alf.js";
+export type { AlfEntry, AlfReport } from "./alf.js";
 import type { Pltd } from "./pltd.js";
 import type { Dcal } from "./dcal.js";
 import type { Prcl, ProtocolDocument } from "./prcl.js";
@@ -452,6 +454,12 @@ export interface Zpcr {
   protocols(password?: string): PrclEntry[];
   /** Decode every `.Dcal` pure-dye calibration entry in the archive (unencrypted). */
   calibrations(): DcalEntry[];
+  /**
+   * Decode every `.alf` run report in the archive (`alf.md`) — the instrument's own per-step
+   * execution log, with the wall-clock time each step began. Every `.zpcr` seen carries exactly
+   * one; a `.pcrd` carries none, so this is empty for a `.pcrd`-derived run.
+   */
+  runReports(): AlfEntry[];
   /**
    * This run's own dye → optical channel mapping, from its calibration set
    * (`Dcal.primaryChannel`). `undefined` for a dye the run doesn't calibrate, and for every dye

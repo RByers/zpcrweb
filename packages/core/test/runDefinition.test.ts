@@ -139,6 +139,28 @@ describe("parseRunDefinition", () => {
     expect(p.directives.every((d) => d.description.length > 0)).toBe(true);
   });
 
+  // `protocol.md` §3.1: the header is fixed-arity, so "off"/"unused" is said with a `0` operand
+  // rather than by dropping the directive — which makes `0` the one value that isn't a
+  // temperature or a volume.
+  it("reads HOTLID 0 as a disabled lid heater, not a 0 °C setpoint", () => {
+    const p = parseRunDefinition("METHOD BLOCK;HOTLID 0,30;VOLUME 0;TEMP 95.0,10;END");
+    const hotlid = p.directives.find((d): d is HotLidDirective => d.verb === "HOTLID")!;
+    expect(hotlid.lidTemperatureC).toBe(0);
+    // The second operand keeps its constant 30 even with the heater off, so it must not be
+    // described as a shutoff threshold that means anything here.
+    expect(hotlid.shutoffTemperatureC).toBe(30);
+    expect(hotlid.description).toBe("Heated lid off");
+  });
+
+  it("reads VOLUME 0 as no thermal model (METHOD BLOCK)", () => {
+    const p = parseRunDefinition("METHOD BLOCK;HOTLID 0,30;VOLUME 0;TEMP 95.0,10;END");
+    const volume = p.directives.find((d) => d.verb === "VOLUME")!;
+    expect(p.volumeUl).toBe(0);
+    expect(volume.description).toBe(
+      "No sample volume — block temperature is controlled directly (METHOD BLOCK)",
+    );
+  });
+
   it("reads a zero hold as an indefinite one (BurnIn.prcl's TEMP 12.0,0)", () => {
     const p = parseRunDefinition("METHOD CALC;HOTLID 105,30;VOLUME 25;TEMP 12.0,0;END");
     expect(p.steps[0]!.description).toBe("Hold 12 °C indefinitely");

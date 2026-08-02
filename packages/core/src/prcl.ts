@@ -84,10 +84,24 @@ export interface ProtocolDocument {
   name: string;
   /** Heated-lid setpoint, °C. */
   lidTemperatureC: number;
-  /** Whether the lid setpoint is the app default rather than user-set. */
+  /**
+   * Whether the lid setpoint is the app default rather than user-set. Note that "default"
+   * always means 105 °C in written text, whatever the block (`protocol.md` §3.1), so this does
+   * not identify the block type.
+   */
   useDefaultLidTemperature: boolean;
-  /** Whether the lid heater turns off below `shutoffTemperatureC`. */
+  /**
+   * **The lid heater is turned off entirely** — the third choice in CFX's lid dialog, not a
+   * "shut off below `shutoffTemperatureC`" setting, despite the name (`protocol.md` §3.1: the
+   * writer collapses the choice to `if (shutoffLidEnabled) lidTemp = 0`). In the text grammar
+   * this is exactly `HOTLID 0,<shutoff>`.
+   */
   shutoffLidEnabled: boolean;
+  /**
+   * `HOTLID`'s second operand — the block temperature below which the lid heater idles. A
+   * constant `30` (`ProtocolConstants.c_ShutoffLidTemperature`) in everything seen, and
+   * untouched by {@link shutoffLidEnabled}, so lid-off is `HOTLID 0,30` rather than `HOTLID 0,0`.
+   */
   shutoffTemperatureC: number;
   /** Sample volume, µL — drives the instrument's thermal model. */
   volumeUl: number;
@@ -282,7 +296,9 @@ export function protocolDocumentFromRunDefinition(
     name,
     lidTemperatureC: program.lidTemperatureC ?? NaN,
     useDefaultLidTemperature: false,
-    shutoffLidEnabled: false,
+    // A `0` setpoint is how the text says "lid heater off" — the directive is never omitted
+    // (`protocol.md` §3.1) — and that is precisely what the XML's `shutoffLidEnabled` means.
+    shutoffLidEnabled: program.lidTemperatureC === 0,
     shutoffTemperatureC: program.shutoffTemperatureC ?? NaN,
     volumeUl: program.volumeUl ?? NaN,
     isRealTime: false,

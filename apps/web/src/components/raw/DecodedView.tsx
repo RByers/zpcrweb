@@ -1,5 +1,6 @@
 import { useMemo } from "react";
-import { parseRunDefinition, parseRunInfoRaw, type Zpcr } from "@zpcrweb/core";
+import { isAlfName, parseRunDefinition, parseRunInfoRaw, type Zpcr } from "@zpcrweb/core";
+import { DecodedAlfFile } from "./DecodedAlf";
 import { DecodedPlateread } from "./DecodedPlateread";
 import { DecodedPlate } from "./DecodedPlate";
 import { DecodedDcalFile } from "./DecodedDcal";
@@ -19,6 +20,7 @@ export type DecodedKind =
   | "runinfo"
   | "runlog"
   | "protocol"
+  | "alf"
   | "xml"
   | null;
 
@@ -30,6 +32,7 @@ export function decodedKind(name: string): DecodedKind {
   if (/RunInfo\.xml$/i.test(name)) return "runinfo";
   if (/runlog\.xml$/i.test(name)) return "runlog";
   if (/ProtocolRunDefinition\.txt$/i.test(name)) return "protocol";
+  if (isAlfName(name)) return "alf";
   if (/\.xml$/i.test(name)) return "xml";
   return null;
 }
@@ -54,6 +57,7 @@ export function DecodedView({ zpcr, name }: Props) {
   if (kind === "runinfo") return <RunInfoTable text={zpcr.archive.text(name)} />;
   if (kind === "runlog") return <RunLogTable parsed={parseRunLog(zpcr.archive.text(name))} />;
   if (kind === "protocol") return <ProtocolDecoded text={zpcr.archive.text(name)} />;
+  if (kind === "alf") return <DecodedAlfFile text={zpcr.archive.text(name)} />;
   if (kind === "xml") return <XmlTreeFromString xml={zpcr.archive.text(name)} />;
 
   return <div className="decoded__na mono">No decoder for this file.</div>;

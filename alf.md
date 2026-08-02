@@ -17,6 +17,12 @@ log: the only artifact in which the instrument, rather than the PC, says what ra
 > capture (`usb.md` §7.6) — 48 reports, 6,205 step lines. Every one has the identical shape described
 > here.
 
+**Implemented by** `packages/core/src/alf.ts`, entry point `parseAlf(bytes)`; `zpcr.runReports()`
+decodes every `.alf` entry in an archive, and the web app's Raw files view renders one
+(`components/raw/DecodedAlf.tsx`). The decoder derives the three things the file only implies —
+per-step durations (§7.4), stage boundaries (§7.2) and plate-read indices (§7.5) — and carries
+the fourth step column through uninterpreted (§8), which is also why the app's table omits it.
+
 Related docs: [`protocol.md`](./protocol.md) owns the protocol language on line 2 and the step
 numbering the log uses (its Appendix A is measured from these files);
 [`plateread.md`](./plateread.md) owns the `.Plateread` files whose reads line 4-and-after index;

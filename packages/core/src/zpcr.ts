@@ -1,4 +1,5 @@
 import type {
+  AlfEntry,
   CurveOptions,
   DcalEntry,
   PlateRead,
@@ -8,6 +9,7 @@ import type {
   Zpcr,
 } from "./types.js";
 import { createArchiveAccess, unzipArchive } from "./archive.js";
+import { isAlfName, parseAlf } from "./alf.js";
 import { isPltdName, parsePltd, type Pltd, type PltdContainer } from "./pltd.js";
 import { isPlateCsvName, parsePlateCsv } from "./plateCsv.js";
 import { isPrclName, parsePrcl, protocolDocumentFromRunDefinition } from "./prcl.js";
@@ -151,6 +153,10 @@ export function parseZpcr(data: Uint8Array | ArrayBuffer): Zpcr {
           name,
           prcl: parsePrcl(files[name] as Uint8Array, password ? { password } : undefined),
         })),
+    runReports: (): AlfEntry[] =>
+      archive.entries
+        .filter(isAlfName)
+        .map((name) => ({ name, alf: parseAlf(files[name] as Uint8Array) })),
     calibrations: (): DcalEntry[] =>
       archive.entries
         .filter(isDcalName)

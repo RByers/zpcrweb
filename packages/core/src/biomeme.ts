@@ -411,6 +411,8 @@ export function parseBiomeme(data: Uint8Array | ArrayBuffer): Zpcr {
     plates: (): PltdEntry[] => plateEntries,
     protocols: (): PrclEntry[] => [],
     calibrations: (): DcalEntry[] => [],
+    // A Biomeme export is one JSON document from a different instrument — no CFX run report.
+    runReports: () => [],
     // A Biomeme run reads per-dye already — there are no optical channels to map a dye onto, and
     // no calibration set that could say so (see `biomeme.md`).
     channelForDye: () => undefined,

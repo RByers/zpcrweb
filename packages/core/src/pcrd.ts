@@ -703,6 +703,9 @@ function buildZpcr(root: XmlElement[]): Zpcr {
     // .zpcr's real .prcl archive entries are, since there's no separate password-gated file
     // here to model.
     protocols: (): PrclEntry[] => [],
+    // A `.pcrd` carries no `.alf` at all — the saved-experiment XML has `RunInfo`/`runlog` but
+    // not the report text (`alf.md` §1).
+    runReports: () => [],
     calibrations,
     channelForDye,
     wellFactors,

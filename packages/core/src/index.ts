@@ -121,6 +121,16 @@ export type {
   ScanSelection,
   TempStepDraft,
 } from "./protocolBuilder.js";
+/** The `.alf` run report (`alf.md`) — the instrument's own per-step execution log. */
+export { parseAlf, isAlfName } from "./alf.js";
+export type {
+  AlfReport,
+  AlfHeader,
+  AlfErrorSummary,
+  AlfStep,
+  AlfSetpoint,
+  AlfEntry,
+} from "./alf.js";
 export { parseDcal, findDcalBlock, isDcalName, dyeChannelLookup } from "./dcal.js";
 export { parsePcrd, isPcrdName, pcrdFromBlob } from "./pcrd.js";
 export { parseBiomeme, isBiomemeJson } from "./biomeme.js";
