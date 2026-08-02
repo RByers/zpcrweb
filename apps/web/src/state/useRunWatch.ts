@@ -32,9 +32,11 @@
  *
  * - **Only new files are fetched.** A `CurrentRun` is ~40 files, 28 of which are the `.Dcal`
  *   calibration set that never changes during a run; re-pulling those every cycle would put
- *   megabytes over a 64-byte-packet bulk endpoint for nothing. Bytes are cached by name, and only
- *   names not already held — plus the handful that genuinely change — are fetched. A cycle's
- *   update is then one 22 KB plate read and a small XML.
+ *   megabytes over a 64-byte-packet bulk endpoint for nothing. Bytes are cached by name, and a
+ *   name already held is never fetched again — a file the instrument has written is final, and a
+ *   new plate read arrives under a new name. A cycle's update is then exactly one 22 KB plate
+ *   read. The four files that *are* rewritten as the run goes (`REFETCH_AT_END`) are re-read once,
+ *   on the end-of-run pass, where the archive has to be complete.
  * - **The first listing is never downloaded — unless it's already running.** `CurrentRun` usually
  *   holds the *previous* run when you connect, finished and complete with its `ended` marker.
  *   Pulling that unasked would be a surprise 400 KB transfer and an unrequested file in the bar,
@@ -59,14 +61,36 @@ import { formatTrafficLog, USB_TRAFFIC_LOG_NAME } from "../lib/usbTrafficLog";
 import type { CfxDeviceHandle } from "./useCfxDevice";
 
 /**
- * Files whose *content* changes while the run goes on, so a cached copy goes stale.
+ * Files whose *content* changes while the run goes on, so a cached copy goes stale — re-fetched
+ * **only on the end-of-run pass**, never per cycle.
  *
- * Everything else in the folder is either written once at the start (the `.Dcal` set, the plate
- * and protocol, `GlobData.xml`) or is a zero-length marker whose name is the entire message.
- * `Read0000N.Plateread` is not here on purpose: each is written once and never revised — a new
- * cycle means a new *name*, which the cache misses and fetches anyway.
+ * Everything else in the folder is written once and never revised: the `.Dcal` set, the plate,
+ * the protocol and `GlobData.xml` at the start, and each `Read0000N.Plateread` as its cycle ends
+ * — a new read means a new *name*, which the cache misses and fetches anyway. So a cycle's
+ * download is exactly the 22 KB read that cycle produced.
+ *
+ * These four are the exceptions, and only two of them genuinely grow: `runlog.xml` accumulates an
+ * entry per event (31 KB by the end of a 45-cycle run) and `lastplatereadstatus` is a 16-byte
+ * record whose payload is the completed-read count. Re-pulling those every cycle was ~40 KB per
+ * cycle on top of the 22 KB read — over a 64-byte bulk endpoint, and behind `useCfxDevice`'s
+ * `busy` flag, which stalls the status poll for the duration — to refresh two things nothing
+ * consumes until the run is over. Only the final archive needs them complete, so that is the only
+ * pass that re-reads them, and an intermediate in-progress snapshot carries the copy it first saw
+ * (visible in the Raw view's run log, which is that far behind mid-run and correct once the run
+ * ends).
+ *
+ * `RunInfo.xml` and `ProtocolName.txt` are here for a different reason: neither is rewritten
+ * during a run, but `RunInfo.xml` is *deposited* by this app after the run starts (`usb.md` §7.4)
+ * and survives in the folder from the previous run until it is, so the one re-read at the end
+ * costs 8 KB once and removes any question of a snapshot holding the previous run's metadata.
+ * `ProtocolName.txt` only appears at the finish anyway, so the cache misses it there regardless.
  */
-const VOLATILE = new Set(["runinfo.xml", "runlog.xml", "lastplatereadstatus", "protocolname.txt"]);
+const REFETCH_AT_END = new Set([
+  "runinfo.xml",
+  "runlog.xml",
+  "lastplatereadstatus",
+  "protocolname.txt",
+]);
 
 /** Identity of a listing, for "has anything changed?" — order-independent. */
 function signatureOf(names: readonly string[]): string {
@@ -127,10 +151,11 @@ export function useRunWatch(
   /**
    * Pull whatever this listing holds that we don't already have, and rebuild the `.zpcr`.
    *
-   * `finalAssembly` adds the session's complete USB traffic log as an extra entry — set only for
-   * the end-of-run pass (see `check`), so every intermediate `.zpcr` a run produces stays exactly
-   * what's on the instrument, and the log is a one-time addition once there's nothing left to
-   * supersede it.
+   * `finalAssembly` marks the end-of-run pass (see `check`), and does two things: it re-reads the
+   * `REFETCH_AT_END` files, whose cached copies are as old as the moment they were first seen, and
+   * it adds the session's complete USB traffic log as an extra entry. Both belong to this pass
+   * only — every intermediate `.zpcr` a run produces stays exactly what's on the instrument, and
+   * the log is a one-time addition once there's nothing left to supersede it.
    */
   const pull = useCallback(
     async (names: string[], finalAssembly = false) => {
@@ -143,7 +168,9 @@ export function useRunWatch(
           break;
         }
       }
-      const wanted = names.filter((n) => !cache.current.has(n) || VOLATILE.has(n.toLowerCase()));
+      const wanted = names.filter(
+        (n) => !cache.current.has(n) || (finalAssembly && REFETCH_AT_END.has(n.toLowerCase())),
+      );
       if (wanted.length > 0) {
         const fetched = await fetchDirectoryFiles(CFX_CURRENT_RUN_DIR, wanted);
         if (!fetched) return; // the fetch failed; the rail reports it, and we retry next tick
