@@ -690,6 +690,178 @@
   color: #fff;
 }
 
+/* The bar itself plus the toggle that opens the full files table (`FilesTableView.tsx`) at its
+   left edge — a row so the toggle sits flush against the bar rather than floating above it. */
+.filebar-row {
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--plane);
+}
+.filebar-row .filebar {
+  flex: 1 1 auto;
+  border-bottom: 0;
+}
+.filebar__toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 34px;
+  border: 0;
+  border-right: 1px solid var(--border);
+  background: transparent;
+  color: var(--ink-muted);
+}
+.filebar__toggle:hover {
+  color: var(--ink);
+  background: var(--raised-2);
+}
+.filebar__toggle.is-open {
+  color: var(--neon-cyan);
+  background: color-mix(in srgb, var(--neon-cyan) 12%, transparent);
+}
+
+/* ---- FilesTableView ------------------------------------------------------ */
+/* Fills `<main>` in place of whatever view was showing (see `App.tsx`'s `filesViewOpen`) — a
+   header row plus a scrolling table, the same two-part shape as any other full-page view here. */
+.filesview {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+.filesview__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+.filesview__title {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 0;
+  color: var(--ink);
+}
+.filesview__close {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ink-muted);
+  width: 26px;
+  height: 26px;
+  font-size: 13px;
+}
+.filesview__close:hover {
+  color: var(--ink);
+  background: var(--raised-2);
+}
+.filesview__scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 0 12px 12px;
+}
+.filesview__tbl {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.filesview__tbl thead th {
+  padding: 0;
+  position: sticky;
+  top: 0;
+  background: var(--panel);
+  z-index: 1;
+  border-bottom: 1px solid var(--border);
+}
+.filesview__tbl td {
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+.filesview__row {
+  cursor: pointer;
+}
+.filesview__row:hover {
+  background: var(--raised-2);
+}
+.filesview__row.is-active {
+  background: color-mix(in srgb, var(--neon-cyan) 10%, transparent);
+}
+.filesview__kind {
+  display: inline-flex;
+  color: var(--ink-muted);
+  margin-right: 6px;
+  vertical-align: middle;
+}
+.filesview__filename {
+  max-width: 22ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink-muted);
+}
+.filesview__desc {
+  max-width: 32ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink-2);
+}
+.filesview__checkcol {
+  width: 30px;
+  text-align: center;
+}
+.filesview__delcol {
+  width: 30px;
+  text-align: center;
+}
+.filesview__moddot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--warn);
+}
+.filesview__empty {
+  padding: 24px 8px;
+  color: var(--ink-muted);
+  font-size: 12px;
+}
+.filesview__totals td {
+  border-bottom: 0;
+  border-top: 1px solid var(--border);
+  color: var(--ink-muted);
+  font-size: 11px;
+  padding-top: 10px;
+}
+/* Same two-stage ✕ → waste bin as the file bar's delete used to be (see `FilesTableView.tsx`'s
+   `DeleteButton`) — now the only place a file is actually removed from IndexedDB. */
+.ftbl__del {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--ink-muted);
+  font-size: 12px;
+}
+.ftbl__del:hover {
+  background: rgba(255, 90, 90, 0.16);
+  color: var(--danger);
+}
+.ftbl__del.is-armed,
+.ftbl__del.is-armed:hover {
+  background: var(--danger);
+  color: #fff;
+}
+
 /* Larger tap targets for touch input. `pointer: coarse` never matches a mouse, so this never
    applies on desktop regardless of viewport width. */
 @media (pointer: coarse) {

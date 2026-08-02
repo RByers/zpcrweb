@@ -399,8 +399,23 @@ async function persistedThresholdChecks(chrome, origin, pw) {
   // here is re-hydrated (and re-analysed) by every page opened afterwards — which is enough extra
   // work to push a later check's fixed-delay reads past their deadline. Checks that load a file
   // beyond the shared fixture clean it up.
-  await cdp.eval(`(() => { const b = [...document.querySelectorAll("button")]
-      .find((b) => /^Delete .*RVP/.test(b.getAttribute("aria-label") || "")); b && b.click(); })()`);
+  //
+  // A chip's own ✕ only hides now (`FileBar.tsx`'s `HideButton`) — an actual delete lives in the
+  // full files table (`FilesTableView.tsx`), so cleanup goes there instead. ZPCR (the shared
+  // fixture, kept loaded across checks) is in there too by this point, so the RVP row has to be
+  // picked out by name rather than just grabbing the first ✕. This check only reads the seeded
+  // threshold, never edits anything, so the file is still unmodified and its row's ✕ deletes on
+  // the first click, same as the chip's used to.
+  await cdp.eval(`(() => { document.querySelector(".filebar__toggle")?.click(); })()`);
+  await waitFor(() => cdp.eval(`!!document.querySelector(".filesview__row")`), { what: "the files table" });
+  await cdp.eval(`(() => { const row = [...document.querySelectorAll(".filesview__row")]
+      .find((r) => /RVP/.test(r.textContent));
+      row?.querySelector(".ftbl__del")?.click(); })()`);
+  await waitFor(
+    () => cdp.eval(`![...document.querySelectorAll(".filesview__row")].some((r) => /RVP/.test(r.textContent))`),
+    { what: "the RVP .pcrd to be deleted" },
+  );
+  await cdp.eval(`(() => { document.querySelector(".filesview__close")?.click(); })()`);
   await sleep(300);
   cdp.close();
 }
@@ -1673,15 +1688,19 @@ async function experimentNameChecks(chrome, origin) {
 }
 
 /**
- * Deleting a file that carries edits nothing else has.
+ * Hiding a chip from the bar, and deleting a file for real, in the full files table.
  *
- * A loaded file is normally disposable — it is on the user's disk too, so its ✕ deletes on the
- * click. Once its *content* has been edited (a threshold moved, the run renamed) the browser holds
- * the only copy in that form, so the same ✕ arms first and the click after it is the one that
- * deletes, and the chip wears a dot to say so before anyone reaches for it. All of that is state:
- * a screenshot can show one of the two button faces, never that the first click didn't delete,
- * that the flag outlived a reload (it must — the stale copy is the one on disk), or that
- * downloading the file put it back to disposable.
+ * A chip's ✕ only ever hides now (`FileSettings.visible`) — the file stays loaded, in IndexedDB,
+ * and in the full files table opened from the bar's own toggle. The table is where a file is
+ * actually deleted: an untouched file's ✕ goes on the first click, the same as the chip used to;
+ * once its *content* has been edited (a threshold moved, the run renamed) the browser holds the
+ * only copy in that form, so the same ✕ arms first and the click after it is the one that
+ * deletes. The bar still wears the "unsaved" dot on a modified chip — that part didn't move.
+ *
+ * All of it is state a screenshot can't judge: whether hiding really left the file in IndexedDB
+ * (a reload not bringing it back would be a real delete in disguise), whether the modified flag
+ * outlived a reload (it must — the stale copy is the one on disk), whether the first click on an
+ * edited row's ✕ really didn't delete, or whether downloading the file put it back to disposable.
  */
 async function deleteConfirmChecks(chrome, origin) {
   console.log("\ndelete confirmation");
@@ -1691,109 +1710,114 @@ async function deleteConfirmChecks(chrome, origin) {
   await waitFor(() => chipPresent(cdp, "S183"), { what: "the .zpcr chip" });
 
   const chips = () => cdp.eval(`document.querySelectorAll(".filebar .filechip").length`);
-  const clickDelete = () =>
+  const clickHide = () =>
     cdp.eval(`(() => { document.querySelector(".filebar .filechip__del").click(); })()`);
-  /** What the delete control currently is: armed or not, and what it draws. */
-  const del = () =>
+  const openTable = () => cdp.eval(`(() => { document.querySelector(".filebar__toggle").click(); })()`);
+  const tableRows = () => cdp.eval(`document.querySelectorAll(".filesview__row").length`);
+  const clickTableCheckbox = () =>
+    cdp.eval(`(() => { document.querySelector(".filesview__checkcol input").click(); })()`);
+  const clickTableDelete = () =>
+    cdp.eval(`(() => { document.querySelector(".ftbl__del").click(); })()`);
+  const tableDel = () =>
+    cdp.eval(
+      `(() => { const btn = document.querySelector(".ftbl__del");
+         if (!btn) return "null";
+         return JSON.stringify({ armed: btn.classList.contains("is-armed") }); })()`,
+    ).then((v) => (v === "null" ? null : JSON.parse(v)));
+  /** The chip's own state: modified dot only — it no longer arms. */
+  const chip = () =>
     cdp
       .eval(
-        `(() => { const chip = document.querySelector(".filebar .filechip");
-           if (!chip) return "null";
-           const dot = chip.querySelector(".filechip__moddot");
+        `(() => { const c = document.querySelector(".filebar .filechip");
+           if (!c) return "null";
+           const dot = c.querySelector(".filechip__moddot");
            return JSON.stringify({
-             modified: chip.classList.contains("is-modified"),
-             armed: chip.classList.contains("is-arming"),
-             bin: !!chip.querySelector(".filechip__del svg"),
+             modified: c.classList.contains("is-modified"),
+             bin: !!c.querySelector(".filechip__del svg"),
              dot: getComputedStyle(dot).backgroundColor,
-             // The delete control's own width: the chip's would move with the name, and it is
-             // this column the dot is squeezed into.
-             width: Math.round(chip.querySelector(".filechip__del").getBoundingClientRect().width),
            }); })()`,
       )
       .then((v) => (v === "null" ? null : JSON.parse(v)));
 
-  const untouched = await del();
+  const untouched = await chip();
   check(
     "an unedited file wears no dot and an ordinary ✕",
     untouched.modified === false && !untouched.bin && /rgba\(0, 0, 0, 0\)|transparent/.test(untouched.dot),
     JSON.stringify(untouched),
   );
-  await clickDelete();
-  await waitFor(async () => (await chips()) === 0, { what: "the unedited file to delete" });
-  check("…and one click deletes it, as it always did", (await chips()) === 0);
+
+  // The chip's ✕ only hides — the file stays loaded, and shows up (unchecked) in the full table.
+  await clickHide();
+  await waitFor(async () => (await chips()) === 0, { what: "the chip to hide" });
+  check("…and its ✕ takes it off the bar without deleting it", (await chips()) === 0);
+  await openTable();
+  await waitFor(async () => (await tableRows()) === 1, { what: "the hidden file's table row" });
+  const hiddenChecked = await cdp.eval(`document.querySelector(".filesview__checkcol input").checked`);
+  check("the hidden file's row is unchecked in the table", hiddenChecked === false);
+
+  // Checking it back on brings the chip back.
+  await clickTableCheckbox();
+  await waitFor(async () => (await chips()) === 1, { what: "the chip to come back" });
+  check("re-checking the table row shows the chip again", (await chips()) === 1);
+
+  // An unedited file's table ✕ deletes on the first click, same as the old chip control did.
+  await clickTableDelete();
+  await waitFor(async () => (await tableRows()) === 0, { what: "the unedited file to delete" });
+  check("an unedited file's table row deletes on one click", (await tableRows()) === 0);
+  await cdp.eval(`(() => { document.querySelector(".filesview__close")?.click(); })()`);
 
   // Now edit one: a rename is the cheapest thing that changes what a download would contain.
   await loadFile(cdp, join(REPO, "samples", EXAMPLE));
   await waitFor(() => chipPresent(cdp, "S183"), { what: "the .zpcr chip again" });
   await cdp.eval(`window.location.hash = "view=overview", undefined`);
   await tabBecomes(cdp, "Overview");
-  const clean = await del();
   await setExperimentName(cdp, "Edited RVP");
   await waitFor(() => chipPresent(cdp, "Edited RVP"), { what: "the renamed chip" });
-  const dirty = await del();
+  const dirty = await chip();
   check(
     "editing a file lights the modified dot",
     dirty.modified === true && !/rgba\(0, 0, 0, 0\)|transparent/.test(dirty.dot),
     JSON.stringify(dirty),
-  );
-  check(
-    "…without the chip taking any more room for it",
-    dirty.width === clean.width,
-    `${clean.width}px → ${dirty.width}px`,
   );
 
   // The flag is about the copy on disk, so it has to outlive this browser session.
   await sleep(700); // the archive rewrite is immediate but asynchronous (`analysisPersist.ts`)
   await cdp.send("Page.navigate", { url: `${origin}#file=${EXAMPLE}&view=overview` });
   await tabBecomes(cdp, "Overview");
-  await waitFor(async () => (await del())?.modified === true, { what: "the flag after a reload" });
-  check("the modified state survives a reload", (await del()).modified === true);
+  await waitFor(async () => (await chip())?.modified === true, { what: "the flag after a reload" });
+  check("the modified state survives a reload", (await chip()).modified === true);
 
-  await clickDelete();
-  const armed = await del();
+  await openTable();
+  await waitFor(async () => (await tableRows()) === 1, { what: "the edited file's table row" });
+  await clickTableDelete();
+  const armed = await tableDel();
+  await waitFor(async () => (await tableRows()) === 1, { what: "the row to still be there" });
   check(
-    "the first click on an edited file's ✕ arms it instead of deleting",
-    armed.armed && armed.bin && (await chips()) === 1,
+    "the first click on an edited file's table ✕ arms it instead of deleting",
+    armed.armed && (await tableRows()) === 1,
     JSON.stringify(armed),
   );
-  // The bin glyph is not the ✕'s size, so without a fixed box arming would widen the chip and
-  // shove every chip after it along the bar.
-  check(
-    "…in place: the bin occupies exactly the ✕'s box",
-    armed.width === dirty.width,
-    `${dirty.width}px → ${armed.width}px`,
-  );
-  await cdp.eval(
-    `(() => { document.querySelector(".filebar .filechip__del")
-        .dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); })()`,
-  );
-  await waitFor(async () => (await del()).armed === false, { what: "Escape to disarm" });
-  const disarmed = await del();
-  check(
-    "Escape disarms it — a red button can't be left waiting for a stray click",
-    disarmed.armed === false && !disarmed.bin && (await chips()) === 1,
-    JSON.stringify(disarmed),
-  );
 
-  await clickDelete();
-  await waitFor(async () => (await del()).armed === true, { what: "the armed button again" });
-  await clickDelete();
-  await waitFor(async () => (await chips()) === 0, { what: "the confirmed delete" });
-  check("the second click deletes", (await chips()) === 0);
+  await clickTableDelete();
+  await waitFor(async () => (await tableRows()) === 0, { what: "the confirmed delete" });
+  check("the second click deletes", (await tableRows()) === 0);
+  await cdp.eval(`(() => { document.querySelector(".filesview__close")?.click(); })()`);
 
-  // Download it: the edits are on disk now, so the chip goes back to deleting on one click.
+  // Download it: the edits are on disk now, so the row goes back to deleting on one click.
   await loadFile(cdp, join(REPO, "samples", EXAMPLE));
   await waitFor(() => chipPresent(cdp, "S183"), { what: "the .zpcr chip once more" });
   await cdp.eval(`window.location.hash = "view=overview", undefined`);
   await tabBecomes(cdp, "Overview");
   await setExperimentName(cdp, "Saved RVP");
-  await waitFor(async () => (await del()).modified === true, { what: "the modified flag" });
+  await waitFor(async () => (await chip()).modified === true, { what: "the modified flag" });
   await cdp.eval(`(() => { document.querySelector(".overview__toolbar .raw__download").click(); })()`);
-  await waitFor(async () => (await del()).modified === false, { what: "the flag to clear" });
-  check("downloading the file clears the modified state", (await del()).modified === false);
-  await clickDelete();
-  await waitFor(async () => (await chips()) === 0, { what: "the one-click delete" });
-  check("…so its ✕ deletes on one click again", (await chips()) === 0);
+  await waitFor(async () => (await chip()).modified === false, { what: "the flag to clear" });
+  check("downloading the file clears the modified state", (await chip()).modified === false);
+  await openTable();
+  await waitFor(async () => (await tableRows()) === 1, { what: "the saved file's table row" });
+  await clickTableDelete();
+  await waitFor(async () => (await tableRows()) === 0, { what: "the one-click delete" });
+  check("…so its table row deletes on one click again", (await tableRows()) === 0);
   cdp.close();
 }
 

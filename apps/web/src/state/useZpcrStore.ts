@@ -217,6 +217,14 @@ export interface FileSettings extends AnalysisSettings {
    * {@link ZpcrStore.modifiedIds}, which is what makes the file chip's delete ask twice.
    */
   modified: boolean;
+  /**
+   * Whether this file shows on the file bar's summary row. Checking it off in the full files
+   * table (see `FilesTableView.tsx`) hides the chip without touching the file itself — it stays
+   * loaded, in IndexedDB, and in that table, exactly like `modified` only gates the delete
+   * confirm rather than the file's existence. Selecting a file anywhere (the table, a `#file=`
+   * link) turns this back on, since a file you're looking at can hardly not be in the bar.
+   */
+  visible: boolean;
 }
 
 /** A file loaded into memory — bytes only. Parsing is derived (see {@link ZpcrStore.runs}),
@@ -228,6 +236,9 @@ export interface LoadedFile {
   addedAt: number;
   kind: FileKind;
   bytes: Uint8Array;
+  /** The source `File`'s own `lastModified` (its OS mtime, epoch ms) — see
+   * `db.ts`'s `StoredFile.lastModified`. */
+  lastModified: number;
 }
 
 /**
@@ -390,6 +401,9 @@ function defaultSettings(): FileSettings {
     cqSource: "file",
     // A freshly loaded file is by definition the copy on disk.
     modified: false,
+    // Every file starts on the bar — hiding is something you do to a file, not a state it loads
+    // into.
+    visible: true,
     ...defaultAnalysisSettings(),
   };
 }
@@ -425,6 +439,7 @@ function toStored(id: string, s: FileSettings): StoredSettings {
     baselineSource: s.baselineSource,
     cqSource: s.cqSource,
     modified: s.modified,
+    visible: s.visible,
   };
 }
 
@@ -493,6 +508,9 @@ function fromStored(s: StoredSettings): FileSettings {
     // "not modified" is the honest default — a wrong `true` would make every old file ask twice
     // forever, since only a download clears it.
     modified: s.modified ?? false,
+    // Absent on a record written before the field existed: such a file was already on the bar,
+    // so "shown" is the correct default rather than a wrong `false` hiding it on upgrade.
+    visible: s.visible ?? true,
     temps: new Set(s.temps ?? []),
     // A record written before the LED series existed has no `leds`; both being non-empty is
     // impossible by construction (see `updateSettings`), so nothing needs reconciling here.
@@ -618,6 +636,19 @@ export interface ZpcrStore {
    * download that actually gets the edits out of the browser.
    */
   markDownloaded: (fileId: string) => void;
+  /**
+   * Ids of files hidden from the file bar's summary row (see {@link FileSettings.visible}) — the
+   * full files table's checkbox column reads this as "unchecked". A file's absence here, not its
+   * presence, is the common case, since it mirrors {@link modifiedIds} in shape but is inverted
+   * in meaning: most files are visible, most files are not modified.
+   */
+  hiddenIds: Set<string>;
+  /**
+   * Show or hide a file on the file bar without touching it otherwise — what the full files
+   * table's checkbox column and a chip's ✕ (which only ever hides, never deletes) both call. See
+   * {@link FileSettings.visible}.
+   */
+  setVisible: (fileId: string, visible: boolean) => void;
   /**
    * Attach (or replace) a `.zpcr` run's plate: rewrites the run's own archive bytes in place
    * (adding/replacing a `.pltd`/`.plt.csv` entry — see `attachPlateToZpcr`) and persists the
@@ -747,6 +778,9 @@ export function useZpcrStore(): ZpcrStore {
           addedAt: f.addedAt,
           kind: f.kind ?? "zpcr",
           bytes: new Uint8Array(f.bytes),
+          // Records written before this field existed have no source mtime to recover; the load
+          // time is the closest honest stand-in.
+          lastModified: f.lastModified ?? f.addedAt,
         }));
         loaded.sort((a, b) => a.addedAt - b.addedAt);
         const map: Record<string, FileSettings> = {};
@@ -849,6 +883,22 @@ export function useZpcrStore(): ZpcrStore {
     [setModifiedFlag],
   );
 
+  /**
+   * Flip a file's file-bar visibility (see {@link FileSettings.visible}). Written straight
+   * through like {@link setModifiedFlag}, for the same reason: it's a discrete, deliberate click
+   * (a chip's ✕, the table's checkbox), not a value worth debouncing.
+   */
+  const setVisible = useCallback((id: string, value: boolean) => {
+    setSettingsMap((prev) => {
+      const current = prev[id] ?? defaultSettings();
+      if (current.visible === value) return prev;
+      const next = { ...current, visible: value };
+      window.clearTimeout(saveTimers.current[id]);
+      void putSettings(toStored(id, next));
+      return { ...prev, [id]: next };
+    });
+  }, []);
+
   const addFiles = useCallback(
     async (input: FileList | File[], options?: AddFilesOptions) => {
       // `.json`'s kind can only be known after reading its bytes (see `fileKind`), so every file
@@ -889,12 +939,13 @@ export function useZpcrStore(): ZpcrStore {
           for (const old of superseded) await forget(old.id);
           const supersededIds = new Set(superseded.map((f) => f.id));
           const addedAt = Date.now();
-          await putFile({ id, name: file.name, size: file.size, addedAt, bytes: buf, kind });
+          const lastModified = file.lastModified;
+          await putFile({ id, name: file.name, size: file.size, addedAt, bytes: buf, kind, lastModified });
           lastId = id;
           lastKind = kind;
           setFiles((prev) => {
             const rest = prev.filter((f) => f.id !== id && !supersededIds.has(f.id));
-            return [...rest, { id, name: file.name, size: file.size, addedAt, kind, bytes }];
+            return [...rest, { id, name: file.name, size: file.size, addedAt, kind, bytes, lastModified }];
           });
           if (options?.modified) setModifiedFlag(id, true);
         } catch (e) {
@@ -961,10 +1012,20 @@ export function useZpcrStore(): ZpcrStore {
 
   // Switching files flushes anything pending: the window of unsaved analysis edits then only
   // ever covers the file you're actually looking at.
-  const setActive = useCallback((id: string) => {
-    void persister.current!.flushAll();
-    setActiveId(id);
-  }, []);
+  //
+  // Also turns the file back on in the bar (see `FileSettings.visible`) — selecting a file and
+  // then not seeing its chip would be a bug, not a feature, and this is the one place every path
+  // to "make this the active file" already goes through: a chip click (a no-op, since a hidden
+  // chip isn't there to click), the full files table's row click, and a `#file=` link landing on
+  // something hidden.
+  const setActive = useCallback(
+    (id: string) => {
+      void persister.current!.flushAll();
+      setActiveId(id);
+      setVisible(id, true);
+    },
+    [setVisible],
+  );
 
   const attachPlate = useCallback(
     async (targetFileId: string, file: File) => {
@@ -993,6 +1054,9 @@ export function useZpcrStore(): ZpcrStore {
           addedAt: target.addedAt,
           bytes: augmented.slice().buffer,
           kind: target.kind,
+          // Kept as the original file's own mtime, not bumped to now — this is the app editing
+          // the archive in place, not a new file arriving from the OS (see `StoredFile.lastModified`).
+          lastModified: target.lastModified,
         });
         setFiles((prev) =>
           prev.map((f) =>
@@ -1189,6 +1253,13 @@ export function useZpcrStore(): ZpcrStore {
     return ids;
   }, [settingsMap]);
 
+  /** See {@link ZpcrStore.hiddenIds}. */
+  const hiddenIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const [id, s] of Object.entries(settingsMap)) if (!s.visible) ids.add(id);
+    return ids;
+  }, [settingsMap]);
+
   /** See {@link ZpcrStore.inProgressIds} — read from each archive's own marker files. */
   const inProgressIds = useMemo(() => {
     const ids = new Set<string>();
@@ -1229,6 +1300,8 @@ export function useZpcrStore(): ZpcrStore {
     activePlateFile,
     activeProtocolFile,
     modifiedIds,
+    hiddenIds,
+    setVisible,
     inProgressIds,
     markDownloaded,
     attachPlate,

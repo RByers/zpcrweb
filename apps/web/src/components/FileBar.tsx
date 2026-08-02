@@ -11,7 +11,7 @@ import {
 import type { ExperimentIdentity } from "../lib/experiment";
 import { fileCategory, plateTargets, type FileCategory } from "@zpcrweb/core";
 import { FileKindIcon } from "./FileIcons";
-import { TrashIcon } from "./TrashIcon";
+import { FilesViewIcon } from "./FilesViewIcon";
 
 /** Tooltip wording for the chip icon — its shape, then its colour. */
 const CATEGORY_TEXT: Record<FileCategory, string> = {
@@ -34,7 +34,22 @@ interface Props {
    * which shows no file, it is the run being staged (`App.tsx`). */
   activeId: string | null;
   onSelect: (id: string) => void;
-  onRemove: (id: string) => void | Promise<void>;
+  /**
+   * A chip's ✕: take this file off the bar (`FileSettings.visible = false`), nothing more — the
+   * file stays loaded, in IndexedDB, and in the full files table (`FilesTableView.tsx`), where
+   * an actual delete now lives. There is no confirm here any more, because there is nothing at
+   * risk: the file is one click away in the table, or one click of {@link Props.onToggleFilesView}
+   * and a checkbox away from being back on the bar.
+   */
+  onHide: (id: string) => void;
+  /** Whether the full files table is currently showing — drives the toggle button's pressed
+   * state; `undefined` where the button isn't offered (see {@link onToggleFilesView}). */
+  filesViewOpen?: boolean;
+  /** Opens/closes the full files table (see `FilesTableView.tsx`), replacing `<main>`. The
+   * button that calls this sits at the bar's own left edge — omit both this and
+   * {@link filesViewOpen} to leave it out, which no current call site does, but keeps the two
+   * props' meaning paired rather than one implying the other. */
+  onToggleFilesView?: () => void;
   /**
    * The *auxiliary* files staged alongside the primary one, for the Instrument view: a plate or
    * protocol file overriding half of the run being assembled (see `useRunStaging.ts`). They are
@@ -194,57 +209,29 @@ function HoverCard({
 }
 
 /**
- * The chip's delete control, and the one place the file bar knows about unsaved work.
+ * The chip's ✕: takes the file off the bar, nothing more — see {@link Props.onHide}. There is no
+ * confirm, unlike the old two-click delete this replaced, because there is nothing to lose: the
+ * file stays in IndexedDB and in the full files table.
  *
- * A file the app loaded and never touched exists on the user's disk too, so removing it costs
- * nothing but a re-drop and the button deletes on the first click, as it always has. A file whose
- * content has been *edited* — a threshold moved, the run renamed, a plate attached — exists in
- * this form only in this browser until it's downloaded, so its ✕ arms instead: it becomes a waste
- * bin on red, and the click after that is the one that deletes.
- *
- * The armed state is deliberately cheap to escape — moving the pointer off the chip or pressing
- * Escape disarms it (see {@link FileChip}) — because it is a warning, not a modal: nothing
- * should be able to leave a red button sitting in the bar waiting for a stray click.
+ * Still carries the "unsaved" dot in the space under the ✕: a modified file announcing itself is
+ * still useful here, it's just no longer what gates this particular button.
  */
-function DeleteButton({
-  name,
-  modified,
-  armed,
-  onArm,
-  onDelete,
-}: {
-  name: string;
-  modified: boolean;
-  armed: boolean;
-  onArm: () => void;
-  onDelete: () => void;
-}) {
+function HideButton({ name, onHide }: { name: string; onHide: () => void }) {
   return (
     <button
-      className={"filechip__del" + (armed ? " is-armed" : "")}
-      aria-label={
-        armed
-          ? `Confirm deleting ${name} — its unsaved changes will be lost`
-          : `Delete ${name} from storage`
-      }
-      title={
-        armed
-          ? "Click again to delete. This file has changes that aren't on disk — download it first to keep them."
-          : modified
-            ? "Delete from storage — this file has changes that aren't on disk, so it will ask again"
-            : "Delete from storage"
-      }
+      className="filechip__del"
+      aria-label={`Hide ${name} from the file bar`}
+      title="Hide from file bar — the file stays loaded; see the full files list to bring it back or delete it"
       onClick={(e) => {
         e.stopPropagation();
-        if (armed) onDelete();
-        else onArm();
+        onHide();
       }}
     >
-      <span className="filechip__delglyph">{armed ? <TrashIcon /> : "✕"}</span>
+      <span className="filechip__delglyph">✕</span>
       {/* The editor's universal "unsaved" dot, in the space under the ✕ that was empty anyway —
-          so a modified chip announces itself before anyone reaches for the delete, and the bar
-          neither grows nor reflows when it does. The slot is always there, just invisible
-          (`app.css`), which is what keeps the ✕ from hopping as files are edited. */}
+          so a modified chip announces itself, and the bar neither grows nor reflows when it does.
+          The slot is always there, just invisible (`app.css`), which is what keeps the ✕ from
+          hopping as files are edited. */}
       <span className="filechip__moddot" aria-hidden="true" />
     </button>
   );
@@ -265,7 +252,7 @@ function FileChip({
   isStaged,
   activeLocked,
   onSelect,
-  onRemove,
+  onHide,
 }: {
   f: LoadedFile;
   identity: ExperimentIdentity;
@@ -273,7 +260,7 @@ function FileChip({
   plateFile: PlateFileResult | undefined;
   password: string;
   isActive: boolean;
-  /** See {@link Props.modifiedIds} — what makes this chip's delete a two-step. */
+  /** See {@link Props.modifiedIds} — the "unsaved" dot under the ✕. */
   isModified: boolean;
   /** See {@link Props.inProgressIds} — the run is still being written to. */
   isRunning: boolean;
@@ -281,14 +268,10 @@ function FileChip({
   /** See {@link Props.activeLocked}. */
   activeLocked: boolean;
   onSelect: (id: string) => void;
-  onRemove: (id: string) => void | Promise<void>;
+  onHide: (id: string) => void;
 }) {
   const mainRef = useRef<HTMLButtonElement>(null);
   const [cardPos, setCardPos] = useState<{ top: number; left: number } | null>(null);
-  // Armed = the confirm click is pending on this chip. A file that stops being modified (it was
-  // just downloaded) can't stay armed, since there is no longer anything to confirm.
-  const [armed, setArmed] = useState(false);
-  const isArmed = armed && isModified;
   const encStatus = fileEncryptionStatus(f, run, plateFile, password);
   // A staging chip (protocol/plate override) locks along with the run chip: showing something
   // other than what the instrument is actually running is exactly the confusion the lock exists
@@ -303,13 +286,8 @@ function FileChip({
         (isStaged && !isActive ? " is-staged" : "") +
         (isModified ? " is-modified" : "") +
         (isRunning ? " is-running" : "") +
-        (isArmed ? " is-arming" : "") +
         (clickLocked ? " is-locked" : "")
       }
-      onMouseLeave={() => setArmed(false)}
-      onKeyDown={(e) => {
-        if (e.key === "Escape") setArmed(false);
-      }}
     >
       <button
         ref={mainRef}
@@ -364,16 +342,24 @@ function FileChip({
           />,
           document.body,
         )}
-      <DeleteButton
-        name={identity.name}
-        modified={isModified}
-        // An untouched file deletes on the first click: `armed` is only ever consulted for one
-        // whose edits would go with it.
-        armed={isArmed}
-        onArm={() => (isModified ? setArmed(true) : void onRemove(f.id))}
-        onDelete={() => void onRemove(f.id)}
-      />
+      <HideButton name={identity.name} onHide={() => onHide(f.id)} />
     </div>
+  );
+}
+
+/** The toggle at the bar's left edge that opens/closes the full files table. A separate button
+ * from any chip, so it reads as chrome for the bar rather than one more file. */
+function FilesViewToggle({ open, onToggle }: { open: boolean; onToggle: () => void }) {
+  return (
+    <button
+      className={"filebar__toggle" + (open ? " is-open" : "")}
+      aria-label={open ? "Close all files" : "Show all files"}
+      aria-pressed={open}
+      title={open ? "Close all files" : "Show all files"}
+      onClick={onToggle}
+    >
+      <FilesViewIcon />
+    </button>
   );
 }
 
@@ -383,45 +369,52 @@ export function FileBar({
   plateFiles,
   activeId,
   onSelect,
-  onRemove,
+  onHide,
   stagedIds,
   modifiedIds,
   inProgressIds,
   activeLocked,
   experiments,
+  filesViewOpen,
+  onToggleFilesView,
 }: Props) {
   const [password] = usePltdPassword();
   return (
-    <div
-      className={"filebar" + (stagedIds ? " filebar--multi" : "")}
-      role="tablist"
-      aria-label={stagedIds ? "Files for the run to start" : "Loaded files"}
-      aria-multiselectable={stagedIds ? true : undefined}
-    >
-      {files.map((f) => (
-        <FileChip
-          key={f.id}
-          f={f}
-          identity={
-            experiments.get(f.id) ?? {
-              name: fallbackLabel(f),
-              date: null,
-              dateText: "",
-              fileName: f.name,
+    <div className="filebar-row">
+      {onToggleFilesView && (
+        <FilesViewToggle open={!!filesViewOpen} onToggle={onToggleFilesView} />
+      )}
+      <div
+        className={"filebar" + (stagedIds ? " filebar--multi" : "")}
+        role="tablist"
+        aria-label={stagedIds ? "Files for the run to start" : "Loaded files"}
+        aria-multiselectable={stagedIds ? true : undefined}
+      >
+        {files.map((f) => (
+          <FileChip
+            key={f.id}
+            f={f}
+            identity={
+              experiments.get(f.id) ?? {
+                name: fallbackLabel(f),
+                date: null,
+                dateText: "",
+                fileName: f.name,
+              }
             }
-          }
-          run={runs.get(f.id)}
-          plateFile={plateFiles.get(f.id)}
-          password={password}
-          isActive={f.id === activeId}
-          isStaged={stagedIds ? stagedIds.has(f.id) : false}
-          isModified={modifiedIds.has(f.id)}
-          isRunning={inProgressIds.has(f.id)}
-          activeLocked={!!activeLocked}
-          onSelect={onSelect}
-          onRemove={onRemove}
-        />
-      ))}
+            run={runs.get(f.id)}
+            plateFile={plateFiles.get(f.id)}
+            password={password}
+            isActive={f.id === activeId}
+            isStaged={stagedIds ? stagedIds.has(f.id) : false}
+            isModified={modifiedIds.has(f.id)}
+            isRunning={inProgressIds.has(f.id)}
+            activeLocked={!!activeLocked}
+            onSelect={onSelect}
+            onHide={onHide}
+          />
+        ))}
+      </div>
     </div>
   );
 }

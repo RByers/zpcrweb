@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useZpcrStore } from "./state/useZpcrStore";
 import { useCfxDevice } from "./state/useCfxDevice";
 import { useRunWatch } from "./state/useRunWatch";
@@ -9,6 +9,7 @@ import { formatLoadHash } from "./state/urlHash";
 import { useHeaderFit } from "./state/useHeaderFit";
 import { DropZone } from "./components/DropZone";
 import { FileBar } from "./components/FileBar";
+import { FilesTableView } from "./components/FilesTableView";
 import { ViewSelector } from "./components/ViewSelector";
 import { PasswordPrompt } from "./components/PasswordPrompt";
 import { OverviewView } from "./components/views/OverviewView";
@@ -222,6 +223,38 @@ export function App() {
     if (store.activeId !== runWatch.fileId) store.setActive(runWatch.fileId);
   }, [store.view]);
 
+  // The full files table (`FilesTableView.tsx`) — toggled from the bar's own left edge, so it
+  // lives here rather than in the store: it's a layer over `<main>`, the same kind of thing
+  // `store.view` already is, but not worth making a `ViewId` since it isn't file-backed and has
+  // no URL of its own.
+  const [filesViewOpen, setFilesViewOpen] = useState(false);
+  // Deleting the last row in the table (or the last chip) empties `store.files`, which sends the
+  // app to the welcome screen — a branch that renders no `<main>` at all, so there's no closing
+  // this from inside the table itself. Without this, the stale `true` would reopen the table over
+  // whatever gets loaded next, instead of that file's own view.
+  useEffect(() => {
+    if (store.files.length === 0) setFilesViewOpen(false);
+  }, [store.files.length]);
+  // What the bar actually shows: a file taken off it (`FileSettings.visible`) stays loaded and
+  // in the table, just not here.
+  const visibleFiles = useMemo(
+    () => store.files.filter((f) => !store.hiddenIds.has(f.id)),
+    [store.files, store.hiddenIds],
+  );
+  /**
+   * A row in the full files table: close the table, select the file (which also turns its
+   * checkbox back on — see `useZpcrStore`'s `setActive`), and land on its own first enabled tab,
+   * the same "click a file, go look at it" a bar chip has always done. Falls back to "overview"
+   * for a file with no restricted set (an ordinary run), since that tab isn't in the tuple for
+   * those — see `enabledViewsFor`.
+   */
+  const selectFromTable = (id: string) => {
+    setFilesViewOpen(false);
+    const f = store.files.find((x) => x.id === id);
+    store.setActive(id);
+    store.setView(f ? enabledViewsFor(f.kind)?.[0] ?? "overview" : "overview");
+  };
+
   const exampleHref = `#${formatLoadHash(EXAMPLE_FILE)}`;
   const loadExample = (e: { preventDefault: () => void }) => {
     if (window.location.hash !== exampleHref) return; // let the navigation do the work
@@ -259,7 +292,7 @@ export function App() {
         </header>
         {store.files.length > 0 && (
           <FileBar
-            files={store.files}
+            files={visibleFiles}
             runs={store.runs}
             plateFiles={store.plateFiles}
             // The cyan chip here is the *run being staged*, not `store.activeId`: this view shows
@@ -271,17 +304,36 @@ export function App() {
             inProgressIds={store.inProgressIds}
             activeLocked={runActive}
             onSelect={selectFile}
-            onRemove={store.remove}
+            onHide={(id) => store.setVisible(id, false)}
             experiments={store.experiments}
+            filesViewOpen={filesViewOpen}
+            onToggleFilesView={() => setFilesViewOpen((v) => !v)}
           />
         )}
         <main className="app__main">
-          <InstrumentView
-            onOpenRun={openRun}
-            staged={staged}
-            instrument={instrument}
-            runWatch={runWatch}
-          />
+          {filesViewOpen ? (
+            <FilesTableView
+              files={store.files}
+              runs={store.runs}
+              plateFiles={store.plateFiles}
+              protocolFiles={store.protocolFiles}
+              experiments={store.experiments}
+              activeId={store.activeId}
+              hiddenIds={store.hiddenIds}
+              modifiedIds={store.modifiedIds}
+              onSelectFile={selectFromTable}
+              onSetVisible={store.setVisible}
+              onDelete={store.remove}
+              onClose={() => setFilesViewOpen(false)}
+            />
+          ) : (
+            <InstrumentView
+              onOpenRun={openRun}
+              staged={staged}
+              instrument={instrument}
+              runWatch={runWatch}
+            />
+          )}
         </main>
         {store.error && <div className="app__error mono">{store.error}</div>}
       </div>
@@ -346,19 +398,36 @@ export function App() {
       </header>
 
       <FileBar
-        files={store.files}
+        files={visibleFiles}
         runs={store.runs}
         plateFiles={store.plateFiles}
         activeId={store.activeId}
         modifiedIds={store.modifiedIds}
         inProgressIds={store.inProgressIds}
         onSelect={selectFile}
-        onRemove={store.remove}
+        onHide={(id) => store.setVisible(id, false)}
         experiments={store.experiments}
+        filesViewOpen={filesViewOpen}
+        onToggleFilesView={() => setFilesViewOpen((v) => !v)}
       />
 
       <main className="app__main">
-        {view === "about" ? (
+        {filesViewOpen ? (
+          <FilesTableView
+            files={store.files}
+            runs={store.runs}
+            plateFiles={store.plateFiles}
+            protocolFiles={store.protocolFiles}
+            experiments={store.experiments}
+            activeId={store.activeId}
+            hiddenIds={store.hiddenIds}
+            modifiedIds={store.modifiedIds}
+            onSelectFile={selectFromTable}
+            onSetVisible={store.setVisible}
+            onDelete={store.remove}
+            onClose={() => setFilesViewOpen(false)}
+          />
+        ) : view === "about" ? (
           <AboutView
             onFiles={store.addFiles}
             exampleHref={exampleHref}

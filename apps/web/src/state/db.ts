@@ -30,6 +30,11 @@ export interface StoredFile {
   addedAt: number;
   bytes: ArrayBuffer;
   kind?: "zpcr" | "pcrd" | "biomeme" | "pltd" | "csv" | "prcl";
+  /** The source `File`'s own `lastModified` (its OS mtime, epoch ms) — when the file was last
+   * saved to disk, as distinct from {@link addedAt} (when it was loaded into this browser).
+   * Absent on records written before this field existed, or for one `attachPlate` rewrote in
+   * place (which keeps the original file's own mtime rather than claiming a new one). */
+  lastModified?: number;
 }
 
 /** Persisted per-file view settings. */
@@ -44,6 +49,14 @@ export interface StoredSettings {
    * download again. See `useZpcrStore`'s `modifiedIds` and the file chip's two-stage delete.
    */
   modified?: boolean;
+  /**
+   * Not a view setting either: whether this file shows in the file bar's summary row. A file
+   * stays in IndexedDB (and in the full files table) when hidden — this only controls the bar,
+   * the same way {@link modified} only controls the delete confirm. Absent on records written
+   * before this field existed, which then default to shown (see `fromStored`) — every file
+   * already loaded was already visible.
+   */
+  visible?: boolean;
   enabledChannels: number[];
   enabledWells: string[]; // "row,col" keys
   /** Reference columns (0-based) shown in the Reference view. */
