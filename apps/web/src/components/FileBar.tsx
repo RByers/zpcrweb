@@ -101,15 +101,27 @@ function fileEncryptionStatus(
   return runEncryptionStatus(run, password);
 }
 
-/** Chip badge: well count for a standalone plate file, or a lock/error/loading glyph while a
- * `.pcrd`/`.pltd`/run password is unresolved. Run chips (`.zpcr`/`.pcrd`) carry no badge once
- * loaded — their detail lives in the hover card instead. */
+/** A standalone plate file's well count — `24w` — rendered as the chip's second line, in the
+ * same slot and style as a run's date (`identity.dateText`): the two are mutually exclusive
+ * (a `.pltd`/`.csv` carries no run date), so they share `filechip__date` rather than each
+ * getting their own rule. */
+function wellsText(f: LoadedFile, plateFile: PlateFileResult | undefined): string {
+  if ((f.kind === "pltd" || f.kind === "csv") && plateFile?.plate) {
+    return `${plateFile.plate.wells.filter((w) => w.loaded).length}w`;
+  }
+  return "";
+}
+
+/** Chip badge: a lock/error/loading glyph while a `.pcrd`/`.pltd`/run password is unresolved.
+ * Run chips (`.zpcr`/`.pcrd`) carry no badge once loaded — their detail lives in the hover card
+ * instead — and a loaded plate file's badge is its well count, shown below the name instead (see
+ * {@link wellsText}). */
 function meta(f: LoadedFile, run: RunResult | undefined, plateFile: PlateFileResult | undefined): string {
   // A protocol has no well count to report, and no longer needs the word "proto" either: the
   // chip's icon is what tells the two override kinds apart at a glance in the Instrument view.
   if (f.kind === "prcl") return "";
   if (f.kind === "pltd" || f.kind === "csv") {
-    if (plateFile?.plate) return `${plateFile.plate.wells.filter((w) => w.loaded).length}w`;
+    if (plateFile?.plate) return "";
     return plateFile?.needsPassword ? "🔒" : plateFile?.error ? "⚠" : "…";
   }
   if (!run?.zpcr) return run?.needsPassword ? "🔒" : run?.error ? "⚠" : "…";
@@ -317,11 +329,15 @@ function FileChip({
           <FileKindIcon kind={f.kind} />
         </span>
         {/* Two lines, so the chip is a name rather than a path: the run's name, and under it a
-            compact local timestamp at a smaller, dimmer size. The full file name is in the
-            hover card. */}
+            compact local timestamp at a smaller, dimmer size — or, for a standalone plate file
+            (which has no run date), its well count in that same slot instead. The full file name
+            is in the hover card. */}
         <span className="filechip__text">
           <span className="filechip__name mono">{identity.name}</span>
           {identity.dateText && <span className="filechip__date mono">{identity.dateText}</span>}
+          {wellsText(f, plateFile) && (
+            <span className="filechip__date mono">{wellsText(f, plateFile)}</span>
+          )}
         </span>
         <span className="filechip__meta mono">{meta(f, run, plateFile)}</span>
       </button>
