@@ -112,6 +112,16 @@ export interface RunWatchState {
   note: string | null;
   /** The id of the file the watcher most recently put in the store, if it is still there. */
   fileId: string | null;
+  /**
+   * Take over a file this watcher didn't produce: the seed `.zpcr` written at the click on Start
+   * run (`core/runSeed.ts`), which is the first version of the very run about to be followed.
+   *
+   * Without this the watcher's first pull would report `previousId: null`, and the caller — which
+   * uses that to decide whether the user was looking at the file being superseded — would leave
+   * them on the seed while the real snapshots piled up beside it. Adopting it says "the run I am
+   * about to follow is already on screen as this".
+   */
+  adopt: (fileId: string) => void;
 }
 
 export function useRunWatch(
@@ -334,5 +344,9 @@ export function useRunWatch(
     cache.current.clear();
   }, [connection]);
 
-  return { watching, setWatching, note, fileId };
+  // The seed is this run's first file, so the watcher treats it exactly as one of its own
+  // snapshots from here on (see `RunWatchState.adopt`).
+  const adopt = useCallback((id: string) => setFileId(id), []);
+
+  return { watching, setWatching, note, fileId, adopt };
 }

@@ -25,6 +25,12 @@ same as a standalone plate has no curves), no component may:
 - read `RunResult.documentXml`, which only a `.pcrd` populates;
 - read any `Zpcr` field only one decoder fills — `Zpcr.wellFactors` is the live example.
 
+For a `.zpcr`/`.pcrd` run those same tabs are decided by *content*, not by kind (`runViews`), and
+that check is held to this rule too: it asks `zpcr.reads`, `factoryRefCal()` and `calibrations()`
+— all of which both decoders fill — rather than looking for `.Dcal` entries in `Zpcr.archive`,
+which a `.pcrd` doesn't have. Reading the archive there would have silently disabled Calibration
+for every `.pcrd`, which is exactly the class of bug this section exists to prevent.
+
 The reason is not tidiness. `.zpcr` and `.pcrd` are two containers around *the same physical
 run*, so anything the app reports off one must match what it reports off the other; a number
 that changes with the container is an artifact, not a measurement. This binds the analysis
@@ -1825,7 +1831,14 @@ response curves, not channel numbers.
   the pointer on each selection change, and read as a per-file menu rather than as the app's
   fixed set of lenses; greying a tab out says "not for this file", while removing it says
   nothing. A run still behind the password prompt greys out *every* file tab for the same reason:
-  the prompt gates the content area, not the app's chrome. It also makes the header's width independent of the active file, which is why
+  the prompt gates the content area, not the app's chrome. For a run, which tabs those are comes
+  from what the archive **holds** rather than from its extension (`App.tsx`'s `runViews`): Curves
+  needs a plate read, Reference needs readings *and* a `FactoryRefRowCal`, Calibration needs
+  readings *and* a `.Dcal` set. A finished run has all of it and nothing changes; a run in progress
+  — and especially the seed written at the click on Start run (see "Starting a run") — does not,
+  and each tab switches itself back on as the data arrives, since every snapshot re-parses. The
+  alternative was three views drawing empty frames, which reads as broken rather than as absent.
+  It also makes the header's width independent of the active file, which is why
   `useHeaderFit`'s only dep is the selected view. Which view the *content* area falls back to
   when the current one is disabled is still `App.tsx`'s job (the first enabled tab).
 - The header **goes iconographic when it stops fitting** rather than scrolling, in four steps
@@ -1991,6 +2004,15 @@ operand reaches the instrument's composed filenames and nothing else, and no fie
 by the time the run's archive came back. With it, the pulled `.zpcr` states its own name through
 the ordinary seeding path, and keeps it across a reload, a rename, or another machine.
 
+The experiment name is **required, and never inferred**. A blank one is an `error` check on the
+plan (`no-experiment-name`), which is what disables Start run — the same mechanism a scan-mask
+mismatch uses, so the UI needs no rule of its own — and the field marks itself rather than waiting
+for the rail to explain. The one plausible default, the protocol's name, is the wrong one: a
+protocol is run many times, so every run of it would share a name, and the name is what the run's
+file is called and how it is told from yesterday's. The instrument cannot supply it either — its
+echo comes back uppercased and cut to eight characters. Somebody has to type it, which is why the
+placeholder is an example rather than a value.
+
 The **file name** never leaves the browser: it is what the `.zpcr` this app assembles is called.
 It exists because the instrument's own naming (`<date>_<time>_<serial>_<NAME>`, or `<date>_<NAME>`
 from the touchscreen) is not addressable over USB, which is how a run named here used to arrive in
@@ -2023,6 +2045,21 @@ app that heats a block. Nothing is asked of the instrument to know a start was r
 reads **Run pending** in both its *Status* and *Current run* sections, the button dims immediately
 (the 150 ms anti-flash delay on the dimmed look applies to short commands, not to this) and relabels
 itself, and the panel badges *pending*.
+
+**The run's file is written at the same click**, before anything goes out on the wire. Core's
+`zpcrSeedArchive()` (see the root [`ARCHITECTURE.md`](../../ARCHITECTURE.md)) turns the plan into a
+`.zpcr` holding the protocol, the plate, the name deposit and the `begun` marker — everything known
+at that moment and nothing invented — and `InstrumentView` hands it to `App`'s `seedRunFile`, which
+adds it like any dropped file (`activate`, `modified`) and calls `runWatch.adopt()` on the new id.
+That last part is what makes the first real snapshot *replace* it rather than land beside it: the
+watcher treats the seed as its own previous file, and both take the same name from
+`useRunNaming`, so the store supersedes by name too.
+
+Without it there is nothing to look at between the click and the first plate read — minutes of lid
+preheat and first hold — while the file bar shows no sign that a run was started at all. With it,
+the run is a chip immediately, its protocol and plate readable, and each cycle's pull grows the
+same file. Nothing downstream knows a "seed" from a run in progress; the difference is only which
+entries the archive happens to have yet.
 
 It lasts exactly until the instrument's own answer replaces it — the `STATUS?` read at the end of
 `startRun()`, taken *whatever it says*. A successful start reports `running` and every live readout

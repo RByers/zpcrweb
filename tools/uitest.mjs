@@ -59,6 +59,32 @@ const PRCL_TXT_BODY =
   "[ProtocolRunDefinition version 06.00]\nMETHOD CALC;\nHOTLID 105,30;\nVOLUME 25;\n" +
   "GRAD 50.0,60.0,30;\nPLATEREAD #h3F;\nGOTO 4,39;\nEND;\n";
 
+/** The `.zpcr` a run gets the moment Start run is clicked, written at test time from the same
+ * core call the app makes — a protocol, a plate and a name, with no `RunInfo.xml`, no plate reads
+ * and no calibration set (`core/runSeed.ts`). */
+const SEED_ZPCR = join(REPO, "tools/.uishot/dupe/20260802-Seeded_Run.zpcr");
+
+/** Write {@link SEED_ZPCR}. Built rather than committed: the point is what the app writes when a
+ * run starts, not a captured artifact — and it is the only run file with nothing to plot. */
+async function makeSeed() {
+  const { planRun, parsePlateCsv, zpcrSeedArchive } = await import(
+    "../packages/core/dist/index.js"
+  );
+  const runDefinition =
+    "METHOD CALC;HOTLID 105,30;VOLUME 20;TEMP 95.0,60;TEMP 60.0,30;PLATEREAD #h3F;GOTO 2,39;END;";
+  const plate = parsePlateCsv(PLATE_CSV_BODY, { sourceName: "Staged.plt.csv" });
+  const plan = planRun({ runDefinition, plate, name: "Seeded Run", plateName: "Staged" });
+  const { bytes } = zpcrSeedArchive({
+    experimentName: "Seeded Run",
+    fileBaseName: "20260802-Seeded_Run",
+    runDefinition,
+    protocolName: "Cycling",
+    plan,
+  });
+  mkdirSync(dirname(SEED_ZPCR), { recursive: true });
+  writeFileSync(SEED_ZPCR, Buffer.from(bytes));
+}
+
 /**
  * A same-name, *different-size* copy of the example — the only way to exercise the replace rule,
  * since `fileId()` hashes name+size and a byte-identical reload is simply the same id. Four
@@ -1791,6 +1817,48 @@ async function renameFile(cdp, value) {
  * Also here because it is the same "one file, no archive" story: a Biomeme run's Raw tab, which
  * shows the JSON document itself rather than the empty archive it has instead.
  */
+/**
+ * The file a run has between Start run and its first plate read: everything it *does* hold reads
+ * normally, and the three tabs whose data does not exist yet are greyed out rather than rendering
+ * an empty frame that looks broken (`App`'s `runViews`).
+ */
+async function runSeedChecks(chrome, origin) {
+  console.log("\na just-started run's file");
+  await makeSeed();
+  const cdp = await openPage(chrome.base, origin);
+  await emptyReload(cdp, origin);
+  await loadFile(cdp, SEED_ZPCR);
+  await waitFor(() => chipPresent(cdp, "Seeded Run"), { what: "the seeded run's chip" });
+
+  const strip = await cdp
+    .eval(
+      `JSON.stringify(Object.fromEntries([...document.querySelectorAll('.viewselect [role="tab"]')]
+         .map((b) => [b.textContent.trim(), !b.disabled])))`,
+    )
+    .then(JSON.parse);
+  check(
+    "Curves, Reference and Calibration are off — the run has no readings yet",
+    strip.Curves === false && strip.Reference === false && strip.Calibration === false,
+    JSON.stringify(strip),
+  );
+  check(
+    "Overview, Protocol, Plates and Raw stay on — those it does have",
+    strip.Overview && strip.Protocol && strip.Plates && strip.Raw,
+    JSON.stringify(strip),
+  );
+
+  // The name came out of the archive's own zpcrweb.json, which is what the run deposits on the
+  // instrument too — so the chip reads the run's name rather than its filename.
+  const chip = await cdp.eval(`document.querySelector(".filechip__name")?.textContent ?? ""`);
+  check("the seeded run states its own name", chip === "Seeded Run", JSON.stringify({ chip }));
+
+  await cdp.eval(`window.location.hash = "view=protocol", undefined`);
+  await tabBecomes(cdp, "Protocol");
+  const steps = await cdp.eval(`document.querySelectorAll(".decoded__prototext").length`);
+  check("its protocol is there to read", steps > 0, `${steps} protocol lines`);
+  cdp.close();
+}
+
 async function experimentNameChecks(chrome, origin) {
   console.log("\nexperiment names");
   const cdp = await openPage(chrome.base, origin);
@@ -2633,6 +2701,7 @@ async function main() {
     await xmlViewChecks(chrome, origin, pw);
     await alfViewChecks(chrome, origin);
     await instrumentRunChecks(chrome, origin);
+    await runSeedChecks(chrome, origin);
     await experimentNameChecks(chrome, origin);
     await deleteConfirmChecks(chrome, origin);
     await protocolEditorChecks(chrome, origin);

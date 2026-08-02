@@ -311,6 +311,23 @@ which is already the name Manager would have saved it under.
 This is what lets the web app's Instrument view open a run off a connected instrument as an ordinary
 file (see [`apps/web/ARCHITECTURE.md`](./apps/web/ARCHITECTURE.md)).
 
+### The run's file exists before the run produces anything (`runSeed.ts`)
+
+Assembling a `.zpcr` backwards from what the instrument has written leaves a window — a lid
+preheat and a first hold, minutes — in which the run exists on the block and nowhere in the app.
+`zpcrSeedArchive()` closes it: at the click on Start run it writes the archive from what is
+already known, namely the plan about to be sent. The entries are the protocol as
+`ProtocolRunDefinition.txt`, the plan's own upload bytes for the plate `.plt.csv` and the
+`zpcrweb.json` name deposit, and the `begun` marker — so the seed and the run folder agree entry
+for entry, and every later snapshot simply replaces it under the same name.
+
+It has no `RunInfo.xml` and no plate reads, because neither exists yet. `parseZpcr` therefore
+treats that file as optional — an archive with a plate read or a protocol is a run whose metadata
+is simply empty — rather than rejecting the seed as malformed; some entry must still identify it
+as a run, so a bare ZIP renamed `.zpcr` is still refused. The app greys out the views whose data
+is absent (see [`apps/web/ARCHITECTURE.md`](./apps/web/ARCHITECTURE.md)) instead of drawing empty
+frames.
+
 ## Plate CSV + attaching a plate (`plateCsv.ts`, `attachPlate.ts`)
 
 There's no real (encrypted) `.pltd` *writer* — not worth building for a format the app only

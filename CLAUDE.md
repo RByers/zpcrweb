@@ -179,6 +179,7 @@ touch `state/urlHash.ts`, `state/useHeaderFit.ts`, `state/pltdPassword.ts`,
 `components/raw/DecodedAlf.tsx` or core's `alf.ts`,
 `components/views/OverviewPanel.tsx`, `components/views/OverviewPlateSection.tsx`,
 `lib/cloneName.ts` or `App.tsx`'s `cloneActiveFile`,
+core's `runSeed.ts` or `App.tsx`'s `runViews`, `state/useRunWatch.ts`,
 `state/writeThrottle.ts`, `state/useZpcrStore.ts`'s
 `modifiedIds`/`markDownloaded`/`setProtocolText`, its settings seeding or `fileKind`, or
 view selection.

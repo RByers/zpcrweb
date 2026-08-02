@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { Zpcr } from "@zpcrweb/core";
 import { useZpcrStore } from "./state/useZpcrStore";
 import { useCfxDevice } from "./state/useCfxDevice";
 import { useRunWatch } from "./state/useRunWatch";
@@ -56,11 +57,39 @@ const isStandaloneKind = (kind: string) => kind === "pltd" || kind === "csv";
  *
  * Typed as a non-empty tuple so the view fallback below can take `[0]` — a file with no enabled
  * tab at all would leave nowhere to fall back to. */
-function enabledViewsFor(kind: string): readonly [ViewId, ...ViewId[]] | null {
+function enabledViewsFor(kind: string, zpcr?: Zpcr | null): readonly [ViewId, ...ViewId[]] | null {
   if (isStandaloneKind(kind)) return STANDALONE_VIEWS;
   if (kind === "biomeme") return BIOMEME_VIEWS;
   if (kind === "prcl") return PROTOCOL_VIEWS;
-  return null;
+  return zpcr ? runViews(zpcr) : null;
+}
+
+/**
+ * The tabs a run supports, from what it actually holds rather than from what kind of file it is.
+ *
+ * A finished run holds everything and this returns the full set — but a run *in progress* does
+ * not, and the extreme case is the seed file written the moment Start run is clicked
+ * (`core/runSeed.ts`): a protocol, a plate, a name, and nothing else. Curves with no plate read,
+ * Reference with no readings to compare against `FactoryRefRowCal`, and Calibration with no
+ * calibration set each render an empty frame that reads as a broken view rather than an absent
+ * one — so each is greyed out with the same "not available for this file" the other kinds already
+ * get, and comes back on its own as the instrument produces the data, since every snapshot
+ * re-parses.
+ */
+function runViews(zpcr: Zpcr): readonly [ViewId, ...ViewId[]] {
+  const views: ViewId[] = ["overview", "protocol"];
+  const read = zpcr.reads.length > 0;
+  if (read) views.push("curves");
+  views.push("plates");
+  // Reference plots the reference row's own readings against the factory calibration, and
+  // Calibration separates this run's channels through the calibration set: both need readings
+  // *and* the thing they are read against. Asked of the decoded run rather than of its archive
+  // entries, since a `.pcrd` carries the same calibrations with no archive at all (see "Format
+  // independence") — `calibrations()` decodes them, which is why the caller memoizes this.
+  if (read && zpcr.factoryRefCal().length > 0) views.push("reference");
+  if (read && zpcr.calibrations().length > 0) views.push("calibration");
+  views.push("raw");
+  return views as [ViewId, ...ViewId[]];
 }
 
 /**
@@ -137,6 +166,23 @@ export function App() {
       [store],
     ),
     runNaming,
+  );
+  /**
+   * Take the `.zpcr` the Instrument view writes at the click on Start run into the file list
+   * (`core/runSeed.ts`): the run's protocol, plate and name, minutes before the instrument has
+   * produced a single plate read.
+   *
+   * It is an ordinary added file — the bar, IndexedDB, the files table — and `modified`, because
+   * it exists nowhere but this browser until it is saved. `adopt` tells the watcher this is the
+   * file its first snapshot supersedes; the snapshots take the same name (both from
+   * `useRunNaming`), so the store replaces it in place rather than growing a second chip.
+   */
+  const seedRunFile = useCallback(
+    async (file: File) => {
+      const id = await store.addFiles([file], { activate: true, modified: true });
+      if (id) runWatch.adopt(id);
+    },
+    [store, runWatch],
   );
   // Memoized, and skipped entirely off the Instrument view: resolving decodes a run's plate
   // and, for a staged `.plt.csv`, re-parses it against the run's calibration set — real work to
@@ -291,6 +337,17 @@ export function App() {
     if (store.activeId !== runWatch.fileId) store.setActive(runWatch.fileId);
   }, [store.view]);
 
+  /**
+   * Which tabs the active file supports. Computed once per file rather than per render, and
+   * before the early returns below as hook order demands: for a run this asks what the archive
+   * actually holds (`runViews`), and answering the calibration half of that decodes the run's
+   * calibration set — tens of milliseconds for a `.pcrd`, which is not a thing to repeat on every
+   * keystroke elsewhere in the app.
+   */
+  const activeViews = useMemo(
+    () => (active ? enabledViewsFor(active.kind, store.runs.get(active.id)?.zpcr) : null),
+    [active, store.runs],
+  );
   // What the bar actually shows: a file taken off it (`FileSettings.visible`) stays loaded and
   // in the full files table (the "Files" tab, `FilesTableView.tsx`), just not here.
   const visibleFiles = useMemo(
@@ -308,7 +365,7 @@ export function App() {
   const selectFromTable = (id: string, view?: ViewId) => {
     const f = store.files.find((x) => x.id === id);
     store.setActive(id);
-    store.setView(view ?? (f ? enabledViewsFor(f.kind)?.[0] ?? "overview" : "overview"));
+    store.setView(view ?? (f ? enabledViewsFor(f.kind, store.runs.get(id)?.zpcr)?.[0] ?? "overview" : "overview"));
   };
 
   const exampleHref = `#${formatLoadHash(EXAMPLE_FILE)}`;
@@ -340,7 +397,7 @@ export function App() {
               value="instrument"
               onChange={store.setView}
               // With no file loaded no file-backed tab leads anywhere, so they all grey out.
-              enabled={active ? enabledViewsFor(active.kind) ?? undefined : []}
+              enabled={active ? activeViews ?? undefined : []}
             />
           </div>
           <div className="app__header-spacer" />
@@ -371,6 +428,7 @@ export function App() {
             instrument={instrument}
             runWatch={runWatch}
             naming={runNaming}
+            onRunSeeded={seedRunFile}
           />
         </main>
         {store.error && <div className="app__error mono">{store.error}</div>}
@@ -403,7 +461,7 @@ export function App() {
   const zpcr = isStandalonePlate || isStandaloneProtocol ? null : activeRun?.zpcr ?? null;
   /** The run is here but not open yet: the password prompt, or a decode that failed. */
   const gated = !zpcr && !isStandalonePlate && !isStandaloneProtocol;
-  const enabledViews = enabledViewsFor(active.kind);
+  const enabledViews = activeViews;
   // `store.view` is global (not per-file), so switching entries can land on a view this file has
   // no answer for (e.g. "calibration" on a Biomeme run) — fall back to its first enabled tab
   // then. The tab is drawn either way, just disabled, so this is about where the *content* goes.

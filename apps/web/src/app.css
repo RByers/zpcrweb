@@ -3635,6 +3635,15 @@ summary.instrument__panelhead {
   outline: none;
   border-color: var(--neon-cyan);
 }
+/* An empty experiment name is the one thing standing between a staged run and a started one, so
+   the field says so itself — in the same tone the rail's blocked-Start note uses. */
+.devrun__nameinput.is-missing {
+  border-color: var(--warn);
+}
+.devrun__required {
+  margin-left: 4px;
+  color: var(--warn);
+}
 .devrun__parthead {
   display: flex;
   align-items: baseline;

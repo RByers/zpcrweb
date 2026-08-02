@@ -63,12 +63,16 @@ export function InstrumentRail({
   staged,
   plan,
   runWatch,
+  onStart,
 }: {
   instrument: CfxDeviceHandle;
   staged: StagedRun;
   /** The staged run as it would be sent, or null when a half is missing (`InstrumentView`). */
   plan: RunPlan | null;
   runWatch: RunWatchState;
+  /** Called the instant Start run is clicked, before anything goes out on the wire: the view
+   * writes the run's `.zpcr` from what is staged (see `InstrumentView`'s `seedRunFile`). */
+  onStart: () => void;
 }) {
   const { connection, info, status, rtStatus, busy, lastAction, runProgress, runPending } = instrument;
   const connected = connection === "connected";
@@ -120,6 +124,10 @@ export function InstrumentRail({
 
   const start = async () => {
     if (!plan) return;
+    // The file first, and unconditionally: the run is about to exist whether or not every upload
+    // lands, and the seed is what gives it somewhere to be seen for the minutes before the first
+    // plate read (`core/runSeed.ts`).
+    onStart();
     const result = await instrument.startRun(plan);
     setStartNote(result ? result.uploadErrors : null);
   };

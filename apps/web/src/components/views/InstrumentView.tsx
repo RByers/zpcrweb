@@ -11,8 +11,8 @@
  * (including Start run), and the content column stacks the staged run, the file browser and the
  * traffic console.
  */
-import { useMemo } from "react";
-import { planRun } from "@zpcrweb/core";
+import { useCallback, useMemo } from "react";
+import { planRun, zpcrSeedArchive } from "@zpcrweb/core";
 import { InstrumentRail } from "../instrument/InstrumentRail";
 import { InstrumentRun } from "../instrument/InstrumentRun";
 import { InstrumentFiles } from "../instrument/InstrumentFiles";
@@ -28,6 +28,7 @@ export function InstrumentView({
   instrument,
   runWatch,
   naming,
+  onRunSeeded,
 }: {
   onOpenRun: (file: File) => Promise<void> | void;
   /** The run the file bar's selection currently describes; see {@link InstrumentRun}. */
@@ -42,6 +43,9 @@ export function InstrumentView({
    * watcher reads it, and it must survive leaving this view.
    */
   naming: RunNaming;
+  /** Take the `.zpcr` this view writes at the click on Start run into the app's file list
+   * (`App`'s `seedRunFile`). */
+  onRunSeeded: (file: File) => Promise<void> | void;
 }) {
   const { experimentName } = naming;
 
@@ -61,7 +65,10 @@ export function InstrumentView({
       return planRun({
         runDefinition: protocol.runDefinition,
         plate,
-        name: experimentName || protocol.document.name || "",
+        // The typed name and nothing else: a run inheriting its protocol's name would give every
+        // run of that protocol the same one, and a blank name is an `error` check on the plan
+        // (`usb/runPlan.ts`) rather than something to paper over here.
+        name: experimentName,
         // The deposited copies keep the protocol's and the plate's own names, not the run's
         // (`runPlan.ts`). An overridden half is named by the file it came from; an overridden
         // plate's file name beats the plate's `identityKey`, which records whatever `.pltd` it
@@ -84,6 +91,28 @@ export function InstrumentView({
     experimentName,
   ]);
 
+  /**
+   * Write the run's `.zpcr` at the moment it is started (`core/runSeed.ts`), from the plan that is
+   * about to be sent plus the two names that were typed.
+   *
+   * Built here, where the plan and the names both are, rather than in the rail that clicks the
+   * button or in `App`, which knows nothing about staging. The plan supplies the plate and the
+   * name deposit as the exact bytes going to the instrument, so the seed and the run folder agree
+   * entry for entry.
+   */
+  const seedRunFile = useCallback(() => {
+    const protocol = staged.protocol.value;
+    if (!plan || !protocol || !experimentName.trim()) return;
+    const { name, bytes } = zpcrSeedArchive({
+      experimentName,
+      fileBaseName: naming.fileName,
+      runDefinition: protocol.runDefinition,
+      protocolName: protocol.document.name || undefined,
+      plan,
+    });
+    void onRunSeeded(new File([bytes.slice()], name, { lastModified: Date.now() }));
+  }, [plan, staged.protocol.value, experimentName, naming.fileName, onRunSeeded]);
+
   return (
     <div className="curves instrument">
       <InstrumentRail
@@ -91,6 +120,7 @@ export function InstrumentView({
         staged={staged}
         plan={plan}
         runWatch={runWatch}
+        onStart={seedRunFile}
       />
       <div className="instrument__content">
         <InstrumentRun

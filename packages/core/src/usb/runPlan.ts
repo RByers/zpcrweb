@@ -98,7 +98,8 @@ export interface RunCheck {
     | "channels-idle"
     | "flyover-multichannel"
     | "no-steps"
-    | "method-unknown";
+    | "method-unknown"
+    | "no-experiment-name";
   message: string;
 }
 
@@ -137,7 +138,17 @@ export interface PlanRunOptions {
   runDefinition: string;
   /** The plate the run will read. Uploaded as a `.plt.csv`, and checked against `PLATEREAD`. */
   plate: PlateDefinition;
-  /** What to call the run. Falls back to the protocol's own name, then to `zpcrweb`. */
+  /**
+   * What to call the run — required in practice, though typed optional so a caller can build a
+   * plan to *look* at before naming it. A blank name is an `error` check, so the plan is not
+   * {@link RunPlan.startable} without one.
+   *
+   * Deliberately never inferred, and the one plausible source is the wrong one: a protocol is run
+   * many times, so defaulting to its name would give every run of it the same name — and the name
+   * is what the run's `.zpcr` is called (`experiment.ts`'s `runFileBaseName`) and how it is told
+   * apart from yesterday's. The instrument can't supply it either: `RemoteRun`'s operand comes
+   * back through `STATUS?` uppercased and cut to eight characters (§7.3). Somebody has to type it.
+   */
   name?: string;
   /**
    * What the uploaded `.prcl.txt` is called (without the extension) — the protocol's own name,
@@ -427,7 +438,18 @@ export function planRun(options: PlanRunOptions): RunPlan {
     `RemoteRun "${BLOCK}","True","False","${name}","${safeUser}","","True","${method}"`;
   assertCommandArgument("RemoteRun", remoteRun);
 
+  // The name is a property of the run rather than of the protocol/plate pair, so it is checked
+  // here rather than in `checkRunPlan` — but it is an `error` like any other, which is what makes
+  // Start run refuse an unnamed run without the UI needing a rule of its own. First in the list:
+  // it is the check the operator can act on before the run exists at all.
   const checks = checkRunPlan(program, plate);
+  if (!experimentName) {
+    checks.unshift({
+      severity: "error",
+      code: "no-experiment-name",
+      message: "Name this experiment before starting it — the run's file is named after it.",
+    });
+  }
   return {
     name,
     program,

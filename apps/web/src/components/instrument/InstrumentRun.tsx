@@ -132,18 +132,31 @@ export function InstrumentRun({
       {/* Shown even with nothing staged: naming the run is a thing you can do before choosing
           its parts, and hiding the fields would make the panel look like it had one job. */}
       <>
+        {/* The placeholder is an example, deliberately *not* the protocol's own name: nothing
+            fills this in for you. A protocol is run many times and its name would be the same
+            every time, so a run inheriting it could not be told from last week's — and the file
+            this run produces is named after it. An empty field is an `error` check on the plan
+            (`usb/runPlan.ts`), which is what keeps Start run disabled until it isn't. */}
         <label className="devrun__name">
-          <span className="devrun__namelabel">Experiment name</span>
+          <span className="devrun__namelabel">
+            Experiment name
+            <span className="devrun__required" title="Required — a run is not started without one">
+              *
+            </span>
+          </span>
           <input
-            className="devrun__nameinput"
+            className={"devrun__nameinput" + (naming.experimentName.trim() ? "" : " is-missing")}
             value={naming.experimentName}
             onChange={(e) => naming.setExperimentName(e.currentTarget.value)}
             spellCheck={false}
-            placeholder={protocol.value?.document.name || "unnamed run"}
+            required
+            aria-required="true"
+            placeholder="e.g. S183-S185 RVP"
             title={
-              "What to call this run. The instrument's own formats have no field for a run name " +
-              "(see zpcrweb-json.md), so this is what the app records alongside the results — " +
-              "sent with the run, and written into the archive it produces."
+              "What to call this run — required, and never guessed. The instrument's own formats " +
+              "have no field for a run name (see zpcrweb-json.md), so this is what the app " +
+              "records alongside the results — sent with the run, written into the archive it " +
+              "produces, and the name that archive's file takes."
             }
           />
         </label>

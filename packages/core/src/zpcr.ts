@@ -79,11 +79,23 @@ export function parseZpcr(data: Uint8Array | ArrayBuffer): Zpcr {
   const files = unzipArchive(toBytes(data));
   const archive = createArchiveAccess(files);
 
+  // `RunInfo.xml` is what a *finished* run is described by, and every archive off an instrument or
+  // out of CFX Manager has one — but a run this app has only just started does not: the instrument
+  // writes it as the run gets going, and until then the archive is the seed `runSeed.ts` builds
+  // (protocol, plate, name). Missing metadata is therefore "not yet" rather than "not a `.zpcr`",
+  // and it parses to the same empty `RunMetadata` an empty document gives, so nothing downstream
+  // needs to ask which case it has.
+  //
+  // Some entry still has to say this is a run, or any ZIP renamed `.zpcr` would open as an empty
+  // one: `RunInfo.xml`, a plate read, or — for a seed — the protocol the run was started with.
   const runInfoBytes = files[RUNINFO_NAME];
-  if (runInfoBytes === undefined) {
-    throw new Error(`Not a valid .zpcr archive: missing ${RUNINFO_NAME}`);
+  if (
+    runInfoBytes === undefined &&
+    !archive.entries.some((n) => isPlateReadName(n) || n === PROTOCOL_NAME)
+  ) {
+    throw new Error(`Not a valid .zpcr archive: no ${RUNINFO_NAME}, plate read or ${PROTOCOL_NAME}`);
   }
-  const metadata = parseRunInfo(textDecoder.decode(runInfoBytes));
+  const metadata = parseRunInfo(runInfoBytes === undefined ? "" : textDecoder.decode(runInfoBytes));
 
   // Dye → optical channel, from the archive's own `.Dcal` set — see `dyeChannelLookup`. Built on
   // first use and cached: a plate CSV is the only thing that asks, and decoding every `.Dcal`

@@ -254,9 +254,23 @@ describe("planRun", () => {
     expect(bad.startable).toBe(false);
   });
 
-  it("falls back to a usable name when given none", () => {
+  /**
+   * The run's name is the one input nothing else can supply — not the protocol (reused across
+   * runs, so every run of it would share a name), not the instrument (which reports the name back
+   * uppercased and cut to eight characters). So an unnamed plan is not startable, and says why.
+   */
+  it("refuses to be startable without an experiment name", () => {
     const anon = planRun({ runDefinition: ALL_CHANNELS, plate: plateUsing([1]) });
+    expect(anon.startable).toBe(false);
+    expect(anon.checks[0]).toMatchObject({ code: "no-experiment-name", severity: "error" });
+    // Still a usable operand, for a caller that sends one anyway.
     expect(anon.name).toBe("zpcrweb");
+
+    const blank = planRun({ runDefinition: ALL_CHANNELS, plate: plateUsing([1]), name: "   " });
+    expect(blank.startable).toBe(false);
+
+    const named = planRun({ runDefinition: ALL_CHANNELS, plate: plateUsing([1]), name: "RVP" });
+    expect(named.checks.some((c) => c.code === "no-experiment-name")).toBe(false);
   });
 });
 

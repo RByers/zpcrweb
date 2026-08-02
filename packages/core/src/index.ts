@@ -58,6 +58,8 @@ export {
   RUN_ENDED_MARKER,
 } from "./runFolder.js";
 export type { RunProgress, RunFolderNaming } from "./runFolder.js";
+export { zpcrSeedArchive } from "./runSeed.js";
+export type { RunSeedOptions } from "./runSeed.js";
 export {
   parseZpcrwebSettings,
   parseZpcrwebSettingsJson,
