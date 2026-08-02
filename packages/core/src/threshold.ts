@@ -85,6 +85,11 @@ export function baselineNoise(
   return SECOND_DIFFERENCE_SIGMA * median(secondDifferences);
 }
 
+/** {@link AutoThresholdOptions.multiplier}'s default — the single source of truth for it, so a
+ * caller that wants to show the value before computing anything (a slider's starting position)
+ * doesn't have to duplicate the literal. */
+export const DEFAULT_THRESHOLD_MULTIPLIER = 20;
+
 export interface AutoThresholdOptions {
   /**
    * `T = multiplier × median baseline noise` over the fluorophore's wells. Default **20**.
@@ -125,7 +130,7 @@ export interface AutoThresholdOptions {
  */
 export function autoThreshold(noiseEstimates: number[], options: AutoThresholdOptions = {}): number {
   if (noiseEstimates.length === 0) return 0;
-  return (options.multiplier ?? 20) * median(noiseEstimates);
+  return (options.multiplier ?? DEFAULT_THRESHOLD_MULTIPLIER) * median(noiseEstimates);
 }
 
 export interface ThresholdOptions {

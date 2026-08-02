@@ -1,10 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { Zpcr } from "@zpcrweb/core";
+import { resolveTubeType, stepTemperature, type Zpcr } from "@zpcrweb/core";
 import type { CalView, FileSettings, Scale } from "../../state/useZpcrStore";
 import { usePltdPassword } from "../../state/pltdPassword";
 import { channelLabel } from "../../lib/channelColors";
-import { resolveTubeType } from "../../lib/fluorCurves";
-import { stepTemperature } from "../../lib/runAnalysis";
 import {
   calChannels,
   calPlateTypes,

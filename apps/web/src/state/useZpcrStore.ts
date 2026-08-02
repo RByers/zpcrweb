@@ -10,13 +10,17 @@ import {
   parseZpcr,
   parseZpcrwebSettings,
   runProgressFromNames,
+  wellKey,
   writeZpcrwebSettings,
+  type AnalysisSource,
   type FileKind,
   type NormalizationMode,
   type PlateDefinition,
   type PltdContainer,
   type Zpcr,
 } from "@zpcrweb/core";
+
+export { wellKey, type AnalysisSource };
 import {
   deleteFile,
   fileId,
@@ -95,16 +99,8 @@ export type RefXAxis = "cycle" | "column";
  * chart (the former standalone Analysis view). Table mode groups by target, like `"target"`.
  */
 export type FluorViewMode = "fluorophore" | "target" | "table";
-/**
- * Curves view, dye-space sources that carry their own analysis only (currently Biomeme —
- * `Zpcr.dyeSpace`, `WellCurve.fileAnalysis`): whether the baseline (`"file"`) or Cq/threshold
- * (`"file"`) a plotted curve shows come from the source file's own reported values, or from this
- * library's own algorithm (`"computed"`) — `threshold.md`'s pipeline, the same one every
- * `.zpcr`/`.pcrd` curve always uses. The two toggles are independent; see `runAnalysis.ts`'s
- * `blendWithFileAnalysis` for exactly what each one swaps. `"file"` is the default: the source
- * instrument's own numbers are what a Biomeme user came to see. Meaningless (and hidden) for a run
- * with no file-side analysis at all. */
-export type AnalysisSource = "file" | "computed";
+// `AnalysisSource` is `@zpcrweb/core`'s own type (see `runAnalysis.ts`'s `blendWithFileAnalysis`
+// for exactly what the two toggles below swap) — re-exported above, not redeclared here.
 
 /**
  * Per-file settings, in-memory form (Sets for cheap toggling) — everything a view reads off
@@ -344,10 +340,6 @@ function parsePlateBytes(
   } catch (e) {
     return { plate: null, needsPassword: false, error: e instanceof Error ? e.message : String(e) };
   }
-}
-
-export function wellKey(row: number, col: number): string {
-  return `${row},${col}`;
 }
 
 /** The display half of the defaults; the analysis half comes from

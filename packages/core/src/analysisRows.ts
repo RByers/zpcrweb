@@ -1,37 +1,51 @@
-import type { SampleType } from "@zpcrweb/core";
+/**
+ * A run's results table: one row per (target, well) pair — `threshold.md` §5–§7's Cq and
+ * endpoint ΔRFU, laid out as a table (or a CSV) instead of a chart.
+ *
+ * Every number here is *looked up* in {@link RunAnalysis.cqTable}, never recomputed from a
+ * filtered subset — a caller's own filters decide which rows to show, nothing more, so a row
+ * always agrees with whatever marker a chart draws for the same curve.
+ */
 
-import { channelLabel } from "./channelColors";
-import { formatBaselineFormula } from "./cq";
-import { csvRow } from "./download";
-import { curveKey, type RunAnalysis } from "./runAnalysis";
+import type { SampleType } from "./pltd.js";
+import { curveKey, formatBaselineFormula, type RunAnalysis } from "./runAnalysis.js";
 
 /**
- * The Curves view's table mode: one row per (target, well) pair — `threshold.md` §5–§6's Cq and
- * endpoint ΔRFU, laid out as a table instead of a chart.
- *
- * Every number here is *looked up* in the run's single Cq table (`runAnalysis.ts`), never
- * recomputed from the filtered subset — the rail's filters decide which rows are shown, nothing
- * more, so a row always agrees with the marker the chart draws for the same curve.
+ * Display label for a channel — always "Ch1"–"Ch6", never a dye guess, and
+ * {@link UNKNOWN_CHANNEL_LABEL} when there is no channel to name. "Ch" rather than "C" to avoid
+ * ambiguity with a well column/position.
  */
+export const UNKNOWN_CHANNEL_LABEL = "Ch?";
+
+export function channelLabel(index: number | null | undefined): string {
+  return index == null ? UNKNOWN_CHANNEL_LABEL : `Ch${index + 1}`;
+}
+
+function csvField(v: string): string {
+  return /[",\r\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
+}
+
+/** RFC4180-ish quoting of one CSV row. */
+export function csvRow(cells: string[]): string {
+  return cells.map(csvField).join(",") + "\r\n";
+}
+
 export interface AnalysisRow {
   /** The threshold group: the target/gene, the `(none)` catch-all, or — on a plate with no
    * targets at all — the fluorophore itself. See `RunAnalysis.groupOf`. */
   target: string;
   fluor: string;
   /** Optical channel, or null/undefined when it isn't known — exported as `Ch?` (see
-   * `channelLabel`). Display only; no reported number depends on it. */
+   * {@link channelLabel}). Display only; no reported number depends on it. */
   channel?: number | null;
   row: number;
   col: number;
   wellLabel: string;
   sample: string;
-  /** The well's normalized sample type (unknown/standard/NTC/…). Display only — it tints the
-   * table row the same colour the plate map paints the well, so a control reads as a control
-   * without hunting for its label. */
+  /** The well's normalized sample type (unknown/standard/NTC/…). Display only. */
   sampleType: SampleType;
-  /** Diagnostic: the linear baseline actually fitted for this curve (see
-   * `CurveBaselineResult.baselineFit`), rendered as a formula (e.g. "2000 + 4c") — helps explain
-   * a surprising threshold/Cq. */
+  /** Diagnostic: the linear baseline actually fitted for this curve, rendered as a formula
+   * (e.g. "2000 + 4c") — helps explain a surprising threshold/Cq. */
   baselineFormula: string;
   threshold: number;
   noise: number;
@@ -44,14 +58,14 @@ export interface AnalysisRow {
   cq: number | null;
 }
 
-/** Whether the rail's filters (wells, chips, samples) leave a given well/fluor pair visible —
- * the same predicate that decides whether the chart plots its curve, so the table and the chart
- * always show the same set. */
+/** Whether a given well/fluor pair should appear in the table — a caller's own filter predicate
+ * (rail chips, wells, samples, …), applied identically to whatever else it's driving (a chart's
+ * plotted curves, say), so the table and that other view always show the same set. */
 export type CurveVisible = (row: number, col: number, fluor: string) => boolean;
 
-/** Rows for every loaded well/fluor pair the rail's filters leave visible, sorted by target then
- * plate position. Only *loaded* wells get rows: an unloaded well/fluor pair can still be plotted
- * (the "Unloaded" switch) but has no real measurement to tabulate. */
+/** Rows for every loaded well/fluor pair `visible` lets through, sorted by target then plate
+ * position. Only *loaded* wells get rows: an unloaded well/fluor pair can still be plotted
+ * elsewhere but has no real measurement to tabulate. */
 export function buildAnalysisRows(run: RunAnalysis, visible: CurveVisible): AnalysisRow[] {
   const { plate, cqTable, groupInfos, groupOf } = run;
   if (!plate || cqTable.size === 0) return [];
@@ -88,8 +102,8 @@ export function buildAnalysisRows(run: RunAnalysis, visible: CurveVisible): Anal
   return out.sort((a, b) => a.target.localeCompare(b.target) || a.row - b.row || a.col - b.col);
 }
 
-/** The same columns the table shows, in the same order, plus `channel` (redundant on screen — the
- * table carries it as a chip colour rather than as text). */
+/** The same columns the table shows, in the same order, plus `channel` (redundant on screen — a
+ * rendered table can carry it as a chip colour instead of text). */
 export function analysisCsv(rows: AnalysisRow[]): string {
   let csv = csvRow([
     "well",
@@ -126,8 +140,7 @@ function sanitizeFilePart(s: string): string {
   return s.replace(/[\\/:*?"<>|]+/g, "_").trim();
 }
 
-/** `<run name>_analysis.csv` — the same `dataFile`-derived naming the Raw view's per-cycle
- * export uses. */
+/** `<run name>_analysis.csv` — the same `dataFile`-derived naming a raw per-cycle export uses. */
 export function analysisCsvFilename(dataFile: string): string {
   const runName = sanitizeFilePart(dataFile.replace(/\.(zpcr|pcrd)$/i, "")) || "run";
   return `${runName}_analysis.csv`;

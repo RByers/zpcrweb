@@ -27,7 +27,7 @@ same as a standalone plate has no curves), no component may:
 The reason is not tidiness. `.zpcr` and `.pcrd` are two containers around *the same physical
 run*, so anything the app reports off one must match what it reports off the other; a number
 that changes with the container is an artifact, not a measurement. This binds the analysis
-pipeline especially hard — see the header comment in `lib/runAnalysis.ts`, and the `wellFactors`
+pipeline especially hard — see the header comment in `@zpcrweb/core`'s `runAnalysis.ts`, and the `wellFactors`
 note in [`calibration.md`](../../calibration.md) §4.1 for the one correction dropped to keep it
 true. Verified: a `.zpcr`/`.pcrd` pair of one run agrees to ~4e-5 cycles in Cq, the residual
 being only that a `.pcrd` stores well readings as text rounded to two decimals where a `.zpcr`
@@ -121,8 +121,8 @@ replaced a plain colored dot, which carried the encryption half alone; a protoco
 badge went with it, the icon now being what tells the two override kinds apart at a glance.
 
 Each chip's hover card (protocol name, cycle count, and the plate's target/sample lists — the
-same lists `OverviewView` shows in its "Plate" section, via the shared `lib/plateTargets.ts`
-helper) renders through a `createPortal` into `document.body` at a `position: fixed` spot
+same lists `OverviewView` shows in its "Plate" section, via `@zpcrweb/core`'s shared
+`plateTargets()` helper) renders through a `createPortal` into `document.body` at a `position: fixed` spot
 computed from the chip's `getBoundingClientRect()` on hover/focus, rather than as a normal
 absolutely-positioned child of the chip. `.filebar` scrolls horizontally
 (`overflow-x: auto`), which per the CSS spec forces the other axis to compute to `auto` too —
@@ -434,7 +434,7 @@ so every call site keeps writing one `onChange({ … })` regardless of where the
   Each target/sample chip carries that group's positive/negative curve tally — how many of its
   well/fluor curves got a Cq and how many didn't — as two counts either side of a small track
   filled to the positive fraction (`CountChip`/`.chipcount`). The numbers come out of
-  `useRunAnalysis`'s single Cq table (`lib/runAnalysis.ts`), the same one the Curves view reads,
+  `useRunAnalysis`'s single Cq table (`@zpcrweb/core`'s `computeRunAnalysis`), the same one the Curves view reads,
   so a chip can't disagree with the Curves table about the same well; the tally is per *curve*,
   so a duplexed well contributes to each of its dyes. That's why Overview takes `settings` —
   thresholds and calibration options change the Cq table. Unloaded wells are skipped, and the
@@ -693,13 +693,24 @@ genuine abbreviation differences, not just casing — `assemblyName` → `ANm`) 
 reshaping one into the other, so `RunLogTable` (`parsed: RunLogParsed`) renders either
 format's real elements without either one faking the other's schema.
 
-## One analysis per run: `lib/runAnalysis.ts`
+## One analysis per run: `@zpcrweb/core`'s `runAnalysis.ts`
 
-**The rule: analysis is computed once, here, by the library — and every other module in the app is
-downstream of it.** Nothing else calls `baseline.ts`/`threshold.ts`, and no view derives a
-baseline, noise estimate, threshold or Cq of its own, not even for something as apparently
-cosmetic as where to draw a line. A curve's analysis travels with it as one record
+**The rule: analysis is computed once, by the library — and every other module, in this app or
+any other consumer, is downstream of it.** Nothing in the app calls `baseline.ts`/`threshold.ts`,
+and no view derives a baseline, noise estimate, threshold or Cq of its own, not even for something
+as apparently cosmetic as where to draw a line. A curve's analysis travels with it as one record
 (`CurveAnalysis`), and a view's job is to project that record onto the screen.
+
+The derivation itself — fluorophore/target grouping, calibration matching, color separation and
+the Cq table — lives in `@zpcrweb/core`'s `computeRunAnalysis` (`packages/core/src/runAnalysis.ts`),
+not in this app. It moved there from a web-only `useRunAnalysis` once a second, non-React consumer
+(`tools/zpcr.mjs`, a CLI that prints a run's results table as CSV) needed the identical
+derivation: the alternative was copying the ~450-line hook body by hand and hoping the copy never
+drifted from the original, which is exactly the failure this section exists to rule out for
+*every* consumer, not just the ones inside this app. `apps/web/src/lib/runAnalysis.ts` is now
+just the React face of it — one `useMemo(() => computeRunAnalysis(zpcr, settings, activeStep,
+password), deps)` — kept only because the derivation genuinely has nothing to do with rendering
+and doesn't need re-running on every render.
 
 This is enforced by construction rather than convention: `lib/uplot/chart.ts` imports no analysis
 function at all, and what it plots in the "Relative" view *is* `CurveAnalysis.correctedValues` —
@@ -723,11 +734,11 @@ Cq ring is placed *at* `(cq, threshold)` and projected through `SeriesMeta.plotD
 on the threshold line by construction rather than by agreement), and the log-scale shift became one
 shared constant for the whole plot.
 
-`useRunAnalysis(zpcr, settings, pltdPassword, activeStep)` is that single run-level
-derivation, shared by the Curves view's chart, hover cards and table mode: plate + password state,
-fluorophore/target groups
-(`lib/plateTargets.ts`), the calibration matrix and `calibration.md` §4 corrections, the
-color-separated `allFluorCurves` — and, on top of those, the run's **Cq table**.
+`computeRunAnalysis(zpcr, settings, activeStep, password)` (called through `useRunAnalysis` in
+this app) is that single run-level derivation, shared by the Curves view's chart, hover cards and
+table mode: plate + password state, fluorophore/target groups (`targetGroups()`, same module), the
+calibration matrix and `calibration.md` §4 corrections, the color-separated `allFluorCurves` —
+and, on top of those, the run's **Cq table**.
 
 - **`cqTable`** — `packages/core/src/analysis.ts`'s `computeCqTable()` over *every* well/dye pair on
   the plate, keyed by `curveKey(row, col, fluor)`. One entry per key: Cq, the §5.2 group threshold,
@@ -851,7 +862,7 @@ differs:
   would hide every fluor), and `calibrationAvailable` follows from that.
 - `matrix` is skipped outright (`dyeSpace || calibratedFluors.length === 0`) rather than built
   and then discarded.
-- `allFluorCurves` comes from `lib/fluorCurves.ts`'s `dyeSpaceFluorCurves()` instead of
+- `allFluorCurves` comes from `@zpcrweb/core`'s `dyeSpaceFluorCurves()` instead of
   `computeFluorCurves()` — a relabelling of `allCurves` (each `WellCurve.channel` is already a
   fluor index; `dyeSpaceFluorCurves` just resolves it back to a name via the plate's `fluors[]`
   and carries `WellCurve.fileAnalysis` through untouched), not a solve.
@@ -916,7 +927,7 @@ only pieces the two views share.
   `"relative"` plots the baseline-corrected curve, `"absolute"` plots the curve's raw RFU
   unmodified. This is purely a display choice: Cq/ΔRFU/noise/threshold in both the chart's own
   markers and the Analysis table are always computed from the corrected values regardless of
-  which is shown (`lib/cq.ts`'s `ANALYSIS_BASELINE_MODE` constant, fixed at
+  which is shown (`@zpcrweb/core`'s `ANALYSIS_BASELINE_MODE` constant, fixed at
   `LinearBaseLineNormalized`). This is a genuinely different concept from the Reference view's
   ΔRFU/Drift %, which are factory-relative, not a fitted baseline — see "Two baseline concepts"
   under Reference view below. Also Relative ↔ Log (uPlot `distr: 3`).
@@ -941,10 +952,10 @@ only pieces the two views share.
   (`SeriesMeta.kind === "baseline"`) since they carry no tooltip of their own.
 - **Baseline formula display:** wherever a baseline is shown or exported — the chart tooltip's
   "baseline" row, the Analysis table's "Baseline" column, its CSV export — it's rendered as the
-  fitted line itself, e.g. `"2000 + 4c"` (`c` = cycle number), via `lib/cq.ts`'s
+  fitted line itself, e.g. `"2000 + 4c"` (`c` = cycle number), via `@zpcrweb/core`'s
   `formatBaselineFormula()` over `CurveBaselineResult.baselineFit` (`{ slope, intercept }`,
   `packages/core/src/analysis.ts`), not a single diagnostic RFU number.
-- **Number formatting:** `lib/cq.ts` owns two helpers used by every analysis-facing readout, so the
+- **Number formatting:** `@zpcrweb/core`'s `runAnalysis.ts` owns two helpers used by every analysis-facing readout, so the
   same quantity never appears at two precisions in two places. `formatRfu()` renders an RFU *level*
   as a whole number (thresholds, ΔRFU, the chart tooltip's mean/min/max, a baseline's intercept):
   readings run to thousands and carry nothing below the ones place, so decimals there are noise
@@ -1060,7 +1071,7 @@ only pieces the two views share.
   the set of curves actually in `plotCurves`) that `HoverCard` uses to greyed-out (`.is-dim`) and
   sort unselected rows after the selected ones. Rows are capped at 10 with a "N more" footer past
   that, selected rows always counted first so a long unselected tail can't crowd them out. Both
-  Both sets of rows take their Cq from the run's single Cq table (`lib/runAnalysis.ts`) by
+  Both sets of rows take their Cq from the run's single Cq table (`@zpcrweb/core`'s `computeRunAnalysis`) by
   well/fluor key, so a curve's Cq in a hover card is by construction the same number as its marker
   on the chart and its row in table mode. (It used to be computed three separate times over
   three different subsets — the plotted curves, every curve, and the standalone Analysis view's
@@ -1100,9 +1111,9 @@ only pieces the two views share.
   (`cqMarkers` in `buildChart()`). A curve with no Cq — one whose corrected trace never crosses its
   threshold, in either direction — gets no ring.
 - **Color separation (dye space) and the channel/fluorophore/target selector** (also labelled
-  "View" in the rail, distinct from the baseline `CurveView` toggle above): `lib/fluorCurves.ts`
-  matches
-  the plate's fluorophores to this run's `.Dcal` data, builds one calibration matrix per step
+  "View" in the rail, distinct from the baseline `CurveView` toggle above): `@zpcrweb/core`'s
+  `matchFluorCalibrations()`
+  matches the plate's fluorophores to this run's `.Dcal` data, builds one calibration matrix per step
   (restricted to the scanned channels, so its RFU scale factors are measured over the right
   rows), and solves every well/cycle — see [`calibration.md`](../../calibration.md). `CurvesView`
   assembles the §4 corrections that go in first: the per-scan reference level from the reference
@@ -1139,7 +1150,7 @@ only pieces the two views share.
   assigned to that fluor *in that well* (`WellFluor.target`, per `pltd.md`), so the same dye
   used for different genes in different wells appears as separate legend entries. Loaded
   well/fluor pairs carrying no target of their own get one shared `"(none)"` group instead
-  (`lib/plateTargets.ts`'s `NO_TARGET`/`targetGroups()`, shared with table mode) — on by
+  (`@zpcrweb/core`'s `NO_TARGET`/`targetGroups()`, shared with table mode) — on by
   default like every other target, so a partially-annotated plate's remaining curves stay
   labelled and toggleable rather than showing up under their dye name with no chip. That
   catch-all is only added *alongside* real targets: on a plate with no `geneName` anywhere,
@@ -1162,14 +1173,15 @@ near-identical rail of its own; the two disagreed about Cq (see "One Cq per well
 about which targets were filtered, so the tab is gone and its two unique controls — the threshold
 overrides and the CSV download — moved into the Curves rail, where they apply to the chart too.
 
-Rows come from `lib/analysisRows.ts` (`buildAnalysisRows`/`analysisCsv`), rendered by
+Rows come from `@zpcrweb/core`'s `analysisRows.ts` (`buildAnalysisRows`/`analysisCsv` — also what
+`tools/zpcr.mjs`'s `results` command calls directly, with no app in the loop), rendered by
 `components/curves/CurveTable.tsx`. Table mode is dye-space-only, for the same reason "Target" mode
 is: a per-target curve needs channel→dye color separation (`calibration.md`).
 
 - **One row per (target, well) — or (fluorophore, well) with no targets assigned:** built from
   `PlateDefinition.wells[].fluors[]`, for `loaded` wells only — an unloaded pair can still be
   *plotted* ("Unloaded") but has no real measurement to tabulate. Grouping keys on
-  `RunAnalysis.groupOf`: `WellFluor.target`, the shared `"(none)"` catch-all `lib/plateTargets.ts`'s
+  `RunAnalysis.groupOf`: `WellFluor.target`, the shared `"(none)"` catch-all `@zpcrweb/core`'s
   `targetGroups()` appends (see the Curves view's target mode above) so untargeted NTC/NRT wells get
   Cq rows instead of being dropped, or — when no well on the plate has a target at all
   (`usingTargets` false) — the fluorophore itself, mirroring Fluorophore mode. In that last case the
@@ -1361,7 +1373,7 @@ Biomeme (`WellCurve.fileAnalysis`, `biomeme.md`). Two independent `FileSettings`
 the rail whenever `RunAnalysis.hasFileAnalysis` is true — absent entirely for a `.zpcr`/`.pcrd`
 run, which has nothing to switch between.
 
-They take effect in exactly one place, `lib/runAnalysis.ts`'s `blendWithFileAnalysis`, called
+They take effect in exactly one place, `@zpcrweb/core`'s `runAnalysis.ts`'s `blendWithFileAnalysis`, called
 once per curve while building `cqTable` — never in a view. `computeCqTable()` still runs
 unconditionally first (a curve's threshold has to come from *somewhere*, and this library's own
 algorithm is the only thing that can resolve one across a group), and `blendWithFileAnalysis`

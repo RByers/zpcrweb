@@ -1,7 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { wellLabel, type LedCurve, type Zpcr, type TemperatureCurve } from "@zpcrweb/core";
+import {
+  analysisCsv,
+  analysisCsvFilename,
+  buildAnalysisRows,
+  NO_TARGET,
+  wellLabel,
+  type LedCurve,
+  type Zpcr,
+  type TemperatureCurve,
+} from "@zpcrweb/core";
 import { computeWellTypes } from "../../lib/wellTypes";
-import { NO_TARGET } from "../../lib/plateTargets";
 import { SAMPLE_TYPE_META } from "../../lib/sampleType";
 import {
   wellKey,
@@ -19,11 +27,6 @@ import {
   darkCurveKey,
   useRunAnalysis,
 } from "../../lib/runAnalysis";
-import {
-  analysisCsv,
-  analysisCsvFilename,
-  buildAnalysisRows,
-} from "../../lib/analysisRows";
 import { downloadText } from "../../lib/download";
 import { ChannelBar } from "../curves/ChannelBar";
 import { FluorBar, type FluorChip } from "../curves/FluorBar";

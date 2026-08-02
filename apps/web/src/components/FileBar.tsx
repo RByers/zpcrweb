@@ -3,14 +3,13 @@ import { createPortal } from "react-dom";
 import type { LoadedFile, PlateFileResult, RunResult } from "../state/useZpcrStore";
 import { usePltdPassword } from "../state/pltdPassword";
 import { channelColor } from "../lib/channelColors";
-import { plateTargets } from "../lib/plateTargets";
 import {
   plateFileEncryptionStatus,
   runEncryptionStatus,
   type EncryptionStatus,
 } from "../lib/encryptionStatus";
 import type { ExperimentIdentity } from "../lib/experiment";
-import { fileCategory, type FileCategory } from "@zpcrweb/core";
+import { fileCategory, plateTargets, type FileCategory } from "@zpcrweb/core";
 import { FileKindIcon } from "./FileIcons";
 import { TrashIcon } from "./TrashIcon";
 

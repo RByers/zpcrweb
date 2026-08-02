@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   formatRunDefinitionText,
+  plateTargets,
   runProgressFromNames,
   type CqTableEntry,
   type PlateDefinition,
@@ -12,7 +13,6 @@ import { DownloadIcon } from "../DownloadIcon";
 import { downloadBytes, downloadText } from "../../lib/download";
 import { protocolFileBase } from "../../lib/protocolSource";
 import { usePltdPassword } from "../../state/pltdPassword";
-import { plateTargets } from "../../lib/plateTargets";
 import { channelColor } from "../../lib/channelColors";
 import { runEncryptionStatus } from "../../lib/encryptionStatus";
 import { curveKey, useRunAnalysis } from "../../lib/runAnalysis";

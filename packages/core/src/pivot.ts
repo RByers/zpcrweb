@@ -45,6 +45,12 @@ export function wellLabel(row: number, col: number): string {
   return `${rowLetter}${col + 1}`;
 }
 
+/** Map key for a well coordinate — unlike {@link wellLabel}, not for display, just a stable,
+ * unambiguous key for `Map`/`Set`. */
+export function wellKey(row: number, col: number): string {
+  return `${row},${col}`;
+}
+
 /**
  * Pivot run-centric reads into well-centric amplification curves. Each curve is one
  * (channel, row, col) coordinate's mean fluorescence across all cycles, ready to plot.

@@ -1,5 +1,7 @@
-import { wellLabel, type PlateRead, type Zpcr } from "@zpcrweb/core";
+import { csvRow, wellLabel, type PlateRead, type Zpcr } from "@zpcrweb/core";
 import { channelLabel } from "./channelColors";
+
+export { csvRow };
 
 /**
  * Client-side "Save As" for the Raw files view: text/XML entries download verbatim, decoded
@@ -35,16 +37,6 @@ export function downloadBytes(filename: string, bytes: Uint8Array, mimeType = "a
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
-}
-
-function csvField(v: string): string {
-  return /[",\r\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
-}
-
-/** RFC4180-ish quoting of one CSV row. Exported so other CSV builders (e.g. the Analysis
- * view's table export) share the same quoting rules instead of re-implementing them. */
-export function csvRow(cells: string[]): string {
-  return cells.map(csvField).join(",") + "\r\n";
 }
 
 function dlToRows(dl: Element): string[][] {

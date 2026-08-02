@@ -24,6 +24,7 @@ export {
   toSteps,
   toChannels,
   wellLabel,
+  wellKey,
   REFERENCE_ROW,
 } from "./pivot.js";
 export { parseFactoryRefRowCal, compareRefToCal } from "./refcal.js";
@@ -123,7 +124,34 @@ export {
   autoThreshold,
   resolveThreshold,
   computeCq,
+  DEFAULT_THRESHOLD_MULTIPLIER,
 } from "./threshold.js";
+export {
+  resolveTubeType,
+  matchFluorCalibrations,
+  computeFluorCurves,
+  dyeSpaceFluorCurves,
+  NO_TARGET,
+  plateTargets,
+  targetGroups,
+  formatRfu,
+  formatCq,
+  formatBaselineFormula,
+  curveKey,
+  channelCurveKey,
+  darkCurveKey,
+  stepTemperature,
+  runAnalysisSettingsFromZpcrweb,
+  computeRunAnalysis,
+} from "./runAnalysis.js";
+export {
+  channelLabel,
+  csvRow,
+  buildAnalysisRows,
+  analysisCsv,
+  analysisCsvFilename,
+  UNKNOWN_CHANNEL_LABEL,
+} from "./analysisRows.js";
 
 export type {
   Zpcr,
@@ -214,3 +242,15 @@ export type {
 } from "./calibration.js";
 export type { BaselineRegion, BaselineMode, LinearBaselineFit } from "./baseline.js";
 export type { AutoThresholdOptions, ThresholdOptions } from "./threshold.js";
+export type {
+  TubeType,
+  FluorCalibration,
+  FluorCorrections,
+  FluorCurve,
+  TargetGroup,
+  AnalysisSource,
+  RunAnalysisSettings,
+  CurveAnalysis,
+  RunAnalysis,
+} from "./runAnalysis.js";
+export type { AnalysisRow, CurveVisible } from "./analysisRows.js";

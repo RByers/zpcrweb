@@ -1,7 +1,6 @@
 import { useMemo, useState } from "react";
-import type { AnalysisRow } from "../../lib/analysisRows";
+import { formatCq, formatRfu, type AnalysisRow } from "@zpcrweb/core";
 import { channelColor, channelLabel } from "../../lib/channelColors";
-import { formatCq, formatRfu } from "../../lib/cq";
 import { SAMPLE_TYPE_META } from "../../lib/sampleType";
 
 interface Props {

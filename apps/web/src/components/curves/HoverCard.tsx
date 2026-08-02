@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { createPortal } from "react-dom";
-import { formatCq } from "../../lib/cq";
+import { formatCq } from "@zpcrweb/core";
 
 /** One row of a {@link HoverCard}: something on the plate (a well, a target/fluor, …) plus its
  * Cq. `selected` mirrors the chart's own dimming: false for a row excluded by a rail filter

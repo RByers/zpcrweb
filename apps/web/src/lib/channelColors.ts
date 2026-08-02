@@ -90,19 +90,7 @@ export function crosstalkColor(
   return base === read ? base : mixHex(base, read, CROSSTALK_TINT);
 }
 
-/**
- * What a fluor whose optical channel isn't known is labelled. A plate CSV names its fluor
- * columns by dye alone, and only the run's `.Dcal` set says which channel a dye is read on — so
- * a dye no calibration covers, or a plate CSV opened with no run, has no channel and is shown
- * as this rather than being assigned a plausible-looking one.
- */
-export const UNKNOWN_CHANNEL_LABEL = "Ch?";
-
-/**
- * Display label for a channel in channel-space views — always "Ch1"–"Ch6", never a dye guess,
- * and {@link UNKNOWN_CHANNEL_LABEL} when there is no channel to name. "Ch" rather than "C" to
- * avoid ambiguity with a well column/position.
- */
-export function channelLabel(index: number | null | undefined): string {
-  return index == null ? UNKNOWN_CHANNEL_LABEL : `Ch${index + 1}`;
-}
+/** Display label for a channel in channel-space views — moved to `@zpcrweb/core` since the
+ * results table/CSV need the identical label with no UI dependency; re-exported here so this
+ * module stays the one import path for anything channel-related in the app. */
+export { channelLabel, UNKNOWN_CHANNEL_LABEL } from "@zpcrweb/core";

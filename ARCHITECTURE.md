@@ -33,13 +33,16 @@ the doc is always the entry point for understanding *and* changing a decoder. Se
   baseline, a noise estimate, a threshold and a Cq are not independent numbers a caller can work
   out for itself: they are one derivation, and re-deriving any part of it somewhere else produces a
   *second, equally defensible* answer that then disagrees with the first. So the library owns the
-  computation (`analysis.ts`'s `baselineCorrectCurve`/`computeCqTable`), a consumer runs it **once
-  per run over the whole plate** (in the web app, `useRunAnalysis`), and everything else — tables,
-  hover cards, exports, and the chart's curves, markers and threshold lines alike — reads the
-  result. No consumer, the renderer least of all, calls into `baseline.ts`/`threshold.ts` on its
-  own. This is not a style preference: the two places that used to run their own copy drifted
-  apart, and the drift was visible on screen as a threshold line that missed the Cq marker it was
-  supposed to run through (see `apps/web/ARCHITECTURE.md`, "One analysis per run").
+  whole derivation, from the low-level fit (`analysis.ts`'s `baselineCorrectCurve`/
+  `computeCqTable`) up through fluorophore matching, target grouping and color separation
+  (`runAnalysis.ts`'s `computeRunAnalysis`), and a consumer runs it **once per run over the whole
+  plate** — the web app's `useRunAnalysis` is a one-line `useMemo` around it, and `tools/zpcr.mjs`
+  calls it directly with no app in between — and everything else — tables, hover cards, exports,
+  and the chart's curves, markers and threshold lines alike — reads the result. No consumer, the
+  renderer least of all, calls into `baseline.ts`/`threshold.ts` on its own. This is not a style
+  preference: the two places that used to run their own copy drifted apart, and the drift was
+  visible on screen as a threshold line that missed the Cq marker it was supposed to run through
+  (see `apps/web/ARCHITECTURE.md`, "One analysis per run").
 
 ## Monorepo
 
@@ -186,7 +189,7 @@ is different enough that the mapping isn't the field-for-field translation `.pcr
   LED/filter pairs, not a per-run naming choice, so it's keyed on color rather than on whichever
   dye name an assay happens to use for that channel this time; the indices are chosen to land on
   the same hues `.zpcr`/`.pcrd`'s own channels 1/3/4 already draw as, per `biomeme.md`).
-  `apps/web`'s `useRunAnalysis` checks `dyeSpace` once and skips color separation entirely for
+  `computeRunAnalysis` checks `dyeSpace` once and skips color separation entirely for
   such a run — see `apps/web/ARCHITECTURE.md`'s "Dye-space sources skip color separation".
 - **No plate reads, because the device already pivoted.** `.zpcr`/`.pcrd` both start from a
   `PlateRead[]` — one header-plus-well-grid record per cycle — that `pivot.ts` turns into curves.
@@ -448,7 +451,7 @@ raw bytes ─▶ fflate.unzipSync ─▶ { name: Uint8Array }
   It's deliberately batch-shaped: a Cq isn't a property of a single curve — its threshold is the
   median noise of the curves it was computed *with* — so recomputing over a filtered subset yields
   a different, equally defensible answer for the same well. Consumers build the table once over the
-  whole plate and filter it for display; see `apps/web/src/lib/runAnalysis.ts`.
+  whole plate and filter it for display; see `runAnalysis.ts`'s `computeRunAnalysis`.
 - **`runinfo.ts`** — a small regex scan over the flat `<KeyValuePairs>` list. No XML
   dependency: the structure is regular and self-closing `<Value />` maps to `""`.
 - **`temps.ts`** — pulls temperatures out of the `.Plateread` ICFF index. It matches on the
@@ -520,13 +523,11 @@ Wells are addressed as `(channel, row, col)`:
   for the raw message log). Needs the optional `usb` dependency and a built core. Every subcommand
   is a named `CfxDevice` operation; there is no "send this command line" escape hatch, in the CLI
   or the library (`usb.md` §10).
-- **`tools/zpcr.ts`** (`node_modules/.bin/vite-node tools/zpcr.ts <file> results`) — prints a run's
-  results table (the Curves view's Table mode / CSV download) to stdout. A plain-Node rerun of
-  `apps/web/src/lib/runAnalysis.ts`'s `useRunAnalysis` with the `useMemo`s stripped — it imports
-  that module's React-free sibling files directly rather than `runAnalysis.ts` itself, since a
-  React hook call outside a component throws. Run via `vite-node` (already a transitive dependency
-  here) rather than plain `node`, since it needs to load `apps/web/src/lib/*.ts` with no build
-  step; needs a built core the same way `cfx.mjs` does.
+- **`tools/zpcr.mjs`** (`node tools/zpcr.mjs <file> results`) — prints a run's results table (the
+  web app's Curves view Table mode / CSV download) to stdout, straight off `@zpcrweb/core`'s
+  `computeRunAnalysis`/`buildAnalysisRows`/`analysisCsv` — no `apps/web` code in the loop at all,
+  so this is wiring (argv parsing, the `secrets.json` password fallback) and nothing else. Plain
+  `node`, no bundler: needs a built core the same way `cfx.mjs` does.
 - **Vitest** for tests — isomorphic, fast, and ready for a future browser-mode test run.
 - **tsup** for builds — emits dual ESM + CJS plus `.d.ts` from a single entry point. The web app
   deliberately does not consume this output (see [Why the web app imports core's

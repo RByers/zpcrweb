@@ -15,8 +15,8 @@ import {
   type ThresholdLineState,
   type TooltipData,
 } from "../../lib/uplot/chart";
+import { formatCq, formatRfu } from "@zpcrweb/core";
 import { channelLabel } from "../../lib/channelColors";
-import { formatCq, formatRfu } from "../../lib/cq";
 
 // Stable reference so the effect-dependency array below doesn't see a new "empty" array
 // (and rebuild the whole chart, cancelling any in-progress hover) on every render.

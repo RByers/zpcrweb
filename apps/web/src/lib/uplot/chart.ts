@@ -15,10 +15,8 @@
  */
 
 import uPlot from "uplot";
-import type { DarkCurve } from "@zpcrweb/core";
+import { formatBaselineFormula, type CurveAnalysis, type DarkCurve } from "@zpcrweb/core";
 import { channelColor, channelLabel } from "../channelColors";
-import { formatBaselineFormula } from "../cq";
-import type { CurveAnalysis } from "../runAnalysis";
 import type { Baseline, CurveView, Scale } from "../../state/useZpcrStore";
 
 const SVG_NS = "http://www.w3.org/2000/svg";

@@ -24,20 +24,27 @@
  */
 
 import {
+  DEFAULT_THRESHOLD_MULTIPLIER,
+  runAnalysisSettingsFromZpcrweb,
   ZPCRWEB_SETTINGS_VERSION,
-  type NormalizationMode,
+  type RunAnalysisSettings,
   type ZpcrwebAnalysisSettings,
   type ZpcrwebSettings,
 } from "@zpcrweb/core";
 
-/** The library's default for `threshold.md` §5.2's auto-threshold multiplier, and the slider's
- * starting point. Must track `AutoThresholdOptions.multiplier`'s own default in `@zpcrweb/core`,
- * which documents where the figure comes from (and why it sits below what the CFX anchors
- * imply). */
-export const DEFAULT_THRESHOLD_MULTIPLIER = 20;
+export { DEFAULT_THRESHOLD_MULTIPLIER };
 
-/** File-backed analysis parameters, in-memory form. */
-export interface AnalysisSettings {
+/**
+ * File-backed analysis parameters, in-memory form: the library's own {@link RunAnalysisSettings}
+ * — the math-affecting fields, defined and documented in `@zpcrweb/core`'s `runAnalysis.ts` — minus
+ * `baselineSource`/`cqSource` (those are real per-run analysis inputs too, but browser-local
+ * display toggles rather than something `zpcrweb.json` round-trips; `useZpcrStore.ts`'s
+ * `FileSettings` carries them instead, straight from IndexedDB), plus {@link experimentName},
+ * which this app also routes into the file (see below) but which changes no number, so it stays
+ * out of the library's own type.
+ */
+export interface AnalysisSettings
+  extends Required<Omit<RunAnalysisSettings, "baselineSource" | "cqSource">> {
   /**
    * What the run is called (`zpcrweb.json`'s top-level `experimentName`; see `experiment.ts` in
    * `@zpcrweb/core` for why no Bio-Rad format has a field for it). `""` means unnamed, and the
@@ -50,33 +57,6 @@ export interface AnalysisSettings {
    * that opened it, for exactly the reasons in this module's header.
    */
   experimentName: string;
-  /** Manual per-fluorophore threshold override (RFU), keyed by threshold group — the
-   * fluorophore, always (see `RunAnalysis.thresholdGroupOf`). A group with no entry uses the
-   * automatic threshold (`threshold.md` §5.2). Edited in the Curves rail's "Threshold overrides"
-   * section; applies to the chart's Cq markers, the hover cards and the table alike, since all
-   * three read the run's one Cq table. */
-  thresholdOverrides: Map<string, number>;
-  /** Manual per-*curve* threshold override (RFU), keyed by `curveKey(row, col, fluor)` — one
-   * well's one dye. Outranks {@link thresholdOverrides}, which in turn outranks the auto value:
-   * a group threshold is a median that deliberately won't follow any single well, so this is the
-   * only way to correct one outlier without moving every other well with it. Edited in the
-   * Curves rail's Threshold section, under the fluorophore's expandable per-curve list. */
-  curveThresholdOverrides: Map<string, number>;
-  /** §5.1's auto-threshold multiplier: `threshold = k × median baseline noise` across the group's
-   * wells, for every group with no entry in {@link thresholdOverrides}. The scale comes from the
-   * thresholds CFX itself persisted in a `.pcrd` (see `AutoThresholdOptions.multiplier`), but
-   * those are two anchors from one run and the default sits deliberately below them — and it is
-   * the single knob that most affects where every Cq lands, so the Curves rail exposes it as a
-   * slider rather than burying it. */
-  thresholdMultiplier: number;
-  /**
-   * Calibration matrix column normalization; see `calibration.md` §3. Deliberately **not**
-   * exposed in the UI: §5.1 divides the scaling back out, so all three modes report identical
-   * RFU for any full-column-rank matrix — it only changes conditioning, which matters solely
-   * for a rank-deficient one (more dyes than scanned channels). Kept as a setting so that case
-   * stays reachable, and so stored files keep round-tripping.
-   */
-  calibrationNormalization: NormalizationMode;
 }
 
 /**
@@ -112,24 +92,27 @@ export function defaultAnalysisSettings(): AnalysisSettings {
 
 /** Seed in-memory state from a file's `zpcrweb.json` (or from nothing, for a file that has
  * none). Any field the document omits — or that failed the library's validation — falls back to
- * the app default, so a partial document is as usable as a complete one. */
+ * the app default, so a partial document is as usable as a complete one.
+ *
+ * The math-affecting fields are `runAnalysisSettingsFromZpcrweb`'s own conversion — this just
+ * layers `experimentName` (not analysis, see {@link AnalysisSettings}) on top and fills in
+ * whatever the library left absent with this app's defaults, since `RunAnalysisSettings`'s
+ * fields are all optional and `AnalysisSettings`'s aren't. */
 export function analysisFromZpcrweb(doc: ZpcrwebSettings | null | undefined): AnalysisSettings {
   const base = defaultAnalysisSettings();
-  // Top-level, not under `analysis` — and read even when the document has no analysis block at
-  // all, which is the shape a file named but never re-thresholded ends up with.
-  const experimentName = doc?.experimentName ?? base.experimentName;
-  const a = doc?.analysis;
-  if (!a) return { ...base, experimentName };
+  const fromFile = runAnalysisSettingsFromZpcrweb(doc);
   return {
-    experimentName,
-    thresholdOverrides: a.thresholdOverrides
-      ? new Map(Object.entries(a.thresholdOverrides))
+    // Top-level, not under `analysis` — and read even when the document has no analysis block at
+    // all, which is the shape a file named but never re-thresholded ends up with.
+    experimentName: doc?.experimentName ?? base.experimentName,
+    thresholdOverrides: fromFile.thresholdOverrides
+      ? new Map(fromFile.thresholdOverrides)
       : base.thresholdOverrides,
-    curveThresholdOverrides: a.curveThresholdOverrides
-      ? new Map(Object.entries(a.curveThresholdOverrides))
+    curveThresholdOverrides: fromFile.curveThresholdOverrides
+      ? new Map(fromFile.curveThresholdOverrides)
       : base.curveThresholdOverrides,
-    thresholdMultiplier: a.thresholdMultiplier ?? base.thresholdMultiplier,
-    calibrationNormalization: a.calibrationNormalization ?? base.calibrationNormalization,
+    thresholdMultiplier: fromFile.thresholdMultiplier ?? base.thresholdMultiplier,
+    calibrationNormalization: fromFile.calibrationNormalization ?? base.calibrationNormalization,
   };
 }
 

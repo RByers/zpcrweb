@@ -59,8 +59,9 @@ The stages are not independent: **the baseline region depends on the Cq, and the
 baseline region** (§3.1). `computeCqTable()` in `packages/core/src/analysis.ts` is the entry point
 that resolves that circularity over a whole plate, and it is the only correct way to call this
 pipeline — a threshold is a property of a *group* of wells (§5.2), so a Cq computed over a subset of
-the plate is a different number. The web app calls it once per run and reads the result everywhere
-(`apps/web/src/lib/runAnalysis.ts`).
+the plate is a different number. `packages/core/src/runAnalysis.ts`'s `computeRunAnalysis()` calls
+it once per run, and every consumer — the web app, `tools/zpcr.mjs` — reads the one result rather
+than calling it again over a subset.
 
 ## 3. The baseline region
 

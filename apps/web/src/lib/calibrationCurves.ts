@@ -15,8 +15,8 @@ import {
   type DcalEntry,
   type ReadingKnot,
   type ResponseKnot,
+  type TubeType,
 } from "@zpcrweb/core";
-import type { TubeType } from "./fluorCurves";
 
 /** Identity of one calibration file: a dye measured on one plate/tube type. Both halves are
  * needed — a run ships the same dye twice, once per tube type (see `dcal.md`). */
@@ -52,7 +52,7 @@ export interface CalibrationFile {
 
 /** Case/whitespace-insensitive, like every other dye and tube-type comparison in the app — a
  * hand-edited plate won't reproduce Bio-Rad's casing ("Tex 615"), and the shipped calibration
- * data itself mixes "BR White" with "BR WHITE" (see `fluorCurves.ts`). */
+ * data itself mixes "BR White" with "BR WHITE" (see `@zpcrweb/core`'s `runAnalysis.ts`). */
 function norm(s: string): string {
   return s.trim().toLowerCase();
 }

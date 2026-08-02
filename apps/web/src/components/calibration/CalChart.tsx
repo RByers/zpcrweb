@@ -9,8 +9,8 @@ import {
   type CalSeriesMeta,
   type CalTooltipData,
 } from "../../lib/uplot/calChart";
+import { formatRfu } from "@zpcrweb/core";
 import { channelLabel } from "../../lib/channelColors";
-import { formatRfu } from "../../lib/cq";
 import type { Scale } from "../../state/useZpcrStore";
 
 interface Props {
