@@ -73,7 +73,8 @@ export function elapsedLabel(seconds: number, withHours: boolean): string {
 /** Tick spacings that read as times rather than as round numbers of seconds. */
 const TIME_STEPS = [10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200, 10800];
 
-function timeSplits(min: number, max: number, targetTicks: number): number[] {
+/** Shared with `liveThermalChart.ts`, which draws the same x axis for a run still in progress. */
+export function timeSplits(min: number, max: number, targetTicks: number): number[] {
   const span = Math.max(1, max - min);
   const step = TIME_STEPS.find((s) => span / s <= targetTicks) ?? TIME_STEPS[TIME_STEPS.length - 1]!;
   const out: number[] = [];

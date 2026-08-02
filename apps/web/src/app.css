@@ -1749,6 +1749,13 @@
 .thermal__key--read {
   color: var(--neon-magenta);
 }
+/* The live chart in the Instrument rail's Status section: same `.thermal` box, but shorter — the
+   rail is a narrow column of stats, not a page section, so 300px would push everything below it
+   off screen. */
+.thermal--live {
+  height: 140px;
+  margin-top: 4px;
+}
 
 /* ---- Raw files view ----------------------------------------------------- */
 .raw {

@@ -2259,9 +2259,19 @@ Four components, under `components/instrument/`:
   the live example). While a run is going, elapsed and estimated-remaining (`usb.md` §3.2 fields 8
   and 10) lead the section as a pair of larger timers — remaining is labelled and tooltipped as an
   estimate rather than corrected for what it doesn't count (plate reads, lid preheat), per that
-  section's own caveats — with the step/ramp/hold clocks, the decoded status-register flags (e.g.
-  "Preheating lid"), and `RTSTATUS?`'s shuttle/ambient temperatures filling out the rest of the
-  section as ordinary stat rows.
+  section's own caveats — with `LiveThermalChart` right below them, then the step/ramp/hold clocks,
+  the decoded status-register flags (e.g. "Preheating lid"), and `RTSTATUS?`'s shuttle/ambient
+  temperatures filling out the rest of the section as ordinary stat rows.
+
+  **`LiveThermalChart`** plots block temperature against elapsed time for the run in progress —
+  the live counterpart to `ThermalProfileChart` below, drawn from the poll loop instead of a
+  finished run's `.alf` report. `useLiveThermalHistory` is the one place that turns the poll loop's
+  overwrite-each-tick `CfxStatus` into a series: it appends a sample whenever `status.running` and
+  starts a fresh one when `runName` changes or `elapsedS` goes backwards, either of which means a
+  new run has begun. There is no ramp/hold/read decomposition to draw, since `STATUS?` reports a
+  temperature and an elapsed second, not a step or a phase — `lib/uplot/liveThermalChart.ts` is a
+  one-line chart sharing only axis styling and the time-tick spacing (`timeSplits`, exported from
+  `thermalChart.ts`) with the after-the-run version.
 
   **Stop and Pause are not action-grid buttons**, and they appear only while there is a run to act
   on. Both are stateful operations rather than one word on the wire, which is why core keeps them

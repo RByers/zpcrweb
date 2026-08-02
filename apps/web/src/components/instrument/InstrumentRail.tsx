@@ -10,6 +10,8 @@ import { CFX_COMMANDS, isPaused, type CfxCommandName, type CfxStatusFlags, type 
 import type { CfxDeviceHandle } from "../../state/useCfxDevice";
 import type { RunWatchState } from "../../state/useRunWatch";
 import type { StagedRun } from "../../lib/protocolSource";
+import { useLiveThermalHistory } from "../../state/useLiveThermalHistory";
+import { LiveThermalChart } from "./LiveThermalChart";
 
 function Stat({
   label,
@@ -80,6 +82,7 @@ export function InstrumentRail({
 }) {
   const { connection, info, status, rtStatus, busy, lastAction, runProgress, runPending } = instrument;
   const connected = connection === "connected";
+  const liveThermal = useLiveThermalHistory(status);
   // What the last start did — kept so the deposit phase can report itself. A run whose files
   // didn't copy is still a run (`usb.md` §7.4), so this is a note, never a failure.
   const [startNote, setStartNote] = useState<string[] | null>(null);
@@ -285,6 +288,7 @@ export function InstrumentRail({
                   </div>
                 </div>
               )}
+              {status.running && <LiveThermalChart samples={liveThermal} />}
               <Stat label="Block" value={temp(status.blockTempC, 2)} />
               <Stat label="Sample*" value={temp(status.sampleTempC, 2)} />
               <Stat label="Lid heater" value={temp(status.lidTempC)} />
