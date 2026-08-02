@@ -17,6 +17,9 @@
  * had; typing into it was the part with the sharp edge.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
+import { DownloadIcon } from "../DownloadIcon";
+import { downloadText } from "../../lib/download";
+import { formatTrafficLog, USB_TRAFFIC_LOG_NAME } from "../../lib/usbTrafficLog";
 import type { CfxDeviceHandle, TrafficLine } from "../../state/useCfxDevice";
 
 const time = (ms: number) => {
@@ -62,6 +65,11 @@ export function InstrumentConsole({ instrument }: { instrument: CfxDeviceHandle 
     bodyRef.current.scrollTop = bodyRef.current.scrollHeight;
   }, [instrument.traffic, follow, open]);
 
+  // Reads `fullTraffic` — the uncapped, un-`clearTraffic`-affected record — not the display-only
+  // `traffic`/`lines`, since the point of this button is a complete log for decoding, not a copy
+  // of whatever the console happens to be showing.
+  const downloadLog = () => downloadText(USB_TRAFFIC_LOG_NAME, formatTrafficLog(instrument.fullTraffic.current));
+
   return (
     // Collapsed by default: the console is for watching the protocol when something is being
     // debugged, not a thing to have open while using the view.
@@ -98,6 +106,15 @@ export function InstrumentConsole({ instrument }: { instrument: CfxDeviceHandle 
           </label>
           <button className="btn btn--sm" onClick={instrument.clearTraffic}>
             Clear
+          </button>
+          <button
+            className="raw__download"
+            onClick={downloadLog}
+            disabled={instrument.fullTraffic.current.length === 0}
+            aria-label="Download USB traffic log"
+            title="Download the complete USB traffic log"
+          >
+            <DownloadIcon />
           </button>
         </div>
       </summary>

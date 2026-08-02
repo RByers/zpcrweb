@@ -78,6 +78,11 @@ function usbApi(): { requestDevice(o: unknown): Promise<UsbDeviceLike>; getDevic
 export function useCfxDevice() {
   const deviceRef = useRef<CfxDevice | null>(null);
   const trafficId = useRef(0);
+  // Every message this session has seen, uncapped — unlike `traffic` (bounded to TRAFFIC_LIMIT
+  // for the on-screen console) and unaffected by `clearTraffic` (which only resets the view).
+  // This is what backs the console's "download log" button and what gets embedded in a run's
+  // `.zpcr` when it finishes — both want the complete record, not the display window.
+  const fullTraffic = useRef<TrafficLine[]>([]);
 
   const [connection, setConnection] = useState<ConnectionState>(() =>
     usbApi() ? "disconnected" : "unsupported",
@@ -104,17 +109,18 @@ export function useCfxDevice() {
   statusRef.current = status;
 
   const onTraffic = useCallback((e: CfxTrafficEvent) => {
+    const line: TrafficLine = {
+      id: trafficId.current++,
+      at: e.at,
+      direction: e.direction,
+      channel: e.channel,
+      unsolicited: e.unsolicited,
+      text: e.text === null ? null : e.text.replace(/\r?\n$/, ""),
+      hex: toHex(e.payload),
+      bytes: e.payload.length,
+    };
+    fullTraffic.current.push(line);
     setTraffic((prev) => {
-      const line: TrafficLine = {
-        id: trafficId.current++,
-        at: e.at,
-        direction: e.direction,
-        channel: e.channel,
-        unsolicited: e.unsolicited,
-        text: e.text === null ? null : e.text.replace(/\r?\n$/, ""),
-        hex: toHex(e.payload),
-        bytes: e.payload.length,
-      };
       const next = prev.length >= TRAFFIC_LIMIT ? prev.slice(prev.length - TRAFFIC_LIMIT + 1) : prev;
       return [...next, line];
     });
@@ -402,6 +408,7 @@ export function useCfxDevice() {
     info,
     status,
     traffic,
+    fullTraffic,
     directories,
     busy,
     lastAction,

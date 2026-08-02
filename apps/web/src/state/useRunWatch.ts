@@ -55,6 +55,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CFX_CURRENT_RUN_DIR, runProgressFromNames, zpcrFromRunFiles } from "@zpcrweb/core";
+import { formatTrafficLog, USB_TRAFFIC_LOG_NAME } from "../lib/usbTrafficLog";
 import type { CfxDeviceHandle } from "./useCfxDevice";
 
 /**
@@ -120,12 +121,19 @@ export function useRunWatch(
   const fileIdRef = useRef<string | null>(null);
   fileIdRef.current = fileId;
 
-  const { connection, status, refreshRunFolder, fetchDirectoryFiles, acknowledgeFinishedRun } =
+  const { connection, status, refreshRunFolder, fetchDirectoryFiles, acknowledgeFinishedRun, fullTraffic } =
     instrument;
 
-  /** Pull whatever this listing holds that we don't already have, and rebuild the `.zpcr`. */
+  /**
+   * Pull whatever this listing holds that we don't already have, and rebuild the `.zpcr`.
+   *
+   * `finalAssembly` adds the session's complete USB traffic log as an extra entry — set only for
+   * the end-of-run pass (see `check`), so every intermediate `.zpcr` a run produces stays exactly
+   * what's on the instrument, and the log is a one-time addition once there's nothing left to
+   * supersede it.
+   */
   const pull = useCallback(
-    async (names: string[]) => {
+    async (names: string[], finalAssembly = false) => {
       // A name that has *gone* means this is a different run — the instrument clears the folder
       // when one starts — so held bytes may belong to the previous one.
       const present = new Set(names);
@@ -142,6 +150,10 @@ export function useRunWatch(
         for (const [name, bytes] of Object.entries(fetched)) cache.current.set(name, bytes);
       }
       const files = Object.fromEntries(cache.current);
+      if (finalAssembly) {
+        const log = formatTrafficLog(fullTraffic.current);
+        if (log !== "") files[USB_TRAFFIC_LOG_NAME] = new TextEncoder().encode(log);
+      }
       const fresh = freshStart.current;
       freshStart.current = false;
       try {
@@ -156,15 +168,16 @@ export function useRunWatch(
         setNote(e instanceof Error ? e.message : String(e));
       }
     },
-    [fetchDirectoryFiles],
+    [fetchDirectoryFiles, fullTraffic],
   );
 
   /**
    * List the run folder, and pull it if anything changed. `force` skips the change test, for the
-   * end-of-run pass where the interesting files land in the same moment we look.
+   * end-of-run pass where the interesting files land in the same moment we look — that pass is
+   * also the one that gets `finalAssembly`, embedding the USB traffic log (see `pull`).
    */
   const check = useCallback(
-    async (force = false) => {
+    async (force = false, finalAssembly = false) => {
       if (pulling.current) return;
       pulling.current = true;
       try {
@@ -186,7 +199,7 @@ export function useRunWatch(
           }
           return;
         }
-        if (changed || force) await pull(dir.names);
+        if (changed || force) await pull(dir.names, finalAssembly);
       } finally {
         pulling.current = false;
       }
@@ -252,8 +265,9 @@ export function useRunWatch(
       setNote(`Run "${status.runName}" finished — collecting the last read.`);
       await acknowledgeFinishedRun();
       // Forced: the final read and `ended` land as part of this same moment, and waiting for the
-      // signature to differ would just add a round trip.
-      await check(true);
+      // signature to differ would just add a round trip. This is also the run's last `.zpcr`, so
+      // the USB traffic log is embedded here (see `pull`'s `finalAssembly`).
+      await check(true, true);
     })();
   }, [connection, watching, status, acknowledgeFinishedRun, check]);
 
