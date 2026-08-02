@@ -919,16 +919,14 @@ but it is the one the instrument agrees with, and the zero-padded 5-digit format
 not `5672`), so a client must format it that way going out even though `GETFILECRC` answers back
 unpadded.
 
-> **Which half is which is not settled, for an even-length file.** All four uploads above have an
-> **odd** byte length (17,299 / 1,821 / 8,751 / 1,291), and that is the limit of what they can
-> establish. The same four values are produced by the degenerate CRC-16 with polynomial
-> `x^16 + 1` — a register that XORs in each byte and rotates right eight times, which is a far more
-> likely thing to find behind a function named `GETFILECRC` than a hand-rolled interleaved XOR. The
-> two formulations agree on **every odd-length input** and **swap the two halves on every
-> even-length one**, so nothing in this capture distinguishes them. A client should send the
-> formula above, and treat a mismatch on an even-length file as the measurement that settles it
-> rather than as a transfer failure — `CfxDevice.sendFile` compares the instrument's answer against
-> both readings and reports which matched (§10).
+**Which half is which is measured, not inferred.** The captures alone could not establish it: every
+file they upload has an **odd** byte length (17,299 / 1,821 / 8,751 / 1,291), and on an odd length
+the formula above is indistinguishable from the degenerate CRC-16 with polynomial `x^16 + 1` — a
+register that XORs in each byte and rotates right eight times, which is a far more likely thing to
+find behind a command named `GETFILECRC`. The two agree on every odd-length input and swap the two
+halves on every even-length one. Five even-length files uploaded to a C1000 (serial CT019138)
+settle it in favor of the interleaved XOR above; see §9.2. **It is not a CRC**, despite all three
+command names.
 
 Three details of the cycle that only this sequence shows:
 
@@ -1081,7 +1079,9 @@ fabricating short spurious messages on channels that were never really used. §2
 and §4's examples were produced with the reassembling version and are the basis for saying channel
 3 never really appears in either capture.
 
-## 9. Appendix: single-observation caveats
+## 9. Appendix: provenance and single-observation caveats
+
+### 9.1 Single-observation caveats
 
 Claims elsewhere in this document that rest on one instrument, one capture pair, or one observed
 instance, rather than a cross-checked pattern:
@@ -1137,6 +1137,35 @@ instance, rather than a cross-checked pattern:
   mask that is neither `#h3F` nor `#h81` — including the FRET (`#hA0`) and two-colour (`#h03`)
   configurations §3.1 names, which are the language's, not measurements.
 
+### 9.2 Measuring the upload checksum's byte order
+
+§7.4's checksum is stated as an interleaved XOR with the even-indexed bytes in the **high** half.
+Which half is which cannot be read off any capture in this repository, because it only shows on an
+even-length file and every file the captures upload is odd-length. The two candidate readings were
+the interleaved XOR and the degenerate CRC-16 with polynomial `x^16 + 1`; they agree on every
+odd-length input and swap halves on every even-length one.
+
+Resolved on 2026-08-02 by uploading files of controlled length to a live C1000 (serial CT019138,
+firmware 2.0.231.0, idle) with `CfxDevice.sendFile`, and comparing `GETFILECRC`'s answer against
+both readings. Payload byte *i* was `(i × 37 + seed × 101 + 13) mod 256` with *seed* = the length,
+sent to `\Storage Card\CurrentRun\zpcrweb_crc_probe.txt` and deleted afterwards:
+
+| Length | Interleaved XOR | Shift-register CRC-16 | `GETFILECRC` |
+| ------ | --------------- | --------------------- | ------------ |
+| 2      | 55292           | 64727                 | **55292**    |
+| 4      | 19158           | 54858                 | **19158**    |
+| 16     | 208             | 53248                 | **208**      |
+| 100    | 19126           | 46666                 | **19126**    |
+| 1000   | 36936           | 18576                 | **36936**    |
+
+Five for five on the interleaved XOR, none on the shift-register form. Three odd-length controls
+(3, 101, 1001 bytes) matched as expected, and two further even lengths (256, 4096) were skipped
+because both readings coincide there, so they discriminate nothing. `packages/core/test/runPlan.test.ts`
+pins these vectors.
+
+The earlier `x^16 + 1` hypothesis is therefore **wrong**, and so is the name: `CRCSENDFILE`,
+`COMPUTEFILECRC` and `GETFILECRC` all traffic in a checksum that is not a CRC.
+
 ## 10. Implementation
 
 `packages/core/src/usb/` implements §1–§7 as an isomorphic client, entry point `CfxDevice`:
@@ -1147,7 +1176,7 @@ instance, rather than a cross-checked pattern:
 | `commands.ts` | §3 — command encoding and the two response shapes, plus `CFX_COMMANDS`, the action commands a UI might offer, each tagged with whether it was actually observed, and `assertCommandArgument`, which keeps a path from injecting a second command line. |
 | `status.ts` | §3 — typed views over `*IDN?`, `STATUS?` and `RTSTATUS?`. Names every field §3.2/§3.3 give a meaning to, including the status register (field 7, decoded into `CfxStatusFlags` plus a derived `phase`), the four clocks (8–12) and `RTSTATUS?`'s shuttle/ambient temperatures and fault list — the raw `fields` array stays alongside them for the three still-unestablished ones (13's redundancy with field 7's paused bit aside, field 18's sensor reading has no known meaning). |
 | `transport.ts` | §1 — the endpoint/interface constants and `UsbDeviceLike`, the structural interface both environments satisfy. |
-| `crc.ts` | §7.4 — the upload checksum, both readings of it, and the even-length ambiguity between them. |
+| `crc.ts` | §7.4 — the upload checksum and its wire format. Its byte order is measured, §9.2. |
 | `runPlan.ts` | §7.2–§7.4 as *data*: `planRun()` turns a run definition plus a plate into the exact command lines, the `RemoteRun` line and the files that would be deposited, and `checkRunPlan()` is the plate↔`PLATEREAD` compatibility check below. Pure — no device involved — which is what lets a UI review a run before any of it is sent. |
 | `device.ts` | §3–§5 and §7 — the read pump, the command queue, the typed operations, `sendFile()` (§5's upload cycle), `startRun()` (§7.1–§7.4) and `acknowledgeRun()` (§7.6). |
 

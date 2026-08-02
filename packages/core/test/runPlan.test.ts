@@ -4,8 +4,6 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   cfxFileCrc,
-  cfxFileCrcIsAmbiguous,
-  cfxFileCrcSwapped,
   checkRunPlan,
   formatCfxFileCrc,
   parsePltd,
@@ -42,26 +40,40 @@ describe("cfxFileCrc (usb.md §7.4)", () => {
   });
 
   /**
-   * The parity ambiguity of `crc.ts`, asserted rather than described so it can't be forgotten.
+   * The byte order, pinned to hardware (`usb.md` §9.2).
    *
-   * Every file the capture uploaded is odd-length, and on an odd length the interleaved-XOR
-   * reading `usb.md` §7.4 states and the shift-register reading (CRC-16 with `x^16 + 1`, the more
-   * likely thing to sit behind a function called `GETFILECRC`) give the same answer. They diverge
-   * on even lengths, which the capture never exercises — so this documents which inputs are
-   * measured and which are a coin toss the upload check has to resolve.
+   * Every file the captures upload is odd-length, and on an odd length this algorithm is
+   * indistinguishable from the degenerate CRC-16 with `x^16 + 1` — the two swap halves only on
+   * even lengths. These five even-length payloads were uploaded to a real C1000 (CT019138) and
+   * the checksums below are what `GETFILECRC` answered, so they are the measurement that rules
+   * the shift-register reading out. The capture's own files cannot: they pass either way.
    */
-  it("is unambiguous for an odd-length file and ambiguous for an even-length one", () => {
-    const odd = new Uint8Array([1, 2, 3]);
-    expect(cfxFileCrcIsAmbiguous(odd.length)).toBe(false);
-    expect(cfxFileCrcSwapped(odd)).toBe(cfxFileCrc(odd));
-
-    const even = new Uint8Array([1, 2, 3, 4]);
-    expect(cfxFileCrcIsAmbiguous(even.length)).toBe(true);
-    expect(cfxFileCrcSwapped(even)).not.toBe(cfxFileCrc(even));
+  it("matches what real hardware returned for even-length files", () => {
+    const probe = (n: number) =>
+      new Uint8Array(n).map((_, i) => (i * 37 + n * 101 + 13) & 0xff);
+    expect(cfxFileCrc(probe(2))).toBe(55292);
+    expect(cfxFileCrc(probe(4))).toBe(19158);
+    expect(cfxFileCrc(probe(16))).toBe(208);
+    expect(cfxFileCrc(probe(100))).toBe(19126);
+    expect(cfxFileCrc(probe(1000))).toBe(36936);
   });
 
-  it("has the four capture files all odd-length, which is why the above matters", () => {
-    expect(sample("QuickPlate_96 wells_All Channels.pltd").length % 2).toBe(1);
+  /**
+   * The same probes under the retired hypothesis, so a regression that silently flips the halves
+   * back fails here with a name that says what happened rather than just a changed number.
+   */
+  it("is not the shift-register CRC-16 the command names suggest", () => {
+    const shiftRegister = (bytes: Uint8Array) => {
+      let crc = 0;
+      for (const b of bytes) {
+        crc ^= b;
+        for (let k = 0; k < 8; k++) crc = crc & 1 ? (crc >>> 1) | 0x8000 : crc >>> 1;
+      }
+      return crc & 0xffff;
+    };
+    const even = new Uint8Array(100).map((_, i) => (i * 37 + 100 * 101 + 13) & 0xff);
+    expect(shiftRegister(even)).toBe(46666);
+    expect(cfxFileCrc(even)).not.toBe(shiftRegister(even));
   });
 });
 

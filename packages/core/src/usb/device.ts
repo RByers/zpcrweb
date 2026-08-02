@@ -68,7 +68,7 @@ import {
   type CfxRtStatus,
   type CfxStatus,
 } from "./status.js";
-import { cfxFileCrc, cfxFileCrcSwapped, formatCfxFileCrc } from "./crc.js";
+import { cfxFileCrc, formatCfxFileCrc } from "./crc.js";
 import { CFX_RUN_REPORT_DIR, type RunPlan } from "./runPlan.js";
 import {
   CFX_CONFIGURATION,
@@ -210,15 +210,6 @@ export interface CfxUploadResult {
   crcStored: number | null;
   /** True when the two agree — the only evidence that the bytes landed intact. */
   verified: boolean;
-  /**
-   * The device's answer matched the *other* byte-order convention (`cfxFileCrcSwapped`).
-   *
-   * This is a measurement, not a transfer error: it means the file arrived intact and that
-   * `usb.md` §7.4's stated formula has the halves the wrong way round for an even-length file.
-   * See `crc.ts`'s module comment — only an even-length upload can produce it, and until one has
-   * been sent to real hardware nothing here knows which convention is right.
-   */
-  checksumConventionSwapped: boolean;
 }
 
 /** What one {@link CfxDevice.startRun} did. The run is going by the time this resolves. */
@@ -705,7 +696,6 @@ export class CfxDevice {
   async sendFile(path: string, bytes: Uint8Array): Promise<CfxUploadResult> {
     assertCommandArgument("path", path);
     const crc = cfxFileCrc(bytes);
-    const swapped = cfxFileCrcSwapped(bytes);
     const prefix = ENCODER.encode(`CRCSENDFILE "${formatCfxFileCrc(crc)}*${path}",`);
     const payload = new Uint8Array(prefix.length + bytes.length);
     payload.set(prefix, 0);
@@ -734,7 +724,6 @@ export class CfxDevice {
           crcSent: crc,
           crcStored: null,
           verified: false,
-          checksumConventionSwapped: false,
         };
       }
       const echoed = await command(`GETFILECRC "${storedPath}"`);
@@ -747,10 +736,6 @@ export class CfxDevice {
         crcSent: crc,
         crcStored,
         verified: crcStored === crc,
-        // Only possible for an even-length file, and it means the bytes are fine but our byte
-        // order isn't — see `crc.ts`. Distinguished here because a corrupt transfer and a wrong
-        // convention need completely different responses from a caller.
-        checksumConventionSwapped: crcStored !== crc && crcStored === swapped,
       };
     });
   }
@@ -840,13 +825,7 @@ export class CfxDevice {
       try {
         const result = await this.sendFile(upload.path, upload.bytes);
         uploads.push(result);
-        if (result.checksumConventionSwapped) {
-          uploadErrors.push(
-            `${upload.name} (${result.bytes} bytes) stored intact, but the instrument's ` +
-              `checksum ${result.crcStored} matches the swapped byte order, not the ${result.crcSent} ` +
-              "we sent. This is the even-length ambiguity in usb.md §7.4 — the file is fine.",
-          );
-        } else if (!result.verified) {
+        if (!result.verified) {
           uploadErrors.push(
             `${upload.name} may not have copied intact: sent ${result.crcSent}, the instrument ` +
               `reports ${result.crcStored ?? "nothing"}.`,

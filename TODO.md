@@ -105,7 +105,7 @@ Still open:
 normalization, drift correction, cycle skips, the data sub-window, the `NoThreshold` Cq
 algorithm, display smoothing) — each understood, none exercised by any sample in hand.
 
-### Confirm the first live run, and settle the even-length checksum
+### Confirm the first live run
 
 Starting a run is implemented (`usb.md` §7, §10) but **has never touched hardware** — it was built
 from the `usb-run` capture alone. Everything below is a question the first real run answers; none
@@ -113,30 +113,13 @@ of it needs a second run, so do them in one sitting with the **USB traffic conso
 (Instrument view, bottom panel — it decodes every message in both directions, and is the only
 record of what actually happened).
 
-**The one genuine unknown: the upload checksum's byte order** (`usb.md` §7.4, `usb/crc.ts`).
-All four files in the capture are odd-length, and on an odd length the interleaved-XOR formula the
-doc states and a CRC-16 shift register (`x^16 + 1`) give **identical** answers — they swap halves
-only on an **even**-length file, which nothing has ever measured. The two files this app uploads
-are a `.prcl.txt` and a `.plt.csv`, so roughly half of all runs exercise it by accident.
+> The upload checksum's byte order used to be the one genuine unknown here. It is **settled**:
+> five even-length files sent to a C1000 all matched the interleaved XOR `usb.md` §7.4 states, and
+> not the CRC-16 shift register the command names suggest. Vectors in `usb.md` §9.2, pinned by
+> `packages/core/test/runPlan.test.ts`. A checksum mismatch on a live run is now just a transfer
+> problem — check the console for a truncated `CRCSENDFILE`.
 
-`CfxDevice.sendFile` computes both readings and compares the instrument's `GETFILECRC` against
-each, so the run reports the answer itself, in the rail under Start run:
-
-- [ ] **Nothing said about checksums** → either both files were odd-length (check the console's
-      `CRCSENDFILE` byte counts; if so, upload an even-length file deliberately — add or drop one
-      character in the experiment name, which changes both filenames and both file lengths), or
-      the interleaved reading is right and the question is closed. **Record which**, in
-      `usb.md` §7.4's caveat block.
-- [ ] **"…matches the swapped byte order…"** → the **shift-register** reading is correct.
-      Fix: make `cfxFileCrc` the rotating-XOR form (`crc = crc & 1 ? (crc >>> 1) ^ 0x8000 :
-      crc >>> 1`, per byte, eight times — it was implemented that way first and is in this
-      commit's history), keep `cfxFileCrcSwapped` as the *other* reading, rewrite `usb.md` §7.4's
-      formula and caveat, and update `packages/core/test/runPlan.test.ts`'s parity test. The four
-      capture values still pass either way, which is exactly why they can't be the test.
-- [ ] **A mismatch that is neither** → a real transfer problem, not the ambiguity. Check the
-      console for a truncated `CRCSENDFILE`.
-
-Then the things that should just work, in the order they'd fail:
+The things that should just work, in the order they'd fail:
 
 - [ ] **Does the authored protocol run at all?** `RemoteRun` should return `0000` and `STATUS?`
       should leave `IDLE` within ~10 s. Expect the **lid** to heat first — the block sits at

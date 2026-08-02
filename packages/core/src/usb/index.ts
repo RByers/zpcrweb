@@ -16,8 +16,6 @@ export type {
 } from "./device.js";
 export {
   cfxFileCrc,
-  cfxFileCrcIsAmbiguous,
-  cfxFileCrcSwapped,
   formatCfxFileCrc,
 } from "./crc.js";
 export {
