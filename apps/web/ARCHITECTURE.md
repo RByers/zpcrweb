@@ -2133,7 +2133,20 @@ Four components, under `components/instrument/`:
 - **`InstrumentConsole`** — every decoded message in both directions, at the level of logical
   messages rather than USB packets, which is where the protocol is legible. Channel is on every
   line: a reply arriving on channel 2 rather than 1 is exactly the thing that would otherwise be
-  invisible. Polling is filtered out by default (it would otherwise be all there is to see).
+  invisible. Polling is hidden by default (it would otherwise be all there is to see).
+
+  **"Hide polling" suppresses at capture, not at render.** The check lives in `useCfxDevice`'s
+  `pushLine`, which decides whether a line reaches the `traffic` state at all; the console just
+  renders what it is given. Filtering in the component instead meant the 1.5 s poll pushed six
+  lines a minute into React state only for the render to discard them — a re-render and a
+  follow-scroll per poll, visible as a flash on an idle console. A poll reply carries no copy of
+  its request, so each line is classified on arrival (`poll: boolean`) against the outbound
+  message before it, which is the one point where the answer is cheap. The uncapped `fullTraffic`
+  record still takes every line either way, so the downloaded log and the copy embedded in a run's
+  `.zpcr` are complete regardless of the toggle. Toggling it rebuilds the display list from
+  `fullTraffic` — necessarily, since hidden lines were never in `traffic` to un-hide — honouring
+  the last `Clear` (tracked as an offset into the record, which is never itself truncated) and the
+  same display cap.
 
   **Read-only, deliberately.** It used to carry a prompt that sent whatever was typed into it;
   that is gone, and the library no longer offers the call it was built on (`usb.md` §10). The

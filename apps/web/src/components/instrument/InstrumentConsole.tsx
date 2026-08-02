@@ -16,11 +16,11 @@
  * an entry in `CFX_COMMANDS`. Watching the traffic keeps all of the debugging value the prompt
  * had; typing into it was the part with the sharp edge.
  */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { DownloadIcon } from "../DownloadIcon";
 import { downloadText } from "../../lib/download";
 import { formatTrafficLog, USB_TRAFFIC_LOG_NAME } from "../../lib/usbTrafficLog";
-import type { CfxDeviceHandle, ConsoleLine } from "../../state/useCfxDevice";
+import type { CfxDeviceHandle } from "../../state/useCfxDevice";
 
 const time = (ms: number) => {
   const d = new Date(ms);
@@ -29,40 +29,18 @@ const time = (ms: number) => {
   ).padStart(2, "0")}.${String(d.getMilliseconds()).padStart(3, "0")}`;
 };
 
-/** The three status queries the poll repeats forever. Filtering them out is what makes the
- * console usable for watching anything else. */
-const POLL_COMMANDS = /^(STATUS\?|RTSTATUS\?|ERRORLIST A)/;
-
-/** A transfer error is never a poll reply — it has no request/reply relationship to filter by,
- * and it's exactly the kind of thing "hide polling" shouldn't hide. */
-function isPollLine(line: ConsoleLine, prevOut: string | null): boolean {
-  if (line.kind === "error") return false;
-  if (line.direction === "out") return line.text !== null && POLL_COMMANDS.test(line.text);
-  return prevOut !== null && POLL_COMMANDS.test(prevOut);
-}
-
 export function InstrumentConsole({ instrument }: { instrument: CfxDeviceHandle }) {
-  const [hidePolls, setHidePolls] = useState(true);
   const [follow, setFollow] = useState(true);
   // Tracked because a closed panel has no scrollable body: without this the first thing seen on
   // opening would be the *top* of the backlog, whatever "follow" says.
   const [open, setOpen] = useState(false);
   const bodyRef = useRef<HTMLDivElement | null>(null);
 
-  // A response carries no copy of the request, so "is this a poll reply?" is answered by the
-  // request it followed — tracked here in one pass rather than guessed at per line.
-  const lines = useMemo(() => {
-    let prevOut: string | null = null;
-    return instrument.traffic.filter((line) => {
-      const poll = isPollLine(line, prevOut);
-      if (line.kind === "message" && line.direction === "out") prevOut = line.text;
-      return !(hidePolls && poll);
-    });
-  }, [instrument.traffic, hidePolls]);
+  // Already filtered: `useCfxDevice` decides what a hidden poll line is and keeps it out of
+  // `traffic` entirely, so this panel re-renders only when something it would actually show
+  // arrives. See `pushLine` for why that check lives there and not here.
+  const lines = instrument.traffic;
 
-  // Depends on `instrument.traffic`, not the filtered `lines`: `lines` gets a new reference
-  // whenever "hide polling" is toggled too, which would otherwise snap the view to the bottom
-  // even though no new traffic arrived.
   useEffect(() => {
     if (!open || !follow || !bodyRef.current) return;
     bodyRef.current.scrollTop = bodyRef.current.scrollHeight;
@@ -94,8 +72,8 @@ export function InstrumentConsole({ instrument }: { instrument: CfxDeviceHandle 
           <label className="switch">
             <input
               type="checkbox"
-              checked={hidePolls}
-              onChange={(e) => setHidePolls((e.target as HTMLInputElement).checked)}
+              checked={instrument.hidePolls}
+              onChange={(e) => instrument.setHidePolls((e.target as HTMLInputElement).checked)}
             />
             hide polling
           </label>
@@ -113,7 +91,11 @@ export function InstrumentConsole({ instrument }: { instrument: CfxDeviceHandle 
           <button
             className="raw__download"
             onClick={downloadLog}
-            disabled={instrument.fullTraffic.current.length === 0}
+            // `hasTraffic`, not `fullTraffic.current.length`: the log is a ref, so reading its
+            // length during render can't re-enable the button on its own — and now that hidden
+            // polls cause no re-render, a session that has only ever polled would leave it stuck
+            // disabled over a log that is anything but empty.
+            disabled={!instrument.hasTraffic}
             aria-label="Download USB traffic log"
             title="Download the complete USB traffic log"
           >

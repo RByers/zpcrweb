@@ -6,6 +6,12 @@
  * session* adds on top: obtaining the device through `navigator.usb`, a poll timer, a bounded
  * traffic log for the debug console, and the React state the view renders.
  *
+ * The traffic log is kept in two forms, and the difference matters: `fullTraffic` is an uncapped
+ * ref holding *every* line of the session, and is what gets downloaded or embedded in a run's
+ * `.zpcr`; `traffic` is the display window — capped, cleared by `clearTraffic`, and with poll
+ * chatter withheld while `hidePolls` is set, so an idle instrument produces no React updates at
+ * all (see {@link pushLine}).
+ *
  * Everything it exposes is a *named* operation — status, listings, file fetches, and `runAction`
  * over the fixed `CFX_COMMANDS` table. There is no "send this line" call, here or in the library
  * beneath it (see `CfxDevice`'s design point 3).
@@ -39,6 +45,9 @@ const TRAFFIC_LIMIT = 400;
 /** Status poll period. CFX Manager polls about once a second; this is deliberately slower, since
  * nothing here needs sub-second latency and every poll is three lines of console noise. */
 const POLL_MS = 1500;
+/** The three status queries the poll repeats forever. Suppressing them is what makes the debug
+ * console usable for watching anything else — see {@link useCfxDevice.setHidePolls}. */
+const POLL_COMMANDS = /^(STATUS\?|RTSTATUS\?|ERRORLIST A)/;
 
 export type ConnectionState = "unsupported" | "disconnected" | "connecting" | "connected";
 
@@ -54,6 +63,10 @@ export interface TrafficLine {
   text: string | null;
   hex: string;
   bytes: number;
+  /** Part of the status poll — see {@link POLL_COMMANDS}. Classified here, on arrival, rather
+   * than by whoever renders the line: a reply carries no copy of its request, so the only place
+   * the question is cheap to answer is the point where the lines stream past in wire order. */
+  poll: boolean;
 }
 
 /** A `transferIn`/`transferOut` failure — the console's other kind of line, interleaved with
@@ -68,6 +81,9 @@ export interface TransferErrorLine {
   message: string;
   attempt: number;
   fatal: boolean;
+  /** Always false. A transfer error has no request/reply relationship to filter by, and it is
+   * exactly the kind of thing "hide polling" shouldn't hide. */
+  poll: false;
 }
 
 export type ConsoleLine = TrafficLine | TransferErrorLine;
@@ -103,6 +119,13 @@ export function useCfxDevice() {
   // embedded in a run's `.zpcr` when it finishes — both want the complete record, not the display
   // window.
   const fullTraffic = useRef<ConsoleLine[]>([]);
+  // Whether the last outbound *message* was a poll query, which is how an inbound reply is
+  // classified: it carries no copy of the request it answers.
+  const lastOutWasPoll = useRef(false);
+  // How much of `fullTraffic` predates the last `clearTraffic`, and so must stay off screen even
+  // when the display list is rebuilt from the full record (which is what toggling `hidePolls`
+  // does). `clearTraffic` resets the view only; the record itself is never truncated.
+  const clearedBefore = useRef(0);
 
   const [connection, setConnection] = useState<ConnectionState>(() =>
     usbApi() ? "disconnected" : "unsupported",
@@ -116,6 +139,16 @@ export function useCfxDevice() {
   const [busy, setBusy] = useState<string | null>(null);
   const [lastAction, setLastAction] = useState<ActionResult | null>(null);
   const [polling, setPolling] = useState(true);
+  /** Whether poll traffic is kept out of {@link traffic}. Lives here rather than in the console
+   * because it decides what reaches React state at all — see {@link setHidePolls}. */
+  const [hidePolls, setHidePollsState] = useState(true);
+  // Read by `pushLine`, which is a stable callback wired into the device and so can't close over
+  // the state; `setHidePolls` keeps the two in step.
+  const hidePollsRef = useRef(true);
+  /** True once any line has been captured. A plain boolean rather than a count so it re-renders
+   * exactly once, ever — the console's download button needs to know the log is non-empty, and
+   * `fullTraffic` is a ref that can't announce itself. */
+  const [hasTraffic, setHasTraffic] = useState(false);
   /**
    * Set the instant Start run is clicked, cleared by the first `STATUS?` that comes back after the
    * start sequence has run — see {@link useCfxDevice.startRun}.
@@ -129,19 +162,40 @@ export function useCfxDevice() {
   const statusRef = useRef<CfxStatus | null>(null);
   statusRef.current = status;
 
-  /** Append one console line to both the uncapped log and the display-capped state — the one
-   * place either is written, so a message and a transfer error interleave in the single arrival
-   * order they actually happened in. */
+  /**
+   * Append one console line to the uncapped log, and — unless it's poll traffic being hidden —
+   * to the display-capped state. The one place either is written, so a message and a transfer
+   * error interleave in the single arrival order they actually happened in.
+   *
+   * The `hidePolls` check is **here**, not in the console's render, and that placement is the
+   * whole point of the flag. Filtering at render time still put every poll line into React state,
+   * so a 1.5 s poll re-rendered the panel and re-ran its follow-scroll six times a minute for
+   * lines that were then thrown away — visible as a flash on an otherwise idle console. Hidden
+   * polls now cause no state update at all, while `fullTraffic` still records them, so the
+   * downloaded log and the copy embedded in a run's `.zpcr` remain complete either way.
+   */
   const pushLine = useCallback((line: ConsoleLine) => {
     fullTraffic.current.push(line);
+    setHasTraffic(true);
+    if (hidePollsRef.current && line.poll) return;
     setTraffic((prev) => {
       const next = prev.length >= TRAFFIC_LIMIT ? prev.slice(prev.length - TRAFFIC_LIMIT + 1) : prev;
       return [...next, line];
     });
   }, []);
 
+  /** Classify one arriving message against the poll vocabulary, and remember the answer for the
+   * reply that follows it. Outbound messages only update the memo — a transfer error goes past
+   * without disturbing which request is still outstanding. */
+  const classifyPoll = useCallback((direction: "out" | "in", text: string | null) => {
+    if (direction === "in") return lastOutWasPoll.current;
+    lastOutWasPoll.current = text !== null && POLL_COMMANDS.test(text);
+    return lastOutWasPoll.current;
+  }, []);
+
   const onTraffic = useCallback(
     (e: CfxTrafficEvent) => {
+      const text = e.text === null ? null : e.text.replace(/\r?\n$/, "");
       pushLine({
         kind: "message",
         id: trafficId.current++,
@@ -149,12 +203,13 @@ export function useCfxDevice() {
         direction: e.direction,
         channel: e.channel,
         unsolicited: e.unsolicited,
-        text: e.text === null ? null : e.text.replace(/\r?\n$/, ""),
+        text,
         hex: toHex(e.payload),
         bytes: e.payload.length,
+        poll: classifyPoll(e.direction, text),
       });
     },
-    [pushLine],
+    [pushLine, classifyPoll],
   );
 
   const onTransferError = useCallback(
@@ -167,6 +222,7 @@ export function useCfxDevice() {
         message: e.message,
         attempt: e.attempt,
         fatal: e.fatal,
+        poll: false,
       });
     },
     [pushLine],
@@ -177,6 +233,9 @@ export function useCfxDevice() {
   // so wiping it on the same event that most needs debugging would defeat the point.
   const teardown = useCallback(() => {
     deviceRef.current = null;
+    // No request is outstanding across a disconnect, so the next reply must not be classified by
+    // whatever the last session happened to have sent.
+    lastOutWasPoll.current = false;
     setConnection("disconnected");
     setInfo(null);
     setStatus(null);
@@ -453,7 +512,30 @@ export function useCfxDevice() {
     [withBusy],
   );
 
-  const clearTraffic = useCallback(() => setTraffic([]), []);
+  const clearTraffic = useCallback(() => {
+    clearedBefore.current = fullTraffic.current.length;
+    setTraffic([]);
+  }, []);
+
+  /**
+   * Turn poll suppression on or off, and rebuild the console's display list from `fullTraffic` to
+   * match.
+   *
+   * The rebuild is what makes hiding at capture time safe: lines suppressed while the flag was on
+   * were never in {@link traffic}, so un-hiding has to go back to the complete record to recover
+   * them, honouring the last {@link clearTraffic} and the same display cap a live push would
+   * have applied. Rebuilding in both directions rather than only when un-hiding keeps the result
+   * a pure function of the flag — turning it on drops the polls already on screen, which is what
+   * "hide polling" is asked for in the first place.
+   */
+  const setHidePolls = useCallback((hide: boolean) => {
+    hidePollsRef.current = hide;
+    setHidePollsState(hide);
+    const shown = fullTraffic.current
+      .slice(clearedBefore.current)
+      .filter((line) => !(hide && line.poll));
+    setTraffic(shown.length > TRAFFIC_LIMIT ? shown.slice(shown.length - TRAFFIC_LIMIT) : shown);
+  }, []);
 
   /** What the last `CurrentRun` listing says about the run's progress — derived, never stored
    * (see `runProgressFromNames`). Null until the folder has been listed at least once. */
@@ -470,6 +552,9 @@ export function useCfxDevice() {
     rtStatus,
     traffic,
     fullTraffic,
+    hasTraffic,
+    hidePolls,
+    setHidePolls,
     directories,
     busy,
     lastAction,
