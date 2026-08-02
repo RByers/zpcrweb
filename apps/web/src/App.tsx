@@ -154,10 +154,12 @@ export function App() {
    * What the run the Instrument view would start is called, and — once one is started — what its
    * file is called. Held here rather than in the view because the run watcher below needs the
    * pinned names, and because leaving the Instrument view for a moment must not forget what was
-   * typed. The live run state is what makes the field read-only while the run is on the block and
-   * clears it when the run comes off (`state/useRunNaming.ts`).
+   * typed. What the instrument says about the block is what makes the field read-only while the
+   * run is on it and clears it when the run comes off — the instrument's own answer, and never
+   * the local "a start was asked for" flag, since between the two there are seconds in which a
+   * run that is starting normally still reports itself idle (`state/useRunNaming.ts`).
    */
-  const runNaming = useRunNaming(instrument.runPending || !!instrument.status?.running);
+  const runNaming = useRunNaming(instrument.status ? instrument.status.running : null);
   const runWatch = useRunWatch(
     instrument,
     useCallback(

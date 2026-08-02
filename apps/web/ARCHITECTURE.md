@@ -2058,6 +2058,17 @@ the field goes `readOnly` (`naming.locked`) — editing it could only make this 
 three. When the run ends it empties, so the next run is named deliberately rather than inheriting
 the last one's name and, with it, the last one's file name.
 
+*Ended* is read from a **running → stopped transition in `STATUS?`**, and from nothing else, which
+is what `useRunNaming`'s three phases (`idle`, `starting`, `running`) exist to distinguish. A run
+asked for here does not appear in the status immediately — the start sequence resolves once the
+instrument has taken the commands, and the block takes seconds to report anything but `IDLE`
+(`usb.md` §7.3 measured ~6 s; core's `cancelRun` allows 20 s for the same window). Deriving "in
+progress" from `runPending || status.running` therefore put a *false falling edge* right after the
+click: the field emptied and then re-locked as the run showed up, leaving a run on the block with a
+blank, complaining name box. `starting` covers that gap, an unknown status (no instrument, or one
+unplugged mid-run) decides nothing, and a start that never appears merely unlocks the field after
+20 s with the name intact — a run that never ran never stopped.
+
 The **file name** never leaves the browser: it is what the `.zpcr` this app assembles is called. It
 is not asked for. It used to be a second field, offered as `<YYYYMMDD>-<name with spaces as
 underscores>` (core's `runFileBaseName`) and following the experiment name until typed over — but
@@ -2098,7 +2109,9 @@ says *Idle* next to an armed Start button — an invitation to click twice on th
 app that heats a block. Nothing is asked of the instrument to know a start was requested: the rail
 reads **Run pending** in both its *Status* and *Current run* sections, the button dims immediately
 (the 150 ms anti-flash delay on the dimmed look applies to short commands, not to this) and relabels
-itself, and the panel badges *pending*.
+itself, and the panel badges *pending*. The name field's own badge reads *starting* over the same
+stretch and *running* once `STATUS?` reports the run (`naming.phase`), so the two never contradict
+each other.
 
 **The run's file is written at the same click**, before anything goes out on the wire. Core's
 `zpcrSeedArchive()` (see the root [`ARCHITECTURE.md`](../../ARCHITECTURE.md)) turns the plan into a

@@ -160,7 +160,12 @@ export function InstrumentRun({
         <span className="devrun__namelabel">
           Experiment name
           {naming.locked ? (
-            <span className="devrun__badge">running</span>
+            // "starting" until the instrument reports the run: it takes seconds to appear in
+            // `STATUS?` (`useRunNaming`), and calling that stretch "running" would have the badge
+            // contradict the panel title's own "pending".
+            <span className="devrun__badge">
+              {naming.phase === "starting" ? "starting" : "running"}
+            </span>
           ) : (
             <span className="devrun__required" title="Required — a run is not started without one">
               *
