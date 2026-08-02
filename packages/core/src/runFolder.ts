@@ -81,7 +81,7 @@ export interface RunFolderNaming {
    * describes *this* run — see {@link zpcrNameFromRunFiles}.
    */
   experimentName?: string;
-  /** The file base name the user chose for this run (no extension). */
+  /** The file base name this run's archive already goes by (no extension). */
   fileName?: string;
 }
 
@@ -93,8 +93,9 @@ function fileBase(name: string): string {
 /**
  * What to call the `.zpcr` this folder becomes, in three rungs.
  *
- * 1. **The name the user chose**, `naming.fileName` — but only for a run this app started and is
- *    still staging, which is what the `zpcrweb.json` deposited into the run folder
+ * 1. **The name this run's file already has**, `naming.fileName` — fixed when the app started the
+ *    run and pinned for its duration (`state/useRunNaming.ts`), and applied only to the run that
+ *    was started, which is what the `zpcrweb.json` deposited into the run folder
  *    (`usb/runPlan.ts`) attests: nothing else writes that entry there, and its `experimentName`
  *    matching `naming.experimentName` is what says the staged run and the folder are the same
  *    run rather than a new name typed over a run still finishing.

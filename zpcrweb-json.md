@@ -195,8 +195,9 @@ Three properties keep it from colliding with §5–§6:
 
 The deposited name has one further use on the way back in: it is what tells
 `zpcrNameFromRunFiles` (`packages/core/src/runFolder.ts`) that a run folder belongs to a run
-*this app started*, and so may be named from the Instrument view's file-name field rather than
-from `RunInfo.xml`'s `DataFile`. Nothing else writes the entry into a run folder.
+*this app started*, and so keeps the file name that run's seed already took (fixed at the click,
+pinned for the run's duration — `apps/web/src/state/useRunNaming.ts`) rather than being named from
+`RunInfo.xml`'s `DataFile`. Nothing else writes the entry into a run folder.
 
 The same bytes are also the *local* copy: at the click on Start run the app writes a seed `.zpcr`
 (`packages/core/src/runSeed.ts`) so the run has a file before it has data, and that archive's

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Zpcr } from "@zpcrweb/core";
+import { nextFreeRunFileBase, type Zpcr } from "@zpcrweb/core";
 import { useZpcrStore } from "./state/useZpcrStore";
 import { useCfxDevice } from "./state/useCfxDevice";
 import { useRunWatch } from "./state/useRunWatch";
@@ -151,11 +151,13 @@ export function App() {
    * begin wants on screen, and there's no previous view of *this* run to preserve.
    */
   /**
-   * The two names the Instrument view collects for the run it would start. Held here rather than
-   * in the view because the run watcher below needs the file name — and because leaving the
-   * Instrument view for a moment must not forget what was typed.
+   * What the run the Instrument view would start is called, and — once one is started — what its
+   * file is called. Held here rather than in the view because the run watcher below needs the
+   * pinned names, and because leaving the Instrument view for a moment must not forget what was
+   * typed. The live run state is what makes the field read-only while the run is on the block and
+   * clears it when the run comes off (`state/useRunNaming.ts`).
    */
-  const runNaming = useRunNaming();
+  const runNaming = useRunNaming(instrument.runPending || !!instrument.status?.running);
   const runWatch = useRunWatch(
     instrument,
     useCallback(
@@ -165,7 +167,9 @@ export function App() {
       },
       [store],
     ),
-    runNaming,
+    // The names as pinned at the click on Start run, not as currently typed: the field empties
+    // when the run ends, and the run still being assembled must keep the name its seed took.
+    runNaming.active ?? undefined,
   );
   /**
    * Take the `.zpcr` the Instrument view writes at the click on Start run into the file list
@@ -175,7 +179,8 @@ export function App() {
    * It is an ordinary added file — the bar, IndexedDB, the files table — and `modified`, because
    * it exists nowhere but this browser until it is saved. `adopt` tells the watcher this is the
    * file its first snapshot supersedes; the snapshots take the same name (both from
-   * `useRunNaming`), so the store replaces it in place rather than growing a second chip.
+   * `useRunNaming`'s pinned `active`), so the store replaces it in place rather than growing a
+   * second chip.
    */
   const seedRunFile = useCallback(
     async (file: File) => {
@@ -183,6 +188,23 @@ export function App() {
       if (id) runWatch.adopt(id);
     },
     [store, runWatch],
+  );
+  /**
+   * The `.zpcr` base name a run being started may have without displacing a file already loaded —
+   * `<base>`, else `<base>-2`, `<base>-3`, … (core's `nextFreeRunFileBase`).
+   *
+   * That "already loaded" set is the store's file list, which is what IndexedDB holds: the app
+   * loads it whole at startup and keeps it current. It matters because the offered name is the
+   * date and the experiment name, so re-running yesterday's experiment today under the same name
+   * collides by construction — and a same-named add *replaces* (`ZpcrStore.addFiles`), which for a
+   * finished run's archive would be the one loss nothing else can undo.
+   */
+  const freeRunFileBase = useCallback(
+    (base: string) => {
+      const taken = new Set(store.files.map((f) => f.name.toLowerCase()));
+      return nextFreeRunFileBase(base, (candidate) => taken.has(`${candidate}.zpcr`.toLowerCase()));
+    },
+    [store.files],
   );
   // Memoized, and skipped entirely off the Instrument view: resolving decodes a run's plate
   // and, for a staged `.plt.csv`, re-parses it against the run's calibration set — real work to
@@ -429,6 +451,7 @@ export function App() {
             runWatch={runWatch}
             naming={runNaming}
             onRunSeeded={seedRunFile}
+            freeRunFileBase={freeRunFileBase}
           />
         </main>
         {store.error && <div className="app__error mono">{store.error}</div>}

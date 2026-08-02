@@ -1991,9 +1991,8 @@ command lines, the `RemoteRun` line, the files to deposit — and `CfxDevice.sta
 to both the panel and the rail, so the warnings shown between the two halves and the state of the
 Start button can never disagree.
 
-**Two names are typed above the staged run, and they go to different places**
-(`state/useRunNaming.ts`, held by `App` because the run watcher needs one of them and both must
-survive leaving the view).
+**One name is typed above the staged run** (`state/useRunNaming.ts`, held by `App` because the run
+watcher needs it and it must survive leaving the view).
 
 The **experiment name** is the run's identity. It reaches `planRun()` as the run name, i.e.
 `RemoteRun`'s fourth operand (`usb.md` §7.3) — what `STATUS?` echoes and what the `.alf` report is
@@ -2005,20 +2004,44 @@ by the time the run's archive came back. With it, the pulled `.zpcr` states its 
 the ordinary seeding path, and keeps it across a reload, a rename, or another machine.
 
 The experiment name is **required, and never inferred**. A blank one is an `error` check on the
-plan (`no-experiment-name`), which is what disables Start run — the same mechanism a scan-mask
-mismatch uses, so the UI needs no rule of its own — and the field marks itself rather than waiting
-for the rail to explain. The one plausible default, the protocol's name, is the wrong one: a
-protocol is run many times, so every run of it would share a name, and the name is what the run's
-file is called and how it is told from yesterday's. The instrument cannot supply it either — its
-echo comes back uppercased and cut to eight characters. Somebody has to type it, which is why the
-placeholder is an example rather than a value.
+plan (`no-experiment-name`), the same mechanism a scan-mask mismatch uses, so the UI needs no rule
+of its own — and the field marks itself rather than waiting for the rail to explain. The one
+plausible default, the protocol's name, is the wrong one: a protocol is run many times, so every
+run of it would share a name, and the name is what the run's file is called and how it is told
+from yesterday's. The instrument cannot supply it either — its echo comes back uppercased and cut
+to eight characters. Somebody has to type it, which is why the placeholder is an example rather
+than a value.
 
-The **file name** never leaves the browser: it is what the `.zpcr` this app assembles is called.
-It exists because the instrument's own naming (`<date>_<time>_<serial>_<NAME>`, or `<date>_<NAME>`
-from the touchscreen) is not addressable over USB, which is how a run named here used to arrive in
-the file bar named after its protocol. It is offered as `<YYYYMMDD>-<name with spaces as
-underscores>` (core's `runFileBaseName`) and follows the experiment name until it is typed over;
-clearing it resumes following.
+**Start run treats a missing name differently from every other blocker.** All the others dim the
+button and explain themselves in its tooltip, because the fix is elsewhere — pick a file, connect
+a cable, fix a scan mask. A missing name's fix is one field a few pixels away, and a dim button
+does not say which. So the button keeps its disabled *appearance* (`aria-disabled`, the `is-disabled`
+class, and the tooltip "Experiment name required to run") while staying clickable, and the click
+puts the cursor in the field (`InstrumentRail`'s `promptForName` → `InstrumentView`'s `focusName`,
+via a ref into `InstrumentRun`). `start()` guards on `canStart` regardless, so the clickable state
+cannot start anything.
+
+**The name locks while the run is on the block, and clears when it comes off.** Once started, it
+has been sent as `RemoteRun`'s operand, deposited into the run folder and used to name a file, so
+the field goes `readOnly` (`naming.locked`) — editing it could only make this app disagree with all
+three. When the run ends it empties, so the next run is named deliberately rather than inheriting
+the last one's name and, with it, the last one's file name.
+
+The **file name** never leaves the browser: it is what the `.zpcr` this app assembles is called. It
+is not asked for. It used to be a second field, offered as `<YYYYMMDD>-<name with spaces as
+underscores>` (core's `runFileBaseName`) and following the experiment name until typed over — but
+the run's file is created at the click and every later snapshot must keep that exact name to
+supersede it, so the field only ever offered a second way to say what the experiment name had
+already said. `InstrumentView` derives it at the click instead, steps it past any name already
+loaded (`App`'s `freeRunFileBase` over core's `nextFreeRunFileBase`: `-2`, then `-3`,
+incrementing an existing `-N` rather than nesting), and **pins** it as `naming.active` for the run's
+duration. That pin is what the run watcher names its snapshots from, which is why clearing the
+typed field at the end of a run doesn't rename the archive still being assembled.
+
+The uniqueness step matters because the derived name collides *by construction*: it is the date and
+the experiment name, and re-running an experiment under the same name on the same day is ordinary.
+A same-named add replaces (`ZpcrStore.addFiles`), so without it a new run's seed would overwrite a
+finished run's archive — the one loss in this app that nothing can undo.
 
 The two **deposited** files keep the names of the things they *are*: the protocol's own name, and
 (for an overridden plate) the plate file's, else what the plate says about itself via
@@ -2052,8 +2075,8 @@ itself, and the panel badges *pending*.
 at that moment and nothing invented — and `InstrumentView` hands it to `App`'s `seedRunFile`, which
 adds it like any dropped file (`activate`, `modified`) and calls `runWatch.adopt()` on the new id.
 That last part is what makes the first real snapshot *replace* it rather than land beside it: the
-watcher treats the seed as its own previous file, and both take the same name from
-`useRunNaming`, so the store supersedes by name too.
+watcher treats the seed as its own previous file, and both take the same name from `useRunNaming`'s
+pinned `active`, so the store supersedes by name too.
 
 Without it there is nothing to look at between the click and the first plate read — minutes of lid
 preheat and first hold — while the file bar shows no sign that a run was started at all. With it,

@@ -107,6 +107,32 @@ export function runFileBaseName(experimentName: string, date: Date = new Date())
 }
 
 /**
+ * The first base name at or after `base` that `taken` says is free: `base` itself, else
+ * `<base>-2`, `<base>-3`, … — and a `base` that already ends in `-N` counts up from there rather
+ * than nesting, so `20260802-RVP-2` becomes `20260802-RVP-3`.
+ *
+ * What this is for: {@link runFileBaseName} collides *by construction*. It is the date and the
+ * experiment name, and re-running an experiment under the same name on the same day is the
+ * ordinary way to repeat one — so two runs a day apart get different names and two runs an hour
+ * apart get the same one. A caller that stores files by name (the web app's `ZpcrStore`, where a
+ * same-named add replaces what is there) would have the second run's archive overwrite the first's.
+ *
+ * The suffix is `-N` rather than the `(N)` a desktop file manager would use because this name is
+ * derived rather than copied: it is already dash-joined and space-free (spaces become underscores
+ * inside the name), and a parenthesised counter would be the only thing in it that isn't.
+ * {@link deriveExperimentName} reads such a name back as "RVP 2" rather than "RVP", which is
+ * honest — it is the second run of that name, and only the file says so.
+ */
+export function nextFreeRunFileBase(base: string, taken: (candidate: string) => boolean): string {
+  if (!taken(base)) return base;
+  const numbered = /^(.*)-(\d+)$/.exec(base);
+  const stem = numbered ? numbered[1]! : base;
+  let n = numbered ? Number(numbered[2]) + 1 : 2;
+  while (taken(`${stem}-${n}`)) n++;
+  return `${stem}-${n}`;
+}
+
+/**
  * The name to show for a run: the stored one, else what the format states, else the filename's
  * (see the module comment for why that order). Total — every argument is optional, and a run
  * with nothing at all still gets its file's base name.

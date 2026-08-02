@@ -4,6 +4,7 @@ import { dirname, resolve } from "node:path";
 import { describe, it, expect } from "vitest";
 import {
   deriveExperimentName,
+  nextFreeRunFileBase,
   parseBiomeme,
   parseZpcr,
   parseZpcrwebSettingsJson,
@@ -66,6 +67,29 @@ describe("runFileBaseName", () => {
   it("replaces what a filename or a RemoteRun operand can't carry, and answers nothing with ''", () => {
     expect(runFileBaseName('RVP "fast"/v2', aug2)).toBe("20260802-RVP_fast_v2");
     expect(runFileBaseName("   ")).toBe("");
+  });
+});
+
+describe("nextFreeRunFileBase", () => {
+  const held = (...names: string[]) => (candidate: string) => names.includes(candidate);
+
+  it("leaves a free name alone", () => {
+    expect(nextFreeRunFileBase("20260802-RVP", held("20260801-RVP"))).toBe("20260802-RVP");
+  });
+
+  it("suffixes a taken name, and counts past every one already taken", () => {
+    expect(nextFreeRunFileBase("20260802-RVP", held("20260802-RVP"))).toBe("20260802-RVP-2");
+    expect(nextFreeRunFileBase("20260802-RVP", held("20260802-RVP", "20260802-RVP-2"))).toBe(
+      "20260802-RVP-3",
+    );
+  });
+
+  it("increments an existing counter rather than nesting one", () => {
+    expect(nextFreeRunFileBase("20260802-RVP-2", held("20260802-RVP-2"))).toBe("20260802-RVP-3");
+    // The dashes a run name is full of are not counters: only a trailing `-<digits>` is.
+    expect(nextFreeRunFileBase("20260802-S183-S185_RVP", held("20260802-S183-S185_RVP"))).toBe(
+      "20260802-S183-S185_RVP-2",
+    );
   });
 });
 

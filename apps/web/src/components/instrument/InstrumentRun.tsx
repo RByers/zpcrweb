@@ -14,18 +14,22 @@
  * protocol shares this panel's width with a plate map, and what the language means is a question
  * Overview answers — here the question is what would be sent.
  *
- * The two things this panel *collects* rather than renders are the run's name and its file's
- * name: unlike the protocol and the plate, neither comes from a file — no Bio-Rad format has a
- * field for what a run is called (see `experiment.ts` in `@zpcrweb/core`), and the instrument
- * composes its own file names from the protocol and the run name it holds, with nothing over USB
- * able to set them (`usb.md` §7.3). So for a run that doesn't exist yet there is nowhere to read
- * either from and someone has to type them. They sit here, with the rest of what the run is made
- * of, rather than in the rail beside the button that would send it — and the state itself lives
- * in `App` (`state/useRunNaming.ts`), since the run watcher needs the file name too.
+ * The one thing this panel *collects* rather than renders is the run's name: unlike the protocol
+ * and the plate it comes from no file — no Bio-Rad format has a field for what a run is called
+ * (see `experiment.ts` in `@zpcrweb/core`), and the instrument's own echo of it comes back
+ * uppercased and cut to eight characters (`usb.md` §7.3) — so for a run that doesn't exist yet
+ * there is nowhere to read it from and someone has to type it. It sits here, with the rest of what
+ * the run is made of, rather than in the rail beside the button that would send it — and the state
+ * itself lives in `App` (`state/useRunNaming.ts`), since the run watcher needs it too.
+ *
+ * What the run's *file* is called is not asked: it is `<YYYYMMDD>-<experiment name>`, derived at
+ * the click and made unique against the files already loaded (`state/useRunNaming.ts` for why the
+ * field that used to be here went away).
  *
  * There is no "start" button here: it lives in the rail with the other commands that actuate the
  * instrument (see `InstrumentRail`), because that is what it is.
  */
+import type { Ref } from "react";
 import type { CfxStatus, RunPlan } from "@zpcrweb/core";
 import { ProtocolDecoded } from "../raw/DecodedView";
 import { PlateViewer } from "../plate/PlateViewer";
@@ -83,14 +87,18 @@ function RunChecks({ plan }: { plan: RunPlan }) {
 export function InstrumentRun({
   staged,
   naming,
+  nameRef,
   plan,
   status,
   pending,
 }: {
   staged: StagedRun;
-  /** The run's name and its file's name, as typed. Owned by `App` (`state/useRunNaming.ts`) —
-   * they outlive this panel's renders, and both are inputs to what Start run sends. */
+  /** The run's name, as typed. Owned by `App` (`state/useRunNaming.ts`) — it outlives this
+   * panel's renders, and it is an input to what Start run sends. */
   naming: RunNaming;
+  /** The name field itself, so the rail's Start run can put the cursor in it when that is the one
+   * thing missing (`InstrumentView` owns the ref; `InstrumentRail` calls `focus()`). */
+  nameRef?: Ref<HTMLInputElement>;
   /** The staged run as it would be sent, or null when a half is missing. */
   plan: RunPlan | null;
   /** The instrument's live status (`InstrumentView`), or null when disconnected. Used only to
@@ -130,62 +138,54 @@ export function InstrumentRun({
       </div>
 
       {/* Shown even with nothing staged: naming the run is a thing you can do before choosing
-          its parts, and hiding the fields would make the panel look like it had one job. */}
-      <>
-        {/* The placeholder is an example, deliberately *not* the protocol's own name: nothing
-            fills this in for you. A protocol is run many times and its name would be the same
-            every time, so a run inheriting it could not be told from last week's — and the file
-            this run produces is named after it. An empty field is an `error` check on the plan
-            (`usb/runPlan.ts`), which is what keeps Start run disabled until it isn't. */}
-        <label className="devrun__name">
-          <span className="devrun__namelabel">
-            Experiment name
+          its parts, and hiding the field would make the panel look like it had one job.
+
+          The placeholder is an example, deliberately *not* the protocol's own name: nothing fills
+          this in for you. A protocol is run many times and its name would be the same every time,
+          so a run inheriting it could not be told from last week's — and the file this run
+          produces is named after it. An empty field is an `error` check on the plan
+          (`usb/runPlan.ts`), which is what keeps Start run from starting anything until it isn't.
+
+          Read-only once the run is on the block (`naming.locked`): by then the name has been sent
+          as `RemoteRun`'s operand, deposited into the run folder and used to name a file, so
+          editing it here could only make this app disagree with all three. It empties itself when
+          the run finishes, so the next one is named rather than inheriting. */}
+      <label className="devrun__name">
+        <span className="devrun__namelabel">
+          Experiment name
+          {naming.locked ? (
+            <span className="devrun__badge">running</span>
+          ) : (
             <span className="devrun__required" title="Required — a run is not started without one">
               *
             </span>
-          </span>
-          <input
-            className={"devrun__nameinput" + (naming.experimentName.trim() ? "" : " is-missing")}
-            value={naming.experimentName}
-            onChange={(e) => naming.setExperimentName(e.currentTarget.value)}
-            spellCheck={false}
-            required
-            aria-required="true"
-            placeholder="e.g. S183-S185 RVP"
-            title={
-              "What to call this run — required, and never guessed. The instrument's own formats " +
-              "have no field for a run name (see zpcrweb-json.md), so this is what the app " +
-              "records alongside the results — sent with the run, written into the archive it " +
-              "produces, and the name that archive's file takes."
-            }
-          />
-        </label>
-        {/* The file name is the app's own doing, not the instrument's: the CFX composes its file
-            names from the protocol and the run name it holds, and nothing over USB can set them
-            (usb.md §7.3). So this names the .zpcr this app assembles, and follows the experiment
-            name until it is typed over — clear it to go back to following. */}
-        <label className="devrun__name">
-          <span className="devrun__namelabel">
-            File name
-            {naming.fileNameOverridden && <span className="devrun__badge">edited</span>}
-          </span>
-          <input
-            className="devrun__nameinput mono"
-            value={naming.fileName}
-            onChange={(e) => naming.setFileName(e.currentTarget.value)}
-            spellCheck={false}
-            placeholder="named after the run"
-            title={
-              "What the .zpcr this app collects will be called. Offered as the date and the " +
-              "experiment name, and follows it until you edit this field; clear it to follow " +
-              "again. The .zpcr extension is added for you."
-            }
-          />
-          <span className="devrun__nameext mono" aria-hidden="true">
-            .zpcr
-          </span>
-        </label>
-      </>
+          )}
+        </span>
+        <input
+          ref={nameRef}
+          className={
+            "devrun__nameinput" +
+            (naming.locked || naming.experimentName.trim() ? "" : " is-missing")
+          }
+          value={naming.experimentName}
+          onChange={(e) => naming.setExperimentName(e.currentTarget.value)}
+          spellCheck={false}
+          required
+          aria-required="true"
+          readOnly={naming.locked}
+          placeholder="e.g. S183-S185 RVP"
+          title={
+            naming.locked
+              ? "This run has started under this name — it named the run, its file and the " +
+                "deposit in the run folder, so it can't be changed now. The field clears itself " +
+                "when the run finishes."
+              : "What to call this run — required, and never guessed. The instrument's own " +
+                "formats have no field for a run name (see zpcrweb-json.md), so this is what the " +
+                "app records alongside the results — sent with the run, written into the archive " +
+                "it produces, and the name that archive's file takes."
+          }
+        />
+      </label>
 
       {empty ? (
         <div className="instrument__empty mono">

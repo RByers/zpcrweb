@@ -1418,6 +1418,29 @@ async function instrumentRunChecks(chrome, origin) {
   const startWhenIdle = await cdp.eval(`!!document.querySelector(".instrument__start")`);
   check("Start run appears only with an instrument connected", startWhenIdle === false);
 
+  // One name is collected here, not two: what the run's *file* is called is derived at the click
+  // and never asked (`state/useRunNaming.ts`), so a second field would be a second way to say the
+  // same thing — and one that could disagree with the file already written.
+  const names = await cdp
+    .eval(
+      `JSON.stringify([...document.querySelectorAll(".devrun__name")].map((l) => ({
+         label: l.querySelector(".devrun__namelabel").textContent.replace(/\\*/g, "").trim(),
+         value: l.querySelector("input").value,
+         missing: l.querySelector("input").classList.contains("is-missing"),
+         readOnly: l.querySelector("input").readOnly,
+       })))`,
+    )
+    .then(JSON.parse);
+  check(
+    "the panel collects exactly one name — the experiment's, empty and marked required",
+    names.length === 1 &&
+      names[0].label === "Experiment name" &&
+      names[0].value === "" &&
+      names[0].missing &&
+      !names[0].readOnly,
+    JSON.stringify(names),
+  );
+
   // A `.prcl.txt` goes in through the ordinary load button, not a picker of its own.
   mkdirSync(dirname(PRCL_TXT), { recursive: true });
   writeFileSync(PRCL_TXT, PRCL_TXT_BODY);

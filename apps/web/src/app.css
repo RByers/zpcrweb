@@ -3208,6 +3208,19 @@
   border-color: var(--border) !important;
   background: transparent !important;
 }
+/* Looks disabled, but still takes the click — a button whose only blocker is a field the user
+   has to fill in, where the click's job is to go put the cursor there (`InstrumentRail`'s
+   `promptForName`). So it dims exactly like `:disabled` above, and keeps the pointer cursor,
+   which is the one honest difference: clicking it does something. */
+.btn.is-disabled {
+  opacity: 0.4;
+  border-color: var(--border) !important;
+  background: transparent !important;
+}
+.btn.is-disabled:hover {
+  border-color: var(--border-strong) !important;
+  background: transparent !important;
+}
 /* Start run stays functionally disabled the instant another USB command is in flight (only one
    can be outstanding at a time), but a lid/indicator command round-trips fast enough that the
    dimmed `:disabled` look above would otherwise flash on and off. `InstrumentRail` adds this
@@ -3615,10 +3628,6 @@ summary.instrument__panelhead {
 }
 /* The extension the app adds, shown next to the field so the name reads as a whole file name
    without the field having to accept (or validate) the suffix itself. */
-.devrun__nameext {
-  font-size: 11px;
-  color: var(--ink-muted);
-}
 .devrun__nameinput {
   flex: 1 1 auto;
   min-width: 0;

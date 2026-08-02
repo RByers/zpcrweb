@@ -64,6 +64,7 @@ export function InstrumentRail({
   plan,
   runWatch,
   onStart,
+  onNeedName,
 }: {
   instrument: CfxDeviceHandle;
   staged: StagedRun;
@@ -73,6 +74,9 @@ export function InstrumentRail({
   /** Called the instant Start run is clicked, before anything goes out on the wire: the view
    * writes the run's `.zpcr` from what is staged (see `InstrumentView`'s `seedRunFile`). */
   onStart: () => void;
+  /** Put the cursor in the Experiment name field — what a click on Start run does when the only
+   * thing missing is that name (see `promptForName` below). */
+  onNeedName: () => void;
 }) {
   const { connection, info, status, rtStatus, busy, lastAction, runProgress, runPending } = instrument;
   const connected = connection === "connected";
@@ -82,19 +86,30 @@ export function InstrumentRail({
   // What a run still needs, in the order it reads: the button says the *first* missing thing
   // rather than a generic "can't start", so the fix is always the next click.
   const blockers = plan?.checks.filter((c) => c.severity === "error") ?? [];
-  const missing = !staged.protocol.value
+  // What is missing before the plan is even consulted — the run's two halves, and something to
+  // send them to. None of these is fixed in this rail, or by clicking anything in it.
+  const unstaged = !staged.protocol.value
     ? "Select a protocol in the file bar first."
     : !staged.plate.value
       ? "Select a plate in the file bar first."
       : !connected
         ? "Connect to the instrument first."
-        : blockers.length > 0
-          ? blockers[0]!.message
-          : runPending
-            ? "The run has been started; waiting for the instrument to report it."
-            : status?.running
-              ? "The instrument is already running something."
-              : null;
+        : null;
+  const missing =
+    unstaged ??
+    (blockers.length > 0
+      ? blockers[0]!.message
+      : runPending
+        ? "The run has been started; waiting for the instrument to report it."
+        : status?.running
+          ? "The instrument is already running something."
+          : null);
+  // An unnamed run is the one blocker whose fix is a single field a few pixels away, and a button
+  // that is merely dim doesn't say which field. So this one stays clickable and the click *is*
+  // the explanation: it puts the cursor in Experiment name (`InstrumentView`'s `focusName`). It
+  // still looks and reports as unstartable — `aria-disabled`, the dimmed class, and a title that
+  // names the requirement — so nothing about it invites a click expecting a run to begin.
+  const promptForName = !unstaged && blockers.some((c) => c.code === "no-experiment-name");
   const canStart =
     !!plan && plan.startable && connected && !busy && !runPending && !status?.running;
   // The USB command channel carries one request at a time, so Start run has to become
@@ -123,7 +138,9 @@ export function InstrumentRail({
     !busyLingering;
 
   const start = async () => {
-    if (!plan) return;
+    // Belt and braces: the button is clickable while `promptForName`, and nothing but its own
+    // `onClick` routing keeps that click away from here.
+    if (!plan || !canStart) return;
     // The file first, and unconditionally: the run is about to exist whether or not every upload
     // lands, and the seed is what gives it somewhere to be seen for the minutes before the first
     // plate read (`core/runSeed.ts`).
@@ -304,15 +321,19 @@ export function InstrumentRail({
           <button
             className={
               "btn btn--primary instrument__start" +
-              (startLooksArmed ? " instrument__start--armed" : "")
+              (startLooksArmed ? " instrument__start--armed" : "") +
+              (promptForName ? " is-disabled" : "")
             }
-            disabled={!canStart}
+            disabled={!canStart && !promptForName}
+            aria-disabled={!canStart}
             title={
-              missing ??
-              `Author ${plan?.commands.length ?? 0} protocol commands, start the run and ` +
-                `upload ${plan?.uploads.length ?? 0} files to the instrument.`
+              promptForName
+                ? "Experiment name required to run"
+                : (missing ??
+                  `Author ${plan?.commands.length ?? 0} protocol commands, start the run and ` +
+                    `upload ${plan?.uploads.length ?? 0} files to the instrument.`)
             }
-            onClick={() => void start()}
+            onClick={promptForName ? onNeedName : () => void start()}
           >
             {runPending ? "Run pending…" : "Start run"}
           </button>

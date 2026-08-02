@@ -42,10 +42,10 @@ export interface RunSeedOptions {
    * file can exist before the instrument has written a byte. */
   experimentName: string;
   /**
-   * What to call the file, without extension — the Instrument view's file-name field
-   * (`state/useRunNaming.ts`). Defaults to {@link runFileBaseName} of the experiment name, which
-   * is what that field offers, so the seed and the snapshots that replace it agree on a name
-   * without either having to ask the other.
+   * What to call the file, without extension. Defaults to {@link runFileBaseName} of the
+   * experiment name; the web app passes that same derivation stepped past any name already loaded
+   * (`state/useRunNaming.ts`), and then pins it, so the seed and the snapshots that replace it
+   * agree on a name without either having to ask the other.
    */
   fileBaseName?: string;
   /** The protocol's run-definition text, exactly as sent (`protocol.md`). */
