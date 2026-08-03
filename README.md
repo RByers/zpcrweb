@@ -171,6 +171,16 @@ npm run dev -w @zpcrweb/web      # start the dev server (http://localhost:5173)
 npm run build -w @zpcrweb/web    # production build
 ```
 
+### Browser support
+
+The app is written against standard web APIs and intended to work on the latest version of any
+major browser. In practice, development and manual testing happen almost entirely on
+Chromium-based browsers (Chrome/Edge/etc.) — partly because the Instrument view's live USB
+connection depends on WebUSB, which only Chromium implements, and partly just because that's
+where the author tests. On first load, a non-Chromium browser gets a one-time dismissable
+warning to that effect (`components/BrowserWarningModal.tsx`); everything except the Instrument
+view is expected to work fine regardless.
+
 ### Everything is in the URL hash, nothing in the query string
 
 - `#file=<name>&view=<overview|curves|plates|reference|calibration|raw|about>` selects the active
