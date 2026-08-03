@@ -52,13 +52,13 @@ export function BrowserWarningModal() {
     <div className="browserwarn" role="dialog" aria-modal="true">
       <div className="browserwarn__box">
         <p className="browserwarn__text">
-          zpcrweb has been tested on Chromium-based browsers due to the dependency on{" "}
+          zpcrweb has not been well tested on non-Chromium browsers due to the dependency on{" "}
           <a href="https://webstatus.dev/features/webusb" target="_blank" rel="noreferrer">
             WebUSB
           </a>
           .
         </p>
-        <button type="button" className="segmented__item" onClick={dismiss}>
+        <button type="button" className="btn btn--primary" onClick={dismiss}>
           Continue anyway
         </button>
       </div>

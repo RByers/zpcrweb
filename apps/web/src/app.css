@@ -4192,6 +4192,6 @@ summary.instrument__panelhead {
   font-size: 13px;
   line-height: 1.5;
 }
-.browserwarn__box .segmented__item {
+.browserwarn__box .btn {
   justify-self: start;
 }
