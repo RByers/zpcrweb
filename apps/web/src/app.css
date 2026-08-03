@@ -4166,3 +4166,32 @@ summary.instrument__panelhead {
 .stepform__check {
   justify-self: start;
 }
+
+/* ---- Browser (non-Chromium) warning modal ------------------------------- */
+.browserwarn {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-content: center;
+  background: rgb(0 0 0 / 0.55);
+}
+.browserwarn__box {
+  display: grid;
+  gap: 16px;
+  max-width: 26em;
+  padding: 20px 22px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: var(--ink);
+  box-shadow: 0 12px 40px rgb(0 0 0 / 0.5);
+}
+.browserwarn__text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.browserwarn__box .segmented__item {
+  justify-self: start;
+}

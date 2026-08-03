@@ -7,9 +7,11 @@ import "uplot/dist/uPlot.min.css";
 import "./theme.css";
 import "./app.css";
 import { App } from "./App";
+import { BrowserWarningModal } from "./components/BrowserWarningModal";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <App />
+    <BrowserWarningModal />
   </StrictMode>,
 );
