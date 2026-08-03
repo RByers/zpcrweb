@@ -43,6 +43,33 @@ the doc is always the entry point for understanding *and* changing a decoder. Se
   preference: the two places that used to run their own copy drifted apart, and the drift was
   visible on screen as a threshold line that missed the Cq marker it was supposed to run through
   (see `apps/web/ARCHITECTURE.md`, "One analysis per run").
+- **Client-only: no user data leaves the browser.** See below.
+
+## Client-only: no user data leaves the browser
+
+A user's `.zpcr`/`.pcrd`/`.pltd` file, and everything derived from it — curves, Cq values,
+plate/sample/target names, USB traffic logs, run reports — stays on the device that opened it.
+Nothing here uploads a file, phones home usage telemetry, or reports errors to a third party;
+storage is local (IndexedDB) and the only server involved is the static host serving the app's
+own JS/CSS/HTML. This is a hard architectural constraint, not an incidental property of the
+current feature set: this is qPCR data from someone's own lab, and the app has no business
+being a place it can leak from.
+
+The one network call the app makes with user involvement is *inbound*: `addUrl` in
+`apps/web/src/state/useZpcrStore.ts` fetches a URL the user supplies (a shared `#load=` link) to
+load a file into the app, the same as a drag-and-drop — nothing about the user's existing data
+is sent to reach it, and `credentials: "omit"` keeps it from riding on the recipient's cookies.
+That's the only `fetch` call in the app today; anything else that starts sending bytes off the
+device — telemetry, crash reporting, a CDN-hosted analytics snippet, a new outbound `fetch` —
+is a violation of this constraint even if the data looks anonymized, and needs a decision at the
+architecture level, not a quiet addition.
+
+Because this property is easy to violate by accident (a debugging `fetch` left in, a dependency
+that bundles its own analytics, an error handler that stringifies parsed file content into a
+report) and expensive to verify by inspection every time, the `client-only-audit` skill
+(`.claude/skills/client-only-audit/`) exists to check it from the code itself — tracing every
+network egress point rather than trusting comments or this doc. It's run occasionally: before a
+release, when networking code changes, or on request — not on every commit.
 
 ## Monorepo
 
