@@ -1,0 +1,19 @@
+# zpcrweb plate definition
+# vessel: BR Clear 8x12
+Well,SampleType,Sample,FAM,Tex 615,Cy5
+A4,unknown,S183+S184+S185,HRV Ma,HMPV Ma,RSV Ma
+B4,unknown,S183+S184+S185,PIV1 Ri,PIV2 Ri,PIV3 Ri
+C4,unknown,S183+S184+S185,ADV Ri,,HBoV Ri
+D4,unknown,S183+S184+S185,INFA Ri,,INFB Ri
+E4,unknown,S183+S184+S185,SC2-N2 CDC,OC43 Ha,229E Ha
+F4,unknown,S183+S184+S185,,,HKU1 Ha
+G4,unknown,S183+S184+S185,,HMPV Bo,
+H4,unknown,S183+S184+S185,NL63 Bo,,
+A9,unknown,S183,,,ENT rc
+B9,unknown,S184,,,ENT rc
+C9,unknown,S185,,,ENT rc
+D9,ntc,,,,ENT rc
+E9,positiveControl,S183,B2M,,
+F9,positiveControl,S184,B2M,,
+G9,positiveControl,S185,B2M,,
+H9,ntc,,B2M,,
