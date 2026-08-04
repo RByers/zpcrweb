@@ -36,6 +36,7 @@ const VIEW_IDS: ViewId[] = [
   "raw",
   "instrument",
   "about",
+  "files",
 ];
 
 export interface HashState {

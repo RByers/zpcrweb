@@ -331,6 +331,19 @@ async function routingChecks(chrome, origin, pw) {
   const cold = await tabBecomes(cdp, "Reference");
   check("cold deep link opens the named view", cold === "Reference", `tab "${cold}"`);
 
+  // The Files table is not a lens on the active file, but it is linkable like any other view.
+  await cdp.send("Page.navigate", {
+    url: `${origin}#file=20260720_FirstQualification.zpcr&view=files`,
+  });
+  await waitFor(() => cdp.eval("document.readyState==='complete'"), { what: "reload" });
+  const filesTab = await tabBecomes(cdp, "Files");
+  check("cold deep link opens the Files table", filesTab === "Files", `tab "${filesTab}"`);
+  check(
+    "the Files view stays in the hash",
+    /view=files/.test(await cdp.eval("window.location.hash")),
+    await cdp.eval("window.location.hash"),
+  );
+
   // Files live in IndexedDB and can't be fetched from a link, so an unknown name must degrade.
   await cdp.send("Page.navigate", { url: `${origin}#file=nope.zpcr&view=plates` });
   await waitFor(() => cdp.eval("document.readyState==='complete'"), { what: "reload" });

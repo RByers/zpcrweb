@@ -183,8 +183,10 @@ view is expected to work fine regardless.
 
 ### Everything is in the URL hash, nothing in the query string
 
-- `#file=<name>&view=<overview|curves|plates|reference|calibration|raw|about>` selects the active
-  file and view. `about` is the credits page behind the logo; it has no tab and needs no file.
+- `#file=<name>&view=<overview|protocol|curves|plates|reference|calibration|raw|instrument|files|about>`
+  selects the active file and view. Every view the app can show is nameable here: `files` is the
+  full files table, `instrument` the USB panel, and `about` the credits page behind the logo —
+  the last of these has no tab, and none of the three needs a file.
 - `#load=<url>` fetches a file and loads it — the only key that can put a file the browser doesn't
   already have into the app. It's consumed on load and replaced by the `#file=` the loaded file
   produces, so it never survives in the address bar. `apps/web/public/examples/` (a symlink to

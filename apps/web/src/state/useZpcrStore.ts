@@ -67,7 +67,9 @@ type PlateFileKind = "pltd" | "csv";
 /** `"about"` is not a tab in {@link ViewSelector} — it's reached by clicking the logo — but it
  * is a view like any other, so it's linkable (`#view=about`) and works with back/forward.
  * `"files"` (the full files table, `FilesTableView.tsx`) is a real tab, but — like `"instrument"`
- * — isn't a lens on the active file, so it sits in its own group there rather than the main one. */
+ * — isn't a lens on the active file, so it sits in its own group there rather than the main one.
+ * Both are linkable too: every id here is in `urlHash.ts`'s VIEW_IDS, so nothing the tab strip
+ * (or the logo) can reach is a state the URL can't name. */
 export type ViewId =
   | "overview"
   | "protocol"

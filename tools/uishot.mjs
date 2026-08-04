@@ -196,16 +196,7 @@ async function main() {
       const caption = label ?? "About";
       // Navigate via the URL hash rather than clicking the tab — one assignment, no
       // dependency on tab label text, and it exercises the same routing a shared link uses.
-      // "files" is the exception: it's a real tab but deliberately not linkable (it isn't in
-      // `urlHash.ts`'s VIEW_IDS), so it can only be reached by clicking it.
-      if (view === "files") {
-        await cdp.eval(
-          `[...document.querySelectorAll('[role="tab"]')]
-             .find(t => t.textContent.trim() === "Files")?.click(), undefined`,
-        );
-      } else {
-        await cdp.eval(`window.location.hash = ${JSON.stringify(`view=${view}`)}, undefined`);
-      }
+      await cdp.eval(`window.location.hash = ${JSON.stringify(`view=${view}`)}, undefined`);
       let settled = "none";
       try {
         await waitFor(
