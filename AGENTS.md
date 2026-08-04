@@ -36,8 +36,27 @@ The operator does manual testing and pushes upstream to deploy live when good, n
 - Typecheck too, before committing — `npm run typecheck` covers only core, so a change under
   `apps/web` needs `npm run typecheck -w @zpcrweb/web` as well. `npm test` passes happily on
   code that doesn't compile, which is how a type error reached `main` in the first place.
-- Then land it with `git merge --ff-only <branch>`. After doing so delete the worktree and branch.
 - Then land it with `git merge --ff-only <branch>`, then delete the worktree and branch.
+- After landing, report the size of what was just merged as lines added and removed, split four
+  ways — core, core tests, UI, UI tests — so the operator can see at a glance how much production
+  code moved versus test code. Run it over the commits that landed (`git diff --numstat
+  <old-main>..main`, where `<old-main>` is `main`'s tip before the merge — `main@{1}` normally
+  works):
+
+  ```sh
+  git diff --numstat main@{1}..main | awk '
+    $3 ~ /^packages\/core\/test\//          {c="core tests"}
+    $3 ~ /^packages\/core\/src\//           {c="core"}
+    $3 ~ /^tools\/(uitest|uishot|harness)\.mjs$/ {c="UI tests"}
+    $3 ~ /^apps\/web\/src\//                {c="UI"}
+    c=="" {c="other"} {a[c]+=$1; d[c]+=$2; c=""}
+    END {for (k in a) printf "%-11s +%d / -%d\n", k, a[k], d[k]}'
+  ```
+
+  "UI tests" is the browser harness in `tools/` (`uitest.mjs`, `uishot.mjs`, `harness.mjs`), since
+  that is where the web app's tests actually live. Everything else — docs, config, other `tools/`
+  scripts — falls into "other"; keep that row, it is the honest remainder. Report the four
+  categories even when a row is zero, so a commit that touched no tests says so plainly.
 - If the fast-forward fails, the branch has fallen behind — rebase it again. Never reach for
   `--no-ff` or `-m` to get unstuck, and never rebase commits already reachable from `origin/main`.
 - Don't open PRs, and don't create branches on `origin`. Pushing `main` to `origin` is a deploy
