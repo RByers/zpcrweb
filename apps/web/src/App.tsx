@@ -13,7 +13,7 @@ import { useHeaderFit } from "./state/useHeaderFit";
 import { DropZone } from "./components/DropZone";
 import { FileBar } from "./components/FileBar";
 import { FilesTableView } from "./components/FilesTableView";
-import { ViewSelector } from "./components/ViewSelector";
+import { ViewBar } from "./components/ViewBar";
 import { PasswordPrompt } from "./components/PasswordPrompt";
 import { OverviewView } from "./components/views/OverviewView";
 import { CurvesView } from "./components/views/CurvesView";
@@ -31,6 +31,13 @@ import { AboutView } from "./components/views/AboutView";
 import { InstrumentView } from "./components/views/InstrumentView";
 import type { ViewId } from "./state/useZpcrStore";
 
+/**
+ * The **view bar** is the app's tab strip (`components/ViewBar.tsx`); the **file bar** is the row
+ * of chips under it (`components/FileBar.tsx`). Everything in the view bar except its Files tab is
+ * a lens on the one file the file bar has selected, and this module is where that correspondence
+ * is enforced: {@link enabledViewsFor} answers "which tabs does *this* file support", and an empty
+ * answer — no selection, or a run that hasn't decoded — greys the whole group out.
+ */
 const STANDALONE_VIEWS = ["overview", "plates", "raw"] as const;
 /** A Biomeme run has no reference row and no `.Dcal` calibration files, so those two tabs are
  * disabled. Raw stays: the run *is* one JSON document, so there is no archive to browse
@@ -49,18 +56,24 @@ const PROTOCOL_VIEWS = ["overview", "protocol", "raw"] as const;
 /** A `.pltd`/`.plt.csv` uploaded on its own, rather than a run — only these three tabs apply. */
 const isStandaloneKind = (kind: string) => kind === "pltd" || kind === "csv";
 
-/** The file-backed tabs a given file kind supports, or `null` for "all of them". The tabs it
- * leaves out are still drawn — greyed out, see `ViewSelector` — so this decides what is *enabled*,
- * not what exists. Shared by the normal render and the Instrument view's early return, which
- * needs the same answer to draw the rest of the tab strip while it is the selected one.
+/**
+ * The view-bar tabs a given file supports. The tabs it leaves out are still drawn — greyed out,
+ * see `ViewBar` — so this decides what is *enabled*, not what exists.
  *
- * Typed as a non-empty tuple so the view fallback below can take `[0]` — a file with no enabled
- * tab at all would leave nowhere to fall back to. */
-function enabledViewsFor(kind: string, zpcr?: Zpcr | null): readonly [ViewId, ...ViewId[]] | null {
+ * An **empty** result means "no tab applies": a run that hasn't decoded (behind the password
+ * prompt, or failed), which has nothing to show anywhere. The caller uses the same empty answer
+ * for "nothing is selected", since the two produce the same strip.
+ */
+function enabledViewsFor(kind: string, zpcr?: Zpcr | null): readonly ViewId[] {
   if (isStandaloneKind(kind)) return STANDALONE_VIEWS;
   if (kind === "biomeme") return BIOMEME_VIEWS;
   if (kind === "prcl") return PROTOCOL_VIEWS;
-  return zpcr ? runViews(zpcr) : null;
+  if (!zpcr) return [];
+  // Instrument is a lens on this file like any other tab: it starts *this* experiment, or reports
+  // on the run this file is a snapshot of. Only a `.zpcr` qualifies — that is the one kind the app
+  // can carry to an instrument and the one kind an instrument produces (a `.pcrd` or a Biomeme
+  // export is somebody else's finished record).
+  return kind === "zpcr" ? [...runViews(zpcr), "instrument"] : runViews(zpcr);
 }
 
 /**
@@ -79,7 +92,7 @@ function enabledViewsFor(kind: string, zpcr?: Zpcr | null): readonly [ViewId, ..
  * from (see `ProtocolView`). Plates, by contrast, needs a plate to show, and attaching one is an
  * Overview affordance while the experiment is pending.
  */
-function runViews(zpcr: Zpcr): readonly [ViewId, ...ViewId[]] {
+function runViews(zpcr: Zpcr): readonly ViewId[] {
   const views: ViewId[] = ["overview", "protocol"];
   const read = zpcr.reads.length > 0;
   if (read) views.push("curves");
@@ -92,7 +105,7 @@ function runViews(zpcr: Zpcr): readonly [ViewId, ...ViewId[]] {
   if (read && zpcr.factoryRefCal().length > 0) views.push("reference");
   if (read && zpcr.calibrations().length > 0) views.push("calibration");
   views.push("raw");
-  return views as [ViewId, ...ViewId[]];
+  return views;
 }
 
 /**
@@ -241,10 +254,10 @@ export function App() {
    * what the experiment is called — and the Overview it lands on asks for the name.
    */
   const createExperiment = useCallback(
-    async (parts: Parameters<typeof store.createExperiment>[0]) => {
+    async (parts: Parameters<typeof store.createExperiment>[0], landOn: ViewId = "overview") => {
       const id = await store.createExperiment(parts);
       if (!id) return;
-      store.setView("overview");
+      store.setView(landOn);
       setNameExperimentFor(id);
     },
     [store],
@@ -443,27 +456,25 @@ export function App() {
    * keystroke elsewhere in the app.
    */
   const activeViews = useMemo(
-    () => (active ? enabledViewsFor(active.kind, store.runs.get(active.id)?.zpcr) : null),
+    () => (active ? enabledViewsFor(active.kind, store.runs.get(active.id)?.zpcr) : []),
     [active, store.runs],
   );
-  // What the bar actually shows: a file taken off it (`FileSettings.visible`) stays loaded and
-  // in the full files table (the "Files" tab, `FilesTableView.tsx`), just not here.
-  const visibleFiles = useMemo(
-    () => store.files.filter((f) => !store.hiddenIds.has(f.id)),
-    [store.files, store.hiddenIds],
-  );
   /**
-   * A row in the full files table: select the file (which also turns its checkbox back on — see
-   * `useZpcrStore`'s `setActive`, and leaves the Files tab since `store.view` changes under it),
+   * A row in the full files table: select the file — which **loads** it if it wasn't (see
+   * `useZpcrStore`'s `setActive`), and leaves the Files tab since `store.view` changes under it —
    * and land on its own first enabled tab, the same "click a file, go look at it" a bar chip has
-   * always done. Falls back to "overview" for a file with no restricted set (an ordinary run),
-   * since that tab isn't in the tuple for those — see `enabledViewsFor`. `view`, when given (the
-   * Plate cell's own link), overrides that landing spot instead of guessing at it.
+   * always done. `view`, when given (the Plate cell's own link), overrides that landing spot
+   * instead of guessing at it.
+   *
+   * A file that isn't loaded yet has no decoded run to ask, so its enabled set isn't known here;
+   * Overview is where such a click lands, and the strip fills in as the bytes arrive.
    */
   const selectFromTable = (id: string, view?: ViewId) => {
-    const f = store.files.find((x) => x.id === id);
+    const f = store.loaded.find((x) => x.id === id);
     store.setActive(id);
-    store.setView(view ?? (f ? enabledViewsFor(f.kind, store.runs.get(id)?.zpcr)?.[0] ?? "overview" : "overview"));
+    store.setView(
+      view ?? (f ? enabledViewsFor(f.kind, store.runs.get(id)?.zpcr)[0] ?? "overview" : "overview"),
+    );
   };
 
   /** The Instrument view's "Run complete" banner's "Open run" button: jump straight to that run's
@@ -507,62 +518,10 @@ export function App() {
     return <div className="splash mono">initializing…</div>;
   }
 
-  // The Instrument view talks to an instrument rather than being a lens on a file, so it renders the
-  // same way whether or not anything is loaded — and is reachable from the welcome screen, which is
-  // where someone with a cycler and no files yet actually starts. It keeps the file bar, and the bar
-  // means exactly what it means everywhere else now (see `selectFile`): the cyan chip is the active
-  // file, which is the experiment this view would start.
-  if (store.view === "instrument") {
-    return (
-      <div className={store.files.length > 0 ? "app" : "app app--nofiles"}>
-        <header className="app__header" ref={headerRef} data-fit={fit}>
-          <Logo onClick={showAbout} />
-          <div className="app__views">
-            <ViewSelector
-              value="instrument"
-              onChange={store.setView}
-              // With no file loaded no file-backed tab leads anywhere, so they all grey out.
-              enabled={active ? activeViews ?? undefined : []}
-            />
-          </div>
-          <div className="app__header-spacer" />
-          <DropZone onFiles={store.addFiles} />
-        </header>
-        {store.files.length > 0 && (
-          <FileBar
-            files={visibleFiles}
-            runs={store.runs}
-            plateFiles={store.plateFiles}
-            activeId={store.activeId}
-            modifiedIds={store.modifiedIds}
-            inProgressIds={store.inProgressIds}
-            incompleteIds={store.incompleteIds}
-            pendingIds={store.pendingIds}
-            activeLocked={runActive}
-            onSelect={selectFile}
-            onHide={(id) => store.setVisible(id, false)}
-            experiments={store.experiments}
-          />
-        )}
-        <main className="app__main">
-          <InstrumentView
-            onOpenRun={openRun}
-            onOpenFinishedRun={openFinishedRun}
-            experiment={instrumentExperiment}
-            instrument={instrument}
-            runWatch={runWatch}
-            onStartExperiment={startExperiment}
-            onCloneExperiment={cloneExperiment}
-          />
-        </main>
-        {store.error && <div className="app__error mono">{store.error}</div>}
-      </div>
-    );
-  }
-
-  if (!active || !settings) {
-    // No file yet, so About *is* the welcome screen — it carries the drop target. There's no
-    // previous view to go back to, hence no `onBack`.
+  if (store.files.length === 0) {
+    // Nothing in the browser at all, so About *is* the welcome screen — it carries the drop
+    // target. There's no previous view to go back to, hence no `onBack`, and no view bar: with an
+    // empty catalog even the Files tab has nothing to list.
     return (
       <div className="app app--empty">
         <header className="app__brand">
@@ -576,7 +535,11 @@ export function App() {
           onNewExperiment={() => void createExperiment({})}
         />
         <div className="app__welcomeinstrument">
-          <button className="btn" onClick={() => store.setView("instrument")}>
+          {/* The Instrument tab is a lens on an experiment now (see `enabledViewsFor`), so there
+              is no such tab to send someone to while nothing exists. Someone with a cycler and no
+              files starts by making the experiment they mean to run — this is that, plus landing
+              on the tab that talks to the instrument rather than on Overview. */}
+          <button className="btn" onClick={() => void createExperiment({}, "instrument")}>
             Connect an instrument over USB
           </button>
         </div>
@@ -585,22 +548,34 @@ export function App() {
     );
   }
 
-  const isStandalonePlate = isStandaloneKind(active.kind);
-  const isStandaloneProtocol = active.kind === "prcl";
+  const isStandalonePlate = !!active && isStandaloneKind(active.kind);
+  const isStandaloneProtocol = active?.kind === "prcl";
   const zpcr = isStandalonePlate || isStandaloneProtocol ? null : activeRun?.zpcr ?? null;
   /** The run is here but not open yet: the password prompt, or a decode that failed. */
-  const gated = !zpcr && !isStandalonePlate && !isStandaloneProtocol;
-  const enabledViews = activeViews;
+  const gated = !!active && !zpcr && !isStandalonePlate && !isStandaloneProtocol;
+  /**
+   * What the view bar enables. Three cases collapse to the same empty answer, because they are
+   * the same fact — no tab has a file to be a lens on:
+   *
+   * - nothing selected (everything released, or a `#file=` this browser can't resolve);
+   * - the selected file's bytes still on their way in from IndexedDB;
+   * - a run that hasn't decoded — locked behind the password prompt, or failed.
+   *
+   * The strip itself stays in all three: the prompt is a gate in the content area, not a reason
+   * for the app's chrome to change shape, and a strip that vanished made unlocking look like the
+   * tabs were something the file had earned.
+   */
+  const enabledViews: readonly ViewId[] = activeViews;
   // `store.view` is global (not per-file), so switching entries can land on a view this file has
   // no answer for (e.g. "calibration" on a Biomeme run) — fall back to its first enabled tab
   // then. The tab is drawn either way, just disabled, so this is about where the *content* goes.
   // "about" and "files" are both file-independent, so they survive regardless.
   const view =
-    enabledViews &&
+    enabledViews.length > 0 &&
     store.view !== "about" &&
     store.view !== "files" &&
-    !(enabledViews as readonly ViewId[]).includes(store.view)
-      ? enabledViews[0]
+    !enabledViews.includes(store.view)
+      ? enabledViews[0]!
       : store.view;
 
   return (
@@ -608,32 +583,24 @@ export function App() {
       <header className="app__header" ref={headerRef} data-fit={fit}>
         <Logo onClick={showAbout} />
         <div className="app__views">
-          <ViewSelector
-            value={view}
-            onChange={store.setView}
-            // A run that hasn't decoded yet — locked behind the password prompt, or failed — has
-            // nothing to show in any tab, so they all grey out. The strip itself stays: the
-            // password prompt is a gate in the content area, not a reason for the app's chrome to
-            // change shape, and a strip that vanished under it made unlocking look like the tabs
-            // were something the file had earned.
-            enabled={gated ? [] : enabledViews ?? undefined}
-          />
+          <ViewBar value={view} onChange={store.setView} enabled={enabledViews} />
         </div>
         <div className="app__header-spacer" />
         <DropZone onFiles={store.addFiles} />
       </header>
 
       <FileBar
-        files={visibleFiles}
+        files={store.loaded}
         runs={store.runs}
         plateFiles={store.plateFiles}
         activeId={store.activeId}
         modifiedIds={store.modifiedIds}
         inProgressIds={store.inProgressIds}
-            incompleteIds={store.incompleteIds}
-            pendingIds={store.pendingIds}
+        incompleteIds={store.incompleteIds}
+        pendingIds={store.pendingIds}
+        activeLocked={view === "instrument" && runActive}
         onSelect={selectFile}
-        onHide={(id) => store.setVisible(id, false)}
+        onUnload={(id) => void store.setLoaded(id, false)}
         experiments={store.experiments}
       />
 
@@ -641,14 +608,11 @@ export function App() {
         {view === "files" ? (
           <FilesTableView
             files={store.files}
-            runs={store.runs}
-            plateFiles={store.plateFiles}
-            experiments={store.experiments}
             activeId={store.activeId}
-            hiddenIds={store.hiddenIds}
+            loadedIds={store.loadedIds}
             modifiedIds={store.modifiedIds}
             onSelectFile={selectFromTable}
-            onSetVisible={store.setVisible}
+            onSetLoaded={(id, on) => void store.setLoaded(id, on)}
             onDelete={store.remove}
             onClose={leaveFiles}
           />
@@ -660,6 +624,24 @@ export function App() {
             onNewExperiment={() => void createExperiment({})}
             onBack={leaveAbout}
           />
+        ) : !active || !settings ? (
+          // Files exist but none is selected — every file released, or a `#file=` naming one this
+          // browser doesn't have. The chrome stays exactly as it is (view bar disabled but for
+          // Files, file bar, drop zone, About), because the way out is to pick a file, and this
+          // says where from.
+          <div className="app__noselection mono">
+            {store.activeId && store.loadingIds.has(store.activeId) ? (
+              "opening…"
+            ) : (
+              <>
+                <p>No file selected.</p>
+                <p>
+                  Choose one from the file bar, or open the <strong>Files</strong> tab to see
+                  everything this browser is holding.
+                </p>
+              </>
+            )}
+          </div>
         ) : isStandalonePlate ? (
           <>
             {view === "overview" && store.activePlateFile && (
@@ -745,7 +727,7 @@ export function App() {
                 // `analysisPersist.ts`'s `resolve`.
                 namePersists={active.kind === "zpcr"}
                 pending={isPendingExperiment(active.kind, zpcr)}
-                files={store.files}
+                files={store.loaded}
                 onAttachPlate={(file) => void store.attachPlate(active.id, file)}
                 onAttachProtocol={(file) => void store.attachProtocol(active.id, file)}
                 onCreateProtocol={() => createProtocolFor(active.id)}
@@ -802,7 +784,7 @@ export function App() {
                 zpcr={zpcr}
                 fileId={active.id}
                 attachPlate={store.attachPlate}
-                files={store.files}
+                files={store.loaded}
                 addFiles={store.addFiles}
               />
             )}
@@ -821,6 +803,20 @@ export function App() {
                 the shape the standalone viewer handles. */}
             {view === "raw" && active.kind === "biomeme" && (
               <StandaloneRawView key={active.id} file={active} />
+            )}
+            {/* The instrument, driven by this experiment — a lens on the selected file like every
+                other tab, which is why it lives in this block rather than in a branch of its own
+                (see `enabledViewsFor`). */}
+            {view === "instrument" && (
+              <InstrumentView
+                onOpenRun={openRun}
+                onOpenFinishedRun={openFinishedRun}
+                experiment={instrumentExperiment}
+                instrument={instrument}
+                runWatch={runWatch}
+                onStartExperiment={startExperiment}
+                onCloneExperiment={cloneExperiment}
+              />
             )}
           </>
         )}

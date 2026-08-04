@@ -87,7 +87,7 @@
    viewport, so the header goes iconographic — in four steps, driven by `data-fit`, which
    `useHeaderFit` sets by measuring what actually fits (see that file for the level meanings and
    for why this isn't a media query). Every label that goes still carries its word in a
-   `title`/`aria-label` (see `ViewSelector`, `DropZone`, `Logo`), so nothing is lost to a screen
+   `title`/`aria-label` (see `ViewBar`, `DropZone`, `Logo`), so nothing is lost to a screen
    reader or a hover. `.app__brand` (the welcome screen, which has no tabs) has no `data-fit` and
    so keeps the full mark — there's room for it there. */
 @media (max-width: 599px) {
@@ -3376,44 +3376,54 @@
 }
 
 /* ---- Instrument view ---------------------------------------------------------
-   A live instrument over WebUSB, not a file. Everything here is deliberately set apart from the
-   file-backed views: its tab sits in its own group (`.segmented--instrument`), the file bar is hidden
-   while it shows (see `App.tsx`), and it uses magenta where the rest of the chrome uses cyan — the
-   palette's second accent, already meaning "this is a different kind of thing" on the rail's
-   switches. Layout is the Curves view's rail + content grid (`.curves`), so the surfaces read the
-   same even though the content doesn't. */
+   A live instrument over WebUSB — driven, though, by the one selected experiment, which is why its
+   tab sits in the view bar's file-view group with every other lens on that file. What stays set
+   apart is the view itself: it uses magenta where the rest of the chrome uses cyan — the palette's
+   second accent, already meaning "this is a different kind of thing" on the rail's switches.
+   Layout is the Curves view's rail + content grid (`.curves`), so the surfaces read the same even
+   though the content doesn't. */
 
-/* The tab strip is now three groups rather than one control: Files, then the file views, then
-   Instrument. The gaps plus the separate borders are the whole visual argument that the file
-   selection doesn't apply to the two on the ends — see `ViewSelector.tsx`. */
-.viewselect {
+/* The view bar is two groups rather than one control: Files, then the file views. The gap plus
+   the separate borders are the whole visual argument that the file selection doesn't apply to the
+   first one — see `ViewBar.tsx`. */
+.viewbar {
   display: inline-flex;
   align-items: center;
   gap: 10px;
 }
-/* At the tightest collapse level the three groups' own gaps and borders are pure overhead next
-   to icon-only tabs — tightening it here (rather than for `.viewselect` generally) buys back the
+/* At the tightest collapse level the groups' own gaps and borders are pure overhead next
+   to icon-only tabs — tightening it here (rather than for `.viewbar` generally) buys back the
    few pixels an extra tab costs without touching any tab's own padding, so tap targets stay the
    same size at every level. */
-.app__header[data-fit="3"] .viewselect {
+.app__header[data-fit="3"] .viewbar {
   gap: 4px;
 }
-.segmented--instrument {
-  border-color: var(--neon-magenta-dim);
-}
-.segmented--instrument .segmented__item.is-active {
-  background: var(--neon-magenta-dim);
-  box-shadow: inset 0 -2px 0 var(--neon-magenta);
-}
-/* Files (`FilesTableView.tsx`): the same "different kind of tab" treatment as Instrument above,
-   sharing every rule but the colour — green (`--good`) rather than magenta, so the two groups
-   read as distinct from each other as well as from the file-backed block between them. */
+/* Files (`FilesTableView.tsx`): the catalog rather than a lens on the selected file, and green
+   (`--good`) rather than the chrome's cyan, so its group reads as a different kind of tab. */
 .segmented--files {
   border-color: var(--good-dim);
 }
 .segmented--files .segmented__item.is-active {
   background: var(--good-dim);
   box-shadow: inset 0 -2px 0 var(--good);
+}
+
+/* Files exist but none is selected — every one released, or a `#file=` this browser can't
+   resolve. The chrome is unchanged (that is the point: the way out is to pick a file), so this is
+   only the placeholder where a view would be. */
+.app__noselection {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 100%;
+  padding: 40px 20px;
+  color: var(--dim);
+  text-align: center;
+}
+.app__noselection strong {
+  color: var(--fg);
 }
 
 /* A page with the header but no file bar (`app--nofiles`) still has to fill the viewport, so it

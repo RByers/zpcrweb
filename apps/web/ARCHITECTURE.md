@@ -1,13 +1,16 @@
 # Web app architecture
 
 The web app (`@zpcrweb/web`) is a browser UI over [`@zpcrweb/core`](../../packages/core). It
-loads one or more files — `.zpcr`, `.pcrd`, a Biomeme run export (`.json`, see "A third format:
-Biomeme" below), or a standalone plate file (`.pltd` or zpcrweb's own `.plt.csv`, see
-"Standalone plate entries and attach" below) — switches between them, and explores each through
-up to seven views: Overview, Protocol, Curves, Plates, Reference, Calibration, and Raw (a
-standalone plate file only gets Overview, Plates and Raw; a standalone protocol file only
-Overview, Protocol and Raw; a Biomeme run only Overview, Protocol, Curves, Plates and Raw — see
-below).
+holds a catalog of files — `.zpcr`, `.pcrd`, a Biomeme run export (`.json`, see "A third format:
+Biomeme" below), a standalone plate file (`.pltd` or zpcrweb's own `.plt.csv`, see "Standalone
+plate entries and attach" below) or a thermal protocol (`.prcl.txt`) — **loads** some of them,
+**selects exactly one** of those, and explores it through up to eight views: Overview, Protocol,
+Curves, Plates, Reference, Calibration, Raw and Instrument (a standalone plate file only gets
+Overview, Plates and Raw; a standalone protocol file only Overview, Protocol and Raw; a Biomeme
+run only Overview, Protocol, Curves, Plates and Raw — see below).
+
+Those three sets — the catalog, the loaded files, the one selection — are the app's spine; see
+"Files, loaded files, and the one selection" below before changing anything that touches them.
 
 ## Format independence
 
@@ -15,7 +18,7 @@ below).
 observation.**
 
 Concretely, outside `RawFilesView`/`PcrdRawView`, the `App.tsx` line that chooses between them,
-and the capability checks that disable `ViewSelector` tabs for a standalone plate or protocol
+and the capability checks that disable `ViewBar` tabs for a standalone plate or protocol
 entry or a Biomeme run (`isStandalonePlate`/`isStandaloneProtocol`/`isBiomeme` in `App.tsx` — a real capability difference: a
 Biomeme `Zpcr` has no reference row or `.Dcal` calibrations for Reference/Calibration to show,
 same as a standalone plate has no curves), no component may:
@@ -424,21 +427,96 @@ alongside `"zpcr"`/`"pcrd"`:
   experiment — through Overview's attach menu, or by editing it on the Protocol tab. A run that has
   happened doesn't get it: its protocol is the record of what the block was asked to do.
 
+## Files, loaded files, and the one selection
+
+Three sets, nested, and every part of the UI belongs to exactly one of them. Getting this right is
+what lets the app hold thousands of files without becoming slow, so it is stated here as an
+invariant rather than left to be inferred from the store.
+
+| Set | What it is | Where it shows | Where it lives |
+| --- | ---------- | -------------- | -------------- |
+| **files** (the catalog) | every file this browser holds | the **Files** tab (`FilesTableView`) | `ZpcrStore.files` — `FileEntry[]`, metadata only |
+| **loaded files** | those whose bytes are in memory and decoded | the **file bar** (`FileBar`), one chip each | `ZpcrStore.loaded` — `LoadedFile[]`, with `bytes` |
+| **the selection** | exactly one loaded file, or none | the cyan chip; every tab of the **view bar** | `ZpcrStore.activeId` / `active` |
+
+The two bars are named after those sets and are referred to by those names throughout the code:
+the **view bar** is the tab strip (`components/ViewBar.tsx`), the **file bar** is the row of chips
+under it (`components/FileBar.tsx`).
+
+### The invariants
+
+1. **A file is decoded only as part of being loaded.** Unzipping, decrypting and parsing happen in
+   exactly two places — `addFiles` (the bytes are already in hand) and `setLoaded(id, true)` (which
+   reads them from IndexedDB) — and the derived `runs`/`plateFiles`/`protocolFiles` maps are built
+   from the loaded set alone. Nothing else may open an archive. In particular **listing files must
+   never decode one**: a catalog of a thousand runs would otherwise cost a thousand unzips to draw
+   a table.
+2. **Everything the catalog shows comes from a cached summary.** At the one moment a file *is*
+   decoded, `lib/fileSummary.ts` reduces it to a `FileSummary` — name, run date, protocol name,
+   plate name, targets, samples, read count, run state, encryption — and `db.ts`'s `putSummary`
+   caches it beside the file. That is what the Files table renders, loaded or not. It is refreshed
+   on every load and whenever the decode changes (a password landing, a plate attached, a name
+   typed), and written synchronously when a file is *released*, since after that there is nothing
+   left to derive it from. A file that has never been loaded has no summary and renders as dashes —
+   the honest answer, not a guess.
+3. **The view bar is tied to the selection, exactly.** Every tab but Files is a lens on the one
+   selected file, and `App.tsx`'s `enabledViewsFor` decides which of them that file can answer.
+   Three situations produce the same empty answer, because they are the same fact — no tab has a
+   file to be a lens on: nothing selected, the selected file's bytes still arriving, or a run that
+   hasn't decoded (locked behind the password prompt, or failed). The strip still renders; it is
+   simply all disabled but **Files**, which is a lens on the catalog and therefore always live. So
+   are the wordmark (About) and the load button, which are not lenses on a file at all — with
+   nothing selected, those are the ways out.
+4. **The selection is always a loaded file, or nothing.** Selecting a released file loads it
+   (`setActive` → `setLoaded(id, true)`); releasing the selected one moves the selection to another
+   loaded file or clears it. There is no third state where the app is pointed at bytes it doesn't
+   have. "Nothing selected" is a real, reachable state — every file released, or a `#file=` naming
+   a file this browser doesn't have — and the app renders it as itself rather than substituting
+   some other file.
+5. **Loading is persisted, so a session reopens as it was left.** `FileSettings.loaded` (formerly
+   `visible`, when every file was loaded and the flag only decided whether it got a chip) rides in
+   the same per-file settings record as `modified`. On startup the whole catalog is read as
+   metadata and only the previously-loaded files have their bytes fetched.
+
+### What the two bars do
+
+- A chip's **✕ releases** the file: bytes out of memory, chip off the bar, file untouched in
+  storage and still listed in the catalog. No confirmation, because nothing is at risk.
+- The Files table's **checkbox is `loaded`** — the other direction of the same act — and its **✕
+  deletes**, arming first (red waste bin, click again). That is the only delete in the app.
+- Clicking a **row** selects the file, loading it if needed, and lands on its own first enabled
+  tab; the Protocol/Plate/Reads cells land on that view instead.
+
+### Instrument is a file view
+
+The Instrument tab sits in the view bar's file-view group like any other, and is enabled for a
+`.zpcr` and nothing else. It used to sit apart, on the argument that a cycler is not a file — but
+what it actually does is start *the selected experiment* and report on the run that comes out of
+it, which makes it exactly as file-backed as Protocol is. Keeping it outside meant the strip had a
+tab whose meaning didn't move with the selection, which is the one thing this bar must not have.
+See "The Instrument view" below.
+
 ## State & persistence
 
-`state/useZpcrStore.ts` is the single store hook. It holds the list of loaded (not yet parsed)
-files, the active file id, a per-file settings map, the derived `runs`/`plateFiles` maps (see
-"The `.pcrd` password gate" above and "Standalone plate entries and attach"), and the
-globally-selected view (`view`/`setView`, plain `useState` — not persisted, and not part of the
-per-file settings map, so switching files never changes which view is showing). `state/db.ts` is
-a minimal IndexedDB wrapper with two object stores:
+`state/useZpcrStore.ts` is the single store hook. It holds the catalog (`FileEntry[]`), the loaded
+files (`LoadedFile[]`, bytes in memory), the active file id, a per-file settings map, the derived
+`runs`/`plateFiles` maps over the loaded set (see "The `.pcrd` password gate" above and "Standalone
+plate entries and attach"), and the globally-selected view (`view`/`setView`, plain `useState` —
+not persisted, and not part of the per-file settings map, so switching files never changes which
+view is showing). `state/db.ts` is a minimal IndexedDB wrapper with three object stores:
 
 - `files` — `{ id, name, size, addedAt, bytes, kind }`; **raw bytes** are stored so files
   survive reloads and are re-parsed (`parseZpcr`/`parsePcrd`/`parsePltd`/`parsePlateCsv`, by
-  `kind`) on load. `id` is a `name:size` key, which also dedupes re-adding the same file (an
+  `kind`) when loaded. `id` is a `name:size` key, which also dedupes re-adding the same file (an
   attach changes `size`, so re-persisting after one just writes the same `id` again — no
   separate override record to keep in sync, see above). `kind` defaults to `"zpcr"` for records
-  written before `.pcrd` support existed.
+  written before `.pcrd` support existed. **Read one id at a time** (`getFileBytes`), never in
+  bulk: this store is the expensive one, and only the loaded set ever touches it.
+- `meta` — `{ id, name, size, addedAt, lastModified, kind, summary? }`, one small record per file,
+  read whole on startup. `summary` is the cached decode described under "Files, loaded files, and
+  the one selection" above, and is what the Files table draws. Added in DB version 2; the upgrade
+  seeds a record per existing file from the `files` store's own fields, deliberately without a
+  summary — deriving one would mean decoding, and decoding only happens on load.
 - `settings` — **display state** (plus the one `modified` flag noted below): `{ fileId,
   enabledChannels[], enabledWells[],
   enabledRefCols[], baseline, curveView, drawBaseline, scale, … }`, so each file remembers its
@@ -453,8 +531,8 @@ a minimal IndexedDB wrapper with two object stores:
   `useZpcrStore.ts`'s `fromStored()` migrates `curveBaseline: "raw"` to `curveView: "absolute"`
   (anything else to `"relative"`) and drops the region override entirely.
 
-Deleting a file removes both its `files` and `settings` records and drops it from memory —
-exposed as a clear affordance on each file chip.
+Deleting a file removes its `files`, `meta` and `settings` records and drops it from both the
+catalog and memory — exposed as the Files table's two-click delete.
 
 The `settings` record carries one field that isn't display state at all: `modified`, meaning this
 file's *content* has been edited since it was loaded and not since downloaded (see "Deleting an
@@ -674,13 +752,14 @@ so every call site keeps writing one `onChange({ … })` regardless of where the
   plate's target list — it is long enough to wrap to several lines, and every target it names is
   already visible in the grid below.
 - **Raw** — `RawFilesView` for `.zpcr`, `PcrdRawView` for `.pcrd` (see "Raw views" below).
-- **Instrument** — a live instrument over USB rather than a file; see "The Instrument view" below.
+- **Instrument** — a live instrument over USB, driven by the selected experiment; enabled for a
+  `.zpcr` only. See "The Instrument view" below.
 - **About** — `AboutView` (`components/views/AboutView.tsx`): one card carrying both the credits
   (name, the "nothing leaves your device" line, author and GitHub links) *and* the large
   `DropZone` plus the "Load an example file" link. About and the welcome screen used to be two
   separate screens; they're one now, so a first-time visitor sees what the app is and where their
   data goes on the same screen that asks for a file, and there's a single place to keep current.
-  It's the one view with no tab in `ViewSelector` — the header wordmark is a `<button>` that
+  It's the one view with no tab in `ViewBar` — the header wordmark is a `<button>` that
   switches to it — and the one that renders with no file loaded, so the empty state's
   `app--empty` branch shows it unconditionally. `onBack` is what distinguishes the two uses:
   `App` keeps the last non-About view in a ref and passes `onBack` only when a file is loaded, so
@@ -1925,8 +2004,8 @@ response curves, not channel numbers.
   intrinsic width used to stretch the whole `.app` grid past a phone viewport and push every
   view into horizontal overflow. The tabs therefore live in their own `.app__views` scroller
   (`min-width: 0; overflow-x: auto`) and the logo/drop button are `flex: 0 0 auto`.
-- **The tab strip is the same seven tabs for every file.** A tab a file has no answer for is
-  *disabled*, never dropped (`ViewSelector`'s `enabled` prop, fed by `App.tsx`'s
+- **The view bar is the same eight file views for every file.** A tab a file has no answer for is
+  *disabled*, never dropped (`ViewBar`'s `enabled` prop, fed by `App.tsx`'s
   `enabledViewsFor`). A strip that changed shape per file moved every other tab out from under
   the pointer on each selection change, and read as a per-file menu rather than as the app's
   fixed set of lenses; greying a tab out says "not for this file", while removing it says
@@ -1945,11 +2024,11 @@ response curves, not channel numbers.
   when the current one is disabled is still `App.tsx`'s job (the first enabled tab).
 - The header **goes iconographic when it stops fitting** rather than scrolling, in four steps
   driven by a `data-fit` attribute that `state/useHeaderFit.ts` sets by measurement: 0 is the
-  full `zpcr//web` + seven labelled tabs (each with its line icon from `components/ViewIcons.tsx`)
+  full `zpcr//web` + nine labelled tabs (each with its line icon from `components/ViewIcons.tsx`)
   + "load file"; 1 drops the wordmark's `//web` tail and the load button's word; 2 drops every
   tab label *but the selected one's*, so the current view still reads as a word for as long as
   there's room for it; 3 is all icons. Nothing is lost at any level — each control keeps its word
-  in `title` + `aria-label` (hence `Logo`'s split spans and `ViewSelector`'s explicit labels), so
+  in `title` + `aria-label` (hence `Logo`'s split spans and `ViewBar`'s explicit labels), so
   hover, screen readers and `tools/uitest.mjs`'s name-based tab lookups all still work. Only
   `.app__header` carries `data-fit`, so the welcome screen's `.app__brand` — no tabs, plenty of
   room — keeps the full mark unconditionally.
@@ -2008,8 +2087,9 @@ response curves, not channel numbers.
 
 ## The Instrument view
 
-The one view that operates on **no file at all**. It connects to a CFX96 over WebUSB and shows the
-instrument: identity, live status, its filesystem, and the decoded protocol traffic. Everything it
+A lens on the selected experiment that happens to talk to hardware: it connects to a CFX96 over
+WebUSB and shows the instrument — identity, live status, its filesystem, and the decoded protocol
+traffic — in the service of starting *this* experiment and following the run that comes out of it. Everything it
 knows about the protocol comes from `@zpcrweb/core`'s `CfxDevice` (see the root
 [`ARCHITECTURE.md`](../../ARCHITECTURE.md#talking-to-an-instrument-not-a-file-srcusb) and
 [`usb.md`](../../usb.md)), per the standing rule that logic lives in the library — the app side is
@@ -2017,20 +2097,18 @@ knows about the protocol comes from `@zpcrweb/core`'s `CfxDevice` (see the root
 `navigator.usb`, a poll timer, the traffic recording and its bounded display window, and the React
 state the components render.
 
-**Why it is set apart in the chrome.** Every other tab is a lens on the active file, and the file
-bar underneath says which one. This tab isn't:
+**Its tab is an ordinary file view.** It sits in the view bar's file-view group with every other
+lens on the selected file, and is enabled for a `.zpcr` and nothing else (`App.tsx`'s
+`enabledViewsFor`). It used to sit in a group of its own, on the argument that a cycler is not a
+file — but starting a run needs a protocol, and that comes from a file, since the instrument has no
+protocol library of its own to pick from (`usb.md` §5.1). The tab's meaning moves with the
+selection exactly like Protocol's does, so it is grouped like Protocol's. What stays set apart is
+the view's own surface, which uses magenta where the rest of the chrome uses cyan.
 
-- Its tab sits in its **own group** in the strip (`ViewSelector`'s `INSTRUMENT_VIEW`, kept out of
-  `ALL_VIEWS`), separated by a gap and accented magenta where the file tabs are cyan. Grouping it
-  with the rest would assert that the file *selection* applies to it in the usual way.
-- It renders **with nothing loaded**, ahead of the empty-state branch, so someone with a cycler
-  and no files can reach it. That is also why the welcome screen carries a "Connect an instrument
-  over USB" button: it is the one thing the drop zone can't offer.
-
-**But it keeps the file bar, meaning exactly what it always means.** Starting a run needs a
-protocol, and that comes from a file — the instrument has no protocol library of its own to pick
-from (`usb.md` §5.1). So the same `FileBar` renders here, with the same single `activeId` selection
-it carries everywhere else, and on this tab that file is **the experiment to start**.
+One consequence: with nothing selected there is no Instrument tab to reach, so the welcome screen's
+"Connect an instrument over USB" button **creates the experiment first** and lands on its Instrument
+tab (`App.tsx`'s `createExperiment(parts, "instrument")`). Someone with a cycler and no files starts
+by making the experiment they mean to run, which is what they were going to do anyway.
 
 **One experiment, one file.** This is the model the whole view rests on, and it replaced a
 considerably larger one. A run used to be assembled here from a **three-slot staging selection** — a
@@ -2057,7 +2135,7 @@ gone with it.
 | ----------- | --------- |
 | a **pending** experiment — no results, never started | starts it; Start arms once it has a name and a protocol |
 | a run **with results** — in progress, or over | won't start it, and offers the clone that is the way to run it again |
-| anything else, or nothing loaded | says so, and names where experiments come from |
+| a `.zpcr` that hasn't decoded | says so, and names where experiments come from (the tab is disabled for every other kind, so this is the only remaining case) |
 
 Refusing the second case is the point of it rather than a limitation: re-running a file that already
 holds results would either overwrite them or contradict them, so the fix is a new experiment, and the

@@ -1,4 +1,4 @@
-/** Line icons for the header controls — the view tabs (see `ViewSelector`) and the compact
+/** Line icons for the header controls — the view tabs (see `ViewBar`) and the compact
  * DropZone. They carry the whole meaning on a narrow viewport, where `app.css` hides the word
  * labels and leaves only these; on a wide one they sit beside the label.
  *

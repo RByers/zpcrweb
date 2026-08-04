@@ -309,13 +309,13 @@ carries no report to plot —
 and what happens when a file with unsaved edits is deleted — an edited file (a rename is enough)
 wears a dot and its ✕ arms into a waste bin that takes a second click, Escape disarms it, neither
 state widens the chip, the flag survives a reload, and downloading the file puts it back to
-deleting on one click — and that the view-tab strip is the *same seven tabs* for every file, a tab
-the file can't answer being disabled rather than dropped (`ViewSelector`'s `enabled` prop),
-including a run still behind the password prompt, which greys out all six file tabs rather than
-dropping the strip — a claim about two files' headers matching that no single-file check can make
-— and the file bar's two kinds of selection, the run staged in the Instrument view reading as its
-one primary chip (cyan, and tapping it can't clear it) while the `.prcl.txt` over it is auxiliary
-(magenta) — plus the file
+deleting on one click — and that the view bar is the *same eight file views* for every file, a tab
+the file can't answer being disabled rather than dropped (`ViewBar`'s `enabled` prop), including a
+run still behind the password prompt, which greys out every file view rather than dropping the
+strip — a claim about two files' headers matching that no single-file check can make — and the
+three sets the app rests on: releasing a file leaves its Files-table row intact, still described
+from the summary cached in IndexedDB when it was last loaded, and a reload brings back the loaded
+set and nothing else — plus the file
 chip's icon, whose shape is what the file *is* (core's `fileCategory`, so the two plate encodings
 draw alike) while its colour stays the encryption status, two claims a screenshot can only show
 one at a time.

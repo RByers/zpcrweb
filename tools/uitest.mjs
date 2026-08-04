@@ -201,11 +201,11 @@ async function tabBecomes(cdp, label, timeout = 8000) {
   return seen;
 }
 
-/** Click a `.viewselect` tab by its visible label — the Files/Instrument tabs (their own
- * `.segmented--*` groups, `ViewSelector.tsx`) as well as the main strip's. Scoped to `.viewselect`
+/** Click a `.viewbar` tab by its visible label — the Files/Instrument tabs (their own
+ * `.segmented--*` groups, `ViewBar.tsx`) as well as the main strip's. Scoped to `.viewbar`
  * rather than every `[role="tab"]` in the page, since a file chip is one too. */
 const clickTab = (cdp, label) =>
-  cdp.eval(`(() => { const t = [...document.querySelectorAll('.viewselect [role="tab"]')]
+  cdp.eval(`(() => { const t = [...document.querySelectorAll('.viewbar [role="tab"]')]
       .find((b) => b.textContent.trim() === ${JSON.stringify(label)});
       t?.click(); })()`);
 
@@ -1074,15 +1074,14 @@ async function passwordChecks(chrome, origin, pw) {
   });
   const lockedStrip = await locked
     .eval(
-      `JSON.stringify([...document.querySelectorAll('.viewselect [role="tab"]')]
+      `JSON.stringify([...document.querySelectorAll('.viewbar [role="tab"]')]
          .map((b) => ({ label: b.textContent.trim(), off: b.disabled })))`,
     )
     .then(JSON.parse);
   check(
-    "a locked run keeps the tab strip, with every file tab disabled",
+    "a locked run keeps the tab strip, with every file view disabled",
     lockedStrip.length === 9 &&
-      lockedStrip.filter((t) => t.off).length === 7 &&
-      !lockedStrip.find((t) => t.label === "Instrument").off &&
+      lockedStrip.filter((t) => t.off).length === 8 &&
       !lockedStrip.find((t) => t.label === "Files").off,
     JSON.stringify(lockedStrip),
   );
@@ -1647,14 +1646,13 @@ async function instrumentRunChecks(chrome, origin) {
   // also the degrade-gracefully case (a target it can't name, still counted correctly).
   const protoTabs = await cdp
     .eval(
-      `JSON.stringify([...document.querySelectorAll('.viewselect [role="tab"]')]
+      `JSON.stringify([...document.querySelectorAll('.viewbar [role="tab"]')]
          .map(b => ({ label: b.textContent.trim(), off: b.disabled })))`,
     )
     .then(JSON.parse);
   check(
-    "a .prcl.txt enables Overview, Protocol and Raw (plus the two file-independent tabs), nothing else",
-    protoTabs.filter((t) => !t.off).map((t) => t.label).join(",") ===
-      "Files,Overview,Protocol,Raw,Instrument",
+    "a .prcl.txt enables Overview, Protocol and Raw (plus the catalog tab), nothing else",
+    protoTabs.filter((t) => !t.off).map((t) => t.label).join(",") === "Files,Overview,Protocol,Raw",
     JSON.stringify(protoTabs.filter((t) => !t.off).map((t) => t.label)),
   );
 
@@ -1990,7 +1988,7 @@ async function instrumentRunChecks(chrome, origin) {
         half: l.firstChild.textContent.trim(),
         state: l.querySelector("span")?.textContent.trim() ?? null,
       })),
-      tabs: [...document.querySelectorAll('.viewselect [role="tab"]')]
+      tabs: [...document.querySelectorAll('.viewbar [role="tab"]')]
         .filter((b) => !b.disabled)
         .map((b) => b.textContent.trim()),
     };
@@ -2164,7 +2162,7 @@ async function runSeedChecks(chrome, origin) {
 
   const strip = await cdp
     .eval(
-      `JSON.stringify(Object.fromEntries([...document.querySelectorAll('.viewselect [role="tab"]')]
+      `JSON.stringify(Object.fromEntries([...document.querySelectorAll('.viewbar [role="tab"]')]
          .map((b) => [b.textContent.trim(), !b.disabled])))`,
     )
     .then(JSON.parse);
@@ -2386,23 +2384,23 @@ async function experimentNameChecks(chrome, origin) {
     JSON.stringify(raw),
   );
 
-  // The tab strip is static: the same nine tabs whatever the file is, with the ones this file
-  // has no answer for *disabled* rather than removed (`ViewSelector`'s `enabled` prop). Only a
+  // The view bar is static: the same nine tabs whatever the file is, with the ones this file
+  // has no answer for *disabled* rather than removed (`ViewBar`'s `enabled` prop). Only a
   // browser can show this — it is a claim about two different files' headers being the same
   // shape, and the failure it guards against (tabs appearing and disappearing under the pointer
   // as the selection moves) is invisible to any single-file check.
   const strip = () =>
     cdp
       .eval(
-        `JSON.stringify([...document.querySelectorAll('.viewselect [role="tab"]')]
+        `JSON.stringify([...document.querySelectorAll('.viewbar [role="tab"]')]
            .map(b => ({ label: b.textContent.trim(), off: b.disabled })))`,
       )
       .then(JSON.parse);
   const offLabels = (s) => s.filter((t) => t.off).map((t) => t.label);
   const bio = await strip();
   check(
-    "a Biomeme run keeps all nine tabs, greying out the two it can't answer",
-    bio.length === 9 && offLabels(bio).join(",") === "Reference,Calibration",
+    "a Biomeme run keeps all nine tabs, greying out the three it can't answer",
+    bio.length === 9 && offLabels(bio).join(",") === "Reference,Calibration,Instrument",
     JSON.stringify(bio),
   );
 
@@ -2422,6 +2420,108 @@ async function experimentNameChecks(chrome, origin) {
     run.length === 9 && run.map((t) => t.label).join(",") === bio.map((t) => t.label).join(","),
     JSON.stringify(run),
   );
+  cdp.close();
+}
+
+
+/**
+ * The catalog, the loaded set, and the one selection — the three-way split the whole app hangs on
+ * (`apps/web/ARCHITECTURE.md`, "Files, loaded files, and the one selection").
+ *
+ * Every claim here is invisible to a screenshot and to Vitest alike, because each is about what
+ * survives a state change no single render shows:
+ *
+ * - releasing a file leaves its **row** intact, still describing the run — that is the cached
+ *   summary in IndexedDB doing its job, and the failure it guards against is a Files table that
+ *   goes blank (or, worse, silently re-reads every archive) the moment a file leaves memory;
+ * - with nothing selected the view bar disables **every** file view and keeps Files, while the
+ *   logo and the load button — which are not lenses on a file — stay live;
+ * - a reload brings back the loaded set and nothing else, which is the property that makes a
+ *   catalog of thousands of files affordable in the first place.
+ */
+async function loadedSetChecks(chrome, origin) {
+  console.log("\nfiles, loaded files, and the selection");
+  const cdp = await openPage(chrome.base, origin);
+  await emptyReload(cdp, origin);
+  await loadFile(cdp, join(REPO, "samples", EXAMPLE));
+  await waitFor(() => chipPresent(cdp, "S183"), { what: "the .zpcr chip" });
+
+  const strip = () =>
+    cdp
+      .eval(
+        `JSON.stringify([...document.querySelectorAll('.viewbar [role="tab"]')]
+           .map((b) => ({ label: b.textContent.trim(), off: b.disabled })))`,
+      )
+      .then(JSON.parse);
+  const chips = () => cdp.eval(`document.querySelectorAll(".filebar .filechip").length`);
+  const row = () =>
+    cdp
+      .eval(
+        `(() => { const r = document.querySelector(".filesview__row");
+           if (!r) return "null";
+           const tds = [...r.querySelectorAll("td")].map((td) => td.textContent.trim());
+           return JSON.stringify({ loaded: r.querySelector("input").checked, cells: tds }); })()`,
+      )
+      .then((v) => (v === "null" ? null : JSON.parse(v)));
+
+  // Release the one file from the chip's ✕. The selection has nowhere to go, which is exactly the
+  // state the strip has to handle.
+  await cdp.eval(`(() => { document.querySelector(".filebar .filechip__del").click(); })()`);
+  await waitFor(async () => (await chips()) === 0, { what: "the chip to go" });
+  const empty = await strip();
+  check(
+    "with nothing selected every file view is disabled, and only Files is left",
+    empty.filter((t) => !t.off).map((t) => t.label).join(",") === "Files",
+    JSON.stringify(empty.filter((t) => !t.off).map((t) => t.label)),
+  );
+  const chrome_ = await cdp.eval(
+    `JSON.stringify({
+       logo: !!document.querySelector(".app__logo") && !document.querySelector(".app__logo").disabled,
+       load: !!document.querySelector('.dropzone input[type="file"]'),
+       says: document.querySelector(".app__noselection")?.textContent.trim() || "",
+     })`,
+  ).then(JSON.parse);
+  check(
+    "…while the About link and the load button, which are not lenses on a file, stay live",
+    chrome_.logo && chrome_.load && /No file selected/.test(chrome_.says),
+    JSON.stringify(chrome_),
+  );
+
+  // The row is still there, and still says what the run *is* — from the summary cached when the
+  // file was loaded, with no archive read to produce it.
+  await clickTab(cdp, "Files");
+  await waitFor(async () => !!(await row()), { what: "the released file's row" });
+  const released = await row();
+  check(
+    "a released file keeps its row, still described from its cached summary",
+    released.loaded === false &&
+      released.cells.some((c) => /S183/.test(c)) &&
+      released.cells.some((c) => /^\d+$/.test(c)),
+    JSON.stringify(released),
+  );
+
+  // And a reload restores exactly that: the file is in the catalog, out of memory, unselected.
+  await cdp.eval(`window.location.reload()`);
+  await sleep(1200);
+  await clickTab(cdp, "Files");
+  await waitFor(async () => !!(await row()), { what: "the row after a reload" });
+  const afterReload = await row();
+  check(
+    "…and stays released across a reload, rather than every file loading on startup",
+    afterReload.loaded === false && (await chips()) === 0,
+    JSON.stringify({ row: afterReload, chips: await chips() }),
+  );
+
+  // Selecting it from the table loads it — the selection is by definition a loaded file.
+  await cdp.eval(`(() => { document.querySelector(".filesview__row").click(); })()`);
+  await waitFor(async () => (await chips()) === 1, { what: "the file to load on selection" });
+  const reopened = await strip();
+  check(
+    "selecting a released file loads it, and the file views come back",
+    reopened.filter((t) => !t.off).length > 1,
+    JSON.stringify(reopened.filter((t) => !t.off).map((t) => t.label)),
+  );
+
   cdp.close();
 }
 
@@ -3097,6 +3197,7 @@ async function main() {
     await deleteConfirmChecks(chrome, origin);
     await protocolEditorChecks(chrome, origin);
     await cloneChecks(chrome, origin);
+    await loadedSetChecks(chrome, origin);
   } finally {
     chrome.stop();
     dev.stop();

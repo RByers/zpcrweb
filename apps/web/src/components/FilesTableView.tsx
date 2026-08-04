@@ -1,17 +1,23 @@
 /**
- * The full files table — every loaded file (not just the visible ones the bar shows), one row
- * each, sortable by any column. Opened from the toggle at the file bar's left edge
- * (`FileBar.tsx`'s `FilesViewToggle`) and fills `<main>` while it's open, replacing whatever view
- * was showing.
+ * The **catalog**: every file this browser holds, loaded or not, one row each, sortable by any
+ * column. It is the "Files" tab of the view bar — the one tab that is not a lens on the selected
+ * file — and fills `<main>` while it's open.
  *
- * Two things live here that the bar no longer does:
+ * **Every cell here comes from a file's cached summary** (`state/db.ts`'s `FileSummary`, written
+ * by `lib/fileSummary.ts` each time a file is loaded), never from a decoded archive. That is what
+ * makes a catalog of thousands of files cost nothing to list: no bytes are read to draw this
+ * table, and nothing here can be the reason a file gets unzipped. A file that has never been
+ * loaded by a version of the app that writes summaries shows dashes until it is opened once,
+ * which is the honest answer — nothing has read its content yet.
  *
- * - The checkbox column is {@link FileSettings.visible} — what actually controls the bar. A
- *   chip's ✕ only ever hides now (see `FileBar.tsx`'s `HideButton`); this is where a file comes
- *   back, and the only other place besides selecting it.
- * - The delete control (✕ → red waste bin, click again to delete) moved here from the bar
- *   wholesale — this is the one place a file is actually removed from IndexedDB, for every file,
- *   not only a modified one. See {@link DeleteButton}.
+ * Two things live here that the file bar doesn't do:
+ *
+ * - The checkbox column is {@link FileSettings.loaded} — whether the file's bytes are in memory
+ *   and it has a chip. A chip's ✕ only ever releases (see `FileBar.tsx`'s `UnloadButton`); this is
+ *   where a file comes back, and the only other place besides selecting it.
+ * - The delete control (✕ → red waste bin, click again to delete) — this is the one place a file
+ *   is actually removed from IndexedDB, for every file, not only a modified one. See
+ *   {@link DeleteButton}.
  *
  * A row's hover card (see {@link RowHoverCard}) mirrors the file bar's own — same detailed type
  * description and targets/samples chips — but leaves out whatever the table's columns already say
@@ -26,29 +32,27 @@
  */
 import { useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { fileKindDescription, plateTargets, type FileKind, type PlateDefinition } from "@zpcrweb/core";
-import type { LoadedFile, PlateFileResult, RunResult, ViewId } from "../state/useZpcrStore";
-import type { ExperimentIdentity } from "../lib/experiment";
+import { fileKindDescription, type FileKind } from "@zpcrweb/core";
+import type { FileEntry, ViewId } from "../state/useZpcrStore";
+import type { FileSummary } from "../state/db";
 import { formatCompactDateTime } from "../lib/experiment";
-import { plateDisplayName } from "../lib/plateNames";
 import { channelColor } from "../lib/channelColors";
-import { usePltdPassword } from "../state/pltdPassword";
 import { FileKindIcon } from "./FileIcons";
 import { TrashIcon } from "./TrashIcon";
 
 interface Props {
-  files: LoadedFile[];
-  runs: Map<string, RunResult>;
-  plateFiles: Map<string, PlateFileResult>;
-  experiments: Map<string, ExperimentIdentity>;
+  /** The whole catalog — metadata and cached summaries, no bytes. */
+  files: FileEntry[];
   activeId: string | null;
-  hiddenIds: Set<string>;
+  /** Which files are loaded (`ZpcrStore.loadedIds`) — the checkbox column. */
+  loadedIds: Set<string>;
   modifiedIds: Set<string>;
-  /** Select this file, close the table, and land on its own view — see `App.tsx`'s wiring.
-   * `view`, when given, overrides the file's usual first-enabled-tab landing spot — the
-   * Protocol/Plate/Reads cells use it to go straight to that view rather than Overview. */
+  /** Select this file — which loads it if it isn't — close the table, and land on its own view;
+   * see `App.tsx`'s wiring. `view`, when given, overrides the usual first-enabled-tab landing
+   * spot — the Protocol/Plate/Reads cells use it to go straight to that view rather than Overview. */
   onSelectFile: (id: string, view?: ViewId) => void;
-  onSetVisible: (id: string, visible: boolean) => void;
+  /** Load or release the file — see `ZpcrStore.setLoaded`. */
+  onSetLoaded: (id: string, loaded: boolean) => void;
   onDelete: (id: string) => void | Promise<void>;
   onClose: () => void;
 }
@@ -65,19 +69,6 @@ const EXTENSION_TEXT: Record<FileKind, string> = {
   csv: "plt.csv",
   prcl: "prcl.txt",
 };
-
-/** The plate behind a row, resolved the same way the file bar's hover card does: a standalone
- * `.pltd`/`.csv`'s own parse, or the first plate a run's own archive carries. */
-function plateFor(
-  f: LoadedFile,
-  run: RunResult | undefined,
-  plateFile: PlateFileResult | undefined,
-  password: string,
-): PlateDefinition | null {
-  if (f.kind === "pltd" || f.kind === "csv") return plateFile?.plate ?? null;
-  if (f.kind === "prcl") return null;
-  return run?.zpcr?.plates(password || undefined)[0]?.pltd.plate ?? null;
-}
 
 /** `12.3 kB` under 1000 kB, `1.24 MB` above — the same threshold a file manager uses, so a run
  * archive (hundreds of kB) and a bare plate CSV (a few kB) both read at a sensible precision. */
@@ -99,12 +90,17 @@ interface Row {
    * and not a link, since there is no Protocol view to open for it. */
   protocol: string | null;
   plateName: string;
-  /** Plateread count — undefined for a file that isn't a run. */
+  /** Plateread count — undefined for a file that isn't a run, or hasn't been read yet. */
   reads: number | undefined;
-  plate: PlateDefinition | null;
+  /** The plate's targets and samples, for the hover card — empty when there is no plate. */
+  targets: FileSummary["targets"];
+  samples: string[];
+  /** Whether the row has a cached summary at all; a row without one renders dashes rather than
+   * claiming a file has no protocol or no plate. */
+  summarized: boolean;
   lastModified: number;
   modified: boolean;
-  visible: boolean;
+  loaded: boolean;
 }
 
 type SortKey =
@@ -189,19 +185,20 @@ function SortArrow({ state }: { state: "asc" | "desc" | null }) {
  */
 function RowHoverCard({
   kind,
-  plate,
+  targets,
+  samples,
   style,
 }: {
   kind: FileKind;
-  plate: PlateDefinition | null;
+  targets: FileSummary["targets"];
+  samples: string[];
   style: React.CSSProperties;
 }) {
-  const targets = plate ? plateTargets(plate) : [];
-  const samples = plate?.samples ?? [];
+  const hasPlate = targets.length > 0 || samples.length > 0;
   return (
     <div className="filecard mono" style={style}>
       <div className="filecard__type">{fileKindDescription(kind)}</div>
-      {plate && (
+      {hasPlate && (
         <>
           <div className="filecard__section">
             <div className="filecard__label">Targets</div>
@@ -292,13 +289,13 @@ function FilesRow({
   r,
   isActive,
   onSelectFile,
-  onSetVisible,
+  onSetLoaded,
   onDelete,
 }: {
   r: Row;
   isActive: boolean;
   onSelectFile: (id: string, view?: ViewId) => void;
-  onSetVisible: (id: string, visible: boolean) => void;
+  onSetLoaded: (id: string, loaded: boolean) => void;
   onDelete: (id: string) => void | Promise<void>;
 }) {
   const rowRef = useRef<HTMLTableRowElement>(null);
@@ -318,10 +315,15 @@ function FilesRow({
       <td className="filesview__checkcol">
         <input
           type="checkbox"
-          checked={r.visible}
-          aria-label={`Show ${r.experimentName} in the file bar`}
+          checked={r.loaded}
+          aria-label={`Load ${r.experimentName} into memory`}
+          title={
+            r.loaded
+              ? "Loaded — uncheck to release it from memory; the file stays here"
+              : "Not loaded — check to read it in and give it a chip on the file bar"
+          }
           onClick={(e) => e.stopPropagation()}
-          onChange={(e) => onSetVisible(r.id, e.target.checked)}
+          onChange={(e) => onSetLoaded(r.id, e.target.checked)}
         />
       </td>
       <td className="filesview__typecol">
@@ -336,7 +338,8 @@ function FilesRow({
           createPortal(
             <RowHoverCard
               kind={r.kind}
-              plate={r.plate}
+              targets={r.targets}
+              samples={r.samples}
               style={{ position: "fixed", top: cardPos.top, left: cardPos.left, zIndex: 50 }}
             />,
             document.body,
@@ -371,7 +374,7 @@ function FilesRow({
         )}
       </td>
       <td>
-        {r.plate ? (
+        {r.plateName !== "—" ? (
           <button
             type="button"
             className="filesview__link"
@@ -413,45 +416,42 @@ function FilesRow({
 
 export function FilesTableView({
   files,
-  runs,
-  plateFiles,
-  experiments,
   activeId,
-  hiddenIds,
+  loadedIds,
   modifiedIds,
   onSelectFile,
-  onSetVisible,
+  onSetLoaded,
   onDelete,
   onClose,
 }: Props) {
-  const [password] = usePltdPassword();
   const [sortKey, setSortKey] = useState<SortKey>("date");
   const [dir, setDir] = useState<1 | -1>(-1);
 
+  // Straight from each file's cached summary — see the module comment. Nothing here decodes, or
+  // even reads, an archive.
   const rows = useMemo<Row[]>(() => {
     return files.map((f) => {
-      const run = runs.get(f.id);
-      const plateFile = plateFiles.get(f.id);
-      const identity = experiments.get(f.id);
-      const plate = plateFor(f, run, plateFile, password);
+      const s = f.summary;
       return {
         id: f.id,
         kind: f.kind,
         fileName: f.name,
-        experimentName: identity?.name || f.name,
-        dateText: identity?.dateText || "",
-        dateMs: identity?.date?.getTime() ?? 0,
+        experimentName: s?.name || f.name,
+        dateText: s?.dateMs ? formatCompactDateTime(new Date(s.dateMs)) : "",
+        dateMs: s?.dateMs ?? 0,
         size: f.size,
-        protocol: run?.zpcr?.protocol()?.name || null,
-        plateName: plate ? plateDisplayName(plate) : "—",
-        reads: run?.zpcr?.reads.length,
-        plate,
+        protocol: s?.protocol ?? null,
+        plateName: s?.plate ?? "—",
+        reads: s?.reads ?? undefined,
+        targets: s?.targets ?? [],
+        samples: s?.samples ?? [],
+        summarized: !!s,
         lastModified: f.lastModified,
         modified: modifiedIds.has(f.id),
-        visible: !hiddenIds.has(f.id),
+        loaded: loadedIds.has(f.id),
       };
     });
-  }, [files, runs, plateFiles, experiments, password, modifiedIds, hiddenIds]);
+  }, [files, modifiedIds, loadedIds]);
 
   const sorted = useMemo(() => sortRows(rows, sortKey, dir), [rows, sortKey, dir]);
 
@@ -476,7 +476,7 @@ export function FilesTableView({
         <table className="filesview__tbl">
           <thead>
             <tr>
-              <th className="filesview__checkcol">Show</th>
+              <th className="filesview__checkcol">Loaded</th>
               {COLUMNS.map((c) => {
                 const state = c.key === sortKey ? (dir === 1 ? "asc" : "desc") : null;
                 return (
@@ -507,7 +507,7 @@ export function FilesTableView({
                 r={r}
                 isActive={r.id === activeId}
                 onSelectFile={onSelectFile}
-                onSetVisible={onSetVisible}
+                onSetLoaded={onSetLoaded}
                 onDelete={onDelete}
               />
             ))}
@@ -516,14 +516,15 @@ export function FilesTableView({
             <tr className="filesview__totals">
               {/* checkbox column + every data column but the last (Reads) */}
               <td colSpan={COLUMNS.length}>
-                {files.length} file{files.length === 1 ? "" : "s"} · {formatSize(totalSize)} total
+                {files.length} file{files.length === 1 ? "" : "s"} · {formatSize(totalSize)} total ·{" "}
+                {loadedIds.size} loaded
               </td>
               {/* the last data column (Reads) + the delete column */}
               <td colSpan={2} />
             </tr>
           </tfoot>
         </table>
-        {files.length === 0 && <div className="filesview__empty mono">No files loaded.</div>}
+        {files.length === 0 && <div className="filesview__empty mono">No files.</div>}
       </div>
     </div>
   );

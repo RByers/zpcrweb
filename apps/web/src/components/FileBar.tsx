@@ -35,12 +35,12 @@ interface Props {
   activeId: string | null;
   onSelect: (id: string) => void;
   /**
-   * A chip's ✕: take this file off the bar (`FileSettings.visible = false`), nothing more — the
-   * file stays loaded, in IndexedDB, and in the full files table (the "Files" tab,
-   * `FilesTableView.tsx`). There is no confirm here any more, because there is nothing at risk:
-   * the file is one click of that tab and a checkbox away from being back on the bar.
+   * A chip's ✕: **release** this file (`FileSettings.loaded = false`) — its bytes leave memory and
+   * its chip leaves the bar; the file itself stays in IndexedDB and in the full files table (the
+   * "Files" tab, `FilesTableView.tsx`), described there by its cached summary. There is no confirm,
+   * because nothing is at risk: the file is one click of that tab away from being back.
    */
-  onHide: (id: string) => void;
+  onUnload: (id: string) => void;
   /** Files whose content has been edited since it was loaded and not since downloaded
    * (`ZpcrStore.modifiedIds`). Deleting one of those throws work away that exists nowhere else,
    * so its chip asks a second time first — see {@link DeleteButton}. */
@@ -221,22 +221,22 @@ function HoverCard({
 }
 
 /**
- * The chip's ✕: takes the file off the bar, nothing more — see {@link Props.onHide}. There is no
+ * The chip's ✕: releases the file, nothing more — see {@link Props.onUnload}. There is no
  * confirm, unlike the old two-click delete this replaced, because there is nothing to lose: the
  * file stays in IndexedDB and in the full files table.
  *
  * Still carries the "unsaved" dot in the space under the ✕: a modified file announcing itself is
  * still useful here, it's just no longer what gates this particular button.
  */
-function HideButton({ name, onHide }: { name: string; onHide: () => void }) {
+function UnloadButton({ name, onUnload }: { name: string; onUnload: () => void }) {
   return (
     <button
       className="filechip__del"
-      aria-label={`Hide ${name} from the file bar`}
-      title="Hide from file bar — the file stays loaded; see the full files list to bring it back or delete it"
+      aria-label={`Close ${name}`}
+      title="Close — releases the file from memory; it stays in storage, see the Files tab to reopen or delete it"
       onClick={(e) => {
         e.stopPropagation();
-        onHide();
+        onUnload();
       }}
     >
       <span className="filechip__delglyph">✕</span>
@@ -265,7 +265,7 @@ function FileChip({
   isPending,
   activeLocked,
   onSelect,
-  onHide,
+  onUnload,
 }: {
   f: LoadedFile;
   identity: ExperimentIdentity;
@@ -284,7 +284,7 @@ function FileChip({
   /** See {@link Props.activeLocked}. */
   activeLocked: boolean;
   onSelect: (id: string) => void;
-  onHide: (id: string) => void;
+  onUnload: (id: string) => void;
 }) {
   const mainRef = useRef<HTMLButtonElement>(null);
   const [cardPos, setCardPos] = useState<{ top: number; left: number } | null>(null);
@@ -368,7 +368,7 @@ function FileChip({
           />,
           document.body,
         )}
-      <HideButton name={identity.name} onHide={() => onHide(f.id)} />
+      <UnloadButton name={identity.name} onUnload={() => onUnload(f.id)} />
     </div>
   );
 }
@@ -379,7 +379,7 @@ export function FileBar({
   plateFiles,
   activeId,
   onSelect,
-  onHide,
+  onUnload,
   modifiedIds,
   inProgressIds,
   incompleteIds,
@@ -417,7 +417,7 @@ export function FileBar({
           isPending={pendingIds.has(f.id)}
           activeLocked={!!activeLocked}
           onSelect={onSelect}
-          onHide={onHide}
+          onUnload={onUnload}
         />
       ))}
     </div>
