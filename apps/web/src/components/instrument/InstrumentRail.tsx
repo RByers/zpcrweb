@@ -9,7 +9,7 @@ import { useEffect, useState } from "react";
 import { CFX_COMMANDS, isPaused, type CfxCommandName, type CfxStatusFlags, type RunPlan } from "@zpcrweb/core";
 import type { CfxDeviceHandle } from "../../state/useCfxDevice";
 import type { RunWatchState } from "../../state/useRunWatch";
-import type { StagedRun } from "../../lib/protocolSource";
+import type { InstrumentExperiment } from "../views/InstrumentView";
 import { useLiveThermalHistory } from "../../state/useLiveThermalHistory";
 import { LiveThermalChart } from "./LiveThermalChart";
 
@@ -62,23 +62,23 @@ const STATUS_FLAG_LABELS: [key: keyof CfxStatusFlags, label: string][] = [
 
 export function InstrumentRail({
   instrument,
-  staged,
+  experiment,
   plan,
   runWatch,
   onStart,
-  onNeedName,
 }: {
   instrument: CfxDeviceHandle;
-  staged: StagedRun;
-  /** The staged run as it would be sent, or null when a half is missing (`InstrumentView`). */
+  /** The experiment the active file is, or null when it isn't one (`InstrumentView`). */
+  experiment: InstrumentExperiment | null;
+  /** The experiment as it would be sent, or null when it has no protocol yet (`InstrumentView`). */
   plan: RunPlan | null;
   runWatch: RunWatchState;
-  /** Called the instant Start run is clicked, before anything goes out on the wire: the view
-   * writes the run's `.zpcr` from what is staged (see `InstrumentView`'s `seedRunFile`). */
-  onStart: () => void;
-  /** Put the cursor in the Experiment name field — what a click on Start run does when the only
-   * thing missing is that name (see `promptForName` below). */
-  onNeedName: () => void;
+  /**
+   * Start the experiment: writes the `begun` marker into its own file and then sends the run
+   * (`App`'s `startExperiment`). Unlike the seeding it replaced, this creates no file — the
+   * experiment already exists, so there is nothing to write first and nothing to name.
+   */
+  onStart: (plan: RunPlan) => Promise<void> | void;
 }) {
   const { connection, info, status, rtStatus, busy, lastAction, runProgress, runPending } = instrument;
   const connected = connection === "connected";
@@ -89,32 +89,42 @@ export function InstrumentRail({
   // What a run still needs, in the order it reads: the button says the *first* missing thing
   // rather than a generic "can't start", so the fix is always the next click.
   const blockers = plan?.checks.filter((c) => c.severity === "error") ?? [];
-  // What is missing before the plan is even consulted — the run's two halves, and something to
-  // send them to. None of these is fixed in this rail, or by clicking anything in it.
-  const unstaged = !staged.protocol.value
-    ? "Select a protocol in the file bar first."
-    : !staged.plate.value
-      ? "Select a plate in the file bar first."
-      : !connected
-        ? "Connect to the instrument first."
-        : null;
+  /**
+   * What is missing before the plan is even consulted — an experiment to start, in a state where
+   * starting it means anything, and something to send it to. None of these is fixed in this rail,
+   * or by clicking anything in it; each names where it *is* fixed instead.
+   *
+   * A run that already has results is the one case that isn't a missing piece but a wrong object:
+   * re-running it would either overwrite what it holds or contradict it, so the fix is a new
+   * experiment, and `InstrumentRun` offers the clone that makes one.
+   */
+  const unstartable = !experiment
+    ? "Select or create an experiment first."
+    : !experiment.pending
+      ? "This experiment has already been run — clone it to run the same protocol again."
+      : !experiment.named
+        ? "Name this experiment on its Overview tab first."
+        : !experiment.zpcr.protocolText
+          ? "This experiment has no protocol yet — write one on the Protocol tab."
+          : !connected
+            ? "Connect to the instrument first."
+            : null;
   const missing =
-    unstaged ??
-    (blockers.length > 0
-      ? blockers[0]!.message
-      : runPending
-        ? "The run has been started; waiting for the instrument to report it."
-        : status?.running
-          ? "The instrument is already running something."
-          : null);
-  // An unnamed run is the one blocker whose fix is a single field a few pixels away, and a button
-  // that is merely dim doesn't say which field. So this one stays clickable and the click *is*
-  // the explanation: it puts the cursor in Experiment name (`InstrumentView`'s `focusName`). It
-  // still looks and reports as unstartable — `aria-disabled`, the dimmed class, and a title that
-  // names the requirement — so nothing about it invites a click expecting a run to begin.
-  const promptForName = !unstaged && blockers.some((c) => c.code === "no-experiment-name");
+    unstartable ??
+    // A protocol that is present but unparseable plans to nothing (`InstrumentView`), which is
+    // neither a missing piece nor a failed check — so it needs saying here, or the footnote below
+    // would have no plan to report on.
+    (!plan
+      ? "This experiment's protocol can't be read, so there is nothing to send."
+      : blockers.length > 0
+        ? blockers[0]!.message
+        : runPending
+          ? "The run has been started; waiting for the instrument to report it."
+          : status?.running
+            ? "The instrument is already running something."
+            : null);
   const canStart =
-    !!plan && plan.startable && connected && !busy && !runPending && !status?.running;
+    !unstartable && !!plan && plan.startable && connected && !busy && !runPending && !status?.running;
   // The USB command channel carries one request at a time, so every button that only *this* rail
   // can queue behind (Start, Stop, Pause/Resume) has to become *un-clickable* the instant any
   // other command is in flight — but a lid or indicator command round-trips fast enough that
@@ -137,7 +147,7 @@ export function InstrumentRail({
   // to be worth showing as disabled — see the comment above.
   const busyBriefly = !!busy && !busyLingering;
   const startLooksArmed =
-    !!plan && plan.startable && connected && !status?.running && !runPending && busyBriefly;
+    !unstartable && !!plan && plan.startable && connected && !status?.running && !runPending && busyBriefly;
 
   // A run is *this rail's business* whenever the instrument is doing one or is about to — which
   // is not the same as `status.running`. The start window (`usb.md` §7.3) is precisely the gap
@@ -171,13 +181,11 @@ export function InstrumentRail({
   };
 
   const start = async () => {
-    // Belt and braces: the button is clickable while `promptForName`, and nothing but its own
-    // `onClick` routing keeps that click away from here.
     if (!plan || !canStart) return;
-    // The file first, and unconditionally: the run is about to exist whether or not every upload
-    // lands, and the seed is what gives it somewhere to be seen for the minutes before the first
-    // plate read (`core/runSeed.ts`).
-    onStart();
+    // Marking the file begun and sending the run are one action, in that order — the same order the
+    // seeding this replaced used, and for the same reason: the run is about to exist whether or not
+    // every upload lands, so the file has to say so first (`App`'s `startExperiment`).
+    await onStart(plan);
     const result = await instrument.startRun(plan);
     setStartNote(result ? result.uploadErrors : null);
   };
@@ -348,29 +356,27 @@ export function InstrumentRail({
       {connected && (
         <div className="rail__section">
           <div className="rail__title">Actions</div>
-          {/* Start run leads the actions because it is the one that runs the experiment, and
-              sits with them rather than beside the staged run because it *actuates the
-              instrument* — that is what this group is. It is the only control in the app that
-              heats a block, so it stays disabled with a reason attached until every half of the
-              run is present and every check passes. */}
+          {/* Start leads the actions because it is the one that runs the experiment, and sits with
+              them rather than beside the experiment panel because it *actuates the instrument* —
+              that is what this group is. It is the only control in the app that heats a block, so
+              it stays disabled with a reason attached until the experiment is startable and every
+              check passes. Each reason names where it is fixed (see `unstartable`), since none of
+              them is fixed here. */}
           <button
             className={
               "btn btn--primary instrument__start" +
-              (startLooksArmed ? " instrument__start--armed" : "") +
-              (promptForName ? " is-disabled" : "")
+              (startLooksArmed ? " instrument__start--armed" : "")
             }
-            disabled={!canStart && !promptForName}
+            disabled={!canStart}
             aria-disabled={!canStart}
             title={
-              promptForName
-                ? "Experiment name required to run"
-                : (missing ??
-                  `Author ${plan?.commands.length ?? 0} protocol commands, start the run and ` +
-                    `upload ${plan?.uploads.length ?? 0} files to the instrument.`)
+              missing ??
+              `Author ${plan?.commands.length ?? 0} protocol commands, start the run and ` +
+                `upload ${plan?.uploads.length ?? 0} files to the instrument.`
             }
-            onClick={promptForName ? onNeedName : () => void start()}
+            onClick={() => void start()}
           >
-            {runPending ? "Run pending…" : "Start run"}
+            {runPending ? "Run pending…" : "Start experiment"}
           </button>
           <div className="rail__note instrument__footnote">
             {missing ??

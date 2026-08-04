@@ -1,40 +1,81 @@
 import { useMemo } from "react";
-import { formatRunDefinitionText, type Zpcr } from "@zpcrweb/core";
+import { formatRunDefinitionText, ProtocolBuilder, type Zpcr } from "@zpcrweb/core";
 import { ProtocolDecoded } from "../raw/DecodedView";
 import { ProtocolStepsTable } from "../raw/ProtocolSteps";
+import { ProtocolEditor } from "../protocol/ProtocolEditor";
 import { ThermalProfileChart } from "../protocol/ThermalProfileChart";
 import { DownloadIcon } from "../DownloadIcon";
 import { CloneIcon } from "../CloneIcon";
 import { downloadText } from "../../lib/download";
-import { protocolFileBase } from "../../lib/protocolSource";
+import { protocolFileBase } from "../../lib/protocolFileBase";
 import type { AddFilesOptions } from "../../state/useZpcrStore";
 
-/** The "Protocol" tab for a run (`.zpcr`/`.pcrd`/Biomeme): the thermal-cycling protocol the run
- * carries — structured step list when one parsed, or the annotated ASCII run definition
- * otherwise — plus the download/clone tools that used to sit inline in `OverviewView`. Moved out
- * to its own tab so Overview stays a summary rather than growing a protocol's worth of detail.
+/**
+ * The "Protocol" tab for a run (`.zpcr`/`.pcrd`/Biomeme): the thermal-cycling protocol the run
+ * carries — structured step list when one parsed, or the annotated ASCII run definition otherwise —
+ * plus the download/clone tools that used to sit inline in `OverviewView`. Moved out to its own tab
+ * so Overview stays a summary rather than growing a protocol's worth of detail.
+ *
+ * **For a pending experiment this tab is an editor instead**, the same {@link ProtocolEditor} a
+ * standalone `.prcl.txt` gets, writing straight into the experiment's own archive entry
+ * (`setRunProtocolText`). That is the difference between the two states, and it is the whole reason
+ * "pending" is a state: an experiment that hasn't run yet *has no record to contradict*, so its
+ * protocol is a draft and editing it is the ordinary thing to do — which is what makes "start from
+ * scratch" possible without authoring a separate file first. A brand-new experiment has no protocol
+ * at all yet, so the editor opens on the blank default (`ProtocolBuilder.empty()`: the three-line
+ * header and `END`), ready to be typed into.
+ *
+ * The moment the experiment is started it stops being pending, permanently, and this tab reverts to
+ * the read-only rendering below — a run's protocol is a record of what the block was asked to do,
+ * and there would be no honest way to edit it after the fact.
  *
  * Beneath it, when the run carries a `.alf` report, what the block *actually* did: the same
  * protocol as the instrument executed it, plotted against wall-clock time (`alf.md` §7.6). The
  * pairing is the point — the table above states the intent, the plot below states the cost, and
  * a hold that ran 46 s for its nominal 30 is only visible in the second. Runs without a report
- * (`.pcrd`, Biomeme) simply don't get the section. */
+ * (`.pcrd`, Biomeme, and a pending experiment, which has run nothing) simply don't get the section.
+ */
 export function ProtocolView({
   zpcr,
   file,
   addFiles,
+  pending,
+  onChangeProtocol,
 }: {
   zpcr: Zpcr;
   /** Only its `name` is used, as the download/clone filename's fallback base. */
   file: { name: string };
   /** Adds the cloned `.prcl.txt` to the file list — see the Clone button below. */
   addFiles: (files: FileList | File[], options?: AddFilesOptions) => Promise<string | null>;
+  /** This run is a pending experiment, so its protocol is a draft — see the module comment. */
+  pending: boolean;
+  /** Persist an edited protocol into the experiment's archive (the store's `setRunProtocolText`).
+   * Only called while {@link pending}. */
+  onChangeProtocol: (runDefinition: string) => void;
 }) {
   const protocolText = zpcr.protocolText || null;
   const protocol = zpcr.protocol();
   const protocolName = protocol?.name || null;
   // One report per archive in every sample examined (alf.md §1); the first is the run's own.
   const report = useMemo(() => zpcr.runReports()[0]?.alf ?? null, [zpcr]);
+  /** What a pending experiment with no protocol yet starts from: the header and `END`, nothing
+   * else. Only built when it's needed, since a run that has one never asks. */
+  const draft = useMemo(
+    () => (pending && !protocolText ? ProtocolBuilder.empty().toRunDefinition() : null),
+    [pending, protocolText],
+  );
+
+  if (pending) {
+    return (
+      <div className="overview">
+        <ProtocolEditor
+          runDefinition={protocolText ?? draft!}
+          onChange={onChangeProtocol}
+          fileName={file.name}
+        />
+      </div>
+    );
+  }
 
   if (!protocol?.steps && !protocolText) {
     return (

@@ -1,19 +1,27 @@
 /**
- * Attach (or replace) a `.zpcr` archive's plate data in memory — the write-side counterpart to
- * `Zpcr.plates()`. `.zpcr` is a plain ZIP (see `archive.ts`), and `fflate` (already a dependency
- * for reading) can write one too, so "attach a plate" is just: drop any existing plate entry,
- * add the new one, re-zip. The result round-trips straight back through `parseZpcr`.
+ * Attach (or replace) a `.zpcr` archive's plate or protocol data in memory — the write-side
+ * counterpart to `Zpcr.plates()`/`Zpcr.protocol()`. `.zpcr` is a plain ZIP (see `archive.ts`), and
+ * `fflate` (already a dependency for reading) can write one too, so "attach a plate/protocol" is
+ * just: drop the existing entry (or entries) for that half, add the new one(s), re-zip. The
+ * result round-trips straight back through `parseZpcr`.
  */
 
 import { zipSync } from "fflate";
 import { unzipArchive } from "./archive.js";
 import { isPltdName } from "./pltd.js";
 import { isPlateCsvName } from "./plateCsv.js";
+import { formatRunDefinitionText } from "./prcl.js";
+import { PROTOCOL_NAME_TXT } from "./usb/runPlan.js";
+
+/** The archive entry a run's thermal protocol lives under — `zpcr.ts`'s own name for it, not
+ * exported there, so this and `experimentArchive.ts` each need their own copy of the string. */
+export const PROTOCOL_RUN_DEFINITION_NAME = "ProtocolRunDefinition.txt";
 
 /** Drop a `.csv`/`.CSV` extension and append `.plt.csv`, so an uploaded plain `.csv` (not
  * already named `.plt.csv`) still lands in the archive under zpcrweb's canonical plate-CSV
- * name. Any other name (e.g. a real `.pltd`) is kept as-is. */
-function canonicalPlateEntryName(name: string): string {
+ * name. Any other name (e.g. a real `.pltd`) is kept as-is. Exported for `experimentArchive.ts`,
+ * which names a fresh experiment's plate entry the same way. */
+export function canonicalPlateEntryName(name: string): string {
   if (isPltdName(name) || isPlateCsvName(name)) return name;
   if (/\.csv$/i.test(name)) return `${name.replace(/\.csv$/i, "")}.plt.csv`;
   throw new Error(`attachPlateToZpcr: "${name}" is not a .pltd or .csv/.plt.csv file`);
@@ -37,5 +45,36 @@ export function attachPlateToZpcr(
     next[name] = bytes;
   }
   next[entryName] = plateFile.bytes;
+  return zipSync(next);
+}
+
+/**
+ * Return new `.zpcr` bytes with `protocol` as the run's thermal protocol, replacing whatever
+ * `ProtocolRunDefinition.txt`/`ProtocolName.txt` were there before — the protocol-side mirror of
+ * {@link attachPlateToZpcr}.
+ *
+ * This is also what in-place protocol editing calls on every keystroke (the app's
+ * `setRunProtocolText`, throttled the way `setProtocolText` throttles a standalone `.prcl.txt`):
+ * attaching a whole different protocol and editing the one already there are the same operation
+ * at this layer, "replace the run-definition text this archive carries". `protocol.name` is
+ * written as `ProtocolName.txt` only when non-blank, the same "nothing to say" rule
+ * `usb/runPlan.ts`'s deposit uses — an unnamed protocol simply has no name entry, rather than an
+ * empty one.
+ */
+export function attachProtocolToZpcr(
+  zpcrBytes: Uint8Array,
+  protocol: { runDefinition: string; name?: string },
+): Uint8Array {
+  const files = unzipArchive(zpcrBytes);
+  const next: Record<string, Uint8Array> = {};
+  for (const [name, bytes] of Object.entries(files)) {
+    if (name === PROTOCOL_RUN_DEFINITION_NAME || name === PROTOCOL_NAME_TXT) continue;
+    next[name] = bytes;
+  }
+  next[PROTOCOL_RUN_DEFINITION_NAME] = new TextEncoder().encode(
+    formatRunDefinitionText(protocol.runDefinition),
+  );
+  const name = protocol.name?.trim();
+  if (name) next[PROTOCOL_NAME_TXT] = new TextEncoder().encode(name);
   return zipSync(next);
 }

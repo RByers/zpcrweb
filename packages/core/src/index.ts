@@ -49,7 +49,9 @@ export {
 } from "./plateread.js";
 export { parsePltd, parsePlatesetup2, isPltdName } from "./pltd.js";
 export { plateToCsv, parsePlateCsv, isPlateCsvName, isBlankWell } from "./plateCsv.js";
-export { attachPlateToZpcr } from "./attachPlate.js";
+export { attachPlateToZpcr, attachProtocolToZpcr } from "./attachPlate.js";
+export { buildExperimentArchive } from "./experimentArchive.js";
+export type { ExperimentArchiveParts } from "./experimentArchive.js";
 /** The inverse of `zpcrFromRunFiles` — a `.zpcr`'s entries as the loose run-directory files it is
  * a ZIP of. Exported so a caller can take an archive apart and put it back together. */
 export { unzipArchive } from "./archive.js";
@@ -58,12 +60,11 @@ export {
   zpcrNameFromRunFiles,
   runProgressFromNames,
   runCompleteness,
+  markExperimentBegun,
   RUN_BEGUN_MARKER,
   RUN_ENDED_MARKER,
 } from "./runFolder.js";
 export type { RunProgress, RunCompleteness, RunFolderNaming } from "./runFolder.js";
-export { zpcrSeedArchive } from "./runSeed.js";
-export type { RunSeedOptions } from "./runSeed.js";
 export {
   parseZpcrwebSettings,
   parseZpcrwebSettingsJson,

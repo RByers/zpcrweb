@@ -143,22 +143,21 @@ async function incompleteRunChecks(chrome, origin) {
 /** Write {@link SEED_ZPCR}. Built rather than committed: the point is what the app writes when a
  * run starts, not a captured artifact — and it is the only run file with nothing to plot. */
 async function makeSeed() {
-  const { planRun, parsePlateCsv, zpcrSeedArchive } = await import(
-    "../packages/core/dist/index.js"
-  );
+  const { buildExperimentArchive, markExperimentBegun, writeZpcrwebSettings, plateToCsv, parsePlateCsv } =
+    await import("../packages/core/dist/index.js");
   const runDefinition =
     "METHOD CALC;HOTLID 105,30;VOLUME 20;TEMP 95.0,60;TEMP 60.0,30;PLATEREAD #h3F;GOTO 2,39;END;";
   const plate = parsePlateCsv(PLATE_CSV_BODY, { sourceName: "Staged.plt.csv" });
-  const plan = planRun({ runDefinition, plate, name: "Seeded Run", plateName: "Staged" });
-  const { bytes } = zpcrSeedArchive({
-    experimentName: "Seeded Run",
-    fileBaseName: "20260802-Seeded_Run",
-    runDefinition,
-    protocolName: "Cycling",
-    plan,
+  // The three steps the app itself takes, in the same order: build the experiment, name it, and
+  // mark it begun. What comes out is a run that has started and produced nothing yet — the state
+  // the old seed archive represented, now reached by starting a file that already existed.
+  const experiment = buildExperimentArchive({
+    protocol: { runDefinition, name: "Cycling" },
+    plate: { name: "Staged.plt.csv", bytes: new TextEncoder().encode(plateToCsv(plate)) },
   });
+  const named = writeZpcrwebSettings(experiment, { experimentName: "Seeded Run" });
   mkdirSync(dirname(SEED_ZPCR), { recursive: true });
-  writeFileSync(SEED_ZPCR, Buffer.from(bytes));
+  writeFileSync(SEED_ZPCR, Buffer.from(markExperimentBegun(named)));
 }
 
 /**
@@ -1459,7 +1458,7 @@ const chipPresent = (cdp, text) =>
  * instrument attached.
  */
 async function instrumentRunChecks(chrome, origin) {
-  console.log("\ninstrument run staging");
+  console.log("\ninstrument runs and experiments");
   const cdp = await openPage(chrome.base, origin);
   await sleep(600);
   // Earlier checks leave their own files in IndexedDB, so start from a known empty bar rather
@@ -1522,65 +1521,66 @@ async function instrumentRunChecks(chrome, origin) {
   await waitFor(() => cdp.eval(`!!document.querySelector(".devrun")`), { what: "the run panel" });
   await sleep(300);
 
-  /** The staged run as the panel renders it: each half's source file and override badge. */
-  const staged = () =>
+  /** The experiment as the Instrument panel renders it: each half, and what the bar shows. */
+  const shown = () =>
     cdp.eval(`(() => {
       const parts = [...document.querySelectorAll(".devrun__part")].map((p) => ({
         title: p.querySelector(".devrun__parttitle").textContent.trim(),
-        source: p.querySelector(".devrun__source")?.textContent.replace("override", "").trim() || null,
-        override: !!p.querySelector(".devrun__badge"),
+        note: p.querySelector(".devrun__source")?.textContent.trim() || null,
         text: p.textContent,
       }));
       return {
         protocol: parts.find((p) => p.title === "Protocol") || null,
         plate: parts.find((p) => p.title === "Plate") || null,
-        chips: [...document.querySelectorAll(".filebar--multi .filechip")].map((c) => ({
+        title: document.querySelector(".instrument__paneltitle")?.textContent.trim() || "",
+        hint: document.querySelector(".devrun__hint")?.textContent.trim() || "",
+        chips: [...document.querySelectorAll(".filebar .filechip")].map((c) => ({
           name: c.querySelector(".filechip__name").textContent.trim(),
-          // Two different kinds of on: the primary selection (cyan, is-active — the run, and
-          // the file the rest of the app is showing) and an auxiliary override staged over it
-          // (magenta, is-staged).
-          on: c.classList.contains("is-active") || c.classList.contains("is-staged"),
-          primary: c.classList.contains("is-active"),
+          on: c.classList.contains("is-active"),
         })),
       };
     })()`);
 
-  // The file bar is still the file bar — the Instrument view just reads it as a selection.
-  const first = await staged();
+  // The file bar means one thing everywhere now: the cyan chip is the active file, and on this tab
+  // that file is the experiment to start. There is no second, magenta kind of selection — the
+  // three-slot staging model that put one here is gone (see `InstrumentView`), and with it the
+  // possibility of the bar meaning something different depending on which tab you were on.
+  const first = await shown();
   check(
-    "the Instrument view keeps the app's file bar, in multi-select mode",
+    "the Instrument view reads the app's ordinary file bar, with one selection",
     first.chips.length === 1 && first.chips[0].on,
     JSON.stringify(first.chips),
   );
   check(
-    "a selected run supplies both halves of the staged run",
-    /METHOD CALC/.test(first.protocol.text) &&
-      !first.protocol.override &&
-      /8×12/.test(first.plate.text),
-    JSON.stringify({ proto: first.protocol.source, plate: first.plate.source }),
+    "a run supplies both halves of what would be started, from the one file",
+    /METHOD CALC/.test(first.protocol.text) && /8×12/.test(first.plate.text),
+    JSON.stringify({ title: first.title, hint: first.hint }),
   );
 
-  // With nothing staged to promote, tapping the primary run chip is a no-op: releasing it would
-  // reach the empty selection `useRunStaging.ts`'s module comment says was rejected, so
-  // `deselectRun` refuses (see `App.tsx`'s `selectFile`).
-  await cdp.eval(
-    `(() => { [...document.querySelectorAll(".filechip__main")]
-        .find((b) => /FirstQualification/.test(b.textContent)).click(); })()`,
-  );
-  await sleep(300);
-  const afterNoOpTap = await staged();
+  // A run that already holds results is not startable — re-running it would either overwrite what
+  // it has or contradict it — so the panel says so and offers the clone that *is* the way to run it
+  // again, rather than leaving a dimmed button to explain itself.
+  const withResults = await cdp.eval(`(() => {
+    const btn = [...document.querySelectorAll("button")]
+      .find((b) => /Clone experiment/.test(b.textContent));
+    return {
+      title: document.querySelector(".instrument__paneltitle")?.textContent.trim() || "",
+      cloneOffered: !!btn,
+      says: document.querySelector(".instrument__completeactions")?.textContent || "",
+    };
+  })()`);
   check(
-    "tapping the primary run with nothing staged to fall back to leaves it selected",
-    afterNoOpTap.chips.length === 1 &&
-      afterNoOpTap.chips[0].primary &&
-      /METHOD CALC/.test(afterNoOpTap.protocol.text),
-    JSON.stringify(afterNoOpTap.chips),
+    "a run with results reads as a record, and offers a clone rather than a start",
+    /^Run/.test(withResults.title) &&
+      withResults.cloneOffered &&
+      /already been run/.test(withResults.says),
+    JSON.stringify(withResults),
   );
 
-  // The staged protocol is the program and nothing else: no per-directive gloss. It shares this
-  // panel's width with a plate map, and what the language *means* is a question Overview answers
-  // (checked above) — here the question is what would be sent, so every line is still numbered
-  // as the instrument numbers it, setup directives included (no number).
+  // The protocol is the program and nothing else: no per-directive gloss. It shares this panel's
+  // width with a plate map, and what the language *means* is a question the Protocol tab answers
+  // (checked above) — here the question is what would be sent, so every line is still numbered as
+  // the instrument numbers it, setup directives included (no number).
   const staging = await cdp.eval(`(() => {
     const lines = [...document.querySelectorAll(".devrun__part .decoded__protoline")].map((l) => ({
       num: l.querySelector(".decoded__protonum").textContent.trim(),
@@ -1594,7 +1594,7 @@ async function instrumentRunChecks(chrome, origin) {
   const stagedGoto = staging.lines.find((l) => l.text.startsWith("GOTO"));
   const stagedRead = staging.lines.find((l) => l.text.startsWith("PLATEREAD"));
   check(
-    "the staged protocol lists the directives themselves, with no decode column",
+    "the panel lists the directives themselves, with no decode column",
     staging.lines.length > 0 &&
       !staging.annotated &&
       stagedLid?.num === "" &&
@@ -1611,31 +1611,21 @@ async function instrumentRunChecks(chrome, origin) {
     JSON.stringify({ read: stagedRead, withScan: staging.lines.filter((l) => l.scan).length }),
   );
 
-  // Start run belongs to the instrument, not the panel, so it is absent until one is attached.
+  // Start belongs to the instrument, not the panel, so it is absent until one is attached.
   const startWhenIdle = await cdp.eval(`!!document.querySelector(".instrument__start")`);
-  check("Start run appears only with an instrument connected", startWhenIdle === false);
+  check("Start appears only with an instrument connected", startWhenIdle === false);
 
-  // One name is collected here, not two: what the run's *file* is called is derived at the click
-  // and never asked (`state/useRunNaming.ts`), so a second field would be a second way to say the
-  // same thing — and one that could disagree with the file already written.
-  const names = await cdp
-    .eval(
-      `JSON.stringify([...document.querySelectorAll(".devrun__name")].map((l) => ({
-         label: l.querySelector(".devrun__namelabel").textContent.replace(/\\*/g, "").trim(),
-         value: l.querySelector("input").value,
-         missing: l.querySelector("input").classList.contains("is-missing"),
-         readOnly: l.querySelector("input").readOnly,
-       })))`,
-    )
-    .then(JSON.parse);
+  // No name is collected here any more, in either form. The experiment's name is a property of its
+  // file, typed once on Overview before the instrument is ever involved (see `OverviewView`), so a
+  // field here would be a second place to say what the file already says — and one that could
+  // disagree with the name already written into the archive.
+  const nameFields = await cdp.eval(
+    `document.querySelectorAll(".devrun__name, .devrun__nameinput").length`,
+  );
   check(
-    "the panel collects exactly one name — the experiment's, empty and marked required",
-    names.length === 1 &&
-      names[0].label === "Experiment name" &&
-      names[0].value === "" &&
-      names[0].missing &&
-      !names[0].readOnly,
-    JSON.stringify(names),
+    "the panel collects no name — that belongs to the file, and Overview asks for it",
+    nameFields === 0,
+    `${nameFields} name fields`,
   );
 
   // A `.prcl.txt` goes in through the ordinary load button, not a picker of its own.
@@ -1662,7 +1652,7 @@ async function instrumentRunChecks(chrome, origin) {
     )
     .then(JSON.parse);
   check(
-    "a .prcl.txt enables Overview, Protocol, Raw and Instrument (and the file-independent Files tab), nothing else",
+    "a .prcl.txt enables Overview, Protocol and Raw (plus the two file-independent tabs), nothing else",
     protoTabs.filter((t) => !t.off).map((t) => t.label).join(",") ===
       "Files,Overview,Protocol,Raw,Instrument",
     JSON.stringify(protoTabs.filter((t) => !t.off).map((t) => t.label)),
@@ -1760,268 +1750,208 @@ async function instrumentRunChecks(chrome, origin) {
     what: "the protocol file's name restored",
   });
 
-  // Back where the rest of this block expects to be.
-  await cdp.eval(`(() => [...document.querySelectorAll('.viewselect [role="tab"]')]
-      .find((b) => b.textContent.trim() === "Instrument").click())()`);
-  await tabBecomes(cdp, "Instrument");
+  // ── The new workflow, end to end ──────────────────────────────────────────────────────────
+  // Everything above this point is about reading a run that already exists. What follows is the
+  // other half of the app: making one. Both entry points land in the same place — a *pending*
+  // experiment, a real file with no results — which is the state this whole flow turns on.
 
-  // In this view the cyan chip is the *run being staged*, not the active file: a loaded
-  // `.prcl.txt` is the file the app is on (it has an Overview of its own), but what the bar has
-  // to name here is the run it is being staged against. So the run reads as the primary
-  // selection and the protocol as an auxiliary one, and the two colours mean two different
-  // things rather than one washed-out "selected".
-  const roles = await cdp
-    .eval(
-      `JSON.stringify({
-         primary: [...document.querySelectorAll(".filechip.is-active .filechip__name")]
-           .map((n) => n.textContent.trim()),
-         staged: [...document.querySelectorAll(".filechip.is-staged .filechip__name")]
-           .map((n) => n.textContent.trim()),
-       })`,
-    )
-    .then(JSON.parse);
-  check(
-    "the staged run is the bar's one primary chip, the .prcl.txt an auxiliary one",
-    roles.primary.length === 1 &&
-      /FirstQualification/.test(roles.primary[0]) &&
-      roles.staged.some((n) => /Gradient/.test(n)),
-    JSON.stringify(roles),
+  // "Clone experiment" is the way to run an experiment again. It is deliberately not a copy of the
+  // file: a finished run's bulk is its results, and a second copy of those is never what was
+  // wanted.
+  await cdp.eval(
+    `(() => { [...document.querySelectorAll(".filechip__main")]
+        .find((b) => /FirstQualification/.test(b.textContent)).click(); })()`,
   );
-
-  // Loading it stages it: the headline flow is "load a protocol, see it against the run you
-  // already had", so the file joins the selection rather than replacing it.
-  const overridden = await staged();
-  check(
-    "a loaded .prcl.txt overrides the run's protocol and is badged as an override",
-    /GRAD 50/.test(overridden.protocol.text) && overridden.protocol.override,
-    JSON.stringify({ source: overridden.protocol.source, badge: overridden.protocol.override }),
-  );
-  check(
-    "…while the run still supplies the plate, and stays selected",
-    !overridden.plate.override &&
-      /8×12/.test(overridden.plate.text) &&
-      overridden.chips.filter((c) => c.on).length === 2,
-    JSON.stringify(overridden.chips),
-  );
-
-  // Overriding the *other* half too leaves the run supplying neither — but it stays selected,
-  // because it is still the instrument whose calibration set gives a plate CSV its channels.
-  await loadFile(cdp, PLTD);
-  await waitFor(() => chipPresent(cdp, "QuickPlate"), { what: "the .pltd chip" });
-  await sleep(500);
-  const both = await staged();
-  const onNames = both.chips.filter((c) => c.on).map((c) => c.name);
-  check(
-    "a run stays selected alongside overrides of both halves",
-    onNames.length === 3 && onNames.some((n) => /FirstQualification/.test(n)),
-    JSON.stringify(onNames),
-  );
-  check(
-    "…and both halves are badged as overrides",
-    both.protocol.override && both.plate.override,
-    JSON.stringify({ proto: both.protocol.override, plate: both.plate.override }),
-  );
-
-  // Tapping a staged override releases its slot.
-  const tap = (pattern) =>
-    cdp.eval(
-      `(() => { [...document.querySelectorAll(".filechip__main")]
-          .find((b) => ${pattern}.test(b.textContent)).click(); })()`,
-    );
-  await tap("/Gradient/");
   await sleep(300);
-  const off = await staged();
-  check(
-    "tapping a selected .prcl.txt deselects it",
-    !off.chips.find((c) => /Gradient/.test(c.name)).on &&
-      off.chips.filter((c) => c.on).length === 2,
-    JSON.stringify(off.chips.filter((c) => c.on).map((c) => c.name)),
-  );
-  // Tapping the run *itself*, though, is not an override toggle: it holds the app's primary
-  // selection. But a tap on the chip that already holds that slot releases it rather than doing
-  // nothing — promoting whichever override is staged (protocol first, else plate — here just the
-  // plate, since the protocol override was just released above) to primary in its place, so the
-  // bar is never left with nothing to point at (`useRunStaging.ts`'s `deselectRun`).
-  await tap("/FirstQualification/");
-  await sleep(300);
-  const released = await staged();
-  const releasedRunChip = released.chips.find((c) => /FirstQualification/.test(c.name));
-  const promotedPlateChip = released.chips.find((c) => /QuickPlate/.test(c.name));
-  check(
-    "tapping the selected run releases it, promoting the staged plate to primary",
-    !releasedRunChip.on &&
-      promotedPlateChip.primary &&
-      !released.protocol.override &&
-      !released.plate.override,
-    JSON.stringify(released.chips),
-  );
-  // The run is still a run-kind chip, just no longer the one holding the slot — tapping it again
-  // reselects it as primary the ordinary way, and the plate resumes being an override over it.
-  await tap("/FirstQualification/");
-  await sleep(300);
-  const stillRun = await staged();
-  const runChip = stillRun.chips.find((c) => /FirstQualification/.test(c.name));
-  const plateChip = stillRun.chips.find((c) => /QuickPlate/.test(c.name));
-  check(
-    "tapping the run chip again reselects it as primary",
-    runChip.primary && /METHOD CALC/.test(stillRun.protocol.text) && !stillRun.protocol.override,
-    JSON.stringify(stillRun.chips),
-  );
-  // …and the two highlights say which is which: the run is the app's ordinary primary selection,
-  // the plate is an override staged over it.
-  check(
-    "the run is the primary chip, the override an auxiliary one",
-    runChip.primary && plateChip.on && !plateChip.primary && stillRun.plate.override,
-    JSON.stringify({ run: runChip, plate: plateChip }),
-  );
-
-  // A staged `.plt.csv` borrows the run's dye→channel mapping. The format records dye names
-  // only, so parsed on its own every channel is unknown; pairing it with a run is what resolves
-  // them, and getting this wrong shows dyes with no colour and no channel grouping.
-  writeFileSync(PLATE_CSV, PLATE_CSV_BODY);
-  await loadFile(cdp, PLATE_CSV);
-  await waitFor(() => chipPresent(cdp, "Staged"), { what: "the .plt.csv chip" });
-  await sleep(500);
-  const csvStaged = await cdp.eval(`(() => {
-    const part = [...document.querySelectorAll(".devrun__part")]
-      .find((p) => p.querySelector(".devrun__parttitle").textContent.trim() === "Plate");
-    return {
-      chips: [...part.querySelectorAll(".plate__chip")].map((c) => c.textContent.trim()),
-      unknown: !!part.querySelector(".plate__chip--unknown"),
-      source: part.querySelector(".devrun__source")?.textContent.replace("override", "").trim(),
-    };
-  })()`);
-  check(
-    "a staged .plt.csv takes its channels from the run it is paired with",
-    /Staged\.plt\.csv/.test(csvStaged.source) &&
-      !csvStaged.unknown &&
-      csvStaged.chips.some((c) => /FAM\s*Ch1/.test(c)) &&
-      csvStaged.chips.some((c) => /Cy5\s*Ch4/.test(c)),
-    JSON.stringify(csvStaged),
-  );
-
-  // The case the three-slot model exists for: a run staged *alongside* overrides of both halves.
-  // It supplies neither, but it is still the instrument, and that is what gives the plate CSV its
-  // channels — so the panel names it rather than leaving a chip lit for no visible reason.
-  await tap("/Gradient/");
-  await sleep(400);
-  const allThree = await cdp.eval(`(() => {
-    const part = [...document.querySelectorAll(".devrun__part")]
-      .find((p) => p.querySelector(".devrun__parttitle").textContent.trim() === "Plate");
-    return {
-      on: [...document.querySelectorAll(
-        ".filebar--multi :is(.filechip.is-active, .filechip.is-staged) .filechip__name",
-      )].map((n) => n.textContent.trim()),
-      unknown: !!part.querySelector(".plate__chip--unknown"),
-      chips: [...part.querySelectorAll(".plate__chip")].map((c) => c.textContent.trim()),
-      channelsFrom: /channels from/.test(part.textContent),
-      hint: document.querySelector(".devrun__hint").textContent.trim(),
-    };
-  })()`);
-  check(
-    "a run can be staged with both halves overridden, and still lends its channels",
-    allThree.on.length === 3 &&
-      !allThree.unknown &&
-      allThree.chips.some((c) => /FAM\s*Ch1/.test(c)) &&
-      allThree.channelsFrom,
-    JSON.stringify(allThree),
-  );
-  check(
-    "…and the panel names it by experiment name, as the rest of the app does",
-    /^instrument: FirstQualification$/.test(allThree.hint),
-    allThree.hint,
-  );
-
-  // Only one run at a time: selecting a second replaces the first.
-  await loadFile(cdp, PCRD);
-  // `Luna.noRT`, not `Luna_noRT`: a chip shows the run's *name*, and the derivation reads the
-  // filename's `_` as the space the user typed (see `experiment.ts`).
-  await waitFor(() => chipPresent(cdp, "Luna.noRT"), { what: "the .pcrd chip" });
-  await sleep(500);
-  const clickRun = (pattern) =>
-    cdp.eval(
-      `(() => { [...document.querySelectorAll(".filechip__main")]
-          .find((b) => ${pattern}.test(b.textContent)).click(); })()`,
-    );
-  await clickRun("/FirstQualification/");
-  await sleep(300);
-  await clickRun("/Luna noRT/");
-  await sleep(400);
-  const runs = await staged();
-  const runsOn = runs.chips.filter((c) => c.on).map((c) => c.name);
-  check(
-    "selecting a second run replaces the first — only one can be staged",
-    runsOn.filter((n) => /FirstQualification|Luna noRT/.test(n)).length === 1 &&
-      runsOn.some((n) => /Luna noRT/.test(n)),
-    JSON.stringify(runsOn),
-  );
-
-  // A chip's icon is two independent claims: its *shape* is what the file is (core's
-  // `fileCategory`), its *colour* is whether it's encrypted. All five chips are loaded by now —
-  // two runs, two plates in different encodings, one protocol — so this is the one place the
-  // "an encoding is not a kind" rule can be checked: the `.pltd` and the `.plt.csv` must draw the
-  // same icon *while* differing in colour, and a run and a protocol must not draw a plate.
-  const icons = await cdp.eval(`(() => {
-    const out = {};
-    for (const chip of document.querySelectorAll(".filebar .filechip")) {
-      const name = chip.querySelector(".filechip__name").textContent.trim();
-      const icon = chip.querySelector(".filechip__icon");
-      out[name] = { shape: icon.querySelector("svg").innerHTML, cls: icon.className };
-    }
-    return out;
-  })()`);
-  const shapeOf = (n) => Object.entries(icons).find(([k]) => new RegExp(n).test(k))?.[1];
-  const [zpcr, pcrd, pltd, csv, prcl] = ["FirstQualification", "Luna noRT", "QuickPlate", "Staged", "Gradient"].map(shapeOf);
-  check(
-    "the two plate encodings share one plate icon, in whatever colour their encryption earns",
-    pltd.shape === csv.shape && pltd.cls !== csv.cls && /--decrypted/.test(pltd.cls) && /--none/.test(csv.cls),
-    JSON.stringify({ pltd: pltd.cls, csv: csv.cls, same: pltd.shape === csv.shape }),
-  );
-  check(
-    "…and a run, a plate and a protocol are three different shapes",
-    zpcr.shape === pcrd.shape &&
-      new Set([zpcr.shape, pltd.shape, prcl.shape]).size === 3,
-    JSON.stringify({ runsAlike: zpcr.shape === pcrd.shape, distinct: new Set([zpcr.shape, pltd.shape, prcl.shape]).size }),
-  );
-
-  // Garbage in reports itself rather than arriving as an unusable chip.
-  writeFileSync(BAD_TXT, "<?xml version=\"1.0\"?>\n<protocol2 />\n");
-  const before = await cdp.eval(`document.querySelectorAll(".filebar .filechip").length`);
-  await setFileInput(cdp, 'input[type="file"]', BAD_TXT);
-  await waitFor(() => cdp.eval(`!!document.querySelector(".app__error")`), {
-    what: "the rejection notice",
+  await cdp.eval(`window.location.hash = "view=overview", undefined`);
+  await waitFor(() => cdp.eval(`!!document.querySelector(".overview__clonebtn")`), {
+    what: "the Overview clone button",
   });
-  const rejected = await cdp.eval(`document.querySelector(".app__error").textContent`);
-  const after = await cdp.eval(`document.querySelectorAll(".filebar .filechip").length`);
+  const chipsBeforeClone = await cdp.eval(`document.querySelectorAll(".filebar .filechip").length`);
+  await cdp.eval(`document.querySelector(".overview__clonebtn").click()`);
+  await waitFor(
+    () => cdp.eval(`document.querySelectorAll(".filebar .filechip").length > ${chipsBeforeClone}`),
+    { what: "the cloned experiment's chip" },
+  );
+  await sleep(500);
+
+  const cloned = await cdp.eval(`(() => {
+    const dl = document.querySelector(".overview__infotable");
+    const info = {};
+    if (dl) {
+      const dts = [...dl.querySelectorAll("dt")];
+      const dds = [...dl.querySelectorAll("dd")];
+      dts.forEach((dt, i) => { info[dt.textContent.trim()] = dds[i].textContent.trim(); });
+    }
+    const name = document.querySelector(".overview__name");
+    return {
+      info,
+      pendingBanner: !!document.querySelector(".overview__pending"),
+      nameValue: name?.value ?? null,
+      nameRequired: !!name?.required,
+      nameMissing: !!name?.classList.contains("is-missing"),
+      focused: document.activeElement === name,
+      parts: [...document.querySelectorAll(".overview__partlabel")].map((l) => ({
+        half: l.firstChild.textContent.trim(),
+        state: l.querySelector("span")?.textContent.trim() ?? null,
+      })),
+    };
+  })()`);
+  // A clone arrives as a *pending* experiment: named nothing, dated today, carrying the protocol and
+  // plate and none of the results. It replaces the very transitory seed file the old flow produced
+  // at the click on Start — a file nobody chose to make, which existed for minutes.
   check(
-    "a .txt that isn't a protocol is rejected rather than loaded",
-    /not a thermal protocol/i.test(rejected) && after === before,
-    rejected,
+    "cloning a run makes a pending experiment, said so plainly",
+    cloned.pendingBanner && /\.zpcr$/.test(cloned.info.Filename ?? ""),
+    JSON.stringify({ file: cloned.info.Filename, banner: cloned.pendingBanner }),
+  );
+  check(
+    "…named nothing yet, with the field required and focused for typing",
+    cloned.nameValue === "" && cloned.nameRequired && cloned.nameMissing && cloned.focused,
+    JSON.stringify({
+      value: cloned.nameValue,
+      required: cloned.nameRequired,
+      missing: cloned.nameMissing,
+      focused: cloned.focused,
+    }),
+  );
+  // The clone's file name is the bare date, deliberately not a guess at what the experiment is
+  // called — there is no honest guess to make, and a placeholder that looked like an answer would
+  // be typed over rather than replaced.
+  check(
+    "…under a bare-date file name, since nothing has named it",
+    /^\d{8}\.zpcr$/.test(cloned.info.Filename ?? ""),
+    cloned.info.Filename,
+  );
+  check(
+    "…carrying the protocol and plate it was cloned from, and offering both as parts",
+    cloned.parts.length === 2 &&
+      cloned.parts[0].half === "Protocol" &&
+      cloned.parts[0].state === "attached" &&
+      cloned.parts[1].half === "Plate" &&
+      cloned.parts[1].state === "attached",
+    JSON.stringify(cloned.parts),
   );
 
-  // A run built from parts alone — a `.prcl.txt` and a plate file, no run selected. Both halves
-  // come from files of their own, but with no run there is nothing for them to supersede, so
-  // neither is badged: "override" is a claim about a run, and saying it here would invite the
-  // reader to look for the run being overridden.
-  await emptyReload(cdp, origin);
-  await loadFile(cdp, PRCL_TXT);
-  await waitFor(() => chipPresent(cdp, "Gradient"), { what: "the .prcl.txt chip" });
-  await loadFile(cdp, PLTD);
-  await waitFor(() => chipPresent(cdp, "QuickPlate"), { what: "the .pltd chip" });
+  // Naming an experiment names its file too, by the same convention every run's file uses. The two
+  // are one action here and nowhere else: leaving `20260804.zpcr` on disk while the run is called
+  // something else would have the bar, the download and the instrument's own deposit disagree
+  // about which run this is.
+  await setExperimentName(cdp, "Cloned RVP");
+  await sleep(600);
+  const named = await cdp.eval(`(() => {
+    const dl = document.querySelector(".overview__infotable");
+    const dts = [...dl.querySelectorAll("dt")];
+    const dds = [...dl.querySelectorAll("dd")];
+    const info = {};
+    dts.forEach((dt, i) => { info[dt.textContent.trim()] = dds[i].textContent.trim(); });
+    return {
+      file: info.Filename,
+      name: document.querySelector(".overview__name")?.value ?? null,
+      stillRequired: !!document.querySelector(".overview__name")?.required,
+    };
+  })()`);
+  check(
+    "naming a pending experiment renames its file to the date-and-name convention",
+    /^\d{8}-Cloned_RVP\.zpcr$/.test(named.file ?? ""),
+    JSON.stringify(named),
+  );
+  check(
+    "…and the field stops being required once it has an answer",
+    named.name === "Cloned RVP" && !named.stillRequired,
+    JSON.stringify(named),
+  );
+
+  // A pending experiment's Protocol tab is an *editor*, not a record — that is the difference the
+  // pending state buys, and what makes "write a protocol from scratch" possible without authoring a
+  // separate file first. A run that has happened gets the read-only listing instead.
+  await cdp.eval(`window.location.hash = "view=protocol", undefined`);
+  await tabBecomes(cdp, "Protocol");
+  await sleep(400);
+  const editable = await cdp.eval(
+    `!!document.querySelector(".protoedit, .protocoledit, [class*='protoedit']") ||
+     [...document.querySelectorAll("button")].some((b) => /^Edit$/.test(b.textContent.trim()))`,
+  );
+  check(
+    "a pending experiment's protocol can be edited in place",
+    editable === true,
+    `editor present: ${editable}`,
+  );
+
+  // Starting it is blocked only by things that are actually missing — and a plate is not one of
+  // them. An experiment may deliberately be run without one (the curves simply carry no target or
+  // sample names), so that is a warning rather than a blocker.
   await cdp.eval(`window.location.hash = "view=instrument", undefined`);
   await waitFor(() => cdp.eval(`!!document.querySelector(".devrun")`), { what: "the run panel" });
   await sleep(400);
-  const noRun = await staged();
+  const pendingPanel = await cdp.eval(`(() => ({
+    title: document.querySelector(".instrument__paneltitle")?.textContent.trim() || "",
+    hint: document.querySelector(".devrun__hint")?.textContent.trim() || "",
+    cloneOffered: [...document.querySelectorAll("button")].some((b) =>
+      /Clone experiment/.test(b.textContent)),
+  }))()`);
   check(
-    "with no run selected, neither half is badged as an override",
-    !noRun.protocol.override &&
-      !noRun.plate.override &&
-      /Gradient\.prcl\.txt/.test(noRun.protocol.source ?? "") &&
-      /QuickPlate/.test(noRun.plate.source ?? ""),
-    JSON.stringify({
-      protocol: { source: noRun.protocol.source, badge: noRun.protocol.override },
-      plate: { source: noRun.plate.source, badge: noRun.plate.override },
-    }),
+    "a pending experiment reads as one to start, under its own name",
+    /Experiment to start/.test(pendingPanel.title) && /Cloned RVP/.test(pendingPanel.hint),
+    JSON.stringify(pendingPanel),
+  );
+  check(
+    "…and is not offered the clone that a run with results is",
+    pendingPanel.cloneOffered === false,
+    JSON.stringify(pendingPanel),
+  );
+
+  // "New experiment" from the About page is the other way in: the same pending state, with neither
+  // half — which is where someone with a cycler and no files at all starts.
+  await cdp.eval(`window.location.hash = "view=about", undefined`);
+  await waitFor(
+    () =>
+      cdp.eval(
+        `[...document.querySelectorAll("button")].some((b) => /New experiment/.test(b.textContent))`,
+      ),
+    { what: "the New experiment button" },
+  );
+  await cdp.eval(
+    `(() => { [...document.querySelectorAll("button")]
+        .find((b) => /New experiment/.test(b.textContent)).click(); })()`,
+  );
+  await waitFor(() => cdp.eval(`!!document.querySelector(".overview__pending")`), {
+    what: "the new experiment's pending banner",
+  });
+  await sleep(400);
+  const fresh = await cdp.eval(`(() => {
+    const dl = document.querySelector(".overview__infotable");
+    const dts = [...dl.querySelectorAll("dt")];
+    const dds = [...dl.querySelectorAll("dd")];
+    const info = {};
+    dts.forEach((dt, i) => { info[dt.textContent.trim()] = dds[i].textContent.trim(); });
+    return {
+      protocol: info.Protocol,
+      parts: [...document.querySelectorAll(".overview__partlabel")].map((l) => ({
+        half: l.firstChild.textContent.trim(),
+        state: l.querySelector("span")?.textContent.trim() ?? null,
+      })),
+      tabs: [...document.querySelectorAll('.viewselect [role="tab"]')]
+        .filter((b) => !b.disabled)
+        .map((b) => b.textContent.trim()),
+    };
+  })()`);
+  check(
+    "New experiment makes an empty pending experiment, with neither half attached",
+    /not set yet/.test(fresh.protocol ?? "") &&
+      fresh.parts.some((p) => p.half === "Protocol" && p.state === "required to start") &&
+      fresh.parts.some((p) => p.half === "Plate" && p.state === "optional"),
+    JSON.stringify(fresh.parts),
+  );
+  // Protocol is enabled even with nothing in it — there it is the editor a from-scratch experiment
+  // starts from. Plates is not: attaching one is an Overview affordance while pending.
+  check(
+    "…offering Overview and Protocol, but not the tabs it has nothing for",
+    fresh.tabs.includes("Overview") &&
+      fresh.tabs.includes("Protocol") &&
+      !fresh.tabs.includes("Plates") &&
+      !fresh.tabs.includes("Curves"),
+    JSON.stringify(fresh.tabs),
   );
 
   cdp.close();
@@ -2864,9 +2794,14 @@ async function cloneChecks(chrome, origin) {
   console.log("\nclone");
   const cdp = await openPage(chrome.base, origin);
   await emptyReload(cdp, origin);
-  await loadFile(cdp, join(REPO, "samples", EXAMPLE));
-  await waitFor(() => chipPresent(cdp, "S183"), { what: "the .zpcr chip" });
-  await cdp.eval(`window.location.hash = "view=overview", undefined`);
+  // A `.prcl.txt` rather than a run, because for a run this button means something else now: a run's
+  // Clone makes a new *experiment* from its protocol and plate (checked in the instrument block),
+  // since a byte-for-byte second copy of a finished run's results is never the thing wanted. The
+  // plain file copy this exercises is what every other kind still gets.
+  mkdirSync(dirname(PRCL_TXT), { recursive: true });
+  writeFileSync(PRCL_TXT, PRCL_TXT_BODY);
+  await loadFile(cdp, PRCL_TXT);
+  await waitFor(() => chipPresent(cdp, "Gradient"), { what: "the .prcl.txt chip" });
   await tabBecomes(cdp, "Overview");
 
   const state = () =>
@@ -2889,7 +2824,8 @@ async function cloneChecks(chrome, origin) {
       )
       .then(JSON.parse);
 
-  const base = EXAMPLE.replace(/\.zpcr$/, "");
+  const base = "Gradient";
+  const ext = ".prcl.txt";
   const clone = () => cdp.eval(`document.querySelector(".overview__clonebtn").click()`);
 
   await clone();
@@ -2897,7 +2833,7 @@ async function cloneChecks(chrome, origin) {
   const first = await state();
   check(
     "Clone copies the file under a (2) name and opens the copy",
-    first.file === `${base} (2).zpcr`,
+    first.file === `${base} (2)${ext}`,
     JSON.stringify(first),
   );
   check(
@@ -2907,7 +2843,7 @@ async function cloneChecks(chrome, origin) {
   );
   check(
     "…beside the original rather than replacing it",
-    first.chips.length === 2 && first.chips.some((c) => c === "S183-S185 RVP"),
+    first.chips.length === 2 && first.chips.some((c) => c === base),
     JSON.stringify(first),
   );
 
@@ -2917,7 +2853,7 @@ async function cloneChecks(chrome, origin) {
   const second = await state();
   check(
     "cloning a clone increments the index instead of nesting another one",
-    second.file === `${base} (3).zpcr` && second.chips.length === 3,
+    second.file === `${base} (3)${ext}` && second.chips.length === 3,
     JSON.stringify(second),
   );
 
@@ -2925,13 +2861,13 @@ async function cloneChecks(chrome, origin) {
   // reload, since nothing but IndexedDB holds it (it was never on disk).
   await cdp.eval(`document.querySelector(".overview__filename-input").blur()`);
   await sleep(300);
-  await cdp.send("Page.navigate", { url: `${origin}#file=${encodeURIComponent(`${base} (3).zpcr`)}&view=overview` });
+  await cdp.send("Page.navigate", { url: `${origin}#file=${encodeURIComponent(`${base} (3)${ext}`)}&view=overview` });
   await tabBecomes(cdp, "Overview");
   await waitFor(async () => (await state()).file !== null, { what: "the reloaded clone" });
   const reloaded = await state();
   check(
     "a clone survives a reload — it went into IndexedDB like any loaded file",
-    reloaded.file === `${base} (3).zpcr` && reloaded.chips.length === 3,
+    reloaded.file === `${base} (3)${ext}` && reloaded.chips.length === 3,
     JSON.stringify(reloaded),
   );
   cdp.close();

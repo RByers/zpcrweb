@@ -20,3 +20,15 @@ export function stripPlateExt(s: string): string {
 export function plateDisplayName(plate: PlateDefinition): string {
   return stripPlateExt(plate.identityKey ?? "") || "Plate";
 }
+
+/**
+ * The `.plt.csv` file name a plate's own identity gives it — what "Clone experiment"
+ * (`App.tsx`'s `cloneExperiment`) names the plate half of the archive it builds. Same sanitizing
+ * `PlateDownloadButton`'s Clone button applies to its own filename, kept separate rather than
+ * shared since that one also has `pltd`/`plateName` fallbacks this caller never has (a plate
+ * pulled from an already-decoded `Zpcr` always carries an `identityKey`).
+ */
+export function plateCsvFileName(plate: PlateDefinition): string {
+  const base = plateDisplayName(plate).replace(/[\\/:*?"<>|]+/g, "_").trim() || "plate";
+  return `${base}.plt.csv`;
+}

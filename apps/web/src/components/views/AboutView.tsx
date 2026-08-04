@@ -6,6 +6,10 @@ interface Props {
    * address" on it — see `App`'s `exampleHref`. */
   exampleHref: string;
   onLoadExample: (e: { preventDefault: () => void }) => void;
+  /** Create an empty experiment and go name it (`App`'s `newExperiment`). Sits here because this
+   * page is the app's empty state, and "I have a cycler and no files" is exactly who needs it —
+   * the other way in is cloning a run you already have, which needs a run first. */
+  onNewExperiment: () => void;
   /** Return to the previous view. Omitted on the welcome screen, where there's nothing to go
    * back to — with no file loaded this page *is* the empty state. */
   onBack?: () => void;
@@ -15,7 +19,7 @@ interface Props {
  * welcome screen itself. One view serves both: the credits sit above the drop target, so the
  * first thing a new user sees says what this is and that their data stays put. Needs no file to
  * render. */
-export function AboutView({ onFiles, exampleHref, onLoadExample, onBack }: Props) {
+export function AboutView({ onFiles, exampleHref, onLoadExample, onNewExperiment, onBack }: Props) {
   return (
     <div className="about">
       <div className="about__card">
@@ -32,6 +36,12 @@ export function AboutView({ onFiles, exampleHref, onLoadExample, onBack }: Props
         <a className="about__example mono" href={exampleHref} onClick={onLoadExample}>
           Load an example file
         </a>
+        {/* The other half of "what can I do here": open a file you have, or start an experiment you
+            don't have yet. A button rather than a link — it creates something rather than
+            navigating, and there is no URL that would mean it. */}
+        <button className="about__example mono" onClick={onNewExperiment}>
+          New experiment
+        </button>
 
         <p className="about__line">
           Copyright{" "}

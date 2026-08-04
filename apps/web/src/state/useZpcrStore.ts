@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   attachPlateToZpcr,
+  attachProtocolToZpcr,
+  buildExperimentArchive,
   formatRunDefinitionText,
   isBiomemeJson,
+  markExperimentBegun,
   parseBiomeme,
   parsePcrd,
   parsePlateCsv,
@@ -15,6 +18,7 @@ import {
   wellKey,
   writeZpcrwebSettings,
   type AnalysisSource,
+  type ExperimentArchiveParts,
   type FileKind,
   type NormalizationMode,
   type PlateDefinition,
@@ -44,7 +48,7 @@ import {
 } from "./analysisSettings";
 import { AnalysisPersister } from "./analysisPersist";
 import { WriteThrottle } from "./writeThrottle";
-import { experimentIdentity, type ExperimentIdentity } from "../lib/experiment";
+import { experimentIdentity, restampExperimentDate, type ExperimentIdentity } from "../lib/experiment";
 import { usePltdPassword } from "./pltdPassword";
 import { onHashChange, readHash, writeHash } from "./urlHash";
 
@@ -675,6 +679,39 @@ export interface ZpcrStore {
    */
   attachPlate: (fileId: string, file: File) => Promise<void>;
   /**
+   * Attach (or replace) a `.zpcr` run's thermal protocol — the protocol-side mirror of
+   * {@link attachPlate}, and what `AttachProtocolMenu` calls. Same restriction: only
+   * `kind === "zpcr"`.
+   */
+  attachProtocol: (fileId: string, file: File) => Promise<void>;
+  /**
+   * Build a bare pending `.zpcr` (`core/buildExperimentArchive`) and load it as a new file, named
+   * with today's date and no experiment name yet (`runFileBaseName` refuses an empty name, so the
+   * bare date stamp is built directly rather than through it). Used by both "New experiment"
+   * (About, with `parts: {}`) and "Clone experiment" (Overview/Instrument, with the source run's
+   * protocol/plate) — they differ only in what `parts` they pass. Returns the new file's id, for
+   * the caller to switch to Overview and focus the name field.
+   */
+  createExperiment: (parts: ExperimentArchiveParts) => Promise<string | null>;
+  /**
+   * The in-place-editing counterpart to {@link attachProtocol}: same `attachProtocolToZpcr` call
+   * (no name change, just new text), throttled the way {@link setProtocolText} throttles a
+   * standalone `.prcl.txt`'s writes — the same {@link WriteThrottle}, keyed by this file's id
+   * rather than a second one. Only valid while the target file is pending (`isPendingExperiment`)
+   * — the caller's responsibility; `ProtocolView` only renders the editor in that state.
+   */
+  setRunProtocolText: (fileId: string, runDefinition: string) => void;
+  /**
+   * Turn a pending experiment into a started run, in place — what the Instrument tab's Start
+   * button calls instead of seeding a new file. Restamps the file's date if it still carries the
+   * one it was created/cloned under (`restampExperimentDate`, via the ordinary `renameFile` so
+   * ids and IndexedDB stay consistent), then writes the `begun` marker
+   * (`core/markExperimentBegun`). Returns the final file's id and name — which may differ from
+   * `fileId`'s if it was restamped — or `null` for a file that isn't a `kind === "zpcr"` pending
+   * experiment.
+   */
+  beginExperiment: (fileId: string) => Promise<{ id: string; name: string } | null>;
+  /**
    * Rename a loaded file — what the Overview view's rename control calls. `newName` becomes
    * {@link LoadedFile.name}; bytes and content are untouched. A no-op for an empty name or one
    * that's already current.
@@ -822,7 +859,11 @@ export function useZpcrStore(): ZpcrStore {
   // The same write-behind policy as an analysis edit, on a much shorter window: a `.prcl.txt` is
   // a few hundred bytes, so the write costs nothing next to the archive rewrite the minute-long
   // window above exists to space out — and a protocol being typed at is state a person would be
-  // upset to lose. See `writeThrottle.ts`.
+  // upset to lose. See `writeThrottle.ts`. Shared by two editors, both of which have already
+  // updated `filesRef.current`/`files` themselves before marking dirty: a standalone `.prcl.txt`
+  // (`setProtocolText`) and a pending experiment's in-place protocol (`setRunProtocolText`) — this
+  // throttle only has to persist whatever bytes it finds under the id at flush time, whichever
+  // editor wrote them.
   const protocolThrottle = useRef<WriteThrottle>();
   if (!protocolThrottle.current) {
     protocolThrottle.current = new WriteThrottle({
@@ -831,7 +872,7 @@ export function useZpcrStore(): ZpcrStore {
       // text even when several edits coalesced into one trailing write.
       write: async (id) => {
         const file = filesRef.current.find((f) => f.id === id);
-        if (!file || file.kind !== "prcl") return;
+        if (!file || (file.kind !== "prcl" && file.kind !== "zpcr")) return;
         await putFile({
           id: file.id,
           name: file.name,
@@ -1160,6 +1201,77 @@ export function useZpcrStore(): ZpcrStore {
     [files, setModifiedFlag],
   );
 
+  /** See {@link ZpcrStore.attachProtocol}. */
+  const attachProtocol = useCallback(
+    async (targetFileId: string, file: File) => {
+      const target = files.find((f) => f.id === targetFileId);
+      if (!target) return;
+      if (target.kind !== "zpcr") {
+        setError(`${target.name}: attaching a protocol is only supported for .zpcr files`);
+        return;
+      }
+      try {
+        const buf = await file.arrayBuffer();
+        const runDefinition = parseRunDefinitionText(new TextDecoder().decode(buf));
+        const name = file.name.replace(/\.prcl\.txt$/i, "");
+        const augmented = attachProtocolToZpcr(target.bytes, { runDefinition, name });
+        await putFile({
+          id: target.id,
+          name: target.name,
+          size: augmented.byteLength,
+          addedAt: target.addedAt,
+          bytes: augmented.slice().buffer,
+          kind: target.kind,
+          lastModified: target.lastModified,
+        });
+        setFiles((prev) =>
+          prev.map((f) =>
+            f.id === target.id ? { ...f, size: augmented.byteLength, bytes: augmented } : f,
+          ),
+        );
+        setModifiedFlag(target.id, true);
+      } catch (e) {
+        setError(`${file.name}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    },
+    [files, setModifiedFlag],
+  );
+
+  /** See {@link ZpcrStore.createExperiment}. */
+  const createExperiment = useCallback(
+    async (parts: ExperimentArchiveParts): Promise<string | null> => {
+      const bytes = buildExperimentArchive(parts);
+      const today = new Date();
+      // `runFileBaseName` refuses an empty name — there is none yet, so the bare date stamp is
+      // built directly the same way it would be, rather than through it.
+      const stamp =
+        `${today.getFullYear()}` +
+        `${String(today.getMonth() + 1).padStart(2, "0")}` +
+        `${String(today.getDate()).padStart(2, "0")}`;
+      const file = new File([bytes.slice()], `${stamp}.zpcr`, { lastModified: Date.now() });
+      return addFiles([file], { activate: true, modified: true });
+    },
+    [addFiles],
+  );
+
+  /** See {@link ZpcrStore.setRunProtocolText}. */
+  const setRunProtocolText = useCallback(
+    (id: string, runDefinition: string) => {
+      const file = filesRef.current.find((f) => f.id === id);
+      if (!file || file.kind !== "zpcr") return;
+      const augmented = attachProtocolToZpcr(file.bytes, { runDefinition });
+      filesRef.current = filesRef.current.map((f) =>
+        f.id === id ? { ...f, bytes: augmented, size: augmented.byteLength } : f,
+      );
+      setFiles((prev) =>
+        prev.map((f) => (f.id === id ? { ...f, bytes: augmented, size: augmented.byteLength } : f)),
+      );
+      setModifiedFlag(id, true);
+      protocolThrottle.current!.markDirty(id);
+    },
+    [setModifiedFlag],
+  );
+
   /** See {@link ZpcrStore.setProtocolText}. */
   const setProtocolText = useCallback(
     (id: string, runDefinition: string) => {
@@ -1226,6 +1338,44 @@ export function useZpcrStore(): ZpcrStore {
       setActiveId((cur) => (cur === id ? newId : cur));
     },
     [forget],
+  );
+
+  /** See {@link ZpcrStore.beginExperiment}. */
+  const beginExperiment = useCallback(
+    async (id: string): Promise<{ id: string; name: string } | null> => {
+      const file = filesRef.current.find((f) => f.id === id);
+      if (!file || file.kind !== "zpcr") return null;
+      // Flush any in-flight protocol edit first — the begun marker must land on top of the
+      // latest text, not race a still-pending throttled write.
+      await protocolThrottle.current!.flush(id);
+      const current = filesRef.current.find((f) => f.id === id) ?? file;
+      let targetId = id;
+      let targetName = current.name;
+      const restamped = restampExperimentDate(current.name, new Date());
+      if (restamped) {
+        await renameFile(id, restamped);
+        targetId = fileId(restamped, current.size);
+        targetName = restamped;
+      }
+      const augmented = markExperimentBegun(current.bytes);
+      await putFile({
+        id: targetId,
+        name: targetName,
+        size: augmented.byteLength,
+        addedAt: current.addedAt,
+        bytes: augmented.slice().buffer,
+        kind: current.kind,
+        lastModified: current.lastModified,
+      });
+      setFiles((prev) =>
+        prev.map((f) =>
+          f.id === targetId ? { ...f, size: augmented.byteLength, bytes: augmented } : f,
+        ),
+      );
+      setModifiedFlag(targetId, true);
+      return { id: targetId, name: targetName };
+    },
+    [renameFile, setModifiedFlag],
   );
 
   // One flat object per file, assembled from the two stores. The analysis half wins, so a
@@ -1470,6 +1620,10 @@ export function useZpcrStore(): ZpcrStore {
     incompleteIds,
     markDownloaded,
     attachPlate,
+    attachProtocol,
+    createExperiment,
+    setRunProtocolText,
+    beginExperiment,
     renameFile,
     setProtocolText,
     settings,

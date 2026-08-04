@@ -110,7 +110,8 @@ export interface RunCheck {
     | "flyover-multichannel"
     | "no-steps"
     | "method-unknown"
-    | "no-experiment-name";
+    | "no-experiment-name"
+    | "no-plate";
   message: string;
 }
 
@@ -147,8 +148,15 @@ export interface RunPlan {
 export interface PlanRunOptions {
   /** The protocol, as the ASCII run definition that would be sent (`prcl.md` §3.1). */
   runDefinition: string;
-  /** The plate the run will read. Uploaded as a `.plt.csv`, and checked against `PLATEREAD`. */
-  plate: PlateDefinition;
+  /**
+   * The plate the run will read. Uploaded as a `.plt.csv`, and checked against `PLATEREAD` when
+   * present. Optional: an experiment can be started with no plate attached yet (the app's
+   * "pending experiment" model lets one be started from scratch and a plate added later) — when
+   * absent, {@link checkRunPlan} is skipped (there is nothing to check channels against) and a
+   * single `"no-plate"` warning takes its place instead, so `RunPlan.startable` is unaffected: a
+   * `warning` never blocks a start, only an `error` does.
+   */
+  plate?: PlateDefinition;
   /**
    * What to call the run — required in practice, though typed optional so a caller can build a
    * plan to *look* at before naming it. A blank name is an `error` check, so the plan is not
@@ -371,7 +379,6 @@ export function planRun(options: PlanRunOptions): RunPlan {
   // The deposited files keep the protocol's and the plate's own names, never the run's — see
   // `PlanRunOptions.plateName` for why the three namespaces stay separate.
   const protocolBase = uploadBase(options.protocolName, "protocol");
-  const plateBase = uploadBase(options.plateName || plate.identityKey, "plate");
 
   const uploads: RunUpload[] = [
     {
@@ -395,11 +402,14 @@ export function planRun(options: PlanRunOptions): RunPlan {
     });
   }
 
-  uploads.push({
-    name: `${plateBase}.plt.csv`,
-    path: `${CFX_CURRENT_RUN_DIR}\\${plateBase}.plt.csv`,
-    bytes: new TextEncoder().encode(plateToCsv(plate)),
-  });
+  if (plate) {
+    const plateBase = uploadBase(options.plateName || plate.identityKey, "plate");
+    uploads.push({
+      name: `${plateBase}.plt.csv`,
+      path: `${CFX_CURRENT_RUN_DIR}\\${plateBase}.plt.csv`,
+      bytes: new TextEncoder().encode(plateToCsv(plate)),
+    });
+  }
 
   // The run's *name* rides along too, as a `zpcrweb.json` (`zpcrwebSettings.ts`) — the one field
   // of it that is known before a single cycle has run. Nothing on the instrument reads the entry;
@@ -449,7 +459,17 @@ export function planRun(options: PlanRunOptions): RunPlan {
   // here rather than in `checkRunPlan` — but it is an `error` like any other, which is what makes
   // Start run refuse an unnamed run without the UI needing a rule of its own. First in the list:
   // it is the check the operator can act on before the run exists at all.
-  const checks = checkRunPlan(program, plate);
+  const checks = plate
+    ? checkRunPlan(program, plate)
+    : [
+        {
+          severity: "warning" as const,
+          code: "no-plate" as const,
+          message:
+            "No plate is attached, so this run will record no well, target or sample mapping — " +
+            "just raw fluorescence. Attach one before starting, or later once it's running.",
+        },
+      ];
   if (!experimentName) {
     checks.unshift({
       severity: "error",

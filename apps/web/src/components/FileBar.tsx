@@ -41,14 +41,6 @@ interface Props {
    * the file is one click of that tab and a checkbox away from being back on the bar.
    */
   onHide: (id: string) => void;
-  /**
-   * The *auxiliary* files staged alongside the primary one, for the Instrument view: a plate or
-   * protocol file overriding half of the run being assembled (see `useRunStaging.ts`). They are
-   * highlighted magenta, and toggle on and off, where {@link Props.activeId} stays what it always
-   * is — the one primarily selected file, in the app's usual cyan. Passing this puts the bar in
-   * multi-select mode; the run is never in here, since it *is* the primary selection there.
-   */
-  stagedIds?: Set<string>;
   /** Files whose content has been edited since it was loaded and not since downloaded
    * (`ZpcrStore.modifiedIds`). Deleting one of those throws work away that exists nowhere else,
    * so its chip asks a second time first — see {@link DeleteButton}. */
@@ -74,11 +66,8 @@ interface Props {
   /**
    * True while a run in progress on a connected instrument owns the whole bar — passed only by
    * the Instrument view's bar (see `App.tsx`'s `runActive`/`selectFile`), since that's the one
-   * place a chip click could otherwise show something other than what the instrument is actually
-   * running. Locks every chip but the active one, primary *and* auxiliary staging (magenta,
-   * `stagedIds`) alike: an override staged over the run in progress isn't "the next run" the way
-   * it is once the run finishes, it's a claim about the plate or protocol *this* run is using, so
-   * leaving it clickable would be exactly the confusion the lock exists to prevent.
+   * place a chip click could otherwise walk away from the run that view is following. Locks every
+   * chip but the active one.
    */
   activeLocked?: boolean;
   /** What each file is called and when it ran, keyed by id (`ZpcrStore.experiments`). A chip
@@ -265,7 +254,6 @@ function FileChip({
   isModified,
   isRunning,
   isIncomplete,
-  isStaged,
   activeLocked,
   onSelect,
   onHide,
@@ -282,7 +270,6 @@ function FileChip({
   isRunning: boolean;
   /** See {@link Props.incompleteIds} — the run ended without finishing its protocol. */
   isIncomplete: boolean;
-  isStaged: boolean;
   /** See {@link Props.activeLocked}. */
   activeLocked: boolean;
   onSelect: (id: string) => void;
@@ -291,9 +278,6 @@ function FileChip({
   const mainRef = useRef<HTMLButtonElement>(null);
   const [cardPos, setCardPos] = useState<{ top: number; left: number } | null>(null);
   const encStatus = fileEncryptionStatus(f, run, plateFile, password);
-  // A staging chip (protocol/plate override) locks along with the run chip: showing something
-  // other than what the instrument is actually running is exactly the confusion the lock exists
-  // to prevent, so there's no carve-out for "only the primary selection."
   const clickLocked = activeLocked && !isActive;
 
   return (
@@ -301,7 +285,6 @@ function FileChip({
       className={
         "filechip" +
         (isActive ? " is-active" : "") +
-        (isStaged && !isActive ? " is-staged" : "") +
         (isModified ? " is-modified" : "") +
         (isRunning ? " is-running" : "") +
         (clickLocked ? " is-locked" : "")
@@ -311,7 +294,7 @@ function FileChip({
         ref={mainRef}
         className="filechip__main"
         role="tab"
-        aria-selected={isActive || isStaged}
+        aria-selected={isActive}
         title={
           clickLocked
             ? "Can't switch files while a run is in progress and connected via USB"
@@ -383,7 +366,6 @@ export function FileBar({
   activeId,
   onSelect,
   onHide,
-  stagedIds,
   modifiedIds,
   inProgressIds,
   incompleteIds,
@@ -393,10 +375,9 @@ export function FileBar({
   const [password] = usePltdPassword();
   return (
     <div
-      className={"filebar" + (stagedIds ? " filebar--multi" : "")}
+      className="filebar"
       role="tablist"
-      aria-label={stagedIds ? "Files for the run to start" : "Loaded files"}
-      aria-multiselectable={stagedIds ? true : undefined}
+      aria-label="Loaded files"
     >
       {files.map((f) => (
         <FileChip
@@ -405,6 +386,7 @@ export function FileBar({
           identity={
             experiments.get(f.id) ?? {
               name: fallbackLabel(f),
+              named: false,
               date: null,
               dateText: "",
               fileName: f.name,
@@ -414,7 +396,6 @@ export function FileBar({
           plateFile={plateFiles.get(f.id)}
           password={password}
           isActive={f.id === activeId}
-          isStaged={stagedIds ? stagedIds.has(f.id) : false}
           isModified={modifiedIds.has(f.id)}
           isRunning={inProgressIds.has(f.id)}
           isIncomplete={incompleteIds.has(f.id)}

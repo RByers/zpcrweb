@@ -277,19 +277,20 @@ stop is where the curves with no Cq live (an upper bound drops them, the *lower*
 there leaves only them, and the handles clamp instead of crossing) — and that a `.pcrd` carrying a
 hand-set threshold seeds it as a per-fluorophore override while a dye the file left on auto is
 left alone (`threshold.md` §5.3: that one value is what makes the app reproduce CFX's own Cq) —
-and the Overview tab's `.prcl.txt` download plus the Instrument view's run staging, where the file
-bar carries a primary selection plus overrides (three slots — the run, plus a
-`.prcl.txt`/`.plt.csv` overriding either half; tapping a staged override releases its slot while
-tapping the run leaves it, since the primary selection is never empty; a loaded `.prcl.txt` joins
-the selection but opens on its Overview; a staged `.plt.csv` takes its dye→channel mapping
-from the run it is paired with, including when that run supplies neither half and is there only
-as the instrument)
-and Start run appears only with an instrument attached, and the staged protocol is the directives
-alone — the plain-English reading of each one belongs to Overview, which is where it is asserted,
-save the `PLATEREAD` scan mask, whose channels and sweep mode are a packed byte the text can't
-show and so stay on a sub-line of their own —
+and the Overview tab's `.prcl.txt` download plus the Instrument view, which starts the **one
+experiment** the file bar has selected (the bar meaning the same single selection it means
+everywhere else) — a run that already holds results is refused a start and offered a clone instead,
+Start appears only with an instrument attached, no name is collected on that tab at all, and the
+protocol shown is the directives alone: the plain-English reading of each one belongs to the
+Protocol tab, which is where it is asserted, save the `PLATEREAD` scan mask, whose channels and
+sweep mode are a packed byte the text can't show and so stay on a sub-line of their own —
+and the **pending experiment** flow both ways in: cloning a run yields a new file with the protocol
+and plate and none of the results, under a bare-date name, with its experiment-name field required
+and focused, and naming it renames the file to the `<date>-<name>` convention; "New experiment"
+yields the same thing with neither half, offering Overview and Protocol (the latter an editor even
+with nothing in it) but not the tabs it has nothing for —
 and that a `.prcl.txt` is a document as
-well as an input: it enables Overview and Instrument and nothing else, and its Overview reports
+well as an input: it enables Overview, Protocol and Raw and nothing else, and its Overview reports
 the protocol's own settings from the decode — and how a run is *named*: the file bar shows an
 experiment name over a compact local timestamp rather than a file name, derived from the
 filename's `<date>_<time>_<serial>_<name>` unless the format states one (Biomeme) or somebody

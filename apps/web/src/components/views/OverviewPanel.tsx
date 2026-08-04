@@ -47,8 +47,12 @@ export interface OverviewPanelProps {
    * clears the file's modified flag. */
   onDownload: () => void;
   /** Copy the file under the next free `(N)` name and open the copy — `App.tsx`'s
-   * `cloneActiveFile`. */
+   * `cloneActiveFile`. A run passes `App.tsx`'s `cloneExperiment` instead, which copies only the
+   * protocol and plate into a fresh experiment; see {@link cloneTitle}. */
   onClone: () => void;
+  /** Overrides the Clone button's tooltip, for a kind whose clone isn't a copy of the whole file
+   * (a run clones into a new experiment, deliberately leaving its results behind). */
+  cloneTitle?: string;
   /** Overrides the Download button's tooltip, for a kind whose download isn't simply the bytes
    * that were loaded (a `.zpcr` also writes its `zpcrweb.json`). */
   downloadTitle?: string;
@@ -74,6 +78,7 @@ export function OverviewPanel({
   onDownload,
   onClone,
   downloadTitle,
+  cloneTitle,
   autoEditName,
   onAutoEditHandled,
   rows,
@@ -117,6 +122,7 @@ export function OverviewPanel({
           downloadTitle={downloadTitle}
           onEdit={filename.beginEdit}
           onClone={onClone}
+          cloneTitle={cloneTitle}
         />
       </div>
       {children}
@@ -213,6 +219,7 @@ function OverviewToolbar({
   onEdit,
   onClone,
   downloadTitle = "Download this file as it stands in the browser, including any edits made here",
+  cloneTitle = "Make a copy of this file, kept alongside your other files, and open it to be renamed",
 }: {
   /** The file's name — only for the buttons' accessible labels. */
   name: string;
@@ -220,6 +227,7 @@ function OverviewToolbar({
   onEdit: () => void;
   onClone: () => void;
   downloadTitle?: string;
+  cloneTitle?: string;
 }) {
   return (
     <div className="overview__toolbar">
@@ -243,7 +251,7 @@ function OverviewToolbar({
         className="raw__download overview__clonebtn"
         onClick={onClone}
         aria-label={`Clone ${name}`}
-        title="Make a copy of this file, kept alongside your other files, and open it to be renamed"
+        title={cloneTitle}
       >
         <CloneIcon />
       </button>

@@ -1,19 +1,29 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { runCompleteness, runProgressFromNames, type FileKind, type Zpcr } from "@zpcrweb/core";
 import { OverviewPanel, type InfoRow, type OverviewPanelProps } from "./OverviewPanel";
 import { OverviewPlateSection } from "./OverviewPlateSection";
+import { AttachPlateMenu } from "../plate/AttachPlateMenu";
+import { AttachProtocolMenu } from "../protocol/AttachProtocolMenu";
 import { usePltdPassword } from "../../state/pltdPassword";
 import { runEncryptionStatus } from "../../lib/encryptionStatus";
 import { useRunAnalysis } from "../../lib/runAnalysis";
-import type { FileSettings, RunResult } from "../../state/useZpcrStore";
+import type { FileSettings, LoadedFile, RunResult } from "../../state/useZpcrStore";
 import type { ExperimentIdentity } from "../../lib/experiment";
 
 /**
  * The Overview tab for a run (`.zpcr`/`.pcrd`/Biomeme `.json`).
  *
- * The shared {@link OverviewPanel} plus the three things a run adds to it: its editable name as
- * the headline, the "still going" banner, and the run's own facts appended to the info table —
- * then its plate's chips below, tallied against the run's Cq table.
+ * The shared {@link OverviewPanel} plus the things a run adds to it: its editable name as the
+ * headline, the "still going" banner, and the run's own facts appended to the info table — then its
+ * plate's chips below, tallied against the run's Cq table.
+ *
+ * **For a pending experiment this tab is also where it gets assembled.** An experiment that hasn't
+ * run yet arrives from "New experiment" or "Clone experiment" with a bare-date file name and no
+ * name of its own, so this view is what asks for one (required, focused on arrival — see
+ * {@link ExperimentHeader}) and what offers the two halves it may still be missing: a protocol and
+ * a plate. Those affordances live here, beside the file's own identity, rather than on the Instrument
+ * tab where they used to be implied by which chips were selected — an experiment is a file, and
+ * what a file is made of is an Overview question.
  */
 export function OverviewView({
   zpcr,
@@ -23,6 +33,14 @@ export function OverviewView({
   identity,
   onRename,
   namePersists,
+  pending,
+  files,
+  onAttachPlate,
+  onAttachProtocol,
+  onCreateProtocol,
+  onCloneExperiment,
+  autoFocusName,
+  onAutoFocusHandled,
   ...tools
 }: {
   zpcr: Zpcr;
@@ -45,9 +63,27 @@ export function OverviewView({
    * archive to hold a `zpcrweb.json`), which the field then says out loud rather than silently
    * losing the edit on reload. */
   namePersists: boolean;
+  /** This experiment hasn't been run yet (`lib/experiment.ts`'s `isPendingExperiment`), so it is
+   * still being assembled: the name is required, and the missing halves can be attached. */
+  pending: boolean;
+  /** Every loaded file, so the attach menus can offer ones already open rather than only a fresh
+   * upload — the same list `PlatesView` passes to `AttachPlateMenu`. */
+  files: LoadedFile[];
+  onAttachPlate: (file: File) => void;
+  onAttachProtocol: (file: File) => void;
+  /** "New protocol…": create an empty `.prcl.txt` under this name and attach it. */
+  onCreateProtocol: (fileName: string) => void;
+  /** Copy this run's protocol and plate into a fresh pending experiment. Replaces the generic
+   * file-clone button for a run — see {@link OverviewPanelProps.onClone} for the difference. */
+  onCloneExperiment: () => void;
+  /** Put the cursor in the experiment-name field as soon as this panel appears — how a
+   * just-created or just-cloned experiment arrives, since naming it is the next thing to do. */
+  autoFocusName?: boolean;
+  /** Called once {@link autoFocusName} has been acted on, so it fires once per new experiment. */
+  onAutoFocusHandled?: () => void;
 } & Pick<
   OverviewPanelProps,
-  "onRenameFile" | "onDownload" | "onClone" | "autoEditName" | "onAutoEditHandled"
+  "onRenameFile" | "onDownload" | "autoEditName" | "onAutoEditHandled"
 >) {
   const m = zpcr.metadata;
   const protocolName = zpcr.protocol()?.name || null;
@@ -89,24 +125,40 @@ export function OverviewView({
     // Omitted rather than shown as "—": a standalone plate/protocol file has no run date at all,
     // and a blank row would read as a missing value rather than a nonsensical question.
     ...(identity.dateText ? [{ label: "Run date", value: identity.dateText }] : []),
-    { label: "Block", value: m.blockDescription || "—" },
-    { label: "Base serial", value: m.baseSerialNumber || "—" },
-    { label: "Channels", value: `${m.channelCount} (mask ${m.scanMask})` },
-    // `reads.length` for a `.zpcr`/`.pcrd`, but a dye-space source (`Zpcr.dyeSpace`) carries no
-    // `PlateRead[]` at all — its curves are already pivoted — so this sums `steps()` instead,
-    // which both formats populate. Equivalent for a `.zpcr`/`.pcrd` (`toSteps` is itself a tally
-    // of `reads`), and the only number that exists at all for the other kind.
-    { label: "Cycles", value: String(steps.reduce((sum, s) => sum + s.readCount, 0)) },
-    { label: "Plate", value: `${m.numberPlateRows}×${m.numberPlateColumns} + ${m.numberReferenceRows} ref` },
-    { label: "Protocol", value: protocolName || "—" },
-    { label: "Last block temp", value: lastTemp != null ? `${lastTemp.toFixed(1)} °C` : "—" },
+    // Everything the *instrument* states about a run it performed. A pending experiment has none of
+    // it — no block, no serial, no scan mask, no cycles, no temperature — because nothing has run
+    // yet, and a dozen rows of "—" would read as a broken file rather than an empty one. They
+    // appear on their own the moment the run does (every snapshot re-parses).
+    ...(pending
+      ? []
+      : [
+          { label: "Block", value: m.blockDescription || "—" },
+          { label: "Base serial", value: m.baseSerialNumber || "—" },
+          { label: "Channels", value: `${m.channelCount} (mask ${m.scanMask})` },
+          // `reads.length` for a `.zpcr`/`.pcrd`, but a dye-space source (`Zpcr.dyeSpace`) carries
+          // no `PlateRead[]` at all — its curves are already pivoted — so this sums `steps()`
+          // instead, which both formats populate. Equivalent for a `.zpcr`/`.pcrd` (`toSteps` is
+          // itself a tally of `reads`), and the only number that exists at all for the other kind.
+          { label: "Cycles", value: String(steps.reduce((sum, s) => sum + s.readCount, 0)) },
+          {
+            label: "Plate",
+            value: `${m.numberPlateRows}×${m.numberPlateColumns} + ${m.numberReferenceRows} ref`,
+          },
+        ]),
+    { label: "Protocol", value: protocolName || (pending ? "not set yet" : "—") },
+    ...(pending ? [] : [{ label: "Last block temp", value: lastTemp != null ? `${lastTemp.toFixed(1)} °C` : "—" }]),
     { label: "Encrypted", value: <EncryptedValue status={encStatus} /> },
-    { label: "Identifier", value: m.identifier || "—" },
+    ...(pending ? [] : [{ label: "Identifier", value: m.identifier || "—" }]),
     // Only a `.zpcr` has inner files to count. A `.pcrd` is one XML document and gets
     // `EMPTY_ARCHIVE`, which rendered as a flatly misleading "0 files" — so the row is dropped
     // rather than answered wrongly.
     ...(zpcr.archive.entries.length > 0
-      ? [{ label: "Archive entries", value: `${zpcr.archive.entries.length} files` }]
+      ? [
+          {
+            label: "Archive entries",
+            value: `${zpcr.archive.entries.length} file${zpcr.archive.entries.length === 1 ? "" : "s"}`,
+          },
+        ]
       : []),
   ];
 
@@ -117,18 +169,168 @@ export function OverviewView({
       fileNameDisplay={identity.fileName}
       rows={rows}
       downloadTitle="Download this file (including its zpcrweb.json analysis settings)"
-      header={<ExperimentHeader identity={identity} onRename={onRename} persists={namePersists} />}
+      header={
+        <ExperimentHeader
+          identity={identity}
+          onRename={onRename}
+          persists={namePersists}
+          // Required only while the experiment can still be started: after that the name has been
+          // sent with the run and named its file, and an ordinary run with a derived name is not
+          // missing anything.
+          required={pending && !identity.named}
+          autoFocus={autoFocusName}
+          onAutoFocusHandled={onAutoFocusHandled}
+        />
+      }
       banner={
-        progress.inProgress ? (
+        pending ? (
+          <PendingBanner named={identity.named} />
+        ) : progress.inProgress ? (
           <RunningBanner plateReads={progress.plateReads} />
         ) : completeness.incomplete ? (
           <IncompleteBanner expected={completeness.expected!} actual={completeness.actual} />
         ) : undefined
       }
+      // A run's Clone is "clone the *experiment*", not the file: a byte-for-byte copy of a finished
+      // run would be a second copy of results that already exist, which is never the thing wanted.
+      // Cloning to run it again is — so that is what the button does here (`App`'s
+      // `cloneExperiment`), and the generic file-copy stays on the kinds where it does make sense.
+      onClone={onCloneExperiment}
+      cloneTitle={
+        "Start a new experiment from this one's protocol and plate — a fresh file, with no results, " +
+        "ready to be named and run"
+      }
       {...tools}
     >
+      {/* Attaching either half is a pending-experiment affordance only: for a run that has already
+          happened, its protocol and plate are part of the record. (A plate can still be attached to
+          a finished run from the Plates tab, which is a different act — labelling results that came
+          in without a map, rather than assembling a run.) */}
+      {pending && (
+        <ExperimentParts
+          hasProtocol={!!zpcr.protocolText}
+          hasPlate={!!plate}
+          files={files}
+          onAttachPlate={onAttachPlate}
+          onAttachProtocol={onAttachProtocol}
+          onCreateProtocol={onCreateProtocol}
+        />
+      )}
+      {/* A missing plate is worth saying whatever state the experiment is in — before the run, it's
+          a thing to fix; after it, it's why there are no target or sample names on the curves. */}
+      {!pending && !plate && (
+        <section className="overview__block">
+          <div className="overview__missing mono">
+            No plate is attached to this run, so its wells have no target or sample names. One can
+            be attached from the Plates tab.
+          </div>
+        </section>
+      )}
       <OverviewPlateSection plate={plate} cqTable={analysis.cqTable} />
     </OverviewPanel>
+  );
+}
+
+/**
+ * The two halves a pending experiment is made of, and the controls to supply whichever is missing.
+ *
+ * Both are optional, and they are optional in different ways — which is why this says more than
+ * "attach a file". A protocol is what the instrument would actually run, so without one there is
+ * nothing to start; the Protocol tab is an editor for exactly this reason, and attaching a
+ * `.prcl.txt` is the alternative for a protocol meant to be reused across experiments. A plate is
+ * only a *map* of what is in the wells, so a run without one still produces every curve — it just
+ * can't say which target or sample any of them is.
+ */
+function ExperimentParts({
+  hasProtocol,
+  hasPlate,
+  files,
+  onAttachPlate,
+  onAttachProtocol,
+  onCreateProtocol,
+}: {
+  hasProtocol: boolean;
+  hasPlate: boolean;
+  files: LoadedFile[];
+  onAttachPlate: (file: File) => void;
+  onAttachProtocol: (file: File) => void;
+  onCreateProtocol: (fileName: string) => void;
+}) {
+  return (
+    <section className="overview__block">
+      <h2 className="overview__h">Experiment parts</h2>
+      <div className="overview__parts">
+        <div className="overview__part">
+          <div className="overview__partlabel">
+            Protocol
+            {hasProtocol ? (
+              <span className="overview__partok">attached</span>
+            ) : (
+              <span className="overview__partmissing">required to start</span>
+            )}
+          </div>
+          <p className="decoded__hint">
+            {hasProtocol
+              ? "Edit it on the Protocol tab, or replace it with another file."
+              : "Write one on the Protocol tab, or attach a protocol file you already have."}
+          </p>
+          <AttachProtocolMenu
+            files={files}
+            compactLabel={hasProtocol ? "replace protocol" : "attach protocol"}
+            confirmReplace={hasProtocol}
+            onSelect={(f) => onAttachProtocol(new File([f.bytes.slice()], f.name))}
+            onUpload={onAttachProtocol}
+            onCreate={onCreateProtocol}
+          />
+        </div>
+        <div className="overview__part">
+          <div className="overview__partlabel">
+            Plate
+            {hasPlate ? (
+              <span className="overview__partok">attached</span>
+            ) : (
+              <span className="overview__partmissing">optional</span>
+            )}
+          </div>
+          <p className="decoded__hint">
+            {hasPlate
+              ? "The map of what's in each well. Replace it to re-label the same protocol's wells."
+              : "Without a plate this experiment can still run — its curves just won't carry target " +
+                "or sample names."}
+          </p>
+          <AttachPlateMenu
+            files={files}
+            compactLabel={hasPlate ? "replace plate" : "attach plate"}
+            confirmReplace={hasPlate}
+            onSelect={(f) => onAttachPlate(new File([f.bytes.slice()], f.name))}
+            onUpload={onAttachPlate}
+          />
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/**
+ * A pending experiment's banner: what this file is, and what it still needs.
+ *
+ * Worth a banner rather than a badge because "pending" is the one file state that is *about to
+ * change through the user's own next action* — every other banner reports something that already
+ * happened to the run. It replaces the very transitory seed file the old flow produced at the click
+ * on Start: that file existed for minutes and nobody ever chose to make one, whereas this is a
+ * thing you deliberately create and then fill in.
+ */
+function PendingBanner({ named }: { named: boolean }) {
+  return (
+    <div className="overview__pending">
+      <span className="overview__pendingmark" aria-hidden="true" />
+      <span>
+        <strong>This experiment hasn't been run yet.</strong>{" "}
+        {named
+          ? "Give it a protocol and (optionally) a plate below, then start it from the Instrument tab."
+          : "Name it above — that name identifies the run and its file — then give it a protocol below."}
+      </span>
+    </div>
   );
 }
 
@@ -203,48 +405,78 @@ function ExperimentHeader({
   identity,
   onRename,
   persists,
+  required,
+  autoFocus,
+  onAutoFocusHandled,
 }: {
   identity: ExperimentIdentity;
   onRename: (name: string) => void;
   persists: boolean;
+  /** This experiment has no name of its own yet and can't be started until it does — see
+   * {@link OverviewView}'s `pending`. Shown as a required field rather than merely empty. */
+  required: boolean;
+  autoFocus?: boolean;
+  onAutoFocusHandled?: () => void;
 }) {
-  const [draft, setDraft] = useState(identity.name);
+  // A field showing the bare-date placeholder derived from the file name would look already
+  // answered, and the first keystroke would append to it. An unnamed experiment therefore starts
+  // empty, with the placeholder text carrying the example instead.
+  const [draft, setDraft] = useState(required ? "" : identity.name);
   // Re-seed when the resolved name changes underneath — a different file, or a rename arriving
   // from elsewhere. Keyed on the value, so typing is never interrupted by an unrelated render.
-  useEffect(() => setDraft(identity.name), [identity.name]);
+  useEffect(() => setDraft(required ? "" : identity.name), [identity.name, required]);
+
+  const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (!autoFocus) return;
+    inputRef.current?.focus();
+    onAutoFocusHandled?.();
+  }, [autoFocus, onAutoFocusHandled]);
 
   const commit = () => {
     const next = draft.trim();
     // Covers "cleared, and the derived name is what was showing anyway": nothing to store.
     if (next === identity.name) return;
     onRename(next);
-    if (!next) setDraft(identity.name);
+    if (!next && !required) setDraft(identity.name);
   };
 
   return (
     <header className="overview__title">
       <input
-        className="overview__name"
+        ref={inputRef}
+        className={"overview__name" + (required ? " is-missing" : "")}
         value={draft}
         onChange={(e) => setDraft(e.currentTarget.value)}
         onBlur={commit}
         onKeyDown={(e) => {
           if (e.key === "Enter") e.currentTarget.blur();
           if (e.key === "Escape") {
-            setDraft(identity.name);
+            setDraft(required ? "" : identity.name);
             e.currentTarget.blur();
           }
         }}
         aria-label="Experiment name"
+        aria-required={required || undefined}
+        required={required || undefined}
+        placeholder={required ? "Name this experiment — e.g. S183-S185 RVP" : undefined}
         spellCheck={false}
         title={
-          persists
-            ? "The run's name — stored in the file's own zpcrweb.json, so it travels with the " +
-              "file. Clear it to go back to the name derived from the file name."
-            : "The run's name. This format has no archive to store it in, so the name lasts for " +
-              "this session only."
+          required
+            ? "What to call this experiment — required, and never guessed. It identifies the run, " +
+              "names its file, and is sent to the instrument with it."
+            : persists
+              ? "The run's name — stored in the file's own zpcrweb.json, so it travels with the " +
+                "file. Clear it to go back to the name derived from the file name."
+              : "The run's name. This format has no archive to store it in, so the name lasts for " +
+                "this session only."
         }
       />
+      {required && (
+        <span className="devrun__required" title="Required — an experiment is not started without one">
+          *
+        </span>
+      )}
     </header>
   );
 }

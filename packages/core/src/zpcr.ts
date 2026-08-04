@@ -80,14 +80,16 @@ export function parseZpcr(data: Uint8Array | ArrayBuffer): Zpcr {
   const archive = createArchiveAccess(files);
 
   // `RunInfo.xml` is what a *finished* run is described by, and every archive off an instrument or
-  // out of CFX Manager has one — but a run this app has only just started does not: the instrument
-  // writes it as the run gets going, and until then the archive is the seed `runSeed.ts` builds
-  // (protocol, plate, name). Missing metadata is therefore "not yet" rather than "not a `.zpcr`",
-  // and it parses to the same empty `RunMetadata` an empty document gives, so nothing downstream
-  // needs to ask which case it has.
+  // out of CFX Manager has one — but a pending experiment (`experimentArchive.ts`) or a run just
+  // begun in place (`runFolder.ts`'s `markExperimentBegun`) does not: the instrument writes it as
+  // the run gets going. Missing metadata is therefore "not yet" rather than "not a `.zpcr`", and it
+  // parses to the same empty `RunMetadata` an empty document gives, so nothing downstream needs to
+  // ask which case it has.
   //
   // Some entry still has to say this is a run, or any ZIP renamed `.zpcr` would open as an empty
-  // one: `RunInfo.xml`, a plate read, or — for a seed — the protocol the run was started with.
+  // one: `RunInfo.xml`, a plate read, or — for a pending experiment — the (possibly zero-length)
+  // `ProtocolRunDefinition.txt` entry `experimentArchive.ts` always writes, whose mere presence is
+  // enough even before it has real content.
   const runInfoBytes = files[RUNINFO_NAME];
   if (
     runInfoBytes === undefined &&

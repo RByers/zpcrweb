@@ -122,10 +122,10 @@ is what the file is — a run, a plate map or a thermal protocol — and its **c
 encryption status above. The shape comes from core's `fileCategory()` (`fileKind.ts`), not from the
 extension, which is why the two plate encodings (`.pltd`, `.plt.csv`) and the two protocol ones
 (`.prcl`, `.prcl.txt`) each draw as one icon: the bar shows the six accepted formats as the three
-kinds of thing they actually are. The same grouping is what `state/useRunStaging.ts` stages a run
-from, so a file's icon and the slot it claims in the Instrument view can't drift apart. The icon
-replaced a plain colored dot, which carried the encryption half alone; a protocol chip's "proto"
-badge went with it, the icon now being what tells the two override kinds apart at a glance.
+kinds of thing they actually are — the same grouping that decides which half of an experiment a file
+can be attached as. The icon replaced a plain colored dot, which carried the encryption half alone; a
+protocol chip's "proto" badge went with it, the icon now being what tells a protocol from a plate at a
+glance.
 
 Each chip's hover card (the file's detailed type description — `fileKindDescription()`,
 `fileKind.ts` — plus protocol name, cycle count, and the plate's target/sample lists, the
@@ -281,7 +281,9 @@ things:
   counts directives, and reads nothing out of the text.
 - **Raw** (`StandaloneRawView`, shared with `.pltd`/`.plt.csv`/Biomeme) — the file's own bytes
   verbatim, since a `.prcl.txt` is already plain UTF-8 text with nothing to decrypt.
-- **Instrument** — the protocol *as an input*, staged against a plate (see "The Instrument view").
+A `.prcl.txt` has **no Instrument tab**: it is not something that can be started, only attached to an
+experiment that can (see "The Instrument view"). It used to list one, from when a protocol file was
+staged directly into a run.
 
 Enabling Overview is what removed the old special case in `App.tsx`, where a `.prcl.txt` selected
 on any tab was forced into the Instrument view because it had no file-backed view to render. It
@@ -391,9 +393,10 @@ alongside `"zpcr"`/`"pcrd"`:
   the run's plate into its own independent `LoadedFile`, which is what populates the "Attach"
   menu above with something to pick besides an upload. `ProtocolView`'s "Thermal protocol"
   block has the same pair of buttons for a run's `protocolText`, download vs. clone to a
-  `.prcl.txt` `addFiles` call — there is no equivalent "replace this run's protocol" control,
-  since (per "A protocol on its own") a protocol override is expressed through run staging, not
-  by rewriting the run's own bytes the way a plate attach does.
+  `.prcl.txt` `addFiles` call. Replacing a run's protocol *is* rewriting its own bytes, the way a
+  plate attach does (core's `attachProtocolToZpcr`), and it is offered only for a **pending**
+  experiment — through Overview's attach menu, or by editing it on the Protocol tab. A run that has
+  happened doesn't get it: its protocol is the record of what the block was asked to do.
 
 ## State & persistence
 
@@ -649,7 +652,7 @@ so every call site keeps writing one `onChange({ … })` regardless of where the
   step 2 (TEMP 95.0,10) — 45 passes in total"). It renders `parseRunDefinition()`'s directives
   and **parses nothing itself**: the verbs, the step numbering `GOTO` counts in, and the
   `PLATEREAD` scan mask are all core's, per [`protocol.md`](../../protocol.md). Takes plain
-  `text`, so `ProtocolView` and the Instrument view's staged protocol reuse it unchanged — the
+  `text`, so `ProtocolView` and the Instrument view's protocol panel reuse it unchanged — the
   latter with `annotated={false}`, which drops the reading column and leaves the program itself
   (plus the scan mask's channels and sweep mode, on a sub-line — a packed operand no text says).
 - **`.prcl`** → `DecodedProtocol` (`components/raw/DecodedProtocol.tsx`), which decrypts the
@@ -776,10 +779,15 @@ logic `addFiles` uses for a same-named re-upload handles a rename that collides 
 already-loaded file. It marks the file `modified`, since a download now writes different
 bytes-under-a-name than what's on disk under the old one.
 
-The Instrument view has a name field too, for a run that does not exist yet: it is the one part of a
-staged run that is typed rather than selected from a file, so it sits in the "Run to start" panel
-with the protocol and plate, and is held by `InstrumentView` so it outlives that panel's renders and
-is reachable by Start run once there is one to send (`usb.md` §10).
+An experiment's name is asked for in exactly one place, this field, and only while the experiment is
+**pending** — where it is required, since an experiment cannot be started without one (see "The
+Instrument view"). It used to be a second name field on the Instrument tab, for a run that did not
+exist yet; now the run exists as a file before it is started, so there is nowhere else the question
+needs asking. Naming a pending experiment also renames its *file*, to the `<YYYYMMDD>-<name>`
+convention every run's file follows (`App`'s `nameExperiment` over core's `runFileBaseName`) — the two
+are one action here and nowhere else, since leaving the placeholder file name in place while the run is
+called something else would have the file bar, the download and the instrument's own deposit disagree
+about which run this is.
 
 ## Raw views
 
@@ -1835,7 +1843,7 @@ has no channel at all. Nothing is ever guessed: `channelColor(undefined)` return
 and `channelLabel(undefined)` returns `UNKNOWN_CHANNEL_LABEL` (`Ch?`). One shared component,
 `components/plate/FluorChannelChip.tsx`, renders every dye chip in both the Plates and Raw views —
 dashed outline plus a `Ch?` marker and an explanatory `title` when the channel is unknown. That
-hover is the whole explanation: the fluor list carries no footnote about it, and a staged run
+hover is the whole explanation: the fluor list carries no footnote about it, and a planned run
 raises no check for it either, since the marker already says everything a reader needs. The rest of the pipeline treats `undefined` as "not in any channel" rather than channel 0:
 `fluorCurves.ts` propagates it, and `chart.ts`'s dark-overlay `presentChannels` set filters it
 out. That only costs colouring and grouping — the color-separation solve keys off `.Dcal`
@@ -1865,8 +1873,10 @@ response curves, not channel numbers.
   from what the archive **holds** rather than from its extension (`App.tsx`'s `runViews`): Curves
   needs a plate read, Reference needs readings *and* a `FactoryRefRowCal`, Calibration needs
   readings *and* a `.Dcal` set. A finished run has all of it and nothing changes; a run in progress
-  — and especially the seed written at the click on Start run (see "Starting a run") — does not,
-  and each tab switches itself back on as the data arrives, since every snapshot re-parses. The
+  — and especially a pending experiment, which may hold nothing but a protocol — does not,
+  and each tab switches itself back on as the data arrives, since every snapshot re-parses. Protocol
+  is the exception that is always on for a pending experiment: there it is the editor the protocol
+  comes from in the first place (see "The Instrument view"). The
   alternative was three views drawing empty frames, which reads as broken rather than as absent.
   It also makes the header's width independent of the active file, which is why
   `useHeaderFit`'s only dep is the selected view. Which view the *content* area falls back to
@@ -1955,61 +1965,51 @@ bar underneath says which one. This tab isn't:
   and no files can reach it. That is also why the welcome screen carries a "Connect an instrument
   over USB" button: it is the one thing the drop zone can't offer.
 
-**But it keeps the file bar, meaning something else.** Starting a run needs a protocol and a plate
-map, and those come from files — the instrument has no protocol library of its own to pick from
-(`usb.md` §5.1). So the same `FileBar` renders here with `stagedIds` alongside `activeId`, and the
-two are different claims. Reusing the bar rather than growing a second file list inside the view
-is the whole point — it is the app's file list doing a second job, not a copy of it.
+**But it keeps the file bar, meaning exactly what it always means.** Starting a run needs a
+protocol, and that comes from a file — the instrument has no protocol library of its own to pick
+from (`usb.md` §5.1). So the same `FileBar` renders here, with the same single `activeId` selection
+it carries everywhere else, and on this tab that file is **the experiment to start**.
 
-**One chip is always the primary selection**, in the app's ordinary cyan. Everywhere else that is
-`activeId`, the file every view is pointed at; here — a view that shows no file — it is the run
-being staged, which is what the bar has to name even when a just-loaded `.prcl.txt` is the active
-file. Selecting another run *switches* it rather than toggling it, the same as everywhere else. The
-**auxiliary** chips are the plate and protocol files staged over it (`stagedIds`, magenta, matching
-the Instrument tab): those do toggle, and each supersedes half of the run. Making all three
-symmetric toggles, as an earlier version did, read as three equal switches when only two of them
-are — a click on the run chip is not "toggle the run off", it is "release the run in favor of
-whatever is staged", and the two read differently.
+**One experiment, one file.** This is the model the whole view rests on, and it replaced a
+considerably larger one. A run used to be assembled here from a **three-slot staging selection** — a
+run plus a protocol override plus a plate override, chosen by clicking chips that meant something
+different on this tab than on any other, with magenta "auxiliary" selections alongside the cyan
+primary one (`state/useRunStaging.ts` and `lib/protocolSource.ts`, both removed). It could pair one
+run's protocol with another's plate, and the run it would start existed *nowhere* until Start was
+clicked — at which point a file was invented from the staged parts and a name typed into this panel.
 
-**Tapping the chip that already holds the primary slot releases it** (`deselectRun`), rather than
-doing nothing — but it never empties the bar out: it promotes whichever override is staged
-(protocol first, else plate) to primary in its place, and refuses when there is nothing staged to
-promote to, since that is exactly the empty selection the rejected all-toggles design used to
-reach. The released run stays *released* — not merely off-screen — until a run is chosen as
-primary again by any route, which is what lets the promoted file's own overrides keep toggling
-without the run reasserting itself; releasing the last remaining override in turn hands the
-primary slot to the other one, guarded the same way. See `state/useRunStaging.ts`'s `released` and
-`App.tsx`'s `selectFile`/`stagingActiveId`.
+What replaced it is an ordinary file. An experiment is created deliberately ("New experiment" on the
+About page, "Clone experiment" on a run's Overview), named on its Overview, filled in there and on
+its Protocol tab, and started here — in place, without creating anything. Everything the old model
+could express, it can still express, in a way that survives a reload and can be downloaded: pairing
+a protocol with a different plate is *attaching* that plate to the experiment, not overriding half of
+some other run's identity. The three-slot selection, the override badges, the release/promote rules
+for tapping a chip, the typed name and its lock/phase machinery (`state/useRunNaming.ts`) are all
+gone with it.
 
-**The staging model** lives in `state/useRunStaging.ts`, held by `App` because the bar that edits
-it does. A selection is **three slots** — a run, a protocol override, a plate override — since a
-`.zpcr`/`.pcrd` carries both halves while a `.prcl.txt` or `.pltd`/`.plt.csv` carries exactly one.
-The run slot is *derived* from the primary selection rather than stored, so the run this view
-would start and the file the rest of the app is showing can never disagree (with the last run to
-hold it remembered, for while you are looking at a standalone plate — unless it was deliberately
-released, above). The two override slots hold at most one file each, selecting replaces whatever
-held the slot, and tapping a selected file releases it (refused when doing so would leave the bar
-with nothing staged and no run to fall back to either). `lib/protocolSource.ts` turns a selection
-into the two resolved halves, each carrying the file it came from and, when empty, why.
+**What this view can do is a property of the active file**, and there are exactly three cases
+(`InstrumentView`'s `InstrumentExperiment`, built by `App` from the active file and
+`lib/experiment.ts`'s `isPendingExperiment`):
 
-**A run stays selected even when both halves are overridden**, where it supplies neither. It is
-still the instrument: its `.Dcal` set is what gives a staged `.plt.csv` its dye→channel mapping
-(below), and a plate CSV with no run to pair with simply has none. The panel therefore names it —
-`instrument: <run>` in the heading, `channels from <run>` over the plate — because a chip lit for
-a reason the reader can't see is worse than the extra line. A run is labelled by its **experiment
-name** here, as everywhere else (`lib/experiment.ts`); the override files keep their file names,
-since a `.prcl.txt`/`.plt.csv` is not an experiment and has no name but the one on disk.
+| Active file | This view |
+| ----------- | --------- |
+| a **pending** experiment — no results, never started | starts it; Start arms once it has a name and a protocol |
+| a run **with results** — in progress, or over | won't start it, and offers the clone that is the way to run it again |
+| anything else, or nothing loaded | says so, and names where experiments come from |
 
-A newly *loaded* override file joins the selection by role rather than replacing it, which is what
-makes the headline flow work: load a `.prcl.txt`, read it on its own Overview (`addFiles` lands
-there), then switch to Instrument and find it already staged against the run already loaded. That
-fold is keyed off the file *list* rather than off the active file, so every entry point stages
-alike and staging doesn't ride on which file a load happened to leave active — which here it
-doesn't: the loaded protocol is the active file while the *run* is the chip this bar has to name.
+Refusing the second case is the point of it rather than a limitation: re-running a file that already
+holds results would either overwrite them or contradict them, so the fix is a new experiment, and the
+panel offers exactly that. Nothing needs to record "already run" — a plate read or a `begun` marker
+in the archive *is* the record (see "A pending experiment" below).
 
-The staged protocol is rendered by the same `ProtocolDecoded` with `annotated={false}` — the
+**A plate is optional.** `planRun`'s `plate` is optional and its absence is a `warning`, never an
+`error` (`usb/runPlan.ts`), so an experiment can be started without one — the curves simply carry no
+target or sample names. Both this panel and Overview say so where it is missing, in the two places it
+matters: before the run, as a thing to fix; after it, as why the wells are unlabelled.
+
+The protocol is rendered by the same `ProtocolDecoded` with `annotated={false}` — the
 directives and their step numbers, no plain-English column. The gloss belongs to the protocol *as
-a document* (Overview); here the protocol shares half the panel with a plate map, and the question
+a document* (the Protocol tab); here the protocol shares half the panel with a plate map, and the question
 is what would be sent, not what the language means. A **scan mask** survives that cut, in smaller
 type on a line below its `PLATEREAD`: `#h3F` is a packed byte (`usb.md` §3.1), so which channels
 are read and how the head sweeps the plate are not in the text at all — and they are what someone
@@ -2032,70 +2032,58 @@ command lines, the `RemoteRun` line, the files to deposit — and `CfxDevice.sta
 to both the panel and the rail, so the warnings shown between the two halves and the state of the
 Start button can never disagree.
 
-**One name is typed above the staged run** (`state/useRunNaming.ts`, held by `App` because the run
-watcher needs it and it must survive leaving the view).
+**The name is not typed here.** It is a property of the experiment's file, given on its Overview
+before the instrument is involved at all (see "A pending experiment" below), and this panel shows it
+read-only. That is the largest single simplification of this refactor: the name used to be typed on
+this panel and held in `state/useRunNaming.ts` (removed) with a three-phase state machine
+(`idle`/`starting`/`running`) locking the field while the run was on the block and clearing it after,
+plus a pinned copy so the watcher could keep naming snapshots once the field had emptied. All of that
+existed because the name lived nowhere but this input until the run started. A file that already
+exists can simply be asked what it is called.
 
-The **experiment name** is the run's identity. It reaches `planRun()` as the run name, i.e.
-`RemoteRun`'s fourth operand (`usb.md` §7.3) — what `STATUS?` echoes and what the `.alf` report is
-filed under — *and* it is deposited into the run folder as a `zpcrweb.json` carrying nothing but
-`experimentName` (§7.4, `zpcrweb-json.md` §7). That second channel is the load-bearing one: the
-operand reaches the instrument's composed filenames and nothing else, and no field of
-`RunInfo.xml` records what a run is called, so without the deposit a name typed here would be gone
-by the time the run's archive came back. With it, the pulled `.zpcr` states its own name through
-the ordinary seeding path, and keeps it across a reload, a rename, or another machine.
+The **experiment name** is still the run's identity, and still travels the same two channels. It
+reaches `planRun()` as the run name, i.e. `RemoteRun`'s fourth operand (`usb.md` §7.3) — what
+`STATUS?` echoes and what the `.alf` report is filed under — *and* it is deposited into the run folder
+as a `zpcrweb.json` carrying nothing but `experimentName` (§7.4, `zpcrweb-json.md` §7). That second
+channel is the load-bearing one: the operand reaches the instrument's composed filenames and nothing
+else, and no field of `RunInfo.xml` records what a run is called, so without the deposit the name
+would be gone by the time the run's archive came back.
 
-The experiment name is **required, and never inferred**. A blank one is an `error` check on the
-plan (`no-experiment-name`), the same mechanism a scan-mask mismatch uses, so the UI needs no rule
-of its own — and the field marks itself rather than waiting for the rail to explain. The one
-plausible default, the protocol's name, is the wrong one: a protocol is run many times, so every
-run of it would share a name, and the name is what the run's file is called and how it is told
-from yesterday's. The instrument cannot supply it either — its echo comes back uppercased and cut
-to eight characters. Somebody has to type it, which is why the placeholder is an example rather
-than a value.
+It is **required, and never inferred**. An experiment still carrying the bare-date file name it was
+created under has no name of its own (`ExperimentIdentity.named`), and `InstrumentView` passes the
+blank that makes `planRun` raise its `no-experiment-name` error — so Start refuses it through the same
+check mechanism a scan-mask mismatch uses, and the rail's reason points at the Overview tab where the
+field is. The one plausible default, the protocol's name, is the wrong one: a protocol is run many
+times, so every run of it would share a name, and the name is what the run's file is called and how it
+is told from yesterday's. The instrument cannot supply it either — its echo comes back uppercased and
+cut to eight characters.
 
-**Start run treats a missing name differently from every other blocker.** All the others dim the
-button and explain themselves in its tooltip, because the fix is elsewhere — pick a file, connect
-a cable, fix a scan mask. A missing name's fix is one field a few pixels away, and a dim button
-does not say which. So the button keeps its disabled *appearance* (`aria-disabled`, the `is-disabled`
-class, and the tooltip "Experiment name required to run") while staying clickable, and the click
-puts the cursor in the field (`InstrumentRail`'s `promptForName` → `InstrumentView`'s `focusName`,
-via a ref into `InstrumentRun`). `start()` guards on `canStart` regardless, so the clickable state
-cannot start anything.
+A run that has already happened is passed the name it actually goes by, derived from its file name if
+nothing stored one, rather than that blank: it is not being started, and demanding a name for it would
+accuse a finished run of missing something it does not need.
 
-**The name locks while the run is on the block, and clears when it comes off.** Once started, it
-has been sent as `RemoteRun`'s operand, deposited into the run folder and used to name a file, so
-the field goes `readOnly` (`naming.locked`) — editing it could only make this app disagree with all
-three. When the run ends it empties, so the next run is named deliberately rather than inheriting
-the last one's name and, with it, the last one's file name.
+**Starting creates no file.** `App`'s `startExperiment` calls the store's `beginExperiment`, which
+writes the `begun` marker into the experiment's *own* archive (core's `markExperimentBegun`) and then
+`instrument.startRun(plan)` sends the run — the same order the old seeding used, and for the same
+reason: the run is about to exist whether or not every upload lands, so the file has to say so first.
 
-*Ended* is read from a **running → stopped transition in `STATUS?`**, and from nothing else, which
-is what `useRunNaming`'s three phases (`idle`, `starting`, `running`) exist to distinguish. A run
-asked for here does not appear in the status immediately — the start sequence resolves once the
-instrument has taken the commands, and the block takes seconds to report anything but `IDLE`
-(`usb.md` §7.3 measured ~6 s; core's `cancelRun` allows 20 s for the same window). Deriving "in
-progress" from `runPending || status.running` therefore put a *false falling edge* right after the
-click: the field emptied and then re-locked as the run showed up, leaving a run on the block with a
-blank, complaining name box. `starting` covers that gap, an unknown status (no instrument, or one
-unplugged mid-run) decides nothing, and a start that never appears merely unlocks the field after
-20 s with the name intact — a run that never ran never stopped.
+This is where the old flow wrote a whole new `.zpcr` from the staged parts (core's `zpcrSeedArchive`,
+removed): a "seed" file, created at the click, existing for the minutes of lid preheat and first hold
+before the first plate read so that there was *something* to look at. A pending experiment is already
+that something, deliberately made and named minutes or days earlier, so the seed had nothing left to
+do. The window it covered is now covered by the file the user is already looking at.
 
-The **file name** never leaves the browser: it is what the `.zpcr` this app assembles is called. It
-is not asked for. It used to be a second field, offered as `<YYYYMMDD>-<name with spaces as
-underscores>` (core's `runFileBaseName`) and following the experiment name until typed over — but
-the run's file is created at the click and every later snapshot must keep that exact name to
-supersede it, so the field only ever offered a second way to say what the experiment name had
-already said. `InstrumentView` derives it at the click instead, steps it past any name already
-loaded (`App`'s `freeRunFileBase` over core's `nextFreeRunFileBase`: `-2`, then `-3`,
-incrementing an existing `-N` rather than nesting), and **pins** it as `naming.active` for the run's
-duration. That pin is what the run watcher names its snapshots from, which is why clearing the
-typed field at the end of a run doesn't rename the archive still being assembled.
+Two things still happen at the click. The file's **date is restamped** to today if it still carries one
+in the standard form (`lib/experiment.ts`'s `restampExperimentDate`, applied through the ordinary
+`renameFile` so ids and IndexedDB stay consistent), so an experiment cloned last week and run today is
+filed under today — and `beginExperiment` returns the possibly-new id and name. And that name is
+**pinned** in `App`'s `startedRun` and the new id **adopted** by the watcher (`runWatch.adopt`), which
+together are what make the first real snapshot *supersede* this file rather than land beside it: the
+watcher names its snapshots from the pin (core's `runFolder.ts` naming precedence) and the store
+supersedes by name. The pin survives the selection moving while the run cycles, which is all that is
+left of what `useRunNaming` used to guard.
 
-The uniqueness step matters because the derived name collides *by construction*: it is the date and
-the experiment name, and re-running an experiment under the same name on the same day is ordinary.
-A same-named add replaces (`ZpcrStore.addFiles`), so without it a new run's seed would overwrite a
-finished run's archive — the one loss in this app that nothing can undo.
-
-The two **deposited** files keep the names of the things they *are*: the protocol's own name, and
+The two **deposited** files keep the names of the things they *are*:The two **deposited** files keep the names of the things they *are*: the protocol's own name, and
 (for an overridden plate) the plate file's, else what the plate says about itself via
 `identityKey`. Protocols and plates are reused across runs and carry their own identities; an
 experiment name belongs to one run, and stamping it on both copies would overwrite that identity
@@ -2119,26 +2107,15 @@ says *Idle* next to an armed Start button — an invitation to click twice on th
 app that heats a block. Nothing is asked of the instrument to know a start was requested: the rail
 reads **Run pending** in both its *Status* and *Current run* sections, the button dims immediately
 (the 150 ms anti-flash delay on the dimmed look applies to short commands, not to this) and relabels
-itself, and the panel badges *pending*. The name field's own badge reads *starting* over the same
-stretch and *running* once `STATUS?` reports the run (`naming.phase`), so the two never contradict
-each other.
+itself, and the panel badges *pending*.
 
-**The run's file is written at the same click**, before anything goes out on the wire. Core's
-`zpcrSeedArchive()` (see the root [`ARCHITECTURE.md`](../../ARCHITECTURE.md)) turns the plan into a
-`.zpcr` holding the protocol, the plate, the name deposit and the `begun` marker — everything known
-at that moment and nothing invented — and `InstrumentView` hands it to `App`'s `seedRunFile`, which
-adds it like any dropped file (`activate`, `modified`) and calls `runWatch.adopt()` on the new id.
-That last part is what makes the first real snapshot *replace* it rather than land beside it: the
-watcher treats the seed as its own previous file, and both take the same name from `useRunNaming`'s
-pinned `active`, so the store supersedes by name too.
-
-Without it there is nothing to look at between the click and the first plate read — minutes of lid
-preheat and first hold — while the file bar shows no sign that a run was started at all. With it,
-the run is a chip immediately, its protocol and plate readable, and each cycle's pull grows the
-same file. Nothing downstream knows a "seed" from a run in progress; the difference is only which
+There is nothing to look at between the click and the first plate read — minutes of lid preheat and
+first hold — except the experiment's own file, which is exactly what it is for: it is already a chip
+in the bar with its protocol and plate readable, and each cycle's pull grows that same file. Nothing
+downstream distinguishes a just-begun experiment from a run in progress; the difference is only which
 entries the archive happens to have yet.
 
-It lasts exactly until the instrument's own answer replaces it — the `STATUS?` read at the end of
+The pending flag lasts exactly until the instrument's own answer replaces it — the `STATUS?` read at the end of
 `startRun()`, taken *whatever it says*. A successful start reports `running` and every live readout
 moves on to the real running state on its own, in the same render; a start that failed reports idle
 and releases the button, so a pending state can never outlive the attempt that set it. Cleared on
@@ -2182,8 +2159,8 @@ name typed in the Instrument view, then `<YYYYMMDD>-<experiment name>` derived f
 own deposited `zpcrweb.json`, then `RunInfo.xml`'s `DataFile` as before. The first two apply only
 to a folder carrying that deposit — i.e. a run *this app started* — so a run begun at the
 touchscreen keeps the name the instrument gave it no matter what is typed here, and the first rung
-additionally requires the deposited name to still match what is staged, so a name typed for the
-*next* run cannot rename the one still finishing. The second rung is what a reloaded browser falls
+additionally requires the deposited name to still match the pinned one, so a later experiment's name
+cannot rename the run still finishing. The second rung is what a reloaded browser falls
 back to, and it dates the name from the run's own `RunStartTime` rather than from the moment of
 the pull.
 
@@ -2221,10 +2198,10 @@ Three economies make the once-a-cycle refresh affordable:
 `runActive` (`instrument.connection === "connected" && !!instrument.status?.running`) scopes both
 halves of this:
 
-- A chip click in the Instrument view that would change what the bar shows — switching the run
-  away from the one in progress, *or* toggling a protocol/plate override — is a no-op while
-  `runActive`: `selectFile` refuses both, and `FileBar`/`FileChip` grey the cursor on every chip
-  but the active one (`is-locked`, `activeLocked` prop). The two are locked together on purpose —
+- A chip click in the Instrument view that would switch away from the run in progress is a no-op
+  while `runActive`: `selectFile` refuses it, and `FileBar`/`FileChip` grey the cursor on every chip
+  but the active one (`is-locked`, `activeLocked` prop). This used to also cover toggling a
+  protocol/plate override, locked together with it on purpose —
   an override staged over the run in progress isn't "the next run" the way it is once this one
   finishes, it's a claim about the plate or protocol *this* run is using, so leaving it toggleable
   would let the panel show something other than what the instrument is actually running, exactly
@@ -2258,9 +2235,10 @@ Four components, under `components/instrument/`:
 
 - **`InstrumentRail`** — the left rail, reusing the Curves view's `.rail__*` vocabulary so the two
   read as the same kind of surface. Connection, the identification block, live status, and the
-  action buttons — **Start run** among them, at their head. It sits with the lid and indicator
-  commands rather than beside the staged run because that is what it is: the control that actuates
-  the instrument. It is disabled until every half of the run is present, the instrument is
+  action buttons — **Start experiment** among them, at their head. It sits with the lid and indicator
+  commands rather than beside the experiment panel because that is what it is: the control that
+  actuates the instrument. It is disabled until the experiment is startable at all (named, with a
+  protocol, and not already run — `unstartable`), the instrument is
   connected and idle, and every check passes, and it names the **first** missing piece rather than
   a generic refusal, so the tooltip is always the next thing to do — including the pending window
   after a click (above), where the next thing to do is wait. A *Current run* section carries
@@ -2299,14 +2277,14 @@ Four components, under `components/instrument/`:
   (`isPaused`, which per §7.9 accepts either indicator); the rail also explains that a run armed
   to start from the touchscreen reports itself paused in the same way, because that state is
   otherwise indistinguishable and looks like a fault.
-- **`InstrumentRun`** — the run that would be started, as its two halves side by side: the thermal
-  protocol and the plate map, each headed by the file supplying it and badged when that file is an
-  override — which takes a run to override, so a protocol and a plate staged with no run between
-  them carry no badge: they are the only sources there are, not overrides of anything. (The
-  resolved half records `fromFile`, "a standalone file supplied this"; the panel is what pairs
-  that with a selected run to make it an override.) It renders a selection it does not own (see the staging model above), and it has no
+- **`InstrumentRun`** — the experiment that would be started, as its two halves side by side: the
+  thermal protocol and the plate map, each headed by what it is. Both come from the one active file,
+  so there is no second source to name and no "override" badge — the halves used to be resolved from
+  a three-slot selection where either could supersede the run's own (see the model note above), which
+  is what those badges existed for. It renders a file it does not own, and it has no
   start button — that belongs with the commands that actuate the instrument, in the rail. What it
-  does carry is the plan's **checks** (above), between the two halves they are about.
+  does carry is the plan's **checks** (above), between the two halves they are about, and — for a run
+  that already has results — the **Clone experiment** button that is the way to run it again.
 
   What is shown for the protocol is the **ASCII run definition**, not a decoded step table — the
   same `ProtocolDecoded` the Raw and Overview views use, directives as they would go on the wire
@@ -2318,14 +2296,13 @@ Four components, under `components/instrument/`:
   it also makes a `.prcl.txt` and a run's embedded protocol render identically, since by then they
   are the same thing. The Overview tab's protocol section is where such a file comes from.
 
-  A staged **`.plt.csv` borrows the run's channels.** The format names its fluor columns by dye
-  alone — a channel is a fact about the optics, not about the plate — so the store, which sees
-  the file sitting in a list beside unrelated ones, parses it with every channel unknown. Here the
-  user has explicitly staged this plate *with this run*, which is the statement the mapping needs,
-  so `resolveStagedRun` re-parses the CSV through `Zpcr.channelForDye` (the run's own `.Dcal`
-  set). Only for a `.plt.csv`: a `.pltd` records `channelPosition` itself. Without this the
-  preview shows dyes with no colour and no channel grouping, which is the plate looking broken
-  when only the pairing was missing.
+  A plate **attached** to an experiment resolves its channels through that archive like any other,
+  since by then the plate is *in* the file (`Zpcr.plates()`), not paired with it. This is what the
+  removed `resolveStagedRun` had to do by hand: a `.plt.csv` names its fluor columns by dye alone — a
+  channel is a fact about the optics, not about the plate — so a CSV sitting in the file list beside
+  unrelated files parses with every channel unknown, and staging it against a run was the only
+  statement that could supply the mapping. Attaching writes it into the archive instead, so the
+  question answers itself and there is no pairing to keep track of.
 
   The plate uses the shared `PlateViewer` in its `compact` variant — no vessel/scan-mode metadata
   and wells shrunk to coloured cells, so a 96-well plate fits the column instead of scrolling out

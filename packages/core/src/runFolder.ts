@@ -12,6 +12,7 @@
  */
 
 import { zipSync } from "fflate";
+import { unzipArchive } from "./archive.js";
 import { runFileBaseName } from "./experiment.js";
 import { expectedPlateReads } from "./runDefinition.js";
 import type { Zpcr } from "./types.js";
@@ -35,6 +36,18 @@ const textDecoder = new TextDecoder("utf-8");
  */
 export const RUN_BEGUN_MARKER = "begun";
 export const RUN_ENDED_MARKER = "ended";
+
+/**
+ * Add the `begun` marker to an existing `.zpcr` archive in memory — what "Start experiment" calls
+ * on a pending experiment's own file instead of creating a new one (the app's `beginExperiment`).
+ * Once this lands, `runProgressFromNames` reads the file as started, permanently: even at zero
+ * plate reads it is no longer "pending" (see the app's definition of that state), only "in
+ * progress". Zero-content, like the marker itself — only its presence means anything.
+ */
+export function markExperimentBegun(zpcrBytes: Uint8Array): Uint8Array {
+  const files = unzipArchive(zpcrBytes);
+  return zipSync({ ...files, [RUN_BEGUN_MARKER]: new Uint8Array(0) });
+}
 
 /** How far along a run is, read from nothing but which files exist. */
 export interface RunProgress {

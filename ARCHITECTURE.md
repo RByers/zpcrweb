@@ -330,7 +330,7 @@ sample). The call throws when `RunInfo.xml` is missing rather than handing back 
 Naming the archive takes three rungs, in `zpcrNameFromRunFiles`. A run *this app started* has its
 own `zpcrweb.json` in the folder (`usb/runPlan.ts` deposits it — nothing else writes one there),
 and that both states the run's name and identifies the folder as ours: such a run takes the file
-name its caller chose, if that caller is still staging the same run, and otherwise
+name its caller chose, if that caller is still following the same run, and otherwise
 `<YYYYMMDD>-<name>` via `experiment.ts`'s `runFileBaseName`, dated from the run's own start. Any
 other run — one begun at the touchscreen, or by CFX Manager — keeps `RunInfo.xml`'s `DataFile`,
 which is already the name Manager would have saved it under.
@@ -366,22 +366,36 @@ Every committed sample matches exactly, which is what
 stored flag, it works on any run from any source — including a `.pcrd`, which has no markers at
 all and is judged on the read count alone.
 
-### The run's file exists before the run produces anything (`runSeed.ts`)
+### An experiment's file exists before the run does (`experimentArchive.ts`)
 
 Assembling a `.zpcr` backwards from what the instrument has written leaves a window — a lid
 preheat and a first hold, minutes — in which the run exists on the block and nowhere in the app.
-`zpcrSeedArchive()` closes it: at the click on Start run it writes the archive from what is
-already known, namely the plan about to be sent. The entries are the protocol as
-`ProtocolRunDefinition.txt`, the plan's own upload bytes for the plate `.plt.csv` and the
-`zpcrweb.json` name deposit, and the `begun` marker — so the seed and the run folder agree entry
-for entry, and every later snapshot simply replaces it under the same name.
+More than that, it leaves no way to *prepare* a run at all: until the instrument had written
+something there was nothing to attach a plate to or write a protocol into.
 
-It has no `RunInfo.xml` and no plate reads, because neither exists yet. `parseZpcr` therefore
-treats that file as optional — an archive with a plate read or a protocol is a run whose metadata
-is simply empty — rather than rejecting the seed as malformed; some entry must still identify it
-as a run, so a bare ZIP renamed `.zpcr` is still refused. The app greys out the views whose data
-is absent (see [`apps/web/ARCHITECTURE.md`](./apps/web/ARCHITECTURE.md)) instead of drawing empty
-frames.
+`buildExperimentArchive()` closes both: it writes a `.zpcr` for an experiment that has not been run,
+from whichever halves are known — the protocol as `ProtocolRunDefinition.txt` (plus
+`ProtocolName.txt`), and the plate as its `.plt.csv` entry — and nothing else. No `RunInfo.xml`, no
+plate reads, **no `begun` marker and no `zpcrweb.json`**: naming and starting both happen later, from
+the app, on a file that by then already exists. The app calls a `.zpcr` in that state a *pending
+experiment* (see [`apps/web/ARCHITECTURE.md`](./apps/web/ARCHITECTURE.md)), and the three functions
+that move it along are `attachProtocolToZpcr`/`attachPlateToZpcr` (fill in a half, or edit the
+protocol in place) and `markExperimentBegun` (add the `begun` marker at the click on Start, which is
+what ends the pending state permanently).
+
+This replaced `runSeed.ts`'s `zpcrSeedArchive()`, which built a very similar archive but only ever at
+the click on Start run, from the run plan about to be sent, complete with name and `begun` marker. The
+file it produced existed for minutes and nobody chose to create it; a pending experiment is the same
+archive made deliberately and early enough to be useful.
+
+Because such an archive may hold nothing but an empty protocol entry, `parseZpcr` treats
+`RunInfo.xml` as optional — an archive with a plate read or a protocol is a run whose metadata is
+simply empty — rather than rejecting it as malformed. Some entry must still identify it as a run, so a
+bare ZIP renamed `.zpcr` is still refused; that is why `buildExperimentArchive` always writes
+`ProtocolRunDefinition.txt`, zero-length when there is no protocol yet, on the same
+"presence is the whole signal" principle the `begun`/`ended` markers use. Empty content reads back as
+no protocol at all, so this changes nothing about what "pending, nothing written yet" means. The app
+greys out the views whose data is absent instead of drawing empty frames.
 
 ## Plate CSV + attaching a plate (`plateCsv.ts`, `attachPlate.ts`)
 
@@ -589,8 +603,8 @@ raw bytes ─▶ fflate.unzipSync ─▶ { name: Uint8Array }
   (`fileCategory()`: a run, a plate map or a thermal protocol; `fileKindDescription()`: a one-line
   "Category: what it is" string, e.g. `"Plate: Bio-Rad format"`). No bytes: it exists so consumers
   stop re-deriving "a `.pltd` and a `.plt.csv` are both a plate" from file extensions. The web
-  app's file-chip icons and its Instrument-view run staging are both driven by it, and its hover
-  cards and per-file overview show `fileKindDescription()` verbatim.
+  app's file-chip icons and which half of an experiment a file can be attached as are both driven by
+  it, and its hover cards and per-file overview show `fileKindDescription()` verbatim.
 
 ## Two output shapes
 

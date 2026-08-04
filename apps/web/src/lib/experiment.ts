@@ -12,12 +12,26 @@
  * → derived from the filename); this module only adds the app's side — where the stored name
  * comes from, and how a `Date` is rendered.
  */
-import { resolveExperimentName } from "@zpcrweb/core";
+import {
+  deriveExperimentName,
+  resolveExperimentName,
+  runFileBaseName,
+  runProgressFromNames,
+  type FileKind,
+  type Zpcr,
+} from "@zpcrweb/core";
 import type { LoadedFile, RunResult } from "../state/useZpcrStore";
 
 export interface ExperimentIdentity {
   /** The run's short name — never empty for a file with a name (see `resolveExperimentName`). */
   name: string;
+  /**
+   * True when {@link name} was actually *given* — a stored `zpcrweb.json` name, or (Biomeme) the
+   * format's own — as opposed to merely derived from the file name. This is what tells Overview a
+   * pending experiment still needs a real name typed in, as distinct from an ordinary finished run
+   * that legitimately has no stored name because its filename already says enough.
+   */
+  named: boolean;
   /** Run start, when the file records one. Null for a standalone plate or protocol file. */
   date: Date | null;
   /** {@link date} through {@link formatCompactDateTime}, or `""` when there is none. */
@@ -57,8 +71,51 @@ export function experimentIdentity(
   const date = metadata?.runStartDate ?? null;
   return {
     name: resolveExperimentName({ stored: storedName, metadata, fileName: file.name }),
+    named: !!storedName?.trim() || !!metadata?.experimentName?.trim(),
     date,
     dateText: date ? formatCompactDateTime(date) : "",
     fileName: file.name,
   };
+}
+
+/**
+ * A `.zpcr` with no results yet and no instrument ever accepted a start for it — the on-disk
+ * analog of what a seed file used to be (`core/runSeed.ts`, since removed), except created
+ * explicitly and by name rather than as a side effect of starting. This covers both a
+ * freshly-created/cloned file and one that's had a protocol/plate attached but never started.
+ *
+ * `zpcr.reads.length > 0` is impossible for a pending experiment by definition — a read only
+ * arrives once a run is under way — which is exactly what "clone before starting a fresh run"
+ * enforces: once there's a plate read, Start is unreachable on purpose (`activeRun.zpcr.reads`,
+ * not a separate flag). The `kind === "zpcr"` check is what a `.pcrd`/Biomeme run's own
+ * finished-by-construction nature already implies (see `runFolder.ts`'s `runCompleteness`), and
+ * is checked here explicitly since only a `.zpcr` archive can carry the `begun` marker at all.
+ */
+export function isPendingExperiment(kind: FileKind, zpcr: Zpcr): boolean {
+  return (
+    kind === "zpcr" &&
+    zpcr.reads.length === 0 &&
+    !runProgressFromNames(zpcr.archive.entries).begun
+  );
+}
+
+/**
+ * Rebuild a `.zpcr` file name with today's date, if its base is already in the
+ * `<YYYYMMDD>-<name>`/`<YYYYMMDD>_<name>` form `runFileBaseName` writes — what "Start experiment"
+ * applies once, so a pending experiment cloned or created days ago and started today gets today's
+ * date rather than the day it was made (`state/useZpcrStore.ts`'s `beginExperiment`).
+ *
+ * Returns `null` when there's nothing to restamp: no leading date to begin with (a name typed
+ * over the auto-generated one, or a file renamed by hand), or the date is already today's —
+ * either way the caller keeps the file's current name.
+ */
+export function restampExperimentDate(fileName: string, date: Date = new Date()): string | null {
+  const m = /^(.*)(\.zpcr)$/i.exec(fileName);
+  const ext = m ? m[2]! : "";
+  const base = m ? m[1]! : fileName;
+  if (!/^\d{8}[-_]/.test(base)) return null;
+  const restamped = runFileBaseName(deriveExperimentName(fileName), date);
+  if (!restamped) return null;
+  const next = `${restamped}${ext}`;
+  return next === fileName ? null : next;
 }

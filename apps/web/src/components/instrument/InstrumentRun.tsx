@@ -1,50 +1,41 @@
 /**
- * The run that would be started: its thermal protocol and its plate map, side by side.
+ * The experiment that would be started: its thermal protocol and its plate map, side by side.
  *
- * Both halves come from the file bar above — this panel renders a selection it does not own (see
- * `state/useRunStaging.ts` for the rules, and `lib/protocolSource.ts` for how a selection becomes
- * these two values). That split is deliberate: the bar is the app's existing file list doing its
- * normal job, and staging a run is just a second thing a chip can mean.
+ * Both halves come from the **one experiment file** the app is on — this panel renders a file it
+ * does not own (see {@link InstrumentView} for how that file is chosen, and what the three cases
+ * are). It used to render a three-slot staging selection instead, where each half could be
+ * overridden by some other loaded file; there are no overrides any more, so a half is either in
+ * the experiment or it isn't, and there is no source to name beyond the file itself.
  *
  * What is shown for the protocol is the **ASCII run definition**, not a decoded step table,
  * because that text is the artifact that would actually be sent (`prcl.md` §3). Reviewing anything
- * other than the bytes that would leave the machine would be reviewing the wrong object — and it
- * makes a `.prcl.txt` and a run's embedded protocol render identically, since by then they are
- * the same thing. It is listed *without* the per-directive gloss (`annotated={false}`): the
- * protocol shares this panel's width with a plate map, and what the language means is a question
- * Overview answers — here the question is what would be sent.
+ * other than the bytes that would leave the machine would be reviewing the wrong object. It is
+ * listed *without* the per-directive gloss (`annotated={false}`): the protocol shares this panel's
+ * width with a plate map, and what the language means is a question the Protocol tab answers —
+ * here the question is what would be sent.
  *
- * The one thing this panel *collects* rather than renders is the run's name: unlike the protocol
- * and the plate it comes from no file — no Bio-Rad format has a field for what a run is called
- * (see `experiment.ts` in `@zpcrweb/core`), and the instrument's own echo of it comes back
- * uppercased and cut to eight characters (`usb.md` §7.3) — so for a run that doesn't exist yet
- * there is nowhere to read it from and someone has to type it. It sits here, with the rest of what
- * the run is made of, rather than in the rail beside the button that would send it — and the state
- * itself lives in `App` (`state/useRunNaming.ts`), since the run watcher needs it too.
- *
- * What the run's *file* is called is not asked: it is `<YYYYMMDD>-<experiment name>`, derived at
- * the click and made unique against the files already loaded (`state/useRunNaming.ts` for why the
- * field that used to be here went away).
+ * The experiment's **name is not collected here** any more. It is a property of the file, typed
+ * once on Overview when the experiment is created (see `OverviewView`'s experiment header) and
+ * stored in the archive — so by the time anyone is on this tab it is already settled, and shown
+ * read-only. It used to be a required field on this panel, which meant the run being staged had a
+ * name that lived nowhere until it was started; a file that exists can simply be asked what it is
+ * called.
  *
  * There is no "start" button here: it lives in the rail with the other commands that actuate the
  * instrument (see `InstrumentRail`), because that is what it is.
  */
-import type { Ref } from "react";
 import type { CfxStatus, RunPlan } from "@zpcrweb/core";
 import { ProtocolDecoded } from "../raw/DecodedView";
 import { PlateViewer } from "../plate/PlateViewer";
 import { duration } from "./InstrumentRail";
-import type { StagedRun } from "../../lib/protocolSource";
-import type { RunNaming } from "../../state/useRunNaming";
+import type { InstrumentExperiment } from "../views/InstrumentView";
 
 /**
  * A run this session watched finish, shown until "Open run" or "New run" dismisses it.
  *
- * Sits above "Run to start" rather than replacing it: the run that just finished and the run
- * that could be staged next are two different things, and staging doesn't wait on this banner
- * being dismissed — `naming.experimentName` has already cleared itself by the time this appears
- * (`state/useRunNaming.ts`), so the fields below are free to be filled in for the next run
- * immediately.
+ * Sits above the experiment rather than replacing it: the run that just finished and the
+ * experiment that could be started next are two different things, and nothing waits on this banner
+ * being dismissed.
  */
 function RunComplete({
   finished,
@@ -69,35 +60,22 @@ function RunComplete({
           Open run
         </button>
         <button className="btn" onClick={onNew}>
-          New run
+          Dismiss
         </button>
       </div>
     </section>
   );
 }
 
-/** A half's heading: what it is, and which file it came from. */
-function PartHead({
-  title,
-  sourceName,
-  overrides,
-}: {
-  title: string;
-  sourceName: string | null;
-  /** This half comes from a file of its own *and* there is a run whose half it supersedes. A
-   * protocol and a plate staged with no run between them override nothing — they are the only
-   * sources there are. */
-  overrides: boolean;
-}) {
+/** A half's heading. Just what it is: with no overrides left there is no second source to name,
+ * and the file the two halves come from is the one the whole app is pointed at. */
+function PartHead({ title, note }: { title: string; note?: string | null }) {
   return (
     <div className="devrun__parthead">
       <span className="devrun__parttitle">{title}</span>
-      {sourceName && (
-        <span className="devrun__source mono" title={sourceName}>
-          {sourceName}
-          {/* Only worth saying when it *is* an override: otherwise the file name alone already
-              answers "from where?", and every heading would carry a redundant badge. */}
-          {overrides && <span className="devrun__badge">override</span>}
+      {note && (
+        <span className="devrun__source mono" title={note}>
+          {note}
         </span>
       )}
     </div>
@@ -108,8 +86,9 @@ function PartHead({
  * What the plate and the protocol say about each other (`usb/runPlan.ts`).
  *
  * Sits between the two halves it is about, not in the rail beside the button: the fix for
- * "channel 3 is never read" is to change one of these two files, and the message is only
- * actionable next to them. An `error` blocks the start; a `warning` is worth reading and doesn't.
+ * "channel 3 is never read" is to change one of these two halves, and the message is only
+ * actionable next to them. An `error` blocks the start; a `warning` — which is what a missing
+ * plate is — is worth reading and doesn't.
  */
 function RunChecks({ plan }: { plan: RunPlan }) {
   if (plan.checks.length === 0) return null;
@@ -128,50 +107,42 @@ function RunChecks({ plan }: { plan: RunPlan }) {
 }
 
 export function InstrumentRun({
-  staged,
-  naming,
-  nameRef,
+  experiment,
   plan,
   status,
   pending,
   finished,
   onOpenFinishedRun,
   onNewRun,
+  onCloneExperiment,
 }: {
-  staged: StagedRun;
-  /** The run's name, as typed. Owned by `App` (`state/useRunNaming.ts`) — it outlives this
-   * panel's renders, and it is an input to what Start run sends. */
-  naming: RunNaming;
-  /** The name field itself, so the rail's Start run can put the cursor in it when that is the one
-   * thing missing (`InstrumentView` owns the ref; `InstrumentRail` calls `focus()`). */
-  nameRef?: Ref<HTMLInputElement>;
-  /** The staged run as it would be sent, or null when a half is missing. */
+  /** The experiment the active file is, or null when it isn't one ({@link InstrumentExperiment}). */
+  experiment: InstrumentExperiment | null;
+  /** The experiment as it would be sent, or null when it has no protocol yet. */
   plan: RunPlan | null;
   /** The instrument's live status (`InstrumentView`), or null when disconnected. Used only to
-   * mark which protocol line is executing right now — this panel still shows the *staged*
-   * selection, not necessarily what's running, so the highlight is a bonus for the common case
-   * (staged run *is* the running one) rather than something this panel asserts as fact. */
+   * mark which protocol line is executing right now — this panel shows the *active file*, not
+   * necessarily what's running, so the highlight is a bonus for the common case (they are the same
+   * run) rather than something this panel asserts as fact. */
   status: CfxStatus | null;
-  /** True from the click on Start run until the instrument's first status answers it — the badge
-   * has to say something in that window, since the run is neither un-started nor yet running. */
+  /** True from the click on Start until the instrument's first status answers it — the badge has to
+   * say something in that window, since the run is neither un-started nor yet running. */
   pending: boolean;
-  /** A run this session watched finish, or null (`state/useRunWatch.ts`). Drives the "Run
-   * complete" banner above the staged run. */
+  /** A run this session watched finish, or null (`state/useRunWatch.ts`). */
   finished: { name: string; totalS: number; fileId: string } | null;
   /** "Open run": jump to that run's curves. */
   onOpenFinishedRun: (fileId: string) => void;
-  /** "New run": dismiss the banner and clear the name field for the next one. */
+  /** Dismiss the "Run complete" banner. */
   onNewRun: () => void;
+  /** Clone this run into a fresh pending experiment — offered when it already has results. */
+  onCloneExperiment: () => void;
 }) {
-  const { protocol, plate } = staged;
-  const empty = !protocol.value && !plate.value && !protocol.reason && !plate.reason;
-  // A run can be staged alongside overrides of *both* halves, in which case it supplies neither
-  // — but it is still the instrument the plate's dyes were read on, which is what gives a
-  // `.plt.csv` its channels. Say so, or its chip is lit for no reason a reader can see.
-  // Whether a half is an *override* is a statement about the run it supersedes, so both of these
-  // need a run selected: with only a protocol and a plate staged, nothing is being overridden.
-  const hasRun = !!staged.runName;
-  const instrumentOnly = hasRun && protocol.fromFile && plate.fromFile;
+  const zpcr = experiment?.zpcr ?? null;
+  const protocolText = zpcr?.protocolText || null;
+  const plate = zpcr?.plates()[0]?.pltd.plate ?? null;
+  // A run with results is not startable, and this is where that is discovered — so the panel says
+  // why and offers the fix, rather than leaving a disabled button in the rail to explain itself.
+  const hasResults = !!experiment && !experiment.pending;
 
   return (
     <>
@@ -185,118 +156,60 @@ export function InstrumentRun({
     <section className="instrument__panel">
       <div className="instrument__panelhead">
         <h2 className="instrument__paneltitle">
-          Run to start
+          {hasResults ? "Run" : "Experiment to start"}
           {pending ? (
             <span className="instrument__runbadge">pending</span>
           ) : (
             status?.running && <span className="instrument__runbadge">running</span>
           )}
         </h2>
-        <span className="devrun__hint mono">
-          {empty
-            ? "select files above"
-            : instrumentOnly && staged.runName
-              ? `instrument: ${staged.runName}`
-              : "a run supplies both halves; a .prcl.txt or .plt.csv overrides one"}
-        </span>
+        {experiment && <span className="devrun__hint mono">{experiment.name}</span>}
       </div>
 
-      {/* Shown even with nothing staged: naming the run is a thing you can do before choosing
-          its parts, and hiding the field would make the panel look like it had one job.
-
-          The placeholder is an example, deliberately *not* the protocol's own name: nothing fills
-          this in for you. A protocol is run many times and its name would be the same every time,
-          so a run inheriting it could not be told from last week's — and the file this run
-          produces is named after it. An empty field is an `error` check on the plan
-          (`usb/runPlan.ts`), which is what keeps Start run from starting anything until it isn't.
-
-          Read-only once the run is on the block (`naming.locked`): by then the name has been sent
-          as `RemoteRun`'s operand, deposited into the run folder and used to name a file, so
-          editing it here could only make this app disagree with all three. It empties itself when
-          the run finishes, so the next one is named rather than inheriting. */}
-      <label className="devrun__name">
-        <span className="devrun__namelabel">
-          Experiment name
-          {naming.locked ? (
-            // "starting" until the instrument reports the run: it takes seconds to appear in
-            // `STATUS?` (`useRunNaming`), and calling that stretch "running" would have the badge
-            // contradict the panel title's own "pending".
-            <span className="devrun__badge">
-              {naming.phase === "starting" ? "starting" : "running"}
-            </span>
-          ) : (
-            <span className="devrun__required" title="Required — a run is not started without one">
-              *
-            </span>
-          )}
-        </span>
-        <input
-          ref={nameRef}
-          className={
-            "devrun__nameinput" +
-            (naming.locked || naming.experimentName.trim() ? "" : " is-missing")
-          }
-          value={naming.experimentName}
-          onChange={(e) => naming.setExperimentName(e.currentTarget.value)}
-          spellCheck={false}
-          required
-          aria-required="true"
-          readOnly={naming.locked}
-          placeholder="e.g. S183-S185 RVP"
-          title={
-            naming.locked
-              ? "This run has started under this name — it named the run, its file and the " +
-                "deposit in the run folder, so it can't be changed now. The field clears itself " +
-                "when the run finishes."
-              : "What to call this run — required, and never guessed. The instrument's own " +
-                "formats have no field for a run name (see zpcrweb-json.md), so this is what the " +
-                "app records alongside the results — sent with the run, written into the archive " +
-                "it produces, and the name that archive's file takes."
-          }
-        />
-      </label>
-
-      {empty ? (
+      {!experiment ? (
         <div className="instrument__empty mono">
-          Nothing staged. Select a run in the bar above, or a <code>.prcl.txt</code> and a{" "}
-          <code>.plt.csv</code> to build one from parts.
+          No experiment selected. Create one from the About page, clone an existing run from its
+          Overview, or select an experiment in the bar above.
         </div>
       ) : (
         <>
+        {hasResults && (
+          <div className="instrument__completeactions">
+            <span className="devrun__hint">
+              This experiment has already been run — its results are part of the file now. Clone it
+              to run the same protocol and plate again.
+            </span>
+            <button className="btn" onClick={onCloneExperiment}>
+              Clone experiment
+            </button>
+          </div>
+        )}
         {plan && <RunChecks plan={plan} />}
         <div className="devrun">
           <div className="devrun__part">
-            <PartHead
-              title="Protocol"
-              sourceName={protocol.sourceName}
-              overrides={hasRun && protocol.fromFile}
-            />
-            {protocol.value ? (
+            <PartHead title="Protocol" note={zpcr?.protocol()?.name || null} />
+            {protocolText ? (
               <ProtocolDecoded
-                text={protocol.value.runDefinition}
+                text={protocolText}
                 annotated={false}
                 activeStepNumber={status?.running ? status.stepNumber : null}
               />
             ) : (
               <div className="instrument__empty mono">
-                {protocol.reason ?? "No protocol selected."}
+                No protocol yet — write one on the Protocol tab, or attach one from Overview.
               </div>
             )}
           </div>
 
           <div className="devrun__part">
-            <PartHead
-              title="Plate"
-              sourceName={plate.sourceName}
-              overrides={hasRun && plate.fromFile}
-            />
-            {staged.channelsFrom && (
-              <div className="devrun__meta mono">channels from {staged.channelsFrom}</div>
-            )}
-            {plate.value ? (
-              <PlateViewer plate={plate.value} compact />
+            <PartHead title="Plate" note={plate ? null : "none"} />
+            {plate ? (
+              <PlateViewer plate={plate} compact />
             ) : (
-              <div className="instrument__empty mono">{plate.reason ?? "No plate selected."}</div>
+              <div className="instrument__empty mono">
+                No plate attached. This run will record no well, target or sample mapping — attach
+                one from Overview to get that.
+              </div>
             )}
           </div>
         </div>

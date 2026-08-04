@@ -935,6 +935,79 @@
   background: var(--danger);
 }
 
+/* An experiment that hasn't been run yet (see `OverviewView`'s PendingBanner). Same shape as the
+   two banners above, in magenta — the colour the app already uses for the instrument, which is
+   where this file is headed. Nothing animates: unlike a run in progress, nothing here changes
+   except by the reader's own next action. */
+.overview__pending {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 14px;
+  border: 1px solid var(--neon-magenta);
+  border-radius: var(--radius-sm);
+  background: var(--neon-magenta-dim);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.overview__pendingmark {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  margin-top: 6px;
+  border-radius: 50%;
+  background: var(--neon-magenta);
+}
+
+/* The two halves a pending experiment is assembled from, side by side — one column each, stacking
+   on a narrow viewport like every other pair in the app. */
+.overview__parts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 16px;
+}
+.overview__part {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--raised);
+}
+.overview__partlabel {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+/* "attached" / "required to start" / "optional" — the state of that half, in the same three tones
+   the rest of the app uses for good/blocking/merely-worth-knowing. */
+.overview__partok {
+  color: var(--good);
+  text-transform: none;
+  letter-spacing: 0;
+}
+.overview__partmissing {
+  color: var(--warn);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+/* A run that came in without a plate, so its wells have no names (see `OverviewView`). A note
+   rather than a banner: the run is over and this is a fact about it, not something to act on. */
+.overview__missing {
+  padding: 8px 12px;
+  border-left: 2px solid var(--warn);
+  color: var(--ink-2);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 /* Styled as a heading, not as a form field: no border or background until it is interacted
    with, so the name reads as a title while still being obviously editable on hover. */
 .overview__name {
@@ -3760,11 +3833,8 @@ summary.instrument__panelhead {
   outline: none;
   border-color: var(--neon-cyan);
 }
-/* An empty experiment name is the one thing standing between a staged run and a started one, so
-   the field says so itself — in the same tone the rail's blocked-Start note uses. */
-.devrun__nameinput.is-missing {
-  border-color: var(--warn);
-}
+/* Marks a required field that hasn't been filled in — the experiment-name asterisk on Overview
+   (`OverviewView`'s ExperimentHeader), in the same tone the rail's blocked-Start note uses. */
 .devrun__required {
   margin-left: 4px;
   color: var(--warn);
@@ -3855,19 +3925,6 @@ summary.instrument__panelhead {
 }
 .devrun__check--warning .devrun__checkicon {
   color: var(--warn);
-}
-
-/* The file bar in its multi-select role (the Instrument view). The primary selection keeps the
-   app's cyan `.is-active` treatment — it is the same "the file you are on" it is everywhere else,
-   and in this view it is also the run to start. The *auxiliary* chips staged over it (a plate or
-   protocol overriding half of that run) are magenta, matching the Instrument tab and saying that
-   these mean something different: not what you're looking at, but what's being assembled. */
-.filebar--multi .filechip.is-staged {
-  border-color: var(--neon-magenta);
-  box-shadow: 0 0 0 1px var(--neon-magenta-dim), 0 0 16px var(--neon-magenta-dim);
-}
-.filebar--multi .filechip.is-staged .filechip__name {
-  color: var(--neon-magenta);
 }
 
 /* Traffic console */

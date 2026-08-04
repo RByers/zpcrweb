@@ -402,8 +402,11 @@ export function ProtocolEditor({
         </div>
       </div>
 
+      {/* Deliberately doesn't say what to do next: this editor serves both a standalone `.prcl.txt`
+          (whose next step is being attached to an experiment) and an experiment's own protocol
+          (whose next step is starting it on the Instrument tab), and the two differ. */}
       <span className="decoded__hint mono">
-        {fileName} — the pure text run definition. Stage it against a plate on the Instrument tab.
+        {fileName} — the pure text run definition.
         {editing && " Click a line to change it; edits are saved as you make them."}
       </span>
 

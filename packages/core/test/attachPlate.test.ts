@@ -1,5 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { attachPlateToZpcr, parseZpcr, plateToCsv, type PlateDefinition } from "../src/index.js";
+import { zipSync } from "fflate";
+import {
+  attachPlateToZpcr,
+  attachProtocolToZpcr,
+  parseZpcr,
+  plateToCsv,
+  type PlateDefinition,
+} from "../src/index.js";
 import { readMultistepBytes, readSampleBytes } from "./sample.js";
 import { readCfxPassword } from "./secrets.js";
 
@@ -98,5 +105,37 @@ describe("attachPlateToZpcr", () => {
     expect(() =>
       attachPlateToZpcr(readSampleBytes(), { name: "notes.txt", bytes: new Uint8Array() }),
     ).toThrow(/not a \.pltd or \.csv/);
+  });
+});
+
+const PROTOCOL = "METHOD CALC;HOTLID 105,30;VOLUME 25;TEMP 95.0,60;PLATEREAD #h3F;GOTO 2,10;END;";
+
+describe("attachProtocolToZpcr", () => {
+  it("replaces the run's protocol text and name, leaving the rest of the archive alone", () => {
+    const original = readMultistepBytes();
+    const before = parseZpcr(original);
+    const augmented = attachProtocolToZpcr(original, {
+      runDefinition: PROTOCOL,
+      name: "Fast test",
+    });
+    const after = parseZpcr(augmented);
+    expect(after.protocolText).toContain("PLATEREAD #h3F");
+    expect(after.protocol()?.name).toBe("Fast test");
+    expect(after.reads).toHaveLength(before.reads.length);
+    expect(after.metadata.dataFile).toBe(before.metadata.dataFile);
+  });
+
+  it("writes no ProtocolName.txt for an unnamed protocol", () => {
+    const augmented = attachProtocolToZpcr(readSampleBytes(), { runDefinition: PROTOCOL });
+    const zpcr = parseZpcr(augmented);
+    expect(zpcr.protocol()?.name).toBeFalsy();
+  });
+
+  it("attaches into an archive with no protocol at all yet", () => {
+    // Mirrors a pending experiment's bare archive (`experimentArchive.ts`): a zero-length
+    // ProtocolRunDefinition.txt exists purely so the ZIP parses as a .zpcr.
+    const bare = zipSync({ "ProtocolRunDefinition.txt": new Uint8Array(0) });
+    const zpcr = parseZpcr(attachProtocolToZpcr(bare, { runDefinition: PROTOCOL }));
+    expect(zpcr.protocolText).toContain("PLATEREAD #h3F");
   });
 });

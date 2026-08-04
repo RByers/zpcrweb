@@ -294,6 +294,19 @@ describe("planRun", () => {
     const named = planRun({ runDefinition: ALL_CHANNELS, plate: plateUsing([1]), name: "RVP" });
     expect(named.checks.some((c) => c.code === "no-experiment-name")).toBe(false);
   });
+
+  /**
+   * A pending experiment can be started with no plate attached at all — the missing-plate
+   * indicator is a `warning`, not an `error`, so it never blocks `startable` on its own.
+   */
+  it("allows starting with no plate, as a warning rather than an error", () => {
+    const plan = planRun({ runDefinition: ALL_CHANNELS, name: "RVP" });
+    expect(plan.checks).toContainEqual(
+      expect.objectContaining({ severity: "warning", code: "no-plate" }),
+    );
+    expect(plan.startable).toBe(true);
+    expect(plan.uploads.some((u) => u.name.endsWith(".plt.csv"))).toBe(false);
+  });
 });
 
 describe("runProgressFromNames — the begun/ended markers", () => {

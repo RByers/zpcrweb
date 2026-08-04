@@ -1,137 +1,124 @@
 /**
- * The Instrument view — a live CFX96 over WebUSB, rather than a file.
+ * The Instrument view — a live CFX96 over WebUSB, and the one place an experiment is started.
  *
  * Unlike every other view it is not a lens on the active file — but it is not file-independent
- * either: starting a run needs a protocol and a plate, and those come from the app's loaded files
- * (`state/useRunStaging.ts`). So the file bar stays, with a different meaning: a chip is part of
- * the run being staged rather than the thing you are looking at.
+ * either: starting a run needs a protocol, and that comes from the **one experiment file** the app
+ * is currently on. There is no selection of its own to make here any more. A run used to be
+ * assembled from a three-slot staging selection over every loaded file, with a `.prcl.txt` or
+ * `.plt.csv` able to override half of some other run — which meant a chip in the file bar meant
+ * something different on this tab than on every other one, and the run about to start existed
+ * nowhere until it was started. Now an experiment is a file first (created by "New experiment" or
+ * "Clone experiment", named and filled in on Overview), and this view only starts the one in front
+ * of it.
+ *
+ * What it can do therefore depends on what that file is, and there are exactly three cases:
+ *
+ * | Active file | This view |
+ * | ----------- | --------- |
+ * | a pending experiment (no results yet) | starts it — Start is armed once it has a protocol |
+ * | a run with results (in progress, or over) | won't start it; offers to clone it instead |
+ * | anything else, or nothing loaded | says so, and points at where experiments come from |
  *
  * Layout reuses the Curves view's rail + content grid so it reads as the same kind of surface:
  * the rail carries connection, identity, status and the commands that actuate the instrument
- * (including Start run), and the content column stacks the staged run, the file browser and the
+ * (including Start), and the content column stacks the experiment, the file browser and the
  * traffic console.
  */
-import { useCallback, useMemo, useRef } from "react";
-import { planRun, runFileBaseName, zpcrSeedArchive } from "@zpcrweb/core";
+import { useCallback, useMemo } from "react";
+import { planRun, type RunPlan, type Zpcr } from "@zpcrweb/core";
 import { InstrumentRail } from "../instrument/InstrumentRail";
 import { InstrumentRun } from "../instrument/InstrumentRun";
 import { InstrumentFiles } from "../instrument/InstrumentFiles";
 import { InstrumentConsole } from "../instrument/InstrumentConsole";
 import type { CfxDeviceHandle } from "../../state/useCfxDevice";
 import type { RunWatchState } from "../../state/useRunWatch";
-import type { RunNaming } from "../../state/useRunNaming";
-import type { StagedRun } from "../../lib/protocolSource";
+
+/**
+ * The experiment this view would start: the active file, once it has turned out to be one at all.
+ *
+ * Null when the active file is a standalone plate or protocol, an unreadable run, or there is no
+ * file at all — the view still renders (it is reachable with nothing loaded, which is where someone
+ * with a cycler and no files starts), it just has nothing to start.
+ */
+export interface InstrumentExperiment {
+  fileId: string;
+  /** What it is called — resolved on Overview and stored in the file, never typed here. */
+  name: string;
+  /** True when that name was actually given rather than derived from the file name; an experiment
+   * still carrying its bare-date placeholder can't be started (`lib/experiment.ts`). */
+  named: boolean;
+  zpcr: Zpcr;
+  /** No results yet and never started — the only state Start applies to (`isPendingExperiment`). */
+  pending: boolean;
+}
 
 export function InstrumentView({
   onOpenRun,
   onOpenFinishedRun,
-  staged,
+  experiment,
   instrument,
   runWatch,
-  naming,
-  onRunSeeded,
-  freeRunFileBase,
+  onStartExperiment,
+  onCloneExperiment,
 }: {
   onOpenRun: (file: File) => Promise<void> | void;
   /** Jump to a finished run's curves — the "Run complete" banner's "Open run" button. Distinct
    * from `onOpenRun`: that one adds a *new* file (an offloaded archive dropped in from outside);
    * this one just switches to a file the watcher already put in the store. */
   onOpenFinishedRun: (fileId: string) => void;
-  /** The run the file bar's selection currently describes; see {@link InstrumentRun}. */
-  staged: StagedRun;
+  /** The experiment the active file is, or null when it isn't one; see the type. */
+  experiment: InstrumentExperiment | null;
   /** The connection, owned by `App` so it outlives this view — see its comment there. */
   instrument: CfxDeviceHandle;
   /** The follow-the-running-run machinery, likewise owned by `App`. */
   runWatch: RunWatchState;
   /**
-   * What the run being staged is called (`state/useRunNaming.ts`). Owned by `App` for the same
-   * reason the two above are: the run watcher reads it, and it must survive leaving this view.
+   * Start the experiment in front of us: `App`'s `startExperiment`, which writes the `begun`
+   * marker into this very file (restamping its date to today first) and then sends the run. It
+   * creates no file — the experiment already exists, which is the whole point of the pending
+   * state.
    */
-  naming: RunNaming;
-  /** Take the `.zpcr` this view writes at the click on Start run into the app's file list
-   * (`App`'s `seedRunFile`). */
-  onRunSeeded: (file: File) => Promise<void> | void;
-  /** The first base name at or after this one that no loaded file already has (`App`, over the
-   * store's file list — i.e. over what is in IndexedDB). Consulted once, at the click. */
-  freeRunFileBase: (base: string) => string;
+  onStartExperiment: (plan: RunPlan) => Promise<void> | void;
+  /** Copy this run's protocol and plate into a fresh pending experiment — the way to run one
+   * again, offered here because "this already has results" is where that need is discovered. */
+  onCloneExperiment: () => void;
 }) {
-  const { experimentName } = naming;
-
   /**
-   * The staged run reduced to exactly what would be sent — commands, files, and the checks that
+   * The experiment reduced to exactly what would be sent — commands, files, and the checks that
    * decide whether it may be sent at all (`usb/runPlan.ts`).
    *
    * Computed here, above both the panel that displays it and the rail that sends it, so the two
    * cannot disagree: the warnings shown next to the plate are the same object the Start button
-   * consults. Null when a half is missing, which is simply "not a run yet".
+   * consults. Both halves come from the one file, so there is nothing to resolve first — the plate
+   * is simply whichever one the archive carries, and its absence is a `warning` rather than a
+   * missing half (`runPlan.ts`), since an experiment may deliberately be run without one.
    */
   const plan = useMemo(() => {
-    const protocol = staged.protocol.value;
-    const plate = staged.plate.value;
-    if (!protocol || !plate) return null;
+    if (!experiment) return null;
+    const { zpcr } = experiment;
+    const runDefinition = zpcr.protocolText;
+    if (!runDefinition) return null;
     try {
       return planRun({
-        runDefinition: protocol.runDefinition,
-        plate,
-        // The typed name and nothing else: a run inheriting its protocol's name would give every
-        // run of that protocol the same one, and a blank name is an `error` check on the plan
-        // (`usb/runPlan.ts`) rather than something to paper over here.
-        name: experimentName,
-        // The deposited copies keep the protocol's and the plate's own names, not the run's
-        // (`runPlan.ts`). A half that came from a file of its own is named by that file, whose
-        // name beats the plate's `identityKey` — that records whatever `.pltd` it was *saved*
-        // from and can be a stale name. A half supplied by the run passes nothing — the `fromFile`
-        // guard is what matters here, not `sourceName`'s value for that case — and lets `planRun`
-        // fall back to what the plate says about itself.
-        protocolName: protocol.document.name || undefined,
-        plateName: (staged.plate.fromFile && staged.plate.sourceName) || undefined,
+        runDefinition,
+        plate: zpcr.plates()[0]?.pltd.plate ?? undefined,
+        // The experiment's own name, as stored in the file. Never the protocol's: a protocol is
+        // run many times, so that would give every run of it the same name.
+        //
+        // A *pending* experiment still on its bare-date placeholder is passed the blank that makes
+        // `planRun` raise its `no-experiment-name` error, which is what stops Start. A run that has
+        // already happened is passed the name it actually goes by — derived from its file name if
+        // nothing stored one — because it is not being started and demanding a name for it would be
+        // accusing a finished run of missing something it doesn't need.
+        name: experiment.pending && !experiment.named ? "" : experiment.name,
+        protocolName: zpcr.protocol()?.name || undefined,
       });
     } catch {
       // A run definition this app can't parse can't be planned; the panel already renders the
       // protocol's own decode, so there is nothing useful to add here.
       return null;
     }
-  }, [
-    staged.protocol.value,
-    staged.plate.value,
-    staged.plate.fromFile,
-    staged.plate.sourceName,
-    experimentName,
-  ]);
-
-  /**
-   * Write the run's `.zpcr` at the moment it is started (`core/runSeed.ts`), from the plan that is
-   * about to be sent plus the name that was typed.
-   *
-   * Built here, where the plan and the name both are, rather than in the rail that clicks the
-   * button or in `App`, which knows nothing about staging. The plan supplies the plate and the
-   * name deposit as the exact bytes going to the instrument, so the seed and the run folder agree
-   * entry for entry.
-   *
-   * The file's name is settled here too, and only here: `<YYYYMMDD>-<experiment name>`, stepped
-   * past any loaded file that already has it (`freeRunFileBase`), then **pinned** as the run's
-   * (`naming.begin`) so every snapshot the watcher pulls supersedes this file instead of landing
-   * beside it. Re-deriving it per snapshot would not do — the typed field clears when the run
-   * ends, and the uniqueness step's answer changes the moment this very file is added.
-   */
-  const seedRunFile = useCallback(() => {
-    const protocol = staged.protocol.value;
-    if (!plan || !protocol || !experimentName.trim()) return;
-    const fileBaseName = freeRunFileBase(runFileBaseName(experimentName));
-    const { name, bytes } = zpcrSeedArchive({
-      experimentName,
-      fileBaseName,
-      runDefinition: protocol.runDefinition,
-      plan,
-    });
-    naming.begin({ experimentName, fileName: fileBaseName });
-    void onRunSeeded(new File([bytes.slice()], name, { lastModified: Date.now() }));
-  }, [plan, staged.protocol.value, experimentName, naming.begin, freeRunFileBase, onRunSeeded]);
-
-  /** The Experiment name field, so Start run can put the cursor in it when that is the one thing
-   * missing — see `InstrumentRail`'s `promptForName`. */
-  const nameRef = useRef<HTMLInputElement>(null);
-  const focusName = useCallback(() => nameRef.current?.focus(), []);
+  }, [experiment]);
 
   /** "Open run" on the "Run complete" banner: switch to that run's curves (`App`'s
    * `openFinishedRun`), and dismiss the banner — it's been acted on, and staying on this view
@@ -144,36 +131,25 @@ export function InstrumentView({
     [onOpenFinishedRun, runWatch],
   );
 
-  /** "New run" on the banner: dismiss it, and clear whatever's typed in the name field so the
-   * next run isn't staged under the one that just finished. The field usually clears itself
-   * already (`useRunNaming`'s own falling-edge effect), but this is what handles the run having
-   * been started from the touchscreen, or the field having been retyped after that. */
-  const newRun = useCallback(() => {
-    runWatch.clearFinished();
-    naming.setExperimentName("");
-  }, [runWatch, naming]);
-
   return (
     <div className="curves instrument">
       <InstrumentRail
         instrument={instrument}
-        staged={staged}
+        experiment={experiment}
         plan={plan}
         runWatch={runWatch}
-        onStart={seedRunFile}
-        onNeedName={focusName}
+        onStart={onStartExperiment}
       />
       <div className="instrument__content">
         <InstrumentRun
-          staged={staged}
-          naming={naming}
-          nameRef={nameRef}
+          experiment={experiment}
           plan={plan}
           status={instrument.status}
           pending={instrument.runPending}
           finished={runWatch.finished}
           onOpenFinishedRun={openFinished}
-          onNewRun={newRun}
+          onNewRun={runWatch.clearFinished}
+          onCloneExperiment={onCloneExperiment}
         />
         <InstrumentFiles instrument={instrument} onOpenRun={onOpenRun} />
         <InstrumentConsole instrument={instrument} />
