@@ -48,7 +48,12 @@ import {
 } from "./analysisSettings";
 import { AnalysisPersister } from "./analysisPersist";
 import { WriteThrottle } from "./writeThrottle";
-import { experimentIdentity, restampExperimentDate, type ExperimentIdentity } from "../lib/experiment";
+import {
+  experimentIdentity,
+  isPendingExperiment,
+  restampExperimentDate,
+  type ExperimentIdentity,
+} from "../lib/experiment";
 import { usePltdPassword } from "./pltdPassword";
 import { onHashChange, readHash, writeHash } from "./urlHash";
 
@@ -769,6 +774,17 @@ export interface ZpcrStore {
    * reason {@link inProgressIds} is — the answer is already in the file.
    */
   incompleteIds: Set<string>;
+  /**
+   * Ids of the loaded experiments that have not been run yet (`lib/experiment.ts`'s
+   * `isPendingExperiment`): no plate reads and no `begun` marker.
+   *
+   * Distinct from {@link incompleteIds} in the way that matters most to someone reading the bar: an
+   * incomplete run *was* started and stopped short, a pending one has not been started at all. The
+   * two are otherwise easy to confuse, since both hold fewer reads than their protocol asks for —
+   * which is why `runCompleteness` excludes a never-started archive from `incomplete` outright, and
+   * these two sets can never overlap.
+   */
+  pendingIds: Set<string>;
   /**
    * Fetch a file over HTTP and load it as if it had been dropped — the `#load=<url>` hash key's
    * implementation, and how the welcome screen's example button works. The name comes from the
@@ -1586,6 +1602,16 @@ export function useZpcrStore(): ZpcrStore {
     return ids;
   }, [runs]);
 
+  /** See {@link ZpcrStore.pendingIds} — an experiment prepared but never started. */
+  const pendingIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const f of files) {
+      const zpcr = runs.get(f.id)?.zpcr;
+      if (zpcr && isPendingExperiment(f.kind, zpcr)) ids.add(f.id);
+    }
+    return ids;
+  }, [files, runs]);
+
   const exportBytes = useCallback(
     (id: string): Uint8Array | null => {
       const file = files.find((f) => f.id === id);
@@ -1618,6 +1644,7 @@ export function useZpcrStore(): ZpcrStore {
     setVisible,
     inProgressIds,
     incompleteIds,
+    pendingIds,
     markDownloaded,
     attachPlate,
     attachProtocol,

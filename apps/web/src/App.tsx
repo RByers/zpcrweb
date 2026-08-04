@@ -532,6 +532,7 @@ export function App() {
             modifiedIds={store.modifiedIds}
             inProgressIds={store.inProgressIds}
             incompleteIds={store.incompleteIds}
+            pendingIds={store.pendingIds}
             activeLocked={runActive}
             onSelect={selectFile}
             onHide={(id) => store.setVisible(id, false)}
@@ -625,6 +626,7 @@ export function App() {
         modifiedIds={store.modifiedIds}
         inProgressIds={store.inProgressIds}
             incompleteIds={store.incompleteIds}
+            pendingIds={store.pendingIds}
         onSelect={selectFile}
         onHide={(id) => store.setVisible(id, false)}
         experiments={store.experiments}

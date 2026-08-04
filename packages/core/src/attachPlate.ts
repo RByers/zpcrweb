@@ -10,7 +10,7 @@ import { zipSync } from "fflate";
 import { unzipArchive } from "./archive.js";
 import { isPltdName } from "./pltd.js";
 import { isPlateCsvName } from "./plateCsv.js";
-import { formatRunDefinitionText } from "./prcl.js";
+import { parseRunDefinitionText } from "./prcl.js";
 import { PROTOCOL_NAME_TXT } from "./usb/runPlan.js";
 
 /** The archive entry a run's thermal protocol lives under — `zpcr.ts`'s own name for it, not
@@ -60,6 +60,14 @@ export function attachPlateToZpcr(
  * written as `ProtocolName.txt` only when non-blank, the same "nothing to say" rule
  * `usb/runPlan.ts`'s deposit uses — an unnamed protocol simply has no name entry, rather than an
  * empty one.
+ *
+ * The entry is written in the **canonical one-line form the instrument itself writes**, via
+ * {@link parseRunDefinitionText} — which also accepts a standalone `.prcl.txt` body and strips its
+ * header, so a caller may pass either form. Not `formatRunDefinitionText`: that adds the
+ * `[ProtocolRunDefinition version …]` header, which belongs to a `.prcl.txt` *file* and not to this
+ * archive entry (no sample carries one here). Writing it meant `Zpcr.protocolText` — which is the
+ * raw entry, unlike a standalone protocol file's text, which the app normalizes on load — handed
+ * that header to `ProtocolBuilder`, which refused the whole protocol as an unrecognized directive.
  */
 export function attachProtocolToZpcr(
   zpcrBytes: Uint8Array,
@@ -72,7 +80,7 @@ export function attachProtocolToZpcr(
     next[name] = bytes;
   }
   next[PROTOCOL_RUN_DEFINITION_NAME] = new TextEncoder().encode(
-    formatRunDefinitionText(protocol.runDefinition),
+    parseRunDefinitionText(protocol.runDefinition),
   );
   const name = protocol.name?.trim();
   if (name) next[PROTOCOL_NAME_TXT] = new TextEncoder().encode(name);

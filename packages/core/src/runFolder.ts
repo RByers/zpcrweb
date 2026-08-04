@@ -106,10 +106,17 @@ export interface RunCompleteness {
  * rather than a flag on purpose — it works on any run, from any source, including one this app
  * never watched.
  *
- * Three ways it deliberately declines to accuse:
+ * Four ways it deliberately declines to accuse:
  *
  * - **A run still in progress is not incomplete**, it is unfinished. `begun` without `ended` is
  *   already its own state ({@link RunProgress.inProgress}) and the app says so separately.
+ * - **A run that never started is not incomplete either**, it is *pending* — an experiment prepared
+ *   but not yet run (`experimentArchive.ts`). It has a protocol calling for reads and no reads,
+ *   which is the exact arithmetic this function accuses on, so without this every pending experiment
+ *   would be flagged as a cancelled run. An archive that keeps markers at all (`archive.entries`
+ *   non-empty) and has no `begun` has not started; a format with no markers to keep — a `.pcrd`, a
+ *   Biomeme export — is finished by construction and still judged on the read count, which is what
+ *   keeps a run cancelled in CFX Manager recognisable.
  * - **A protocol whose read count can't be predicted** yields `expected: null` and never
  *   `incomplete` — see {@link expectedPlateReads} for the three cases.
  * - **More reads than expected is not incomplete.** `ADDCYCLES` extends a running protocol's loop
@@ -123,10 +130,13 @@ export function runCompleteness(zpcr: Zpcr): RunCompleteness {
   const actual = zpcr.reads.length;
   const progress = runProgressFromNames(zpcr.archive.entries);
   const expected = zpcr.protocolText ? expectedPlateReads(zpcr.protocolText) : null;
+  // See the "never started" case above: only an archive that keeps markers can be *known* not to
+  // have started, so a format carrying none is taken as started rather than as pending.
+  const started = progress.begun || zpcr.archive.entries.length === 0;
   return {
     expected,
     actual,
-    incomplete: !progress.inProgress && expected !== null && actual < expected,
+    incomplete: started && !progress.inProgress && expected !== null && actual < expected,
   };
 }
 

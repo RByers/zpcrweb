@@ -10,7 +10,7 @@
  * the app, once the file already exists to be named and started.
  */
 import { zipSync } from "fflate";
-import { formatRunDefinitionText } from "./prcl.js";
+import { parseRunDefinitionText } from "./prcl.js";
 import { PROTOCOL_NAME_TXT } from "./usb/runPlan.js";
 import { PROTOCOL_RUN_DEFINITION_NAME, canonicalPlateEntryName } from "./attachPlate.js";
 
@@ -39,8 +39,10 @@ export function buildExperimentArchive(parts: ExperimentArchiveParts): Uint8Arra
     [PROTOCOL_RUN_DEFINITION_NAME]: new Uint8Array(0),
   };
   if (parts.protocol) {
+    // The canonical one-line form the instrument writes, not the `.prcl.txt` file form — see
+    // `attachProtocolToZpcr`, which says why the header must not land in an archive entry.
     files[PROTOCOL_RUN_DEFINITION_NAME] = new TextEncoder().encode(
-      formatRunDefinitionText(parts.protocol.runDefinition),
+      parseRunDefinitionText(parts.protocol.runDefinition),
     );
     const name = parts.protocol.name?.trim();
     if (name) files[PROTOCOL_NAME_TXT] = new TextEncoder().encode(name);

@@ -2231,6 +2231,18 @@ most — and the Overview grows a banner stating the arithmetic it is accusing o
 cannot tell a cancel from an instrument-initiated stop. The two states are mutually exclusive: a
 run still in progress is unfinished, not incomplete, and the in-progress banner wins.
 
+**"Pending" is the third of the same family, and had to be carved out of "incomplete".** An
+experiment that has never been run holds a protocol calling for reads and no reads — the exact
+arithmetic above — so it was flagged as a cancelled run. `runCompleteness` therefore refuses to
+accuse an archive that has not started (marker files present, no `begun`); a format that keeps no
+markers at all, a `.pcrd` or a Biomeme export, is finished by construction and still judged on the
+count, which is what keeps a run cancelled in CFX Manager recognisable. `ZpcrStore.pendingIds`
+(over `lib/experiment.ts`'s `isPendingExperiment`) then names the state positively, and the chip
+says **Pending** in the instrument's magenta where an incomplete run says **Incomplete** in red:
+both take the date's slot, because which of the three states a file is in is the thing to notice
+about it, and the distinction that matters is that one was started and stopped short while the
+other has not been started. The three sets cannot overlap.
+
 Four components, under `components/instrument/`:
 
 - **`InstrumentRail`** — the left rail, reusing the Curves view's `.rail__*` vocabulary so the two

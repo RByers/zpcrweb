@@ -486,6 +486,16 @@
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
+/* An experiment that hasn't been run, in the same slot and shape as INCOMPLETE above — the two are
+   easily confused (both hold fewer reads than their protocol asks for) so they have to read as
+   different states at a glance. Magenta, the app's instrument accent: this file is on its way *to*
+   an instrument, where an incomplete run is one that came back from one having gone wrong. */
+.filechip__date--pending {
+  color: var(--neon-magenta);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
 .filecard {
   pointer-events: none;
   min-width: 220px;
@@ -2024,6 +2034,31 @@
 }
 .dlmenu > summary::-webkit-details-marker {
   display: none;
+}
+
+/* A popover trigger while its own panel is open, which nothing said before: the panel appeared and
+   the button it came out of went on looking untouched, so with two of them side by side (Overview's
+   attach-protocol and attach-plate) nothing tied the open list to the button that opened it.
+   Cyan-on-solid is the app's existing "this one is active" idiom (`.filechip.is-active`,
+   `.segmented__item.is-active`), and it has to out-state *hover* rather than match it, since the
+   pointer is usually still on the trigger it just clicked — so where hover tints, open commits: a
+   solid border in place of the dashed one, and the accent moved into the text too.
+
+   Written against `[open]` rather than a class because the `<details>` element is the state — there
+   is nothing for React to keep in sync, and the two flavours of trigger (`.dropzone` for the attach
+   menus, `.raw__download` for the plate download) each need their own base to build on. */
+.dlmenu[open] > summary.dropzone {
+  border-style: solid;
+  border-color: var(--neon-cyan);
+  background: var(--neon-cyan-dim);
+  color: var(--neon-cyan);
+  box-shadow: 0 0 0 1px var(--neon-cyan-dim), 0 0 18px var(--neon-cyan-dim);
+}
+.dlmenu[open] > summary.raw__download {
+  border-color: var(--neon-cyan);
+  background: var(--raised);
+  color: var(--neon-cyan);
+  box-shadow: 0 0 0 1px var(--neon-cyan-dim);
 }
 .dlmenu__list {
   position: absolute;

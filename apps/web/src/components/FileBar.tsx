@@ -64,6 +64,14 @@ interface Props {
    */
   incompleteIds: Set<string>;
   /**
+   * Experiments prepared but never started (`ZpcrStore.pendingIds`). Their chips say **Pending**
+   * where the date would go, the same slot **Incomplete** uses and for the same reason — but in the
+   * magenta the app uses for the instrument, since this is a file on its way *to* one rather than a
+   * run that went wrong. The two states are worth telling apart precisely because both hold fewer
+   * reads than their protocol asks for: one was started and stopped short, the other hasn't run.
+   */
+  pendingIds: Set<string>;
+  /**
    * True while a run in progress on a connected instrument owns the whole bar — passed only by
    * the Instrument view's bar (see `App.tsx`'s `runActive`/`selectFile`), since that's the one
    * place a chip click could otherwise walk away from the run that view is following. Locks every
@@ -254,6 +262,7 @@ function FileChip({
   isModified,
   isRunning,
   isIncomplete,
+  isPending,
   activeLocked,
   onSelect,
   onHide,
@@ -270,6 +279,8 @@ function FileChip({
   isRunning: boolean;
   /** See {@link Props.incompleteIds} — the run ended without finishing its protocol. */
   isIncomplete: boolean;
+  /** See {@link Props.pendingIds} — the experiment has not been started. */
+  isPending: boolean;
   /** See {@link Props.activeLocked}. */
   activeLocked: boolean;
   onSelect: (id: string) => void;
@@ -329,9 +340,12 @@ function FileChip({
             is in the hover card. */}
         <span className="filechip__text">
           <span className="filechip__name mono">{identity.name}</span>
-          {/* Incomplete displaces the date rather than joining it: a run that didn't finish is
-              the thing to notice about it, and when it ran is still in the hover card. */}
-          {isIncomplete ? (
+          {/* Either state displaces the date rather than joining it: which of the two a file is in
+              is the thing to notice about it, and when it ran is still in the hover card. A pending
+              experiment has no run date to displace anyway — it hasn't run. */}
+          {isPending ? (
+            <span className="filechip__date filechip__date--pending mono">Pending</span>
+          ) : isIncomplete ? (
             <span className="filechip__date filechip__date--incomplete mono">Incomplete</span>
           ) : (
             identity.dateText && <span className="filechip__date mono">{identity.dateText}</span>
@@ -369,6 +383,7 @@ export function FileBar({
   modifiedIds,
   inProgressIds,
   incompleteIds,
+  pendingIds,
   activeLocked,
   experiments,
 }: Props) {
@@ -399,6 +414,7 @@ export function FileBar({
           isModified={modifiedIds.has(f.id)}
           isRunning={inProgressIds.has(f.id)}
           isIncomplete={incompleteIds.has(f.id)}
+          isPending={pendingIds.has(f.id)}
           activeLocked={!!activeLocked}
           onSelect={onSelect}
           onHide={onHide}

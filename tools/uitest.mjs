@@ -1833,6 +1833,34 @@ async function instrumentRunChecks(chrome, origin) {
     JSON.stringify(cloned.parts),
   );
 
+  // PENDING, not INCOMPLETE. Both states hold fewer plate reads than their protocol asks for, which
+  // is the arithmetic `runCompleteness` accuses a *cancelled* run on — so a pending experiment used
+  // to be flagged as one. They now read as the two different things they are: one was started and
+  // stopped short, the other has not been started.
+  const badges = await cdp
+    .eval(
+      `JSON.stringify([...document.querySelectorAll(".filebar .filechip")].map((c) => ({
+         name: c.querySelector(".filechip__name").textContent.trim(),
+         badge: c.querySelector(".filechip__date")?.textContent.trim() ?? null,
+         pending: !!c.querySelector(".filechip__date--pending"),
+         incomplete: !!c.querySelector(".filechip__date--incomplete"),
+       })))`,
+    )
+    .then(JSON.parse);
+  const pendingChip = badges.find((b) => b.pending);
+  check(
+    "the pending experiment's chip says PENDING, never INCOMPLETE",
+    !!pendingChip && pendingChip.badge === "Pending" && !badges.some((b) => b.incomplete),
+    JSON.stringify(badges),
+  );
+  check(
+    "…while the finished run it was cloned from keeps its run date",
+    badges.some(
+      (b) => /FirstQualification/.test(b.name) && !b.pending && !b.incomplete && /\d/.test(b.badge ?? ""),
+    ),
+    JSON.stringify(badges),
+  );
+
   // Naming an experiment names its file too, by the same convention every run's file uses. The two
   // are one action here and nowhere else: leaving `20260804.zpcr` on disk while the run is called
   // something else would have the bar, the download and the instrument's own deposit disagree
@@ -1868,14 +1896,33 @@ async function instrumentRunChecks(chrome, origin) {
   await cdp.eval(`window.location.hash = "view=protocol", undefined`);
   await tabBecomes(cdp, "Protocol");
   await sleep(400);
-  const editable = await cdp.eval(
-    `!!document.querySelector(".protoedit, .protocoledit, [class*='protoedit']") ||
-     [...document.querySelectorAll("button")].some((b) => /^Edit$/.test(b.textContent.trim()))`,
-  );
+  // Asserting the editor is *usable*, not merely present: the Edit button renders either way, and
+  // the bug this pins had it rendering disabled with "Not editable: Unrecognized directive
+  // "[ProtocolRunDefinition version 06.00]"" — the archive entry had been written in the `.prcl.txt`
+  // file form, header and all, which `ProtocolBuilder` rightly refuses (see `attachProtocolToZpcr`).
+  const editable = await cdp
+    .eval(
+      `JSON.stringify((() => {
+         const btn = [...document.querySelectorAll("button")]
+           .find((b) => /^Edit$/.test(b.textContent.trim()));
+         return {
+           present: !!btn,
+           enabled: !!btn && !btn.disabled,
+           refusal: document.querySelector(".protoedit__note")?.textContent.trim() ?? null,
+           lines: [...document.querySelectorAll(".decoded__prototext")].map((l) => l.textContent.trim()),
+         };
+       })())`,
+    )
+    .then(JSON.parse);
   check(
     "a pending experiment's protocol can be edited in place",
-    editable === true,
-    `editor present: ${editable}`,
+    editable.present && editable.enabled && editable.refusal === null,
+    JSON.stringify({ enabled: editable.enabled, refusal: editable.refusal }),
+  );
+  check(
+    "…and its protocol entry carries no .prcl.txt header to choke the builder",
+    editable.lines.length > 0 && !editable.lines.some((l) => /^\[ProtocolRunDefinition/.test(l)),
+    JSON.stringify(editable.lines.slice(0, 4)),
   );
 
   // Starting it is blocked only by things that are actually missing — and a plate is not one of
