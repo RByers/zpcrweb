@@ -15,7 +15,10 @@
  *
  * A row's hover card (see {@link RowHoverCard}) mirrors the file bar's own — same detailed type
  * description and targets/samples chips — but leaves out whatever the table's columns already say
- * (name, date, protocol, plate), showing only what neither does: the run's cycle count.
+ * (name, date, protocol, plate, plateread count).
+ *
+ * Three cells are links into the file's own views rather than plain text — Protocol → Protocol,
+ * Plate → Plates, Reads → Curves — so the table doubles as a way in to the thing the cell names.
  *
  * Clicking a row anywhere else selects that file (which also turns its checkbox back on — see
  * `useZpcrStore`'s `setActive`) and closes this view, landing on the file's own first enabled
@@ -42,8 +45,8 @@ interface Props {
   hiddenIds: Set<string>;
   modifiedIds: Set<string>;
   /** Select this file, close the table, and land on its own view — see `App.tsx`'s wiring.
-   * `view`, when given, overrides the file's usual first-enabled-tab landing spot — the Plate
-   * cell uses it to go straight to the Plates view rather than Overview. */
+   * `view`, when given, overrides the file's usual first-enabled-tab landing spot — the
+   * Protocol/Plate/Reads cells use it to go straight to that view rather than Overview. */
   onSelectFile: (id: string, view?: ViewId) => void;
   onSetVisible: (id: string, visible: boolean) => void;
   onDelete: (id: string) => void | Promise<void>;
@@ -92,9 +95,12 @@ interface Row {
   dateText: string;
   dateMs: number;
   size: number;
-  protocol: string;
+  /** Null for a file that carries no protocol (a standalone plate, say) — rendered as a dash,
+   * and not a link, since there is no Protocol view to open for it. */
+  protocol: string | null;
   plateName: string;
-  cycles: number | undefined;
+  /** Plateread count — undefined for a file that isn't a run. */
+  reads: number | undefined;
   plate: PlateDefinition | null;
   lastModified: number;
   modified: boolean;
@@ -109,6 +115,7 @@ type SortKey =
   | "size"
   | "protocol"
   | "plateName"
+  | "reads"
   | "lastModified";
 
 interface Column {
@@ -121,11 +128,12 @@ const COLUMNS: readonly Column[] = [
   { key: "type", label: "Type" },
   { key: "experimentName", label: "Name" },
   { key: "fileName", label: "File" },
-  { key: "date", label: "Date" },
+  { key: "lastModified", label: "File modified" },
   { key: "size", label: "Size", numeric: true },
+  { key: "date", label: "Run date" },
   { key: "protocol", label: "Protocol" },
   { key: "plateName", label: "Plate" },
-  { key: "lastModified", label: "File modified" },
+  { key: "reads", label: "Reads", numeric: true },
 ];
 
 function sortValue(r: Row, key: SortKey): string | number {
@@ -141,9 +149,11 @@ function sortValue(r: Row, key: SortKey): string | number {
     case "size":
       return r.size;
     case "protocol":
-      return r.protocol;
+      return r.protocol ?? "";
     case "plateName":
       return r.plateName;
+    case "reads":
+      return r.reads ?? -1;
     case "lastModified":
       return r.lastModified;
   }
@@ -171,20 +181,18 @@ function SortArrow({ state }: { state: "asc" | "desc" | null }) {
 
 /**
  * A row's hover card: the file's detailed type description, then the same targets/samples chips
- * as the file bar's own (`FileBar.tsx`'s `HoverCard`), plus the run's cycle count — everything
- * else that card shows (the run's name, protocol, file name) already has its own table column
- * here, so repeating it would just be noise. Portalled to a fixed screen position for the same
+ * as the file bar's own (`FileBar.tsx`'s `HoverCard`) — everything else that card shows (the
+ * run's name, protocol, file name, plateread count) already has its own table column here, so
+ * repeating it would just be noise. Portalled to a fixed screen position for the same
  * reason the bar's version is: the table's own scroll container (`.filesview__scroll`) would
  * otherwise clip it.
  */
 function RowHoverCard({
   kind,
-  cycles,
   plate,
   style,
 }: {
   kind: FileKind;
-  cycles: number | undefined;
   plate: PlateDefinition | null;
   style: React.CSSProperties;
 }) {
@@ -193,12 +201,6 @@ function RowHoverCard({
   return (
     <div className="filecard mono" style={style}>
       <div className="filecard__type">{fileKindDescription(kind)}</div>
-      {cycles != null && (
-        <dl className="filecard__dl">
-          <dt>Cycles</dt>
-          <dd>{cycles}</dd>
-        </dl>
-      )}
       {plate && (
         <>
           <div className="filecard__section">
@@ -334,7 +336,6 @@ function FilesRow({
           createPortal(
             <RowHoverCard
               kind={r.kind}
-              cycles={r.cycles}
               plate={r.plate}
               style={{ position: "fixed", top: cardPos.top, left: cardPos.left, zIndex: 50 }}
             />,
@@ -344,14 +345,36 @@ function FilesRow({
       <td className="mono filesview__filename" title={r.fileName}>
         {r.fileName}
       </td>
-      <td className="mono">{r.dateText || "—"}</td>
+      <td className="mono">
+        {formatCompactDateTime(new Date(r.lastModified))}
+        {r.modified && (
+          <span className="filesview__moddot" title="Edited since it was loaded, not yet downloaded" />
+        )}
+      </td>
       <td className="mono atbl__num">{formatSize(r.size)}</td>
-      <td>{r.protocol}</td>
+      <td className="mono">{r.dateText || "—"}</td>
+      <td>
+        {r.protocol != null ? (
+          <button
+            type="button"
+            className="filesview__link"
+            onClick={(e) => {
+              e.stopPropagation();
+              onSelectFile(r.id, "protocol");
+            }}
+            title="Open the Protocol view"
+          >
+            {r.protocol}
+          </button>
+        ) : (
+          "—"
+        )}
+      </td>
       <td>
         {r.plate ? (
           <button
             type="button"
-            className="filesview__platelink"
+            className="filesview__link"
             onClick={(e) => {
               e.stopPropagation();
               onSelectFile(r.id, "plates");
@@ -364,10 +387,21 @@ function FilesRow({
           r.plateName
         )}
       </td>
-      <td className="mono">
-        {formatCompactDateTime(new Date(r.lastModified))}
-        {r.modified && (
-          <span className="filesview__moddot" title="Edited since it was loaded, not yet downloaded" />
+      <td className="mono atbl__num">
+        {r.reads ? (
+          <button
+            type="button"
+            className="filesview__link"
+            onClick={(e) => {
+              e.stopPropagation();
+              onSelectFile(r.id, "curves");
+            }}
+            title="Open the Curves view"
+          >
+            {r.reads}
+          </button>
+        ) : (
+          (r.reads ?? "—")
         )}
       </td>
       <td className="filesview__delcol">
@@ -408,9 +442,9 @@ export function FilesTableView({
         dateText: identity?.dateText || "",
         dateMs: identity?.date?.getTime() ?? 0,
         size: f.size,
-        protocol: run?.zpcr?.protocol()?.name || "—",
+        protocol: run?.zpcr?.protocol()?.name || null,
         plateName: plate ? plateDisplayName(plate) : "—",
-        cycles: run?.zpcr?.reads.length,
+        reads: run?.zpcr?.reads.length,
         plate,
         lastModified: f.lastModified,
         modified: modifiedIds.has(f.id),
@@ -480,11 +514,11 @@ export function FilesTableView({
           </tbody>
           <tfoot>
             <tr className="filesview__totals">
-              {/* checkbox column + every data column but the last (File modified) */}
+              {/* checkbox column + every data column but the last (Reads) */}
               <td colSpan={COLUMNS.length}>
                 {files.length} file{files.length === 1 ? "" : "s"} · {formatSize(totalSize)} total
               </td>
-              {/* the last data column (File modified) + the delete column */}
+              {/* the last data column (Reads) + the delete column */}
               <td colSpan={2} />
             </tr>
           </tfoot>

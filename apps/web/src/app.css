@@ -782,7 +782,7 @@
   white-space: nowrap;
   color: var(--ink-muted);
 }
-.filesview__platelink {
+.filesview__link {
   border: 0;
   background: transparent;
   padding: 0;
@@ -793,7 +793,7 @@
   text-underline-offset: 2px;
   cursor: pointer;
 }
-.filesview__platelink:hover {
+.filesview__link:hover {
   color: var(--neon-cyan);
 }
 .filesview__checkcol {

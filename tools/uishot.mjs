@@ -41,6 +41,7 @@ const VIEW_LABELS = {
   calibration: "Calibration",
   raw: "Raw",
   instrument: "Instrument",
+  files: "Files",
   // Reached by clicking the logo, so it has no tab to go `aria-selected` — matched by the
   // rendered card instead (see the `settle` branch below).
   about: null,
@@ -195,7 +196,16 @@ async function main() {
       const caption = label ?? "About";
       // Navigate via the URL hash rather than clicking the tab — one assignment, no
       // dependency on tab label text, and it exercises the same routing a shared link uses.
-      await cdp.eval(`window.location.hash = ${JSON.stringify(`view=${view}`)}, undefined`);
+      // "files" is the exception: it's a real tab but deliberately not linkable (it isn't in
+      // `urlHash.ts`'s VIEW_IDS), so it can only be reached by clicking it.
+      if (view === "files") {
+        await cdp.eval(
+          `[...document.querySelectorAll('[role="tab"]')]
+             .find(t => t.textContent.trim() === "Files")?.click(), undefined`,
+        );
+      } else {
+        await cdp.eval(`window.location.hash = ${JSON.stringify(`view=${view}`)}, undefined`);
+      }
       let settled = "none";
       try {
         await waitFor(
