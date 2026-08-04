@@ -325,4 +325,4 @@ hover put a curve back, or that eight rows are in the right order — and the co
 no DOM.
 
 Agent-facing guidance on when and how to run these — cost control, headless flags, sample loading
-— lives in [`CLAUDE.md`](./CLAUDE.md).
+— lives in [`AGENTS.md`](./AGENTS.md).

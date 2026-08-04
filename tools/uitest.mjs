@@ -3065,7 +3065,7 @@ async function main() {
   const pw = cfxPassword();
   if (!pw) {
     console.error(
-      "uitest: no cfxPassword in secrets.json — the password checks need it (see CLAUDE.md).",
+      "uitest: no cfxPassword in secrets.json — the password checks need it (see AGENTS.md).",
     );
     process.exit(1);
   }

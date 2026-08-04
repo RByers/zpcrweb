@@ -67,7 +67,7 @@ architecture level, not a quiet addition.
 Because this property is easy to violate by accident (a debugging `fetch` left in, a dependency
 that bundles its own analytics, an error handler that stringifies parsed file content into a
 report) and expensive to verify by inspection every time, the `client-only-audit` skill
-(`.claude/skills/client-only-audit/`) exists to check it from the code itself — tracing every
+(`.agents/skills/client-only-audit/`) exists to check it from the code itself — tracing every
 network egress point rather than trusting comments or this doc. It's run occasionally: before a
 release, when networking code changes, or on request — not on every commit.
 

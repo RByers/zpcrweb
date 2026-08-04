@@ -27,7 +27,7 @@ import {
   zpcrFromFile,
 } from "../packages/core/dist/index.js";
 
-/** The local, gitignored CFX ZipCrypto password — see `CLAUDE.md`'s Secrets section and
+/** The local, gitignored CFX ZipCrypto password — see `AGENTS.md`'s Secrets section and
  * `packages/core/test/secrets.ts`, which this mirrors. `undefined` when there's no `secrets.json`. */
 function readCfxPassword() {
   const path = new URL("../secrets.json", import.meta.url);

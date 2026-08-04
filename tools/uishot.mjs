@@ -9,7 +9,7 @@
  *
  * The point is token economy: every click, reload and wait happens *inside* this script, so
  * an agent pays for one command's output and one image rather than a round-trip per step.
- * See README.md "UI tooling" for what it does, CLAUDE.md "UI testing" for when to run it.
+ * See README.md "UI tooling" for what it does, AGENTS.md "UI testing" for when to run it.
  *
  *   node tools/uishot.mjs                            # overview+curves of the default sample
  *   node tools/uishot.mjs --views curves --width 1100
@@ -169,7 +169,7 @@ async function main() {
 
   try {
     // Password goes in the hash, not the query string — fragments are never sent to the
-    // server, and the app strips it from the URL as soon as it reads it. See CLAUDE.md.
+    // server, and the app strips it from the URL as soon as it reads it. See AGENTS.md.
     const q = new URLSearchParams();
     if (pw) q.set("cfxPassword", pw);
     const pageUrl = `${dev.base}${opts.url}${q.toString() ? `#${q}` : ""}`;

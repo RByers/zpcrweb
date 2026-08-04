@@ -5,7 +5,7 @@ dist/
 coverage/
 .claude/*
 !.claude/settings.json
-!.claude/skills/
+!.claude/skills
 secrets.json
 tools/.uishot/
 .vscode/
