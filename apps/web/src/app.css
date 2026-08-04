@@ -2040,6 +2040,21 @@
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
   overflow: hidden;
 }
+/* The right edge is the anchor by default because every menu that came first hangs off a
+   right-aligned toolbar (the Plates view's), where a list growing leftward is the one that stays on
+   screen. In Overview's experiment-parts cards the button is at the *left* of its card, so the same
+   rule ran the list off the left of the viewport — anchor it under the button's left edge there and
+   let it grow the way it has room to.
+
+   Scoped to the context rather than offered as a prop each caller has to remember: which edge is
+   safe follows from where the button sits, which the caller does not choose either. (This is the
+   job CSS anchor positioning's `position-area` + `position-try-fallbacks` does declaratively, and
+   it is what to switch to once it needs no polyfill — the polyfill is a CDN import, which this app
+   cannot make.) */
+.overview__part .dlmenu__list {
+  right: auto;
+  left: 0;
+}
 /* AttachPlateMenu's list, not PlateDownloadButton's: its rows are file names (a run's own or a
    sample's export can run long), where the default width just wraps them across several lines. */
 .dlmenu__list--wide {
