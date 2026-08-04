@@ -20,6 +20,7 @@ import {
   plateReadNumber,
 } from "./plateread.js";
 import { parseRunInfo } from "./runinfo.js";
+import { ZPCRWEB_SETTINGS_NAME } from "./zpcrwebSettings.js";
 import {
   toChannels,
   toCurves,
@@ -87,15 +88,27 @@ export function parseZpcr(data: Uint8Array | ArrayBuffer): Zpcr {
   // ask which case it has.
   //
   // Some entry still has to say this is a run, or any ZIP renamed `.zpcr` would open as an empty
-  // one: `RunInfo.xml`, a plate read, or — for a pending experiment — the (possibly zero-length)
-  // `ProtocolRunDefinition.txt` entry `experimentArchive.ts` always writes, whose mere presence is
-  // enough even before it has real content.
+  // one. Four things can say it: `RunInfo.xml`, a plate read, a `ProtocolRunDefinition.txt`, or a
+  // `zpcrweb.json`.
+  //
+  // That last one is what makes a **pending experiment with nothing in it yet** openable
+  // (`experimentArchive.ts`). Such a file genuinely holds no protocol and no plate — that is the
+  // state it is for — so the only honest thing in it is zpcrweb's own settings entry, which says
+  // "this app made this archive". It earns its place the way `begun`/`ended` do, by presence rather
+  // than content: the document may be an empty `{}` until the experiment is named. An earlier
+  // version wrote a zero-length `ProtocolRunDefinition.txt` for this instead, which was worse in
+  // exactly the way it sounds — the archive claimed a protocol entry it did not have, and the file's
+  // own Raw tab listed it.
   const runInfoBytes = files[RUNINFO_NAME];
   if (
     runInfoBytes === undefined &&
-    !archive.entries.some((n) => isPlateReadName(n) || n === PROTOCOL_NAME)
+    !archive.entries.some(
+      (n) => isPlateReadName(n) || n === PROTOCOL_NAME || n === ZPCRWEB_SETTINGS_NAME,
+    )
   ) {
-    throw new Error(`Not a valid .zpcr archive: no ${RUNINFO_NAME}, plate read or ${PROTOCOL_NAME}`);
+    throw new Error(
+      `Not a valid .zpcr archive: no ${RUNINFO_NAME}, plate read, ${PROTOCOL_NAME} or ${ZPCRWEB_SETTINGS_NAME}`,
+    );
   }
   const metadata = parseRunInfo(runInfoBytes === undefined ? "" : textDecoder.decode(runInfoBytes));
 

@@ -1688,14 +1688,25 @@ async function instrumentRunChecks(chrome, origin) {
     note: l.querySelector(".decoded__protonote").textContent.trim(),
   }))`);
   const protoOverview = { tiles: protoInfo, lines: protoLines };
+  // The Method/Lid/Volume/Steps/Plate-reads/Scan table this tab used to lead with is gone: every one
+  // of those facts is a directive in the listing below it, annotated in plain English, so the table
+  // restated the protocol in a second shorter form that could only agree with it or be a bug.
   check(
-    "…and its Protocol tab reports the protocol's own settings, from the decode not the text",
+    "…and its Protocol tab leads with the protocol itself, not a table restating it",
     protoTab === "Protocol" &&
-      protoOverview.tiles.Lid === "105 °C" &&
-      protoOverview.tiles.Volume === "25 µL" &&
-      protoOverview.tiles.Steps === "3" &&
-      /all 6 channels/.test(protoOverview.tiles.Scan ?? ""),
-    JSON.stringify(protoOverview.tiles),
+      Object.keys(protoOverview.tiles).length === 0 &&
+      protoOverview.lines.length > 0,
+    JSON.stringify({ tiles: protoOverview.tiles, lines: protoOverview.lines.length }),
+  );
+  // The name leads the view instead, the way an experiment's does on its Overview.
+  const protoHeadline = await cdp.eval(
+    `document.querySelector(".overview__nametext, .overview__name")?.value ??
+     document.querySelector(".overview__nametext")?.textContent.trim() ?? null`,
+  );
+  check(
+    "…under its own name as the headline",
+    protoHeadline === "Gradient",
+    JSON.stringify({ headline: protoHeadline }),
   );
   const grad = protoOverview.lines.find((l) => l.text.startsWith("GRAD"));
   const strayGoto = protoOverview.lines.find((l) => l.text.startsWith("GOTO"));
@@ -1903,8 +1914,9 @@ async function instrumentRunChecks(chrome, origin) {
   const editable = await cdp
     .eval(
       `JSON.stringify((() => {
+         // The pencil, by its accessible label — it has no text to match on any more.
          const btn = [...document.querySelectorAll("button")]
-           .find((b) => /^Edit$/.test(b.textContent.trim()));
+           .find((b) => /^Edit this protocol$/.test(b.getAttribute("aria-label") ?? ""));
          return {
            present: !!btn,
            enabled: !!btn && !btn.disabled,
@@ -1990,8 +2002,8 @@ async function instrumentRunChecks(chrome, origin) {
       fresh.parts.some((p) => p.half === "Plate" && p.state === "optional"),
     JSON.stringify(fresh.parts),
   );
-  // Protocol is enabled even with nothing in it — there it is the editor a from-scratch experiment
-  // starts from. Plates is not: attaching one is an Overview affordance while pending.
+  // Protocol is enabled even with nothing in it — there it is where a from-scratch experiment's
+  // protocol comes from. Plates is not: attaching one is an Overview affordance while pending.
   check(
     "…offering Overview and Protocol, but not the tabs it has nothing for",
     fresh.tabs.includes("Overview") &&
@@ -1999,6 +2011,74 @@ async function instrumentRunChecks(chrome, origin) {
       !fresh.tabs.includes("Plates") &&
       !fresh.tabs.includes("Curves"),
     JSON.stringify(fresh.tabs),
+  );
+
+  // The archive really is empty. An earlier version wrote a zero-length `ProtocolRunDefinition.txt`
+  // so the file would parse, and the Protocol tab synthesised a default protocol to show — so a
+  // brand-new experiment claimed a protocol it didn't have, in the archive *and* on screen. Its own
+  // `zpcrweb.json` is what identifies it now (`zpcr.ts`).
+  await clickTab(cdp, "Raw");
+  await tabBecomes(cdp, "Raw");
+  await sleep(400);
+  const entries = await cdp
+    .eval(
+      `JSON.stringify([...document.querySelectorAll(".raw__item")].map((i) => i.textContent.trim()))`,
+    )
+    .then(JSON.parse);
+  check(
+    "…holding no protocol entry at all, just the settings entry that identifies the archive",
+    entries.length === 1 && /zpcrweb\.json/.test(entries[0]),
+    JSON.stringify(entries),
+  );
+
+  // …and its Protocol tab says where a protocol comes from rather than showing a default one.
+  await clickTab(cdp, "Protocol");
+  await tabBecomes(cdp, "Protocol");
+  await sleep(400);
+  const emptyProto = await cdp.eval(
+    `JSON.stringify({
+       note: document.querySelector(".decoded__na")?.textContent.trim() ?? null,
+       lines: document.querySelectorAll(".decoded__protoline").length,
+     })`,
+  ).then(JSON.parse);
+  check(
+    "an experiment with no protocol shows no protocol, not an invented default",
+    emptyProto.lines === 0 && /No protocol yet/.test(emptyProto.note ?? ""),
+    JSON.stringify(emptyProto),
+  );
+
+  // "new protocol" writes the default and lands on the editor, with the name asked for in place —
+  // it used to be a "New protocol…" item inside the attach menu that demanded a file name first.
+  await clickTab(cdp, "Overview");
+  await tabBecomes(cdp, "Overview");
+  await sleep(300);
+  const clickedNew = await cdp.eval(
+    `(() => { const b = [...document.querySelectorAll(".overview__part button")]
+        .find((x) => /^new protocol$/i.test(x.textContent.trim()));
+       if (b) b.click(); return !!b; })()`,
+  );
+  check("Overview offers a 'new protocol' button beside 'attach protocol'", clickedNew === true);
+  await tabBecomes(cdp, "Protocol");
+  await sleep(600);
+  const created = await cdp
+    .eval(
+      `JSON.stringify({
+         lines: [...document.querySelectorAll(".decoded__prototext")].map((l) => l.textContent.trim()),
+         nameField: !!document.querySelector(".overview__name"),
+         nameMissing: !!document.querySelector(".overview__name.is-missing"),
+         required: document.querySelector(".overview__namerequired")?.textContent.trim() ?? null,
+       })`,
+    )
+    .then(JSON.parse);
+  check(
+    "new protocol lands on the editor holding the default protocol — a header and END, no steps",
+    created.lines.join(" ") === "METHOD CALC; HOTLID 105,30; VOLUME 20; END;",
+    JSON.stringify(created.lines),
+  );
+  check(
+    "…with its own name asked for, marked missing the way an experiment's is",
+    created.nameField && created.nameMissing && created.required === "required",
+    JSON.stringify(created),
   );
 
   cdp.close();
@@ -2525,14 +2605,22 @@ async function protocolEditorChecks(chrome, origin) {
       text: l.querySelector(".decoded__prototext").textContent.trim(),
     }))`);
   const program = async () => (await lines()).map((l) => l.text).join(" ");
+  // Edit is the pencil icon now (matching Overview's rename buttons), so it has no text to match on
+  // — it is found by its accessible label, and reports "Edit"/"Done" as its label either way so the
+  // checks below still read as the states they are. Done stays a worded button: it is the way out.
   const editBtn = () =>
     cdp.eval(`(() => { const b = [...document.querySelectorAll(".overview__blocktools button")]
-        .find((x) => /^(Edit|Done)$/.test(x.textContent.trim()));
-       return b ? JSON.stringify({ label: b.textContent.trim(), off: b.disabled, why: b.title }) : "null"; })()`)
+        .find((x) => /^(Edit|Done)$/.test(x.textContent.trim()) ||
+                     /^Edit this protocol$/.test(x.getAttribute("aria-label") ?? ""));
+       if (!b) return "null";
+       const label = /^Done$/.test(b.textContent.trim()) ? "Done" : "Edit";
+       return JSON.stringify({ label, off: b.disabled, why: b.title }); })()`)
       .then((v) => (v === "null" ? null : JSON.parse(v)));
   const clickButton = (label) =>
-    cdp.eval(`(() => { const b = [...document.querySelectorAll(".overview__blocktools button")]
-        .find((x) => x.textContent.trim().startsWith(${JSON.stringify(label)}));
+    cdp.eval(`(() => { const want = ${JSON.stringify(label)};
+       const b = [...document.querySelectorAll(".overview__blocktools button")]
+        .find((x) => x.textContent.trim().startsWith(want) ||
+                     (want === "Edit" && /^Edit this protocol$/.test(x.getAttribute("aria-label") ?? "")));
        if (b) b.click(); return !!b; })()`);
   /** Click the row whose directive text starts with `prefix`. */
   const clickRow = (prefix) =>

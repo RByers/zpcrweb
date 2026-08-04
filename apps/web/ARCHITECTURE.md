@@ -273,12 +273,11 @@ things:
   at all (see "One Overview panel" below): the `Type`/`Filename`/`Last modified` identity card and
   the download/edit/clone toolbar, and nothing else. All the protocol's own content lives on
   Protocol instead, the same split a run's Overview/Protocol pair uses.
-- **Protocol** (`StandaloneProtocolView`) — the protocol *as a document*, and the one place it
-  can be **edited**: stat tiles for the settings its header directives carry, then the same
-  annotated `ProtocolDecoded` listing a run's Protocol tab uses, behind an Edit button
-  (`components/protocol/`, see "Editing a protocol" below). Everything shown is
-  `parseRunDefinition`'s (`protocol.md`); the view picks tiles out of the decoded program and
-  counts directives, and reads nothing out of the text.
+- **Protocol** (`ProtocolView` — the *same* component a run's Protocol tab uses, see "One Protocol
+  view" below) — the protocol *as a document*, editable here because a `.prcl.txt` is a draft rather
+  than a record. Its name leads the view and the annotated `ProtocolDecoded` listing follows, behind
+  an Edit pencil (`components/protocol/`, see "Editing a protocol" below). Everything shown is
+  `parseRunDefinition`'s (`protocol.md`) — the view reads nothing out of the text itself.
 - **Raw** (`StandaloneRawView`, shared with `.pltd`/`.plt.csv`/Biomeme) — the file's own bytes
   verbatim, since a `.prcl.txt` is already plain UTF-8 text with nothing to decrypt.
 A `.prcl.txt` has **no Instrument tab**: it is not something that can be started, only attached to an
@@ -291,11 +290,38 @@ now falls back like every other file, to the first tab its kind enables — and 
 on Overview** (`addFiles`), because opening a protocol is asking what it is; Instrument is where
 you go when you mean to start a run.
 
+### One Protocol view (`ProtocolView`)
+
+**A protocol is rendered by one component wherever it lives** — a standalone `.prcl.txt` and a run's
+own protocol alike. There were two (`StandaloneProtocolView` and `ProtocolView`) and they had
+drifted in every way two components can: only one had an editor, only one had the download/clone
+pair, one led with a stat table of `Method`/`Lid`/`Volume`/`Steps`/`Plate reads`/`Scan` and the other
+didn't. But the thing on screen is the same directive text either way, so where it is stored changes
+only two things, and both are props:
+
+- **whether it may be edited** — a standalone file and a *pending* experiment are drafts, a run that
+  has happened is a record (see "Editing what has already happened");
+- **whether there is a thermal profile below it**, which only a run that actually executed has.
+
+It takes the protocol *text* rather than a `Zpcr`, which is what lets it serve a `.prcl.txt` at all —
+that file has no run around it to hand over.
+
+**The stat table is gone.** Every fact in it was a directive in the listing directly below it —
+`HOTLID 105,30` *is* the lid row, annotated in plain English — so it restated the protocol in a
+second, shorter form that could only ever agree with it or be a bug.
+
+**The name leads the view**, the same shape an experiment's name leads its Overview
+(`ExperimentHeader`), down to the red required state and the pencil: it is the same question about
+the same kind of thing, and answering it two different ways in two tabs is the drift this
+unification exists to undo. What that name *is* differs by carrier, which is the one thing the two
+callers still resolve for themselves — a `.prcl.txt` has only its file name to be named by, while a
+run's protocol carries `ProtocolName.txt`.
+
 ### Editing a protocol (`components/protocol/`)
 
-Only a `.prcl.txt` gets an editor, and only on its own Protocol tab. Every other carrier of the
-same text (`protocol.md` §2) is a record of a run that already happened — there is no honest way
-to edit one. A `.prcl.txt` is the portable, authorable form, so this is where authoring belongs.
+A protocol is editable when it is a **draft**: a standalone `.prcl.txt`, or a *pending* experiment's
+protocol. Every other carrier of the same text (`protocol.md` §2) is a record of a run that already
+happened — there is no honest way to edit one.
 
 - **The editor never touches text.** `ProtocolEditor` edits core's `ProtocolBuilder`
   (`protocol.md` §10), which owns serialization, step numbering, `END`'s position and what a
@@ -577,8 +603,8 @@ so every call site keeps writing one `onChange({ … })` regardless of where the
   buttons described under `PlateDownloadButton` above. Reads only `zpcr.protocol()`/
   `zpcr.protocolText`, so it works identically for a `.zpcr`, a `.pcrd` or a Biomeme run — the
   same format independence `OverviewView` has. Split out of Overview so a run's protocol detail
-  doesn't crowd the summary; `StandaloneProtocolView` (see "A protocol on its own" below) is the
-  equivalent tab for a `.prcl.txt` with no run around it.
+  doesn't crowd the summary. **The same component serves a standalone `.prcl.txt`** — see "One
+  Protocol view" below for what it varies and what it doesn't.
 
   Beneath the step table, when the run carries a `.alf` report (`zpcr.runReports()`), the
   **thermal profile as run** — `ThermalProfileChart` over core's `alfThermalProfile`

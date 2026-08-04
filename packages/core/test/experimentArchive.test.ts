@@ -1,3 +1,4 @@
+import { zipSync } from "fflate";
 import { describe, expect, it } from "vitest";
 import {
   attachProtocolToZpcr,
@@ -65,12 +66,34 @@ describe("buildExperimentArchive — a bare .zpcr for a pending experiment", () 
     expect(plates[0]!.pltd.plate?.fluors[0]?.fluor).toBe("FAM");
   });
 
-  it("writes no begun marker and no zpcrweb.json, unlike a started run", () => {
+  it("writes no begun marker, so it reads as never started", () => {
     const zpcr = parseZpcr(
       buildExperimentArchive({ protocol: { runDefinition: PROTOCOL } }),
     );
     expect(zpcr.archive.entries).not.toContain("begun");
-    expect(zpcr.archive.entries).not.toContain("zpcrweb.json");
+    expect(runProgressFromNames(zpcr.archive.entries).begun).toBe(false);
+  });
+
+  /**
+   * An experiment created from scratch holds *nothing* — that is the state it is for, and claiming
+   * otherwise is what the earlier zero-length `ProtocolRunDefinition.txt` did: the archive listed a
+   * protocol entry it did not have. Its own settings entry is what keeps it parseable instead
+   * (`zpcr.ts`), by presence rather than content.
+   */
+  it("holds no protocol and no plate when given neither, and still parses", () => {
+    const zpcr = parseZpcr(buildExperimentArchive({}));
+    expect(zpcr.archive.entries).toEqual(["zpcrweb.json"]);
+    expect(zpcr.protocolText).toBe("");
+    expect(zpcr.protocol()).toBeUndefined();
+    expect(zpcr.plates()).toEqual([]);
+    expect(zpcr.reads).toEqual([]);
+  });
+
+  it("…and a ZIP with none of the four identifying entries is still refused", () => {
+    // The guard `zpcrweb.json` was added to must still reject anything renamed `.zpcr`.
+    expect(() => parseZpcr(zipSync({ "notes.txt": new TextEncoder().encode("hi") }))).toThrow(
+      /Not a valid \.zpcr archive/,
+    );
   });
 });
 

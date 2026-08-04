@@ -5,7 +5,7 @@ import { useCfxDevice } from "./state/useCfxDevice";
 import { useRunWatch } from "./state/useRunWatch";
 import { usePltdPassword } from "./state/pltdPassword";
 import { formatLoadHash } from "./state/urlHash";
-import { cloneFileName } from "./lib/cloneName";
+import { cloneFileName, splitFileName } from "./lib/cloneName";
 import { isPendingExperiment } from "./lib/experiment";
 import { plateCsvFileName } from "./lib/plateNames";
 import { downloadBytes } from "./lib/download";
@@ -26,7 +26,6 @@ import { StandalonePlateView } from "./components/views/StandalonePlateView";
 import { StandalonePlateOverviewView } from "./components/views/StandalonePlateOverviewView";
 import { StandaloneRawView } from "./components/views/StandaloneRawView";
 import { StandaloneProtocolOverview } from "./components/views/StandaloneProtocolOverview";
-import { StandaloneProtocolView } from "./components/views/StandaloneProtocolView";
 import { ProtocolView } from "./components/views/ProtocolView";
 import { AboutView } from "./components/views/AboutView";
 import { InstrumentView } from "./components/views/InstrumentView";
@@ -225,6 +224,12 @@ export function App() {
   const [nameExperimentFor, setNameExperimentFor] = useState<string | null>(null);
   const clearNameExperiment = useCallback(() => setNameExperimentFor(null), []);
 
+  /** The same signal for a just-created *protocol*, whose name the Protocol tab asks for — see
+   * {@link createProtocolFor}. Separate from {@link nameExperimentFor} because the two are different
+   * fields on different tabs, and a file can be waiting on either. */
+  const [nameProtocolFor, setNameProtocolFor] = useState<string | null>(null);
+  const clearNameProtocol = useCallback(() => setNameProtocolFor(null), []);
+
   /**
    * Create a pending experiment and go name it — "New experiment" (About) and "Clone experiment"
    * (Overview, Instrument) both land here, differing only in the parts they pass.
@@ -297,29 +302,29 @@ export function App() {
   );
 
   /**
-   * "New protocol…" on an experiment's Overview: create an empty `.prcl.txt` under the name given,
-   * and attach it to that experiment.
+   * "New protocol" on an experiment's Overview: write the default protocol into the experiment and
+   * go straight to editing it.
    *
-   * Two files, deliberately. The protocol becomes a file of its own — nameable, downloadable,
-   * attachable to a second experiment later — which is the reason to come this way rather than
-   * simply typing on the Protocol tab, where the protocol would belong to this one experiment and
-   * nothing else. Both end up editable: the copy inside the experiment through the Protocol tab, the
-   * standalone file through its own.
+   * The default is `ProtocolBuilder.empty()` — the three-line header and `END`, no steps — which is
+   * where a protocol typed from scratch starts. It goes into the experiment's *own* archive rather
+   * than into a separate `.prcl.txt` beside it: this is the "write one for this experiment" path, and
+   * a second file to keep in sync would be exactly the thing the attach menu is for when a reusable
+   * protocol is what's wanted (a protocol can still be extracted into its own file afterwards, from
+   * the Protocol tab's clone button).
+   *
+   * It is created **unnamed**, and the Protocol tab asks — the same shape as a new experiment
+   * arriving unnamed on its Overview. An earlier version asked for the file name up front, in a form
+   * inside the attach menu, which put a text field between the click and the protocol for no reason:
+   * the name isn't needed to write the first step, and the view it lands on can ask for it in place.
    */
   const createProtocolFor = useCallback(
-    async (fileId: string, fileName: string) => {
-      const text = ProtocolBuilder.empty().toRunDefinition();
-      const file = new File([new TextEncoder().encode(text)], fileName, {
-        lastModified: Date.now(),
-      });
-      // `addFiles` would activate the new `.prcl.txt` and switch to its own Overview (see the store's
-      // `prcl` landing rule), which would walk away from the experiment being assembled — so it is
-      // added without activating, and the experiment stays on screen with its new protocol attached.
-      await store.addFiles([file], { activate: false, modified: true });
-      await store.attachProtocol(fileId, file);
-      // Naming a protocol is only ever the preamble to writing one, so land on the editor — the
-      // experiment's own Protocol tab, which is now holding the empty protocol just attached.
+    (fileId: string) => {
+      // `setRunProtocolText` rather than `attachProtocol`: attaching derives the protocol's name from
+      // the file it came from, and this one came from no file — it must arrive *unnamed*, which is
+      // what the Protocol tab's headline then asks about.
+      store.setRunProtocolText(fileId, ProtocolBuilder.empty().toRunDefinition());
       store.setView("protocol");
+      setNameProtocolFor(fileId);
     },
     [store],
   );
@@ -686,11 +691,23 @@ export function App() {
               />
             )}
             {view === "protocol" && store.activeProtocolFile !== null && (
-              <StandaloneProtocolView
+              <ProtocolView
                 key={active.id}
+                protocolText={store.activeProtocolFile}
                 file={active}
-                runDefinition={store.activeProtocolFile}
+                addFiles={store.addFiles}
+                // A protocol file is always a draft: it is a document you author, with no run behind
+                // it that editing it could contradict.
+                editable
                 onChangeProtocol={(text) => store.setProtocolText(active.id, text)}
+                // A standalone protocol has no `ProtocolName.txt` — its name *is* its file name, so
+                // the headline edits that, extension preserved.
+                name={splitFileName(active.name).base}
+                onRenameProtocol={(name) =>
+                  void store.renameFile(active.id, `${name}${splitFileName(active.name).ext}`)
+                }
+                autoFocusName={nameProtocolFor === active.id}
+                onAutoFocusHandled={clearNameProtocol}
               />
             )}
             {view === "raw" && <StandaloneRawView key={active.id} file={active} />}
@@ -731,7 +748,7 @@ export function App() {
                 files={store.files}
                 onAttachPlate={(file) => void store.attachPlate(active.id, file)}
                 onAttachProtocol={(file) => void store.attachProtocol(active.id, file)}
-                onCreateProtocol={(fileName) => void createProtocolFor(active.id, fileName)}
+                onCreateProtocol={() => createProtocolFor(active.id)}
                 onCloneExperiment={cloneExperiment}
                 onRenameFile={(name) => void store.renameFile(active.id, name)}
                 onDownload={downloadActiveFile}
@@ -743,11 +760,19 @@ export function App() {
             )}
             {view === "protocol" && (
               <ProtocolView
-                zpcr={zpcr}
+                protocolText={zpcr.protocolText || null}
+                steps={zpcr.protocol()?.steps ?? null}
+                // One report per archive (`alf.md` §1); the first is the run's own. Only a run that
+                // executed has one, which is what the thermal-profile section is about.
+                report={zpcr.runReports()[0]?.alf ?? null}
                 file={active}
                 addFiles={store.addFiles}
-                pending={isPendingExperiment(active.kind, zpcr)}
+                editable={isPendingExperiment(active.kind, zpcr)}
                 onChangeProtocol={(text) => store.setRunProtocolText(active.id, text)}
+                name={zpcr.protocol()?.name ?? ""}
+                onRenameProtocol={(name) => void store.setRunProtocolName(active.id, name)}
+                autoFocusName={nameProtocolFor === active.id}
+                onAutoFocusHandled={clearNameProtocol}
               />
             )}
             {view === "curves" && (

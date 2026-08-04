@@ -72,8 +72,8 @@ export function OverviewView({
   files: LoadedFile[];
   onAttachPlate: (file: File) => void;
   onAttachProtocol: (file: File) => void;
-  /** "New protocol…": create an empty `.prcl.txt` under this name and attach it. */
-  onCreateProtocol: (fileName: string) => void;
+  /** "new protocol": write the default protocol into this experiment and go edit it. */
+  onCreateProtocol: () => void;
   /** Copy this run's protocol and plate into a fresh pending experiment. Replaces the generic
    * file-clone button for a run — see {@link OverviewPanelProps.onClone} for the difference. */
   onCloneExperiment: () => void;
@@ -256,7 +256,7 @@ function ExperimentParts({
   files: LoadedFile[];
   onAttachPlate: (file: File) => void;
   onAttachProtocol: (file: File) => void;
-  onCreateProtocol: (fileName: string) => void;
+  onCreateProtocol: () => void;
 }) {
   return (
     <section className="overview__block">
@@ -274,16 +274,26 @@ function ExperimentParts({
           <p className="decoded__hint">
             {hasProtocol
               ? "Edit it on the Protocol tab, or replace it with another file."
-              : "Write one on the Protocol tab, or attach a protocol file you already have."}
+              : "Write a new one, or attach a protocol file you already have."}
           </p>
-          <AttachProtocolMenu
-            files={files}
-            compactLabel={hasProtocol ? "replace protocol" : "attach protocol"}
-            confirmReplace={hasProtocol}
-            onSelect={(f) => onAttachProtocol(new File([f.bytes.slice()], f.name))}
-            onUpload={onAttachProtocol}
-            onCreate={onCreateProtocol}
-          />
+          <div className="overview__partactions">
+            {/* Two peers, not a menu with a hidden option in it: "write one" and "use one I have"
+                are the two ways to get a protocol, and they are equally likely. "New protocol" used
+                to be a third item inside the attach menu, which buried the more common of the two
+                behind the less common one. */}
+            {!hasProtocol && (
+              <button className="btn btn--sm btn--primary" onClick={onCreateProtocol}>
+                new protocol
+              </button>
+            )}
+            <AttachProtocolMenu
+              files={files}
+              compactLabel={hasProtocol ? "replace protocol" : "attach protocol"}
+              confirmReplace={hasProtocol}
+              onSelect={(f) => onAttachProtocol(new File([f.bytes.slice()], f.name))}
+              onUpload={onAttachProtocol}
+            />
+          </div>
         </div>
         <div className="overview__part">
           <div className="overview__partlabel">

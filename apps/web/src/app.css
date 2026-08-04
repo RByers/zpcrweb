@@ -995,6 +995,15 @@
   text-transform: uppercase;
   color: var(--ink-2);
 }
+/* The controls for one half, side by side — "new protocol" beside "attach protocol". Wraps rather
+   than squeezing, since the attach menu's trigger carries a word rather than an icon. */
+.overview__partactions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 /* "attached" / "required to start" / "optional" — the state of that half, in the same three tones
    the rest of the app uses for good/blocking/merely-worth-knowing. */
 .overview__partok {

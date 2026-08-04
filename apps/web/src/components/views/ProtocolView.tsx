@@ -1,139 +1,172 @@
-import { useMemo } from "react";
-import { formatRunDefinitionText, ProtocolBuilder, type Zpcr } from "@zpcrweb/core";
+import { useEffect, useRef, useState } from "react";
+import { formatRunDefinitionText, type AlfReport, type ProtocolStep } from "@zpcrweb/core";
 import { ProtocolDecoded } from "../raw/DecodedView";
 import { ProtocolStepsTable } from "../raw/ProtocolSteps";
 import { ProtocolEditor } from "../protocol/ProtocolEditor";
 import { ThermalProfileChart } from "../protocol/ThermalProfileChart";
 import { DownloadIcon } from "../DownloadIcon";
 import { CloneIcon } from "../CloneIcon";
+import { RenameIcon } from "../RenameIcon";
 import { downloadText } from "../../lib/download";
 import { protocolFileBase } from "../../lib/protocolFileBase";
 import type { AddFilesOptions } from "../../state/useZpcrStore";
 
 /**
- * The "Protocol" tab for a run (`.zpcr`/`.pcrd`/Biomeme): the thermal-cycling protocol the run
- * carries — structured step list when one parsed, or the annotated ASCII run definition otherwise —
- * plus the download/clone tools that used to sit inline in `OverviewView`. Moved out to its own tab
- * so Overview stays a summary rather than growing a protocol's worth of detail.
+ * The Protocol tab — for a standalone `.prcl.txt` and for a run's own protocol alike.
  *
- * **For a pending experiment this tab is an editor instead**, the same {@link ProtocolEditor} a
- * standalone `.prcl.txt` gets, writing straight into the experiment's own archive entry
- * (`setRunProtocolText`). That is the difference between the two states, and it is the whole reason
- * "pending" is a state: an experiment that hasn't run yet *has no record to contradict*, so its
- * protocol is a draft and editing it is the ordinary thing to do — which is what makes "start from
- * scratch" possible without authoring a separate file first. A brand-new experiment has no protocol
- * at all yet, so the editor opens on the blank default (`ProtocolBuilder.empty()`: the three-line
- * header and `END`), ready to be typed into.
+ * **One view, not two.** These used to be separate components (`StandaloneProtocolView` and this
+ * one) that had drifted: only one had an editor, only one had the download/clone pair, one led with
+ * a stat table of `Method`/`Lid`/`Volume` and the other didn't. But a protocol is a protocol — the
+ * same directive text, rendered the same way — and where it is stored changes only two things,
+ * both of which are props here:
  *
- * The moment the experiment is started it stops being pending, permanently, and this tab reverts to
- * the read-only rendering below — a run's protocol is a record of what the block was asked to do,
- * and there would be no honest way to edit it after the fact.
+ * - **whether it may be edited** ({@link editable}), which follows the app's rule about editing what
+ *   has already happened (`apps/web/ARCHITECTURE.md`): a standalone file and a *pending* experiment
+ *   are drafts, a run that has happened is a record;
+ * - **whether there is a thermal profile to show**, which only a run that has actually executed has
+ *   (its `.alf` report).
  *
- * Beneath it, when the run carries a `.alf` report, what the block *actually* did: the same
- * protocol as the instrument executed it, plotted against wall-clock time (`alf.md` §7.6). The
- * pairing is the point — the table above states the intent, the plot below states the cost, and
- * a hold that ran 46 s for its nominal 30 is only visible in the second. Runs without a report
- * (`.pcrd`, Biomeme, and a pending experiment, which has run nothing) simply don't get the section.
+ * The `Method`/`Lid`/`Volume`/`Steps`/`Plate reads`/`Scan` table the standalone view used to lead
+ * with is gone. Every one of those facts is a directive in the listing below it — `HOTLID 105,30`
+ * *is* the lid row, annotated in plain English — so the table restated the protocol in a second,
+ * shorter form that could only ever agree with it or be a bug.
+ *
+ * The **name** leads the view, the way an experiment's name leads its Overview, and for the same
+ * reason: it is what a person calls the thing, and for a protocol it is genuinely editable (a
+ * standalone file has only its filename to be named by; a run's protocol carries `ProtocolName.txt`).
+ * A protocol that has just been created has none, and the field says so in the same red the
+ * experiment-name field uses.
  */
 export function ProtocolView({
-  zpcr,
+  protocolText,
+  steps,
+  report,
   file,
   addFiles,
-  pending,
+  editable,
   onChangeProtocol,
+  name,
+  onRenameProtocol,
+  autoFocusName,
+  onAutoFocusHandled,
 }: {
-  zpcr: Zpcr;
+  /**
+   * The protocol's directive text, or null when there isn't one yet. Deliberately the text and not
+   * a `Zpcr`: a standalone `.prcl.txt` has no run around it, and taking the protocol itself is what
+   * lets one component serve both callers (see the module comment).
+   */
+  protocolText: string | null;
+  /** The structured step list, when the format carries one of its own (a `.pcrd`/Biomeme run).
+   * Preferred over the directive listing when present, as it always was. */
+  steps?: ProtocolStep[] | null;
+  /** The run's `.alf` report, when it executed and recorded one — the thermal profile below. */
+  report?: AlfReport | null;
   /** Only its `name` is used, as the download/clone filename's fallback base. */
   file: { name: string };
   /** Adds the cloned `.prcl.txt` to the file list — see the Clone button below. */
   addFiles: (files: FileList | File[], options?: AddFilesOptions) => Promise<string | null>;
-  /** This run is a pending experiment, so its protocol is a draft — see the module comment. */
-  pending: boolean;
-  /** Persist an edited protocol into the experiment's archive (the store's `setRunProtocolText`).
-   * Only called while {@link pending}. */
+  /** This protocol is a draft rather than a record, so it may be changed here — a standalone
+   * `.prcl.txt`, or a pending experiment's protocol. False for a run that has happened. */
+  editable: boolean;
+  /** Persist an edited protocol (the store's `setProtocolText`/`setRunProtocolText`). Only called
+   * while {@link editable}. */
   onChangeProtocol: (runDefinition: string) => void;
+  /** What this protocol is called, or `""` when it has never been named. */
+  name: string;
+  /** Store a new name — a rename of the file itself for a standalone `.prcl.txt`, or of the
+   * `ProtocolName.txt` entry for a run's. Only offered while {@link editable}. */
+  onRenameProtocol: (name: string) => void;
+  /** Open the name field focused as soon as this view appears — how a just-created protocol
+   * arrives, since naming it is the next thing to do. */
+  autoFocusName?: boolean;
+  onAutoFocusHandled?: () => void;
 }) {
-  const protocolText = zpcr.protocolText || null;
-  const protocol = zpcr.protocol();
-  const protocolName = protocol?.name || null;
-  // One report per archive in every sample examined (alf.md §1); the first is the run's own.
-  const report = useMemo(() => zpcr.runReports()[0]?.alf ?? null, [zpcr]);
-  /** What a pending experiment with no protocol yet starts from: the header and `END`, nothing
-   * else. Only built when it's needed, since a run that has one never asks. */
-  const draft = useMemo(
-    () => (pending && !protocolText ? ProtocolBuilder.empty().toRunDefinition() : null),
-    [pending, protocolText],
+  const header = (
+    <ProtocolHeader
+      name={name}
+      editable={editable}
+      onRename={onRenameProtocol}
+      autoFocus={autoFocusName}
+      onAutoFocusHandled={onAutoFocusHandled}
+    />
   );
 
-  if (pending) {
+  // A pending experiment that has no protocol yet. Not an error and not an empty frame with an
+  // editor in it: writing one is a deliberate act, and Overview is where the two ways to do it live
+  // (write a new one, or attach a file), so this says where to go rather than half-offering it here.
+  if (!protocolText && !steps?.length) {
     return (
       <div className="overview">
-        <ProtocolEditor
-          runDefinition={protocolText ?? draft!}
-          onChange={onChangeProtocol}
-          fileName={file.name}
-        />
-      </div>
-    );
-  }
-
-  if (!protocol?.steps && !protocolText) {
-    return (
-      <div className="overview">
-        <div className="decoded__na mono">No thermal protocol for this run.</div>
+        {header}
+        <div className="decoded__na mono">
+          {editable
+            ? "No protocol yet. Add one from this experiment's Overview tab — either a new protocol " +
+              "to write here, or a protocol file you already have."
+            : "No thermal protocol for this run."}
+        </div>
       </div>
     );
   }
 
   return (
     <div className="overview">
-      <section className="overview__block">
-        <div className="overview__blockhead">
-          <h2 className="overview__h">Thermal protocol</h2>
-          {/* The ASCII run definition, not the `.prcl` — see the button's own title. Offered
-              only when the run carries that text form at all; a run whose protocol is
-              structured-only would have nothing to write. */}
-          {protocolText && (
-            <div className="overview__blocktools">
-              <button
-                className="raw__download"
-                onClick={() =>
-                  downloadText(
-                    `${protocolFileBase(protocolName, file.name)}.prcl.txt`,
-                    formatRunDefinitionText(protocolText),
-                  )
-                }
-                aria-label="Download the thermal protocol as .prcl.txt"
-                title={
-                  "Download the ASCII run definition as .prcl.txt — one directive per line. " +
-                  "This is the form the instrument itself records, and what the Instrument view " +
-                  "loads to stage a protocol for a new run."
-                }
-              >
-                <DownloadIcon />
-              </button>
-              <button
-                className="raw__download"
-                onClick={() => {
-                  const name = `${protocolFileBase(protocolName, file.name)}.prcl.txt`;
-                  const text = formatRunDefinitionText(protocolText);
-                  void addFiles([new File([new TextEncoder().encode(text)], name)]);
-                }}
-                aria-label="Clone the thermal protocol into an independent .prcl.txt file"
-                title="Extract this protocol into its own .prcl.txt file, kept alongside your other files"
-              >
-                <CloneIcon />
-              </button>
-            </div>
+      {header}
+      {editable && protocolText ? (
+        <ProtocolEditor runDefinition={protocolText} onChange={onChangeProtocol} />
+      ) : (
+        <section className="overview__block">
+          <div className="overview__blockhead">
+            <h2 className="overview__h">Thermal protocol</h2>
+            {/* The ASCII run definition, not the `.prcl` — see the button's own title. Offered
+                only when the protocol carries that text form at all; one that is
+                structured-only would have nothing to write. */}
+            {protocolText && (
+              <div className="overview__blocktools">
+                <button
+                  className="raw__download"
+                  onClick={() =>
+                    downloadText(
+                      `${protocolFileBase(name || null, file.name)}.prcl.txt`,
+                      formatRunDefinitionText(protocolText),
+                    )
+                  }
+                  aria-label="Download the thermal protocol as .prcl.txt"
+                  title={
+                    "Download the ASCII run definition as .prcl.txt — one directive per line. " +
+                    "This is the form the instrument itself records, and what an experiment loads " +
+                    "when a protocol is attached to it."
+                  }
+                >
+                  <DownloadIcon />
+                </button>
+                <button
+                  className="raw__download"
+                  onClick={() => {
+                    const fileName = `${protocolFileBase(name || null, file.name)}.prcl.txt`;
+                    const text = formatRunDefinitionText(protocolText);
+                    void addFiles([new File([new TextEncoder().encode(text)], fileName)]);
+                  }}
+                  aria-label="Clone the thermal protocol into an independent .prcl.txt file"
+                  title="Extract this protocol into its own .prcl.txt file, kept alongside your other files"
+                >
+                  <CloneIcon />
+                </button>
+              </div>
+            )}
+          </div>
+          {steps?.length ? (
+            <ProtocolStepsTable steps={steps} />
+          ) : (
+            <ProtocolDecoded text={protocolText!} />
           )}
-        </div>
-        {protocol?.steps ? (
-          <ProtocolStepsTable steps={protocol.steps} />
-        ) : (
-          <ProtocolDecoded text={protocolText!} />
-        )}
-      </section>
+        </section>
+      )}
 
+      {/* What the block *actually* did, when the run carries a `.alf` report: the same protocol as
+          the instrument executed it, plotted against wall-clock time (`alf.md` §7.6). The pairing is
+          the point — the listing above states the intent, the plot below states the cost, and a hold
+          that ran 46 s for its nominal 30 is only visible in the second. A standalone protocol, a
+          pending experiment and a `.pcrd` have no report, and simply don't get the section. */}
       {report && (
         <section className="overview__block">
           <h2 className="overview__h">Thermal profile as run</h2>
@@ -152,5 +185,113 @@ export function ProtocolView({
         </section>
       )}
     </div>
+  );
+}
+
+/**
+ * The view's headline: what this protocol is called. Deliberately the same shape as an experiment's
+ * name on Overview (`OverviewView`'s `ExperimentHeader`) — a live field while the protocol is a
+ * draft, a heading plus a pencil once it is a record — because it is the same question about the
+ * same kind of thing, and answering it two different ways in two tabs would be the drift this view's
+ * unification exists to undo.
+ *
+ * An unnamed protocol is marked in red rather than merely left blank, for the reason the experiment
+ * field is: a heading-sized box holding a placeholder reads as empty, and empty looks like nothing
+ * to do.
+ */
+function ProtocolHeader({
+  name,
+  editable,
+  onRename,
+  autoFocus,
+  onAutoFocusHandled,
+}: {
+  name: string;
+  editable: boolean;
+  onRename: (name: string) => void;
+  autoFocus?: boolean;
+  onAutoFocusHandled?: () => void;
+}) {
+  const [draft, setDraft] = useState(name);
+  useEffect(() => setDraft(name), [name]);
+  const [editing, setEditing] = useState(false);
+  const missing = editable && !name.trim();
+  // Unnamed protocols are open from the start — there is nothing to read, only something to answer.
+  const live = editable && (missing || editing);
+
+  const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (!autoFocus) return;
+    inputRef.current?.focus();
+    onAutoFocusHandled?.();
+  }, [autoFocus, onAutoFocusHandled]);
+
+  const commit = () => {
+    setEditing(false);
+    const next = draft.trim();
+    if (next === name) return;
+    if (!next) {
+      setDraft(name);
+      return;
+    }
+    onRename(next);
+  };
+
+  const title = editable
+    ? "What this protocol is called. It names the file it can be saved as, and travels with the " +
+      "experiment it belongs to."
+    : "What this protocol is called, as the run recorded it.";
+
+  if (!live) {
+    return (
+      <header className="overview__title">
+        <h1 className="overview__nametext" title={title}>
+          {name || "Untitled protocol"}
+        </h1>
+        {editable && (
+          <button
+            className="raw__download overview__nameeditbtn"
+            onClick={() => setEditing(true)}
+            aria-label="Rename this protocol"
+            title="Rename this protocol"
+          >
+            <RenameIcon />
+          </button>
+        )}
+      </header>
+    );
+  }
+
+  return (
+    <header className="overview__title">
+      <input
+        ref={inputRef}
+        className={"overview__name" + (missing ? " is-missing" : "")}
+        value={draft}
+        autoFocus={editing}
+        onFocus={(e) => editing && e.currentTarget.select()}
+        onChange={(e) => setDraft(e.currentTarget.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") e.currentTarget.blur();
+          if (e.key === "Escape") {
+            setDraft(name);
+            setEditing(false);
+            e.currentTarget.blur();
+          }
+        }}
+        aria-label="Protocol name"
+        aria-required={missing || undefined}
+        required={missing || undefined}
+        placeholder={missing ? "Name this protocol — e.g. RVP fast" : undefined}
+        spellCheck={false}
+        title={title}
+      />
+      {missing && (
+        <span className="overview__namerequired" title="Required — name this protocol">
+          required
+        </span>
+      )}
+    </header>
   );
 }

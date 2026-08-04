@@ -388,14 +388,16 @@ the click on Start run, from the run plan about to be sent, complete with name a
 file it produced existed for minutes and nobody chose to create it; a pending experiment is the same
 archive made deliberately and early enough to be useful.
 
-Because such an archive may hold nothing but an empty protocol entry, `parseZpcr` treats
-`RunInfo.xml` as optional — an archive with a plate read or a protocol is a run whose metadata is
-simply empty — rather than rejecting it as malformed. Some entry must still identify it as a run, so a
-bare ZIP renamed `.zpcr` is still refused; that is why `buildExperimentArchive` always writes
-`ProtocolRunDefinition.txt`, zero-length when there is no protocol yet, on the same
-"presence is the whole signal" principle the `begun`/`ended` markers use. Empty content reads back as
-no protocol at all, so this changes nothing about what "pending, nothing written yet" means. The app
-greys out the views whose data is absent instead of drawing empty frames.
+Because such an archive may hold **nothing at all** yet, `parseZpcr` treats `RunInfo.xml` as
+optional — an archive with a plate read or a protocol is a run whose metadata is simply empty —
+rather than rejecting it as malformed. Some entry must still identify it as a run, so a bare ZIP
+renamed `.zpcr` is still refused, and for an experiment created from scratch the entry that does that
+is **`zpcrweb.json`**: this app's own settings document, saying "zpcrweb made this archive", by
+presence rather than content (it may be an empty `{}` until the experiment is named). An earlier
+version wrote a zero-length `ProtocolRunDefinition.txt` for this instead, which was worse in exactly
+the way it sounds — the archive claimed a protocol entry it did not have, and the file's own Raw tab
+listed it as one. An experiment with no protocol now holds no protocol. The app greys out the views
+whose data is absent instead of drawing empty frames.
 
 ## Plate CSV + attaching a plate (`plateCsv.ts`, `attachPlate.ts`)
 

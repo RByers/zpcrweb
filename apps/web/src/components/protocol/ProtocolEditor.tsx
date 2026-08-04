@@ -32,6 +32,7 @@ import {
   type ProtocolStepKind,
 } from "@zpcrweb/core";
 import { ProtocolDecoded } from "../raw/DecodedView";
+import { RenameIcon } from "../RenameIcon";
 import { HeaderForm, StepForm } from "./StepForm";
 
 /** What the open popover is editing. `insert` is a step that doesn't exist yet. */
@@ -223,12 +224,10 @@ function StepPopover({
 export function ProtocolEditor({
   runDefinition,
   onChange,
-  fileName,
 }: {
   runDefinition: string;
   /** Persist an edited protocol — the store's `setProtocolText`, throttled on its own. */
   onChange: (runDefinition: string) => void;
-  fileName: string;
 }) {
   const [editing, setEditing] = useState(false);
   const [open, setOpen] = useState<OpenTarget | null>(null);
@@ -384,11 +383,19 @@ export function ProtocolEditor({
               </button>
             </>
           )}
+          {/* The pencil, matching Overview's rename buttons: this is the same "turn this into
+              something I can change" affordance, and it read as a different kind of control while it
+              was the only one of them spelled out in words. It stays a labelled button while
+              *editing*, though — "Done" is the way out, and an icon would not say so. */}
           <button
             type="button"
-            className={"btn btn--sm" + (canEdit ? " btn--primary" : "")}
+            className={
+              (editing ? "btn btn--sm btn--primary" : "raw__download") +
+              (editable ? "" : " is-disabled")
+            }
             onClick={() => setEditing((v) => !v)}
             disabled={!editable}
+            aria-label={editing ? undefined : "Edit this protocol"}
             title={
               editable
                 ? editing
@@ -397,18 +404,21 @@ export function ProtocolEditor({
                 : `This protocol can't be edited: ${loadError}`
             }
           >
-            {editing ? "Done" : "Edit"}
+            {editing ? "Done" : <RenameIcon />}
           </button>
         </div>
       </div>
 
-      {/* Deliberately doesn't say what to do next: this editor serves both a standalone `.prcl.txt`
-          (whose next step is being attached to an experiment) and an experiment's own protocol
-          (whose next step is starting it on the Instrument tab), and the two differ. */}
-      <span className="decoded__hint mono">
-        {fileName} — the pure text run definition.
-        {editing && " Click a line to change it; edits are saved as you make them."}
-      </span>
+      {/* Only while editing, and only about editing. This line used to lead with the file's name,
+          which the view's own headline now carries — and for an experiment's protocol that name was
+          the *experiment's* file, not the protocol's identity at all. It also used to say what to do
+          next, which differs by caller (attach it somewhere, or start the run), so it said nothing
+          useful to either. */}
+      {editing && (
+        <span className="decoded__hint mono">
+          Click a line to change it; edits are saved as you make them.
+        </span>
+      )}
 
       {!editable && !editing && (
         <div className="decoded__hint mono protoedit__note">Not editable: {loadError}</div>

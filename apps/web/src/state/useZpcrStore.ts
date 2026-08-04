@@ -707,6 +707,12 @@ export interface ZpcrStore {
    */
   setRunProtocolText: (fileId: string, runDefinition: string) => void;
   /**
+   * Name (or rename) a run's own protocol — the `ProtocolName.txt` entry, which is what the Protocol
+   * tab's headline shows and edits. A standalone `.prcl.txt` has no such entry: its name *is* its
+   * file name, so that case goes through {@link renameFile} instead.
+   */
+  setRunProtocolName: (fileId: string, name: string) => Promise<void>;
+  /**
    * Turn a pending experiment into a started run, in place — what the Instrument tab's Start
    * button calls instead of seeding a new file. Restamps the file's date if it still carries the
    * one it was created/cloned under (`restampExperimentDate`, via the ordinary `renameFile` so
@@ -1288,6 +1294,40 @@ export function useZpcrStore(): ZpcrStore {
     [setModifiedFlag],
   );
 
+  /** See {@link ZpcrStore.setRunProtocolName}. */
+  const setRunProtocolName = useCallback(
+    async (id: string, name: string) => {
+      const file = filesRef.current.find((f) => f.id === id);
+      if (!file || file.kind !== "zpcr") return;
+      // Flush a pending protocol-text write first: both rewrite the same two entries, and re-zipping
+      // from stale bytes would drop whichever edit hadn't landed.
+      await protocolThrottle.current!.flush(id);
+      const current = filesRef.current.find((f) => f.id === id) ?? file;
+      let runDefinition: string;
+      try {
+        runDefinition = parseZpcr(current.bytes).protocolText;
+      } catch {
+        return;
+      }
+      if (!runDefinition) return;
+      const augmented = attachProtocolToZpcr(current.bytes, { runDefinition, name });
+      await putFile({
+        id: current.id,
+        name: current.name,
+        size: augmented.byteLength,
+        addedAt: current.addedAt,
+        bytes: augmented.slice().buffer,
+        kind: current.kind,
+        lastModified: current.lastModified,
+      });
+      setFiles((prev) =>
+        prev.map((f) => (f.id === id ? { ...f, size: augmented.byteLength, bytes: augmented } : f)),
+      );
+      setModifiedFlag(id, true);
+    },
+    [setModifiedFlag],
+  );
+
   /** See {@link ZpcrStore.setProtocolText}. */
   const setProtocolText = useCallback(
     (id: string, runDefinition: string) => {
@@ -1650,6 +1690,7 @@ export function useZpcrStore(): ZpcrStore {
     attachProtocol,
     createExperiment,
     setRunProtocolText,
+    setRunProtocolName,
     beginExperiment,
     renameFile,
     setProtocolText,
