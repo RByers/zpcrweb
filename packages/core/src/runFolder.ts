@@ -11,8 +11,7 @@
  * dependency for reading.
  */
 
-import { zipSync } from "fflate";
-import { unzipArchive } from "./archive.js";
+import { unzipArchive, zipArchive, type ArchiveFiles } from "./archive.js";
 import { runFileBaseName } from "./experiment.js";
 import { expectedPlateReads } from "./runDefinition.js";
 import type { Zpcr } from "./types.js";
@@ -45,8 +44,13 @@ export const RUN_ENDED_MARKER = "ended";
  * progress". Zero-content, like the marker itself — only its presence means anything.
  */
 export function markExperimentBegun(zpcrBytes: Uint8Array): Uint8Array {
-  const files = unzipArchive(zpcrBytes);
-  return zipSync({ ...files, [RUN_BEGUN_MARKER]: new Uint8Array(0) });
+  return zipArchive(markFilesBegun(unzipArchive(zpcrBytes)));
+}
+
+/** {@link markExperimentBegun} on an open archive map rather than on zipped bytes — the map-level
+ * half of the pair described in `archive.ts`. */
+export function markFilesBegun(files: ArchiveFiles): ArchiveFiles {
+  return { ...files, [RUN_BEGUN_MARKER]: new Uint8Array(0) };
 }
 
 /** How far along a run is, read from nothing but which files exist. */
@@ -237,14 +241,35 @@ function runStartDate(runInfo: Uint8Array): Date {
  * files — rather than handing back an archive that cannot be opened.
  */
 export function zpcrFromRunFiles(
-  files: Record<string, Uint8Array>,
+  files: ArchiveFiles,
   naming?: RunFolderNaming,
 ): {
   name: string;
   bytes: Uint8Array;
 } {
+  const run = runArchiveFromRunFiles(files, naming);
+  return { name: run.name, bytes: zipArchive(run.files) };
+}
+
+/**
+ * {@link zpcrFromRunFiles} without the zip: the same completeness check and the same name, handing
+ * back the run's files as the archive map they already are.
+ *
+ * This is what following a live run uses (the app's `useRunWatch`). Every cycle re-assembles the
+ * whole archive from ~40 cached files, and zipping that to hand it over — only for the receiving
+ * side to unzip it again to read it — was the single most expensive thing a plate read cost. The
+ * run's archive stays open until it ends; see the app's `state/fileContent.ts`.
+ *
+ * Throws for the same reason and with the same message as {@link zpcrFromRunFiles}: a folder with
+ * no `RunInfo.xml` in it yet is not a run anyone can open, and saying so here names the actual
+ * problem.
+ */
+export function runArchiveFromRunFiles(
+  files: ArchiveFiles,
+  naming?: RunFolderNaming,
+): { name: string; files: ArchiveFiles } {
   if (files[RUNINFO_NAME] === undefined) {
     throw new Error(`Can't assemble a .zpcr: no ${RUNINFO_NAME} among the run's files`);
   }
-  return { name: zpcrNameFromRunFiles(files, naming), bytes: zipSync(files) };
+  return { name: zpcrNameFromRunFiles(files, naming), files };
 }

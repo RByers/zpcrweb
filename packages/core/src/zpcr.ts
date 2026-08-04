@@ -8,7 +8,7 @@ import type {
   ProtocolDocument,
   Zpcr,
 } from "./types.js";
-import { createArchiveAccess, unzipArchive } from "./archive.js";
+import { createArchiveAccess, unzipArchive, type ArchiveFiles } from "./archive.js";
 import { isAlfName, parseAlf } from "./alf.js";
 import { isPltdName, parsePltd, type Pltd, type PltdContainer } from "./pltd.js";
 import { isPlateCsvName, parsePlateCsv } from "./plateCsv.js";
@@ -77,7 +77,20 @@ function pltdFromPlateCsv(
  * decompress in memory, so this is synchronous.
  */
 export function parseZpcr(data: Uint8Array | ArrayBuffer): Zpcr {
-  const files = unzipArchive(toBytes(data));
+  return parseZpcrFiles(unzipArchive(toBytes(data)));
+}
+
+/**
+ * Parse an already-decompressed archive — {@link parseZpcr} with the unzip already done, and where
+ * all of its work actually happens.
+ *
+ * The pairing is `archive.ts`'s: a caller holding the archive open (the web app, for any run still
+ * being written to — see its `state/fileContent.ts`) re-parses on every edit, and paying an unzip
+ * each time to read entries it already has in hand is exactly the cost the open form exists to
+ * avoid. The map is not copied or mutated; entry bytes are handed out by reference, as
+ * {@link unzipArchive}'s already are.
+ */
+export function parseZpcrFiles(files: ArchiveFiles): Zpcr {
   const archive = createArchiveAccess(files);
 
   // `RunInfo.xml` is what a *finished* run is described by, and every archive off an instrument or

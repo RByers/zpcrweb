@@ -169,7 +169,8 @@ It takes ~35s and needs Chrome, so it is deliberately **not** part of `npm test`
 touch `state/urlHash.ts`, `state/useHeaderFit.ts`, `state/pltdPassword.ts`,
 `components/curves/ChipBar.tsx`, `components/curves/CurveTable.tsx`, `components/curves/CqRange.tsx`,
 `components/instrument/InstrumentRun.tsx`, `state/useRunStaging.ts`, `state/useRunNaming.ts`,
-`components/instrument/InstrumentRail.tsx`, `state/useCfxDevice.ts`'s `cancelRun`/`setRunPaused`
+`components/instrument/InstrumentRail.tsx`, `state/fileContent.ts` (or `state/db.ts`'s
+`StoredFile`, or `useZpcrStore.ts`'s `addRunArchive`), `state/useCfxDevice.ts`'s `cancelRun`/`setRunPaused`
 (or core's `usb/device.ts` `cancelRun`), `lib/protocolSource.ts`,
 `lib/experiment.ts` (or core's `experiment.ts`), `components/ViewSelector.tsx` or `App.tsx`'s
 `enabledViewsFor`/`selectFile`, core's `runDefinition.ts`, `components/raw/DecodedView.tsx`'s

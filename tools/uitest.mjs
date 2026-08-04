@@ -71,6 +71,23 @@ const SEED_ZPCR = join(REPO, "tools/.uishot/dupe/20260802-Seeded_Run.zpcr");
  * the point is the comparison, not a captured artifact. */
 const SHORT_ZPCR = join(REPO, "tools/.uishot/dupe/20260725-Cut_Short.zpcr");
 
+/** A real run with its `ended` marker removed — byte for byte the shape of an archive the
+ * instrument is still writing to, which is what the store keeps exploded (see
+ * {@link explodedStorageChecks}). Built rather than committed, like {@link SHORT_ZPCR}. */
+const IN_PROGRESS_ZPCR = join(REPO, "tools/.uishot/dupe/20260725-Still_Running.zpcr");
+
+/** Write {@link IN_PROGRESS_ZPCR}: a finished sample, minus the marker that says it finished. */
+async function makeInProgressRun() {
+  const { zpcrFromRunFiles, unzipArchive } = await import("../packages/core/dist/index.js");
+  const files = unzipArchive(
+    new Uint8Array(readFileSync(join(REPO, "samples/20260725_GRADIENTTEST.zpcr"))),
+  );
+  delete files["ended"];
+  const { bytes } = zpcrFromRunFiles(files, { fileName: "20260725-Still_Running" });
+  mkdirSync(dirname(IN_PROGRESS_ZPCR), { recursive: true });
+  writeFileSync(IN_PROGRESS_ZPCR, Buffer.from(bytes));
+}
+
 /** Write {@link SHORT_ZPCR} by deleting plate reads from a committed sample's own files. */
 async function makeShortRun() {
   const { zpcrFromRunFiles, unzipArchive } = await import("../packages/core/dist/index.js");
@@ -3161,6 +3178,163 @@ async function cloneChecks(chrome, origin) {
   cdp.close();
 }
 
+/**
+ * A run that is still being written to is stored **exploded** — its archive entries individually,
+ * with no ZIP — and a finished one is stored as the `.zpcr` it is. See
+ * `apps/web/src/state/fileContent.ts` for why; this checks the rule actually holds where it can
+ * only be seen, in IndexedDB, and that nothing about it reaches the user.
+ *
+ * The fixture is a real 3-read run with its `ended` marker deleted: byte for byte what an
+ * archive looks like mid-run, which is the state the app can otherwise only reach with an
+ * instrument attached.
+ */
+async function explodedStorageChecks(chrome, origin) {
+  console.log("\nexploded storage");
+  await makeInProgressRun();
+  const cdp = await openPage(chrome.base, origin);
+  await emptyReload(cdp, origin);
+
+  /** Every stored record, as the shape of its content rather than its content. */
+  const records = () =>
+    cdp
+      .eval(
+        `new Promise((res) => { const q = indexedDB.open("zpcrweb");
+           q.onsuccess = () => { const db = q.result;
+             const g = db.transaction("files", "readonly").objectStore("files").getAll();
+             g.onsuccess = () => res(JSON.stringify(g.result.map((f) => ({
+               name: f.name,
+               zipped: f.bytes ? f.bytes.byteLength : null,
+               entries: f.files ? Object.keys(f.files).length : null,
+             })))); }; })`,
+        { awaitPromise: true },
+      )
+      .then(JSON.parse);
+  const recordFor = async (fragment) =>
+    (await records()).find((r) => r.name.includes(fragment)) ?? null;
+
+  // A finished run: nothing more will be appended, so it is kept as the file it came in as.
+  await loadFile(cdp, join(REPO, "samples", EXAMPLE));
+  await waitFor(() => chipPresent(cdp, "S183"), { what: "the finished run's chip" });
+  await waitFor(async () => (await recordFor("S183")) !== null, { what: "its stored record" });
+  const finished = await recordFor("S183");
+  check(
+    "a finished run is stored as one zipped .zpcr, exactly as it arrived",
+    finished.zipped > 0 && finished.entries === null,
+    JSON.stringify(finished),
+  );
+
+  // A run in progress: held open, one record value per archive entry.
+  await loadFile(cdp, IN_PROGRESS_ZPCR);
+  await waitFor(() => chipPresent(cdp, "Still Running"), { what: "the in-progress chip" });
+  await waitFor(async () => (await recordFor("Still_Running")) !== null, { what: "its record" });
+  const running = await recordFor("Still_Running");
+  check(
+    "a run still in progress is stored exploded — every entry on its own, no ZIP",
+    running.entries > 30 && running.zipped === null,
+    JSON.stringify(running),
+  );
+
+  // …and it is still a run to everything above the store: same tabs, same reads, same state.
+  await cdp.eval(`window.location.hash = "view=overview", undefined`);
+  await tabBecomes(cdp, "Overview");
+  // The file's bytes arrive asynchronously (the loaded set — see `useZpcrStore.loadOne`), and the
+  // content-derived tabs only light up once they have, so wait for the run rather than racing it.
+  const enabledTabs = () =>
+    cdp
+      .eval(
+        `JSON.stringify([...document.querySelectorAll('.viewbar [role="tab"]')]
+           .filter((b) => !b.disabled).map((b) => b.textContent.trim()))`,
+      )
+      .then(JSON.parse);
+  await waitFor(async () => (await enabledTabs()).includes("Curves"), {
+    what: "the in-progress run's views",
+  });
+  const opened = {
+    inProgress: await cdp.eval(`!!document.querySelector(".filechip.is-running")`),
+    tabs: await enabledTabs(),
+  };
+  check(
+    "…and opens as an ordinary run, with the views its content earns",
+    opened.tabs.includes("Curves") && opened.tabs.includes("Plates") && opened.inProgress,
+    JSON.stringify(opened),
+  );
+
+  // Editing it must not force it back into a ZIP: renaming the experiment rewrites one JSON entry.
+  await setExperimentName(cdp, "Still Running Renamed");
+  await waitFor(() => chipPresent(cdp, "Still Running Renamed"), { what: "the renamed chip" });
+  await sleep(700); // the archive rewrite is immediate but asynchronous (`analysisPersist.ts`)
+  // Looked up by file name, which a renamed *experiment* doesn't change — the chip's label does.
+  const edited = await recordFor("Still_Running");
+  check(
+    "editing a run in progress leaves it exploded, never re-zipping it",
+    edited !== null && edited.entries > 30 && edited.zipped === null,
+    JSON.stringify(edited),
+  );
+
+  // The one thing that has to be true for any of this to be safe: what leaves the browser is a
+  // real `.zpcr`. Capture the blob the download builds and look at it.
+  const downloaded = await cdp
+    .eval(
+      `(async () => {
+         const real = URL.createObjectURL;
+         let blob = null;
+         URL.createObjectURL = (b) => { blob = b; return real.call(URL, b); };
+         document.querySelector(".overview__toolbar .overview__downloadbtn").click();
+         URL.createObjectURL = real;
+         if (!blob) return JSON.stringify({ got: false });
+         const head = new Uint8Array(await new Response(blob).arrayBuffer());
+         return JSON.stringify({
+           got: true,
+           size: head.length,
+           zip: head[0] === 0x50 && head[1] === 0x4b && head[2] === 0x03 && head[3] === 0x04,
+         });
+       })()`,
+      { awaitPromise: true },
+    )
+    .then(JSON.parse);
+  check(
+    "downloading one zips it back up — what leaves the browser is an ordinary .zpcr",
+    downloaded.got && downloaded.zip && downloaded.size > 10_000,
+    JSON.stringify(downloaded),
+  );
+
+  // A reload reads the exploded record straight back: still a run, still open, still cheap.
+  await cdp.send("Page.navigate", { url: `${origin}#view=overview` });
+  await tabBecomes(cdp, "Overview");
+  await waitFor(() => chipPresent(cdp, "Still Running Renamed"), { what: "the chip after reload" });
+  const afterReload = await recordFor("Still_Running");
+  check(
+    "an exploded run survives a reload as itself, without being repacked",
+    afterReload !== null && afterReload.entries > 30 && afterReload.zipped === null,
+    JSON.stringify(afterReload),
+  );
+
+  // A brand-new experiment has not started either, so it is born exploded.
+  await cdp.eval(`window.location.hash = "view=about", undefined`);
+  await waitFor(
+    () =>
+      cdp.eval(
+        `[...document.querySelectorAll("button")].some((b) => /New experiment/.test(b.textContent))`,
+      ),
+    { what: "the New experiment button" },
+  );
+  await cdp.eval(
+    `(() => { [...document.querySelectorAll("button")]
+        .find((b) => /New experiment/.test(b.textContent)).click(); })()`,
+  );
+  await waitFor(() => cdp.eval(`!!document.querySelector(".overview__pending")`), {
+    what: "the new experiment's pending banner",
+  });
+  await sleep(400);
+  const pending = (await records()).filter((r) => r.entries !== null && r.entries < 5);
+  check(
+    "a pending experiment is stored exploded too — it hasn't started, so nothing is packed",
+    pending.length === 1 && pending[0].zipped === null && pending[0].entries >= 1,
+    JSON.stringify(pending),
+  );
+  cdp.close();
+}
+
 async function main() {
   const pw = cfxPassword();
   if (!pw) {
@@ -3193,6 +3367,7 @@ async function main() {
     await instrumentRunChecks(chrome, origin);
     await runSeedChecks(chrome, origin);
     await incompleteRunChecks(chrome, origin);
+    await explodedStorageChecks(chrome, origin);
     await experimentNameChecks(chrome, origin);
     await deleteConfirmChecks(chrome, origin);
     await protocolEditorChecks(chrome, origin);

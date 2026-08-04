@@ -24,9 +24,10 @@
  * transition tells them apart, which is what lets the file that transition's next listing
  * eventually produces be selected unconditionally (see `onRun`'s `freshStart` below).
  *
- * When a listing turns out to differ from the last one, the folder is pulled and zipped into a
- * `.zpcr` exactly as the Instrument view's **Open run** button does, and handed to the store,
- * which replaces the previous snapshot under the same name. What that name is comes from
+ * When a listing turns out to differ from the last one, the folder is pulled and handed to the
+ * store as the `.zpcr` archive it is, which replaces the previous snapshot under the same name.
+ * Nothing is zipped on the way: a run still going is kept open and appended to, and only the
+ * end-of-run snapshot becomes an ordinary `.zpcr` file (see `state/fileContent.ts`). What that name is comes from
  * `runFolder.ts`: the file name typed in the Instrument view for a run this app started, and
  * otherwise whatever the run itself says it is called.
  *
@@ -61,8 +62,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   CFX_CURRENT_RUN_DIR,
   USB_TRAFFIC_LOG_NAME,
+  runArchiveFromRunFiles,
   runProgressFromNames,
-  zpcrFromRunFiles,
+  type ArchiveFiles,
 } from "@zpcrweb/core";
 import type { CfxDeviceHandle } from "./useCfxDevice";
 
@@ -150,11 +152,15 @@ export function useRunWatch(
    * tells them apart, and it's what the caller uses to decide whether to select the new file
    * unconditionally. Returns the new file's id.
    */
-  onRun: (file: File, previousId: string | null, freshStart: boolean) => Promise<string | null>,
+  onRun: (
+    run: { name: string; files: ArchiveFiles },
+    previousId: string | null,
+    freshStart: boolean,
+  ) => Promise<string | null>,
   /**
    * What the Instrument view's two name fields currently hold (`state/useRunNaming.ts`). Only the
    * archive's *name* depends on it, and only for a run this app started and is still staging —
-   * `zpcrFromRunFiles` decides that from the `zpcrweb.json` in the folder, so a run started at
+   * `runArchiveFromRunFiles` decides that from the `zpcrweb.json` in the folder, so a run started at
    * the touchscreen keeps the name the instrument gave it whatever is typed here.
    */
   naming?: { experimentName: string; fileName: string },
@@ -226,8 +232,11 @@ export function useRunWatch(
       const fresh = freshStart.current;
       freshStart.current = false;
       try {
-        const { name, bytes } = zpcrFromRunFiles(files, namingRef.current);
-        const id = await onRunRef.current(new File([bytes.slice()], name), fileIdRef.current, fresh);
+        // Handed over as the archive it already is, not as zipped bytes: the store keeps a run in
+        // progress open and appends to it (see its `addRunArchive` and `state/fileContent.ts`), so
+        // a cycle costs the one plate read that arrived and no ZIP work at either end.
+        const run = runArchiveFromRunFiles(files, namingRef.current);
+        const id = await onRunRef.current(run, fileIdRef.current, fresh);
         setFileId(id);
         const reads = names.filter((n) => /\.Plateread$/i.test(n)).length;
         setNote(`Updated at ${new Date().toLocaleTimeString()} — ${reads} plate reads`);

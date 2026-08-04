@@ -2,14 +2,14 @@ import { PasswordPrompt } from "../PasswordPrompt";
 import { PlateViewer } from "../plate/PlateViewer";
 import { PlateDownloadButton } from "../plate/PlateDownloadButton";
 import { usePltdPassword } from "../../state/pltdPassword";
-import type { LoadedFile, PlateFileResult } from "../../state/useZpcrStore";
+import { fileBytes, type LoadedFile, type PlateFileResult } from "../../state/useZpcrStore";
 
 /** The "Plate" tab for a standalone `.pltd`/`.plt.csv` top-level entry (not attached to any
  * run) — same {@link PlateViewer} the "Plates" tab of a `.zpcr`/`.pcrd` run uses, just resolved
  * from {@link PlateFileResult} instead of `Zpcr.plates()`. */
 export function StandalonePlateView({ file, result }: { file: LoadedFile; result: PlateFileResult }) {
   const [, setPassword] = usePltdPassword();
-  const pltd = file.kind === "pltd" ? { name: file.name, bytes: file.bytes } : undefined;
+  const pltd = file.kind === "pltd" ? { name: file.name, bytes: fileBytes(file) } : undefined;
   // Rides the plate's heading line when there is one to share; the password/error branches
   // below have no heading, so they keep it above their own content.
   const toolbar = (

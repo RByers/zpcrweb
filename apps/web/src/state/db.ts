@@ -1,10 +1,12 @@
 /**
  * Thin IndexedDB wrapper — no dependencies. Three stores:
  *
- * - `files` — every file the app holds, as raw bytes, so they survive reloads and are re-parsed
- *   on demand. This is the app's *only* source of run data. **Records are read one id at a time**
- *   ({@link getFileBytes}), never all at once: the bytes of a file only enter memory when that
- *   file is loaded (see `useZpcrStore`'s loaded set, and `apps/web/ARCHITECTURE.md`'s "Files,
+ * - `files` — every file the app holds, so they survive reloads and are re-parsed on demand. This
+ *   is the app's *only* source of run data. A record holds either the file's raw bytes or, for a
+ *   run still being written to, its archive entries individually — see {@link StoredFile} and
+ *   `fileContent.ts`, which owns that choice. **Records are read one id at a time**
+ *   ({@link getFileContent}), never all at once: the content of a file only enters memory when
+ *   that file is loaded (see `useZpcrStore`'s loaded set, and `apps/web/ARCHITECTURE.md`'s "Files,
  *   loaded files, and the one selection").
  * - `meta` — one small record per file ({@link StoredMeta}): its identity, plus a cached
  *   {@link FileSummary} of what the *content* turned out to say, written each time the file is
@@ -36,9 +38,29 @@ const META = "meta";
 export interface StoredFile {
   id: string;
   name: string;
+  /** The size the app reports for this file — its byte length when stored as {@link bytes}, and
+   * the total of its entries when stored as {@link files}. See `fileContent.ts`'s `contentSize`. */
   size: number;
   addedAt: number;
-  bytes: ArrayBuffer;
+  /**
+   * The file's bytes — every kind, and the only form records written before {@link files} existed
+   * take. Exactly one of this and {@link files} is set.
+   *
+   * IndexedDB stores an `ArrayBuffer` by structured clone, so this is a copy rather than a view
+   * onto whatever the app is holding.
+   */
+  bytes?: ArrayBuffer;
+  /**
+   * A `.zpcr`'s archive entries, name → bytes, stored individually instead of as one ZIP — what a
+   * run still being written to is kept as, so appending a plate read or renaming the experiment
+   * doesn't unzip and re-zip several hundred KB. Set instead of {@link bytes}, never alongside it,
+   * and only ever for `kind: "zpcr"`.
+   *
+   * Which form a run takes is decided in one place, from the archive's own `begun`/`ended`
+   * markers: see `fileContent.ts`. Once the run ends, the record is rewritten as ordinary
+   * {@link bytes}. Nothing outside `fileContent.ts` should read either field directly.
+   */
+  files?: Record<string, ArrayBuffer>;
   kind?: "zpcr" | "pcrd" | "biomeme" | "pltd" | "csv" | "prcl";
   /** The source `File`'s own `lastModified` (its OS mtime, epoch ms) — when the file was last
    * saved to disk, as distinct from {@link addedAt} (when it was loaded into this browser).
@@ -309,13 +331,22 @@ export function fileId(name: string, size: number): string {
 }
 
 /**
- * Write a file's bytes **and** its identity metadata, so the two can never disagree about a
+ * Write a file's content **and** its identity metadata, so the two can never disagree about a
  * file's name, size or kind. The summary is left alone: it belongs to the file's content, is
- * written by whoever just decoded it ({@link putSummary}), and a caller rewriting bytes here has
+ * written by whoever just decoded it ({@link putSummary}), and a caller rewriting content here has
  * usually not re-derived it yet.
+ *
+ * The record is held to "one representation, never both" (see {@link StoredFile}): whichever of
+ * `bytes`/`files` the caller supplied wins and the other is cleared. Callers build records by
+ * spreading an existing one, so a run that has just been collapsed to a ZIP would otherwise keep
+ * its exploded entries alongside the bytes — twice the storage, and two answers to what the file
+ * is.
  */
 export async function putFile(file: StoredFile): Promise<void> {
-  await tx(FILES, "readwrite", (s) => s.put(file));
+  const record: StoredFile = file.files
+    ? { ...file, bytes: undefined }
+    : { ...file, files: undefined };
+  await tx(FILES, "readwrite", (s) => s.put(record));
   const existing = await tx<StoredMeta | undefined>(META, "readonly", (s) => s.get(file.id));
   await tx(META, "readwrite", (s) =>
     s.put({
@@ -344,11 +375,12 @@ export function getAllMeta(): Promise<StoredMeta[]> {
   return tx<StoredMeta[]>(META, "readonly", (s) => s.getAll());
 }
 
-/** One file's bytes, by id — the only way bytes enter memory. Resolves to `undefined` for a file
- * that has since been deleted. */
-export async function getFileBytes(id: string): Promise<ArrayBuffer | undefined> {
-  const rec = await tx<StoredFile | undefined>(FILES, "readonly", (s) => s.get(id));
-  return rec?.bytes;
+/** One file's stored content, by id — the only way a file's content enters memory. Handed back as
+ * the whole record so the caller can read whichever representation it was stored in (`bytes` or
+ * `files`; see `fileContent.ts`'s `fromStoredContent`). Resolves to `undefined` for a file that
+ * has since been deleted. */
+export function getFileContent(id: string): Promise<StoredFile | undefined> {
+  return tx<StoredFile | undefined>(FILES, "readonly", (s) => s.get(id));
 }
 
 export async function deleteFile(id: string): Promise<void> {

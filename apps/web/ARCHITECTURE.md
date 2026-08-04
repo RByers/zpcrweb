@@ -505,12 +505,14 @@ plate entries and attach"), and the globally-selected view (`view`/`setView`, pl
 not persisted, and not part of the per-file settings map, so switching files never changes which
 view is showing). `state/db.ts` is a minimal IndexedDB wrapper with three object stores:
 
-- `files` — `{ id, name, size, addedAt, bytes, kind }`; **raw bytes** are stored so files
-  survive reloads and are re-parsed (`parseZpcr`/`parsePcrd`/`parsePltd`/`parsePlateCsv`, by
-  `kind`) when loaded. `id` is a `name:size` key, which also dedupes re-adding the same file (an
+- `files` — `{ id, name, size, addedAt, kind }` plus the file's content, so files survive reloads
+  and are re-parsed (`parseZpcr`/`parsePcrd`/`parsePltd`/`parsePlateCsv`, by `kind`) when loaded.
+  The content is either **raw bytes** (`bytes`) or, for a run still being written to, its
+  **archive entries individually** (`files`) — see "Runs still being written are stored exploded"
+  below. `id` is a `name:size` key, which also dedupes re-adding the same file (an
   attach changes `size`, so re-persisting after one just writes the same `id` again — no
   separate override record to keep in sync, see above). `kind` defaults to `"zpcr"` for records
-  written before `.pcrd` support existed. **Read one id at a time** (`getFileBytes`), never in
+  written before `.pcrd` support existed. **Read one id at a time** (`getFileContent`), never in
   bulk: this store is the expensive one, and only the loaded set ever touches it.
 - `meta` — `{ id, name, size, addedAt, lastModified, kind, summary? }`, one small record per file,
   read whole on startup. `summary` is the cached decode described under "Files, loaded files, and
@@ -537,6 +539,47 @@ catalog and memory — exposed as the Files table's two-click delete.
 The `settings` record carries one field that isn't display state at all: `modified`, meaning this
 file's *content* has been edited since it was loaded and not since downloaded (see "Deleting an
 edited file" below). It rides there because that is the app's one per-file store keyed by id.
+
+### Runs still being written are stored exploded
+
+A `.zpcr` is a ZIP of ~40 entries, and the app *writes* to it: a plate read arrives every cycle of
+a live run, an experiment is named, a protocol is typed at, a threshold is dragged. Held as bytes,
+each of those edits costs an unzip of the whole archive, a change to one entry and a re-zip of
+everything else, on the main thread — a 45-cycle run paying that once per cycle to append files it
+was handed already decompressed.
+
+So a run that is still being written to is stored **exploded**: its entries as they are, one value
+each in the record, and no ZIP anywhere. This is a property of the *record*, orthogonal to whether
+the file is loaded (above): a released run's entries sit in IndexedDB exactly as they were, and
+loading one hands them back without a decompress. `state/fileContent.ts` owns the whole of it — the
+`FileContent` union (`{bytes}` or `{files}`) that a `LoadedFile` holds, the conversions, and the
+single rule that decides which form a `.zpcr` takes, read from the archive's own markers and nothing else (core's `runProgressFromNames`, the
+same derivation `inProgressIds`/`pendingIds` use, so there is no second source of truth):
+
+| Run state | Marker files | Stored as |
+| --------- | ------------ | --------- |
+| pending (an experiment being prepared) | no `begun` | exploded |
+| in progress (a run being followed) | `begun`, no `ended` | exploded |
+| finished | `ended` | zipped, as a `.zpcr` on disk is |
+
+The collapse back to a ZIP happens automatically on the write that first carries `ended` — the
+end-of-run pass in `useRunWatch`. A finished archive is worth compressing (~400 KB against ~1.1 MB)
+and is not going to be appended to again.
+
+**None of this is visible to the user.** The two forms are the same archive: `contentBytes` zips an
+open one on demand, which is what download, clone and any hand-off to `addFiles` get, so a `.zpcr`
+leaving the browser is an ordinary `.zpcr` either way. The one place it shows through is the size
+the app reports for a run in progress, which is what its entries add up to rather than what they
+would zip to — the zipped length isn't known without doing the zip the open form exists to avoid.
+
+The core library is the other half of this. Every archive writer there comes in a pair — a `…Files`
+one taking and returning an `ArchiveFiles` map, and a byte-level wrapper that unzips, calls it and
+re-zips (`attachPlateToFiles`/`attachPlateToZpcr`, `attachProtocolToFiles`, `markFilesBegun`,
+`writeZpcrwebSettingsToFiles`, `buildExperimentFiles`) — plus `parseZpcrFiles`, which parses an
+archive that is already open, and `runArchiveFromRunFiles`, which is `zpcrFromRunFiles` without the
+zip. A run being followed therefore goes from the wire into the store without ever being packed:
+`useRunWatch` hands the store the folder's files, `addRunArchive` keeps them, and a cycle's cost is
+the one plate read that arrived.
 
 ### Editing what has already happened
 
@@ -2291,8 +2334,12 @@ anyway, though, purely to tell a run *starting* apart from one *found* already g
 the two listings are identical, so only the live transition tells them apart — which is what the
 `freshStart` flag below rides on.
 
-Each changed listing is pulled and zipped with `zpcrFromRunFiles`, then handed to `store.addFiles`
-— the same path a drop takes.
+Each changed listing is pulled with `runArchiveFromRunFiles` and handed to `store.addRunArchive`
+as the archive it already is — the same validate → IndexedDB path a drop takes, minus the ZIP: the
+store keeps a run in progress open (see "Runs still being written are stored exploded"), so a
+cycle's cost is the one plate read that arrived rather than a re-zip of the whole run. The
+end-of-run pass is the first snapshot carrying `ended`, and so the one that becomes an ordinary
+zipped `.zpcr`.
 
 **What the snapshot is called** is decided by `core`'s `runFolder.ts`, in three rungs: the file
 name typed in the Instrument view, then `<YYYYMMDD>-<experiment name>` derived from the folder's
@@ -2471,12 +2518,12 @@ Four components, under `components/instrument/`:
   A whole directory is different, and is what **Open run** does: a `.zpcr` *is* a ZIP of a run
   directory (root `ARCHITECTURE.md`, "A run directory is a `.zpcr`"), so the button pulls every
   file — sequentially, since the command channel carries one request at a time, with the busy
-  label counting them off — hands them to the library's `zpcrFromRunFiles`, and drops the result
-  into `store.addFiles`. From there it is an ordinary loaded file: the same validate → IndexedDB
-  path as a drop, under the name the run calls itself, then a switch to Overview so a successful
-  open goes somewhere. It is offered for any directory whose listing contains a `RunInfo.xml`
+  label counting them off — hands them to the library's `runArchiveFromRunFiles`, and drops the
+  result into `store.addRunArchive`. From there it is an ordinary loaded file: the same validate →
+  IndexedDB path as a drop, under the name the run calls itself, then a switch to Overview so a
+  successful open goes somewhere. It is offered for any directory whose listing contains a `RunInfo.xml`
   (what makes a directory a run, and what `parseZpcr` refuses an archive without) — in practice
-  `CurrentRun`. `addFiles` returns the id it left active precisely so this caller can tell a
+  `CurrentRun`. `addRunArchive` returns the id it left active precisely so this caller can tell a
   rejected archive from a loaded one and stay put, with the error banner, in the first case. When
   `GETFILESLEN` answers with a status code instead of a length, the panel distinguishes the two
   the instrument actually sends (`usb.md` §5): *empty* — which `\Storage Card` is, holding only

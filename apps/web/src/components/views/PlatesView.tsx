@@ -5,7 +5,7 @@ import { PlateDownloadButton } from "../plate/PlateDownloadButton";
 import { AttachPlateMenu } from "../plate/AttachPlateMenu";
 import { PasswordPrompt } from "../PasswordPrompt";
 import { usePltdPassword } from "../../state/pltdPassword";
-import type { AddFilesOptions, LoadedFile } from "../../state/useZpcrStore";
+import { fileBytes, type AddFilesOptions, type LoadedFile } from "../../state/useZpcrStore";
 
 /**
  * Visual plate viewer for every plate file attached to the run — one per `.pltd`/`.plt.csv`
@@ -46,7 +46,7 @@ export function PlatesView({
   const attachControl = (
     <AttachPlateMenu
       files={files}
-      onSelect={(f) => void attachPlate(fileId, new File([f.bytes.slice()], f.name))}
+      onSelect={(f) => void attachPlate(fileId, new File([fileBytes(f).slice()], f.name))}
       onUpload={(file) => void attachPlate(fileId, file)}
       compactLabel={entries.length === 0 ? "attach plate" : "replace plate"}
       confirmReplace={entries.length > 0}

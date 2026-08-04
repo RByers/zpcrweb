@@ -5,7 +5,7 @@ import { DownloadIcon } from "../DownloadIcon";
 import { usePltdPassword } from "../../state/pltdPassword";
 import { downloadBytes } from "../../lib/download";
 import { looksLikeXml, XmlTreeFromString } from "../../lib/xmlTree";
-import type { LoadedFile } from "../../state/useZpcrStore";
+import { fileBytes, type LoadedFile } from "../../state/useZpcrStore";
 
 type Mode = "text" | "hex";
 const textDecoder = new TextDecoder("utf-8");
@@ -29,12 +29,15 @@ export function StandaloneRawView({ file }: { file: LoadedFile }) {
   // one entry is a JSON document, and "Text" undersells it next to the Decoded views elsewhere.
   const textLabel = isPltd ? "XML" : file.kind === "biomeme" ? "JSON" : "Text";
 
+  // Never an archive held open (`fileContent.ts`) — a standalone plate/protocol/Biomeme file is
+  // its bytes — so this is the file itself, not a zip of anything.
+  const bytes = fileBytes(file);
   const pltd = useMemo(
-    () => (isPltd ? parsePltd(file.bytes, password ? { password } : undefined) : null),
-    [isPltd, file.bytes, password],
+    () => (isPltd ? parsePltd(bytes, password ? { password } : undefined) : null),
+    [isPltd, bytes, password],
   );
-  const text = isPltd ? pltd?.xml : textDecoder.decode(file.bytes);
-  const size = file.bytes.length;
+  const text = isPltd ? pltd?.xml : textDecoder.decode(bytes);
+  const size = bytes.length;
 
   return (
     <div className="raw raw--solo">
@@ -60,7 +63,7 @@ export function StandaloneRawView({ file }: { file: LoadedFile }) {
           </div>
           <button
             className="raw__download"
-            onClick={() => downloadBytes(file.name, file.bytes)}
+            onClick={() => downloadBytes(file.name, bytes)}
             aria-label="Download"
             title="Download original file"
           >
@@ -82,7 +85,7 @@ export function StandaloneRawView({ file }: { file: LoadedFile }) {
           <pre className="raw__dump mono">{text}</pre>
         ) : (
           <>
-            <pre className="raw__dump mono">{hexDump(file.bytes, { maxBytes: limit })}</pre>
+            <pre className="raw__dump mono">{hexDump(bytes, { maxBytes: limit })}</pre>
             {limit < size && (
               <button className="raw__more" onClick={() => setLimit((l) => l + 8192)}>
                 Show more ({(size - limit).toLocaleString()} B remaining)

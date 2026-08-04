@@ -8,7 +8,7 @@
  * Unlike `runSeed.ts`'s seed archive (which this file replaces — see that module's removal), this
  * writes no `begun` marker: starting happens later, from the app, on a file that already exists.
  */
-import { zipSync } from "fflate";
+import { zipArchive, type ArchiveFiles } from "./archive.js";
 import { parseRunDefinitionText } from "./prcl.js";
 import { PROTOCOL_NAME_TXT } from "./usb/runPlan.js";
 import { PROTOCOL_RUN_DEFINITION_NAME, canonicalPlateEntryName } from "./attachPlate.js";
@@ -39,8 +39,16 @@ export interface ExperimentArchiveParts {
  * fills in as the experiment is named and analysed (`zpcrweb-json.md`).
  */
 export function buildExperimentArchive(parts: ExperimentArchiveParts): Uint8Array {
+  return zipArchive(buildExperimentFiles(parts));
+}
+
+/** {@link buildExperimentArchive} without the zip — the map-level half of the pair described in
+ * `archive.ts`. A new experiment is by definition a run that hasn't started, so this is the form
+ * the app actually stores it in (see its `state/fileContent.ts`); zipping one only ever happens on
+ * download. */
+export function buildExperimentFiles(parts: ExperimentArchiveParts): ArchiveFiles {
   const encoder = new TextEncoder();
-  const files: Record<string, Uint8Array> = {
+  const files: ArchiveFiles = {
     [ZPCRWEB_SETTINGS_NAME]: encoder.encode("{}"),
   };
   if (parts.protocol) {
@@ -55,5 +63,5 @@ export function buildExperimentArchive(parts: ExperimentArchiveParts): Uint8Arra
   if (parts.plate) {
     files[canonicalPlateEntryName(parts.plate.name)] = parts.plate.bytes;
   }
-  return zipSync(files);
+  return files;
 }

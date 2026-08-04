@@ -6,8 +6,7 @@
  * result round-trips straight back through `parseZpcr`.
  */
 
-import { zipSync } from "fflate";
-import { unzipArchive } from "./archive.js";
+import { unzipArchive, zipArchive, type ArchiveFiles } from "./archive.js";
 import { isPltdName } from "./pltd.js";
 import { isPlateCsvName } from "./plateCsv.js";
 import { parseRunDefinitionText } from "./prcl.js";
@@ -28,24 +27,37 @@ export function canonicalPlateEntryName(name: string): string {
 }
 
 /**
- * Return new `.zpcr` bytes with `plateFile` added as the run's plate, replacing any existing
+ * Return a new archive map with `plateFile` as the run's plate, replacing any existing
  * `.pltd`/`.plt.csv` entries (at most one plate entry is kept — matches "uploading replaces the
- * plate"). Throws if `zpcrBytes` isn't a valid ZIP or `plateFile.name` isn't a recognized plate
- * file name.
+ * plate"). Throws if `plateFile.name` isn't a recognized plate file name.
+ *
+ * The map-level half of the pair described in `archive.ts`; {@link attachPlateToZpcr} is the same
+ * operation on zipped bytes.
  */
-export function attachPlateToZpcr(
-  zpcrBytes: Uint8Array,
+export function attachPlateToFiles(
+  files: ArchiveFiles,
   plateFile: { name: string; bytes: Uint8Array },
-): Uint8Array {
+): ArchiveFiles {
   const entryName = canonicalPlateEntryName(plateFile.name);
-  const files = unzipArchive(zpcrBytes);
-  const next: Record<string, Uint8Array> = {};
+  const next: ArchiveFiles = {};
   for (const [name, bytes] of Object.entries(files)) {
     if (isPltdName(name) || isPlateCsvName(name)) continue;
     next[name] = bytes;
   }
   next[entryName] = plateFile.bytes;
-  return zipSync(next);
+  return next;
+}
+
+/**
+ * Return new `.zpcr` bytes with `plateFile` added as the run's plate — {@link attachPlateToFiles}
+ * with an unzip in front and a re-zip behind. Throws if `zpcrBytes` isn't a valid ZIP or
+ * `plateFile.name` isn't a recognized plate file name.
+ */
+export function attachPlateToZpcr(
+  zpcrBytes: Uint8Array,
+  plateFile: { name: string; bytes: Uint8Array },
+): Uint8Array {
+  return zipArchive(attachPlateToFiles(unzipArchive(zpcrBytes), plateFile));
 }
 
 /**
@@ -73,8 +85,20 @@ export function attachProtocolToZpcr(
   zpcrBytes: Uint8Array,
   protocol: { runDefinition: string; name?: string },
 ): Uint8Array {
-  const files = unzipArchive(zpcrBytes);
-  const next: Record<string, Uint8Array> = {};
+  return zipArchive(attachProtocolToFiles(unzipArchive(zpcrBytes), protocol));
+}
+
+/**
+ * {@link attachProtocolToZpcr} on an open archive map rather than on zipped bytes — the map-level
+ * half of the pair described in `archive.ts`, and the one in-place protocol editing actually
+ * wants: a pending experiment's archive is held open while it is being edited, so replacing the
+ * run-definition entry on a keystroke costs one `TextEncoder` call and no ZIP work at all.
+ */
+export function attachProtocolToFiles(
+  files: ArchiveFiles,
+  protocol: { runDefinition: string; name?: string },
+): ArchiveFiles {
+  const next: ArchiveFiles = {};
   for (const [name, bytes] of Object.entries(files)) {
     if (name === PROTOCOL_RUN_DEFINITION_NAME || name === PROTOCOL_NAME_TXT) continue;
     next[name] = bytes;
@@ -84,5 +108,5 @@ export function attachProtocolToZpcr(
   );
   const name = protocol.name?.trim();
   if (name) next[PROTOCOL_NAME_TXT] = new TextEncoder().encode(name);
-  return zipSync(next);
+  return next;
 }

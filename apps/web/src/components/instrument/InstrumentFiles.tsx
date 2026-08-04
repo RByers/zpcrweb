@@ -6,13 +6,15 @@
  * the `.pltd`/`.prcl` pair — where every format this app opens is a whole run in one container.
  *
  * A whole directory is a different matter, and is what **Open run** does: a `.zpcr` *is* a ZIP of
- * a run directory, so pulling every file and zipping them (`zpcrFromRunFiles`) yields a real
- * `.zpcr` — not a reconstruction — which then goes through exactly the same validate/persist path
- * as a dropped file. The button is offered for any directory whose listing has a `RunInfo.xml`,
- * which is what makes it a run rather than an arbitrary folder.
+ * a run directory, so pulling every file yields a real run — not a reconstruction — which then goes
+ * through exactly the same validate/persist path as a dropped file (`runArchiveFromRunFiles`, then
+ * the store's `addRunArchive`; whether it is stored as a ZIP or kept open depends on whether the
+ * run has ended, and is the store's business, not this view's). The button is offered for any
+ * directory whose listing has a `RunInfo.xml`, which is what makes it a run rather than an
+ * arbitrary folder.
  */
 import { useState } from "react";
-import { CFX_DIRECTORIES, zpcrFromRunFiles } from "@zpcrweb/core";
+import { CFX_DIRECTORIES, runArchiveFromRunFiles, type ArchiveFiles } from "@zpcrweb/core";
 import { downloadBytes } from "../../lib/download";
 import type { CfxDeviceHandle } from "../../state/useCfxDevice";
 
@@ -45,7 +47,7 @@ export function InstrumentFiles({
 }: {
   instrument: CfxDeviceHandle;
   /** Hand the assembled `.zpcr` to the app, exactly as if it had been dropped on the drop zone. */
-  onOpenRun: (file: File) => Promise<void> | void;
+  onOpenRun: (name: string, archive: ArchiveFiles) => Promise<void> | void;
 }) {
   const { directories, busy, connection } = instrument;
   const connected = connection === "connected";
@@ -62,10 +64,8 @@ export function InstrumentFiles({
     // `undefined` means the fetch itself failed, which the rail already reports.
     if (!files) return;
     try {
-      const { name, bytes } = zpcrFromRunFiles(files);
-      // `.slice()` for the same reason `downloadBytes` does it: a `Uint8Array` over a possibly
-      // shared buffer isn't a `BlobPart`, and a copy of a few hundred KB costs nothing here.
-      await onOpenRun(new File([bytes.slice()], name));
+      const run = runArchiveFromRunFiles(files);
+      await onOpenRun(run.name, run.files);
     } catch (e) {
       setOpenError(e instanceof Error ? e.message : String(e));
     }

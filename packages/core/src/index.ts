@@ -6,7 +6,7 @@
  * browser, pass `await file.arrayBuffer()` (or a `Uint8Array`) to `parseZpcr`.
  */
 
-export { parseZpcr, zpcrFromBlob } from "./zpcr.js";
+export { parseZpcr, parseZpcrFiles, zpcrFromBlob } from "./zpcr.js";
 export { zpcrFromFile, pcrdFromFile } from "./node.js";
 
 export { hexDump } from "./hex.js";
@@ -49,18 +49,27 @@ export {
 } from "./plateread.js";
 export { parsePltd, parsePlatesetup2, isPltdName } from "./pltd.js";
 export { plateToCsv, parsePlateCsv, isPlateCsvName, isBlankWell } from "./plateCsv.js";
-export { attachPlateToZpcr, attachProtocolToZpcr } from "./attachPlate.js";
-export { buildExperimentArchive } from "./experimentArchive.js";
+export {
+  attachPlateToZpcr,
+  attachPlateToFiles,
+  attachProtocolToZpcr,
+  attachProtocolToFiles,
+} from "./attachPlate.js";
+export { buildExperimentArchive, buildExperimentFiles } from "./experimentArchive.js";
 export type { ExperimentArchiveParts } from "./experimentArchive.js";
-/** The inverse of `zpcrFromRunFiles` — a `.zpcr`'s entries as the loose run-directory files it is
- * a ZIP of. Exported so a caller can take an archive apart and put it back together. */
-export { unzipArchive } from "./archive.js";
+/** A `.zpcr`'s entries as the loose run-directory files it is a ZIP of, and back again — the two
+ * halves of `archive.ts`'s pairing, exported so a caller can take an archive apart, work on it and
+ * put it back together. Every archive writer here comes in both forms; see `ArchiveFiles`. */
+export { unzipArchive, zipArchive } from "./archive.js";
+export type { ArchiveFiles } from "./archive.js";
 export {
   zpcrFromRunFiles,
+  runArchiveFromRunFiles,
   zpcrNameFromRunFiles,
   runProgressFromNames,
   runCompleteness,
   markExperimentBegun,
+  markFilesBegun,
   RUN_BEGUN_MARKER,
   RUN_ENDED_MARKER,
 } from "./runFolder.js";
@@ -70,6 +79,7 @@ export {
   parseZpcrwebSettingsJson,
   formatZpcrwebSettings,
   writeZpcrwebSettings,
+  writeZpcrwebSettingsToFiles,
   hasZpcrwebSettings,
   ZPCRWEB_SETTINGS_NAME,
   ZPCRWEB_SETTINGS_VERSION,

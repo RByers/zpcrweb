@@ -22,8 +22,7 @@
  * by hand) degrades field by field instead of failing as a whole.
  */
 
-import { zipSync } from "fflate";
-import { unzipArchive } from "./archive.js";
+import { unzipArchive, zipArchive, type ArchiveFiles } from "./archive.js";
 import type { NormalizationMode } from "./calibration.js";
 import type { Zpcr } from "./types.js";
 
@@ -207,9 +206,23 @@ export function writeZpcrwebSettings(
   zpcrBytes: Uint8Array,
   settings: ZpcrwebSettings,
 ): Uint8Array {
-  const files = unzipArchive(zpcrBytes);
-  files[ZPCRWEB_SETTINGS_NAME] = new TextEncoder().encode(formatZpcrwebSettings(settings));
-  return zipSync(files);
+  return zipArchive(writeZpcrwebSettingsToFiles(unzipArchive(zpcrBytes), settings));
+}
+
+/**
+ * {@link writeZpcrwebSettings} on an open archive map rather than on zipped bytes — the map-level
+ * half of the pair described in `archive.ts`. Same rewrite-don't-merge rule; the only difference
+ * is that a caller holding the archive open pays neither the unzip nor the re-zip, which is what
+ * makes saving a threshold on a run still in progress cost one JSON serialization.
+ */
+export function writeZpcrwebSettingsToFiles(
+  files: ArchiveFiles,
+  settings: ZpcrwebSettings,
+): ArchiveFiles {
+  return {
+    ...files,
+    [ZPCRWEB_SETTINGS_NAME]: new TextEncoder().encode(formatZpcrwebSettings(settings)),
+  };
 }
 
 /** True once a settings document holds anything worth writing — used to avoid adding an entry

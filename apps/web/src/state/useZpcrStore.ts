@@ -1,23 +1,27 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  attachPlateToZpcr,
-  attachProtocolToZpcr,
-  buildExperimentArchive,
+  attachPlateToFiles,
+  attachProtocolToFiles,
+  buildExperimentFiles,
   formatRunDefinitionText,
   isBiomemeJson,
-  markExperimentBegun,
+  markFilesBegun,
   parseBiomeme,
   parsePcrd,
   parsePlateCsv,
   parsePltd,
   parseRunDefinitionText,
   parseZpcr,
+  parseZpcrFiles,
   parseZpcrwebSettings,
   runCompleteness,
   runProgressFromNames,
   wellKey,
-  writeZpcrwebSettings,
+  unzipArchive,
+  writeZpcrwebSettingsToFiles,
+  zipArchive,
   type AnalysisSource,
+  type ArchiveFiles,
   type ExperimentArchiveParts,
   type FileKind,
   type NormalizationMode,
@@ -32,12 +36,13 @@ import {
   fileId,
   getAllMeta,
   getAllSettings,
-  getFileBytes,
+  getFileContent,
   hasLegacyAnalysisFields,
   putFile,
   putSettings,
   putSummary,
   type FileSummary,
+  type StoredFile,
   type StoredSettings,
 } from "./db";
 import {
@@ -50,6 +55,18 @@ import {
   type AnalysisSettings,
 } from "./analysisSettings";
 import { AnalysisPersister } from "./analysisPersist";
+import {
+  contentBytes,
+  contentFiles,
+  contentSize,
+  fromStoredContent,
+  loadedRunContent,
+  parseContent,
+  runContent,
+  toStoredContent,
+  zippedContent,
+  type FileContent,
+} from "./fileContent";
 import { WriteThrottle } from "./writeThrottle";
 import {
   experimentIdentity,
@@ -279,18 +296,63 @@ export interface FileEntry {
   summary: FileSummary | null;
 }
 
-/** A file loaded into memory — bytes only. Parsing is derived (see {@link ZpcrStore.runs}),
+/** A file loaded into memory — content only. Parsing is derived (see {@link ZpcrStore.runs}),
  * since a `.pcrd`'s decode depends on the (mutable, shared) decryption password. */
 export interface LoadedFile {
   id: string;
   name: string;
+  /** What the app reports as this file's size; see `fileContent.ts`'s `contentSize`. */
   size: number;
   addedAt: number;
   kind: FileKind;
-  bytes: Uint8Array;
+  /**
+   * The file itself — its bytes, or (for a run still being written to) its archive entries held
+   * open. `fileContent.ts` owns the distinction and every operation on it: `fileBytes(file)` for
+   * the bytes, `contentFiles`/`runContent` for the edit path. Nothing outside that module should
+   * branch on `content.exploded`.
+   */
+  content: FileContent;
   /** The source `File`'s own `lastModified` (its OS mtime, epoch ms) — see
    * `db.ts`'s `StoredFile.lastModified`. */
   lastModified: number;
+}
+
+/** A loaded file's bytes, zipping an open archive if that's how it's held — see
+ * `fileContent.ts`'s `contentBytes` for when that is and isn't appropriate. */
+export function fileBytes(file: LoadedFile): Uint8Array {
+  return contentBytes(file.content);
+}
+
+/** A loaded file as its IndexedDB record — the one place a {@link StoredFile} is assembled, so
+ * the choice of storage representation is made once (`toStoredContent`) rather than at each of
+ * the dozen call sites that persist a file. */
+function storedFile(file: LoadedFile): StoredFile {
+  return {
+    id: file.id,
+    name: file.name,
+    size: file.size,
+    addedAt: file.addedAt,
+    kind: file.kind,
+    lastModified: file.lastModified,
+    ...toStoredContent(file.content),
+  };
+}
+
+/**
+ * A loaded file with new content — its size follows, since that is what the app reports and what
+ * its id would hash from (`fileContent.ts`'s `contentSize`).
+ *
+ * `lastModified` deliberately does not: every caller of this is the app editing a file in place,
+ * not a new one arriving from the OS, so the file keeps the source mtime it was loaded with (see
+ * `db.ts`'s `StoredFile.lastModified`).
+ */
+function withContent(file: LoadedFile, content: FileContent): LoadedFile {
+  return { ...file, content, size: contentSize(content) };
+}
+
+/** Replace one file in a list, by id — the shape every in-place edit below updates state with. */
+function replaceFile(files: LoadedFile[], next: LoadedFile): LoadedFile[] {
+  return files.map((f) => (f.id === next.id ? next : f));
 }
 
 /**
@@ -336,10 +398,16 @@ export interface RunResult {
  * The app's format boundary: every source format goes in, one {@link RunResult} comes out. Every
  * `kind === "pcrd"` test in the app that isn't about the raw view should be here instead.
  */
-function parseRun(bytes: Uint8Array, kind: "zpcr" | "pcrd" | "biomeme", password: string): RunResult {
+function parseRun(
+  content: FileContent,
+  kind: "zpcr" | "pcrd" | "biomeme",
+  password: string,
+): RunResult {
   if (kind === "zpcr" || kind === "biomeme") {
     try {
-      const zpcr = kind === "zpcr" ? parseZpcr(bytes) : parseBiomeme(bytes);
+      // A `.zpcr` parses from whichever form it's held in without being zipped or unzipped when
+      // it's already open (`fileContent.ts`); the other two formats are only ever bytes.
+      const zpcr = kind === "zpcr" ? parseContent(content) : parseBiomeme(contentBytes(content));
       return { zpcr, needsPassword: false, error: null, selfEncrypted: false };
     } catch (e) {
       return {
@@ -350,7 +418,7 @@ function parseRun(bytes: Uint8Array, kind: "zpcr" | "pcrd" | "biomeme", password
       };
     }
   }
-  const pcrd = parsePcrd(bytes, password ? { password } : undefined);
+  const pcrd = parsePcrd(contentBytes(content), password ? { password } : undefined);
   return {
     zpcr: pcrd.zpcr ?? null,
     needsPassword: !!pcrd.needsPassword,
@@ -724,7 +792,7 @@ export interface ZpcrStore {
   markDownloaded: (fileId: string) => void;
   /**
    * Attach (or replace) a `.zpcr` run's plate: rewrites the run's own archive bytes in place
-   * (adding/replacing a `.pltd`/`.plt.csv` entry — see `attachPlateToZpcr`) and persists the
+   * (adding/replacing a `.pltd`/`.plt.csv` entry — see core's `attachPlateToFiles`) and persists the
    * result, so the plate travels with the file from then on and `zpcr.plates()` picks it up
    * with no separate override state. Only valid for a `kind === "zpcr"` run; sets `error`
    * otherwise (a `.pcrd` has no real archive to attach an entry to).
@@ -737,7 +805,7 @@ export interface ZpcrStore {
    */
   attachProtocol: (fileId: string, file: File) => Promise<void>;
   /**
-   * Build a bare pending `.zpcr` (`core/buildExperimentArchive`) and load it as a new file, named
+   * Build a bare pending `.zpcr` (`core/buildExperimentFiles`) and load it as a new file, named
    * with today's date and no experiment name yet (`runFileBaseName` refuses an empty name, so the
    * bare date stamp is built directly rather than through it). Used by both "New experiment"
    * (About, with `parts: {}`) and "Clone experiment" (Overview/Instrument, with the source run's
@@ -746,7 +814,7 @@ export interface ZpcrStore {
    */
   createExperiment: (parts: ExperimentArchiveParts) => Promise<string | null>;
   /**
-   * The in-place-editing counterpart to {@link attachProtocol}: same `attachProtocolToZpcr` call
+   * The in-place-editing counterpart to {@link attachProtocol}: same `attachProtocolToFiles` call
    * (no name change, just new text), throttled the way {@link setProtocolText} throttles a
    * standalone `.prcl.txt`'s writes — the same {@link WriteThrottle}, keyed by this file's id
    * rather than a second one. Only valid while the target file is pending (`isPendingExperiment`)
@@ -764,7 +832,7 @@ export interface ZpcrStore {
    * button calls instead of seeding a new file. Restamps the file's date if it still carries the
    * one it was created/cloned under (`restampExperimentDate`, via the ordinary `renameFile` so
    * ids and IndexedDB stay consistent), then writes the `begun` marker
-   * (`core/markExperimentBegun`). Returns the final file's id and name — which may differ from
+   * (`core/markFilesBegun`). Returns the final file's id and name — which may differ from
    * `fileId`'s if it was restamped — or `null` for a file that isn't a `kind === "zpcr"` pending
    * experiment.
    */
@@ -808,6 +876,25 @@ export interface ZpcrStore {
    * files can ignore it; one that wants to *go* to what it just added can't, since the store's
    * own state hasn't re-rendered yet at that point. */
   addFiles: (files: FileList | File[], options?: AddFilesOptions) => Promise<string | null>;
+  /**
+   * Load a `.zpcr` handed over as its archive entries rather than as a file — {@link addFiles}
+   * without the ZIP in the middle, and otherwise identical: the archive is validated, superseded
+   * against the same name, persisted, loaded and activated exactly as a dropped file is.
+   *
+   * This is how a run being followed reaches the store (`useRunWatch`). Each cycle re-assembles the
+   * run's whole folder, and zipping that only for the store to unzip it again to read it was the
+   * bulk of what a plate read cost. A run in progress is then also *kept* open (`fileContent.ts`),
+   * so the next cycle appends to it, and the end-of-run snapshot — the first carrying `ended` — is
+   * the one that becomes an ordinary zipped `.zpcr`.
+   *
+   * Returns the new file's id, or `null` if the archive wouldn't parse (the reason lands in
+   * {@link error}, as with `addFiles`).
+   */
+  addRunArchive: (
+    name: string,
+    archive: ArchiveFiles,
+    options?: AddFilesOptions,
+  ) => Promise<string | null>;
   /**
    * Ids of the loaded runs that are still running on an instrument — `begun` present, `ended`
    * absent among the archive's own entries (see core's `runProgressFromNames`).
@@ -928,17 +1015,7 @@ export function useZpcrStore(): ZpcrStore {
         if (!file || file.kind !== "zpcr") return null;
         const settings = analysisRef.current[id];
         if (!settings) return null;
-        return {
-          file: {
-            id: file.id,
-            name: file.name,
-            size: file.size,
-            addedAt: file.addedAt,
-            kind: file.kind,
-            bytes: file.bytes.slice().buffer,
-          },
-          settings,
-        };
+        return { file: storedFile(file), files: contentFiles(file.content), settings };
       },
       onError: (e) => setError(e instanceof Error ? e.message : String(e)),
     });
@@ -963,17 +1040,7 @@ export function useZpcrStore(): ZpcrStore {
       write: async (id) => {
         const file = loadedRef.current.find((f) => f.id === id);
         if (!file || (file.kind !== "prcl" && file.kind !== "zpcr")) return;
-        await putFile({
-          id: file.id,
-          name: file.name,
-          size: file.size,
-          addedAt: file.addedAt,
-          bytes: file.bytes.slice().buffer,
-          kind: file.kind,
-          // The app editing a file in place, not a new one arriving from the OS — same reasoning
-          // as `attachPlate` (see `StoredFile.lastModified`).
-          lastModified: file.lastModified,
-        });
+        await putFile(storedFile(file));
       },
       onError: (e) => setError(e instanceof Error ? e.message : String(e)),
     });
@@ -992,15 +1059,17 @@ export function useZpcrStore(): ZpcrStore {
     if (loadedRef.current.some((f) => f.id === entry.id)) return null;
     setLoadingIds((prev) => new Set(prev).add(entry.id));
     try {
-      const buf = await getFileBytes(entry.id);
-      if (!buf) return null;
+      const stored = await getFileContent(entry.id);
+      if (!stored) return null;
       const file: LoadedFile = {
         id: entry.id,
         name: entry.name,
         size: entry.size,
         addedAt: entry.addedAt,
         kind: entry.kind,
-        bytes: new Uint8Array(buf),
+        // Either representation comes back as itself: a run stored open stays open (and so stays
+        // cheap to append to across a reload), a zipped one stays zipped. See `fileContent.ts`.
+        content: fromStoredContent(stored),
         lastModified: entry.lastModified,
       };
       loadedRef.current = [...loadedRef.current.filter((f) => f.id !== file.id), file];
@@ -1223,6 +1292,75 @@ export function useZpcrStore(): ZpcrStore {
     [loadOne, setLoadedFlag, patchEntry],
   );
 
+  /**
+   * Put a validated file into the catalog *and* the loaded set: supersede any same-named copy,
+   * write the record, land it in both sets. The tail every way of adding a file shares — a drop, a
+   * `#load=`, and a snapshot of a run in progress ({@link addRunArchive}) — so they differ in how
+   * the content is *obtained* and in nothing else.
+   *
+   * An added file is a loaded file: this is the one path by which a file's content is in hand
+   * without a read from IndexedDB.
+   */
+  const install = useCallback(
+    async (file: LoadedFile, modified: boolean): Promise<string> => {
+      // Re-loading a name that's already here replaces it. Ids hash name+size, so an edited file
+      // (attached plate, saved thresholds, another cycle of a running run) gets a *different* id
+      // under the same name — without this it would sit alongside the stale copy as an
+      // indistinguishable second chip, and `#file=` would have two candidates to mean. Asked of
+      // the whole catalog, not just the loaded set: a released file under the same name is just as
+      // much a stale duplicate, and leaving it would put two rows with the same name in the Files
+      // table.
+      const superseded = entriesRef.current.filter((f) => f.name === file.name && f.id !== file.id);
+      for (const old of superseded) await forget(old.id);
+      const supersededIds = new Set(superseded.map((f) => f.id));
+      await putFile(storedFile(file));
+      const entry: FileEntry = {
+        id: file.id,
+        name: file.name,
+        size: file.size,
+        addedAt: file.addedAt,
+        kind: file.kind,
+        lastModified: file.lastModified,
+        summary: null,
+      };
+      setEntries((prev) => {
+        entriesRef.current = [
+          ...prev.filter((f) => f.id !== file.id && !supersededIds.has(f.id)),
+          entry,
+        ];
+        return entriesRef.current;
+      });
+      setLoadedFiles((prev) => {
+        loadedRef.current = [
+          ...prev.filter((f) => f.id !== file.id && !supersededIds.has(f.id)),
+          file,
+        ];
+        return loadedRef.current;
+      });
+      setLoadedFlag(file.id, true);
+      if (modified) setModifiedFlag(file.id, true);
+      return file.id;
+    },
+    [forget, setModifiedFlag, setLoadedFlag],
+  );
+
+  /**
+   * Persist an in-place edit to a loaded file — the record, the loaded set, and the catalog row's
+   * size, which is the one identity field an edit can change. Every archive edit below ends here,
+   * so none of them has to know how a file is stored (`fileContent.ts`) or that the catalog exists.
+   */
+  const commitContent = useCallback(
+    async (next: LoadedFile) => {
+      await putFile(storedFile(next));
+      setLoadedFiles((prev) => {
+        loadedRef.current = replaceFile(prev, next);
+        return loadedRef.current;
+      });
+      patchEntry(next.id, { size: next.size });
+    },
+    [patchEntry],
+  );
+
   const addFiles = useCallback(
     async (input: FileList | File[], options?: AddFilesOptions) => {
       // `.json`'s kind can only be known after reading its bytes (see `fileKind`), so every file
@@ -1247,13 +1385,25 @@ export function useZpcrStore(): ZpcrStore {
           // Validate the container eagerly so obviously-bad files are rejected up front; a
           // .pcrd/.pltd's payload may still need a password, resolved reactively via `runs`/
           // `plateFiles`.
-          if (kind === "zpcr") parseZpcr(bytes);
-          else if (kind === "pcrd") parsePcrd(bytes);
-          else if (kind === "biomeme") parseBiomeme(bytes);
-          else if (kind === "pltd") parsePltd(bytes);
-          // Already validated by `fileKind`'s content sniff — parsing again would only repeat it.
-          else if (kind === "prcl") void 0;
-          else parsePlateCsv(new TextDecoder().decode(bytes));
+          //
+          // A `.zpcr` is unzipped exactly once here, and that same open archive is both what
+          // validates it and what it's stored as if the run is still being written to — a dropped
+          // run in progress never gets re-zipped just to be put away. See `fileContent.ts`.
+          let content: FileContent;
+          if (kind === "zpcr") {
+            content = loadedRunContent(bytes, unzipArchive(bytes));
+            parseContent(content);
+          } else {
+            if (kind === "pcrd") parsePcrd(bytes);
+            else if (kind === "biomeme") parseBiomeme(bytes);
+            else if (kind === "pltd") parsePltd(bytes);
+            // Already validated by `fileKind`'s content sniff — parsing again would only repeat it.
+            else if (kind === "prcl") void 0;
+            else parsePlateCsv(new TextDecoder().decode(bytes));
+            content = zippedContent(bytes);
+          }
+          // Hashed from the size on disk, not the stored size: this is the file's identity as the
+          // user's own copy of it, so re-dropping it resolves to this record either way.
           const id = fileId(file.name, file.size);
           // Re-loading a name that's already here replaces it. Ids hash name+size, so an edited
           // file (attached plate, saved thresholds, a re-export) gets a *different* id under the
@@ -1262,33 +1412,20 @@ export function useZpcrStore(): ZpcrStore {
           // Asked of the whole catalog, not just the loaded set: a released file under the same
           // name is just as much a stale duplicate, and leaving it would put two rows with the
           // same name in the Files table.
-          const superseded = entriesRef.current.filter((f) => f.name === file.name && f.id !== id);
-          for (const old of superseded) await forget(old.id);
-          const supersededIds = new Set(superseded.map((f) => f.id));
-          const addedAt = Date.now();
-          const lastModified = file.lastModified;
-          await putFile({ id, name: file.name, size: file.size, addedAt, bytes: buf, kind, lastModified });
+          await install(
+            {
+              id,
+              name: file.name,
+              size: contentSize(content),
+              addedAt: Date.now(),
+              kind,
+              content,
+              lastModified: file.lastModified,
+            },
+            options?.modified === true,
+          );
           lastId = id;
           lastKind = kind;
-          // An added file is a loaded file — this is the one path by which a file's bytes are in
-          // hand without a read from IndexedDB, so it joins both sets directly.
-          const entry: FileEntry = { id, name: file.name, size: file.size, addedAt, kind, lastModified, summary: null };
-          setEntries((prev) => {
-            entriesRef.current = [
-              ...prev.filter((f) => f.id !== id && !supersededIds.has(f.id)),
-              entry,
-            ];
-            return entriesRef.current;
-          });
-          setLoadedFiles((prev) => {
-            loadedRef.current = [
-              ...prev.filter((f) => f.id !== id && !supersededIds.has(f.id)),
-              { id, name: file.name, size: file.size, addedAt, kind, bytes, lastModified },
-            ];
-            return loadedRef.current;
-          });
-          setLoadedFlag(id, true);
-          if (options?.modified) setModifiedFlag(id, true);
         } catch (e) {
           setError(`${file.name}: ${e instanceof Error ? e.message : String(e)}`);
         }
@@ -1302,7 +1439,45 @@ export function useZpcrStore(): ZpcrStore {
       if (lastKind === "prcl") setView("overview");
       return lastId;
     },
-    [forget, setModifiedFlag, setLoadedFlag],
+    [install],
+  );
+
+  /** See {@link ZpcrStore.addRunArchive}. */
+  const addRunArchive = useCallback(
+    async (name: string, archive: ArchiveFiles, options?: AddFilesOptions): Promise<string | null> => {
+      try {
+        // `runContent` is what makes the end of a run the moment the file becomes an ordinary
+        // zipped `.zpcr`: every snapshot before it carries no `ended` marker and stays open, and
+        // the last one — the end-of-run pass, which is the first to carry it — zips, once.
+        const content = runContent(archive);
+        parseContent(content);
+        const size = contentSize(content);
+        const id = fileId(name, size);
+        // By name, not by id: a new snapshot is a longer archive, so it necessarily hashes to a
+        // different id — the previous one is the copy `install` is about to supersede.
+        const previous = entriesRef.current.find((f) => f.name === name);
+        const installed = await install(
+          {
+            id,
+            name,
+            size,
+            // A run's successive snapshots are the same file getting longer, so it keeps the
+            // moment it first appeared rather than jumping to the end of the bar every cycle.
+            addedAt: previous?.addedAt ?? Date.now(),
+            kind: "zpcr",
+            content,
+            lastModified: Date.now(),
+          },
+          options?.modified === true,
+        );
+        if (options?.activate !== false) setActiveId(installed);
+        return installed;
+      } catch (e) {
+        setError(`${name}: ${e instanceof Error ? e.message : String(e)}`);
+        return null;
+      }
+    },
+    [install],
   );
 
   /**
@@ -1385,28 +1560,23 @@ export function useZpcrStore(): ZpcrStore {
       try {
         const buf = await file.arrayBuffer();
         const plateBytes = new Uint8Array(buf);
-        // .csv has no password step, so validate eagerly; a .pltd's container is validated by
-        // attachPlateToZpcr re-zipping it, and its plate resolved reactively via `runs`.
+        // .csv has no password step, so validate eagerly; a .pltd's container is validated when
+        // the archive is written back out, and its plate resolved reactively via `runs`.
         if (kind === "csv") parsePlateCsv(new TextDecoder().decode(plateBytes));
-        const augmented = attachPlateToZpcr(target.bytes, { name: file.name, bytes: plateBytes });
-        await putFile({
-          id: target.id,
-          name: target.name,
-          size: augmented.byteLength,
-          addedAt: target.addedAt,
-          bytes: augmented.slice().buffer,
-          kind: target.kind,
-          // Kept as the original file's own mtime, not bumped to now — this is the app editing
-          // the archive in place, not a new file arriving from the OS (see `StoredFile.lastModified`).
-          lastModified: target.lastModified,
-        });
-        setLoadedFiles((prev) => {
-          loadedRef.current = prev.map((f) =>
-            f.id === target.id ? { ...f, size: augmented.byteLength, bytes: augmented } : f,
-          );
-          return loadedRef.current;
-        });
-        patchEntry(target.id, { size: augmented.byteLength });
+        // Working on the archive itself: free for a run still in progress or not yet started (the
+        // common case for attaching a plate), and an unzip + re-zip for a finished one, which is
+        // what it always cost. See `fileContent.ts`.
+        await commitContent(
+          withContent(
+            target,
+            runContent(
+              attachPlateToFiles(contentFiles(target.content), {
+                name: file.name,
+                bytes: plateBytes,
+              }),
+            ),
+          ),
+        );
         // The archive itself now differs from the one on disk, which is exactly what the flag is
         // for — a plate attached and then deleted is as much lost work as a threshold is.
         setModifiedFlag(target.id, true);
@@ -1414,7 +1584,7 @@ export function useZpcrStore(): ZpcrStore {
         setError(`${file.name}: ${e instanceof Error ? e.message : String(e)}`);
       }
     },
-    [loadedFiles, setModifiedFlag, patchEntry],
+    [loadedFiles, setModifiedFlag, commitContent],
   );
 
   /** See {@link ZpcrStore.attachProtocol}. */
@@ -1430,35 +1600,23 @@ export function useZpcrStore(): ZpcrStore {
         const buf = await file.arrayBuffer();
         const runDefinition = parseRunDefinitionText(new TextDecoder().decode(buf));
         const name = file.name.replace(/\.prcl\.txt$/i, "");
-        const augmented = attachProtocolToZpcr(target.bytes, { runDefinition, name });
-        await putFile({
-          id: target.id,
-          name: target.name,
-          size: augmented.byteLength,
-          addedAt: target.addedAt,
-          bytes: augmented.slice().buffer,
-          kind: target.kind,
-          lastModified: target.lastModified,
-        });
-        setLoadedFiles((prev) => {
-          loadedRef.current = prev.map((f) =>
-            f.id === target.id ? { ...f, size: augmented.byteLength, bytes: augmented } : f,
-          );
-          return loadedRef.current;
-        });
-        patchEntry(target.id, { size: augmented.byteLength });
+        await commitContent(
+          withContent(
+            target,
+            runContent(attachProtocolToFiles(contentFiles(target.content), { runDefinition, name })),
+          ),
+        );
         setModifiedFlag(target.id, true);
       } catch (e) {
         setError(`${file.name}: ${e instanceof Error ? e.message : String(e)}`);
       }
     },
-    [loadedFiles, setModifiedFlag, patchEntry],
+    [loadedFiles, setModifiedFlag, commitContent],
   );
 
   /** See {@link ZpcrStore.createExperiment}. */
   const createExperiment = useCallback(
     async (parts: ExperimentArchiveParts): Promise<string | null> => {
-      const bytes = buildExperimentArchive(parts);
       const today = new Date();
       // `runFileBaseName` refuses an empty name — there is none yet, so the bare date stamp is
       // built directly the same way it would be, rather than through it.
@@ -1466,10 +1624,14 @@ export function useZpcrStore(): ZpcrStore {
         `${today.getFullYear()}` +
         `${String(today.getMonth() + 1).padStart(2, "0")}` +
         `${String(today.getDate()).padStart(2, "0")}`;
-      const file = new File([bytes.slice()], `${stamp}.zpcr`, { lastModified: Date.now() });
-      return addFiles([file], { activate: true, modified: true });
+      // A new experiment is by definition a run that hasn't started, so it goes straight in as an
+      // open archive: there is nothing to zip and nothing to unzip again to read it back.
+      return addRunArchive(`${stamp}.zpcr`, buildExperimentFiles(parts), {
+        activate: true,
+        modified: true,
+      });
     },
-    [addFiles],
+    [addRunArchive],
   );
 
   /** See {@link ZpcrStore.setRunProtocolText}. */
@@ -1477,14 +1639,15 @@ export function useZpcrStore(): ZpcrStore {
     (id: string, runDefinition: string) => {
       const file = loadedRef.current.find((f) => f.id === id);
       if (!file || file.kind !== "zpcr") return;
-      const augmented = attachProtocolToZpcr(file.bytes, { runDefinition });
-      loadedRef.current = loadedRef.current.map((f) =>
-        f.id === id ? { ...f, bytes: augmented, size: augmented.byteLength } : f,
+      // A keystroke in the protocol editor: on the pending experiment this is only ever called
+      // for, replacing the run-definition entry is one `TextEncoder` call and no ZIP work at all.
+      const next = withContent(
+        file,
+        runContent(attachProtocolToFiles(contentFiles(file.content), { runDefinition })),
       );
-      setLoadedFiles((prev) =>
-        prev.map((f) => (f.id === id ? { ...f, bytes: augmented, size: augmented.byteLength } : f)),
-      );
-      patchEntry(id, { size: augmented.byteLength });
+      loadedRef.current = replaceFile(loadedRef.current, next);
+      setLoadedFiles((prev) => replaceFile(prev, next));
+      patchEntry(id, { size: next.size });
       setModifiedFlag(id, true);
       protocolThrottle.current!.markDirty(id);
     },
@@ -1496,34 +1659,24 @@ export function useZpcrStore(): ZpcrStore {
     async (id: string, name: string) => {
       const file = loadedRef.current.find((f) => f.id === id);
       if (!file || file.kind !== "zpcr") return;
-      // Flush a pending protocol-text write first: both rewrite the same two entries, and re-zipping
-      // from stale bytes would drop whichever edit hadn't landed.
+      // Flush a pending protocol-text write first: both rewrite the same two entries, and writing
+      // from a stale archive would drop whichever edit hadn't landed.
       await protocolThrottle.current!.flush(id);
       const current = loadedRef.current.find((f) => f.id === id) ?? file;
+      const archive = contentFiles(current.content);
       let runDefinition: string;
       try {
-        runDefinition = parseZpcr(current.bytes).protocolText;
+        runDefinition = parseZpcrFiles(archive).protocolText;
       } catch {
         return;
       }
       if (!runDefinition) return;
-      const augmented = attachProtocolToZpcr(current.bytes, { runDefinition, name });
-      await putFile({
-        id: current.id,
-        name: current.name,
-        size: augmented.byteLength,
-        addedAt: current.addedAt,
-        bytes: augmented.slice().buffer,
-        kind: current.kind,
-        lastModified: current.lastModified,
-      });
-      setLoadedFiles((prev) =>
-        prev.map((f) => (f.id === id ? { ...f, size: augmented.byteLength, bytes: augmented } : f)),
+      await commitContent(
+        withContent(current, runContent(attachProtocolToFiles(archive, { runDefinition, name }))),
       );
-      patchEntry(id, { size: augmented.byteLength });
       setModifiedFlag(id, true);
     },
-    [setModifiedFlag, patchEntry],
+    [setModifiedFlag, commitContent],
   );
 
   /** See {@link ZpcrStore.setProtocolText}. */
@@ -1531,16 +1684,15 @@ export function useZpcrStore(): ZpcrStore {
     (id: string, runDefinition: string) => {
       const file = loadedRef.current.find((f) => f.id === id);
       if (!file || file.kind !== "prcl") return;
-      const bytes = new TextEncoder().encode(formatRunDefinitionText(runDefinition));
+      const next = withContent(
+        file,
+        zippedContent(new TextEncoder().encode(formatRunDefinitionText(runDefinition))),
+      );
       // Keep the ref current for a flush that fires before React re-renders (the throttle can
       // write synchronously, on the very first edit to an idle file).
-      loadedRef.current = loadedRef.current.map((f) =>
-        f.id === id ? { ...f, bytes, size: bytes.byteLength } : f,
-      );
-      setLoadedFiles((prev) =>
-        prev.map((f) => (f.id === id ? { ...f, bytes, size: bytes.byteLength } : f)),
-      );
-      patchEntry(id, { size: bytes.byteLength });
+      loadedRef.current = replaceFile(loadedRef.current, next);
+      setLoadedFiles((prev) => replaceFile(prev, next));
+      patchEntry(id, { size: next.size });
       // The bytes now differ from the copy on disk, which is exactly what the flag is for — an
       // edited protocol deleted before it was downloaded is lost work.
       setModifiedFlag(id, true);
@@ -1562,15 +1714,7 @@ export function useZpcrStore(): ZpcrStore {
       // Renaming onto a name (+size) that collides with an already-loaded file supersedes it,
       // the same way `addFiles` handles a same-named re-upload.
       for (const old of loadedRef.current.filter((f) => f.id === newId)) await forget(old.id);
-      await putFile({
-        id: newId,
-        name,
-        size: file.size,
-        addedAt: file.addedAt,
-        bytes: file.bytes.slice().buffer,
-        kind: file.kind,
-        lastModified: file.lastModified,
-      });
+      await putFile(storedFile({ ...file, id: newId, name }));
       await deleteFile(id);
       setLoadedFiles((prev) => {
         loadedRef.current = prev.map((f) => (f.id === id ? { ...f, id: newId, name } : f));
@@ -1619,26 +1763,18 @@ export function useZpcrStore(): ZpcrStore {
         targetId = fileId(restamped, current.size);
         targetName = restamped;
       }
-      const augmented = markExperimentBegun(current.bytes);
-      await putFile({
-        id: targetId,
-        name: targetName,
-        size: augmented.byteLength,
-        addedAt: current.addedAt,
-        bytes: augmented.slice().buffer,
-        kind: current.kind,
-        lastModified: current.lastModified,
-      });
-      setLoadedFiles((prev) =>
-        prev.map((f) =>
-          f.id === targetId ? { ...f, size: augmented.byteLength, bytes: augmented } : f,
+      // Pending → in progress: both states are held open (`fileContent.ts`), so writing the
+      // marker adds one zero-length entry and re-puts the record, with no ZIP work either side.
+      await commitContent(
+        withContent(
+          { ...current, id: targetId, name: targetName },
+          runContent(markFilesBegun(contentFiles(current.content))),
         ),
       );
-      patchEntry(targetId, { size: augmented.byteLength });
       setModifiedFlag(targetId, true);
       return { id: targetId, name: targetName };
     },
-    [renameFile, setModifiedFlag, patchEntry],
+    [renameFile, setModifiedFlag, commitContent],
   );
 
   // One flat object per file, assembled from the two stores. The analysis half wins, so a
@@ -1712,7 +1848,7 @@ export function useZpcrStore(): ZpcrStore {
     const map = new Map<string, RunResult>();
     for (const f of loadedFiles) {
       if (f.kind === "zpcr" || f.kind === "pcrd" || f.kind === "biomeme") {
-        map.set(f.id, parseRun(f.bytes, f.kind, password));
+        map.set(f.id, parseRun(f.content, f.kind, password));
       }
     }
     return map;
@@ -1724,7 +1860,7 @@ export function useZpcrStore(): ZpcrStore {
     const map = new Map<string, PlateFileResult>();
     for (const f of loadedFiles) {
       if (f.kind === "pltd" || f.kind === "csv") {
-        map.set(f.id, parsePlateBytes(f.kind, f.bytes, password, f.name));
+        map.set(f.id, parsePlateBytes(f.kind, fileBytes(f), password, f.name));
       }
     }
     return map;
@@ -1742,7 +1878,7 @@ export function useZpcrStore(): ZpcrStore {
     for (const f of loadedFiles) {
       if (f.kind !== "prcl") continue;
       try {
-        map.set(f.id, parseRunDefinitionText(new TextDecoder().decode(f.bytes)));
+        map.set(f.id, parseRunDefinitionText(new TextDecoder().decode(fileBytes(f))));
       } catch {
         /* admitted only if it parsed; a failure here means the bytes changed underneath us */
       }
@@ -1908,12 +2044,16 @@ export function useZpcrStore(): ZpcrStore {
       const file = loadedFiles.find((f) => f.id === id);
       if (!file) return null;
       const analysis = analysisMap[id];
-      if (file.kind !== "zpcr" || !analysis) return file.bytes;
+      if (file.kind !== "zpcr" || !analysis) return fileBytes(file);
       try {
-        return writeZpcrwebSettings(file.bytes, zpcrwebFromAnalysis(analysis));
+        // The one place a run held open is zipped (`fileContent.ts`): a `.zpcr` leaving the
+        // browser is an ordinary `.zpcr` whatever form it was being kept in.
+        return zipArchive(
+          writeZpcrwebSettingsToFiles(contentFiles(file.content), zpcrwebFromAnalysis(analysis)),
+        );
       } catch {
-        // A file we somehow can't re-zip still downloads as what was loaded.
-        return file.bytes;
+        // A file we somehow can't write settings into still downloads as what was loaded.
+        return fileBytes(file);
       }
     },
     [loadedFiles, analysisMap],
@@ -1953,6 +2093,7 @@ export function useZpcrStore(): ZpcrStore {
     loading,
     error,
     addFiles,
+    addRunArchive,
     addUrl,
     setActive,
     remove,

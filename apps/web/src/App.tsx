@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { plateToCsv, ProtocolBuilder, runFileBaseName, type RunPlan, type Zpcr } from "@zpcrweb/core";
-import { useZpcrStore } from "./state/useZpcrStore";
+import {
+  plateToCsv,
+  ProtocolBuilder,
+  runFileBaseName,
+  type ArchiveFiles,
+  type RunPlan,
+  type Zpcr,
+} from "@zpcrweb/core";
+import { fileBytes, useZpcrStore } from "./state/useZpcrStore";
 import { useCfxDevice } from "./state/useCfxDevice";
 import { useRunWatch } from "./state/useRunWatch";
 import { usePltdPassword } from "./state/pltdPassword";
@@ -181,9 +188,16 @@ export function App() {
   const runWatch = useRunWatch(
     instrument,
     useCallback(
-      async (file: File, previousId: string | null, freshStart: boolean) => {
+      async (
+        run: { name: string; files: ArchiveFiles },
+        previousId: string | null,
+        freshStart: boolean,
+      ) => {
         const wasWatchingIt = store.activeId !== null && store.activeId === previousId;
-        return store.addFiles([file], { activate: wasWatchingIt || freshStart, modified: true });
+        return store.addRunArchive(run.name, run.files, {
+          activate: wasWatchingIt || freshStart,
+          modified: true,
+        });
       },
       [store],
     ),
@@ -208,8 +222,8 @@ export function App() {
   // `addFiles` path as a drop — and then leaves the Instrument view for it, since staying on a
   // view that shows no file would make a successful open look like nothing happened. Only on success:
   // a rejected archive leaves you where you are, with the error banner.
-  const openRun = async (file: File) => {
-    if (await store.addFiles([file], { modified: true })) store.setView("overview");
+  const openRun = async (name: string, archive: ArchiveFiles) => {
+    if (await store.addRunArchive(name, archive, { modified: true })) store.setView("overview");
   };
 
   /**
@@ -380,7 +394,7 @@ export function App() {
   const cloneActiveFile = useCallback(async () => {
     const file = store.active;
     if (!file) return;
-    const bytes = store.exportBytes(file.id) ?? file.bytes;
+    const bytes = store.exportBytes(file.id) ?? fileBytes(file);
     const names = new Set(store.files.map((f) => f.name));
     const name = cloneFileName(file.name, (candidate) => names.has(candidate));
     const id = await store.addFiles([new File([bytes.slice()], name, { lastModified: Date.now() })], {
@@ -402,7 +416,7 @@ export function App() {
   const downloadActiveFile = useCallback(() => {
     const file = store.active;
     if (!file) return;
-    downloadBytes(file.name, store.exportBytes(file.id) ?? file.bytes);
+    downloadBytes(file.name, store.exportBytes(file.id) ?? fileBytes(file));
     store.markDownloaded(file.id);
   }, [store]);
 

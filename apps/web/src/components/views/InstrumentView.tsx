@@ -25,7 +25,7 @@
  * traffic console.
  */
 import { useCallback, useMemo } from "react";
-import { planRun, type RunPlan, type Zpcr } from "@zpcrweb/core";
+import { planRun, type ArchiveFiles, type RunPlan, type Zpcr } from "@zpcrweb/core";
 import { InstrumentRail } from "../instrument/InstrumentRail";
 import { InstrumentRun } from "../instrument/InstrumentRun";
 import { InstrumentFiles } from "../instrument/InstrumentFiles";
@@ -61,7 +61,7 @@ export function InstrumentView({
   onStartExperiment,
   onCloneExperiment,
 }: {
-  onOpenRun: (file: File) => Promise<void> | void;
+  onOpenRun: (name: string, archive: ArchiveFiles) => Promise<void> | void;
   /** Jump to a finished run's curves — the "Run complete" banner's "Open run" button. Distinct
    * from `onOpenRun`: that one adds a *new* file (an offloaded archive dropped in from outside);
    * this one just switches to a file the watcher already put in the store. */

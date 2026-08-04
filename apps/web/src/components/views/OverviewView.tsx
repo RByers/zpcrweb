@@ -8,7 +8,7 @@ import { RenameIcon } from "../RenameIcon";
 import { usePltdPassword } from "../../state/pltdPassword";
 import { runEncryptionStatus } from "../../lib/encryptionStatus";
 import { useRunAnalysis } from "../../lib/runAnalysis";
-import type { FileSettings, LoadedFile, RunResult } from "../../state/useZpcrStore";
+import { fileBytes, type FileSettings, type LoadedFile, type RunResult } from "../../state/useZpcrStore";
 import type { ExperimentIdentity } from "../../lib/experiment";
 
 /**
@@ -290,7 +290,7 @@ function ExperimentParts({
               files={files}
               compactLabel={hasProtocol ? "replace protocol" : "attach protocol"}
               confirmReplace={hasProtocol}
-              onSelect={(f) => onAttachProtocol(new File([f.bytes.slice()], f.name))}
+              onSelect={(f) => onAttachProtocol(new File([fileBytes(f).slice()], f.name))}
               onUpload={onAttachProtocol}
             />
           </div>
@@ -314,7 +314,7 @@ function ExperimentParts({
             files={files}
             compactLabel={hasPlate ? "replace plate" : "attach plate"}
             confirmReplace={hasPlate}
-            onSelect={(f) => onAttachPlate(new File([f.bytes.slice()], f.name))}
+            onSelect={(f) => onAttachPlate(new File([fileBytes(f).slice()], f.name))}
             onUpload={onAttachPlate}
           />
         </div>

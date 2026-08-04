@@ -312,10 +312,19 @@ ZIP decompression is the one thing not worth hand-rolling. `fflate` is tiny (~8 
 zero dependencies, is actively maintained, and runs identically in Node and the browser.
 `.zpcr` archives are small (hundreds of KB), so we decompress the **whole** archive into
 memory up front (`unzipSync`). That keeps the rest of the library synchronous and lets the
-low-level archive API serve any file instantly. `fflate` also writes zips (`zipSync`), used by
+low-level archive API serve any file instantly. `fflate` also writes zips (`zipArchive`), used by
 the library's three write paths: `attachPlate.ts` (see below), `zpcrwebSettings.ts` (see below),
 and `runFolder.ts` (see [below](#a-run-directory-is-a-zpcr-runfolderts)), in an otherwise
 read-only library.
+
+**Every one of those writers comes in a pair**, because a `.zpcr` is only ever a ZIP *at rest*: a
+`…Files` function that takes and returns the decompressed `ArchiveFiles` map (`attachPlateToFiles`,
+`attachProtocolToFiles`, `writeZpcrwebSettingsToFiles`, `markFilesBegun`, `buildExperimentFiles`),
+and a byte-level wrapper that unzips, calls it and re-zips. `parseZpcrFiles` reads an open archive
+the same way, and `runArchiveFromRunFiles` is `zpcrFromRunFiles` without the zip. A caller that
+holds an archive open across many edits — the web app does, for any run still being written to;
+see its [`ARCHITECTURE.md`](./apps/web/ARCHITECTURE.md), "Runs still being written are stored
+exploded" — then pays neither the unzip nor the re-zip per edit.
 
 ## A run directory *is* a `.zpcr` (`runFolder.ts`)
 
@@ -379,9 +388,10 @@ from whichever halves are known — the protocol as `ProtocolRunDefinition.txt` 
 plate reads, **no `begun` marker and no `zpcrweb.json`**: naming and starting both happen later, from
 the app, on a file that by then already exists. The app calls a `.zpcr` in that state a *pending
 experiment* (see [`apps/web/ARCHITECTURE.md`](./apps/web/ARCHITECTURE.md)), and the three functions
-that move it along are `attachProtocolToZpcr`/`attachPlateToZpcr` (fill in a half, or edit the
-protocol in place) and `markExperimentBegun` (add the `begun` marker at the click on Start, which is
-what ends the pending state permanently).
+that move it along are `attachProtocolToFiles`/`attachPlateToFiles` (fill in a half, or edit the
+protocol in place) and `markFilesBegun` (add the `begun` marker at the click on Start, which is what
+ends the pending state permanently) — each with a byte-level `…ToZpcr`/`markExperimentBegun` twin,
+per the pairing above.
 
 This replaced `runSeed.ts`'s `zpcrSeedArchive()`, which built a very similar archive but only ever at
 the click on Start run, from the run plan about to be sent, complete with name and `begun` marker. The
@@ -462,12 +472,12 @@ a synthetic `Pltd`-shaped result (`pltdFromPlateCsv`) with a dummy `PltdContaine
 `needsPassword` always `false` — so every existing plate consumer (the web app's Plates/Curves
 views) needs zero changes to read one.
 
-`attachPlate.ts`'s `attachPlateToZpcr(zpcrBytes, plateFile)` is the write side: unzip, drop any
-existing `.pltd`/`.plt.csv` entry (at most one plate entry is kept — attaching replaces, not
-adds), add the new entry, `zipSync` back to bytes. The web app calls this to "attach a plate to
-a run": it rewrites the run's own in-memory bytes and re-persists them under the same file id,
-so the plate travels with the file with no separate override state to keep in sync — see
-`apps/web/ARCHITECTURE.md`.
+`attachPlate.ts`'s `attachPlateToFiles(files, plateFile)` is the write side: drop any existing
+`.pltd`/`.plt.csv` entry (at most one plate entry is kept — attaching replaces, not adds) and add
+the new one; `attachPlateToZpcr(zpcrBytes, plateFile)` is the same thing on zipped bytes. The web
+app calls this to "attach a plate to a run": it rewrites the run's own in-memory archive and
+re-persists it under the same file id, so the plate travels with the file with no separate override
+state to keep in sync — see `apps/web/ARCHITECTURE.md`.
 
 ## Analysis settings in the archive (`zpcrwebSettings.ts`)
 
