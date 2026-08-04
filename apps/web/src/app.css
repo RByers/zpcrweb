@@ -1018,6 +1018,16 @@
   line-height: 1.5;
 }
 
+/* The headline row. Was a lone input and needed no layout; it now carries a second child in both of
+   its states — the "required" marker while unnamed, the edit button once the run has happened — so
+   the two sit on one line with the name taking the room. */
+.overview__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
 /* Styled as a heading, not as a form field: no border or background until it is interacted
    with, so the name reads as a title while still being obviously editable on hover. */
 .overview__name {
@@ -1042,6 +1052,68 @@
   outline: none;
   background: var(--plane);
   border-color: var(--neon-cyan);
+}
+/* An experiment with no name yet — the one thing standing between it and being started, and the
+   reason its Overview is where you land on creating one. It gets the app's `--danger` red rather
+   than the warn orange the small asterisk used to: a heading-sized field with only a placeholder in
+   it reads as *empty*, not as *unanswered*, and empty looks like nothing to do. Red plus the word
+   "required" beside it is what makes the next action unmissable. The red survives focus (below),
+   since it is a statement about the value and not about the field being active. */
+.overview__name.is-missing {
+  border-color: var(--danger);
+  background: rgba(255, 90, 90, 0.06);
+}
+.overview__name.is-missing:focus {
+  border-color: var(--danger);
+  box-shadow: 0 0 0 1px rgba(255, 90, 90, 0.35), 0 0 18px rgba(255, 90, 90, 0.14);
+}
+.overview__name.is-missing::placeholder {
+  color: var(--danger);
+  opacity: 0.75;
+}
+/* The word, not an asterisk: an asterisk is a convention that has to be known, and there is room
+   here for the requirement to simply say itself. */
+.overview__namerequired {
+  flex: 0 0 auto;
+  color: var(--danger);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* The same headline once the experiment has run: a heading, not a field. See `ExperimentHeader` for
+   why — the name is part of the record by then, so changing it goes through the button beside it
+   rather than being permanently one keystroke from being overwritten. Matches `.overview__name`'s
+   type exactly, so the two states are the same headline in the same place rather than a layout
+   change when the edit opens. */
+.overview__nametext {
+  margin: 0;
+  padding: 2px 0;
+  color: var(--ink);
+  font-size: clamp(20px, 3.2cqi, 28px);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Sits with the heading rather than in the toolbar column, because it acts on the heading and not
+   on the file — the toolbar's own Rename button is the *filename*'s, a different identity.
+
+   Dimmed but always drawn, never hover-only. It is the only way to rename an experiment, and a
+   control that appears on hover cannot be found by someone who doesn't already know it is there —
+   or reached at all on a touch screen, which has no hover to give. The toolbar's three buttons are
+   likewise always present; this is the same affordance in the row it belongs to. */
+.overview__nameeditbtn {
+  flex: 0 0 auto;
+  opacity: 0.5;
+  transition: opacity 120ms;
+}
+.overview__title:hover .overview__nameeditbtn,
+.overview__nameeditbtn:hover,
+.overview__nameeditbtn:focus-visible {
+  opacity: 1;
 }
 /* Info table + file buttons side by side, so the buttons reserve their own column instead of
    pushing the table (or anything below) down a row. */

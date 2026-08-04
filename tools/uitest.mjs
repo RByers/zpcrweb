@@ -2013,6 +2013,16 @@ async function instrumentRunChecks(chrome, origin) {
  * never does.
  */
 async function setExperimentName(cdp, value) {
+  // A run that has already happened shows its name as a heading, not a field — changing it takes a
+  // click on the edit button first (see `ExperimentHeader`, and `apps/web/ARCHITECTURE.md`'s
+  // "Editing what has already happened"). A pending experiment's field is already live, so this is a
+  // no-op there. Doing what a user does rather than reaching past the gate is the point: if the gate
+  // ever stops opening, these checks should fail.
+  await cdp.eval(
+    `(() => { if (!document.querySelector(".overview__name"))
+        document.querySelector(".overview__nameeditbtn")?.click(); })()`,
+  );
+  await sleep(150);
   await cdp.eval(
     // `focus()` first because the commit is on blur, and blurring an element that was never
     // focused fires nothing at all — the field would keep the text and store none of it.
@@ -2125,7 +2135,12 @@ async function experimentNameChecks(chrome, origin) {
              dts.forEach((dt, i) => { info[dt.textContent.trim()] = dds[i].textContent.trim(); });
            }
            return {
-             name: document.querySelector(".overview__name")?.value ?? null,
+             // Either state of the headline: the live field, or the heading a run that has
+             // already happened shows instead -- see setExperimentName.
+             name:
+               document.querySelector(".overview__name")?.value ??
+               document.querySelector(".overview__nametext")?.textContent.trim() ??
+               null,
              when: info["Run date"] ?? null,
              file: info["Filename"] ?? null,
              chip: document.querySelector(".filechip__name")?.textContent ?? null,
@@ -2134,6 +2149,44 @@ async function experimentNameChecks(chrome, origin) {
          })())`,
       )
       .then(JSON.parse);
+
+  // A run that has happened shows its name as a *heading*, not a permanently-live text field. The
+  // field used to sit there open on every finished run, one stray keystroke from rewriting the
+  // archive of a run from weeks ago; correcting a typo is legitimate, so the answer is a gate rather
+  // than a refusal. See ARCHITECTURE's "Editing what has already happened" for the general rule.
+  const gate = await cdp
+    .eval(
+      `JSON.stringify({
+         liveField: !!document.querySelector(".overview__name"),
+         heading: document.querySelector(".overview__nametext")?.textContent.trim() ?? null,
+         editBtn: !!document.querySelector(".overview__nameeditbtn"),
+         btnHidden: (() => {
+           const b = document.querySelector(".overview__nameeditbtn");
+           return b ? getComputedStyle(b).opacity === "0" : null;
+         })(),
+       })`,
+    )
+    .then(JSON.parse);
+  check(
+    "a run that has happened shows its name as a heading, not an open text field",
+    gate.liveField === false && !!gate.heading && gate.editBtn,
+    JSON.stringify(gate),
+  );
+  // Never hover-only: hover cannot be discovered by someone who doesn't know the control is there,
+  // and does not exist at all on a touch screen.
+  check(
+    "…with its edit button always drawn rather than appearing on hover",
+    gate.btnHidden === false,
+    JSON.stringify(gate),
+  );
+  await cdp.eval(`document.querySelector(".overview__nameeditbtn").click()`);
+  await sleep(250);
+  check(
+    "…and the button is what opens the field",
+    (await cdp.eval(`!!document.querySelector(".overview__name")`)) === true,
+  );
+  await cdp.eval(`document.querySelector(".overview__name").blur()`);
+  await sleep(250);
 
   const first = await headline();
   check(

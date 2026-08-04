@@ -4,6 +4,7 @@ import { OverviewPanel, type InfoRow, type OverviewPanelProps } from "./Overview
 import { OverviewPlateSection } from "./OverviewPlateSection";
 import { AttachPlateMenu } from "../plate/AttachPlateMenu";
 import { AttachProtocolMenu } from "../protocol/AttachProtocolMenu";
+import { RenameIcon } from "../RenameIcon";
 import { usePltdPassword } from "../../state/pltdPassword";
 import { runEncryptionStatus } from "../../lib/encryptionStatus";
 import { useRunAnalysis } from "../../lib/runAnalysis";
@@ -178,6 +179,7 @@ export function OverviewView({
           // sent with the run and named its file, and an ordinary run with a derived name is not
           // missing anything.
           required={pending && !identity.named}
+          pending={pending}
           autoFocus={autoFocusName}
           onAutoFocusHandled={onAutoFocusHandled}
         />
@@ -392,11 +394,27 @@ function IncompleteBanner({ expected, actual }: { expected: number; actual: numb
  * The panel's headline: what the run is called. When it ran and which file it came out of are
  * rows of the info table below instead of a subheading here — see `rows`.
  *
- * The name is an input rather than a label because for a `.zpcr` it is genuinely editable: no
- * Bio-Rad format has a field for it, so a run is named either by its filename or by whatever
- * gets typed here, which is then stored in the archive's own `zpcrweb.json` and travels with the
- * file (see `state/analysisSettings.ts`). Clearing the field is meaningful — it removes the
- * stored name, and the run reverts to the one derived from its filename.
+ * No Bio-Rad format has a field for a run's name, so a run is named either by its filename or by
+ * whatever gets typed here, which is then stored in the archive's own `zpcrweb.json` and travels
+ * with the file (see `state/analysisSettings.ts`). Clearing it is meaningful — it removes the stored
+ * name, and the run reverts to the one derived from its filename.
+ *
+ * **How editable it is depends on whether the experiment has run**, which is the app's rule for
+ * every mutation and not just this field (see `apps/web/ARCHITECTURE.md`, "Editing what has already
+ * happened"). Three states:
+ *
+ * | State | The field |
+ * | ----- | --------- |
+ * | pending, unnamed | a live input, marked **required** — the experiment can't start without one |
+ * | pending, named | a live input; the experiment is still being assembled, so typing is the point |
+ * | run (in progress, or over) | a heading, with an edit button that turns it into an input |
+ *
+ * That last state is the one worth explaining. The name of a run that happened is part of its
+ * record: it went out as `RemoteRun`'s operand, was deposited into the run folder, and named the
+ * file. Editing it is *allowed* — it is the app's own field, and correcting a typo afterwards is
+ * legitimate — but it should take saying so, because a text cursor sitting in a record invites an
+ * accidental keystroke that rewrites the archive. So the edit is one click away rather than zero,
+ * the same shape the "Filename" row already uses ({@link OverviewPanel}'s `useFilenameEditor`).
  *
  * Edits commit on blur or Enter rather than on every keystroke: each commit eventually rewrites
  * the archive, and Escape has to be able to abandon a half-typed name.
@@ -406,6 +424,7 @@ function ExperimentHeader({
   onRename,
   persists,
   required,
+  pending,
   autoFocus,
   onAutoFocusHandled,
 }: {
@@ -415,6 +434,8 @@ function ExperimentHeader({
   /** This experiment has no name of its own yet and can't be started until it does — see
    * {@link OverviewView}'s `pending`. Shown as a required field rather than merely empty. */
   required: boolean;
+  /** The experiment hasn't run, so it is still being assembled and the field is live. */
+  pending: boolean;
   autoFocus?: boolean;
   onAutoFocusHandled?: () => void;
 }) {
@@ -426,6 +447,16 @@ function ExperimentHeader({
   // from elsewhere. Keyed on the value, so typing is never interrupted by an unrelated render.
   useEffect(() => setDraft(required ? "" : identity.name), [identity.name, required]);
 
+  /** Whether the input is showing at all. Always, while pending; only once asked for, after that. */
+  const [editing, setEditing] = useState(false);
+  const live = pending || editing;
+  // A run that finishes while its name is open for editing closes it: by then the name is part of a
+  // record, which is exactly the state the edit gate exists for.
+  useEffect(() => {
+    if (pending) return;
+    setEditing(false);
+  }, [pending]);
+
   const inputRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     if (!autoFocus) return;
@@ -434,6 +465,7 @@ function ExperimentHeader({
   }, [autoFocus, onAutoFocusHandled]);
 
   const commit = () => {
+    setEditing(false);
     const next = draft.trim();
     // Covers "cleared, and the derived name is what was showing anyway": nothing to store.
     if (next === identity.name) return;
@@ -441,18 +473,54 @@ function ExperimentHeader({
     if (!next && !required) setDraft(identity.name);
   };
 
+  const title = required
+    ? "What to call this experiment — required, and never guessed. It identifies the run, " +
+      "names its file, and is sent to the instrument with it."
+    : persists
+      ? "The run's name — stored in the file's own zpcrweb.json, so it travels with the " +
+        "file. Clear it to go back to the name derived from the file name."
+      : "The run's name. This format has no archive to store it in, so the name lasts for " +
+        "this session only.";
+
+  if (!live) {
+    return (
+      <header className="overview__title">
+        <h1 className="overview__nametext" title={title}>
+          {identity.name}
+        </h1>
+        <button
+          className="raw__download overview__nameeditbtn"
+          onClick={() => setEditing(true)}
+          aria-label="Rename this experiment"
+          title={
+            "Rename this experiment. Its name is part of the record of a run that happened, so " +
+            "editing it takes a click rather than being one stray keystroke away."
+          }
+        >
+          <RenameIcon />
+        </button>
+      </header>
+    );
+  }
+
   return (
     <header className="overview__title">
       <input
         ref={inputRef}
         className={"overview__name" + (required ? " is-missing" : "")}
         value={draft}
+        // Only when the click on the edit button is what opened it: a pending experiment's field is
+        // live from the start, where stealing focus would fight both `autoFocus` above and a reader
+        // who came to look rather than to type.
+        autoFocus={editing}
+        onFocus={(e) => editing && e.currentTarget.select()}
         onChange={(e) => setDraft(e.currentTarget.value)}
         onBlur={commit}
         onKeyDown={(e) => {
           if (e.key === "Enter") e.currentTarget.blur();
           if (e.key === "Escape") {
             setDraft(required ? "" : identity.name);
+            setEditing(false);
             e.currentTarget.blur();
           }
         }}
@@ -461,20 +529,14 @@ function ExperimentHeader({
         required={required || undefined}
         placeholder={required ? "Name this experiment — e.g. S183-S185 RVP" : undefined}
         spellCheck={false}
-        title={
-          required
-            ? "What to call this experiment — required, and never guessed. It identifies the run, " +
-              "names its file, and is sent to the instrument with it."
-            : persists
-              ? "The run's name — stored in the file's own zpcrweb.json, so it travels with the " +
-                "file. Clear it to go back to the name derived from the file name."
-              : "The run's name. This format has no archive to store it in, so the name lasts for " +
-                "this session only."
-        }
+        title={title}
       />
       {required && (
-        <span className="devrun__required" title="Required — an experiment is not started without one">
-          *
+        <span
+          className="overview__namerequired"
+          title="Required — an experiment is not started without one"
+        >
+          required
         </span>
       )}
     </header>

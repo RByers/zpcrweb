@@ -434,6 +434,42 @@ The `settings` record carries one field that isn't display state at all: `modifi
 file's *content* has been edited since it was loaded and not since downloaded (see "Deleting an
 edited file" below). It rides there because that is the app's one per-file store keyed by id.
 
+### Editing what has already happened
+
+**A run that has happened is a record, and the app treats it as one.** Nothing about it may be
+changed except through an affordance the user deliberately reaches for — a button clicked, a menu
+opened, a confirmation answered. What may still be changed freely is everything that is *about
+looking at* the run rather than about the run: which channels are shown, log or linear, a threshold,
+the Cq range. Those describe the reader's view, they are undoable by putting them back, and demanding
+a click to arm each one would make the app tiresome to use for its main purpose.
+
+**A pending experiment is the opposite, and deliberately so.** It has not run, so it has no record to
+protect: it is a thing being assembled, and every part of it — its name, its protocol, its plate — is
+meant to be edited directly, with no gate in front of any of it. The two states want opposite
+defaults, which is why "pending" is a state the app names rather than a detail of one archive.
+
+Where this shows up today:
+
+| Surface | Pending | Once it has run |
+| ------- | ------- | --------------- |
+| Experiment name (`ExperimentHeader`) | a live input, marked required while unnamed | a heading, plus an edit button that opens it |
+| Protocol (`ProtocolView`) | the editor, writing into the archive as you type | the read-only listing; no editor at all |
+| Plate / protocol attach | offered on Overview as ordinary controls | plate only, from the Plates tab, behind a menu *and* a replace confirmation |
+| Filename (`OverviewPanel`) | behind the toolbar's Rename button | behind the toolbar's Rename button |
+| Analysis + display settings | direct | direct — see above |
+| Deleting the file | ✕ on the chip, twice if unsaved | ✕ on the chip, twice if unsaved |
+
+The name field is what this rule was written down for: it used to be a permanently-live text input
+sitting at the top of every finished run, one stray keystroke from rewriting the archive of a run
+that happened weeks ago. Correcting a typo afterwards is legitimate — it is the app's own field, not
+the instrument's — so the answer was a gate rather than a refusal.
+
+Note that the filename row was already built this way, and analysis settings deliberately are not:
+they change reported numbers and do reach the file (see "Analysis state lives in the file"), but they
+are the app's reading of the run rather than the run's own record, and they are what the Curves view
+exists to let someone try. If that distinction ever needs revisiting, this is the paragraph to argue
+with.
+
 ### Deleting an edited file
 
 A loaded file is normally disposable: it came off the user's disk and is still there, so the file
