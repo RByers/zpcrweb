@@ -61,11 +61,10 @@ import {
   contentFiles,
   contentSize,
   fromStoredContent,
-  loadedRunContent,
   parseContent,
-  runContent,
+  archiveContent,
   toStoredContent,
-  zippedContent,
+  plainContent,
   type FileContent,
 } from "./fileContent";
 import { WriteThrottle } from "./writeThrottle";
@@ -310,10 +309,10 @@ export interface LoadedFile {
   addedAt: number;
   kind: FileKind;
   /**
-   * The file itself — its bytes, or (for a run still being written to) its archive entries held
-   * open. `fileContent.ts` owns the distinction and every operation on it: `fileBytes(file)` for
-   * the bytes, `contentFiles`/`runContent` for the edit path. Nothing outside that module should
-   * branch on `content.exploded`.
+   * The file itself — a `.zpcr`'s archive entries, or any other kind's bytes. `fileContent.ts`
+   * owns the distinction and every operation on it: `fileBytes(file)` for the bytes,
+   * `contentFiles`/`archiveContent` for the edit path. Nothing outside that module should branch
+   * on `content.archive`.
    */
   content: FileContent;
   /** The source `File`'s own `lastModified` (its OS mtime, epoch ms) — see
@@ -367,7 +366,7 @@ function contentToStore(file: LoadedFile, analysis: AnalysisSettings | undefined
   const doc = zpcrwebFromAnalysis(analysis);
   if (!hasZpcrwebSettings(doc)) return file.content;
   try {
-    return runContent(writeZpcrwebSettings(contentFiles(file.content), doc));
+    return archiveContent(writeZpcrwebSettings(contentFiles(file.content), doc));
   } catch {
     // Not an archive this build can rewrite: store what we have rather than losing the write.
     return file.content;
@@ -1397,7 +1396,7 @@ export function useZpcrStore(): ZpcrStore {
           // run in progress never gets re-zipped just to be put away. See `fileContent.ts`.
           let content: FileContent;
           if (kind === "zpcr") {
-            content = loadedRunContent(bytes, unzipArchive(bytes));
+            content = archiveContent(unzipArchive(bytes));
             parseContent(content);
           } else {
             if (kind === "pcrd") parsePcrd(bytes);
@@ -1406,7 +1405,7 @@ export function useZpcrStore(): ZpcrStore {
             // Already validated by `fileKind`'s content sniff — parsing again would only repeat it.
             else if (kind === "prcl") void 0;
             else parsePlateCsv(new TextDecoder().decode(bytes));
-            content = zippedContent(bytes);
+            content = plainContent(bytes);
           }
           // Dropping a file replaces whatever held its name, and counts as a *different* file:
           // the copy on disk is authoritative, and whatever the old one accumulated here — its
@@ -1444,10 +1443,10 @@ export function useZpcrStore(): ZpcrStore {
   const addRunArchive = useCallback(
     async (name: string, archive: ZpcrArchive, options?: AddFilesOptions): Promise<string | null> => {
       try {
-        // `runContent` is what makes the end of a run the moment the file becomes an ordinary
+        // `archiveContent` is what makes the end of a run the moment the file becomes an ordinary
         // zipped `.zpcr`: every snapshot before it carries no `ended` marker and stays open, and
         // the last one — the end-of-run pass, which is the first to carry it — zips, once.
-        const content = runContent(archive);
+        const content = archiveContent(archive);
         parseContent(content);
         const size = contentSize(content);
         // A run's snapshots are one file getting longer under one name, so they are one record,
@@ -1566,7 +1565,7 @@ export function useZpcrStore(): ZpcrStore {
         await commitContent(
           withContent(
             target,
-            runContent(
+            archiveContent(
               attachPlateToArchive(contentFiles(target.content), {
                 name: file.name,
                 bytes: plateBytes,
@@ -1600,7 +1599,7 @@ export function useZpcrStore(): ZpcrStore {
         await commitContent(
           withContent(
             target,
-            runContent(attachProtocolToArchive(contentFiles(target.content), { runDefinition, name })),
+            archiveContent(attachProtocolToArchive(contentFiles(target.content), { runDefinition, name })),
           ),
         );
         setModifiedFlag(target.name, true);
@@ -1640,7 +1639,7 @@ export function useZpcrStore(): ZpcrStore {
       // for, replacing the run-definition entry is one `TextEncoder` call and no ZIP work at all.
       const next = withContent(
         file,
-        runContent(attachProtocolToArchive(contentFiles(file.content), { runDefinition })),
+        archiveContent(attachProtocolToArchive(contentFiles(file.content), { runDefinition })),
       );
       loadedRef.current = replaceFile(loadedRef.current, next);
       setLoadedFiles((prev) => replaceFile(prev, next));
@@ -1669,7 +1668,7 @@ export function useZpcrStore(): ZpcrStore {
       }
       if (!runDefinition) return;
       await commitContent(
-        withContent(current, runContent(attachProtocolToArchive(archive, { runDefinition, name }))),
+        withContent(current, archiveContent(attachProtocolToArchive(archive, { runDefinition, name }))),
       );
       setModifiedFlag(id, true);
     },
@@ -1683,7 +1682,7 @@ export function useZpcrStore(): ZpcrStore {
       if (!file || file.kind !== "prcl") return;
       const next = withContent(
         file,
-        zippedContent(new TextEncoder().encode(formatRunDefinitionText(runDefinition))),
+        plainContent(new TextEncoder().encode(formatRunDefinitionText(runDefinition))),
       );
       // Keep the ref current for a flush that fires before React re-renders (the throttle can
       // write synchronously, on the very first edit to an idle file).
@@ -1774,7 +1773,7 @@ export function useZpcrStore(): ZpcrStore {
       await commitContent(
         withContent(
           { ...current, name: targetName },
-          runContent(markExperimentBegun(contentFiles(current.content))),
+          archiveContent(markExperimentBegun(contentFiles(current.content))),
         ),
       );
       setModifiedFlag(targetName, true);

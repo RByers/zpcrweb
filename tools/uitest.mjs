@@ -3282,36 +3282,48 @@ async function cloneChecks(chrome, origin) {
 }
 
 /**
- * A run that is still being written to is stored **exploded** — its archive entries individually,
- * with no ZIP — and a finished one is stored as the `.zpcr` it is. See
- * `apps/web/src/state/fileContent.ts` for why; this checks the rule actually holds where it can
- * only be seen, in IndexedDB, and that nothing about it reaches the user.
+ * Every `.zpcr` is stored as its archive entries, one IndexedDB record each, and never as a ZIP —
+ * running or finished alike. See `apps/web/src/state/fileContent.ts` for why; this checks the rule
+ * actually holds where it can only be seen, in IndexedDB, and that nothing about it reaches the
+ * user.
  *
- * The fixture is a real 3-read run with its `ended` marker deleted: byte for byte what an
- * archive looks like mid-run, which is the state the app can otherwise only reach with an
+ * The in-progress fixture is a real 3-read run with its `ended` marker deleted: byte for byte what
+ * an archive looks like mid-run, which is the state the app can otherwise only reach with an
  * instrument attached.
  */
 async function explodedStorageChecks(chrome, origin) {
-  console.log("\nexploded storage");
+  console.log("\nentry storage");
   await makeInProgressRun();
   const cdp = await openPage(chrome.base, origin);
   await emptyReload(cdp, origin);
 
   /**
-   * Every stored record, as the shape of its content rather than its content. A file's name is its
-   * key in both stores (see `state/db.ts`), so this needs no join.
+   * Every stored file, as the shape of its content rather than its content. The `content` store
+   * holds one record per archive entry, keyed `[name, entry]`, so this groups by the file name —
+   * which is also its key in `catalog` (see `state/db.ts`), so there is nothing to join.
+   *
+   * A plain file is the single `WHOLE_FILE` entry, U+0000; anything else is a `.zpcr`'s entries.
    */
   const records = () =>
     cdp
       .eval(
         `new Promise((res) => { const q = indexedDB.open("zpcrweb");
            q.onsuccess = () => { const db = q.result;
-             const g = db.transaction("files", "readonly").objectStore("files").getAll();
-             g.onsuccess = () => res(JSON.stringify(g.result.map((f) => ({
-               name: f.name,
-               zipped: f.bytes ? f.bytes.byteLength : null,
-               entries: f.files ? Object.keys(f.files).length : null,
-             })))); }; })`,
+             const g = db.transaction("content", "readonly").objectStore("content").getAll();
+             g.onsuccess = () => {
+               const byFile = new Map();
+               for (const r of g.result) {
+                 const v = byFile.get(r.name) ?? { name: r.name, entries: [], bytes: 0 };
+                 v.entries.push(r.entry);
+                 v.bytes += r.bytes.byteLength;
+                 byFile.set(r.name, v);
+               }
+               res(JSON.stringify([...byFile.values()].map((v) => {
+                 const whole = v.entries.length === 1 && v.entries[0] === "\u0000";
+                 return { name: v.name, bytes: v.bytes, whole,
+                          entries: whole ? null : v.entries.length };
+               })));
+             }; }; })`,
         { awaitPromise: true },
       )
       .then(JSON.parse);
@@ -3324,8 +3336,8 @@ async function explodedStorageChecks(chrome, origin) {
   await waitFor(async () => (await recordFor("S183")) !== null, { what: "its stored record" });
   const finished = await recordFor("S183");
   check(
-    "a finished run is stored as one zipped .zpcr, exactly as it arrived",
-    finished.zipped > 0 && finished.entries === null,
+    "a finished run is stored as its entries too — no ZIP anywhere in the database",
+    finished.entries > 30 && !finished.whole,
     JSON.stringify(finished),
   );
 
@@ -3335,8 +3347,8 @@ async function explodedStorageChecks(chrome, origin) {
   await waitFor(async () => (await recordFor("Still_Running")) !== null, { what: "its record" });
   const running = await recordFor("Still_Running");
   check(
-    "a run still in progress is stored exploded — every entry on its own, no ZIP",
-    running.entries > 30 && running.zipped === null,
+    "a run still in progress is stored the same way — every entry its own record",
+    running.entries > 30 && !running.whole,
     JSON.stringify(running),
   );
 
@@ -3373,7 +3385,7 @@ async function explodedStorageChecks(chrome, origin) {
   const edited = await recordFor("Still_Running");
   check(
     "editing a run in progress leaves it exploded, never re-zipping it",
-    edited !== null && edited.entries > 30 && edited.zipped === null,
+    edited !== null && edited.entries > 30 && !edited.whole,
     JSON.stringify(edited),
   );
 
@@ -3411,7 +3423,7 @@ async function explodedStorageChecks(chrome, origin) {
   const afterReload = await recordFor("Still_Running");
   check(
     "an exploded run survives a reload as itself, without being repacked",
-    afterReload !== null && afterReload.entries > 30 && afterReload.zipped === null,
+    afterReload !== null && afterReload.entries > 30 && !afterReload.whole,
     JSON.stringify(afterReload),
   );
 
@@ -3435,7 +3447,7 @@ async function explodedStorageChecks(chrome, origin) {
   const pending = (await records()).filter((r) => r.entries !== null && r.entries < 5);
   check(
     "a pending experiment is stored exploded too — it hasn't started, so nothing is packed",
-    pending.length === 1 && pending[0].zipped === null && pending[0].entries >= 1,
+    pending.length === 1 && !pending[0].whole && pending[0].entries >= 1,
     JSON.stringify(pending),
   );
   cdp.close();

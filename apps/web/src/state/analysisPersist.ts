@@ -18,7 +18,7 @@
 import { writeZpcrwebSettings, type ZpcrArchive } from "@zpcrweb/core";
 import { putFile, type FileIdentity } from "./db";
 import { zpcrwebFromAnalysis, type AnalysisSettings } from "./analysisSettings";
-import { runContent, toStoredContent } from "./fileContent";
+import { archiveContent, toStoredContent } from "./fileContent";
 import { WriteThrottle } from "./writeThrottle";
 
 /** At most one archive rewrite per file per minute. */
@@ -59,7 +59,7 @@ export class AnalysisPersister {
         // Not writable (a `.pcrd`, or a file that's since been removed): drop the pending edit
         // rather than retrying forever. The in-memory value stays live for this session.
         if (!target) return;
-        const content = runContent(
+        const content = archiveContent(
           writeZpcrwebSettings(target.files, zpcrwebFromAnalysis(target.settings)),
         );
         // `size` is deliberately left at the stored value rather than the rewritten length: it is

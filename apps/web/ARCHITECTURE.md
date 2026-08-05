@@ -148,9 +148,9 @@ The active file and selected view live in the URL hash as a **query string**, no
 optional and order-independent (an old link degrades instead of failing to parse), and more
 shareable state can be added later without inventing path segments.
 
-The file is identified by **name**, not by the store's `id` — `fileId()` hashes name+size, so
-ids aren't portable between browsers. Files themselves live only in IndexedDB and can't be
-fetched from a link, so a hash naming a file the user hasn't loaded falls back to the default
+The file is identified by **name**, which is also its key in IndexedDB — so `#file=` names a
+stored record directly, with nothing to resolve. Files themselves live only in IndexedDB and can't
+be fetched from a link, so a hash naming a file the user hasn't loaded falls back to the default
 active file while still honoring the `view`.
 
 `useZpcrStore` syncs both directions, each guarded by an "is it already that value?" check so
@@ -414,8 +414,8 @@ alongside `"zpcr"`/`"pcrd"`:
   context, not the caller's taste: an icon among icons reads as one of a set, an icon by itself on
   an otherwise empty panel is the only thing on screen to find and needs its label.
   Either path ends by wrapping the chosen bytes in a `File`
-  and calling `store.attachPlate(fileId, file)`, which rewrites the run's own archive via core's
-  `attachPlate` (see root `ARCHITECTURE.md`) and re-persists it under the same file id.
+  and calling `store.attachPlate(fileName, file)`, which rewrites the run's own archive via core's
+  `attachPlate` (see root `ARCHITECTURE.md`) and re-persists it under the same name.
   There is **no separate override state** — once
   attached, the plate is just part of the run's `.zpcr` bytes, so `zpcr.plates()` picks it up the
   same way it would an originally-embedded `.pltd`, and `CurvesView`'s
@@ -477,7 +477,7 @@ invariant rather than left to be inferred from the store.
 | --- | ---------- | -------------- | -------------- |
 | **files** (the catalog) | every file this browser holds | the **Files** tab (`FilesTableView`) | `ZpcrStore.files` — `FileEntry[]`, metadata only |
 | **loaded files** | those whose bytes are in memory and decoded | the **file bar** (`FileBar`), one chip each | `ZpcrStore.loaded` — `LoadedFile[]`, with `bytes` |
-| **the selection** | exactly one loaded file, or none | the cyan chip; every tab of the **view bar** | `ZpcrStore.activeId` / `active` |
+| **the selection** | exactly one loaded file, or none | the cyan chip; every tab of the **view bar** | `ZpcrStore.activeName` / `active` |
 
 The two bars are named after those sets and are referred to by those names throughout the code:
 the **view bar** is the tab strip (`components/ViewBar.tsx`), the **file bar** is the row of chips
@@ -493,7 +493,7 @@ under it (`components/FileBar.tsx`).
    a table.
 2. **Everything the catalog shows comes from a cached summary.** At the one moment a file *is*
    decoded, `lib/fileSummary.ts` reduces it to a `FileSummary` — name, run date, protocol name,
-   plate name, targets, samples, read count, run state, encryption — and `db.ts`'s `updateEntry`
+   plate name, targets, samples, read count, run state, encryption — and `db.ts`'s `updateFile`
    caches it on the file's catalog record. That is what the Files table renders, loaded or not. It is refreshed
    on every load and whenever the decode changes (a password landing, a plate attached, a name
    typed), and written synchronously when a file is *released*, since after that there is nothing
@@ -545,17 +545,16 @@ plate entries and attach"), and the globally-selected view (`view`/`setView`, pl
 not persisted, and not part of the per-file settings map, so switching files never changes which
 view is showing). `state/db.ts` is a minimal IndexedDB wrapper with **two** object stores:
 
-- `files` — `{ id }` plus the file's content and nothing else, so files survive reloads and are
-  re-parsed (`parseZpcr`/`parsePcrd`/`parsePltd`/`parsePlateCsv`, by the catalog's `kind`) when
-  loaded. The content is either **raw bytes** (`bytes`) or, for a run still being written to, its
-  **archive entries individually** (`files`) — see "Runs still being written are stored exploded"
-  below. **Read one id at a time** (`getFileContent`), never in bulk: this store is the expensive
+- `content` — the bytes, keyed `[name, entry]`: **one record per archive entry**. A `.zpcr` has
+  ~40 of them, one per entry; every other kind has a single record under the `WHOLE_FILE` sentinel
+  entry (U+0000). Files survive reloads and are re-parsed (`parseZpcrArchive`/`parsePcrd`/
+  `parsePltd`/`parsePlateCsv`, by the catalog's `kind`) when loaded. **Read one file at a time**
+  (`getContent`, a range read over that file's keys), never in bulk: this store is the expensive
   one, and only the loaded set ever touches it.
 - `catalog` — everything else the app knows about a file, one small record each
-  (`StoredEntry`), read whole on startup by `getAllEntries()`:
-  - **identity** — `{ id, name, size, addedAt, lastModified, kind }`. `id` is a `name:size` key,
-    which also dedupes re-adding the same file (an attach changes `size`, so re-persisting after
-    one just writes the same `id` again — no separate override record to keep in sync, see above).
+  (`StoredFile`), read whole on startup by `getAllFiles()`:
+  - **identity** — `{ name, size, addedAt, lastModified, kind }`. The **name is the key**, in both
+    stores — see "A file is its name" below. `size` is reported only; nothing is keyed on it.
   - **`summary?`** — the cached decode described under "Files, loaded files, and the one selection"
     above, and what the Files table draws. Absent until the file has been loaded once.
   - **`modified` / `loaded`** — not display state: whether this file's *content* has been edited
@@ -569,24 +568,48 @@ view is showing). `state/db.ts` is a minimal IndexedDB wrapper with **two** obje
     stored, since it's always the auto-detected linear fit) are independent settings — see "Two
     baseline concepts" under Reference view. Writes are debounced by 300 ms.
 
-**Content is the only thing worth a store of its own.** `getAllEntries()` lists the whole catalog
+**Content is the only thing worth a store of its own.** `getAllFiles()` lists the whole catalog
 in one `getAll()`, and IndexedDB has no way to fetch part of a record — a store holding the bytes
 too would clone every archive in the database on that call. Everything that *isn't* bytes is one
-record per file, so a rename or a release is one write, and identity can't disagree with itself.
+record per file, so a release is one write and identity can't disagree with itself.
 
-**`view` is kept only while `loaded` is true.** Releasing a file drops it (`updateEntry(id, { view:
+**`view` is kept only while `loaded` is true.** Releasing a file drops it (`updateFile(name, { view:
 undefined })`), and re-loading the file starts from defaults. Everything that changes a reported
 number lives in the run's own archive and survives (see "Analysis state lives in the file" below);
 which wells you had hidden is a property of *looking at* the run, and lasts as long as you are.
 This also keeps the largest field off the records in the one query that has to stay cheap.
 
-Every catalog write is a read-modify-write that merges into what's stored, and several fire at once
-on one file — releasing it writes the flags, the summary and the dropped view from three places in
-the same tick. `db.ts`'s `serializeCatalog` chains them per id so a later write can't read a stale
-"before" record and undo an earlier one.
+Every write here is a read-modify-write — a catalog write merges into what is stored, and a content
+write reads back the entry keys it should delete — and several fire at once on one file: releasing
+it writes the flags, the summary and the dropped view from three places in the same tick. `db.ts`'s
+`serializeWrites` chains them per file so a later write can't read a stale "before" record and undo
+an earlier one. Deletes are on the same chain, or a delete racing a put would leave the row it just
+removed resurrected by the put's merge.
 
-Deleting a file removes its `files` and `catalog` records and drops it from both the catalog and
-memory — exposed as the Files table's two-click delete.
+Deleting a file removes its whole `content` range and its `catalog` record, and drops it from both
+the catalog and memory — exposed as the Files table's two-click delete.
+
+### A file is its name
+
+A file's **name is its identity**, and its key in both stores. There is no id.
+
+The app has always required names to be unique: adding a file supersedes whatever held its name,
+`lib/cloneName.ts` invents `(2)`/`(3)` precisely to avoid a collision, and `#file=` addresses a file
+by name. A separate id was a second identity layered over one the app already maintained — and the
+id it derived, `name:size`, hashed the file's *content size*, so a run being written to took a new
+key on every plate read. Each cycle therefore deleted the whole previous record, wrote a fresh one,
+and dropped everything else keyed by the old id: the run's display settings reset once per read, and
+a threshold edit inside the 60 s write window was discarded outright.
+
+What a same-name arrival *means* is now stated rather than derived. `useZpcrStore`'s `install` takes
+a `replacing` flag:
+
+- **a snapshot** (`addRunArchive`) keeps the record's summary, view settings and modified flag —
+  they belong to the file, not to this snapshot of it;
+- **a drop** (`addFiles`) is a different file that happens to share a name, so all of that is reset.
+
+A rename is the one edit that *moves* a file's records rather than rewriting them; `renameFile`
+writes the content under the new name and deletes the old, carrying the settings across.
 
 ### The schema is not migrated
 
@@ -603,37 +626,39 @@ and re-picking their view settings, and costs them nothing that isn't recoverabl
 > **Future:** once the app ships to people who keep files only in the browser, this becomes a real
 > upgrade path, and the stored types go back to tolerating older shapes.
 
-### Runs still being written are stored exploded
+### A `.zpcr` is stored as its entries, never as a ZIP
 
 A `.zpcr` is a ZIP of ~40 entries, and the app *writes* to it: a plate read arrives every cycle of
-a live run, an experiment is named, a protocol is typed at, a threshold is dragged. Held as bytes,
-each of those edits costs an unzip of the whole archive, a change to one entry and a re-zip of
-everything else, on the main thread — a 45-cycle run paying that once per cycle to append files it
-was handed already decompressed.
+a live run, an experiment is named, a protocol is typed at, a threshold is dragged. Held as ZIP
+bytes, each of those edits costs an unzip of the whole archive, a change to one entry and a re-zip
+of everything else, on the main thread — a 45-cycle run paying that once per cycle to append files
+it was handed already decompressed.
 
-So a run that is still being written to is stored **exploded**: its entries as they are, one value
-each in the record, and no ZIP anywhere. This is a property of the *record*, orthogonal to whether
-the file is loaded (above): a released run's entries sit in IndexedDB exactly as they were, and
-loading one hands them back without a decompress. `state/fileContent.ts` owns the whole of it — the
-`FileContent` union (`{bytes}` or `{files}`) that a `LoadedFile` holds, the conversions, and the
-single rule that decides which form a `.zpcr` takes, read from the archive's own markers and nothing else (core's `runProgressFromNames`, the
-same derivation `inProgressIds`/`pendingIds` use, so there is no second source of truth):
+So a `.zpcr` is held as its entries and stored as its entries, one `content` record each. Appending
+a plate read is `{...files, [name]: bytes}`; parsing it (`parseZpcrArchive`) decompresses nothing,
+because nothing is compressed. `state/fileContent.ts` owns the whole of it — the `FileContent` union
+a `LoadedFile` holds and the conversions to and from what is stored. The union's discriminator is
+what the file *is* (`archive: true` for a `.zpcr`, `false` for everything else), not what state its
+run is in: there is no longer a rule about when a run changes form, because it never does.
 
-| Run state | Marker files | Stored as |
-| --------- | ------------ | --------- |
-| pending (an experiment being prepared) | no `begun` | exploded |
-| in progress (a run being followed) | `begun`, no `ended` | exploded |
-| finished | `ended` | zipped, as a `.zpcr` on disk is |
+**Nothing is stored zipped, including finished runs.** A run used to collapse into a single ZIP
+record once it carried `ended`, on the reasoning that a finished archive is worth compressing. The
+browser does that itself now: since Chrome 129 IndexedDB compresses stored values, including the
+large ones that previously went to disk as plain files
+([announcement](https://developer.chrome.com/docs/chromium/indexeddb-storage-improvements)). Our
+DEFLATE was a second compression pass over data the platform was about to compress anyway, and the
+**JS inflate on every load** was the expensive half of it. Storing entries hands both to the
+platform: no zip at the end of a run, no inflate when a file is opened, and one less rule.
 
-The collapse back to a ZIP happens automatically on the write that first carries `ended` — the
-end-of-run pass in `useRunWatch`. A finished archive is worth compressing (~400 KB against ~1.1 MB)
-and is not going to be appended to again.
+What it costs is disk — the browser's compressor optimizes for speed over ratio, so it will not
+match DEFLATE — and, for a loaded *finished* run, memory: its entries are held unpacked (~1.9 MB for
+the RVP sample) where the ZIP bytes used to be (~410 KB). Both are bounded by the loaded set.
 
-**None of this is visible to the user.** The two forms are the same archive: `contentBytes` zips an
-open one on demand, which is what download, clone and any hand-off to `addFiles` get, so a `.zpcr`
-leaving the browser is an ordinary `.zpcr` either way. The one place it shows through is the size
-the app reports for a run in progress, which is what its entries add up to rather than what they
-would zip to — the zipped length isn't known without doing the zip the open form exists to avoid.
+**None of this is visible to the user.** `contentBytes` zips on demand, which is what download,
+clone and any hand-off to `addFiles` get, so a `.zpcr` leaving the browser is an ordinary `.zpcr`.
+The one place it shows through is the size the app reports for a `.zpcr`, which is what its entries
+add up to uncompressed — the zipped length is not knowable without doing the zip that storing
+entries exists to avoid, and the unpacked number is the honest answer to what the file costs here.
 
 The core library is the other half of this, and it made the same choice: its one currency is the
 unpacked archive (`ZpcrArchive`), every writer takes and returns one (`attachPlate`,
@@ -739,8 +764,8 @@ so every call site keeps writing one `onChange({ … })` regardless of where the
   policy on a 2-second window — a `.prcl.txt` is a few hundred bytes, not a re-zipped archive);
   `analysisPersist.ts` keeps only what is specific to `zpcrweb.json`. The rewritten bytes go to IndexedDB only —
   never back into `files` state, where they would re-parse the run and rebuild every derived
-  value on each save. `size` is deliberately left at the loaded file's size so `fileId()` still
-  dedupes a re-add of the same file.
+  value on each save. `size` is deliberately left at the loaded file's size: it is what the UI
+  labels, and re-adding the same file should still read as the same file.
 - **Every other write carries them too.** Because the in-memory archive never holds the settings
   entry, a write made for some *other* reason — a rename, a protocol edit, a plate read arriving —
   would otherwise store an archive with `zpcrweb.json` missing and silently drop the run's name and
@@ -1028,10 +1053,11 @@ turns the info table's "Filename" row into an edit-in-place input (the same comm
 Escape-reverts pattern as the name field), and calls `ZpcrStore.renameFile`. For a `.prcl.txt` or
 a standalone plate it is the *only* identity there is to edit, neither kind having a stored name.
 Renaming the *file* is a bigger operation than
-it looks: ids hash name+size (`db.ts`'s `fileId`), so a new name means a new id, and `renameFile`
-migrates every id-keyed map (`settingsMap`, `analysisMap`, `activeId`, the analysis persister's
-pending writes) rather than just patching `LoadedFile.name` in place — the same supersede-by-id
-logic `addFiles` uses for a same-named re-upload handles a rename that collides with an
+it looks: the name **is** the key (`db.ts`'s `FileIdentity`), so a rename re-keys the file, and
+`renameFile` migrates every name-keyed map (`settingsMap`, `analysisMap`, `activeName`, the analysis
+persister's pending writes) rather than just patching `LoadedFile.name` in place — the same
+supersede-by-name logic `addFiles` uses for a same-named re-upload handles a rename that collides
+with an
 already-loaded file. It marks the file `modified`, since a download now writes different
 bytes-under-a-name than what's on disk under the old one.
 
@@ -2410,10 +2436,9 @@ the two listings are identical, so only the live transition tells them apart —
 
 Each changed listing is pulled with `zpcrFromRunFiles` and handed to `store.addRunArchive`
 as the archive it already is — the same validate → IndexedDB path a drop takes, minus the ZIP: the
-store keeps a run in progress open (see "Runs still being written are stored exploded"), so a
-cycle's cost is the one plate read that arrived rather than a re-zip of the whole run. The
-end-of-run pass is the first snapshot carrying `ended`, and so the one that becomes an ordinary
-zipped `.zpcr`.
+store holds a `.zpcr` as its entries (see "A `.zpcr` is stored as its entries, never as a ZIP"), so
+a cycle's cost is the one plate read that arrived rather than a re-zip of the whole run. The
+snapshots are all one file under one name, so they are one record, rewritten in place.
 
 **What the snapshot is called** is decided by `core`'s `runFolder.ts`, in three rungs: the file
 name typed in the Instrument view, then `<YYYYMMDD>-<experiment name>` derived from the folder's
@@ -2470,8 +2495,8 @@ halves of this:
   tab — switching files is never blocked: reading Curves while a run cycles is the point of the
   connection staying open across tabs, and pinning the selection there would defeat it.
 - Since the selection can roam freely elsewhere, an effect in `App` snaps it back on *arrival*:
-  switching to the Instrument view while `runActive` sets `activeId` to `runWatch.fileId` (the
-  watcher's own record of what it last put in the store), not `store.activeId` — the two can have
+  switching to the Instrument view while `runActive` sets `activeName` to `runWatch.fileName` (the
+  watcher's own record of what it last put in the store), not `store.activeName` — the two can have
   drifted, since a snapshot pulled while the user was elsewhere doesn't activate itself
   (`AddFilesOptions.activate`). The effect is keyed on `store.view` alone so it fires once on
   arrival rather than on every later snapshot of the same run.
