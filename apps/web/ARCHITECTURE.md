@@ -579,6 +579,26 @@ number lives in the run's own archive and survives (see "Analysis state lives in
 which wells you had hidden is a property of *looking at* the run, and lasts as long as you are.
 This also keeps the largest field off the records in the one query that has to stay cheap.
 
+**A write costs what changed, not what the file is.** `putFile` takes the set of entries the caller
+actually touched (`fileContent.ts`'s `changedEntries`) and leaves the rest of the records alone, so
+appending a plate read is *one* ~22 KB put rather than forty. The set is derived **by reference**:
+entry bytes are never mutated in place — `useRunWatch` caches entry bytes by name and rebuilds only
+the wrapper object, and every writer in `packages/core` builds a new archive by spread — so an
+untouched entry is the same `Uint8Array` object it was, and a cycle is ~41 pointer comparisons and
+one real change. It is derived rather than declared on purpose: each caller does know what it
+touched, but a caller that forgot to mention something would silently fail to persist it.
+
+It is an optimization and only an optimization. *Which entries exist* is read from IndexedDB itself
+(`getAllKeys` over the file's range — keys only, no values cloned), so an entry the store is missing
+is written whatever the change set says, and being wrong can only cost a redundant put. The first
+snapshot after a reload writes the whole archive, because the run watcher's cache is empty and every
+array is genuinely new.
+
+Two writers each hand the store a *complete* archive, so whichever lands second decides which
+entries exist. `addRunArchive` therefore flushes any pending analysis write before installing a
+snapshot — otherwise a threshold edit flushing afterwards would be working from an archive without
+the plate read that just arrived. Same precedent as `renameFile` and `setRunProtocolName`.
+
 Every write here is a read-modify-write — a catalog write merges into what is stored, and a content
 write reads back the entry keys it should delete — and several fire at once on one file: releasing
 it writes the flags, the summary and the dropped view from three places in the same tick. `db.ts`'s

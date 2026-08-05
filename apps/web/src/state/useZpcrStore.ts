@@ -64,6 +64,7 @@ import {
   parseContent,
   archiveContent,
   toStoredContent,
+  changedEntries,
   plainContent,
   type FileContent,
 } from "./fileContent";
@@ -337,12 +338,23 @@ function identityOf(file: LoadedFile): FileIdentity {
   };
 }
 
-/** Persist a loaded file — the one place a `db.ts` write is assembled from a {@link LoadedFile}, so
- * the choice of storage representation is made once (`toStoredContent`) rather than at each of
- * the dozen call sites that persist a file. `analysis` is the file's file-backed settings, layered
- * in on the way out; see {@link contentToStore} for why every write has to carry them. */
-function persistFile(file: LoadedFile, analysis?: AnalysisSettings): Promise<void> {
-  return putFile(identityOf(file), toStoredContent(contentToStore(file, analysis)));
+/**
+ * Persist a loaded file — the one place a `db.ts` write is assembled from a {@link LoadedFile}, so
+ * the choice of storage representation is made once (`toStoredContent`) rather than at each of the
+ * dozen call sites that persist a file. `analysis` is the file's file-backed settings, layered in
+ * on the way out; see {@link contentToStore} for why every write has to carry them.
+ *
+ * `previous` is the version this one replaces, when there is one — the entries it shares with this
+ * write are already stored and are left alone (`changedEntries`). Omitting it writes the whole
+ * file, which is what a file arriving for the first time needs.
+ */
+function persistFile(
+  file: LoadedFile,
+  analysis?: AnalysisSettings,
+  previous?: FileContent,
+): Promise<void> {
+  const content = toStoredContent(contentToStore(file, analysis));
+  return putFile(identityOf(file), content, changedEntries(previous, content));
 }
 
 /**
@@ -1305,6 +1317,12 @@ export function useZpcrStore(): ZpcrStore {
       options: { modified: boolean; replacing: boolean },
     ): Promise<string> => {
       const prior = entriesRef.current.find((f) => f.name === file.name);
+      // The version this write replaces, read before the loaded set moves on — what tells the store
+      // which entries are already on disk (`persistFile`). A replacement shares nothing meaningful
+      // with what it replaces, so it is written whole.
+      const previous = options.replacing
+        ? undefined
+        : loadedRef.current.find((f) => f.name === file.name)?.content;
       if (options.replacing && prior) {
         // A pending write belongs to content that no longer exists: drop it rather than let it
         // flush onto the file that has just taken its place.
@@ -1320,10 +1338,6 @@ export function useZpcrStore(): ZpcrStore {
         setSettingsMap((prev) => ({ ...prev, [file.name]: defaultSettings() }));
         await updateFile(file.name, { summary: undefined, view: undefined, modified: false });
       }
-      // Normally nothing to layer in — a file arriving from disk hasn't been seeded yet, and its
-      // own `zpcrweb.json` (if it has one) is already in the bytes. A snapshot of a run we are
-      // following keeps whatever was typed against it, which is exactly what must not be lost.
-      await persistFile(file, options.replacing ? undefined : analysisRef.current[file.name]);
       const entry: FileEntry = {
         name: file.name,
         size: file.size,
@@ -1334,6 +1348,14 @@ export function useZpcrStore(): ZpcrStore {
         // say yet. Refreshed either way by the summary effect once the new content parses.
         summary: options.replacing ? null : prior?.summary ?? null,
       };
+      // Normally nothing to layer in — a file arriving from disk hasn't been seeded yet, and its
+      // own `zpcrweb.json` (if it has one) is already in the bytes. A snapshot of a run we are
+      // following keeps whatever was typed against it, which is exactly what must not be lost.
+      await persistFile(
+        file,
+        options.replacing ? undefined : analysisRef.current[file.name],
+        previous,
+      );
       setEntries((prev) => {
         entriesRef.current = [...prev.filter((f) => f.name !== file.name), entry];
         return entriesRef.current;
@@ -1356,7 +1378,8 @@ export function useZpcrStore(): ZpcrStore {
    */
   const commitContent = useCallback(
     async (next: LoadedFile) => {
-      await persistFile(next, analysisRef.current[next.name]);
+      const previous = loadedRef.current.find((f) => f.name === next.name)?.content;
+      await persistFile(next, analysisRef.current[next.name], previous);
       setLoadedFiles((prev) => {
         loadedRef.current = replaceFile(prev, next);
         return loadedRef.current;
@@ -1452,6 +1475,12 @@ export function useZpcrStore(): ZpcrStore {
         // A run's snapshots are one file getting longer under one name, so they are one record,
         // rewritten in place. Nothing about the key moves as the run grows — which is what keeps a
         // plate read from costing a delete, a full rewrite, and the run's own display settings.
+        //
+        // Settle any pending analysis write first. Both it and this snapshot hand the store a
+        // *complete* archive, so whichever lands second decides which entries exist — and a
+        // threshold edit flushing after this one would be working from an archive without the plate
+        // read that just arrived. Same precedent as `renameFile` and `setRunProtocolName`.
+        await persister.current!.flush(name);
         const previous = entriesRef.current.find((f) => f.name === name);
         const installed = await install(
           {

@@ -10,15 +10,15 @@
  *
  * At most one archive rewrite per file per minute; a continuously-dragged slider therefore costs
  * one rewrite per minute, and the last position always lands because the trailing write reads
- * current state rather than a captured value. (A run still in progress is held open rather than
- * zipped — `fileContent.ts` — so its rewrite is one small JSON entry and a re-put of entries the
- * app already has; the throttle still applies, since the IndexedDB write itself is the cost there.)
+ * current state rather than a captured value. (The write itself is now one small record —
+ * `zpcrweb.json` and nothing else, see below — so what the throttle is really rate-limiting is the
+ * rewrite of the in-memory archive and the churn it causes downstream, not the IndexedDB cost.)
  */
 
 import { writeZpcrwebSettings, type ZpcrArchive } from "@zpcrweb/core";
 import { putFile, type FileIdentity } from "./db";
 import { zpcrwebFromAnalysis, type AnalysisSettings } from "./analysisSettings";
-import { archiveContent, toStoredContent } from "./fileContent";
+import { archiveContent, changedEntries, toStoredContent } from "./fileContent";
 import { WriteThrottle } from "./writeThrottle";
 
 /** At most one archive rewrite per file per minute. */
@@ -59,14 +59,17 @@ export class AnalysisPersister {
         // Not writable (a `.pcrd`, or a file that's since been removed): drop the pending edit
         // rather than retrying forever. The in-memory value stays live for this session.
         if (!target) return;
-        const content = archiveContent(
-          writeZpcrwebSettings(target.files, zpcrwebFromAnalysis(target.settings)),
+        const content = toStoredContent(
+          archiveContent(writeZpcrwebSettings(target.files, zpcrwebFromAnalysis(target.settings))),
         );
         // `size` is deliberately left at the stored value rather than the rewritten length: it is
-        // the size of the file the user loaded (what the UI labels, and what `fileName()` hashes),
-        // and re-adding that same file from disk should still resolve to this record instead of
-        // creating a duplicate that differs only by however many bytes of settings we added.
-        await putFile(target.identity, toStoredContent(content));
+        // the size of the file the user loaded, which is what the UI labels, and adding however
+        // many bytes of settings to it would be a change the user has no way to account for.
+        //
+        // The write itself is one record. `writeZpcrwebSettings` returns the archive it was given
+        // with one entry replaced, so every other entry is the same array it already was and the
+        // delta comes out as `zpcrweb.json` alone — a few hundred bytes, whatever the run's size.
+        await putFile(target.identity, content, changedEntries(archiveContent(target.files), content));
       },
     });
   }

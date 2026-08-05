@@ -145,3 +145,35 @@ export function fromStoredContent(stored: FileBytes): FileContent {
   const bytes = stored[WHOLE_FILE];
   return bytes !== undefined ? plainContent(bytes) : archiveContent(stored);
 }
+
+/**
+ * Which of `next`'s entries differ from the version last persisted — what lets appending a plate
+ * read cost one record instead of forty.
+ *
+ * **By reference.** Entry bytes are never mutated in place (see the module comment), so an entry
+ * the app didn't touch is the *same* `Uint8Array` object it was: `useRunWatch` caches entry bytes
+ * by name and rebuilds only the wrapper object, and every writer in `packages/core` builds a new
+ * archive by spread. A cycle is therefore ~41 pointer comparisons and one real change.
+ *
+ * `undefined` means "no previous version to compare against" — write everything. That is a fresh
+ * drop, and also the first snapshot after a reload, where the run watcher's cache is empty and
+ * every array is genuinely new.
+ *
+ * Derived rather than declared on purpose: each caller does know what it touched, but a caller that
+ * forgot to mention something would silently fail to persist it, and that is a worse failure than a
+ * redundant write. The answer is only ever *skip*-or-*write* for an entry the store already has —
+ * which entries exist at all is read from IndexedDB, not from this (see `db.ts`'s `putFile`) — so
+ * being wrong here costs a redundant put and can never lose one.
+ */
+export function changedEntries(
+  previous: FileContent | undefined,
+  next: FileBytes,
+): ReadonlySet<string> | undefined {
+  if (!previous) return undefined;
+  const before = toStoredContent(previous);
+  const changed = new Set<string>();
+  for (const [entry, bytes] of Object.entries(next)) {
+    if (before[entry] !== bytes) changed.add(entry);
+  }
+  return changed;
+}

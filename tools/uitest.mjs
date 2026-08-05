@@ -3377,6 +3377,49 @@ async function explodedStorageChecks(chrome, origin) {
     JSON.stringify(opened),
   );
 
+  // ── Only what changed is written ───────────────────────────────────────────────────────────
+  //
+  // The claim is that an edit rewrites the one entry it touched and leaves the other ~41 alone.
+  // From outside there is no way to watch a write, so instead: poison an entry nobody is about to
+  // edit, directly in IndexedDB, then make an edit and read that entry back. If it still holds the
+  // sentinel, the write skipped it. Before the delta this check would fail — every entry was
+  // re-put on every write, and the poison would have been overwritten with the real bytes.
+  const poison = async (file, entry) =>
+    cdp.eval(
+      `new Promise((res) => { const q = indexedDB.open("zpcrweb");
+         q.onsuccess = () => { const db = q.result;
+           const s = db.transaction("content", "readwrite").objectStore("content");
+           const g = s.get([${JSON.stringify(file)}, ${JSON.stringify(entry)}]);
+           g.onsuccess = () => { const r = g.result;
+             r.bytes = new Uint8Array([0xde, 0xad, 0xbe, 0xef]);
+             s.put(r); res(true); }; }; })`,
+      { awaitPromise: true },
+    );
+  const entryNames = async (file) =>
+    cdp
+      .eval(
+        `new Promise((res) => { const q = indexedDB.open("zpcrweb");
+           q.onsuccess = () => { const db = q.result;
+             const g = db.transaction("content", "readonly").objectStore("content")
+               .getAllKeys(IDBKeyRange.bound([${JSON.stringify(file)}], [${JSON.stringify(file)}, []]));
+             g.onsuccess = () => res(JSON.stringify(g.result.map((k) => k[1]))); }; })`,
+        { awaitPromise: true },
+      )
+      .then(JSON.parse);
+  const entryBytes = async (file, entry) =>
+    cdp.eval(
+      `new Promise((res) => { const q = indexedDB.open("zpcrweb");
+         q.onsuccess = () => { const db = q.result;
+           const g = db.transaction("content", "readonly").objectStore("content")
+             .get([${JSON.stringify(file)}, ${JSON.stringify(entry)}]);
+           g.onsuccess = () => res(g.result ? g.result.bytes.byteLength : -1); }; })`,
+      { awaitPromise: true },
+    );
+  const runFile = (await recordFor("Still_Running")).name;
+  // Any calibration entry will do — they are the bulk of the archive and nothing here touches them.
+  const untouched = (await entryNames(runFile)).find((n) => n.endsWith(".Dcal"));
+  await poison(runFile, untouched);
+
   // Editing it must not force it back into a ZIP: renaming the experiment rewrites one JSON entry.
   await setExperimentName(cdp, "Still Running Renamed");
   await waitFor(() => chipPresent(cdp, "Still Running Renamed"), { what: "the renamed chip" });
@@ -3384,9 +3427,15 @@ async function explodedStorageChecks(chrome, origin) {
   // Looked up by file name, which a renamed *experiment* doesn't change — the chip's label does.
   const edited = await recordFor("Still_Running");
   check(
-    "editing a run in progress leaves it exploded, never re-zipping it",
+    "editing a run in progress leaves it as entries, never re-zipping it",
     edited !== null && edited.entries > 30 && !edited.whole,
     JSON.stringify(edited),
+  );
+  const survived = await entryBytes(runFile, untouched);
+  check(
+    "…and rewrites only the entry it touched, leaving the other 41 records alone",
+    survived === 4,
+    `${untouched}: ${survived} bytes (4 = the sentinel survived, ~31000 = it was rewritten)`,
   );
 
   // The one thing that has to be true for any of this to be safe: what leaves the browser is a
