@@ -6,6 +6,9 @@ interface Props {
   /** Every loaded file — filtered down to `.prcl.txt` entries to list. */
   files: LoadedFile[];
   compactLabel: string;
+  /** Bare icon in a box instead of a labelled chip, with the label as its tooltip — see
+   * `AttachPlateMenu`'s `iconOnly`, which this mirrors. */
+  iconOnly?: boolean;
   /** True when a protocol is already attached, so choosing another discards it — the menu asks
    * for confirmation first, exactly as `AttachPlateMenu` does for a plate. */
   confirmReplace: boolean;
@@ -35,6 +38,7 @@ interface Pending {
 export function AttachProtocolMenu({
   files,
   compactLabel,
+  iconOnly,
   confirmReplace,
   onSelect,
   onUpload,
@@ -72,15 +76,19 @@ export function AttachProtocolMenu({
   return (
     <details className="dlmenu" ref={detailsRef}>
       <summary
-        className="dropzone"
+        className={iconOnly ? "raw__download" : "dropzone"}
         title={compactLabel}
         aria-label={compactLabel}
         onClick={() => setPending(null)}
       >
-        <span className="dropzone__compact mono">
+        {iconOnly ? (
           <UploadIcon />
-          <span className="dropzone__compact-label">{compactLabel}</span>
-        </span>
+        ) : (
+          <span className="dropzone__compact mono">
+            <UploadIcon />
+            <span className="dropzone__compact-label">{compactLabel}</span>
+          </span>
+        )}
       </summary>
       <div className="dlmenu__list dlmenu__list--wide">
         {pending ? (

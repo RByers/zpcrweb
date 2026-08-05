@@ -48,7 +48,14 @@ export function PlateDownloadButton({ plate, pltd, onClone }: Props) {
   return (
     <>
       <details className="dlmenu" ref={detailsRef}>
-        <summary className="raw__download" aria-label="Download plate">
+        <summary
+          className="raw__download"
+          aria-label="Download plate"
+          title={
+            "Download this plate — the original .pltd bytes when the run has them, or a .plt.csv " +
+            "written from the plate as it stands here"
+          }
+        >
           <DownloadIcon />
         </summary>
         <div className="dlmenu__list">

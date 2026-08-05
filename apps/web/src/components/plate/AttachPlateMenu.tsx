@@ -6,6 +6,12 @@ interface Props {
   /** Every loaded file — filtered down to `.pltd`/`.plt.csv` entries to list. */
   files: LoadedFile[];
   compactLabel: string;
+  /** Shrink the trigger to a bare icon in a box, the shape every other button on a view's toolbar
+   * has (`raw__download`) — the label survives as the tooltip. For the Plates/Protocol toolbars,
+   * where this sits beside download and clone and a labelled chip made it read as a different
+   * class of control. Overview's "Experiment parts" cards keep the labelled trigger: there it is
+   * the card's main action, with room for words and no icon row to match. */
+  iconOnly?: boolean;
   disabled?: boolean;
   disabledTitle?: string;
   /** True when a plate is already attached, so choosing a replacement discards it — the menu
@@ -38,6 +44,7 @@ interface Pending {
 export function AttachPlateMenu({
   files,
   compactLabel,
+  iconOnly,
   disabled,
   disabledTitle,
   confirmReplace,
@@ -76,7 +83,13 @@ export function AttachPlateMenu({
   };
 
   if (disabled) {
-    return (
+    // A real disabled <button> in the icon shape, so it greys out through `.raw__download:disabled`
+    // like the download and clone buttons it sits with, rather than needing a rule of its own.
+    return iconOnly ? (
+      <button className="raw__download" disabled title={disabledTitle} aria-label={compactLabel}>
+        <UploadIcon />
+      </button>
+    ) : (
       <div className="dropzone dropzone--disabled" title={disabledTitle} aria-disabled="true">
         <span className="dropzone__compact mono">
           <UploadIcon />
@@ -89,15 +102,19 @@ export function AttachPlateMenu({
   return (
     <details className="dlmenu" ref={detailsRef}>
       <summary
-        className="dropzone"
+        className={iconOnly ? "raw__download" : "dropzone"}
         title={compactLabel}
         aria-label={compactLabel}
         onClick={() => setPending(null)}
       >
-        <span className="dropzone__compact mono">
+        {iconOnly ? (
           <UploadIcon />
-          <span className="dropzone__compact-label">{compactLabel}</span>
-        </span>
+        ) : (
+          <span className="dropzone__compact mono">
+            <UploadIcon />
+            <span className="dropzone__compact-label">{compactLabel}</span>
+          </span>
+        )}
       </summary>
       <div className="dlmenu__list dlmenu__list--wide">
         {pending ? (

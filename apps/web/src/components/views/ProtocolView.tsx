@@ -131,6 +131,10 @@ export function ProtocolView({
         <AttachProtocolMenu
           files={files}
           compactLabel={protocolText ? "replace protocol" : "attach protocol"}
+          // Icon-only when it rides the heading line beside download and clone; labelled in the
+          // no-protocol state, where it stands alone and is the only thing there is to do. Same
+          // split `PlatesView` makes, for the same reason.
+          iconOnly={!!protocolText}
           confirmReplace={!!protocolText}
           onSelect={(f) => onAttachProtocol(new File([fileBytes(f).slice()], f.name))}
           onUpload={onAttachProtocol}

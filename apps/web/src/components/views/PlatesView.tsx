@@ -49,6 +49,11 @@ export function PlatesView({
       onSelect={(f) => void attachPlate(fileId, new File([fileBytes(f).slice()], f.name))}
       onUpload={(file) => void attachPlate(fileId, file)}
       compactLabel={entries.length === 0 ? "attach plate" : "replace plate"}
+      // Icon-only where it sits in the toolbar beside download and clone, so all three read as one
+      // row of controls. The empty state below has no such row — the control stands alone under a
+      // "no plate files" line, where a bare icon would be the only thing on screen to find — so
+      // there it keeps its label.
+      iconOnly={entries.length > 0}
       confirmReplace={entries.length > 0}
       disabled={!hasArchive}
       disabledTitle="This run has no file archive to attach a plate to"

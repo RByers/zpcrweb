@@ -404,7 +404,14 @@ alongside `"zpcr"`/`"pcrd"`:
   with no undo; a run with no plate yet skips the prompt, as there's nothing to lose. The menu
   also closes on an outside `mousedown`, like any other dismissable popover, rather than only on
   a second click on its own toggle — worth having regardless, but especially so once it can be
-  showing a destructive confirmation. Either path ends by wrapping the chosen bytes in a `File`
+  showing a destructive confirmation. **The trigger has two shapes** (`iconOnly`, shared with
+  `AttachProtocolMenu`): a bare upload icon in a `raw__download` box wherever it rides a view's
+  toolbar next to download and clone — three peers in one row, each a box around an icon with its
+  words in the tooltip — and the labelled `dropzone` chip wherever it stands alone, which is
+  Overview's "Experiment parts" cards and the Plates/Protocol empty states. The rule is the
+  context, not the caller's taste: an icon among icons reads as one of a set, an icon by itself on
+  an otherwise empty panel is the only thing on screen to find and needs its label.
+  Either path ends by wrapping the chosen bytes in a `File`
   and calling `store.attachPlate(fileId, file)`, which rewrites the run's own archive via core's
   `attachPlate` (see root `ARCHITECTURE.md`) and re-persists it under the same file id.
   There is **no separate override state** — once
