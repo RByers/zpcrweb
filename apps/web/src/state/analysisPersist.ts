@@ -16,7 +16,7 @@
  */
 
 import { writeZpcrwebSettings, type ZpcrArchive } from "@zpcrweb/core";
-import { putFile, type StoredFile } from "./db";
+import { putFile, type FileIdentity } from "./db";
 import { zpcrwebFromAnalysis, type AnalysisSettings } from "./analysisSettings";
 import { runContent, toStoredContent } from "./fileContent";
 import { WriteThrottle } from "./writeThrottle";
@@ -28,9 +28,9 @@ const MIN_INTERVAL_MS = 60_000;
  * a rewrite always uses the newest archive (e.g. after a plate was attached) and the newest
  * settings, never a value captured when the edit happened. */
 interface AnalysisFlushTarget {
-  /** The record to rewrite. Its content fields are ignored — {@link AnalysisFlushTarget.files} is
-   * the archive, and the representation to store it in is decided at write time. */
-  file: StoredFile;
+  /** Who the rewritten archive is being stored as — {@link AnalysisFlushTarget.files} is the
+   * archive itself, and the representation to store it in is decided at write time. */
+  identity: FileIdentity;
   /** The run's archive, open (`fileContent.ts`'s `contentFiles`). */
   files: ZpcrArchive;
   settings: AnalysisSettings;
@@ -66,7 +66,7 @@ export class AnalysisPersister {
         // the size of the file the user loaded (what the UI labels, and what `fileId()` hashes),
         // and re-adding that same file from disk should still resolve to this record instead of
         // creating a duplicate that differs only by however many bytes of settings we added.
-        await putFile({ ...target.file, ...toStoredContent(content) });
+        await putFile(target.identity, toStoredContent(content));
       },
     });
   }

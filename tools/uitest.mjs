@@ -3206,18 +3206,27 @@ async function explodedStorageChecks(chrome, origin) {
   const cdp = await openPage(chrome.base, origin);
   await emptyReload(cdp, origin);
 
-  /** Every stored record, as the shape of its content rather than its content. */
+  /**
+   * Every stored record, as the shape of its content rather than its content. The name comes from
+   * the `catalog` store and the shape from `files` — content and metadata are separate stores, so
+   * this joins them on the id they share (see `state/db.ts`).
+   */
   const records = () =>
     cdp
       .eval(
         `new Promise((res) => { const q = indexedDB.open("zpcrweb");
            q.onsuccess = () => { const db = q.result;
-             const g = db.transaction("files", "readonly").objectStore("files").getAll();
-             g.onsuccess = () => res(JSON.stringify(g.result.map((f) => ({
-               name: f.name,
-               zipped: f.bytes ? f.bytes.byteLength : null,
-               entries: f.files ? Object.keys(f.files).length : null,
-             })))); }; })`,
+             const t = db.transaction(["files", "catalog"], "readonly");
+             const g = t.objectStore("files").getAll();
+             const c = t.objectStore("catalog").getAll();
+             t.oncomplete = () => {
+               const names = new Map(c.result.map((e) => [e.id, e.name]));
+               res(JSON.stringify(g.result.map((f) => ({
+                 name: names.get(f.id) ?? "",
+                 zipped: f.bytes ? f.bytes.byteLength : null,
+                 entries: f.files ? Object.keys(f.files).length : null,
+               }))));
+             }; }; })`,
         { awaitPromise: true },
       )
       .then(JSON.parse);

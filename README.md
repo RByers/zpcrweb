@@ -162,8 +162,9 @@ view each several ways:
   ΔRFU baselining, Linear ↔ Log scale, and a hover/tap tooltip showing mean/min/max/std.
 - **Raw files** — a hex/ASCII (and text) viewer over every file in the archive.
 
-Loaded files and each file's view settings persist in **IndexedDB** across reloads; files
-can be deleted from storage from the file bar. Non-trivial logic lives in `@zpcrweb/core` —
+Files persist in **IndexedDB** across reloads, along with which of them were loaded and — for those
+— their view settings; files can be deleted from storage from the file bar. Everything that changes
+a reported number is written into the run's own file instead, so it travels with it. Non-trivial logic lives in `@zpcrweb/core` —
 see the [web architecture notes](./apps/web/ARCHITECTURE.md).
 
 ```sh

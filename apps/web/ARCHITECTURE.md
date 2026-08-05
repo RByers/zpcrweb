@@ -453,8 +453,8 @@ under it (`components/FileBar.tsx`).
    a table.
 2. **Everything the catalog shows comes from a cached summary.** At the one moment a file *is*
    decoded, `lib/fileSummary.ts` reduces it to a `FileSummary` — name, run date, protocol name,
-   plate name, targets, samples, read count, run state, encryption — and `db.ts`'s `putSummary`
-   caches it beside the file. That is what the Files table renders, loaded or not. It is refreshed
+   plate name, targets, samples, read count, run state, encryption — and `db.ts`'s `updateEntry`
+   caches it on the file's catalog record. That is what the Files table renders, loaded or not. It is refreshed
    on every load and whenever the decode changes (a password landing, a plate attached, a name
    typed), and written synchronously when a file is *released*, since after that there is nothing
    left to derive it from. A file that has never been loaded has no summary and renders as dashes —
@@ -503,42 +503,65 @@ files (`LoadedFile[]`, bytes in memory), the active file id, a per-file settings
 `runs`/`plateFiles` maps over the loaded set (see "The `.pcrd` password gate" above and "Standalone
 plate entries and attach"), and the globally-selected view (`view`/`setView`, plain `useState` —
 not persisted, and not part of the per-file settings map, so switching files never changes which
-view is showing). `state/db.ts` is a minimal IndexedDB wrapper with three object stores:
+view is showing). `state/db.ts` is a minimal IndexedDB wrapper with **two** object stores:
 
-- `files` — `{ id, name, size, addedAt, kind }` plus the file's content, so files survive reloads
-  and are re-parsed (`parseZpcr`/`parsePcrd`/`parsePltd`/`parsePlateCsv`, by `kind`) when loaded.
-  The content is either **raw bytes** (`bytes`) or, for a run still being written to, its
+- `files` — `{ id }` plus the file's content and nothing else, so files survive reloads and are
+  re-parsed (`parseZpcr`/`parsePcrd`/`parsePltd`/`parsePlateCsv`, by the catalog's `kind`) when
+  loaded. The content is either **raw bytes** (`bytes`) or, for a run still being written to, its
   **archive entries individually** (`files`) — see "Runs still being written are stored exploded"
-  below. `id` is a `name:size` key, which also dedupes re-adding the same file (an
-  attach changes `size`, so re-persisting after one just writes the same `id` again — no
-  separate override record to keep in sync, see above). `kind` defaults to `"zpcr"` for records
-  written before `.pcrd` support existed. **Read one id at a time** (`getFileContent`), never in
-  bulk: this store is the expensive one, and only the loaded set ever touches it.
-- `meta` — `{ id, name, size, addedAt, lastModified, kind, summary? }`, one small record per file,
-  read whole on startup. `summary` is the cached decode described under "Files, loaded files, and
-  the one selection" above, and is what the Files table draws. Added in DB version 2; the upgrade
-  seeds a record per existing file from the `files` store's own fields, deliberately without a
-  summary — deriving one would mean decoding, and decoding only happens on load.
-- `settings` — **display state** (plus the one `modified` flag noted below): `{ fileId,
-  enabledChannels[], enabledWells[],
-  enabledRefCols[], baseline, curveView, drawBaseline, scale, … }`, so each file remembers its
-  enabled wells/channels/reference columns. `baseline` (Reference view's factory-relative
-  ΔRFU/Drift %) and `curveView` (the Curves view's display mode — baselining itself is never
-  stored, since it's always the auto-detected linear fit) are independent settings — see "Two
-  baseline concepts" under Reference view. Two settings of the retired standalone Analysis view
-  are simply ignored when present: `analysisDisabledTargets[]` (its own target opt-out set, since
-  folded into the shared `disabledFluors`) and `analysisCqAlgorithm` (its Cq-algorithm selector —
-  Cq is always §6's threshold crossing now). Writes are debounced by 300 ms. Older records may
-  still carry the retired `curveBaseline`/`curveBaselineRange` fields (`state/db.ts`);
-  `useZpcrStore.ts`'s `fromStored()` migrates `curveBaseline: "raw"` to `curveView: "absolute"`
-  (anything else to `"relative"`) and drops the region override entirely.
+  below. **Read one id at a time** (`getFileContent`), never in bulk: this store is the expensive
+  one, and only the loaded set ever touches it.
+- `catalog` — everything else the app knows about a file, one small record each
+  (`StoredEntry`), read whole on startup by `getAllEntries()`:
+  - **identity** — `{ id, name, size, addedAt, lastModified, kind }`. `id` is a `name:size` key,
+    which also dedupes re-adding the same file (an attach changes `size`, so re-persisting after
+    one just writes the same `id` again — no separate override record to keep in sync, see above).
+  - **`summary?`** — the cached decode described under "Files, loaded files, and the one selection"
+    above, and what the Files table draws. Absent until the file has been loaded once.
+  - **`modified` / `loaded`** — not display state: whether this file's *content* has been edited
+    since it was loaded and not since downloaded (see "Deleting an edited file" below), and whether
+    its bytes are in memory. Both are kept for every file, and written straight through rather than
+    debounced.
+  - **`view?`** — display state (`StoredView`): `{ enabledChannels[], enabledWells[],
+    enabledRefCols[], baseline, curveView, drawBaseline, scale, … }`, so each file remembers its
+    enabled wells/channels/reference columns. `baseline` (Reference view's factory-relative
+    ΔRFU/Drift %) and `curveView` (the Curves view's display mode — baselining itself is never
+    stored, since it's always the auto-detected linear fit) are independent settings — see "Two
+    baseline concepts" under Reference view. Writes are debounced by 300 ms.
 
-Deleting a file removes its `files`, `meta` and `settings` records and drops it from both the
-catalog and memory — exposed as the Files table's two-click delete.
+**Content is the only thing worth a store of its own.** `getAllEntries()` lists the whole catalog
+in one `getAll()`, and IndexedDB has no way to fetch part of a record — a store holding the bytes
+too would clone every archive in the database on that call. Everything that *isn't* bytes is one
+record per file, so a rename or a release is one write, and identity can't disagree with itself.
 
-The `settings` record carries one field that isn't display state at all: `modified`, meaning this
-file's *content* has been edited since it was loaded and not since downloaded (see "Deleting an
-edited file" below). It rides there because that is the app's one per-file store keyed by id.
+**`view` is kept only while `loaded` is true.** Releasing a file drops it (`updateEntry(id, { view:
+undefined })`), and re-loading the file starts from defaults. Everything that changes a reported
+number lives in the run's own archive and survives (see "Analysis state lives in the file" below);
+which wells you had hidden is a property of *looking at* the run, and lasts as long as you are.
+This also keeps the largest field off the records in the one query that has to stay cheap.
+
+Every catalog write is a read-modify-write that merges into what's stored, and several fire at once
+on one file — releasing it writes the flags, the summary and the dropped view from three places in
+the same tick. `db.ts`'s `serializeCatalog` chains them per id so a later write can't read a stale
+"before" record and undo an earlier one.
+
+Deleting a file removes its `files` and `catalog` records and drops it from both the catalog and
+memory — exposed as the Files table's two-click delete.
+
+### The schema is not migrated
+
+A change to any stored shape bumps `DB_VERSION`, and `openDb`'s upgrade **drops every store and
+rebuilds them empty**. No migration path, and no compatibility shims — none of the optional fields,
+renamed-field fallbacks and "records written before this existed" defaults that a migration path
+grows into every type in `db.ts`.
+
+This is safe because nobody's data lives only here while the app is in development: a run is a file
+the user has on disk, and everything the app adds to one is written back into that file
+(`zpcrweb.json`, the archive rewrite). Wiping the database costs the user re-dropping their files
+and re-picking their view settings, and costs them nothing that isn't recoverable from disk.
+
+> **Future:** once the app ships to people who keep files only in the browser, this becomes a real
+> upgrade path, and the stored types go back to tolerating older shapes.
 
 ### Runs still being written are stored exploded
 
@@ -645,7 +668,7 @@ loads as unmodified, since only a download clears it and a wrong `true` would ne
 
 Anything that changes a **number** the app reports is stored in the run's own archive, as a
 `zpcrweb.json` entry (`zpcrweb-json.md`, `packages/core/src/zpcrwebSettings.ts`) — not in the
-`settings` store above. That is `thresholdOverrides` (manual per-fluorophore threshold RFU),
+catalog record's `view` above. That is `thresholdOverrides` (manual per-fluorophore threshold RFU),
 `curveThresholdOverrides` (the same one curve at a time), `thresholdMultiplier` (§5.2's
 auto-threshold `k`) and `calibrationNormalization` (`calibration.md` §3): the inputs
 `useRunAnalysis` uses to produce a different Cq for the same run. (`subtractDark` was a fifth
@@ -668,9 +691,7 @@ so every call site keeps writing one `onChange({ … })` regardless of where the
 - **Seeding.** A file's settings are read from its `zpcrweb.json` once it parses — which for an
   encrypted `.pcrd` means after the password lands, so the effect keyed on `runs` retries rather
   than seeding defaults over a file it couldn't read yet. The file is authoritative; local state
-  never overrides it. The one exception is a one-time migration of pre-split IndexedDB records
-  (`legacyAnalysisFromStored`), which applies only to a file carrying no `zpcrweb.json` and is
-  then written into it.
+  never overrides it.
 - **Writing** is rate-limited to one archive rewrite per file per minute, plus a flush on active-
   file change, `visibilitychange` → `hidden`, and `pagehide` (`state/analysisPersist.ts`; the
   first edit to an idle file writes immediately). The scheduling itself is

@@ -38,16 +38,14 @@ export { wellKey, type AnalysisSource };
 import {
   deleteFile,
   fileId,
-  getAllMeta,
-  getAllSettings,
+  getAllEntries,
   getFileContent,
-  hasLegacyAnalysisFields,
   putFile,
-  putSettings,
-  putSummary,
+  updateEntry,
+  type FileIdentity,
   type FileSummary,
-  type StoredFile,
-  type StoredSettings,
+  type StoredEntry,
+  type StoredView,
 } from "./db";
 import {
   ANALYSIS_KEYS,
@@ -261,9 +259,10 @@ export interface FileSettings extends AnalysisSettings {
   /**
    * Whether this file's content has been edited since it was loaded — a threshold moved, the run
    * renamed, a plate attached — and not yet downloaded. The odd one out in this interface: not a
-   * view setting at all, and no view reads it. It lives here because this is the per-file record
-   * that is persisted and keyed by id, and it must survive a reload for the same reason it exists
-   * — the stale copy is the one on the user's disk. Surfaced to the UI as
+   * view setting at all, and no view reads it. It is kept here because call sites want one flat
+   * per-file object; on the record it is a field of its own (`StoredEntry.modified`), kept for
+   * every file rather than only loaded ones, since the stale copy is the one on the user's disk
+   * whether or not this browser still holds the bytes. Surfaced to the UI as
    * {@link ZpcrStore.modifiedIds}, which is what makes the file chip's delete ask twice.
    */
   modified: boolean;
@@ -276,7 +275,9 @@ export interface FileSettings extends AnalysisSettings {
    * showing.
    *
    * Persisted so a session reopens holding what it was working on rather than every archive the
-   * browser has ever seen — the whole point of separating the two sets.
+   * browser has ever seen — the whole point of separating the two sets. It is also what decides
+   * whether the rest of this object is persisted at all: a released file keeps no display state
+   * (see `db.ts`'s `StoredEntry.view`), so loading it again starts from {@link defaultSettings}.
    */
   loaded: boolean;
 }
@@ -327,10 +328,8 @@ export function fileBytes(file: LoadedFile): Uint8Array {
   return contentBytes(file.content);
 }
 
-/** A loaded file as its IndexedDB record — the one place a {@link StoredFile} is assembled, so
- * the choice of storage representation is made once (`toStoredContent`) rather than at each of
- * the dozen call sites that persist a file. */
-function storedFile(file: LoadedFile): StoredFile {
+/** A loaded file's identity, as its catalog record carries it. */
+function identityOf(file: LoadedFile): FileIdentity {
   return {
     id: file.id,
     name: file.name,
@@ -338,8 +337,14 @@ function storedFile(file: LoadedFile): StoredFile {
     addedAt: file.addedAt,
     kind: file.kind,
     lastModified: file.lastModified,
-    ...toStoredContent(file.content),
   };
+}
+
+/** Persist a loaded file — the one place a `db.ts` write is assembled from a {@link LoadedFile}, so
+ * the choice of storage representation is made once (`toStoredContent`) rather than at each of
+ * the dozen call sites that persist a file. */
+function persistFile(file: LoadedFile): Promise<void> {
+  return putFile(identityOf(file), toStoredContent(file.content));
 }
 
 /**
@@ -532,11 +537,14 @@ function defaultSettings(): FileSettings {
   };
 }
 
-/** Display state only — the analysis fields are pointedly not written, which is also what
- * strips them from a pre-split record the first time anything else is saved. */
-function toStored(id: string, s: FileSettings): StoredSettings {
+/**
+ * The display half of a file's settings, as its record's {@link StoredView} — sets flattened to
+ * arrays, and the analysis fields pointedly not written (they live in the file; see
+ * {@link FileSettings}). {@link FileSettings.modified} and {@link FileSettings.loaded} aren't here
+ * either: they are fields of the record itself, kept for every file rather than only loaded ones.
+ */
+function viewOf(s: FileSettings): StoredView {
   return {
-    fileId: id,
     enabledChannels: [...s.enabledChannels],
     enabledWells: [...s.enabledWells],
     enabledRefCols: [...s.enabledRefCols],
@@ -562,86 +570,51 @@ function toStored(id: string, s: FileSettings): StoredSettings {
     calView: s.calView,
     baselineSource: s.baselineSource,
     cqSource: s.cqSource,
-    modified: s.modified,
-    loaded: s.loaded,
   };
 }
 
 /**
- * The analysis settings a pre-split record still carries, for the one-time migration into the
- * file. Returns `null` for a record with none — the ordinary case from here on.
+ * A file's settings as its record holds them: the two flags, plus the display state if the file
+ * was loaded when the session ended. A released file has no {@link StoredEntry.view} by
+ * construction (see the field), so it comes back on defaults — the deliberate other half of not
+ * keeping view state for every file the browser has ever seen.
  *
- * Only consulted when the file itself has no `zpcrweb.json`: the file is authoritative, and a
- * stale IndexedDB record must never be able to override the thresholds a run was actually saved
- * with. What it recovers is the pre-split user's work, which would otherwise silently revert to
- * automatic thresholds on first load after upgrading.
+ * Analysis fields are *not* read from the record: they come from the file's own `zpcrweb.json`,
+ * and are merged in by the store's seeding effect.
  */
-function legacyAnalysisFromStored(s: StoredSettings): Partial<AnalysisSettings> | null {
-  if (!hasLegacyAnalysisFields(s)) return null;
-  const out: Partial<AnalysisSettings> = {};
-  const overrides = s.thresholdOverrides ?? s.analysisThresholdOverrides;
-  if (overrides) out.thresholdOverrides = new Map(overrides);
-  if (s.curveThresholdOverrides) out.curveThresholdOverrides = new Map(s.curveThresholdOverrides);
-  if (s.thresholdMultiplier !== undefined) out.thresholdMultiplier = s.thresholdMultiplier;
-  // `subtractDark` (and the older three-way `calibrationBackground` it replaced) are deliberately
-  // dropped rather than migrated: the dark-current stage is gone, measured to make results worse
-  // (`calibration.md` §4.2a). Old records still parse; the field is simply ignored.
-  if (s.calibrationNormalization !== undefined) {
-    out.calibrationNormalization = s.calibrationNormalization;
-  }
-  return out;
-}
-
-function fromStored(s: StoredSettings): FileSettings {
+function fromStored(e: StoredEntry): FileSettings {
+  const v = e.view;
+  if (!v) return { ...defaultSettings(), modified: e.modified, loaded: e.loaded };
   return {
-    enabledChannels: new Set(s.enabledChannels),
-    enabledWells: new Set(s.enabledWells),
-    enabledRefCols: new Set(s.enabledRefCols ?? Array.from({ length: 12 }, (_, c) => c)),
-    baseline: s.baseline ?? "raw",
-    // Old records may carry the retired three-way curveBaseline setting ("raw"/"constant"/
-    // "linear"): "raw" maps to the new absolute view, anything else to relative — constant
-    // baselining itself is gone (see baseline.ts's `LinearBaseLineNormalized`-only pipeline).
-    curveView: s.curveView ?? (s.curveBaseline === "raw" ? "absolute" : "relative"),
-    drawBaseline: s.drawBaseline ?? false,
-    scale: s.scale ?? "linear",
-    showDark: s.showDark ?? false,
-    // Absent from records written before the toggle existed, when the line was always drawn.
-    showFactory: s.showFactory ?? true,
-    refXAxis: s.refXAxis === "column" ? "column" : "cycle",
-    // Records written while `bands` was a three-way mode ("off"/"auto"/"on") migrate to the
-    // boolean switch: only an explicit "on" survives as on. "auto" (draw the bands only when a
-    // single well is selected) is gone — a switch can't express it, and it made the control's
-    // effect depend on the well selection.
-    bands: typeof s.bands === "boolean" ? s.bands : s.bands === "on",
-    step: s.step ?? null,
-    calibration: s.calibration ?? null,
-    fluorViewMode: s.fluorViewMode ?? "fluorophore",
-    disabledFluors: new Set(s.disabledFluors ?? []),
-    disabledSamples: new Set(s.disabledSamples ?? []),
-    showUnloadedFluors: s.showUnloadedFluors ?? false,
-    cqMin: s.cqMin ?? null,
-    cqMax: s.cqMax ?? null,
-    // Absent on a record written before the Calibration view existed; empty simply means the
-    // view will seed it from the run the first time it's opened.
-    calFiles: new Set(s.calFiles ?? []),
-    calView: s.calView ?? "relative",
-    // Absent from records written before this format existed; "file" is the default either way.
-    baselineSource: s.baselineSource ?? "file",
-    cqSource: s.cqSource ?? "file",
-    // Absent on a record written before the flag existed: such a file may well carry edits, but
-    // "not modified" is the honest default — a wrong `true` would make every old file ask twice
-    // forever, since only a download clears it.
-    modified: s.modified ?? false,
-    // `visible` is the field's former name, from when every file was loaded and this only decided
-    // whether it got a chip; a record carrying it keeps its answer. Absent altogether (older
-    // still) means loaded, which is what such a file was.
-    loaded: s.loaded ?? s.visible ?? true,
-    temps: new Set(s.temps ?? []),
-    // A record written before the LED series existed has no `leds`; both being non-empty is
-    // impossible by construction (see `updateSettings`), so nothing needs reconciling here.
-    leds: new Set(s.leds ?? []),
-    // Analysis fields are *not* read from the record here — they come from the file, and are
-    // merged in by the store (see `legacyAnalysisFromStored` for the one migration exception).
+    enabledChannels: new Set(v.enabledChannels),
+    enabledWells: new Set(v.enabledWells),
+    enabledRefCols: new Set(v.enabledRefCols),
+    baseline: v.baseline,
+    curveView: v.curveView,
+    drawBaseline: v.drawBaseline,
+    scale: v.scale,
+    showDark: v.showDark,
+    showFactory: v.showFactory,
+    refXAxis: v.refXAxis,
+    bands: v.bands,
+    step: v.step,
+    calibration: v.calibration,
+    fluorViewMode: v.fluorViewMode,
+    disabledFluors: new Set(v.disabledFluors),
+    disabledSamples: new Set(v.disabledSamples),
+    showUnloadedFluors: v.showUnloadedFluors,
+    cqMin: v.cqMin,
+    cqMax: v.cqMax,
+    calFiles: new Set(v.calFiles),
+    calView: v.calView,
+    baselineSource: v.baselineSource,
+    cqSource: v.cqSource,
+    temps: new Set(v.temps),
+    // Both being non-empty is impossible by construction (see `updateSettings`), so nothing
+    // needs reconciling here.
+    leds: new Set(v.leds),
+    modified: e.modified,
+    loaded: e.loaded,
     ...defaultAnalysisSettings(),
   };
 }
@@ -981,9 +954,6 @@ export function useZpcrStore(): ZpcrStore {
   /** Ids already seeded from their file, so a re-parse (password change, plate attach) never
    * overwrites edits made since. */
   const seeded = useRef(new Set<string>());
-  /** Pre-split IndexedDB analysis state, awaiting a file with no `zpcrweb.json` to migrate into.
-   * Populated once at hydration and consumed by the seeding effect below. */
-  const legacyAnalysis = useRef<Record<string, Partial<AnalysisSettings>>>({});
   // Refs, not state, so the persister's `resolve` always sees current values without the
   // persister having to be rebuilt (and its pending timers reset) on every keystroke.
   const loadedRef = useRef<LoadedFile[]>(loadedFiles);
@@ -1019,7 +989,7 @@ export function useZpcrStore(): ZpcrStore {
         if (!file || file.kind !== "zpcr") return null;
         const settings = analysisRef.current[id];
         if (!settings) return null;
-        return { file: storedFile(file), files: contentFiles(file.content), settings };
+        return { identity: identityOf(file), files: contentFiles(file.content), settings };
       },
       onError: (e) => setError(e instanceof Error ? e.message : String(e)),
     });
@@ -1044,7 +1014,7 @@ export function useZpcrStore(): ZpcrStore {
       write: async (id) => {
         const file = loadedRef.current.find((f) => f.id === id);
         if (!file || (file.kind !== "prcl" && file.kind !== "zpcr")) return;
-        await putFile(storedFile(file));
+        await persistFile(file);
       },
       onError: (e) => setError(e instanceof Error ? e.message : String(e)),
     });
@@ -1094,36 +1064,23 @@ export function useZpcrStore(): ZpcrStore {
     let cancelled = false;
     (async () => {
       try {
-        const [meta, storedSettings] = await Promise.all([getAllMeta(), getAllSettings()]);
+        // One read, one record per file: the catalog row and its settings are the same object now.
+        const stored = await getAllEntries();
         if (cancelled) return;
-        const catalog: FileEntry[] = meta.map((m) => ({
-          id: m.id,
-          name: m.name,
-          size: m.size,
-          addedAt: m.addedAt,
-          kind: m.kind ?? "zpcr",
-          // Records written before this field existed have no source mtime to recover; the load
-          // time is the closest honest stand-in.
-          lastModified: m.lastModified ?? m.addedAt,
-          summary: m.summary ?? null,
+        const catalog: FileEntry[] = stored.map((e) => ({
+          id: e.id,
+          name: e.name,
+          size: e.size,
+          addedAt: e.addedAt,
+          kind: e.kind,
+          lastModified: e.lastModified,
+          summary: e.summary ?? null,
         }));
         catalog.sort((a, b) => a.addedAt - b.addedAt);
         const map: Record<string, FileSettings> = {};
-        for (const s of storedSettings) {
-          map[s.fileId] = fromStored(s);
-          // One-time migration of pre-split records: stash the analysis half for the seeding
-          // effect, and immediately rewrite the record without it — `toStored` no longer emits
-          // those fields, so this both strips them and makes the migration idempotent.
-          const legacy = legacyAnalysisFromStored(s);
-          if (legacy) {
-            legacyAnalysis.current[s.fileId] = legacy;
-            void putSettings(toStored(s.fileId, map[s.fileId]!));
-          }
-        }
+        for (const e of stored) map[e.id] = fromStored(e);
         setEntries(catalog);
-        // A file with no settings record at all has never been released, so it counts as loaded —
-        // that is what every file was before the two sets were distinguished.
-        const wantsLoading = catalog.filter((e) => map[e.id]?.loaded ?? true);
+        const wantsLoading = catalog.filter((e) => map[e.id]!.loaded);
         // A `#file=` from the URL picks the selection; without one, the most recently added
         // loaded file. A link naming a file this browser doesn't have selects **nothing** rather
         // than silently substituting another — the app then shows the file bar with no tab
@@ -1134,9 +1091,9 @@ export function useZpcrStore(): ZpcrStore {
           : wantsLoading.at(-1) ?? null;
         // A link may name a file that was released; selecting it loads it, so the flag has to
         // agree before the record is written back.
-        if (target && !(map[target.id]?.loaded ?? true)) {
+        if (target && !map[target.id]!.loaded) {
           map[target.id] = { ...map[target.id]!, loaded: true };
-          void putSettings(toStored(target.id, map[target.id]!));
+          void updateEntry(target.id, { loaded: true, view: viewOf(map[target.id]!) });
         }
         setSettingsMap(map);
         // The selected file loads first, so the app has something to draw before the rest arrive.
@@ -1235,7 +1192,7 @@ export function useZpcrStore(): ZpcrStore {
       if (current.modified === value) return prev;
       const next = { ...current, modified: value };
       window.clearTimeout(saveTimers.current[id]);
-      void putSettings(toStored(id, next));
+      void updateEntry(id, { modified: value, ...(next.loaded ? { view: viewOf(next) } : {}) });
       return { ...prev, [id]: next };
     });
   }, []);
@@ -1256,7 +1213,9 @@ export function useZpcrStore(): ZpcrStore {
       if (current.loaded === value) return prev;
       const next = { ...current, loaded: value };
       window.clearTimeout(saveTimers.current[id]);
-      void putSettings(toStored(id, next));
+      // Releasing a file drops its display state (see `StoredEntry.view`); loading one writes the
+      // state it is being loaded with, so the record always says what the file bar is showing.
+      void updateEntry(id, { loaded: value, view: value ? viewOf(next) : undefined });
       return { ...prev, [id]: next };
     });
   }, []);
@@ -1282,7 +1241,7 @@ export function useZpcrStore(): ZpcrStore {
         const { runs: r, plateFiles: pf, password: pw, names } = summaryInputs.current;
         const summary = summarizeFile(going, r.get(id), pf.get(id), pw, names[id]);
         patchEntry(id, { summary });
-        void putSummary(id, summary);
+        void updateEntry(id, { summary });
       }
       loadedRef.current = loadedRef.current.filter((f) => f.id !== id);
       setLoadedFiles(loadedRef.current);
@@ -1317,7 +1276,7 @@ export function useZpcrStore(): ZpcrStore {
       const superseded = entriesRef.current.filter((f) => f.name === file.name && f.id !== file.id);
       for (const old of superseded) await forget(old.id);
       const supersededIds = new Set(superseded.map((f) => f.id));
-      await putFile(storedFile(file));
+      await persistFile(file);
       const entry: FileEntry = {
         id: file.id,
         name: file.name,
@@ -1355,7 +1314,7 @@ export function useZpcrStore(): ZpcrStore {
    */
   const commitContent = useCallback(
     async (next: LoadedFile) => {
-      await putFile(storedFile(next));
+      await persistFile(next);
       setLoadedFiles((prev) => {
         loadedRef.current = replaceFile(prev, next);
         return loadedRef.current;
@@ -1718,7 +1677,7 @@ export function useZpcrStore(): ZpcrStore {
       // Renaming onto a name (+size) that collides with an already-loaded file supersedes it,
       // the same way `addFiles` handles a same-named re-upload.
       for (const old of loadedRef.current.filter((f) => f.id === newId)) await forget(old.id);
-      await putFile(storedFile({ ...file, id: newId, name }));
+      await persistFile({ ...file, id: newId, name });
       await deleteFile(id);
       setLoadedFiles((prev) => {
         loadedRef.current = prev.map((f) => (f.id === id ? { ...f, id: newId, name } : f));
@@ -1731,7 +1690,9 @@ export function useZpcrStore(): ZpcrStore {
       setSettingsMap((prev) => {
         const { [id]: current, ...rest } = prev;
         const next = { ...(current ?? defaultSettings()), modified: true };
-        void putSettings(toStored(newId, next));
+        // The record under `newId` was created by `persistFile` above, so this carries the renamed
+        // file's settings onto it — the old id's record is gone (`deleteFile`).
+        void updateEntry(newId, { modified: true, view: viewOf(next) });
         return { ...rest, [newId]: next };
       });
       setAnalysisMap((prev) => {
@@ -1818,10 +1779,11 @@ export function useZpcrStore(): ZpcrStore {
           // rather than at each call site so no control can leave both on (see `rightAxis.ts`).
           if (displayPatch.temps?.size) next.leds = new Set();
           if (displayPatch.leds?.size) next.temps = new Set();
-          // debounced persist
+          // debounced persist. Only the view half: the active file is loaded by definition, and
+          // the flags are written straight through by their own setters.
           window.clearTimeout(saveTimers.current[activeId]);
           saveTimers.current[activeId] = window.setTimeout(() => {
-            void putSettings(toStored(activeId, next));
+            void updateEntry(activeId, { view: viewOf(next) });
           }, 300);
           return { ...prev, [activeId]: next };
         });
@@ -1920,14 +1882,6 @@ export function useZpcrStore(): ZpcrStore {
         if (!fromFile?.analysis?.thresholdOverrides && zpcr.persistedThresholds) {
           next = { ...next, thresholdOverrides: new Map(zpcr.persistedThresholds) };
         }
-        const legacy = legacyAnalysis.current[f.id];
-        // The file is authoritative; pre-split IndexedDB state only fills a file that has
-        // nothing to say, and is then written into it so the migration happens exactly once.
-        if (!fromFile && legacy) {
-          next = { ...next, ...legacy };
-          persister.current!.markDirty(f.id);
-        }
-        delete legacyAnalysis.current[f.id];
       } else {
         // A standalone plate file has no curves and so no analysis — defaults keep `settings`
         // a complete object for the views that read it.
@@ -2037,7 +1991,7 @@ export function useZpcrStore(): ZpcrStore {
         const current = entriesRef.current.find((e) => e.id === f.id);
         if (current && JSON.stringify(current.summary) === JSON.stringify(summary)) continue;
         patchEntry(f.id, { summary });
-        void putSummary(f.id, summary);
+        void updateEntry(f.id, { summary });
       }
     }, 400);
     return () => window.clearTimeout(timer);

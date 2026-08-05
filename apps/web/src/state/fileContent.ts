@@ -149,8 +149,8 @@ export function toStoredContent(content: FileContent): Pick<StoredFile, "bytes" 
   return { files };
 }
 
-/** Rebuild a content from a stored record. A record written before the exploded form existed has
- * only `bytes`, which is exactly what a zipped content is. */
+/** Rebuild a content from a stored record — whichever of the two representations it was written
+ * in (`StoredFile` sets exactly one). */
 export function fromStoredContent(stored: StoredFile): FileContent {
   if (stored.files) {
     const files: ZpcrArchive = {};

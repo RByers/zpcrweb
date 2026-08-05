@@ -1,50 +1,67 @@
 /**
- * Thin IndexedDB wrapper — no dependencies. Three stores:
+ * Thin IndexedDB wrapper — no dependencies. Two stores:
  *
- * - `files` — every file the app holds, so they survive reloads and are re-parsed on demand. This
- *   is the app's *only* source of run data. A record holds either the file's raw bytes or, for a
- *   run still being written to, its archive entries individually — see {@link StoredFile} and
+ * - `files` — the bytes, and nothing else. A record holds either a file's raw bytes or, for a run
+ *   still being written to, its archive entries individually — see {@link StoredFile} and
  *   `fileContent.ts`, which owns that choice. **Records are read one id at a time**
- *   ({@link getFileContent}), never all at once: the content of a file only enters memory when
- *   that file is loaded (see `useZpcrStore`'s loaded set, and `apps/web/ARCHITECTURE.md`'s "Files,
+ *   ({@link getFileContent}), never all at once: the content of a file only enters memory when that
+ *   file is loaded (see `useZpcrStore`'s loaded set, and `apps/web/ARCHITECTURE.md`'s "Files,
  *   loaded files, and the one selection").
- * - `meta` — one small record per file ({@link StoredMeta}): its identity, plus a cached
- *   {@link FileSummary} of what the *content* turned out to say, written each time the file is
- *   loaded. This is what lets the Files table list thousands of files — names, dates, protocol
- *   and plate names, read counts — without decoding, or even reading, a single archive.
- * - `settings` — per-file **display** state: which channels/wells/fluorophores are shown, log
- *   vs. linear, which protocol step, whether to draw baselines. A per-person view onto a run.
- *   Plus two fields that are not view settings at all — {@link StoredSettings.modified} and
- *   {@link StoredSettings.loaded} — which need a per-file record that survives a reload, and this
- *   is the app's only one.
+ * - `catalog` — one small record per file ({@link StoredEntry}): its identity, a cached
+ *   {@link FileSummary} of what the *content* turned out to say, the two per-file flags that must
+ *   outlive a reload ({@link StoredEntry.modified} and {@link StoredEntry.loaded}), and — for a
+ *   loaded file only — its {@link StoredView} display state.
  *
- * **Analysis state is deliberately absent.** Thresholds, the auto-threshold multiplier, dark
- * subtraction and calibration normalization all change the numbers the app reports, so they
- * belong to the run and travel inside the archive as its `zpcrweb.json` entry — see
- * `state/analysisSettings.ts` and `zpcrweb-json.md`. {@link StoredSettings} still *declares*
- * those fields, read-only, so records written before that split can be migrated into the file
- * on load (see `fromStored`'s callers); nothing writes them any more.
+ * **Why content is a separate store.** {@link getAllEntries} reads the whole catalog in one
+ * `getAll()`, which is what lets the Files table list thousands of files — names, dates, protocol
+ * and plate names, read counts — without decoding, or even reading, a single archive. IndexedDB has
+ * no way to fetch part of a record, so a store holding both would structured-clone every archive in
+ * the database on that call. That is the one split worth keeping, and the reason everything *else*
+ * about a file lives together in `catalog`.
+ *
+ * **Analysis state is deliberately absent.** Thresholds, the auto-threshold multiplier and
+ * calibration normalization all change the numbers the app reports, so they belong to the run and
+ * travel inside the archive as its `zpcrweb.json` entry — see `state/analysisSettings.ts` and
+ * `zpcrweb-json.md`. What is left here is display state, which never leaves this browser.
+ *
+ * **The schema is not migrated.** While the app is in development, a change to the shape of what is
+ * stored bumps {@link DB_VERSION} and drops every store, rebuilding empty — see {@link openDb}.
+ * There is therefore no such thing as a record written by an older version, and nothing here has to
+ * tolerate a missing or renamed field. See `apps/web/ARCHITECTURE.md`, "Stored state".
  */
 
 const DB_NAME = "zpcrweb";
-/** v2 added the `meta` store — see {@link openDb}'s upgrade path for how v1 data reaches it. */
-const DB_VERSION = 2;
+/** Bumping this **erases the database**. See {@link openDb}. */
+const DB_VERSION = 3;
 const FILES = "files";
-const SETTINGS = "settings";
-const META = "meta";
+const CATALOG = "catalog";
 
-/** A stored file record. `kind` defaults to `"zpcr"` for records written before `.pcrd`
- * support was added (absent field on load), so existing IndexedDB data keeps working. */
-export interface StoredFile {
+type FileKindName = "zpcr" | "pcrd" | "biomeme" | "pltd" | "csv" | "prcl";
+
+/** A file's identity — everything about it that is knowable without reading its bytes, and the
+ * half of a {@link StoredEntry} that {@link putFile} owns. */
+export interface FileIdentity {
   id: string;
   name: string;
-  /** The size the app reports for this file — its byte length when stored as {@link bytes}, and
-   * the total of its entries when stored as {@link files}. See `fileContent.ts`'s `contentSize`. */
+  /** The size the app reports for this file — its byte length when stored as
+   * {@link StoredFile.bytes}, and the total of its entries when stored as {@link StoredFile.files}.
+   * See `fileContent.ts`'s `contentSize`. */
   size: number;
+  /** When the file was loaded into this browser, epoch ms. */
   addedAt: number;
+  /** The source `File`'s own `lastModified` (its OS mtime, epoch ms) — when the file was last saved
+   * to disk, as distinct from {@link addedAt}. A file the app rewrote in place keeps the original
+   * mtime rather than claiming a new one. */
+  lastModified: number;
+  kind: FileKindName;
+}
+
+/** A stored file's content — exactly one of the two representations, keyed by the same id as its
+ * {@link StoredEntry}. */
+export interface StoredFile {
+  id: string;
   /**
-   * The file's bytes — every kind, and the only form records written before {@link files} existed
-   * take. Exactly one of this and {@link files} is set.
+   * The file's bytes. Exactly one of this and {@link files} is set.
    *
    * IndexedDB stores an `ArrayBuffer` by structured clone, so this is a copy rather than a view
    * onto whatever the app is holding.
@@ -61,12 +78,6 @@ export interface StoredFile {
    * {@link bytes}. Nothing outside `fileContent.ts` should read either field directly.
    */
   files?: Record<string, ArrayBuffer>;
-  kind?: "zpcr" | "pcrd" | "biomeme" | "pltd" | "csv" | "prcl";
-  /** The source `File`'s own `lastModified` (its OS mtime, epoch ms) — when the file was last
-   * saved to disk, as distinct from {@link addedAt} (when it was loaded into this browser).
-   * Absent on records written before this field existed, or for one `attachPlate` rewrote in
-   * place (which keeps the original file's own mtime rather than claiming a new one). */
-  lastModified?: number;
 }
 
 /**
@@ -78,9 +89,8 @@ export interface StoredFile {
  * `apps/web/ARCHITECTURE.md`), and writes this summary at that moment. Everything the table and
  * its hover card show comes from here.
  *
- * Absent on a {@link StoredMeta} for a file that has never been loaded by a version of the app
- * that writes summaries — a v1 record carried into v2, say. Such a row renders with dashes until
- * the file is loaded once, which is the honest answer: nothing has read its content yet.
+ * Absent on a file that has never been loaded. Such a row renders with dashes, which is the honest
+ * answer: nothing has read its content yet.
  */
 export interface FileSummary {
   /** The experiment's resolved name (`lib/experiment.ts`'s `experimentIdentity`). */
@@ -115,188 +125,124 @@ export interface FileSummary {
 }
 
 /**
- * One record per file, holding everything the app can say about it **without reading its bytes**.
- * The `files` store's own records duplicate the identity fields; these exist so the whole catalog
- * can be listed in one small `getAll` while the archives stay on disk.
+ * A file's **display** state: which channels/wells/fluorophores are shown, log vs. linear, which
+ * protocol step, whether to draw baselines. A per-person view onto a run, and the one part of a
+ * {@link StoredEntry} that is not kept for every file — see {@link StoredEntry.view}.
+ *
+ * Sets are stored as arrays. Structured clone would round-trip a `Set` directly, but the persisted
+ * shape is worth keeping plain: it is what a person reads in the browser's storage inspector, and
+ * `useZpcrStore`'s `viewOf`/`fromStored` are the one place the two shapes meet.
  */
-export interface StoredMeta {
-  id: string;
-  name: string;
-  size: number;
-  addedAt: number;
-  lastModified: number;
-  kind: FileKindName;
-  /** See {@link FileSummary} — absent until the file has been loaded at least once. */
-  summary?: FileSummary;
-}
-
-type FileKindName = "zpcr" | "pcrd" | "biomeme" | "pltd" | "csv" | "prcl";
-
-/** Persisted per-file view settings. */
-export interface StoredSettings {
-  fileId: string;
-  /**
-   * Not a view setting: whether this file's *content* has been edited since it was loaded (or
-   * since it was last downloaded) — a threshold moved, the run renamed. It rides in this record
-   * because that is the app's one per-file store keyed by id, and because the fact has to
-   * outlive a reload: the edits themselves are already durable (in the archive's `zpcrweb.json`,
-   * in IndexedDB), so what is at risk is the copy on the user's disk, which is stale until they
-   * download again. See `useZpcrStore`'s `modifiedIds` and the file chip's two-stage delete.
-   */
-  modified?: boolean;
-  /**
-   * Not a view setting either: whether this file is **loaded** — its bytes in memory, decoded, and
-   * so a chip on the file bar and a candidate for the tab strip. An unloaded file stays in
-   * IndexedDB and in the full files table; only its bytes leave memory. This is what the app
-   * restores on the next session, so a browser holding a thousand archives reopens holding the
-   * handful that were in use.
-   *
-   * Absent on records written before this field existed (where it was called `visible` and meant
-   * "shows on the file bar", a file being loaded either way) — {@link visible} is still read for
-   * those, and defaults to loaded, which is what they did.
-   */
-  loaded?: boolean;
-  /** @deprecated Former name for {@link loaded}, when every file was loaded and this only decided
-   * whether it got a chip. Still read so an older record keeps its state; never written. */
-  visible?: boolean;
+export interface StoredView {
   enabledChannels: number[];
   enabledWells: string[]; // "row,col" keys
   /** Reference columns (0-based) shown in the Reference view. */
-  enabledRefCols?: number[];
+  enabledRefCols: number[];
   baseline: "raw" | "delta" | "percent";
-  /** Curves view's display mode; absent on records written before this setting existed
-   * (falls back via {@link curveBaseline}, below). */
-  curveView?: "relative" | "absolute";
-  /** Overlay the auto-detected linear baseline on each curve. Absent on older records, which
-   * then default to off. */
-  drawBaseline?: boolean;
-  /** Retired three-way baseline-subtraction mode (`threshold.md` §4) — kept only so older
-   * records can be migrated to {@link curveView} (`"raw"` → `"absolute"`, else `"relative"`);
-   * baselining itself is no longer configurable, always an auto-detected linear fit. */
-  curveBaseline?: "raw" | "constant" | "linear";
+  /** Curves view's display mode. */
+  curveView: "relative" | "absolute";
+  /** Overlay the auto-detected linear baseline on each curve. */
+  drawBaseline: boolean;
   scale: "linear" | "log";
   showDark: boolean;
-  /** Reference view's factory-calibration overlay. Absent in records written before the
-   * toggle existed; `fromStored` defaults those to on, which is what they rendered. */
-  showFactory?: boolean;
-  /** Reference view's x-axis mode. Absent in older records, which default to `"cycle"`. */
-  refXAxis?: "cycle" | "column";
-  /** Min/max envelope bands. Older records carry the retired three-way mode; `fromStored`
-   * migrates it (only `"on"` becomes `true`). */
-  bands: boolean | "off" | "auto" | "on";
+  /** Reference view's factory-calibration overlay. */
+  showFactory: boolean;
+  /** Reference view's x-axis mode. */
+  refXAxis: "cycle" | "column";
+  /** Min/max envelope bands. */
+  bands: boolean;
   step: number | null;
   /** Temperature field keys plotted on the right axis, e.g. `["BLOCKTEMP"]`. */
-  temps?: string[];
+  temps: string[];
   /** LED drive-current field keys plotted on the right axis, e.g. `["LEDCURRENT01"]`. Never
    * non-empty at the same time as {@link temps} — the two share one axis. */
-  leds?: string[];
-  /** Color separation: on/off, or unset to auto-enable when plate + calibration data exist. */
-  calibration?: boolean | null;
+  leds: string[];
+  /** Color separation: on/off, or null to auto-enable when plate + calibration data exist. */
+  calibration: boolean | null;
   /** When color separation is on, group/label curves by fluorophore or by target/gene — or show
    * the Cq/ΔRFU table instead of the chart (`"table"`). */
-  fluorViewMode?: "fluorophore" | "target" | "table";
+  fluorViewMode: "fluorophore" | "target" | "table";
   /** Fluorophore (or, in target view mode, target) names hidden from the dye-space view. */
-  disabledFluors?: string[];
+  disabledFluors: string[];
   /** Curves view: sample names hidden from the plotted curves. */
-  disabledSamples?: string[];
+  disabledSamples: string[];
   /** When true, dye-space curves are drawn for every enabled well/fluor pair, even ones the
-   * plate definition doesn't actually load into that well. Off by default. */
-  showUnloadedFluors?: boolean;
-  /** Curves view: the Cq filter's bounds in cycles, `null`/absent for unbounded. An absent (or
-   * `null`) {@link cqMax} is also what keeps the curves with no Cq at all on screen — see
-   * `FileSettings.cqMin`. */
-  cqMin?: number | null;
-  cqMax?: number | null;
+   * plate definition doesn't actually load into that well. */
+  showUnloadedFluors: boolean;
+  /** Curves view: the Cq filter's bounds in cycles, `null` for unbounded. A `null` {@link cqMax} is
+   * also what keeps the curves with no Cq at all on screen — see `FileSettings.cqMin`. */
+  cqMin: number | null;
+  cqMax: number | null;
   /** Calibration view: `${dye}|${plateType}` keys of the `.Dcal` files plotted. Opt-in, so an
-   * absent/empty list means "unseeded" rather than "none" — see `FileSettings.calFiles`. */
-  calFiles?: string[];
+   * empty list means "unseeded" rather than "none" — see `FileSettings.calFiles`. */
+  calFiles: string[];
   /** Calibration view: response curves (`"relative"`) or the raw dye/empty readings behind them
-   * (`"absolute"`). Absent on older records, which then default to `"relative"`. */
-  calView?: "relative" | "absolute";
+   * (`"absolute"`). */
+  calView: "relative" | "absolute";
   /** Curves view: file-vs-computed baseline/Cq toggles for a source that carries its own
-   * analysis (Biomeme). Absent on older records, which then default to `"file"` — see
-   * `FileSettings.baselineSource`/`cqSource`. */
-  baselineSource?: "file" | "computed";
-  cqSource?: "file" | "computed";
-  /** Retired: the standalone Analysis view's own target opt-out set. That view is now the Curves
-   * view's table mode and shares the rail's {@link disabledFluors}, so these are ignored. */
-  analysisDisabledTargets?: string[];
-  /** Retired: the Analysis view's Cq-algorithm selector. Cq is always `threshold.md` §6's
-   * threshold crossing now, so this is ignored. */
-  analysisCqAlgorithm?: "Threshold" | "NoThreshold";
-
-  // ── Migrated-away analysis fields ────────────────────────────────────────────────────────
-  // Read once on load and folded into the file's own `zpcrweb.json` (see the module comment and
-  // `legacyAnalysisFromStored` in `useZpcrStore.ts`), then dropped: nothing writes them, so the
-  // first save of any display setting rewrites the record without them.
-  /** @deprecated → `zpcrweb.json` `analysis.thresholdOverrides`. `[fluor, RFU]` pairs. */
-  thresholdOverrides?: [string, number][];
-  /** @deprecated → `zpcrweb.json` `analysis.curveThresholdOverrides`.
-   * `["row,col,fluor", RFU]` pairs. */
-  curveThresholdOverrides?: [string, number][];
-  /** @deprecated → `zpcrweb.json` `analysis.thresholdMultiplier`. */
-  thresholdMultiplier?: number;
-  /** @deprecated → `zpcrweb.json` `analysis.subtractDark`. */
-  subtractDark?: boolean;
-  /** @deprecated → `zpcrweb.json` `analysis.calibrationNormalization`. */
-  calibrationNormalization?: "none" | "column" | "global";
-  /** @deprecated Retired three-way background selector ("none"/"dark"/"plate"), migrated to
-   * {@link subtractDark} ("dark" → true, else false) and from there into the file. */
-  calibrationBackground?: "none" | "dark" | "plate";
-  /** @deprecated Retired name for {@link thresholdOverrides}, still read when migrating. */
-  analysisThresholdOverrides?: [string, number][];
+   * analysis (Biomeme) — see `FileSettings.baselineSource`/`cqSource`. */
+  baselineSource: "file" | "computed";
+  cqSource: "file" | "computed";
 }
 
-/** True when a stored record still carries analysis fields that now belong in the file — the
- * trigger for the one-time migration, and for rewriting the record without them. */
-export function hasLegacyAnalysisFields(s: StoredSettings): boolean {
-  return (
-    s.thresholdOverrides !== undefined ||
-    s.curveThresholdOverrides !== undefined ||
-    s.analysisThresholdOverrides !== undefined ||
-    s.thresholdMultiplier !== undefined ||
-    s.subtractDark !== undefined ||
-    s.calibrationNormalization !== undefined ||
-    s.calibrationBackground !== undefined
-  );
+/**
+ * One record per file, holding everything the app can say about it **without reading its bytes**.
+ * This is what the whole catalog is listed from ({@link getAllEntries}) while the archives stay on
+ * disk, so it must stay small: {@link view} is the largest thing on it, and it is kept only for the
+ * handful of files that are loaded.
+ */
+export interface StoredEntry extends FileIdentity {
+  /** See {@link FileSummary} — absent until the file has been loaded at least once. */
+  summary?: FileSummary;
+  /**
+   * Whether this file's *content* has been edited since it was loaded (or since it was last
+   * downloaded) — a threshold moved, the run renamed. Not display state, and it has to outlive a
+   * reload: the edits themselves are already durable (in the archive's `zpcrweb.json`, in
+   * IndexedDB), so what is at risk is the copy on the user's disk, which is stale until they
+   * download again. See `useZpcrStore`'s `modifiedIds` and the file chip's two-stage delete.
+   */
+  modified: boolean;
+  /**
+   * Whether this file is **loaded** — its bytes in memory, decoded, and so a chip on the file bar
+   * and a candidate for the tab strip. An unloaded file stays in IndexedDB and in the full files
+   * table; only its bytes leave memory. This is what the app restores on the next session, so a
+   * browser holding a thousand archives reopens holding the handful that were in use.
+   */
+  loaded: boolean;
+  /**
+   * This file's display state — **present only while {@link loaded} is true**.
+   *
+   * Releasing a file drops it, and re-loading the file starts from defaults again. That is the
+   * deliberate bargain of the two sets: everything that changes a reported number lives in the
+   * archive and survives (see the module comment), while which wells you had hidden is a property
+   * of looking at the run, not of the run, and lasts as long as you are looking at it. Keeping it
+   * for every file the browser has ever seen would also put the largest field on this record into
+   * the one query that has to stay cheap.
+   */
+  view?: StoredView;
 }
 
+/**
+ * Open the database, **erasing it whenever {@link DB_VERSION} has moved**.
+ *
+ * The app is in development and nobody's data lives only here: a run is a file the user has on
+ * disk, and everything the app adds to one is written back into that file. So a schema change
+ * drops every store and rebuilds empty rather than carrying a migration path — and, more to the
+ * point, rather than carrying the compatibility shims a migration path grows (optional fields,
+ * renamed-field fallbacks, "records written before this existed" defaults) into every type in this
+ * module. Change a stored shape, bump the version, and the next load starts clean.
+ *
+ * > **Future:** once the app ships to people who keep files only in the browser, this becomes a
+ * > real upgrade path, and stored types go back to tolerating older shapes.
+ */
 function openDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
-    req.onupgradeneeded = (e) => {
+    req.onupgradeneeded = () => {
       const db = req.result;
-      if (!db.objectStoreNames.contains(FILES)) {
-        db.createObjectStore(FILES, { keyPath: "id" });
-      }
-      if (!db.objectStoreNames.contains(SETTINGS)) {
-        db.createObjectStore(SETTINGS, { keyPath: "fileId" });
-      }
-      if (!db.objectStoreNames.contains(META)) {
-        const meta = db.createObjectStore(META, { keyPath: "id" });
-        // v1 → v2: seed one meta record per existing file from what the file record already says.
-        // Deliberately **no summary**: deriving one means decoding the archive, and decoding
-        // happens only when a file is loaded. Every one of these rows gets its summary the first
-        // time its file is opened, which for the files that were in use is the very next moment
-        // (they reload on hydration), and for the rest is whenever they are next wanted.
-        if (e.oldVersion >= 1 && req.transaction) {
-          const files = req.transaction.objectStore(FILES);
-          files.openCursor().onsuccess = (ev) => {
-            const cursor = (ev.target as IDBRequest<IDBCursorWithValue | null>).result;
-            if (!cursor) return;
-            const f = cursor.value as StoredFile;
-            meta.put({
-              id: f.id,
-              name: f.name,
-              size: f.size,
-              addedAt: f.addedAt,
-              lastModified: f.lastModified ?? f.addedAt,
-              kind: f.kind ?? "zpcr",
-            } satisfies StoredMeta);
-            cursor.continue();
-          };
-        }
-      }
+      for (const name of Array.from(db.objectStoreNames)) db.deleteObjectStore(name);
+      db.createObjectStore(FILES, { keyPath: "id" });
+      db.createObjectStore(CATALOG, { keyPath: "id" });
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
@@ -330,49 +276,88 @@ export function fileId(name: string, size: number): string {
   return `${name}:${size}`;
 }
 
+/** In-flight catalog writes, per file id — see {@link serializeCatalog}. */
+const catalogWrites = new Map<string, Promise<unknown>>();
+
 /**
- * Write a file's content **and** its identity metadata, so the two can never disagree about a
- * file's name, size or kind. The summary is left alone: it belongs to the file's content, is
- * written by whoever just decoded it ({@link putSummary}), and a caller rewriting content here has
- * usually not re-derived it yet.
+ * Run a catalog read-modify-write after any already in flight for the same id.
  *
- * The record is held to "one representation, never both" (see {@link StoredFile}): whichever of
- * `bytes`/`files` the caller supplied wins and the other is cleared. Callers build records by
- * spreading an existing one, so a run that has just been collapsed to a ZIP would otherwise keep
- * its exploded entries alongside the bytes — twice the storage, and two answers to what the file
- * is.
+ * Every write to a `catalog` record merges into what is already stored, and the app fires several
+ * at once on one file — releasing it writes the flags, the summary and the dropped view from three
+ * places in the same tick. Without this, two of them could read the same "before" record and the
+ * later write would silently undo the earlier one. Per id, so unrelated files still write in
+ * parallel.
  */
-export async function putFile(file: StoredFile): Promise<void> {
-  const record: StoredFile = file.files
-    ? { ...file, bytes: undefined }
-    : { ...file, files: undefined };
-  await tx(FILES, "readwrite", (s) => s.put(record));
-  const existing = await tx<StoredMeta | undefined>(META, "readonly", (s) => s.get(file.id));
-  await tx(META, "readwrite", (s) =>
-    s.put({
-      id: file.id,
-      name: file.name,
-      size: file.size,
-      addedAt: file.addedAt,
-      lastModified: file.lastModified ?? file.addedAt,
-      kind: file.kind ?? "zpcr",
-      ...(existing?.summary ? { summary: existing.summary } : {}),
-    } satisfies StoredMeta),
+function serializeCatalog<T>(id: string, run: () => Promise<T>): Promise<T> {
+  const result = (catalogWrites.get(id) ?? Promise.resolve()).then(run, run);
+  // The chain must survive a rejection, or one failed write would wedge that id forever.
+  const settled = result.then(
+    () => {},
+    () => {},
   );
+  catalogWrites.set(id, settled);
+  void settled.then(() => {
+    if (catalogWrites.get(id) === settled) catalogWrites.delete(id);
+  });
+  return result;
 }
 
-/** Cache what a file's content says, having just decoded it — see {@link FileSummary}. A no-op
- * for an id with no meta record, which can only mean the file was deleted mid-flight. */
-export async function putSummary(id: string, summary: FileSummary): Promise<void> {
-  const existing = await tx<StoredMeta | undefined>(META, "readonly", (s) => s.get(id));
-  if (!existing) return;
-  await tx(META, "readwrite", (s) => s.put({ ...existing, summary } satisfies StoredMeta));
+/**
+ * Write a file's content **and** its identity, so the two can never disagree about a file's name,
+ * size or kind. Everything else on the catalog record — the summary, the flags, the view — belongs
+ * to whoever last wrote it ({@link updateEntry}) and is carried over untouched; a file being seen
+ * for the first time starts unmodified and loaded, which is what adding a file means.
+ *
+ * The content record is held to "one representation, never both" (see {@link StoredFile}):
+ * whichever of `bytes`/`files` the caller supplied wins and the other is cleared. Callers build
+ * records by spreading an existing one, so a run that has just been collapsed to a ZIP would
+ * otherwise keep its exploded entries alongside the bytes — twice the storage, and two answers to
+ * what the file is.
+ */
+export async function putFile(
+  identity: FileIdentity,
+  content: Omit<StoredFile, "id">,
+): Promise<void> {
+  const record: StoredFile = content.files
+    ? { id: identity.id, files: content.files }
+    : { id: identity.id, bytes: content.bytes };
+  await tx(FILES, "readwrite", (s) => s.put(record));
+  await serializeCatalog(identity.id, async () => {
+    const existing = await tx<StoredEntry | undefined>(CATALOG, "readonly", (s) =>
+      s.get(identity.id),
+    );
+    await tx(CATALOG, "readwrite", (s) =>
+      s.put({ modified: false, loaded: true, ...existing, ...identity } satisfies StoredEntry),
+    );
+  });
 }
 
-/** The whole catalog, metadata only — no archive bytes are read. This is the query the Files
- * table is built on, and the reason a browser holding thousands of files still starts instantly. */
-export function getAllMeta(): Promise<StoredMeta[]> {
-  return tx<StoredMeta[]>(META, "readonly", (s) => s.getAll());
+/**
+ * Change part of a file's catalog record, leaving the rest as it stands — how the summary, the two
+ * flags and the view are all written. A key set to `undefined` is **removed**, which is how
+ * releasing a file drops its {@link StoredEntry.view}.
+ *
+ * A no-op for an id with no record, which can only mean the file was deleted mid-flight.
+ */
+export async function updateEntry(
+  id: string,
+  patch: Partial<Omit<StoredEntry, "id">>,
+): Promise<void> {
+  await serializeCatalog(id, async () => {
+    const existing = await tx<StoredEntry | undefined>(CATALOG, "readonly", (s) => s.get(id));
+    if (!existing) return;
+    const next = { ...existing, ...patch };
+    for (const [key, value] of Object.entries(patch)) {
+      if (value === undefined) delete (next as Record<string, unknown>)[key];
+    }
+    await tx(CATALOG, "readwrite", (s) => s.put(next satisfies StoredEntry));
+  });
+}
+
+/** The whole catalog — no archive bytes are read. This is the query the Files table is built on,
+ * and the reason a browser holding thousands of files still starts instantly. */
+export function getAllEntries(): Promise<StoredEntry[]> {
+  return tx<StoredEntry[]>(CATALOG, "readonly", (s) => s.getAll());
 }
 
 /** One file's stored content, by id — the only way a file's content enters memory. Handed back as
@@ -385,14 +370,5 @@ export function getFileContent(id: string): Promise<StoredFile | undefined> {
 
 export async function deleteFile(id: string): Promise<void> {
   await tx(FILES, "readwrite", (s) => s.delete(id));
-  await tx(META, "readwrite", (s) => s.delete(id));
-  await tx(SETTINGS, "readwrite", (s) => s.delete(id));
-}
-
-export function putSettings(settings: StoredSettings): Promise<unknown> {
-  return tx(SETTINGS, "readwrite", (s) => s.put(settings));
-}
-
-export function getAllSettings(): Promise<StoredSettings[]> {
-  return tx<StoredSettings[]>(SETTINGS, "readonly", (s) => s.getAll());
+  await tx(CATALOG, "readwrite", (s) => s.delete(id));
 }
