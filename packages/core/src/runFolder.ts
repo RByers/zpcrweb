@@ -3,15 +3,13 @@
  *
  * A `.zpcr` is a plain ZIP of exactly what the instrument keeps in `\Storage Card\CurrentRun`
  * (see `archive.ts` and `usb.md` §7): `RunInfo.xml`, the `Read*.Plateread` series, the `.Dcal`
- * set, the marker files, and whatever plate/protocol the run carried. So there is no format
- * conversion here — the files that come off the wire are the archive's entries verbatim, and
- * zipping them is the whole job.
- *
- * The counterpart to `attachPlate.ts`: both write a `.zpcr` with `fflate`'s `zipSync`, already a
- * dependency for reading.
+ * set, the marker files, and whatever plate/protocol the run carried. So a run directory already
+ * *is* a {@link ZpcrArchive} — there is no format conversion here, and nothing to assemble. All
+ * {@link zpcrFromRunFiles} does is check that the folder is a run and work out what it should be
+ * called; `zipArchive` is the separate step that makes it a file, for a caller that wants one.
  */
 
-import { unzipArchive, zipArchive, type ArchiveFiles } from "./archive.js";
+import type { ZpcrArchive } from "./archive.js";
 import { runFileBaseName } from "./experiment.js";
 import { expectedPlateReads } from "./runDefinition.js";
 import type { Zpcr } from "./types.js";
@@ -37,20 +35,14 @@ export const RUN_BEGUN_MARKER = "begun";
 export const RUN_ENDED_MARKER = "ended";
 
 /**
- * Add the `begun` marker to an existing `.zpcr` archive in memory — what "Start experiment" calls
+ * Add the `begun` marker to an existing archive — what "Start experiment" calls
  * on a pending experiment's own file instead of creating a new one (the app's `beginExperiment`).
  * Once this lands, `runProgressFromNames` reads the file as started, permanently: even at zero
  * plate reads it is no longer "pending" (see the app's definition of that state), only "in
  * progress". Zero-content, like the marker itself — only its presence means anything.
  */
-export function markExperimentBegun(zpcrBytes: Uint8Array): Uint8Array {
-  return zipArchive(markFilesBegun(unzipArchive(zpcrBytes)));
-}
-
-/** {@link markExperimentBegun} on an open archive map rather than on zipped bytes — the map-level
- * half of the pair described in `archive.ts`. */
-export function markFilesBegun(files: ArchiveFiles): ArchiveFiles {
-  return { ...files, [RUN_BEGUN_MARKER]: new Uint8Array(0) };
+export function markExperimentBegun(archive: ZpcrArchive): ZpcrArchive {
+  return { ...archive, [RUN_BEGUN_MARKER]: new Uint8Array(0) };
 }
 
 /** How far along a run is, read from nothing but which files exist. */
@@ -187,7 +179,7 @@ function fileBase(name: string): string {
  *    by hand. Falls back to `CurrentRun.zpcr` when the field is absent or empty.
  */
 export function zpcrNameFromRunFiles(
-  files: Record<string, Uint8Array>,
+  files: ZpcrArchive,
   naming?: RunFolderNaming,
 ): string {
   const runInfo = files[RUNINFO_NAME];
@@ -213,7 +205,7 @@ export function zpcrNameFromRunFiles(
 }
 
 /** The run name this app deposited into the folder when it started the run, or `""`. */
-function depositedName(files: Record<string, Uint8Array>): string {
+function depositedName(files: ZpcrArchive): string {
   const settings = files[ZPCRWEB_SETTINGS_NAME];
   if (settings === undefined) return "";
   try {
@@ -233,43 +225,25 @@ function runStartDate(runInfo: Uint8Array): Date {
 }
 
 /**
- * Zip a run directory's files into `.zpcr` bytes, named after the run (see
- * {@link zpcrNameFromRunFiles}). The result parses straight back through `parseZpcr`.
+ * Read a run directory as the `.zpcr` archive it already is: the same entries back, plus what the
+ * run should be called (see {@link zpcrNameFromRunFiles}).
+ *
+ * The archive is returned rather than zipped because that is what a caller following a live run
+ * wants — every cycle re-assembles the whole run from ~40 cached files, and zipping that to hand
+ * it over, only for the receiving side to unzip it again to read it, was the single most expensive
+ * thing a plate read cost (the app's `useRunWatch` and `state/fileContent.ts`). A caller that
+ * wants a file writes `zipArchive(archive)`.
  *
  * Throws when `RunInfo.xml` is absent: without it there is no run metadata and `parseZpcr` would
- * reject the result anyway, so failing here names the actual problem — an incomplete set of
- * files — rather than handing back an archive that cannot be opened.
+ * reject the archive anyway, so failing here names the actual problem — an incomplete set of
+ * files — rather than handing back something that cannot be opened.
  */
 export function zpcrFromRunFiles(
-  files: ArchiveFiles,
+  files: ZpcrArchive,
   naming?: RunFolderNaming,
-): {
-  name: string;
-  bytes: Uint8Array;
-} {
-  const run = runArchiveFromRunFiles(files, naming);
-  return { name: run.name, bytes: zipArchive(run.files) };
-}
-
-/**
- * {@link zpcrFromRunFiles} without the zip: the same completeness check and the same name, handing
- * back the run's files as the archive map they already are.
- *
- * This is what following a live run uses (the app's `useRunWatch`). Every cycle re-assembles the
- * whole archive from ~40 cached files, and zipping that to hand it over — only for the receiving
- * side to unzip it again to read it — was the single most expensive thing a plate read cost. The
- * run's archive stays open until it ends; see the app's `state/fileContent.ts`.
- *
- * Throws for the same reason and with the same message as {@link zpcrFromRunFiles}: a folder with
- * no `RunInfo.xml` in it yet is not a run anyone can open, and saying so here names the actual
- * problem.
- */
-export function runArchiveFromRunFiles(
-  files: ArchiveFiles,
-  naming?: RunFolderNaming,
-): { name: string; files: ArchiveFiles } {
+): { name: string; archive: ZpcrArchive } {
   if (files[RUNINFO_NAME] === undefined) {
     throw new Error(`Can't assemble a .zpcr: no ${RUNINFO_NAME} among the run's files`);
   }
-  return { name: zpcrNameFromRunFiles(files, naming), files };
+  return { name: zpcrNameFromRunFiles(files, naming), archive: files };
 }

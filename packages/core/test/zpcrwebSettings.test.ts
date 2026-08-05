@@ -1,9 +1,9 @@
 import { describe, it, expect } from "vitest";
 import {
-  attachPlateToZpcr,
+  attachPlate,
   formatZpcrwebSettings,
   hasZpcrwebSettings,
-  parseZpcr,
+  parseZpcrArchive,
   parseZpcrwebSettings,
   parseZpcrwebSettingsJson,
   plateToCsv,
@@ -12,7 +12,7 @@ import {
   ZPCRWEB_SETTINGS_VERSION,
   type ZpcrwebSettings,
 } from "../src/index.js";
-import { readSampleBytes } from "./sample.js";
+import { readSampleArchive } from "./sample.js";
 
 const SETTINGS: ZpcrwebSettings = {
   version: ZPCRWEB_SETTINGS_VERSION,
@@ -27,16 +27,16 @@ const SETTINGS: ZpcrwebSettings = {
 };
 
 describe("zpcrweb.json in a .zpcr archive", () => {
-  it("round-trips through writeZpcrwebSettings → parseZpcr → parseZpcrwebSettings", () => {
-    const augmented = writeZpcrwebSettings(readSampleBytes(), SETTINGS);
-    const zpcr = parseZpcr(augmented);
+  it("round-trips through writeZpcrwebSettings → parseZpcrArchive → parseZpcrwebSettings", () => {
+    const augmented = writeZpcrwebSettings(readSampleArchive(), SETTINGS);
+    const zpcr = parseZpcrArchive(augmented);
     expect(zpcr.archive.entries).toContain(ZPCRWEB_SETTINGS_NAME);
     expect(parseZpcrwebSettings(zpcr)).toEqual(SETTINGS);
   });
 
   it("leaves the rest of the archive, and everything parseZpcr derives, untouched", () => {
-    const original = parseZpcr(readSampleBytes());
-    const zpcr = parseZpcr(writeZpcrwebSettings(readSampleBytes(), SETTINGS));
+    const original = parseZpcrArchive(readSampleArchive());
+    const zpcr = parseZpcrArchive(writeZpcrwebSettings(readSampleArchive(), SETTINGS));
 
     // Same entries plus exactly one.
     expect(zpcr.archive.entries.filter((e) => e !== ZPCRWEB_SETTINGS_NAME).sort()).toEqual(
@@ -54,27 +54,27 @@ describe("zpcrweb.json in a .zpcr archive", () => {
   });
 
   it("replaces an existing entry rather than accumulating them", () => {
-    const once = writeZpcrwebSettings(readSampleBytes(), SETTINGS);
+    const once = writeZpcrwebSettings(readSampleArchive(), SETTINGS);
     const twice = writeZpcrwebSettings(once, {
       version: ZPCRWEB_SETTINGS_VERSION,
       analysis: { thresholdMultiplier: 10 },
     });
-    const zpcr = parseZpcr(twice);
+    const zpcr = parseZpcrArchive(twice);
     expect(zpcr.archive.entries.filter((e) => e === ZPCRWEB_SETTINGS_NAME)).toHaveLength(1);
     expect(parseZpcrwebSettings(zpcr)?.analysis).toEqual({ thresholdMultiplier: 10 });
   });
 
-  it("survives a later attachPlateToZpcr, and vice versa", () => {
-    const withSettings = writeZpcrwebSettings(readSampleBytes(), SETTINGS);
-    const withPlate = attachPlateToZpcr(withSettings, {
+  it("survives a later attachPlate, and vice versa", () => {
+    const withSettings = writeZpcrwebSettings(readSampleArchive(), SETTINGS);
+    const withPlate = attachPlate(withSettings, {
       name: "MyPlate.csv",
-      bytes: new TextEncoder().encode(plateToCsv(parseZpcr(withSettings).plates()[0]!.pltd.plate!)),
+      bytes: new TextEncoder().encode(plateToCsv(parseZpcrArchive(withSettings).plates()[0]!.pltd.plate!)),
     });
-    expect(parseZpcrwebSettings(parseZpcr(withPlate))).toEqual(SETTINGS);
+    expect(parseZpcrwebSettings(parseZpcrArchive(withPlate))).toEqual(SETTINGS);
   });
 
   it("returns null for a file with no settings entry", () => {
-    expect(parseZpcrwebSettings(parseZpcr(readSampleBytes()))).toBeNull();
+    expect(parseZpcrwebSettings(parseZpcrArchive(readSampleArchive()))).toBeNull();
   });
 
   it("writes human-readable JSON with a trailing newline", () => {

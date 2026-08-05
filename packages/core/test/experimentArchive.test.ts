@@ -1,11 +1,10 @@
-import { zipSync } from "fflate";
 import { describe, expect, it } from "vitest";
 import {
-  attachProtocolToZpcr,
+  attachProtocol,
   buildExperimentArchive,
   formatRunDefinitionText,
   markExperimentBegun,
-  parseZpcr,
+  parseZpcrArchive,
   plateToCsv,
   ProtocolBuilder,
   runProgressFromNames,
@@ -32,7 +31,7 @@ const plate: PlateDefinition = {
 
 describe("buildExperimentArchive — a bare .zpcr for a pending experiment", () => {
   it("with neither part still parses as a run with no protocol and no plate", () => {
-    const zpcr = parseZpcr(buildExperimentArchive({}));
+    const zpcr = parseZpcrArchive(buildExperimentArchive({}));
     expect(zpcr.protocolText).toBe("");
     expect(zpcr.protocol()).toBeUndefined();
     expect(zpcr.plates()).toEqual([]);
@@ -40,13 +39,13 @@ describe("buildExperimentArchive — a bare .zpcr for a pending experiment", () 
   });
 
   it("is pending: no begun marker, no reads", () => {
-    const zpcr = parseZpcr(buildExperimentArchive({}));
+    const zpcr = parseZpcrArchive(buildExperimentArchive({}));
     expect(runProgressFromNames(zpcr.archive.entries).begun).toBe(false);
     expect(zpcr.reads.length).toBe(0);
   });
 
   it("carries a given protocol's text and name", () => {
-    const zpcr = parseZpcr(
+    const zpcr = parseZpcrArchive(
       buildExperimentArchive({ protocol: { runDefinition: PROTOCOL, name: "Luna noRT" } }),
     );
     expect(zpcr.protocolText).toContain("PLATEREAD #h3F");
@@ -55,7 +54,7 @@ describe("buildExperimentArchive — a bare .zpcr for a pending experiment", () 
 
   it("carries a given plate, renaming a bare .csv upload the same way attachPlateToZpcr does", () => {
     const csv = plateToCsv(plate);
-    const zpcr = parseZpcr(
+    const zpcr = parseZpcrArchive(
       buildExperimentArchive({
         plate: { name: "MyPlate.csv", bytes: new TextEncoder().encode(csv) },
       }),
@@ -67,7 +66,7 @@ describe("buildExperimentArchive — a bare .zpcr for a pending experiment", () 
   });
 
   it("writes no begun marker, so it reads as never started", () => {
-    const zpcr = parseZpcr(
+    const zpcr = parseZpcrArchive(
       buildExperimentArchive({ protocol: { runDefinition: PROTOCOL } }),
     );
     expect(zpcr.archive.entries).not.toContain("begun");
@@ -81,7 +80,7 @@ describe("buildExperimentArchive — a bare .zpcr for a pending experiment", () 
    * (`zpcr.ts`), by presence rather than content.
    */
   it("holds no protocol and no plate when given neither, and still parses", () => {
-    const zpcr = parseZpcr(buildExperimentArchive({}));
+    const zpcr = parseZpcrArchive(buildExperimentArchive({}));
     expect(zpcr.archive.entries).toEqual(["zpcrweb.json"]);
     expect(zpcr.protocolText).toBe("");
     expect(zpcr.protocol()).toBeUndefined();
@@ -91,7 +90,7 @@ describe("buildExperimentArchive — a bare .zpcr for a pending experiment", () 
 
   it("…and a ZIP with none of the four identifying entries is still refused", () => {
     // The guard `zpcrweb.json` was added to must still reject anything renamed `.zpcr`.
-    expect(() => parseZpcr(zipSync({ "notes.txt": new TextEncoder().encode("hi") }))).toThrow(
+    expect(() => parseZpcrArchive({ "notes.txt": new TextEncoder().encode("hi") })).toThrow(
       /Not a valid \.zpcr archive/,
     );
   });
@@ -100,9 +99,9 @@ describe("buildExperimentArchive — a bare .zpcr for a pending experiment", () 
 describe("markExperimentBegun — starting a pending experiment in place", () => {
   it("adds the begun marker without touching the rest of the archive", () => {
     const before = buildExperimentArchive({ protocol: { runDefinition: PROTOCOL } });
-    const after = parseZpcr(markExperimentBegun(before));
+    const after = parseZpcrArchive(markExperimentBegun(before));
     expect(runProgressFromNames(after.archive.entries).begun).toBe(true);
-    expect(after.protocolText).toBe(parseZpcr(before).protocolText);
+    expect(after.protocolText).toBe(parseZpcrArchive(before).protocolText);
   });
 });
 
@@ -124,7 +123,7 @@ describe("an experiment's protocol entry is the form the instrument writes", () 
   };
 
   it("has no .prcl.txt version header, and is editable", () => {
-    const zpcr = parseZpcr(buildExperimentArchive({ protocol: { runDefinition: PROTOCOL } }));
+    const zpcr = parseZpcrArchive(buildExperimentArchive({ protocol: { runDefinition: PROTOCOL } }));
     expect(zpcr.protocolText).not.toContain("[ProtocolRunDefinition");
     expect(zpcr.protocolText.trim()).toBe(PROTOCOL);
     expect(editable(zpcr.protocolText)).toBe(true);
@@ -132,7 +131,7 @@ describe("an experiment's protocol entry is the form the instrument writes", () 
 
   it("…likewise after attaching a protocol, so an attach doesn't break editing either", () => {
     const bare = buildExperimentArchive({});
-    const zpcr = parseZpcr(attachProtocolToZpcr(bare, { runDefinition: PROTOCOL }));
+    const zpcr = parseZpcrArchive(attachProtocol(bare, { runDefinition: PROTOCOL }));
     expect(zpcr.protocolText).not.toContain("[ProtocolRunDefinition");
     expect(editable(zpcr.protocolText)).toBe(true);
   });
@@ -140,7 +139,7 @@ describe("an experiment's protocol entry is the form the instrument writes", () 
   it("accepts a headered .prcl.txt body as input and strips it, so either form may be passed", () => {
     const asFile = formatRunDefinitionText(PROTOCOL);
     expect(asFile).toContain("[ProtocolRunDefinition");
-    const zpcr = parseZpcr(buildExperimentArchive({ protocol: { runDefinition: asFile } }));
+    const zpcr = parseZpcrArchive(buildExperimentArchive({ protocol: { runDefinition: asFile } }));
     expect(zpcr.protocolText.trim()).toBe(PROTOCOL);
     expect(editable(zpcr.protocolText)).toBe(true);
   });
@@ -148,9 +147,9 @@ describe("an experiment's protocol entry is the form the instrument writes", () 
   it("survives the edit → write → re-read cycle the editor drives, unchanged", () => {
     // The editor hands back `builder.toRunDefinition()`; writing that must not re-wrap it, or the
     // second mount would fail where the first succeeded.
-    const zpcr = parseZpcr(buildExperimentArchive({ protocol: { runDefinition: PROTOCOL } }));
+    const zpcr = parseZpcrArchive(buildExperimentArchive({ protocol: { runDefinition: PROTOCOL } }));
     const edited = ProtocolBuilder.fromRunDefinition(zpcr.protocolText).toRunDefinition();
-    const again = parseZpcr(attachProtocolToZpcr(buildExperimentArchive({}), { runDefinition: edited }));
+    const again = parseZpcrArchive(attachProtocol(buildExperimentArchive({}), { runDefinition: edited }));
     expect(again.protocolText).not.toContain("[ProtocolRunDefinition");
     expect(editable(again.protocolText)).toBe(true);
     // And a further round trip is a fixed point rather than drifting.

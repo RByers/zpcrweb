@@ -401,8 +401,8 @@ alongside `"zpcr"`/`"pcrd"`:
   also closes on an outside `mousedown`, like any other dismissable popover, rather than only on
   a second click on its own toggle — worth having regardless, but especially so once it can be
   showing a destructive confirmation. Either path ends by wrapping the chosen bytes in a `File`
-  and calling `store.attachPlate(fileId, file)`, which rewrites the run's own bytes via
-  `attachPlateToZpcr` (see root `ARCHITECTURE.md`) and re-persists them under the same file id.
+  and calling `store.attachPlate(fileId, file)`, which rewrites the run's own archive via core's
+  `attachPlate` (see root `ARCHITECTURE.md`) and re-persists it under the same file id.
   There is **no separate override state** — once
   attached, the plate is just part of the run's `.zpcr` bytes, so `zpcr.plates()` picks it up the
   same way it would an originally-embedded `.pltd`, and `CurvesView`'s
@@ -423,7 +423,7 @@ alongside `"zpcr"`/`"pcrd"`:
   menu above with something to pick besides an upload. `ProtocolView`'s "Thermal protocol"
   block has the same pair of buttons for a run's `protocolText`, download vs. clone to a
   `.prcl.txt` `addFiles` call. Replacing a run's protocol *is* rewriting its own bytes, the way a
-  plate attach does (core's `attachProtocolToZpcr`), and it is offered only for a **pending**
+  plate attach does (core's `attachProtocol`), and it is offered only for a **pending**
   experiment — through Overview's attach menu, or by editing it on the Protocol tab. A run that has
   happened doesn't get it: its protocol is the record of what the block was asked to do.
 
@@ -572,14 +572,14 @@ leaving the browser is an ordinary `.zpcr` either way. The one place it shows th
 the app reports for a run in progress, which is what its entries add up to rather than what they
 would zip to — the zipped length isn't known without doing the zip the open form exists to avoid.
 
-The core library is the other half of this. Every archive writer there comes in a pair — a `…Files`
-one taking and returning an `ArchiveFiles` map, and a byte-level wrapper that unzips, calls it and
-re-zips (`attachPlateToFiles`/`attachPlateToZpcr`, `attachProtocolToFiles`, `markFilesBegun`,
-`writeZpcrwebSettingsToFiles`, `buildExperimentFiles`) — plus `parseZpcrFiles`, which parses an
-archive that is already open, and `runArchiveFromRunFiles`, which is `zpcrFromRunFiles` without the
-zip. A run being followed therefore goes from the wire into the store without ever being packed:
-`useRunWatch` hands the store the folder's files, `addRunArchive` keeps them, and a cycle's cost is
-the one plate read that arrived.
+The core library is the other half of this, and it made the same choice: its one currency is the
+unpacked archive (`ZpcrArchive`), every writer takes and returns one (`attachPlate`,
+`attachProtocol`, `writeZpcrwebSettings`, `markExperimentBegun`, `buildExperimentArchive`), and
+zipping is a separate step — `zipArchive` — that only a caller wanting a *file* takes. `parseZpcr`
+is the one byte-level entry point kept, since bytes are how a `.zpcr` arrives from disk;
+`parseZpcrArchive` is what this app uses. A run being followed therefore goes from the wire into
+the store without ever being packed: `useRunWatch` hands the store what `zpcrFromRunFiles` returned,
+`addRunArchive` keeps it, and a cycle's cost is the one plate read that arrived.
 
 ### Editing what has already happened
 
@@ -2334,7 +2334,7 @@ anyway, though, purely to tell a run *starting* apart from one *found* already g
 the two listings are identical, so only the live transition tells them apart — which is what the
 `freshStart` flag below rides on.
 
-Each changed listing is pulled with `runArchiveFromRunFiles` and handed to `store.addRunArchive`
+Each changed listing is pulled with `zpcrFromRunFiles` and handed to `store.addRunArchive`
 as the archive it already is — the same validate → IndexedDB path a drop takes, minus the ZIP: the
 store keeps a run in progress open (see "Runs still being written are stored exploded"), so a
 cycle's cost is the one plate read that arrived rather than a re-zip of the whole run. The
@@ -2518,7 +2518,7 @@ Four components, under `components/instrument/`:
   A whole directory is different, and is what **Open run** does: a `.zpcr` *is* a ZIP of a run
   directory (root `ARCHITECTURE.md`, "A run directory is a `.zpcr`"), so the button pulls every
   file — sequentially, since the command channel carries one request at a time, with the busy
-  label counting them off — hands them to the library's `runArchiveFromRunFiles`, and drops the
+  label counting them off — hands them to the library's `zpcrFromRunFiles`, and drops the
   result into `store.addRunArchive`. From there it is an ordinary loaded file: the same validate →
   IndexedDB path as a drop, under the name the run calls itself, then a switch to Overview so a
   successful open goes somewhere. It is offered for any directory whose listing contains a `RunInfo.xml`

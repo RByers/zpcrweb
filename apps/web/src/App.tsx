@@ -3,7 +3,7 @@ import {
   plateToCsv,
   ProtocolBuilder,
   runFileBaseName,
-  type ArchiveFiles,
+  type ZpcrArchive,
   type RunPlan,
   type Zpcr,
 } from "@zpcrweb/core";
@@ -189,12 +189,12 @@ export function App() {
     instrument,
     useCallback(
       async (
-        run: { name: string; files: ArchiveFiles },
+        run: { name: string; archive: ZpcrArchive },
         previousId: string | null,
         freshStart: boolean,
       ) => {
         const wasWatchingIt = store.activeId !== null && store.activeId === previousId;
-        return store.addRunArchive(run.name, run.files, {
+        return store.addRunArchive(run.name, run.archive, {
           activate: wasWatchingIt || freshStart,
           modified: true,
         });
@@ -222,7 +222,7 @@ export function App() {
   // `addFiles` path as a drop — and then leaves the Instrument view for it, since staying on a
   // view that shows no file would make a successful open look like nothing happened. Only on success:
   // a rejected archive leaves you where you are, with the error banner.
-  const openRun = async (name: string, archive: ArchiveFiles) => {
+  const openRun = async (name: string, archive: ZpcrArchive) => {
     if (await store.addRunArchive(name, archive, { modified: true })) store.setView("overview");
   };
 

@@ -15,7 +15,7 @@
  * app already has; the throttle still applies, since the IndexedDB write itself is the cost there.)
  */
 
-import { writeZpcrwebSettingsToFiles, type ArchiveFiles } from "@zpcrweb/core";
+import { writeZpcrwebSettings, type ZpcrArchive } from "@zpcrweb/core";
 import { putFile, type StoredFile } from "./db";
 import { zpcrwebFromAnalysis, type AnalysisSettings } from "./analysisSettings";
 import { runContent, toStoredContent } from "./fileContent";
@@ -32,7 +32,7 @@ interface AnalysisFlushTarget {
    * the archive, and the representation to store it in is decided at write time. */
   file: StoredFile;
   /** The run's archive, open (`fileContent.ts`'s `contentFiles`). */
-  files: ArchiveFiles;
+  files: ZpcrArchive;
   settings: AnalysisSettings;
 }
 
@@ -60,7 +60,7 @@ export class AnalysisPersister {
         // rather than retrying forever. The in-memory value stays live for this session.
         if (!target) return;
         const content = runContent(
-          writeZpcrwebSettingsToFiles(target.files, zpcrwebFromAnalysis(target.settings)),
+          writeZpcrwebSettings(target.files, zpcrwebFromAnalysis(target.settings)),
         );
         // `size` is deliberately left at the stored value rather than the rewritten length: it is
         // the size of the file the user loaded (what the UI labels, and what `fileId()` hashes),

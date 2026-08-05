@@ -1,27 +1,31 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  attachPlateToFiles,
-  attachProtocolToFiles,
-  buildExperimentFiles,
+  // Aliased because this store exposes its own `attachPlate`/`attachProtocol` — the app-level
+  // operation (a file id and an uploaded `File`, persisted and flagged modified) as against the
+  // library's entry swap on an archive. Two different things at two levels; the local names say
+  // which is which rather than making either give up the obvious name.
+  attachPlate as attachPlateToArchive,
+  attachProtocol as attachProtocolToArchive,
+  buildExperimentArchive,
   formatRunDefinitionText,
   isBiomemeJson,
-  markFilesBegun,
+  markExperimentBegun,
   parseBiomeme,
   parsePcrd,
   parsePlateCsv,
   parsePltd,
   parseRunDefinitionText,
   parseZpcr,
-  parseZpcrFiles,
+  parseZpcrArchive,
   parseZpcrwebSettings,
   runCompleteness,
   runProgressFromNames,
   wellKey,
   unzipArchive,
-  writeZpcrwebSettingsToFiles,
+  writeZpcrwebSettings,
   zipArchive,
   type AnalysisSource,
-  type ArchiveFiles,
+  type ZpcrArchive,
   type ExperimentArchiveParts,
   type FileKind,
   type NormalizationMode,
@@ -792,7 +796,7 @@ export interface ZpcrStore {
   markDownloaded: (fileId: string) => void;
   /**
    * Attach (or replace) a `.zpcr` run's plate: rewrites the run's own archive bytes in place
-   * (adding/replacing a `.pltd`/`.plt.csv` entry — see core's `attachPlateToFiles`) and persists the
+   * (adding/replacing a `.pltd`/`.plt.csv` entry — see core's `attachPlate`) and persists the
    * result, so the plate travels with the file from then on and `zpcr.plates()` picks it up
    * with no separate override state. Only valid for a `kind === "zpcr"` run; sets `error`
    * otherwise (a `.pcrd` has no real archive to attach an entry to).
@@ -805,7 +809,7 @@ export interface ZpcrStore {
    */
   attachProtocol: (fileId: string, file: File) => Promise<void>;
   /**
-   * Build a bare pending `.zpcr` (`core/buildExperimentFiles`) and load it as a new file, named
+   * Build a bare pending `.zpcr` (`core/buildExperimentArchive`) and load it as a new file, named
    * with today's date and no experiment name yet (`runFileBaseName` refuses an empty name, so the
    * bare date stamp is built directly rather than through it). Used by both "New experiment"
    * (About, with `parts: {}`) and "Clone experiment" (Overview/Instrument, with the source run's
@@ -814,7 +818,7 @@ export interface ZpcrStore {
    */
   createExperiment: (parts: ExperimentArchiveParts) => Promise<string | null>;
   /**
-   * The in-place-editing counterpart to {@link attachProtocol}: same `attachProtocolToFiles` call
+   * The in-place-editing counterpart to {@link attachProtocol}: same `attachProtocol` call
    * (no name change, just new text), throttled the way {@link setProtocolText} throttles a
    * standalone `.prcl.txt`'s writes — the same {@link WriteThrottle}, keyed by this file's id
    * rather than a second one. Only valid while the target file is pending (`isPendingExperiment`)
@@ -832,7 +836,7 @@ export interface ZpcrStore {
    * button calls instead of seeding a new file. Restamps the file's date if it still carries the
    * one it was created/cloned under (`restampExperimentDate`, via the ordinary `renameFile` so
    * ids and IndexedDB stay consistent), then writes the `begun` marker
-   * (`core/markFilesBegun`). Returns the final file's id and name — which may differ from
+   * (`core/markExperimentBegun`). Returns the final file's id and name — which may differ from
    * `fileId`'s if it was restamped — or `null` for a file that isn't a `kind === "zpcr"` pending
    * experiment.
    */
@@ -892,7 +896,7 @@ export interface ZpcrStore {
    */
   addRunArchive: (
     name: string,
-    archive: ArchiveFiles,
+    archive: ZpcrArchive,
     options?: AddFilesOptions,
   ) => Promise<string | null>;
   /**
@@ -1444,7 +1448,7 @@ export function useZpcrStore(): ZpcrStore {
 
   /** See {@link ZpcrStore.addRunArchive}. */
   const addRunArchive = useCallback(
-    async (name: string, archive: ArchiveFiles, options?: AddFilesOptions): Promise<string | null> => {
+    async (name: string, archive: ZpcrArchive, options?: AddFilesOptions): Promise<string | null> => {
       try {
         // `runContent` is what makes the end of a run the moment the file becomes an ordinary
         // zipped `.zpcr`: every snapshot before it carries no `ended` marker and stays open, and
@@ -1570,7 +1574,7 @@ export function useZpcrStore(): ZpcrStore {
           withContent(
             target,
             runContent(
-              attachPlateToFiles(contentFiles(target.content), {
+              attachPlateToArchive(contentFiles(target.content), {
                 name: file.name,
                 bytes: plateBytes,
               }),
@@ -1603,7 +1607,7 @@ export function useZpcrStore(): ZpcrStore {
         await commitContent(
           withContent(
             target,
-            runContent(attachProtocolToFiles(contentFiles(target.content), { runDefinition, name })),
+            runContent(attachProtocolToArchive(contentFiles(target.content), { runDefinition, name })),
           ),
         );
         setModifiedFlag(target.id, true);
@@ -1626,7 +1630,7 @@ export function useZpcrStore(): ZpcrStore {
         `${String(today.getDate()).padStart(2, "0")}`;
       // A new experiment is by definition a run that hasn't started, so it goes straight in as an
       // open archive: there is nothing to zip and nothing to unzip again to read it back.
-      return addRunArchive(`${stamp}.zpcr`, buildExperimentFiles(parts), {
+      return addRunArchive(`${stamp}.zpcr`, buildExperimentArchive(parts), {
         activate: true,
         modified: true,
       });
@@ -1643,7 +1647,7 @@ export function useZpcrStore(): ZpcrStore {
       // for, replacing the run-definition entry is one `TextEncoder` call and no ZIP work at all.
       const next = withContent(
         file,
-        runContent(attachProtocolToFiles(contentFiles(file.content), { runDefinition })),
+        runContent(attachProtocolToArchive(contentFiles(file.content), { runDefinition })),
       );
       loadedRef.current = replaceFile(loadedRef.current, next);
       setLoadedFiles((prev) => replaceFile(prev, next));
@@ -1666,13 +1670,13 @@ export function useZpcrStore(): ZpcrStore {
       const archive = contentFiles(current.content);
       let runDefinition: string;
       try {
-        runDefinition = parseZpcrFiles(archive).protocolText;
+        runDefinition = parseZpcrArchive(archive).protocolText;
       } catch {
         return;
       }
       if (!runDefinition) return;
       await commitContent(
-        withContent(current, runContent(attachProtocolToFiles(archive, { runDefinition, name }))),
+        withContent(current, runContent(attachProtocolToArchive(archive, { runDefinition, name }))),
       );
       setModifiedFlag(id, true);
     },
@@ -1768,7 +1772,7 @@ export function useZpcrStore(): ZpcrStore {
       await commitContent(
         withContent(
           { ...current, id: targetId, name: targetName },
-          runContent(markFilesBegun(contentFiles(current.content))),
+          runContent(markExperimentBegun(contentFiles(current.content))),
         ),
       );
       setModifiedFlag(targetId, true);
@@ -2049,7 +2053,7 @@ export function useZpcrStore(): ZpcrStore {
         // The one place a run held open is zipped (`fileContent.ts`): a `.zpcr` leaving the
         // browser is an ordinary `.zpcr` whatever form it was being kept in.
         return zipArchive(
-          writeZpcrwebSettingsToFiles(contentFiles(file.content), zpcrwebFromAnalysis(analysis)),
+          writeZpcrwebSettings(contentFiles(file.content), zpcrwebFromAnalysis(analysis)),
         );
       } catch {
         // A file we somehow can't write settings into still downloads as what was loaded.

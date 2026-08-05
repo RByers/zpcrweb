@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
+import { unzipArchive, type ZpcrArchive } from "../src/index.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -56,4 +57,15 @@ export const STANDALONE_PLTD_PATH = resolve(
 export function readStandalonePltdBytes(): Uint8Array {
   const buf = readFileSync(STANDALONE_PLTD_PATH);
   return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
+}
+
+/** The committed sample, unpacked — the form every archive function in the library takes (a
+ * `.zpcr` is a ZIP only at rest; see `archive.ts`'s `ZpcrArchive`). */
+export function readSampleArchive(): ZpcrArchive {
+  return unzipArchive(readSampleBytes());
+}
+
+/** The multi-step sample, unpacked — see {@link readSampleArchive}. */
+export function readMultistepArchive(): ZpcrArchive {
+  return unzipArchive(readMultistepBytes());
 }

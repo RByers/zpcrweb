@@ -78,19 +78,19 @@ const IN_PROGRESS_ZPCR = join(REPO, "tools/.uishot/dupe/20260725-Still_Running.z
 
 /** Write {@link IN_PROGRESS_ZPCR}: a finished sample, minus the marker that says it finished. */
 async function makeInProgressRun() {
-  const { zpcrFromRunFiles, unzipArchive } = await import("../packages/core/dist/index.js");
+  const { zpcrFromRunFiles, unzipArchive, zipArchive } = await import("../packages/core/dist/index.js");
   const files = unzipArchive(
     new Uint8Array(readFileSync(join(REPO, "samples/20260725_GRADIENTTEST.zpcr"))),
   );
   delete files["ended"];
-  const { bytes } = zpcrFromRunFiles(files, { fileName: "20260725-Still_Running" });
+  const { archive } = zpcrFromRunFiles(files, { fileName: "20260725-Still_Running" });
   mkdirSync(dirname(IN_PROGRESS_ZPCR), { recursive: true });
-  writeFileSync(IN_PROGRESS_ZPCR, Buffer.from(bytes));
+  writeFileSync(IN_PROGRESS_ZPCR, Buffer.from(zipArchive(archive)));
 }
 
 /** Write {@link SHORT_ZPCR} by deleting plate reads from a committed sample's own files. */
 async function makeShortRun() {
-  const { zpcrFromRunFiles, unzipArchive } = await import("../packages/core/dist/index.js");
+  const { zpcrFromRunFiles, unzipArchive, zipArchive } = await import("../packages/core/dist/index.js");
   const files = unzipArchive(
     new Uint8Array(readFileSync(join(REPO, "samples/20260725_GRADIENTTEST.zpcr"))),
   );
@@ -98,9 +98,9 @@ async function makeShortRun() {
     .filter((n) => /\.Plateread$/i.test(n))
     .sort();
   for (const name of reads.slice(-2)) delete files[name];
-  const { bytes } = zpcrFromRunFiles(files, { fileName: "20260725-Cut_Short" });
+  const { archive } = zpcrFromRunFiles(files, { fileName: "20260725-Cut_Short" });
   mkdirSync(dirname(SHORT_ZPCR), { recursive: true });
-  writeFileSync(SHORT_ZPCR, Buffer.from(bytes));
+  writeFileSync(SHORT_ZPCR, Buffer.from(zipArchive(archive)));
 }
 
 /**
@@ -160,21 +160,32 @@ async function incompleteRunChecks(chrome, origin) {
 /** Write {@link SEED_ZPCR}. Built rather than committed: the point is what the app writes when a
  * run starts, not a captured artifact — and it is the only run file with nothing to plot. */
 async function makeSeed() {
-  const { buildExperimentArchive, markExperimentBegun, writeZpcrwebSettings, plateToCsv, parsePlateCsv } =
-    await import("../packages/core/dist/index.js");
+  const {
+    buildExperimentArchive,
+    markExperimentBegun,
+    writeZpcrwebSettings,
+    zipArchive,
+    plateToCsv,
+    parsePlateCsv,
+  } = await import("../packages/core/dist/index.js");
   const runDefinition =
     "METHOD CALC;HOTLID 105,30;VOLUME 20;TEMP 95.0,60;TEMP 60.0,30;PLATEREAD #h3F;GOTO 2,39;END;";
   const plate = parsePlateCsv(PLATE_CSV_BODY, { sourceName: "Staged.plt.csv" });
   // The three steps the app itself takes, in the same order: build the experiment, name it, and
   // mark it begun. What comes out is a run that has started and produced nothing yet — the state
-  // the old seed archive represented, now reached by starting a file that already existed.
-  const experiment = buildExperimentArchive({
-    protocol: { runDefinition, name: "Cycling" },
-    plate: { name: "Staged.plt.csv", bytes: new TextEncoder().encode(plateToCsv(plate)) },
-  });
-  const named = writeZpcrwebSettings(experiment, { experimentName: "Seeded Run" });
+  // the old seed archive represented, now reached by starting a file that already existed. Each
+  // step hands the next an archive, so the whole chain costs the one `zipArchive` at the end.
+  const started = markExperimentBegun(
+    writeZpcrwebSettings(
+      buildExperimentArchive({
+        protocol: { runDefinition, name: "Cycling" },
+        plate: { name: "Staged.plt.csv", bytes: new TextEncoder().encode(plateToCsv(plate)) },
+      }),
+      { experimentName: "Seeded Run" },
+    ),
+  );
   mkdirSync(dirname(SEED_ZPCR), { recursive: true });
-  writeFileSync(SEED_ZPCR, Buffer.from(markExperimentBegun(named)));
+  writeFileSync(SEED_ZPCR, Buffer.from(zipArchive(started)));
 }
 
 /**
@@ -1925,7 +1936,7 @@ async function instrumentRunChecks(chrome, origin) {
   // Asserting the editor is *usable*, not merely present: the Edit button renders either way, and
   // the bug this pins had it rendering disabled with "Not editable: Unrecognized directive
   // "[ProtocolRunDefinition version 06.00]"" — the archive entry had been written in the `.prcl.txt`
-  // file form, header and all, which `ProtocolBuilder` rightly refuses (see `attachProtocolToZpcr`).
+  // file form, header and all, which `ProtocolBuilder` rightly refuses (see core's `attachProtocol`).
   const editable = await cdp
     .eval(
       `JSON.stringify((() => {

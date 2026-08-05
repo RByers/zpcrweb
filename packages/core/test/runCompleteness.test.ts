@@ -2,7 +2,13 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
-import { expectedPlateReads, parseZpcr, runCompleteness, zpcrFromRunFiles } from "../src/index.js";
+import {
+  expectedPlateReads,
+  parseZpcr,
+  parseZpcrArchive,
+  runCompleteness,
+  zpcrFromRunFiles,
+} from "../src/index.js";
 import { unzipArchive } from "../src/archive.js";
 import {
   readSampleBytes,
@@ -108,5 +114,5 @@ function withoutLastReads(
     .sort();
   for (const name of reads.slice(reads.length - n)) delete files[name];
   if (options.dropEnded) delete files["ended"];
-  return parseZpcr(zpcrFromRunFiles(files).bytes);
+  return parseZpcrArchive(zpcrFromRunFiles(files).archive);
 }

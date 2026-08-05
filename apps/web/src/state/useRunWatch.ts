@@ -62,9 +62,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   CFX_CURRENT_RUN_DIR,
   USB_TRAFFIC_LOG_NAME,
-  runArchiveFromRunFiles,
+  zpcrFromRunFiles,
   runProgressFromNames,
-  type ArchiveFiles,
+  type ZpcrArchive,
 } from "@zpcrweb/core";
 import type { CfxDeviceHandle } from "./useCfxDevice";
 
@@ -153,14 +153,14 @@ export function useRunWatch(
    * unconditionally. Returns the new file's id.
    */
   onRun: (
-    run: { name: string; files: ArchiveFiles },
+    run: { name: string; archive: ZpcrArchive },
     previousId: string | null,
     freshStart: boolean,
   ) => Promise<string | null>,
   /**
    * What the Instrument view's two name fields currently hold (`state/useRunNaming.ts`). Only the
    * archive's *name* depends on it, and only for a run this app started and is still staging —
-   * `runArchiveFromRunFiles` decides that from the `zpcrweb.json` in the folder, so a run started at
+   * `zpcrFromRunFiles` decides that from the `zpcrweb.json` in the folder, so a run started at
    * the touchscreen keeps the name the instrument gave it whatever is typed here.
    */
   naming?: { experimentName: string; fileName: string },
@@ -235,7 +235,7 @@ export function useRunWatch(
         // Handed over as the archive it already is, not as zipped bytes: the store keeps a run in
         // progress open and appends to it (see its `addRunArchive` and `state/fileContent.ts`), so
         // a cycle costs the one plate read that arrived and no ZIP work at either end.
-        const run = runArchiveFromRunFiles(files, namingRef.current);
+        const run = zpcrFromRunFiles(files, namingRef.current);
         const id = await onRunRef.current(run, fileIdRef.current, fresh);
         setFileId(id);
         const reads = names.filter((n) => /\.Plateread$/i.test(n)).length;

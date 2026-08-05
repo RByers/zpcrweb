@@ -1,12 +1,11 @@
 /**
- * Attach (or replace) a `.zpcr` archive's plate or protocol data in memory — the write-side
- * counterpart to `Zpcr.plates()`/`Zpcr.protocol()`. `.zpcr` is a plain ZIP (see `archive.ts`), and
- * `fflate` (already a dependency for reading) can write one too, so "attach a plate/protocol" is
- * just: drop the existing entry (or entries) for that half, add the new one(s), re-zip. The
- * result round-trips straight back through `parseZpcr`.
+ * Attach (or replace) a `.zpcr` archive's plate or protocol data — the write-side counterpart to
+ * `Zpcr.plates()`/`Zpcr.protocol()`. Both are entry swaps on a {@link ZpcrArchive}: drop the
+ * existing entry (or entries) for that half, add the new one(s). The result parses straight back
+ * through `parseZpcrArchive`, or through `parseZpcr` once a caller has zipped it.
  */
 
-import { unzipArchive, zipArchive, type ArchiveFiles } from "./archive.js";
+import type { ZpcrArchive } from "./archive.js";
 import { isPltdName } from "./pltd.js";
 import { isPlateCsvName } from "./plateCsv.js";
 import { parseRunDefinitionText } from "./prcl.js";
@@ -23,24 +22,23 @@ export const PROTOCOL_RUN_DEFINITION_NAME = "ProtocolRunDefinition.txt";
 export function canonicalPlateEntryName(name: string): string {
   if (isPltdName(name) || isPlateCsvName(name)) return name;
   if (/\.csv$/i.test(name)) return `${name.replace(/\.csv$/i, "")}.plt.csv`;
-  throw new Error(`attachPlateToZpcr: "${name}" is not a .pltd or .csv/.plt.csv file`);
+  throw new Error(`attachPlate: "${name}" is not a .pltd or .csv/.plt.csv file`);
 }
 
 /**
- * Return a new archive map with `plateFile` as the run's plate, replacing any existing
+ * Return a new archive with `plateFile` as the run's plate, replacing any existing
  * `.pltd`/`.plt.csv` entries (at most one plate entry is kept — matches "uploading replaces the
  * plate"). Throws if `plateFile.name` isn't a recognized plate file name.
  *
- * The map-level half of the pair described in `archive.ts`; {@link attachPlateToZpcr} is the same
- * operation on zipped bytes.
+ * Neither the input archive nor its entry bytes are modified.
  */
-export function attachPlateToFiles(
-  files: ArchiveFiles,
+export function attachPlate(
+  archive: ZpcrArchive,
   plateFile: { name: string; bytes: Uint8Array },
-): ArchiveFiles {
+): ZpcrArchive {
   const entryName = canonicalPlateEntryName(plateFile.name);
-  const next: ArchiveFiles = {};
-  for (const [name, bytes] of Object.entries(files)) {
+  const next: ZpcrArchive = {};
+  for (const [name, bytes] of Object.entries(archive)) {
     if (isPltdName(name) || isPlateCsvName(name)) continue;
     next[name] = bytes;
   }
@@ -49,21 +47,9 @@ export function attachPlateToFiles(
 }
 
 /**
- * Return new `.zpcr` bytes with `plateFile` added as the run's plate — {@link attachPlateToFiles}
- * with an unzip in front and a re-zip behind. Throws if `zpcrBytes` isn't a valid ZIP or
- * `plateFile.name` isn't a recognized plate file name.
- */
-export function attachPlateToZpcr(
-  zpcrBytes: Uint8Array,
-  plateFile: { name: string; bytes: Uint8Array },
-): Uint8Array {
-  return zipArchive(attachPlateToFiles(unzipArchive(zpcrBytes), plateFile));
-}
-
-/**
- * Return new `.zpcr` bytes with `protocol` as the run's thermal protocol, replacing whatever
+ * Return a new archive with `protocol` as the run's thermal protocol, replacing whatever
  * `ProtocolRunDefinition.txt`/`ProtocolName.txt` were there before — the protocol-side mirror of
- * {@link attachPlateToZpcr}.
+ * {@link attachPlate}.
  *
  * This is also what in-place protocol editing calls on every keystroke (the app's
  * `setRunProtocolText`, throttled the way `setProtocolText` throttles a standalone `.prcl.txt`):
@@ -80,26 +66,17 @@ export function attachPlateToZpcr(
  * archive entry (no sample carries one here). Writing it meant `Zpcr.protocolText` — which is the
  * raw entry, unlike a standalone protocol file's text, which the app normalizes on load — handed
  * that header to `ProtocolBuilder`, which refused the whole protocol as an unrecognized directive.
+ *
+ * Since no ZIP is involved, this is cheap enough to be what in-place protocol editing calls on
+ * every keystroke (the app's `setRunProtocolText`): replacing the run-definition entry costs one
+ * `TextEncoder` call.
  */
-export function attachProtocolToZpcr(
-  zpcrBytes: Uint8Array,
+export function attachProtocol(
+  archive: ZpcrArchive,
   protocol: { runDefinition: string; name?: string },
-): Uint8Array {
-  return zipArchive(attachProtocolToFiles(unzipArchive(zpcrBytes), protocol));
-}
-
-/**
- * {@link attachProtocolToZpcr} on an open archive map rather than on zipped bytes — the map-level
- * half of the pair described in `archive.ts`, and the one in-place protocol editing actually
- * wants: a pending experiment's archive is held open while it is being edited, so replacing the
- * run-definition entry on a keystroke costs one `TextEncoder` call and no ZIP work at all.
- */
-export function attachProtocolToFiles(
-  files: ArchiveFiles,
-  protocol: { runDefinition: string; name?: string },
-): ArchiveFiles {
-  const next: ArchiveFiles = {};
-  for (const [name, bytes] of Object.entries(files)) {
+): ZpcrArchive {
+  const next: ZpcrArchive = {};
+  for (const [name, bytes] of Object.entries(archive)) {
     if (name === PROTOCOL_RUN_DEFINITION_NAME || name === PROTOCOL_NAME_TXT) continue;
     next[name] = bytes;
   }

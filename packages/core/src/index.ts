@@ -6,7 +6,7 @@
  * browser, pass `await file.arrayBuffer()` (or a `Uint8Array`) to `parseZpcr`.
  */
 
-export { parseZpcr, parseZpcrFiles, zpcrFromBlob } from "./zpcr.js";
+export { parseZpcr, parseZpcrArchive, zpcrFromBlob } from "./zpcr.js";
 export { zpcrFromFile, pcrdFromFile } from "./node.js";
 
 export { hexDump } from "./hex.js";
@@ -49,27 +49,20 @@ export {
 } from "./plateread.js";
 export { parsePltd, parsePlatesetup2, isPltdName } from "./pltd.js";
 export { plateToCsv, parsePlateCsv, isPlateCsvName, isBlankWell } from "./plateCsv.js";
-export {
-  attachPlateToZpcr,
-  attachPlateToFiles,
-  attachProtocolToZpcr,
-  attachProtocolToFiles,
-} from "./attachPlate.js";
-export { buildExperimentArchive, buildExperimentFiles } from "./experimentArchive.js";
+export { attachPlate, attachProtocol } from "./attachPlate.js";
+export { buildExperimentArchive } from "./experimentArchive.js";
 export type { ExperimentArchiveParts } from "./experimentArchive.js";
-/** A `.zpcr`'s entries as the loose run-directory files it is a ZIP of, and back again — the two
- * halves of `archive.ts`'s pairing, exported so a caller can take an archive apart, work on it and
- * put it back together. Every archive writer here comes in both forms; see `ArchiveFiles`. */
+/** A `.zpcr` as a file, and a `.zpcr` as the entries it holds. Everything else in this library
+ * that touches an archive takes and returns the latter — see `ZpcrArchive`, which is also what a
+ * run directory off the instrument already is. */
 export { unzipArchive, zipArchive } from "./archive.js";
-export type { ArchiveFiles } from "./archive.js";
+export type { ZpcrArchive } from "./archive.js";
 export {
   zpcrFromRunFiles,
-  runArchiveFromRunFiles,
   zpcrNameFromRunFiles,
   runProgressFromNames,
   runCompleteness,
   markExperimentBegun,
-  markFilesBegun,
   RUN_BEGUN_MARKER,
   RUN_ENDED_MARKER,
 } from "./runFolder.js";
@@ -79,7 +72,6 @@ export {
   parseZpcrwebSettingsJson,
   formatZpcrwebSettings,
   writeZpcrwebSettings,
-  writeZpcrwebSettingsToFiles,
   hasZpcrwebSettings,
   ZPCRWEB_SETTINGS_NAME,
   ZPCRWEB_SETTINGS_VERSION,

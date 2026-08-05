@@ -317,24 +317,33 @@ the library's three write paths: `attachPlate.ts` (see below), `zpcrwebSettings.
 and `runFolder.ts` (see [below](#a-run-directory-is-a-zpcr-runfolderts)), in an otherwise
 read-only library.
 
-**Every one of those writers comes in a pair**, because a `.zpcr` is only ever a ZIP *at rest*: a
-`…Files` function that takes and returns the decompressed `ArchiveFiles` map (`attachPlateToFiles`,
-`attachProtocolToFiles`, `writeZpcrwebSettingsToFiles`, `markFilesBegun`, `buildExperimentFiles`),
-and a byte-level wrapper that unzips, calls it and re-zips. `parseZpcrFiles` reads an open archive
-the same way, and `runArchiveFromRunFiles` is `zpcrFromRunFiles` without the zip. A caller that
-holds an archive open across many edits — the web app does, for any run still being written to;
+**Zipping is not part of any operation.** A `.zpcr` is a ZIP only *at rest*, so the library's one
+currency is `ZpcrArchive` — the unpacked archive, entry name → bytes — and every writer
+(`attachPlate`, `attachProtocol`, `writeZpcrwebSettings`, `markExperimentBegun`,
+`buildExperimentArchive`) takes one and returns a new one. `unzipArchive`/`zipArchive` are the two
+steps a caller takes when it has, or wants, a *file*:
+
+```ts
+zipArchive(attachPlate(unzipArchive(bytes), plate))
+```
+
+There is deliberately no wrapper for that. It is longer, and it says what it costs — which is the
+point, since chaining two edits through such a wrapper would zip twice for nothing, and a caller
+that holds an archive open across many edits (the web app does, for any run still being written to;
 see its [`ARCHITECTURE.md`](./apps/web/ARCHITECTURE.md), "Runs still being written are stored
-exploded" — then pays neither the unzip nor the re-zip per edit.
+exploded") pays no ZIP at all. `parseZpcr(bytes)` is the single exception, since bytes are how a
+`.zpcr` arrives from a disk or a network; `parseZpcrArchive` is the same parse one step in.
 
 ## A run directory *is* a `.zpcr` (`runFolder.ts`)
 
 The instrument keeps a run in `\Storage Card\CurrentRun` as loose files — `RunInfo.xml`, the
 `Read*.Plateread` series, the `.Dcal` set, the marker files. A `.zpcr` is a plain ZIP of exactly
-those entries, so `zpcrFromRunFiles(files)` is a zip and nothing else: no conversion, no
-synthesis, and the result parses straight back through `parseZpcr` with every entry byte-for-byte
-what came off the wire (`packages/core/test/runFolder.test.ts` checks that against a committed
-sample). The call throws when `RunInfo.xml` is missing rather than handing back an archive
-`parseZpcr` would reject.
+those entries — a run directory already *is* a `ZpcrArchive`. So `zpcrFromRunFiles(files)` hands
+the same entries straight back, along with the name the run should carry: no conversion, no
+synthesis, and no zip (`zipArchive` is the caller's separate step, and what
+`packages/core/test/runFolder.test.ts` checks the round trip through, byte-for-byte against a
+committed sample). The call throws when `RunInfo.xml` is missing rather than handing back an
+archive `parseZpcr` would reject.
 
 Naming the archive takes three rungs, in `zpcrNameFromRunFiles`. A run *this app started* has its
 own `zpcrweb.json` in the folder (`usb/runPlan.ts` deposits it — nothing else writes one there),
@@ -388,10 +397,10 @@ from whichever halves are known — the protocol as `ProtocolRunDefinition.txt` 
 plate reads, **no `begun` marker and no `zpcrweb.json`**: naming and starting both happen later, from
 the app, on a file that by then already exists. The app calls a `.zpcr` in that state a *pending
 experiment* (see [`apps/web/ARCHITECTURE.md`](./apps/web/ARCHITECTURE.md)), and the three functions
-that move it along are `attachProtocolToFiles`/`attachPlateToFiles` (fill in a half, or edit the
-protocol in place) and `markFilesBegun` (add the `begun` marker at the click on Start, which is what
-ends the pending state permanently) — each with a byte-level `…ToZpcr`/`markExperimentBegun` twin,
-per the pairing above.
+that move it along are `attachProtocol`/`attachPlate` (fill in a half, or edit the protocol in
+place) and `markExperimentBegun` (add the `begun` marker at the click on Start, which is what ends
+the pending state permanently). Like every writer here they take and return an archive, so the
+whole sequence costs one `zipArchive` at whatever point a file is actually wanted.
 
 This replaced `runSeed.ts`'s `zpcrSeedArchive()`, which built a very similar archive but only ever at
 the click on Start run, from the run plan about to be sent, complete with name and `begun` marker. The
@@ -472,12 +481,11 @@ a synthetic `Pltd`-shaped result (`pltdFromPlateCsv`) with a dummy `PltdContaine
 `needsPassword` always `false` — so every existing plate consumer (the web app's Plates/Curves
 views) needs zero changes to read one.
 
-`attachPlate.ts`'s `attachPlateToFiles(files, plateFile)` is the write side: drop any existing
+`attachPlate.ts`'s `attachPlate(archive, plateFile)` is the write side: drop any existing
 `.pltd`/`.plt.csv` entry (at most one plate entry is kept — attaching replaces, not adds) and add
-the new one; `attachPlateToZpcr(zpcrBytes, plateFile)` is the same thing on zipped bytes. The web
-app calls this to "attach a plate to a run": it rewrites the run's own in-memory archive and
-re-persists it under the same file id, so the plate travels with the file with no separate override
-state to keep in sync — see `apps/web/ARCHITECTURE.md`.
+the new one. The web app calls this to "attach a plate to a run": it rewrites the run's own
+in-memory archive and re-persists it under the same file id, so the plate travels with the file
+with no separate override state to keep in sync — see `apps/web/ARCHITECTURE.md`.
 
 ## Analysis settings in the archive (`zpcrwebSettings.ts`)
 

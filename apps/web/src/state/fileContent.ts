@@ -12,7 +12,7 @@
  * So a run that is still being written to is stored **exploded**: the archive's entries as they
  * are, each one its own value in the record, and no ZIP anywhere. Appending a plate read is
  * `{...files, [name]: bytes}`. Renaming the experiment rewrites one 200-byte JSON entry. Parsing
- * it (`parseZpcrFiles`) doesn't decompress at all, because there is nothing compressed.
+ * it (`parseZpcrArchive`) doesn't decompress at all, because there is nothing compressed.
  *
  * **The user never sees this.** The two forms are the same archive; `contentBytes` zips an exploded
  * one on demand, which is what download, clone and "attach to something else" get, so a `.zpcr`
@@ -41,11 +41,11 @@
 
 import {
   parseZpcr,
-  parseZpcrFiles,
+  parseZpcrArchive,
   runProgressFromNames,
   unzipArchive,
   zipArchive,
-  type ArchiveFiles,
+  type ZpcrArchive,
   type Zpcr,
 } from "@zpcrweb/core";
 import type { StoredFile } from "./db";
@@ -58,7 +58,7 @@ import type { StoredFile } from "./db";
  */
 export type FileContent =
   | { exploded: false; bytes: Uint8Array }
-  | { exploded: true; files: ArchiveFiles };
+  | { exploded: true; files: ZpcrArchive };
 
 /** Hold plain bytes — every non-`.zpcr` kind, and a finished run. */
 export function zippedContent(bytes: Uint8Array): FileContent {
@@ -70,7 +70,7 @@ export function zippedContent(bytes: Uint8Array): FileContent {
  * The single decision point: every path that writes a run's archive ends here, so "when does a run
  * stop being exploded" is one rule in one place rather than a condition at each call site.
  */
-export function runContent(files: ArchiveFiles): FileContent {
+export function runContent(files: ZpcrArchive): FileContent {
   return runProgressFromNames(Object.keys(files)).ended
     ? { exploded: false, bytes: zipArchive(files) }
     : { exploded: true, files };
@@ -84,7 +84,7 @@ export function runContent(files: ArchiveFiles): FileContent {
  * of zipping the entries back up: they are the same archive and one of them is already in hand.
  * Re-zipping there would be the most expensive thing about opening a file, for no change to it.
  */
-export function loadedRunContent(bytes: Uint8Array, files: ArchiveFiles): FileContent {
+export function loadedRunContent(bytes: Uint8Array, files: ZpcrArchive): FileContent {
   return runProgressFromNames(Object.keys(files)).ended
     ? { exploded: false, bytes }
     : { exploded: true, files };
@@ -102,13 +102,14 @@ export function contentBytes(content: FileContent): Uint8Array {
 }
 
 /**
- * The content as an open archive map, ready to be edited and handed back to {@link runContent}.
- * Free for an exploded file; an unzip for a zipped one (a finished run being edited — attaching a
- * plate to an old file, say — which costs exactly what it did before this existed).
+ * The content as a {@link ZpcrArchive}, ready to be edited by any of the library's writers and
+ * handed back to {@link runContent}. Free for an exploded file; an unzip for a zipped one (a
+ * finished run being edited — attaching a plate to an old file, say — which costs exactly what it
+ * did before this existed).
  *
  * Only meaningful for a `.zpcr`: anything else throws, from `unzipArchive`, as it would have.
  */
-export function contentFiles(content: FileContent): ArchiveFiles {
+export function contentFiles(content: FileContent): ZpcrArchive {
   return content.exploded ? content.files : unzipArchive(content.bytes);
 }
 
@@ -120,7 +121,7 @@ export function contentFiles(content: FileContent): ArchiveFiles {
  * render as well as re-zipping it per edit.
  */
 export function parseContent(content: FileContent): Zpcr {
-  return content.exploded ? parseZpcrFiles(content.files) : parseZpcr(content.bytes);
+  return content.exploded ? parseZpcrArchive(content.files) : parseZpcr(content.bytes);
 }
 
 /**
@@ -152,7 +153,7 @@ export function toStoredContent(content: FileContent): Pick<StoredFile, "bytes" 
  * only `bytes`, which is exactly what a zipped content is. */
 export function fromStoredContent(stored: StoredFile): FileContent {
   if (stored.files) {
-    const files: ArchiveFiles = {};
+    const files: ZpcrArchive = {};
     for (const [name, buffer] of Object.entries(stored.files)) files[name] = new Uint8Array(buffer);
     return { exploded: true, files };
   }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { zpcrFromRunFiles, zpcrNameFromRunFiles, parseZpcr } from "../src/index.js";
+import { zipArchive, zpcrFromRunFiles, zpcrNameFromRunFiles, parseZpcr } from "../src/index.js";
 import { unzipArchive } from "../src/archive.js";
 import { readSampleBytes } from "./sample.js";
 
@@ -12,8 +12,9 @@ describe("zpcrFromRunFiles", () => {
   const runFiles = unzipArchive(readSampleBytes());
 
   it("round-trips a sample's own files back into a parseable .zpcr", () => {
-    const { bytes } = zpcrFromRunFiles(runFiles);
-    const rebuilt = parseZpcr(bytes);
+    // Through a real ZIP: the archive it hands back is what a caller writes to disk with
+    // `zipArchive`, and that file has to be the run the folder held.
+    const rebuilt = parseZpcr(zipArchive(zpcrFromRunFiles(runFiles).archive));
     const original = parseZpcr(readSampleBytes());
 
     expect(rebuilt.archive.entries.sort()).toEqual(original.archive.entries.sort());

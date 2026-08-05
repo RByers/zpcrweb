@@ -8,7 +8,7 @@ import type {
   ProtocolDocument,
   Zpcr,
 } from "./types.js";
-import { createArchiveAccess, unzipArchive, type ArchiveFiles } from "./archive.js";
+import { createArchiveAccess, unzipArchive, type ZpcrArchive } from "./archive.js";
 import { isAlfName, parseAlf } from "./alf.js";
 import { isPltdName, parsePltd, type Pltd, type PltdContainer } from "./pltd.js";
 import { isPlateCsvName, parsePlateCsv } from "./plateCsv.js";
@@ -77,20 +77,22 @@ function pltdFromPlateCsv(
  * decompress in memory, so this is synchronous.
  */
 export function parseZpcr(data: Uint8Array | ArrayBuffer): Zpcr {
-  return parseZpcrFiles(unzipArchive(toBytes(data)));
+  return parseZpcrArchive(unzipArchive(toBytes(data)));
 }
 
 /**
- * Parse an already-decompressed archive — {@link parseZpcr} with the unzip already done, and where
- * all of its work actually happens.
+ * Parse a {@link ZpcrArchive} — {@link parseZpcr} with the unzip already done, and where all of its
+ * work actually happens.
  *
- * The pairing is `archive.ts`'s: a caller holding the archive open (the web app, for any run still
- * being written to — see its `state/fileContent.ts`) re-parses on every edit, and paying an unzip
- * each time to read entries it already has in hand is exactly the cost the open form exists to
- * avoid. The map is not copied or mutated; entry bytes are handed out by reference, as
- * {@link unzipArchive}'s already are.
+ * The one deliberate exception to "the library takes an archive": bytes are how a `.zpcr` arrives
+ * from a disk or a network, so `parseZpcr` stays the headline entry point. This is what a caller
+ * holding an archive open uses (the web app, for any run still being written to — see its
+ * `state/fileContent.ts`), since it re-parses on every edit and paying an unzip each time to read
+ * entries it already has in hand is exactly the cost holding it open avoids. The archive is
+ * neither copied nor mutated; entry bytes are handed out by reference, as {@link unzipArchive}'s
+ * already are.
  */
-export function parseZpcrFiles(files: ArchiveFiles): Zpcr {
+export function parseZpcrArchive(files: ZpcrArchive): Zpcr {
   const archive = createArchiveAccess(files);
 
   // `RunInfo.xml` is what a *finished* run is described by, and every archive off an instrument or

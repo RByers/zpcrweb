@@ -22,7 +22,7 @@
  * by hand) degrades field by field instead of failing as a whole.
  */
 
-import { unzipArchive, zipArchive, type ArchiveFiles } from "./archive.js";
+import type { ZpcrArchive } from "./archive.js";
 import type { NormalizationMode } from "./calibration.js";
 import type { Zpcr } from "./types.js";
 
@@ -191,36 +191,22 @@ export function formatZpcrwebSettings(settings: ZpcrwebSettings): string {
 }
 
 /**
- * Return new `.zpcr` bytes carrying `settings` as their `zpcrweb.json` entry, replacing any
- * existing one. Every other entry is copied through untouched.
+ * Return a new archive carrying `settings` as its `zpcrweb.json` entry, replacing any existing
+ * one. Every other entry is copied through untouched, and no ZIP work is involved — which is what
+ * makes saving a threshold on a run still in progress cost one JSON serialization.
  *
  * The document is rewritten rather than merged, so a key this build doesn't understand is
  * dropped on write. That is the deliberate trade: the alternative — round-tripping unknown keys
  * — makes the file a shared mutable namespace between versions, where an old build silently
  * preserves state it can't honor and the two disagree about what the run means. Losing an
  * unknown key is visible; honoring half of one isn't.
- *
- * Throws if `zpcrBytes` isn't a valid ZIP.
  */
 export function writeZpcrwebSettings(
-  zpcrBytes: Uint8Array,
+  archive: ZpcrArchive,
   settings: ZpcrwebSettings,
-): Uint8Array {
-  return zipArchive(writeZpcrwebSettingsToFiles(unzipArchive(zpcrBytes), settings));
-}
-
-/**
- * {@link writeZpcrwebSettings} on an open archive map rather than on zipped bytes — the map-level
- * half of the pair described in `archive.ts`. Same rewrite-don't-merge rule; the only difference
- * is that a caller holding the archive open pays neither the unzip nor the re-zip, which is what
- * makes saving a threshold on a run still in progress cost one JSON serialization.
- */
-export function writeZpcrwebSettingsToFiles(
-  files: ArchiveFiles,
-  settings: ZpcrwebSettings,
-): ArchiveFiles {
+): ZpcrArchive {
   return {
-    ...files,
+    ...archive,
     [ZPCRWEB_SETTINGS_NAME]: new TextEncoder().encode(formatZpcrwebSettings(settings)),
   };
 }

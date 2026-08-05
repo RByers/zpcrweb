@@ -1150,8 +1150,10 @@ plate reads:
    then pull the `.alf` from `\Storage Card\PCRunReport\` if wanted.
 10. To take the *whole* run rather than its pieces: pull every file `LISTALLFILES` reported for
     `\Storage Card\CurrentRun` and zip them unchanged — a `.zpcr` is a plain ZIP of exactly that
-    directory, so no conversion is involved. `zpcrFromRunFiles` (`packages/core/src/runFolder.ts`)
-    does this, and is what the web app's Instrument view "Open run" button calls.
+    directory, so no conversion is involved. `zpcrFromRunFiles`
+    (`packages/core/src/runFolder.ts`) checks the folder is a run and works out what the file
+    should be called, handing the entries back as they are; `zipArchive` is the separate step that
+    makes them a file. It is what the web app's Instrument view "Open run" button calls.
 
 A client that also offers a **Stop** button needs one more step, §7.8.
 
@@ -1624,8 +1626,9 @@ live, and the marker files it would otherwise chase are a property of the archiv
 assembles, not of the rail's live state, so they can wait for whichever real edge lists next.
 
 Each time the listing changes, the folder is pulled — **only the names not already cached**, since
-28 of a `CurrentRun`'s ~40 files are the `.Dcal` set and never change — zipped with
-`zpcrFromRunFiles` and handed to the store, which replaces the previous snapshot. The connection
+28 of a `CurrentRun`'s ~40 files are the `.Dcal` set and never change — named by
+`zpcrFromRunFiles` and handed to the store as the archive it already is (no zip: the app keeps a
+run in progress unpacked until it ends), which replaces the previous snapshot. The connection
 therefore lives in `App`, not in the Instrument view: a run has to keep being followed while the
 user sits in Curves watching its amplification curves arrive.
 
