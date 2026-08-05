@@ -17,6 +17,7 @@
 import uPlot from "uplot";
 import { formatBaselineFormula, type CurveAnalysis, type DarkCurve } from "@zpcrweb/core";
 import { channelColor, channelLabel } from "../channelColors";
+import { curveColor } from "../fluorColors";
 import type { Baseline, CurveView, Scale } from "../../state/useZpcrStore";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -37,9 +38,9 @@ function hexToRgba(hex: string, alpha: number): string {
  * never guesses a dye from a channel index; see `channelColors.ts`.
  */
 export interface PlotCurve {
-  /** Optical channel — used only for color. Undefined for a dye-space curve whose plate doesn't
-   * know the channel, which draws in the neutral color (see `channelColor`). Channel-space
-   * curves always have one: they *are* a channel's readings. */
+  /** Optical channel. Colors a **channel-space** curve, which always has one: it *is* a
+   * channel's readings. A dye-space curve colors from {@link fluor} instead (see `curveColor`),
+   * so this may be undefined there without costing it a color. */
   channel?: number;
   dyeLabel: string;
   /** The raw fluorophore name, when this is a dye-space curve. Distinct from {@link dyeLabel},
@@ -535,7 +536,7 @@ export function buildChart(cfg: BuildChartConfig): {
     });
     series.push({
       label: `${curve.wellLabel} · ${curve.dyeLabel}`,
-      stroke: channelColor(curve.channel),
+      stroke: curveColor(curve),
       width: 1,
       dash: curve.isReference ? REF_DASH : undefined,
       points: { show: false },
@@ -570,7 +571,7 @@ export function buildChart(cfg: BuildChartConfig): {
       });
       series.push({
         label: `${curve.wellLabel} · ${curve.dyeLabel} baseline`,
-        stroke: hexToRgba(channelColor(curve.channel), BASELINE_LINE_ALPHA),
+        stroke: hexToRgba(curveColor(curve), BASELINE_LINE_ALPHA),
         width: 1,
         points: { show: false },
       });
@@ -711,7 +712,7 @@ export function buildChart(cfg: BuildChartConfig): {
     cqMarkers.push({
       x: cq,
       y: value + delta,
-      color: channelColor(curve.channel),
+      color: curveColor(curve),
       seriesIdx: i + 1,
     });
   });
@@ -732,7 +733,7 @@ export function buildChart(cfg: BuildChartConfig): {
       if (idx === -1) continue;
       const y = row[idx];
       if (y == null) continue;
-      baselineTicks.push({ x: c, y, color: channelColor(m.channel), seriesIdx: i + 1 });
+      baselineTicks.push({ x: c, y, color: curveColor(m), seriesIdx: i + 1 });
     }
   });
 
@@ -757,7 +758,7 @@ export function buildChart(cfg: BuildChartConfig): {
       min.push(gap || (scale === "log" && mn <= 0) ? null : mn);
       max.push(gap || (scale === "log" && mx <= 0) ? null : mx);
     }
-    return { color: channelColor(c.channel), cycles: c.cycles, min, max };
+    return { color: curveColor(c), cycles: c.cycles, min, max };
   };
 
   const bands: BandData[] = cfg.bands
@@ -1292,7 +1293,7 @@ function overlayPlugin(
         const stdOff = (spread?.std ?? 0) * a.scale;
         const yHi = u.valToPos(plotted + stdOff, "y");
         const yLo = u.valToPos(plotted - stdOff, "y");
-        const color = channelColor(m.channel);
+        const color = curveColor(m);
 
         if (spread && [x, yMax, yMin, yHi, yLo].every(Number.isFinite)) {
           const set = (el: SVGElement, attrs: Record<string, number | string>) => {

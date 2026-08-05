@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import type { FileKind } from "@zpcrweb/core";
 import type { LoadedFile, PlateFileResult, RunResult } from "../state/useZpcrStore";
 import { usePltdPassword } from "../state/pltdPassword";
-import { channelColor } from "../lib/channelColors";
+import { fluorColor } from "../lib/fluorColors";
 import {
   plateFileEncryptionStatus,
   runEncryptionStatus,
@@ -190,7 +190,7 @@ function HoverCard({
                   <span
                     key={t.name}
                     className="filecard__chip"
-                    style={t.channel != null ? { color: channelColor(t.channel) } : undefined}
+                    style={t.fluor != null ? { color: fluorColor(t.fluor) } : undefined}
                   >
                     {t.name}
                   </span>

@@ -4,6 +4,7 @@ import {
   baselineCorrectCurve,
   computeCq,
   computeCqTable,
+  plateTargets,
 } from "../src/index.js";
 import { readSampleBytes } from "./sample.js";
 
@@ -285,5 +286,44 @@ describe("computeCqTable", () => {
       curve("0,1,FAM", "G", amp(27), { contributesToThreshold: false }),
     ]);
     expect(table.get("0,0,FAM")!.threshold).toBeGreaterThan(0);
+  });
+});
+
+describe("plateTargets", () => {
+  /** A minimal plate: two targets, one loaded as two dyes, plus a target no well assigns.
+   * Deliberately no fluor states a channel — that is the case the old channel-based coloring
+   * could not serve. */
+  const well = (index: number, label: string, fluor: string, target: string) => ({
+    index,
+    row: 0,
+    col: index,
+    label,
+    loaded: true,
+    sampleType: "unknown" as const,
+    sampleTypeRaw: "wcSample",
+    fluors: [{ fluor, target }],
+  });
+  const plate = {
+    plateName: "BR Clear",
+    rows: 1,
+    columns: 3,
+    dyeCount: 2,
+    scanMode: "",
+    plateType: "",
+    standardUnits: "",
+    fluors: [{ fluor: "FAM" }, { fluor: "Cy5" }],
+    targets: ["GeneA", "GeneB", "Unused"],
+    samples: [],
+    meta: {},
+    // GeneA appears twice, as two dyes: first occurrence wins.
+    wells: [well(0, "A1", "FAM", "GeneA"), well(1, "A2", "Cy5", "GeneB"), well(2, "A3", "Cy5", "GeneA")],
+  };
+
+  it("carries the dye each target is first loaded as, for coloring", () => {
+    expect(plateTargets(plate)).toEqual([
+      { name: "GeneA", fluor: "FAM" },
+      { name: "GeneB", fluor: "Cy5" },
+      { name: "Unused", fluor: null },
+    ]);
   });
 });

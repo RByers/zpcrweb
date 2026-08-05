@@ -13,9 +13,9 @@ const PW = readCfxPassword();
 
 /**
  * The dye→channel lookup `zpcr.plates()` builds from an archive's `.Dcal` set, for the two dyes
- * {@link syntheticPlate} uses. Round-trip tests pass it because that is the real path — an
- * archive entry always has one, and it outranks the ` Ch<n>` hint the writer puts in the column
- * heading. Either way the channel is stated, never inferred from column position.
+ * {@link syntheticPlate} uses. Round-trip tests have to pass it: the CSV labels its fluor columns
+ * by dye alone, so the channel comes back from calibration or not at all — there is deliberately
+ * no positional fallback to paper over its absence.
  */
 const SYNTHETIC_CHANNELS = (fluor: string) => ({ FAM: 0, HEX: 1 })[fluor];
 
@@ -84,7 +84,7 @@ describe("plate CSV round-trip", () => {
     const lines = plateToCsv(syntheticPlate()).split("\r\n");
     expect(lines.some((l) => l.startsWith("# fluors:"))).toBe(false);
     const header = lines.find((l) => l.startsWith("Well,"))!;
-    expect(header).toBe("Well,SampleType,Sample,Replicate,Quantity,FAM Ch1,HEX Ch2");
+    expect(header).toBe("Well,SampleType,Sample,Replicate,Quantity,FAM,HEX");
     // A1 is loaded: FAM has a target, HEX doesn't.
     expect(lines.find((l) => l.startsWith("A1,"))!.endsWith(",GeneA,+")).toBe(true);
   });
@@ -126,7 +126,7 @@ describe("plate CSV round-trip", () => {
     for (const w of plate.wells) w.fluors = [...w.fluors].reverse();
     const lines = plateToCsv(plate).split("\r\n");
     expect(lines.find((l) => l.startsWith("Well,"))).toBe(
-      "Well,SampleType,Sample,Replicate,Quantity,FAM Ch1,HEX Ch2",
+      "Well,SampleType,Sample,Replicate,Quantity,FAM,HEX",
     );
     // …so each well's cells read low channel → high: FAM's target first, then HEX's bare marker.
     expect(lines.find((l) => l.startsWith("A1,"))!.endsWith(",GeneA,+")).toBe(true);
@@ -214,44 +214,23 @@ describe("plate CSV round-trip", () => {
     ]);
   });
 
-  it("reads an explicit Ch<n> suffix when no calibration lookup answers", () => {
+  it("treats a Ch<n> suffix as part of the dye name, not as a channel", () => {
+    // The format has no channel syntax: a heading is the dye name entire. Anything that looks
+    // like one is just an unusual dye name, and the calibration is asked about it verbatim —
+    // which is what keeps the file from ever asserting an optical fact about the instrument.
     const csv = [
       "# vessel: BR Clear 1x1",
-      "Well,SampleType,Sample,FAM Ch1,Tex 615 Ch3,Cy5 Ch4",
-      "A1,unknown,,GeneA,GeneB,GeneC",
+      "Well,SampleType,Sample,FAM Ch1",
+      "A1,unknown,,GeneA",
     ].join("\r\n");
-    // No lookup at all — the standalone case the suffix exists for.
-    expect(parsePlateCsv(csv).fluors).toEqual([
-      { fluor: "FAM", channel: 0 },
-      { fluor: "Tex 615", channel: 2 },
-      { fluor: "Cy5", channel: 3 },
-    ]);
-    // A lookup that doesn't know this dye is the same as none: the suffix still fills in.
-    expect(parsePlateCsv(csv, { channelForFluor: () => undefined }).fluors).toEqual([
-      { fluor: "FAM", channel: 0 },
-      { fluor: "Tex 615", channel: 2 },
-      { fluor: "Cy5", channel: 3 },
+    expect(parsePlateCsv(csv).fluors).toEqual([{ fluor: "FAM Ch1", channel: undefined }]);
+    // …and it is the whole string the lookup sees, so a plain `FAM` lookup does not match it.
+    expect(parsePlateCsv(csv, { channelForFluor: (f) => (f === "FAM" ? 0 : undefined) }).fluors).toEqual([
+      { fluor: "FAM Ch1", channel: undefined },
     ]);
   });
 
-  it("lets the run's calibration outrank the suffix, so a plate travels between runs", () => {
-    // The suffix records the optics of whatever run the file was written against. Carry that
-    // plate to a run that reads the same dyes elsewhere and the *run* decides — otherwise a
-    // stale claim in a file would quietly override live hardware, and every curve after it
-    // would be unmixed against the wrong channel.
-    const csv = [
-      "# vessel: BR Clear 1x1",
-      "Well,SampleType,Sample,FAM Ch1,Tex 615 Ch3",
-      "A1,unknown,,GeneA,GeneB",
-    ].join("\r\n");
-    const elsewhere = new Map([["FAM", 4], ["Tex 615", 5]]);
-    expect(parsePlateCsv(csv, { channelForFluor: (f) => elsewhere.get(f) }).fluors).toEqual([
-      { fluor: "FAM", channel: 4 },
-      { fluor: "Tex 615", channel: 5 },
-    ]);
-  });
-
-  it("leaves the channel unknown with neither a suffix nor a calibration lookup", () => {
+  it("leaves the channel unknown with no calibration lookup", () => {
     // Column order is not a channel. Deriving one from it (this used to) produces a plausible
     // wrong answer — the dye is coloured and grouped as a neighbouring channel — where undefined
     // produces a visible "Ch?".
@@ -271,7 +250,7 @@ describe("plate CSV round-trip", () => {
   it("treats wells left out of the table as empty", () => {
     const csv = [
       "# vessel: BR Clear 8x12",
-      "Well,SampleType,Sample,FAM Ch1",
+      "Well,SampleType,Sample,FAM",
       "B2,unknown,S1,GeneA",
     ].join("\r\n");
     const plate = parsePlateCsv(csv);
@@ -313,7 +292,7 @@ describe("plate CSV round-trip", () => {
     };
     const csv = plateToCsv(bare);
     expect(csv.split("\r\n").find((l) => l.startsWith("Well,"))).toBe(
-      "Well,SampleType,Sample,FAM Ch1,HEX Ch2",
+      "Well,SampleType,Sample,FAM,HEX",
     );
     expect(parsePlateCsv(csv, { channelForFluor: SYNTHETIC_CHANNELS })).toEqual(bare);
   });
@@ -326,7 +305,7 @@ describe("plate CSV round-trip", () => {
     };
     const csv = plateToCsv(replicateOnly);
     expect(csv.split("\r\n").find((l) => l.startsWith("Well,"))).toBe(
-      "Well,SampleType,Sample,Replicate,FAM Ch1,HEX Ch2",
+      "Well,SampleType,Sample,Replicate,FAM,HEX",
     );
     expect(parsePlateCsv(csv, { channelForFluor: SYNTHETIC_CHANNELS })).toEqual(replicateOnly);
   });
@@ -344,7 +323,7 @@ describe("plate CSV round-trip", () => {
   it("accepts a raw wc* code in the SampleType cell and normalizes it", () => {
     const csv = [
       "# vessel: BR Clear 1x3",
-      "Well,SampleType,Sample,FAM Ch1",
+      "Well,SampleType,Sample,FAM",
       "A1,wcNTC,,GeneA",
       "A2,ntc,,GeneA",
       "A3,wcFirst,,",
@@ -424,9 +403,8 @@ describe("Zpcr.channelForDye — giving an outside plate CSV its channels", () =
   });
 
   it("gives a standalone plate CSV the same channels as parsing it inside the archive", () => {
-    // Written text carries the channel as a ` Ch<n>` hint, so a plate downloaded from a run and
-    // reopened on its own keeps the channels it was written with — no lookup needed. Handing it
-    // the run's calibration agrees, which is what makes the hint safe to write.
+    // The CSV records dye names only, so parsed bare every channel is unknown; parsed against
+    // the run it matches what the same bytes yield as an archive entry.
     // This sample's plate *is* a `.plt.csv` archive entry, which never needs a password — so
     // this runs with or without secrets.json, and asserting rather than skipping keeps it from
     // passing silently if that ever changes.
@@ -438,17 +416,8 @@ describe("Zpcr.channelForDye — giving an outside plate CSV its channels", () =
       sourceName: "x.plt.csv",
       channelForFluor: (f) => zpcr.channelForDye(f),
     });
-    expect(bare.fluors.map((f) => f.channel)).toEqual(plate.fluors.map((f) => f.channel));
+    expect(bare.fluors.every((f) => f.channel === undefined)).toBe(true);
     expect(mapped.fluors.map((f) => f.channel)).toEqual(plate.fluors.map((f) => f.channel));
     expect(mapped.fluors.some((f) => f.channel !== undefined)).toBe(true);
-  });
-
-  it("still leaves a suffix-less file's channels unknown when nothing resolves them", () => {
-    // The hint is only in text this app wrote. A hand-authored file that names dyes alone, read
-    // with no run in hand, is still honestly unknown — column position never stands in.
-    const csv = ["# vessel: BR Clear 1x1", "Well,SampleType,Sample,FAM,Cy5", "A1,unknown,,GeneA,GeneB"].join(
-      "\r\n",
-    );
-    expect(parsePlateCsv(csv).fluors.every((f) => f.channel === undefined)).toBe(true);
   });
 });

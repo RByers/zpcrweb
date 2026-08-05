@@ -21,7 +21,7 @@ table with one row per well:
 ```csv
 # zpcrweb plate definition
 # vessel: BR Clear 8x12
-Well,SampleType,Sample,FAM Ch1,Tex 615 Ch3
+Well,SampleType,Sample,FAM,Tex 615
 A1,unknown,S183,ATP,+
 B1,ntc,,ATP,
 ```
@@ -61,15 +61,13 @@ the well labels seen) keep the plate's extent regardless.
 
 ## 4. Fluor columns
 
-Every column that isn't one of the fixed ones (§3) is a fluor column, labelled with the dye name
-and, when the channel is known, a ` Ch<n>` suffix (1-based — the "FAM Ch1" form the app
-displays): `FAM Ch1`, `Tex 615 Ch3`. A bare `FAM` is equally valid, and is what a plate with
-unknown channels writes. These columns *are* the plate's whole fluor list — there's no separate
-header line to keep in sync — and are written in ascending channel order (unknown-channel dyes
-last), matching every fluor list elsewhere in the app and in a parsed `.pltd` (`byChannel` in
-`pltd.ts`). Like row order, column order is presentation only: `parsePlateCsv` keys each cell to
-its column heading and re-sorts, so a file whose columns are in some other order still reads back
-the same plate.
+Every column that isn't one of the fixed ones (§3) is a fluor column, and the heading is the **dye
+name entire** (`FAM`, `Tex 615`) — there is no other syntax in it. These columns *are* the plate's
+whole fluor list; there's no separate header line to keep in sync. They are written in ascending
+channel order (unknown-channel dyes last), matching every fluor list elsewhere in the app and in
+a parsed `.pltd` (`byChannel` in `pltd.ts`). Like row order, column order is presentation only:
+`parsePlateCsv` keys each cell to its column heading and re-sorts, so a file whose columns are in
+some other order still reads back the same plate.
 
 Each cell holds only that well's **target** for that fluor:
 
@@ -79,44 +77,36 @@ Each cell holds only that well's **target** for that fluor:
 | `+` | fluor present, no target set |
 | any other text | fluor present, this is the target |
 
-### 4.1 Channel resolution — the suffix is a hint, not an authority
+### 4.1 No optical channel, on purpose
 
-A channel is a fact about the **instrument's optics**, not about the plate: a dye is read on
-exactly one channel, and the run's own `.Dcal` calibration says which. The plate says which wells
-hold which dye; the run says where that dye is read. So resolution is, in order:
+The file never states which channel a dye is read on. A channel is a fact about the
+*instrument's* optics, not about the plate: the same plate run on a machine whose filters map the
+dye elsewhere is still the same plate. Writing one into the file would let a stale claim travel
+with a portable document and contradict the hardware that actually read it.
 
-| # | Source | |
-|---|---|---|
-| 1 | `ParsePlateCsvOptions.channelForFluor` | The run's own calibration (`Dcal.primaryChannel`, via `zpcr.ts`'s `dyeChannelLookup`; `zpcr.plates()` wires it up, and `Zpcr.channelForDye` publishes it for an outside plate). **Wins whenever it answers.** |
-| 2 | the column's ` Ch<n>` suffix | What the file was written against. Fills in only when there's no lookup, or the lookup doesn't know the dye. |
-| 3 | — | **Unknown**: `PlateFluor.channel` / `WellFluor.channel` left `undefined`. |
+Nothing needs it to. A dye is displayed in **its own colour, from its own name** — FAM is green
+because FAM emits green — so a hand-authored plate, or one opened with no run beside it, looks
+exactly right with no calibration in sight. (In the app that table is `lib/fluorColors.ts`.)
 
-The suffix ranks *below* live calibration on purpose, and that ordering is what keeps a plate
-portable. Carry a plate from the run it was authored against to a run whose optics map the same
-dye elsewhere, and the new run's calibration decides — a stale claim in a file must never quietly
-override live hardware, because every curve downstream would then be unmixed against the wrong
-channel. Writing the suffix is safe *because* it can't win against a run.
+Where a channel *is* wanted anyway — ordering the fluor list, and labelling a chip `Ch1` — it
+comes from the run's own calibration: `ParsePlateCsvOptions.channelForFluor`, normally wired to
+`Dcal.primaryChannel` via `zpcr.ts`'s `dyeChannelLookup`. With no lookup, or a dye it doesn't
+cover, the channel is simply **unknown** (`PlateFluor.channel` / `WellFluor.channel` left
+`undefined`), and the UI omits it rather than flagging it — an unknown channel costs a label, not
+a colour. It is never inferred from column position, since position carries no meaning and a
+positional guess would produce a wrong answer that looks plausible rather than a missing one.
 
-What it buys is the standalone case: a plate downloaded from a run and reopened on its own, with
-no archive in hand, keeps the channels it was written with instead of degrading to `Ch?`
-(`useZpcrStore.ts` deliberately passes no lookup there — there is no run to ask).
-
-There is **no positional fallback** at any tier. Column order carries no meaning, so inferring a
-channel from it would invent a physical fact — and one that reads as valid downstream, giving the
-dye a neighbouring channel's colour and grouping rather than flagging it. A hand-authored file
-that names dyes alone, read with no run, is honestly unknown.
-
-Unknown costs presentation only — channels drive colouring and grouping, never the
-color-separation solve — so the app shows `Ch?` and a neutral swatch rather than substituting a
-default.
+> A heading that happens to look like `FAM Ch1` is therefore just a dye whose name is `FAM Ch1`,
+> matched verbatim against the calibration like any other. Earlier versions parsed that as a
+> channel; nothing writes or reads it that way now.
 
 ## 5. What's deliberately not in the file
 
 - **The plate's identity** (`PlateDefinition.identityKey`, its user-facing name) — the
   file/archive-entry name *is* that identity. `parsePlateCsv`'s `sourceName` option derives it by
   stripping `.plt.csv` (or a bare `.csv`) and any directory part.
-- **Fluor channels as an authority.** They're written when known (§4), but only ever as a hint a
-  run's own calibration outranks — never as something the file gets to assert over live optics.
+- **Fluor channels** — see §4.1. They belong to the instrument, and nothing the file is for
+  needs them.
 - **CFX-specific fidelity** (`meta`/`fluorId` and the like) — this is deliberately not a CFX
   format, so it isn't a decoder doc in the README's format-doc table alongside the reverse-engineered
   ones.

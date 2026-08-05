@@ -1,4 +1,4 @@
-import { channelColor } from "../../lib/channelColors";
+import { fluorColor } from "../../lib/fluorColors";
 import { ChipBar } from "./ChipBar";
 import type { HoverCardData } from "./HoverCard";
 
@@ -11,11 +11,10 @@ export interface FluorChip {
   /** Secondary label shown below — the channel (fluorophore mode) or the fluorophore itself
    * (target mode). */
   sublabel: string;
-  /** Optical channel — used only for coloring, so a channel's hue stays consistent between
-   * channel-space and dye-space views. Nullish when the chip covers more than one channel (a
-   * target spanning several fluorophores) or when the channel isn't known at all, either of
-   * which colors it neutrally instead. */
-  channel?: number | null;
+  /** The dye this chip stands for — used only for coloring (`fluorColors.ts`). Nullish when the
+   * chip covers more than one dye (a target spanning several fluorophores), which colors it
+   * neutrally instead; an unrecognized dye lands on the same neutral. */
+  fluor?: string | null;
   /** False when no matching `.Dcal` calibration was found — shown dimmed and non-interactive,
    * so its absence from the plot is visible rather than silent. */
   calibrated: boolean;
@@ -36,8 +35,8 @@ interface Props {
 
 /**
  * One chip per fluorophore or target (see {@link FluorChip}) present on the plate — colored by
- * its primary channel, over the shared {@link ChipBar}. Multiple items sharing a channel simply
- * share a color, distinguished by their label.
+ * the dye itself, over the shared {@link ChipBar}. Dyes in the same emission band share a color,
+ * distinguished by their label.
  */
 export function FluorBar({ items, disabled, onToggle, onHover, onSolo, cardData }: Props) {
   return (
@@ -46,7 +45,7 @@ export function FluorBar({ items, disabled, onToggle, onHover, onSolo, cardData 
         key: f.key,
         label: f.label,
         sublabel: f.sublabel,
-        color: channelColor(f.channel),
+        color: fluorColor(f.fluor),
         on: f.calibrated && !disabled.has(f.key),
         selectable: f.calibrated,
         title: f.calibrated

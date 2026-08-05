@@ -2758,17 +2758,6 @@
 .plate__chipch {
   color: var(--ink-muted);
 }
-/* An optical channel the plate doesn't state (see `PlateFluor.channel`). Marked rather than
-   quietly muted: the dye is usable, but anything channel-derived about it — its color here, its
-   grouping in the Curves view — is absent, and that should be visible at a glance. */
-.plate__chipch--unknown {
-  color: var(--warn);
-  border-bottom: 1px dotted var(--warn);
-  cursor: help;
-}
-.plate__chip--unknown {
-  border-style: dashed;
-}
 .plate__grid {
   table-layout: auto;
   /* Separate borders, unlike every other `.decoded__grid`: a loaded well tints its own border

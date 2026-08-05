@@ -11,9 +11,9 @@
  * order a plate is actually filled down. Row order is presentation only — {@link parsePlateCsv}
  * places each row by its own well label, so a file in any order reads back the same. The fixed columns
  * (`Well`…`Quantity`) are followed by **one column per fluorophore**, labelled with the dye
- * name and its channel when known (`FAM Ch1`; see {@link FLUOR_COLUMN_RE}, and note the written
- * channel is a fallback hint that a run's own calibration outranks); each cell holds only that
- * well's target for that fluor
+ * name and nothing else — no channel: a channel is a fact about the instrument's optics, not
+ * about the plate, and the app colors a dye from its own name (`fluorColors.ts`) rather than
+ * needing one. Each cell holds only that well's target for that fluor
  * (empty = the fluor isn't in the well, {@link PRESENT_NO_TARGET} = in the well but with no
  * target). Those columns *are* the plate's fluor list (`PlateDefinition.fluors`) — there's no
  * separate header line to keep in sync. A well with no fluor cell filled in is unloaded
@@ -154,32 +154,6 @@ const OPTIONAL_COLUMNS = ["Replicate", "Quantity"];
 /** Everything that isn't a fluor column. */
 const FIXED_COLUMNS = [...REQUIRED_COLUMNS, ...OPTIONAL_COLUMNS];
 
-/**
- * A fluor column is labelled with the dye name and, when the channel is known, a ` Ch<n>` suffix
- * (1-based — the "FAM Ch1" form the app displays): `FAM Ch1`, `Tex 615 Ch3`. A bare `FAM` is
- * equally valid and is what a plate with unknown channels writes.
- *
- * **The suffix is a hint, not an authority.** A channel is a fact about the *instrument's*
- * optics, not about the plate: a dye is read on exactly one channel and the run's own `.Dcal`
- * calibration says which ({@link ParsePlateCsvOptions.channelForFluor}, which `zpcr.plates()`
- * wires up). So the lookup wins wherever there is one, and the suffix only fills in when there
- * isn't — a plate read on its own, outside any archive. That ordering is what keeps a plate
- * portable: carry one from the run it was authored against to a run whose optics map the dye
- * elsewhere, and the new run's calibration decides, rather than the file's stale claim quietly
- * overriding live hardware.
- *
- * With neither, the channel is **unknown** (`PlateFluor.channel` undefined) — not the column's
- * position. Column order carries no meaning here, so deriving a channel from it invents a
- * physical fact, and one that reads as valid downstream: the dye gets a neighbouring channel's
- * color and grouping rather than being flagged.
- */
-const FLUOR_COLUMN_RE = /^(.*?)\s+Ch(\d+)$/;
-
-/** A fluor's column heading: dye name, plus the 1-based channel when it's known. */
-function fluorColumnLabel(f: PlateFluor): string {
-  return f.channel === undefined ? f.fluor : `${f.fluor} Ch${f.channel + 1}`;
-}
-
 /** A well carrying nothing at all — the row is left out of the table, since a well missing from
  * the table parses back to exactly this (the `# rows`/`# columns` header keeps the extent). On
  * a typical plate that's most of the file. Exported so displays of a plate's wells can hide the
@@ -231,7 +205,7 @@ export function plateToCsv(plate: PlateDefinition): string {
     ...REQUIRED_COLUMNS,
     ...(hasReplicate ? ["Replicate"] : []),
     ...(hasQuantity ? ["Quantity"] : []),
-    ...fluorColumns.map(fluorColumnLabel),
+    ...fluorColumns.map((f) => f.fluor),
   ]);
   for (const w of written) {
     const byFluor = new Map(w.fluors.map((f) => [f.fluor, f]));
@@ -277,11 +251,10 @@ export interface ParsePlateCsvOptions {
   sourceName?: string;
   /** Which optical channel a dye is read on, normally from the run's `.Dcal` calibration
    * (`Dcal.primaryChannel` — `zpcr.plates()` supplies this; build one with `dyeChannelLookup`).
-   * Called for every fluor column, and **outranks a ` Ch<n>` suffix the column may carry**: live
-   * optics beat whatever the file was written against (see {@link FLUOR_COLUMN_RE}). Returning
-   * `undefined` — an unknown dye, or no lookup passed at all — falls back to that suffix, and
-   * failing that leaves the fluor's channel unset, which consumers surface as unknown; nothing
-   * is substituted for it. */
+   * The file itself never states a channel, so this is the only source there is: called for
+   * every fluor column, and returning `undefined` — an unknown dye, or no lookup passed at all —
+   * leaves that fluor's channel unset. Nothing is substituted for it, and nothing needs to be:
+   * the channel orders the fluor list and labels a chip, but no longer decides any color. */
   channelForFluor?: (fluor: string) => number | undefined;
 }
 
@@ -326,18 +299,16 @@ export function parsePlateCsv(text: string, options: ParsePlateCsvOptions = {}):
     throw new Error("Plate CSV: no well rows, and no vessel extent to size the plate");
   }
 
-  // Every column that isn't one of the fixed ones is a fluor column, and those columns are the
-  // only declaration of the plate's fluors — see {@link FLUOR_COLUMN_RE}.
+  // Every column that isn't one of the fixed ones is a fluor column, and the heading is the dye
+  // name entire — those columns are the only declaration of the plate's fluors.
   const fluorColumns = header
     .map((name, column) => ({ name, column }))
     .filter(({ name }) => name !== "" && !FIXED_COLUMNS.includes(name))
     .map(({ name, column }) => {
-      const m = FLUOR_COLUMN_RE.exec(name);
-      const fluor = m ? m[1]!.trim() : name;
+      const fluor = name.trim();
       if (!fluor) throw new Error(`Plate CSV: malformed fluor column "${name}"`);
-      // Calibration first, the label's suffix only as a fallback: see {@link FLUOR_COLUMN_RE}.
-      // Undefined when neither says — never the column position.
-      const channel = channelForFluor?.(fluor) ?? (m ? Number(m[2]) - 1 : undefined);
+      // The calibration's answer or nothing — never the column position.
+      const channel = channelForFluor?.(fluor);
       return { fluor, channel, column };
     });
   // Channel order, not column order: `plateToCsv` writes the columns sorted, but a hand-authored

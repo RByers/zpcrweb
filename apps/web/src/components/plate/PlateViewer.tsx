@@ -6,7 +6,7 @@ import {
   type PlateFluor,
   type WellDefinition,
 } from "@zpcrweb/core";
-import { channelColor } from "../../lib/channelColors";
+import { fluorColor } from "../../lib/fluorColors";
 import { FluorChannelChip } from "./FluorChannelChip";
 import { ROW_LABELS, SAMPLE_TYPE_META } from "../../lib/sampleType";
 import { plateDisplayName } from "../../lib/plateNames";
@@ -185,7 +185,7 @@ function wellCard(well: WellDefinition, fluorOrder: PlateFluor[]): HoverCardData
         key: pf.fluor,
         label: pf.fluor,
         sublabel: f.target || undefined,
-        color: channelColor(pf.channel),
+        color: fluorColor(pf.fluor),
         selected: true,
       },
     ];
@@ -234,7 +234,7 @@ function WellCell({
                 <span
                   key={pf.fluor}
                   className="plate__target"
-                  style={f ? { color: channelColor(pf.channel) } : undefined}
+                  style={f ? { color: fluorColor(pf.fluor) } : undefined}
                 >
                   {f ? f.target || f.fluor : ""}
                 </span>
@@ -251,7 +251,7 @@ function WellCell({
                 <span
                   key={pf.fluor}
                   className="plate__welldot"
-                  style={{ background: channelColor(pf.channel) }}
+                  style={{ background: fluorColor(pf.fluor) }}
                 />
               ))}
           </span>

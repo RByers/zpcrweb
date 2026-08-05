@@ -255,20 +255,17 @@ export function dyeSpaceFluorCurves(
  * labelled and toggleable. Parenthesized so it can't collide with a real `geneName`. */
 export const NO_TARGET = "(none)";
 
-/** Distinct target names on a plate, each carrying the channel of the fluor it's first seen
- * assigned to (for coloring) — same "first occurrence wins" approach as {@link targetGroups}. */
-export function plateTargets(plate: PlateDefinition): { name: string; channel: number | null }[] {
-  const channelByTarget = new Map<string, number>();
+/** Distinct target names on a plate, each carrying the fluor it's first seen assigned to (for
+ * coloring — the app colors a dye from its name) — same "first occurrence wins" approach as
+ * {@link targetGroups}. */
+export function plateTargets(plate: PlateDefinition): { name: string; fluor: string | null }[] {
+  const fluorByTarget = new Map<string, string>();
   for (const w of plate.wells) {
     for (const wf of w.fluors) {
-      // Only a known channel colors a target; an unknown one leaves it neutral rather than
-      // borrowing a hue (see `PlateFluor.channel`).
-      if (wf.target && wf.channel !== undefined && !channelByTarget.has(wf.target)) {
-        channelByTarget.set(wf.target, wf.channel);
-      }
+      if (wf.target && !fluorByTarget.has(wf.target)) fluorByTarget.set(wf.target, wf.fluor);
     }
   }
-  return plate.targets.map((name) => ({ name, channel: channelByTarget.get(name) ?? null }));
+  return plate.targets.map((name) => ({ name, fluor: fluorByTarget.get(name) ?? null }));
 }
 
 /** One group of curves in target mode: a target/gene, or the {@link NO_TARGET} catch-all. */
@@ -276,8 +273,10 @@ export interface TargetGroup {
   target: string;
   /** Every fluorophore this target is loaded as, in plate order — a chip's sublabel. */
   fluors: string[];
-  /** Optical channel for coloring, or nullish when the group spans several fluorophores and no
-   * single channel hue would represent it, or when the channel isn't known. */
+  /** Optical channel, for the `Ch<n>` sublabel a chip carries in fluorophore mode; nullish when
+   * the group spans several fluorophores, or when the channel isn't known. Not a color — a dye's
+   * color comes from its own name (the app's `fluorColors.ts`), so this decides nothing visual
+   * beyond that label. */
   channel?: number | null;
   /** Calibration curve of the first of `fluors` that has one — unset when none do, which shows
    * the group as present-but-uncalibrated. */
@@ -314,9 +313,6 @@ export function targetGroups(plate: PlateDefinition, fluorCals: FluorCalibration
     return {
       target,
       fluors,
-      // A plate fluor with no `.Dcal` match still has a channel of its own (from the plate), so
-      // a single-fluor group is colored even while uncalibrated — unless that channel is itself
-      // unknown, which lands on the same neutral as a multi-fluor group.
       channel: fluors.length === 1 ? (cals[0]?.channel ?? null) : null,
       curve: cals.find((c) => c?.curve)?.curve,
     };

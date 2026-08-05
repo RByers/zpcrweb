@@ -1,5 +1,9 @@
 /**
- * Channel → color mapping.
+ * Channel → color mapping, for views whose subject really is the optical channel: raw
+ * `.Plateread` tables, the reference-calibration panel, the calibration crosstalk chart, and
+ * per-channel curve rows. **A dye's color does not come from here** — that is `fluorColors.ts`,
+ * which colors by the dye's own name so it doesn't depend on a calibration being loaded. The two
+ * palettes are the same hues, so a dye and the channel it is read on still match on screen.
  *
  * Color encodes the OPTICAL CHANNEL (6 categories), never the individual well — with up to
  * ~648 lines on screen, wells within a channel share a hue and are distinguished by
@@ -18,8 +22,7 @@
  * Channel space and dye space are deliberately kept apart (see `fluorCurves.ts`): which dye, if
  * any, is actually read on a given channel depends on the plate and its calibration, not on the
  * channel index, so no dye name is attached here. A channel is always just "Ch1"–"Ch6" in this
- * module; fluorophore names appear only once color separation has actually resolved them, in
- * the calibration ("Fluorophores") view.
+ * module; dye names, and the colors that go with them, live in `fluorColors.ts`.
  *
  * Channel 6 is a real sixth optical channel the CFX scans (ScanMask=63) — not the dark/reference
  * data (those are stored separately). It is off by default since standard 5-dye runs don't use
@@ -41,12 +44,11 @@ export const CHANNEL_INFO: readonly ChannelInfo[] = [
 ];
 
 /** Neutral blue-grey (`--ink-2`) for anything that isn't one single channel — e.g. a target chip
- * whose wells load several fluorophores, where borrowing one of their channel hues would
- * misrepresent the group. */
-const NEUTRAL_COLOR = "#8aa0c0";
+ * whose wells load several fluorophores, where borrowing one of their hues would misrepresent
+ * the group. Shared with `fluorColors.ts`, which needs the same "no color for this one" grey. */
+export const NEUTRAL_COLOR = "#8aa0c0";
 
-/** Color for a channel index, or {@link NEUTRAL_COLOR} for `null`/`undefined`/out-of-range —
- * no single channel, including a plate fluor whose channel isn't known (see `UNKNOWN_CHANNEL_LABEL`).
+/** Color for a channel index, or {@link NEUTRAL_COLOR} for `null`/`undefined`/out-of-range.
  * Neutral is deliberately not one of the six hues: an unknown channel must not read as a real one. */
 export function channelColor(index: number | null | undefined): string {
   return (index != null && CHANNEL_INFO[index]?.color) || NEUTRAL_COLOR;

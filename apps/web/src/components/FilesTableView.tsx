@@ -36,7 +36,7 @@ import { fileKindDescription, type FileKind } from "@zpcrweb/core";
 import type { FileEntry, ViewId } from "../state/useZpcrStore";
 import type { FileSummary } from "../state/db";
 import { formatCompactDateTime } from "../lib/experiment";
-import { channelColor } from "../lib/channelColors";
+import { fluorColor } from "../lib/fluorColors";
 import { FileKindIcon } from "./FileIcons";
 import { TrashIcon } from "./TrashIcon";
 
@@ -208,7 +208,7 @@ function RowHoverCard({
                   <span
                     key={t.name}
                     className="filecard__chip"
-                    style={t.channel != null ? { color: channelColor(t.channel) } : undefined}
+                    style={t.fluor != null ? { color: fluorColor(t.fluor) } : undefined}
                   >
                     {t.name}
                   </span>

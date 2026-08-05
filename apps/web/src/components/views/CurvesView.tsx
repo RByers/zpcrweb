@@ -21,6 +21,7 @@ import {
 } from "../../state/useZpcrStore";
 import { usePltdPassword } from "../../state/pltdPassword";
 import { channelColor, channelLabel } from "../../lib/channelColors";
+import { curveColor } from "../../lib/fluorColors";
 import {
   channelCurveKey,
   curveKey,
@@ -307,7 +308,8 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
             key: g.target,
             label: g.target,
             sublabel: usingTargets ? g.fluors.join(", ") : channelLabel(g.channel ?? 0),
-            channel: g.channel,
+            // One dye colors the chip; a target spanning several has no one dye to borrow from.
+            fluor: g.fluors.length === 1 ? g.fluors[0] : null,
             // A dye-space source has no `.Dcal` calibration to have matched — see `dyeSpace`.
             calibrated: dyeSpace || !!g.curve,
           }))
@@ -315,7 +317,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
             key: f.fluor,
             label: f.fluor,
             sublabel: channelLabel(f.channel),
-            channel: f.channel,
+            fluor: f.fluor,
             calibrated: dyeSpace || !!f.curve,
           })),
     [groupByTarget, groupInfos, usingTargets, fluorCals, dyeSpace],
@@ -585,7 +587,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
           key: `${c.dyeLabel}-${c.channel}`,
           label: c.dyeLabel,
           cq: c.analysis?.cq,
-          color: channelColor(c.channel),
+          color: curveColor(c),
           selected: isSelected(c),
         })),
     );
@@ -605,7 +607,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
         label: c.wellLabel,
         sublabel: c.sample,
         cq: c.analysis?.cq,
-        color: channelColor(c.channel),
+        color: curveColor(c),
         selected: isSelected(c),
       })),
     );
@@ -637,7 +639,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
         label: c.dyeLabel,
         sublabel: c.wellLabel,
         cq: c.analysis?.cq,
-        color: channelColor(c.channel),
+        color: curveColor(c),
         selected: isSelected(c),
       })),
     );

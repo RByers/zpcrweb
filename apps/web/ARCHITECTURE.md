@@ -387,13 +387,12 @@ alongside `"zpcr"`/`"pcrd"`:
   is the *same* `OverviewPanel` a run uses (see "One Overview panel" below), given the plate
   setup's own rows (dimensions, vessel, encryption) and its target/sample chips. It has no run to
   report on, so no Cq tally comes with those chips — there's no analysis to tally against. A standalone
-  `.plt.csv` carries no calibration of its own, and there is no run to ask, so **no
-  `channelForFluor` is passed** — the channels are whatever the file's own `FAM Ch1`-style column
-  suffixes say (`pltcsv.md` §4.1). A plate this app wrote therefore keeps the channels it was
-  downloaded with; one hand-authored with bare dye names is simply **unknown**. Nothing is
-  inferred from column order, and the mapping isn't borrowed from some other run that happens to
-  be loaded, since that would be a guess about a different instrument's optics. The UI says so
-  explicitly instead (see `FluorChannelChip`, below).
+  `.plt.csv` states no channel and carries no calibration of its own, so its channels are simply
+  **unknown** — no `channelForFluor` is passed. Nothing is inferred from column order, and the
+  mapping isn't borrowed from some other run that happens to be loaded, since that would be a
+  guess about a different instrument's optics. It costs nothing visual: the dyes are coloured
+  from their own names (see "A dye's colour is the dye's", below), and the chips just carry no
+  `Ch<n>`.
 - **Attach (replace a run's plate)** — `PlatesView`'s `AttachPlateMenu`
   (`components/plate/AttachPlateMenu.tsx`), enabled only for a run that has a file archive to add
   an entry to (so: a `.zpcr`; a `.pcrd` gets the control disabled with an explanatory title, since
@@ -885,7 +884,7 @@ so every call site keeps writing one `onChange({ … })` regardless of where the
   (replicate, quantity, the fluor→channel→target mapping) is in each cell's **hover card**, and
   the 320px column it needed was one a narrow container could only stack below the grid. That card
   is the Curves view's `HoverCard` (`PlateViewer`'s `wellCard`), so a well reads the same in both
-  views — same title, same sample-type/sample subtitle, same channel-coloured swatch per fluor —
+  views — same title, same sample-type/sample subtitle, same dye-coloured swatch per fluor —
   minus the Cq column, since a plate definition is a setup with no run to quantify. Wells are
   therefore not clickable; the hover outline stays, as a reading aid pairing with the card.
   Cells: each well cell writes the well's `sample` and each loaded fluor's `target` directly
@@ -1671,11 +1670,11 @@ only pieces the two views share.
   target mode is already de facto fluorophore mode, and one lumped group would merge the dyes'
   per-group Cq thresholds — so those curves keep falling back to their fluor name (the same
   reason table mode falls back to fluorophore grouping there; see `usingTargets` below).
-  Both modes keep the same channel-derived color (`FluorChip.channel`) — target mode does not
-  introduce a new color scheme, just a different grouping/label built by `CurvesView`'s
-  `labelForFluorCurve`/`targetInfos`. A group spanning several fluorophores (`"(none)"`, or a
-  target loaded as more than one dye) has no single channel, so its chip takes
-  `channelColors.ts`'s `NEUTRAL_COLOR` rather than borrowing one member's hue.
+  Both modes keep the same dye-derived color (`FluorChip.fluor`, via `fluorColors.ts`) — target
+  mode does not introduce a new color scheme, just a different grouping/label built by
+  `CurvesView`'s `labelForFluorCurve`/`targetInfos`. A group spanning several fluorophores
+  (`"(none)"`, or a target loaded as more than one dye) has no single dye to borrow from, so its
+  chip takes `NEUTRAL_COLOR` rather than one member's hue.
 
 ### Table mode
 
@@ -2139,18 +2138,33 @@ per-well data. Channels 1–5 are the standard dye set; **channel 6 is a real si
 the reference row inside `WELLDATA`). Channel 6 is off by default since standard runs don't
 use it.
 
-**Unknown channels.** A fluor's channel is optional (`PlateFluor.channel?`) — a dye no `.Dcal`
-covers, or a hand-authored `.plt.csv` that labels its columns by dye alone and is opened with no
-run to resolve them against, has no channel at all. (A `.plt.csv` this app wrote carries its
-channels in the column headings, so the standalone case is now usually covered — see
-`pltcsv.md` §4.1 — but the gap is still reachable and still has to render.) Nothing is ever guessed: `channelColor(undefined)` returns `NEUTRAL_COLOR`
-and `channelLabel(undefined)` returns `UNKNOWN_CHANNEL_LABEL` (`Ch?`). One shared component,
-`components/plate/FluorChannelChip.tsx`, renders every dye chip in both the Plates and Raw views —
-dashed outline plus a `Ch?` marker and an explanatory `title` when the channel is unknown. That
-hover is the whole explanation: the fluor list carries no footnote about it, and a planned run
-raises no check for it either, since the marker already says everything a reader needs. The rest of the pipeline treats `undefined` as "not in any channel" rather than channel 0:
-`fluorCurves.ts` propagates it, and `chart.ts`'s dark-overlay `presentChannels` set filters it
-out. That only costs colouring and grouping — the color-separation solve keys off `.Dcal`
+### A dye's colour is the dye's, not the channel's
+
+`lib/fluorColors.ts` maps a **dye name** to a colour, and everything dye-shaped reads it: plate
+well dots and per-fluor target text (`PlateViewer`), dye/target chips (`FluorBar`, via
+`FluorChip.fluor`), target chips on file cards and Overview, dye-space curve strokes, baselines,
+Cq markers and hover-card rows (`curveColor` in `chart.ts` and `CurvesView`). `channelColors.ts`
+keeps colour only for views whose subject really *is* the channel: raw `.Plateread` tables, the
+reference-calibration panel, the crosstalk chart, per-channel curve rows.
+
+The table is the channel palette redistributed dye by dye — each dye takes the hue its channel
+already used — so nothing changed colour on screen; what changed is what the colour *depends on*.
+Colouring a dye by its channel made the UI's colours contingent on a `.Dcal` being loaded and
+covering that dye, so a hand-authored plate or one opened with no run rendered every dye a
+featureless grey. A dye emits what it emits; the table is seeded from every dye the committed
+samples name (14 across the `.zpcr`/`.pcrd` `.Dcal` sets, all agreeing dye-for-dye on channel,
+plus the Biomeme sample's three). Dyes sharing a channel share a hue — honest, since they sit on
+one channel *because* they emit in one band, and a run can't use two of them and still unmix.
+
+**Unknown is not a warning.** The dye set is open: an unrecognized name simply gets
+`NEUTRAL_COLOR`, and that is a plain "no colour for this one", not a problem to report. Likewise
+a fluor's channel is still optional (`PlateFluor.channel?`) — a `.plt.csv` states none, so a dye
+no `.Dcal` covers, or any plate CSV opened standalone, has none — but it now costs only the
+`Ch<n>` label, which `components/plate/FluorChannelChip.tsx` omits rather than marking. The
+dashed outline, `Ch?` marker and explanatory `title` are gone with the reason for them. Nothing
+is ever guessed. The rest of the pipeline still treats `undefined` as "not in any channel" rather
+than channel 0: `fluorCurves.ts` propagates it, and `chart.ts`'s dark-overlay `presentChannels`
+set filters it out. That costs grouping only — the color-separation solve keys off `.Dcal`
 response curves, not channel numbers.
 
 ## Styling & responsiveness
@@ -2616,17 +2630,17 @@ Four components, under `components/instrument/`:
 
   A plate **attached** to an experiment resolves its channels through that archive like any other,
   since by then the plate is *in* the file (`Zpcr.plates()`), not paired with it. This is what the
-  removed `resolveStagedRun` had to do by hand: a channel is a fact about the optics, not about the
-  plate, so a CSV sitting in the file list beside unrelated files has only its own written
-  `Ch<n>` hints to go on — the run it was authored against, which may not be the run it is about
-  to be used with — and staging it against a run was the only statement that could supply the real
-  mapping. Attaching writes it into the archive instead, so the question answers itself and there
-  is no pairing to keep track of: the archive's calibration outranks the file's hint from then on
-  (`pltcsv.md` §4.1).
+  removed `resolveStagedRun` had to do by hand: a `.plt.csv` names its fluor columns by dye alone — a
+  channel is a fact about the optics, not about the plate — so a CSV sitting in the file list beside
+  unrelated files parses with every channel unknown, and staging it against a run was the only
+  statement that could supply the mapping. Attaching writes it into the archive instead, so the
+  question answers itself and there is no pairing to keep track of. Since colour now comes from
+  the dye name, what that mapping still buys is the fluor ordering and the `Ch<n>` labels — not,
+  as it once did, whether the plate renders in colour at all.
 
   The plate uses the shared `PlateViewer` in its `compact` variant — no vessel/scan-mode metadata
   and wells shrunk to coloured cells, so a 96-well plate fits the column instead of scrolling out
-  of it. A loaded well still carries one channel-coloured dot per fluor it holds
+  of it. A loaded well still carries one dye-coloured dot per fluor it holds
   (`.plate__welldots`, hidden in the full-size grid where the per-fluor target text says the same
   thing), so the cell answers "what is loaded here?" without a hover; everything else is one hover
   away in the well card. The question this preview answers is "is this the right plate?", not

@@ -436,26 +436,26 @@ present with no target) — so a plate reads as a target-per-fluor grid in a spr
 columns are ordered by ascending channel (unknown-channel dyes last, `pltd.ts`'s shared
 `byChannel`), so each well row reads its fluors low channel → high; like row order it's
 presentation only, since `parsePlateCsv` keys each cell to its column heading and re-sorts. They
-are the plate's whole fluor list. The `SampleType` cell holds a normalized type name (`unknown`, `ntc`, …), but a raw CFX
+are the plate's whole fluor list.
+The `SampleType` cell holds a normalized type name (`unknown`, `ntc`, …), but a raw CFX
 `wellSampleType` code is accepted too and normalized on read — which is how an `other` well
 round-trips: since `other` means "a code we didn't recognize" rather than a type, `plateToCsv`
 writes the preserved `sampleTypeRaw` instead of inventing a `wcOther` that no CFX tool emits.
-`parseZpcr` builds that dye→channel map lazily (via `dcal.ts`'s `dyeChannelLookup`) and hands it
-to `parsePlateCsv` as `channelForFluor`, which is the **top** of a three-tier resolution: the
-run's calibration, else the column's `FAM Ch1`-style suffix, else `channel` **undefined**. The
-written suffix deliberately ranks *below* live calibration — a channel is a fact about the
-instrument's optics, not the plate, so carrying a plate to a run whose optics map the dye
-elsewhere must let that run decide rather than let a stale claim in a file override live
-hardware. That demotion is what makes the suffix safe to write at all, and what it buys is the
-standalone case: a plate downloaded from a run and reopened with no archive in hand keeps the
-channels it was written with instead of degrading to unknown. There is deliberately
-no positional fallback at any tier, because column order carries no meaning and inferring a
-channel from it produces a wrong answer that looks plausible rather than a missing one.
-`WellFluor.channel` and `PlateFluor.channel` are therefore still optional all the way through,
-and consumers must render the gap as unknown rather than substituting a default (the web app
-shows `Ch?`, a neutral swatch and a footnote; see `apps/web/ARCHITECTURE.md`). Go through
-`zpcr.plates()` where an archive is in hand, so the lookup is wired up; a hand-authored plate CSV
-that names dyes alone, read on its own, still has unknown channels.
+
+**The file states no optical channel**, and the format has no syntax for one: a channel belongs
+to the instrument's optics, not to the plate, so a portable document must not assert one. Nothing
+displayed needs it either — a dye is drawn in its own colour, keyed off its own name (the web
+app's `lib/fluorColors.ts`), which is right with or without a calibration loaded. Where a channel
+is still wanted — to order the fluor list, and to label a chip `Ch1` — `parseZpcr` builds the
+dye→channel map lazily (via `dcal.ts`'s `dyeChannelLookup`) and hands it to `parsePlateCsv` as
+`channelForFluor`. A dye it doesn't cover leaves `channel` **undefined**; there is deliberately
+no positional fallback, because column order carries no meaning and inferring a channel from it
+produces a wrong answer that looks plausible rather than a missing one. `WellFluor.channel` and
+`PlateFluor.channel` are therefore optional all the way through, and consumers simply omit the
+label rather than substituting a default — an unknown channel costs a `Ch<n>` label and nothing
+else, so it is not worth flagging (see `apps/web/ARCHITECTURE.md`). Go through `zpcr.plates()`
+where an archive is in hand, so the lookup is wired up; a plate CSV read on its own has unknown
+channels and full colour.
 
 For a plate CSV that *isn't* in the archive, `Zpcr.channelForDye(dye)` publishes the same cached
 lookup, so a caller pairing a run with an outside plate can hand it to `parsePlateCsv` as
@@ -464,8 +464,8 @@ ruled out above and not a guess at all: it is one instrument's calibration set a
 the caller has stated belongs with that run — the app's Instrument view stages exactly that pair (see
 `apps/web/ARCHITECTURE.md`). A source with no calibrations of its own (a Biomeme run) answers
 `undefined` for every dye, as it should.
-Channels only drive colouring and grouping, never the color-separation solve, so an unknown one
-costs presentation rather than correctness. Wells with nothing on them aren't written at
+Channels drive fluor-list ordering and a chip's `Ch<n>` label, never colour and never the
+color-separation solve, so an unknown one costs a label rather than correctness. Wells with nothing on them aren't written at
 all, and a well missing from the table parses back as empty, so the only header line that
 really matters is `vessel` — everything else is an optional display-only passenger. The plate's `identityKey` (its user-facing name) isn't in the file
 either: the file/archive-entry name *is* that identity, so `parsePlateCsv`'s `sourceName`

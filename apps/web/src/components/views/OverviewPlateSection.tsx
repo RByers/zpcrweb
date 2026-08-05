@@ -1,5 +1,5 @@
 import { plateTargets, type CqTableEntry, type PlateDefinition } from "@zpcrweb/core";
-import { channelColor } from "../../lib/channelColors";
+import { fluorColor } from "../../lib/fluorColors";
 import { curveKey } from "../../lib/runAnalysis";
 
 /**
@@ -42,7 +42,7 @@ export function OverviewPlateSection({
                   key={t.name}
                   name={t.name}
                   counts={byTarget.get(t.name)}
-                  color={t.channel != null ? channelColor(t.channel) : undefined}
+                  color={t.fluor != null ? fluorColor(t.fluor) : undefined}
                 />
               ))}
             </div>
