@@ -1964,6 +1964,25 @@ async function instrumentRunChecks(chrome, origin) {
     JSON.stringify(editable.lines.slice(0, 4)),
   );
 
+  // The three the Plates tab carries for a plate, on the protocol's own heading line: replace,
+  // download, clone. They pin the mirror itself — the pair used to exist only on the read-only
+  // listing, so a pending experiment's protocol could be edited but neither saved out nor swapped.
+  const protoTools = await cdp
+    .eval(
+      `JSON.stringify([...document.querySelectorAll(".overview__blocktools > *")].map((el) =>
+         el.tagName === "DETAILS"
+           ? el.querySelector("summary")?.getAttribute("aria-label") ?? "menu"
+           : el.getAttribute("aria-label") ?? el.textContent.trim()))`,
+    )
+    .then(JSON.parse);
+  check(
+    "a pending experiment's protocol can be replaced, downloaded and cloned from its own tab",
+    protoTools[0] === "replace protocol" &&
+      /^Download the thermal protocol/.test(protoTools[1] ?? "") &&
+      /^Clone the thermal protocol/.test(protoTools[2] ?? ""),
+    JSON.stringify(protoTools),
+  );
+
   // Starting it is blocked only by things that are actually missing — and a plate is not one of
   // them. An experiment may deliberately be run without one (the curves simply carry no target or
   // sample names), so that is a warning rather than a blocker.

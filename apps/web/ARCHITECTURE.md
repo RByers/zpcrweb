@@ -306,6 +306,10 @@ only two things, and both are props:
   has happened is a record (see "Editing what has already happened");
 - **whether there is a thermal profile below it**, which only a run that actually executed has.
 
+Its replace/download/clone toolbar is the Plates tab's, mirrored — see `PlateDownloadButton` under
+"Plates and plate files" for the three buttons and the two places the protocol's set deliberately
+differs from the plate's.
+
 It takes the protocol *text* rather than a `Zpcr`, which is what lets it serve a `.prcl.txt` at all —
 that file has no run around it to hand over.
 
@@ -420,12 +424,19 @@ alongside `"zpcr"`/`"pcrd"`:
   sibling "Clone" button: same `plateToCsv` encode, but the resulting bytes are wrapped in a
   `.plt.csv` `File` and handed to `store.addFiles` instead of triggering a download — extracting
   the run's plate into its own independent `LoadedFile`, which is what populates the "Attach"
-  menu above with something to pick besides an upload. `ProtocolView`'s "Thermal protocol"
-  block has the same pair of buttons for a run's `protocolText`, download vs. clone to a
-  `.prcl.txt` `addFiles` call. Replacing a run's protocol *is* rewriting its own bytes, the way a
-  plate attach does (core's `attachProtocol`), and it is offered only for a **pending**
-  experiment — through Overview's attach menu, or by editing it on the Protocol tab. A run that has
-  happened doesn't get it: its protocol is the record of what the block was asked to do.
+  menu above with something to pick besides an upload. **`ProtocolView`'s "Thermal protocol" block
+  carries the same three controls in the same order** — replace, download, clone — because a
+  protocol and a plate are the two halves an experiment is assembled from, and one of them offering
+  all three while the other offered two was drift rather than a distinction. Download and clone go
+  to a `.prcl.txt` (`downloadText` vs. an `addFiles` call); they appear whenever the protocol has
+  directive text at all, editor or not, riding the heading line through the editor's own `tools`
+  slot the way `PlateViewer` takes its `toolbar`. Replace is `AttachProtocolMenu`, the same menu
+  Overview's "Experiment parts" uses and the same `store.attachProtocol` call. Where it differs
+  from the plate's: it is offered only for a **pending** experiment, never for a run that has
+  happened (attaching a plate to a finished run labels results that arrived without a map; swapping
+  its protocol would rewrite the record of what the block was asked to do), and never for a
+  standalone `.prcl.txt`, which *is* the file — replacing its contents from another file is just
+  opening that other file, the same reason `StandalonePlateView` has no attach control.
 
 ## Files, loaded files, and the one selection
 
@@ -624,7 +635,7 @@ Where this shows up today:
 | ------- | ------- | --------------- |
 | Experiment name (`ExperimentHeader`) | a live input, marked required while unnamed | a heading, plus an edit button that opens it |
 | Protocol (`ProtocolView`) | the editor, writing into the archive as you type | the read-only listing; no editor at all |
-| Plate / protocol attach | offered on Overview as ordinary controls | plate only, from the Plates tab, behind a menu *and* a replace confirmation |
+| Plate / protocol attach | offered on Overview as ordinary controls, and on each half's own tab | plate only, from the Plates tab, behind a menu *and* a replace confirmation |
 | Filename (`OverviewPanel`) | behind the toolbar's Rename button | behind the toolbar's Rename button |
 | Analysis + display settings | direct | direct — see above |
 | Deleting the file | ✕ on the chip, twice if unsaved | ✕ on the chip, twice if unsaved |
@@ -741,8 +752,8 @@ so every call site keeps writing one `onChange({ … })` regardless of where the
   still behind the password prompt.
 - **Protocol** (`components/views/ProtocolView.tsx`) — the thermal protocol itself: the
   structured step table (`ProtocolStepsTable`) when the format provides one, otherwise the
-  annotated `ProtocolDecoded` listing of `zpcr.protocolText`, plus the download/clone-to-`.prcl.txt`
-  buttons described under `PlateDownloadButton` above. Reads only `zpcr.protocol()`/
+  annotated `ProtocolDecoded` listing of `zpcr.protocolText`, plus the replace/download/clone
+  toolbar described under `PlateDownloadButton` above. Reads only `zpcr.protocol()`/
   `zpcr.protocolText`, so it works identically for a `.zpcr`, a `.pcrd` or a Biomeme run — the
   same format independence `OverviewView` has. Split out of Overview so a run's protocol detail
   doesn't crowd the summary. **The same component serves a standalone `.prcl.txt`** — see "One

@@ -3,13 +3,14 @@ import { formatRunDefinitionText, type AlfReport, type ProtocolStep } from "@zpc
 import { ProtocolDecoded } from "../raw/DecodedView";
 import { ProtocolStepsTable } from "../raw/ProtocolSteps";
 import { ProtocolEditor } from "../protocol/ProtocolEditor";
+import { AttachProtocolMenu } from "../protocol/AttachProtocolMenu";
 import { ThermalProfileChart } from "../protocol/ThermalProfileChart";
 import { DownloadIcon } from "../DownloadIcon";
 import { CloneIcon } from "../CloneIcon";
 import { RenameIcon } from "../RenameIcon";
 import { downloadText } from "../../lib/download";
 import { protocolFileBase } from "../../lib/protocolFileBase";
-import type { AddFilesOptions } from "../../state/useZpcrStore";
+import { fileBytes, type AddFilesOptions, type LoadedFile } from "../../state/useZpcrStore";
 
 /**
  * The Protocol tab — for a standalone `.prcl.txt` and for a run's own protocol alike.
@@ -25,6 +26,10 @@ import type { AddFilesOptions } from "../../state/useZpcrStore";
  *   are drafts, a run that has happened is a record;
  * - **whether there is a thermal profile to show**, which only a run that has actually executed has
  *   (its `.alf` report).
+ *
+ * The protocol's own **Replace / Download / Clone** buttons ride the "Thermal protocol" heading
+ * line in both modes, mirroring the three the Plates tab carries for a plate — see the `toolbar`
+ * const below for what each one is and where the two sets deliberately differ.
  *
  * The `Method`/`Lid`/`Volume`/`Steps`/`Plate reads`/`Scan` table the standalone view used to lead
  * with is gone. Every one of those facts is a directive in the listing below it — `HOTLID 105,30`
@@ -42,9 +47,11 @@ export function ProtocolView({
   steps,
   report,
   file,
+  files,
   addFiles,
   editable,
   onChangeProtocol,
+  onAttachProtocol,
   name,
   onRenameProtocol,
   autoFocusName,
@@ -63,6 +70,9 @@ export function ProtocolView({
   report?: AlfReport | null;
   /** Only its `name` is used, as the download/clone filename's fallback base. */
   file: { name: string };
+  /** Every loaded file, so Replace can offer already-loaded `.prcl.txt` files instead of only a
+   * fresh upload — the same list `PlatesView` passes to `AttachPlateMenu`. */
+  files: LoadedFile[];
   /** Adds the cloned `.prcl.txt` to the file list — see the Clone button below. */
   addFiles: (files: FileList | File[], options?: AddFilesOptions) => Promise<string | null>;
   /** This protocol is a draft rather than a record, so it may be changed here — a standalone
@@ -71,6 +81,17 @@ export function ProtocolView({
   /** Persist an edited protocol (the store's `setProtocolText`/`setRunProtocolText`). Only called
    * while {@link editable}. */
   onChangeProtocol: (runDefinition: string) => void;
+  /**
+   * Swap this experiment's protocol for another `.prcl.txt` — the store's `attachProtocol`, and
+   * the Replace half of the toolbar. Omitted where there is no experiment to attach to: a
+   * standalone `.prcl.txt` *is* the file, so replacing its contents from another file is just
+   * opening that other file (the same reason `StandalonePlateView` has no attach control).
+   *
+   * Only offered while {@link editable}, unlike the plate's, which a finished run still gets:
+   * attaching a plate to a run that happened is labelling results that came in without a map,
+   * whereas swapping its protocol would rewrite the record of what the instrument actually ran.
+   */
+  onAttachProtocol?: (file: File) => void;
   /** What this protocol is called, or `""` when it has never been named. */
   name: string;
   /** Store a new name — a rename of the file itself for a standalone `.prcl.txt`, or of the
@@ -91,19 +112,76 @@ export function ProtocolView({
     />
   );
 
+  const fileBase = `${protocolFileBase(name || null, file.name)}.prcl.txt`;
+
+  /**
+   * Replace / Download / Clone — the same three the Plates tab carries, in the same order and
+   * spelled the same way (`PlatesView`'s `plateview__toolbar`: the attach menu, then
+   * `PlateDownloadButton`'s download and clone). Protocols and plates are the two halves an
+   * experiment is assembled from, and having one of them offer all three while the other offered
+   * only two was drift, not a distinction.
+   *
+   * Download and Clone need text to write, so a protocol that is structured-only (a `.pcrd`'s
+   * step list) or not there yet gets Replace alone — the same way the Plates tab's empty state
+   * shows its attach control and nothing else.
+   */
+  const toolbar = (
+    <>
+      {editable && onAttachProtocol && (
+        <AttachProtocolMenu
+          files={files}
+          compactLabel={protocolText ? "replace protocol" : "attach protocol"}
+          confirmReplace={!!protocolText}
+          onSelect={(f) => onAttachProtocol(new File([fileBytes(f).slice()], f.name))}
+          onUpload={onAttachProtocol}
+        />
+      )}
+      {protocolText && (
+        <>
+          <button
+            className="raw__download"
+            onClick={() => downloadText(fileBase, formatRunDefinitionText(protocolText))}
+            aria-label="Download the thermal protocol as .prcl.txt"
+            title={
+              "Download the ASCII run definition as .prcl.txt — one directive per line. " +
+              "This is the form the instrument itself records, and what an experiment loads " +
+              "when a protocol is attached to it."
+            }
+          >
+            <DownloadIcon />
+          </button>
+          <button
+            className="raw__download"
+            onClick={() => {
+              const text = formatRunDefinitionText(protocolText);
+              void addFiles([new File([new TextEncoder().encode(text)], fileBase)]);
+            }}
+            aria-label="Clone the thermal protocol into an independent .prcl.txt file"
+            title="Extract this protocol into its own .prcl.txt file, kept alongside your other files"
+          >
+            <CloneIcon />
+          </button>
+        </>
+      )}
+    </>
+  );
+
   // A pending experiment that has no protocol yet. Not an error and not an empty frame with an
-  // editor in it: writing one is a deliberate act, and Overview is where the two ways to do it live
-  // (write a new one, or attach a file), so this says where to go rather than half-offering it here.
+  // editor in it: writing a protocol is a deliberate act, and "new protocol" lives on the Overview
+  // tab beside the experiment's other missing halves. Attaching one it already has is offered right
+  // here, though — that is the same button this view carries once there *is* a protocol, and the
+  // same shape the Plates tab's empty state uses for a run with no plate.
   if (!protocolText && !steps?.length) {
     return (
       <div className="overview">
         {header}
         <div className="decoded__na mono">
           {editable
-            ? "No protocol yet. Add one from this experiment's Overview tab — either a new protocol " +
-              "to write here, or a protocol file you already have."
+            ? "No protocol yet. Attach a protocol file you already have, or write a new one from " +
+              "this experiment's Overview tab."
             : "No thermal protocol for this run."}
         </div>
+        <div className="overview__blocktools">{toolbar}</div>
       </div>
     );
   }
@@ -112,47 +190,12 @@ export function ProtocolView({
     <div className="overview">
       {header}
       {editable && protocolText ? (
-        <ProtocolEditor runDefinition={protocolText} onChange={onChangeProtocol} />
+        <ProtocolEditor runDefinition={protocolText} onChange={onChangeProtocol} tools={toolbar} />
       ) : (
         <section className="overview__block">
           <div className="overview__blockhead">
             <h2 className="overview__h">Thermal protocol</h2>
-            {/* The ASCII run definition, not the `.prcl` — see the button's own title. Offered
-                only when the protocol carries that text form at all; one that is
-                structured-only would have nothing to write. */}
-            {protocolText && (
-              <div className="overview__blocktools">
-                <button
-                  className="raw__download"
-                  onClick={() =>
-                    downloadText(
-                      `${protocolFileBase(name || null, file.name)}.prcl.txt`,
-                      formatRunDefinitionText(protocolText),
-                    )
-                  }
-                  aria-label="Download the thermal protocol as .prcl.txt"
-                  title={
-                    "Download the ASCII run definition as .prcl.txt — one directive per line. " +
-                    "This is the form the instrument itself records, and what an experiment loads " +
-                    "when a protocol is attached to it."
-                  }
-                >
-                  <DownloadIcon />
-                </button>
-                <button
-                  className="raw__download"
-                  onClick={() => {
-                    const fileName = `${protocolFileBase(name || null, file.name)}.prcl.txt`;
-                    const text = formatRunDefinitionText(protocolText);
-                    void addFiles([new File([new TextEncoder().encode(text)], fileName)]);
-                  }}
-                  aria-label="Clone the thermal protocol into an independent .prcl.txt file"
-                  title="Extract this protocol into its own .prcl.txt file, kept alongside your other files"
-                >
-                  <CloneIcon />
-                </button>
-              </div>
-            )}
+            <div className="overview__blocktools">{toolbar}</div>
           </div>
           {steps?.length ? (
             <ProtocolStepsTable steps={steps} />

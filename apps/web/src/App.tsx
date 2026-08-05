@@ -699,6 +699,7 @@ export function App() {
                 key={active.id}
                 protocolText={store.activeProtocolFile}
                 file={active}
+                files={store.loaded}
                 addFiles={store.addFiles}
                 // A protocol file is always a draft: it is a document you author, with no run behind
                 // it that editing it could contradict.
@@ -770,9 +771,13 @@ export function App() {
                 // executed has one, which is what the thermal-profile section is about.
                 report={zpcr.runReports()[0]?.alf ?? null}
                 file={active}
+                files={store.loaded}
                 addFiles={store.addFiles}
                 editable={isPendingExperiment(active.kind, zpcr)}
                 onChangeProtocol={(text) => store.setRunProtocolText(active.id, text)}
+                // The same `attachProtocol` the Overview tab's "replace protocol" calls — the view
+                // itself only offers it while the experiment is still pending.
+                onAttachProtocol={(file) => void store.attachProtocol(active.id, file)}
                 name={zpcr.protocol()?.name ?? ""}
                 onRenameProtocol={(name) => void store.setRunProtocolName(active.id, name)}
                 autoFocusName={nameProtocolFor === active.id}

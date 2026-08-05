@@ -224,10 +224,17 @@ function StepPopover({
 export function ProtocolEditor({
   runDefinition,
   onChange,
+  tools,
 }: {
   runDefinition: string;
   /** Persist an edited protocol — the store's `setProtocolText`, throttled on its own. */
   onChange: (runDefinition: string) => void;
+  /** The view's own replace/download/clone buttons, so they sit on this block's heading line
+   * instead of the editor growing a second row of controls above or below it. Same slot
+   * `PlateViewer` takes its `toolbar` through, and for the same reason: the buttons belong to
+   * the view (they are the same three whether or not the protocol is editable), the heading
+   * line belongs to this component. */
+  tools?: ReactNode;
 }) {
   const [editing, setEditing] = useState(false);
   const [open, setOpen] = useState<OpenTarget | null>(null);
@@ -361,6 +368,7 @@ export function ProtocolEditor({
       <div className="overview__blockhead">
         <h2 className="overview__h">Thermal protocol</h2>
         <div className="overview__blocktools">
+          {tools}
           {canEdit && (
             <>
               <button
