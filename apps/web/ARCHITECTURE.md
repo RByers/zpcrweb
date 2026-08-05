@@ -829,7 +829,10 @@ so every call site keeps writing one `onChange({ … })` regardless of where the
   `App` keeps the last non-About view in a ref and passes `onBack` only when a file is loaded, so
   "← back" returns where the user was and the welcome screen (with nowhere to go back to) omits
   the button; with a file loaded the tab strip stays visible (no tab selected) as a second way
-  out. Being file-independent, it is also exempt from the standalone-plate view fallback.
+  out. Being file-independent, it is also exempt from the standalone-plate view fallback — which
+  is why picking a file chip from About is a third way out: `selectFile` sends that click to
+  Overview, since a selection change on its own would leave About on screen and make the click
+  look like it did nothing.
 
 ### Decoded views (`components/raw/DecodedView.tsx`)
 

@@ -2551,6 +2551,17 @@ async function loadedSetChecks(chrome, origin) {
     JSON.stringify(reopened.filter((t) => !t.off).map((t) => t.label)),
   );
 
+  // About is file-independent, so it survives a selection change — which means picking a chip from
+  // it would otherwise leave you reading About with a file freshly selected behind it, and look
+  // like the click did nothing. `App.tsx`'s `selectFile` sends that click to Overview.
+  await cdp.eval(`window.location.hash = "view=about", undefined`);
+  await waitFor(() => cdp.eval(`!!document.querySelector(".about")`), { what: "the About view" });
+  await cdp.eval(
+    `(() => { document.querySelector(".filebar .filechip__main").click(); })()`,
+  );
+  const landed = await tabBecomes(cdp, "Overview");
+  check("picking a file chip from About leaves it for that file's Overview", landed === "Overview", landed);
+
   cdp.close();
 }
 

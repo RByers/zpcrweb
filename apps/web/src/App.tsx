@@ -443,10 +443,18 @@ export function App() {
    * very tab that is following it. Everywhere else switching is never blocked — reading Curves while
    * a run cycles is the headline use of the connection staying open across tabs (see `instrument`
    * above), and it would defeat that to pin the selection.
+   *
+   * From About, picking a chip also *leaves* About for Overview. About is file-independent — it
+   * survives a selection change (see `view` below) — so without this the click would land on a
+   * page that shows nothing about the file just chosen, and look like nothing happened. Overview
+   * rather than the file's first enabled tab because every kind has one, and it is the same place
+   * every other "here is a file, go look at it" path lands.
    */
   const selectFile = (id: string) => {
     if (store.view === "instrument" && runActive) return;
-    if (store.files.some((f) => f.id === id)) store.setActive(id);
+    if (!store.files.some((f) => f.id === id)) return;
+    store.setActive(id);
+    if (store.view === "about") store.setView("overview");
   };
   /**
    * Arriving at the Instrument view while a run is live snaps the selection to it, even if the
