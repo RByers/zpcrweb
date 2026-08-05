@@ -430,26 +430,32 @@ by its own well label and derives the plate's target/sample lists by walking the
 file re-sorted in a spreadsheet reads back identically. The fixed columns (`Well`, `SampleType`,
 `Sample`, plus `Replicate`/`Quantity` when any well on the plate uses them — most don't, and a
 column of empty cells says nothing) are followed by one column per fluorophore, labelled with
-the dye name, whose cells hold only that well's target for it (empty = fluor absent, `+` =
+the dye name plus its channel when known (`FAM Ch1`), whose cells hold only that well's target
+for it (empty = fluor absent, `+` =
 present with no target) — so a plate reads as a target-per-fluor grid in a spreadsheet. Those
 columns are ordered by ascending channel (unknown-channel dyes last, `pltd.ts`'s shared
 `byChannel`), so each well row reads its fluors low channel → high; like row order it's
 presentation only, since `parsePlateCsv` keys each cell to its column heading and re-sorts. They
-are the plate's whole fluor list; the channel isn't written, since a dye is read on
-exactly one channel and the run's own `.Dcal` set says which (`Dcal.primaryChannel`).
-The `SampleType` cell holds a normalized type name (`unknown`, `ntc`, …), but a raw CFX
+are the plate's whole fluor list. The `SampleType` cell holds a normalized type name (`unknown`, `ntc`, …), but a raw CFX
 `wellSampleType` code is accepted too and normalized on read — which is how an `other` well
 round-trips: since `other` means "a code we didn't recognize" rather than a type, `plateToCsv`
 writes the preserved `sampleTypeRaw` instead of inventing a `wcOther` that no CFX tool emits.
-`parseZpcr` builds that dye→channel map lazily (via `dcal.ts`'s `dyeChannelLookup`) and hands
-it to `parsePlateCsv` as `channelForFluor`; an explicit `FAM Ch1`-style suffix still wins if a
-file carries one, and a dye in neither leaves `channel` **undefined** — there is deliberately
-no positional fallback, because column order carries no meaning and inferring a channel from it
-produces a wrong answer that looks plausible rather than a missing one. `WellFluor.channel` and
-`PlateFluor.channel` are therefore optional all the way through, and consumers must render the
-gap as unknown rather than substituting a default (the web app shows `Ch?`, a neutral swatch and
-a footnote; see `apps/web/ARCHITECTURE.md`). Go through `zpcr.plates()` where an archive is in
-hand, so the lookup is wired up; a plate CSV read on its own simply has unknown channels.
+`parseZpcr` builds that dye→channel map lazily (via `dcal.ts`'s `dyeChannelLookup`) and hands it
+to `parsePlateCsv` as `channelForFluor`, which is the **top** of a three-tier resolution: the
+run's calibration, else the column's `FAM Ch1`-style suffix, else `channel` **undefined**. The
+written suffix deliberately ranks *below* live calibration — a channel is a fact about the
+instrument's optics, not the plate, so carrying a plate to a run whose optics map the dye
+elsewhere must let that run decide rather than let a stale claim in a file override live
+hardware. That demotion is what makes the suffix safe to write at all, and what it buys is the
+standalone case: a plate downloaded from a run and reopened with no archive in hand keeps the
+channels it was written with instead of degrading to unknown. There is deliberately
+no positional fallback at any tier, because column order carries no meaning and inferring a
+channel from it produces a wrong answer that looks plausible rather than a missing one.
+`WellFluor.channel` and `PlateFluor.channel` are therefore still optional all the way through,
+and consumers must render the gap as unknown rather than substituting a default (the web app
+shows `Ch?`, a neutral swatch and a footnote; see `apps/web/ARCHITECTURE.md`). Go through
+`zpcr.plates()` where an archive is in hand, so the lookup is wired up; a hand-authored plate CSV
+that names dyes alone, read on its own, still has unknown channels.
 
 For a plate CSV that *isn't* in the archive, `Zpcr.channelForDye(dye)` publishes the same cached
 lookup, so a caller pairing a run with an outside plate can hand it to `parsePlateCsv` as

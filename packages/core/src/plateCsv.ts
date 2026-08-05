@@ -11,7 +11,9 @@
  * order a plate is actually filled down. Row order is presentation only — {@link parsePlateCsv}
  * places each row by its own well label, so a file in any order reads back the same. The fixed columns
  * (`Well`…`Quantity`) are followed by **one column per fluorophore**, labelled with the dye
- * name (see {@link FLUOR_COLUMN_RE}); each cell holds only that well's target for that fluor
+ * name and its channel when known (`FAM Ch1`; see {@link FLUOR_COLUMN_RE}, and note the written
+ * channel is a fallback hint that a run's own calibration outranks); each cell holds only that
+ * well's target for that fluor
  * (empty = the fluor isn't in the well, {@link PRESENT_NO_TARGET} = in the well but with no
  * target). Those columns *are* the plate's fluor list (`PlateDefinition.fluors`) — there's no
  * separate header line to keep in sync. A well with no fluor cell filled in is unloaded
@@ -153,11 +155,18 @@ const OPTIONAL_COLUMNS = ["Replicate", "Quantity"];
 const FIXED_COLUMNS = [...REQUIRED_COLUMNS, ...OPTIONAL_COLUMNS];
 
 /**
- * A fluor column is labelled with the dye name alone (`FAM`, `Tex 615`). The channel isn't
- * written, because a dye is only ever read on one channel and the run's own `.Dcal`
- * calibration says which (`Dcal.primaryChannel`) — see {@link ParsePlateCsvOptions.channelForFluor},
- * which `zpcr.plates()` wires up. An explicit ` Ch<n>` suffix (1-based, the "FAM Ch1" form the
- * app displays) is still honoured if a file carries one, and wins over the lookup.
+ * A fluor column is labelled with the dye name and, when the channel is known, a ` Ch<n>` suffix
+ * (1-based — the "FAM Ch1" form the app displays): `FAM Ch1`, `Tex 615 Ch3`. A bare `FAM` is
+ * equally valid and is what a plate with unknown channels writes.
+ *
+ * **The suffix is a hint, not an authority.** A channel is a fact about the *instrument's*
+ * optics, not about the plate: a dye is read on exactly one channel and the run's own `.Dcal`
+ * calibration says which ({@link ParsePlateCsvOptions.channelForFluor}, which `zpcr.plates()`
+ * wires up). So the lookup wins wherever there is one, and the suffix only fills in when there
+ * isn't — a plate read on its own, outside any archive. That ordering is what keeps a plate
+ * portable: carry one from the run it was authored against to a run whose optics map the dye
+ * elsewhere, and the new run's calibration decides, rather than the file's stale claim quietly
+ * overriding live hardware.
  *
  * With neither, the channel is **unknown** (`PlateFluor.channel` undefined) — not the column's
  * position. Column order carries no meaning here, so deriving a channel from it invents a
@@ -165,6 +174,11 @@ const FIXED_COLUMNS = [...REQUIRED_COLUMNS, ...OPTIONAL_COLUMNS];
  * color and grouping rather than being flagged.
  */
 const FLUOR_COLUMN_RE = /^(.*?)\s+Ch(\d+)$/;
+
+/** A fluor's column heading: dye name, plus the 1-based channel when it's known. */
+function fluorColumnLabel(f: PlateFluor): string {
+  return f.channel === undefined ? f.fluor : `${f.fluor} Ch${f.channel + 1}`;
+}
 
 /** A well carrying nothing at all — the row is left out of the table, since a well missing from
  * the table parses back to exactly this (the `# rows`/`# columns` header keeps the extent). On
@@ -217,7 +231,7 @@ export function plateToCsv(plate: PlateDefinition): string {
     ...REQUIRED_COLUMNS,
     ...(hasReplicate ? ["Replicate"] : []),
     ...(hasQuantity ? ["Quantity"] : []),
-    ...fluorColumns.map((f) => f.fluor),
+    ...fluorColumns.map(fluorColumnLabel),
   ]);
   for (const w of written) {
     const byFluor = new Map(w.fluors.map((f) => [f.fluor, f]));
@@ -263,9 +277,11 @@ export interface ParsePlateCsvOptions {
   sourceName?: string;
   /** Which optical channel a dye is read on, normally from the run's `.Dcal` calibration
    * (`Dcal.primaryChannel` — `zpcr.plates()` supplies this; build one with `dyeChannelLookup`).
-   * Called for every fluor column that doesn't spell its channel out. Returning `undefined` —
-   * an unknown dye, or no lookup passed at all — leaves that fluor's channel unset, which
-   * consumers surface as unknown; nothing is substituted for it. */
+   * Called for every fluor column, and **outranks a ` Ch<n>` suffix the column may carry**: live
+   * optics beat whatever the file was written against (see {@link FLUOR_COLUMN_RE}). Returning
+   * `undefined` — an unknown dye, or no lookup passed at all — falls back to that suffix, and
+   * failing that leaves the fluor's channel unset, which consumers surface as unknown; nothing
+   * is substituted for it. */
   channelForFluor?: (fluor: string) => number | undefined;
 }
 
@@ -319,8 +335,9 @@ export function parsePlateCsv(text: string, options: ParsePlateCsvOptions = {}):
       const m = FLUOR_COLUMN_RE.exec(name);
       const fluor = m ? m[1]!.trim() : name;
       if (!fluor) throw new Error(`Plate CSV: malformed fluor column "${name}"`);
-      // Undefined when neither the label nor the calibration says — never the column position.
-      const channel = m ? Number(m[2]) - 1 : channelForFluor?.(fluor);
+      // Calibration first, the label's suffix only as a fallback: see {@link FLUOR_COLUMN_RE}.
+      // Undefined when neither says — never the column position.
+      const channel = channelForFluor?.(fluor) ?? (m ? Number(m[2]) - 1 : undefined);
       return { fluor, channel, column };
     });
   // Channel order, not column order: `plateToCsv` writes the columns sorted, but a hand-authored
