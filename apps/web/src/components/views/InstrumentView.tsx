@@ -41,7 +41,7 @@ import type { RunWatchState } from "../../state/useRunWatch";
  * with a cycler and no files starts), it just has nothing to start.
  */
 export interface InstrumentExperiment {
-  fileId: string;
+  fileName: string;
   /** What it is called — resolved on Overview and stored in the file, never typed here. */
   name: string;
   /** True when that name was actually given rather than derived from the file name; an experiment
@@ -65,7 +65,7 @@ export function InstrumentView({
   /** Jump to a finished run's curves — the "Run complete" banner's "Open run" button. Distinct
    * from `onOpenRun`: that one adds a *new* file (an offloaded archive dropped in from outside);
    * this one just switches to a file the watcher already put in the store. */
-  onOpenFinishedRun: (fileId: string) => void;
+  onOpenFinishedRun: (fileName: string) => void;
   /** The experiment the active file is, or null when it isn't one; see the type. */
   experiment: InstrumentExperiment | null;
   /** The connection, owned by `App` so it outlives this view — see its comment there. */
@@ -124,8 +124,8 @@ export function InstrumentView({
    * `openFinishedRun`), and dismiss the banner — it's been acted on, and staying on this view
    * afterwards would show it beside a run that's no longer the newest thing to look at. */
   const openFinished = useCallback(
-    (fileId: string) => {
-      onOpenFinishedRun(fileId);
+    (fileName: string) => {
+      onOpenFinishedRun(fileName);
       runWatch.clearFinished();
     },
     [onOpenFinishedRun, runWatch],

@@ -30,9 +30,9 @@ interface Props {
   runs: Map<string, RunResult>;
   plateFiles: Map<string, PlateFileResult>;
   /** The **primary selection** — one chip, in cyan, that a click switches and can never clear.
-   * Usually `ZpcrStore.activeId`, the file every view is pointed at; in the Instrument view,
+   * Usually `ZpcrStore.activeName`, the file every view is pointed at; in the Instrument view,
    * which shows no file, it is the run being staged (`App.tsx`). */
-  activeId: string | null;
+  activeName: string | null;
   onSelect: (id: string) => void;
   /**
    * A chip's ✕: **release** this file (`FileSettings.loaded = false`) — its bytes leave memory and
@@ -312,7 +312,7 @@ function FileChip({
             : undefined
         }
         onClick={() => {
-          if (!clickLocked) onSelect(f.id);
+          if (!clickLocked) onSelect(f.name);
         }}
         onMouseEnter={() => {
           const r = mainRef.current?.getBoundingClientRect();
@@ -368,7 +368,7 @@ function FileChip({
           />,
           document.body,
         )}
-      <UnloadButton name={identity.name} onUnload={() => onUnload(f.id)} />
+      <UnloadButton name={identity.name} onUnload={() => onUnload(f.name)} />
     </div>
   );
 }
@@ -377,7 +377,7 @@ export function FileBar({
   files,
   runs,
   plateFiles,
-  activeId,
+  activeName,
   onSelect,
   onUnload,
   modifiedIds,
@@ -396,10 +396,10 @@ export function FileBar({
     >
       {files.map((f) => (
         <FileChip
-          key={f.id}
+          key={f.name}
           f={f}
           identity={
-            experiments.get(f.id) ?? {
+            experiments.get(f.name) ?? {
               name: fallbackLabel(f),
               named: false,
               date: null,
@@ -407,14 +407,14 @@ export function FileBar({
               fileName: f.name,
             }
           }
-          run={runs.get(f.id)}
-          plateFile={plateFiles.get(f.id)}
+          run={runs.get(f.name)}
+          plateFile={plateFiles.get(f.name)}
           password={password}
-          isActive={f.id === activeId}
-          isModified={modifiedIds.has(f.id)}
-          isRunning={inProgressIds.has(f.id)}
-          isIncomplete={incompleteIds.has(f.id)}
-          isPending={pendingIds.has(f.id)}
+          isActive={f.name === activeName}
+          isModified={modifiedIds.has(f.name)}
+          isRunning={inProgressIds.has(f.name)}
+          isIncomplete={incompleteIds.has(f.name)}
+          isPending={pendingIds.has(f.name)}
           activeLocked={!!activeLocked}
           onSelect={onSelect}
           onUnload={onUnload}

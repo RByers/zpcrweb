@@ -43,7 +43,7 @@ import { TrashIcon } from "./TrashIcon";
 interface Props {
   /** The whole catalog — metadata and cached summaries, no bytes. */
   files: FileEntry[];
-  activeId: string | null;
+  activeName: string | null;
   /** Which files are loaded (`ZpcrStore.loadedIds`) — the checkbox column. */
   loadedIds: Set<string>;
   modifiedIds: Set<string>;
@@ -416,7 +416,7 @@ function FilesRow({
 
 export function FilesTableView({
   files,
-  activeId,
+  activeName,
   loadedIds,
   modifiedIds,
   onSelectFile,
@@ -433,7 +433,7 @@ export function FilesTableView({
     return files.map((f) => {
       const s = f.summary;
       return {
-        id: f.id,
+        id: f.name,
         kind: f.kind,
         fileName: f.name,
         experimentName: s?.name || f.name,
@@ -447,8 +447,8 @@ export function FilesTableView({
         samples: s?.samples ?? [],
         summarized: !!s,
         lastModified: f.lastModified,
-        modified: modifiedIds.has(f.id),
-        loaded: loadedIds.has(f.id),
+        modified: modifiedIds.has(f.name),
+        loaded: loadedIds.has(f.name),
       };
     });
   }, [files, modifiedIds, loadedIds]);
@@ -505,7 +505,7 @@ export function FilesTableView({
               <FilesRow
                 key={r.id}
                 r={r}
-                isActive={r.id === activeId}
+                isActive={r.id === activeName}
                 onSelectFile={onSelectFile}
                 onSetLoaded={onSetLoaded}
                 onDelete={onDelete}

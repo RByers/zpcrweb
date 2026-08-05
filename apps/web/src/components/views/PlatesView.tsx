@@ -20,14 +20,14 @@ import type { AddFilesOptions } from "../../state/useZpcrStore";
  */
 export function PlatesView({
   zpcr,
-  fileId,
+  fileName,
   attachPlate,
   plateSources,
   addFiles,
 }: {
   zpcr: Zpcr;
-  fileId: string;
-  attachPlate: (fileId: string, file: File) => Promise<void>;
+  fileName: string;
+  attachPlate: (fileName: string, file: File) => Promise<void>;
   /** Every plate the browser is holding that isn't this run's own — standalone files and plates
    * inside other loaded runs alike (`lib/attachSources.ts`), so "replace plate" can offer any of
    * them instead of only a fresh upload. */
@@ -48,7 +48,7 @@ export function PlatesView({
   const attachControl = (
     <AttachPlateMenu
       sources={plateSources}
-      onAttach={(file) => void attachPlate(fileId, file)}
+      onAttach={(file) => void attachPlate(fileName, file)}
       compactLabel={entries.length === 0 ? "attach plate" : "replace plate"}
       // Icon-only where it sits in the toolbar beside download and clone, so all three read as one
       // row of controls. The empty state below has no such row — the control stands alone under a

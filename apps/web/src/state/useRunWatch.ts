@@ -117,7 +117,7 @@ export interface RunWatchState {
   /** What the watcher last did, for the rail to show. */
   note: string | null;
   /** The id of the file the watcher most recently put in the store, if it is still there. */
-  fileId: string | null;
+  fileName: string | null;
   /**
    * Take over a file this watcher didn't produce: the seed `.zpcr` written at the click on Start
    * run (`core/runSeed.ts`), which is the first version of the very run about to be followed.
@@ -127,7 +127,7 @@ export interface RunWatchState {
    * them on the seed while the real snapshots piled up beside it. Adopting it says "the run I am
    * about to follow is already on screen as this".
    */
-  adopt: (fileId: string) => void;
+  adopt: (fileName: string) => void;
   /**
    * Set once a run this session watched running has finished and its final `.zpcr` has been
    * assembled: what it was called, how long it ran, and the id of that final file — everything
@@ -135,7 +135,7 @@ export interface RunWatchState {
    * the §7.6 acknowledgement above is still in flight (the banner is for a run that's actually
    * done, not merely idle-and-held).
    */
-  finished: { name: string; totalS: number; fileId: string } | null;
+  finished: { name: string; totalS: number; fileName: string } | null;
   /** Dismiss the banner — the Instrument view's "New run" button. */
   clearFinished: () => void;
 }
@@ -167,8 +167,8 @@ export function useRunWatch(
 ): RunWatchState {
   const [watching, setWatching] = useState(true);
   const [note, setNote] = useState<string | null>(null);
-  const [fileId, setFileId] = useState<string | null>(null);
-  const [finished, setFinished] = useState<{ name: string; totalS: number; fileId: string } | null>(
+  const [fileName, setFileName] = useState<string | null>(null);
+  const [finished, setFinished] = useState<{ name: string; totalS: number; fileName: string } | null>(
     null,
   );
 
@@ -187,8 +187,8 @@ export function useRunWatch(
   // Likewise read through a ref: a keystroke in the name field must not restart the poll.
   const namingRef = useRef(naming);
   namingRef.current = naming;
-  const fileIdRef = useRef<string | null>(null);
-  fileIdRef.current = fileId;
+  const fileNameRef = useRef<string | null>(null);
+  fileNameRef.current = fileName;
 
   const { connection, status, refreshRunFolder, fetchDirectoryFiles, acknowledgeFinishedRun, trafficLogForRun } =
     instrument;
@@ -236,8 +236,8 @@ export function useRunWatch(
         // progress open and appends to it (see its `addRunArchive` and `state/fileContent.ts`), so
         // a cycle costs the one plate read that arrived and no ZIP work at either end.
         const run = zpcrFromRunFiles(files, namingRef.current);
-        const id = await onRunRef.current(run, fileIdRef.current, fresh);
-        setFileId(id);
+        const id = await onRunRef.current(run, fileNameRef.current, fresh);
+        setFileName(id);
         const reads = names.filter((n) => /\.Plateread$/i.test(n)).length;
         setNote(`Updated at ${new Date().toLocaleTimeString()} — ${reads} plate reads`);
         return id;
@@ -360,7 +360,7 @@ export function useRunWatch(
       // signature to differ would just add a round trip. This is also the run's last `.zpcr`, so
       // the USB traffic log is attached here, if "save log" asks for one (see `finalAssembly`).
       const id = await check(true, true);
-      if (id) setFinished({ name: finishedName, totalS: totalS ?? 0, fileId: id });
+      if (id) setFinished({ name: finishedName, totalS: totalS ?? 0, fileName: id });
     })();
   }, [connection, watching, status, acknowledgeFinishedRun, check]);
 
@@ -390,8 +390,8 @@ export function useRunWatch(
 
   // The seed is this run's first file, so the watcher treats it exactly as one of its own
   // snapshots from here on (see `RunWatchState.adopt`).
-  const adopt = useCallback((id: string) => setFileId(id), []);
+  const adopt = useCallback((id: string) => setFileName(id), []);
   const clearFinished = useCallback(() => setFinished(null), []);
 
-  return { watching, setWatching, note, fileId, adopt, finished, clearFinished };
+  return { watching, setWatching, note, fileName, adopt, finished, clearFinished };
 }

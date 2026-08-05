@@ -194,7 +194,7 @@ export function App() {
         previousId: string | null,
         freshStart: boolean,
       ) => {
-        const wasWatchingIt = store.activeId !== null && store.activeId === previousId;
+        const wasWatchingIt = store.activeName !== null && store.activeName === previousId;
         return store.addRunArchive(run.name, run.archive, {
           activate: wasWatchingIt || freshStart,
           modified: true,
@@ -319,7 +319,7 @@ export function App() {
   const nameExperiment = useCallback(
     (id: string, name: string) => {
       store.updateSettings({ experimentName: name });
-      const file = store.files.find((f) => f.id === id);
+      const file = store.files.find((f) => f.name === id);
       const trimmed = name.trim();
       if (!file || !trimmed) return;
       // Only the bare-date placeholder `createExperiment` writes, never a name someone chose.
@@ -346,13 +346,13 @@ export function App() {
    * the name isn't needed to write the first step, and the view it lands on can ask for it in place.
    */
   const createProtocolFor = useCallback(
-    (fileId: string) => {
+    (fileName: string) => {
       // `setRunProtocolText` rather than `attachProtocol`: attaching derives the protocol's name from
       // the file it came from, and this one came from no file — it must arrive *unnamed*, which is
       // what the Protocol tab's headline then asks about.
-      store.setRunProtocolText(fileId, ProtocolBuilder.empty().toRunDefinition());
+      store.setRunProtocolText(fileName, ProtocolBuilder.empty().toRunDefinition());
       store.setView("protocol");
-      setNameProtocolFor(fileId);
+      setNameProtocolFor(fileName);
     },
     [store],
   );
@@ -369,7 +369,7 @@ export function App() {
    */
   const startExperiment = useCallback(
     async (plan: RunPlan) => {
-      const id = store.activeId;
+      const id = store.activeName;
       if (!id) return;
       const started = await store.beginExperiment(id);
       if (!started) return;
@@ -377,7 +377,7 @@ export function App() {
         experimentName: plan.name,
         fileName: started.name.replace(/\.zpcr$/i, ""),
       });
-      runWatch.adopt(started.id);
+      runWatch.adopt(started.name);
     },
     [store, runWatch],
   );
@@ -395,7 +395,7 @@ export function App() {
   const cloneActiveFile = useCallback(async () => {
     const file = store.active;
     if (!file) return;
-    const bytes = store.exportBytes(file.id) ?? fileBytes(file);
+    const bytes = store.exportBytes(file.name) ?? fileBytes(file);
     const names = new Set(store.files.map((f) => f.name));
     const name = cloneFileName(file.name, (candidate) => names.has(candidate));
     const id = await store.addFiles([new File([bytes.slice()], name, { lastModified: Date.now() })], {
@@ -417,8 +417,8 @@ export function App() {
   const downloadActiveFile = useCallback(() => {
     const file = store.active;
     if (!file) return;
-    downloadBytes(file.name, store.exportBytes(file.id) ?? fileBytes(file));
-    store.markDownloaded(file.id);
+    downloadBytes(file.name, store.exportBytes(file.name) ?? fileBytes(file));
+    store.markDownloaded(file.name);
   }, [store]);
 
   /**
@@ -430,7 +430,7 @@ export function App() {
   const runActive = instrument.connection === "connected" && !!instrument.status?.running;
   /**
    * What a file chip does: the one thing it always meant — *show me this file* — which is the app's
-   * primary selection, `activeId`, drawn in the bar's usual cyan. Every kind can hold it: a run, a
+   * primary selection, `activeName`, drawn in the bar's usual cyan. Every kind can hold it: a run, a
    * standalone plate, and (since it has an Overview of its own) a `.prcl.txt`.
    *
    * It used to mean something else on the Instrument view, where the chips split into a primary run
@@ -453,22 +453,22 @@ export function App() {
    */
   const selectFile = (id: string) => {
     if (store.view === "instrument" && runActive) return;
-    if (!store.files.some((f) => f.id === id)) return;
+    if (!store.files.some((f) => f.name === id)) return;
     store.setActive(id);
     if (store.view === "about") store.setView("overview");
   };
   /**
    * Arriving at the Instrument view while a run is live snaps the selection to it, even if the
    * user had been looking at something else — that's the one file this view can usefully show
-   * while a run owns the selection (see `selectFile` above). `runWatch.fileId` rather than
-   * `store.activeId` because the two can have drifted apart: a snapshot pulled while the user was
-   * elsewhere doesn't activate itself (`AddFilesOptions.activate`), so the store's `activeId` may
-   * still be a stale one from before they left. Keyed off `store.view` alone, not `runWatch.fileId`
+   * while a run owns the selection (see `selectFile` above). `runWatch.fileName` rather than
+   * `store.activeName` because the two can have drifted apart: a snapshot pulled while the user was
+   * elsewhere doesn't activate itself (`AddFilesOptions.activate`), so the store's `activeName` may
+   * still be a stale one from before they left. Keyed off `store.view` alone, not `runWatch.fileName`
    * too, so a later snapshot of the *same* run doesn't re-snap someone who has moved on.
    */
   useEffect(() => {
-    if (store.view !== "instrument" || !runActive || !runWatch.fileId) return;
-    if (store.activeId !== runWatch.fileId) store.setActive(runWatch.fileId);
+    if (store.view !== "instrument" || !runActive || !runWatch.fileName) return;
+    if (store.activeName !== runWatch.fileName) store.setActive(runWatch.fileName);
   }, [store.view]);
 
   /**
@@ -479,7 +479,7 @@ export function App() {
    * keystroke elsewhere in the app.
    */
   const activeViews = useMemo(
-    () => (active ? enabledViewsFor(active.kind, store.runs.get(active.id)?.zpcr) : []),
+    () => (active ? enabledViewsFor(active.kind, store.runs.get(active.name)?.zpcr) : []),
     [active, store.runs],
   );
 
@@ -490,11 +490,11 @@ export function App() {
    * same things, so the list is built once from the store the menus would otherwise each re-derive.
    */
   const plateAttachSources = useMemo(
-    () => plateSources(store.loaded, store.runs, active?.id ?? null, pltdPassword || undefined),
+    () => plateSources(store.loaded, store.runs, active?.name ?? null, pltdPassword || undefined),
     [store.loaded, store.runs, active, pltdPassword],
   );
   const protocolAttachSources = useMemo(
-    () => protocolSources(store.loaded, store.runs, active?.id ?? null),
+    () => protocolSources(store.loaded, store.runs, active?.name ?? null),
     [store.loaded, store.runs, active],
   );
   /**
@@ -508,7 +508,7 @@ export function App() {
    * Overview is where such a click lands, and the strip fills in as the bytes arrive.
    */
   const selectFromTable = (id: string, view?: ViewId) => {
-    const f = store.loaded.find((x) => x.id === id);
+    const f = store.loaded.find((x) => x.name === id);
     store.setActive(id);
     store.setView(
       view ?? (f ? enabledViewsFor(f.kind, store.runs.get(id)?.zpcr)[0] ?? "overview" : "overview"),
@@ -542,9 +542,9 @@ export function App() {
   const instrumentExperiment = useMemo(() => {
     if (!active || !activeRun?.zpcr) return null;
     const zpcr = activeRun.zpcr;
-    const identity = store.experiments.get(active.id);
+    const identity = store.experiments.get(active.name);
     return {
-      fileId: active.id,
+      fileName: active.name,
       name: identity?.name ?? active.name,
       named: identity?.named ?? false,
       zpcr,
@@ -631,7 +631,7 @@ export function App() {
         files={store.loaded}
         runs={store.runs}
         plateFiles={store.plateFiles}
-        activeId={store.activeId}
+        activeName={store.activeName}
         modifiedIds={store.modifiedIds}
         inProgressIds={store.inProgressIds}
         incompleteIds={store.incompleteIds}
@@ -646,7 +646,7 @@ export function App() {
         {view === "files" ? (
           <FilesTableView
             files={store.files}
-            activeId={store.activeId}
+            activeName={store.activeName}
             loadedIds={store.loadedIds}
             modifiedIds={store.modifiedIds}
             onSelectFile={selectFromTable}
@@ -668,7 +668,7 @@ export function App() {
           // Files, file bar, drop zone, About), because the way out is to pick a file, and this
           // says where from.
           <div className="app__noselection mono">
-            {store.activeId && store.loadingIds.has(store.activeId) ? (
+            {store.activeName && store.loadingIds.has(store.activeName) ? (
               "opening…"
             ) : (
               <>
@@ -686,33 +686,33 @@ export function App() {
               <StandalonePlateOverviewView
                 file={active}
                 result={store.activePlateFile}
-                onRenameFile={(name) => void store.renameFile(active.id, name)}
+                onRenameFile={(name) => void store.renameFile(active.name, name)}
                 onDownload={downloadActiveFile}
                 onClone={() => void cloneActiveFile()}
-                autoEditName={editNameFor === active.id}
+                autoEditName={editNameFor === active.name}
                 onAutoEditHandled={clearEditName}
               />
             )}
             {view === "plates" && store.activePlateFile && (
               <StandalonePlateView file={active} result={store.activePlateFile} />
             )}
-            {view === "raw" && <StandaloneRawView key={active.id} file={active} />}
+            {view === "raw" && <StandaloneRawView key={active.name} file={active} />}
           </>
         ) : isStandaloneProtocol ? (
           <>
             {view === "overview" && (
               <StandaloneProtocolOverview
                 file={active}
-                onRenameFile={(name) => void store.renameFile(active.id, name)}
+                onRenameFile={(name) => void store.renameFile(active.name, name)}
                 onDownload={downloadActiveFile}
                 onClone={() => void cloneActiveFile()}
-                autoEditName={editNameFor === active.id}
+                autoEditName={editNameFor === active.name}
                 onAutoEditHandled={clearEditName}
               />
             )}
             {view === "protocol" && store.activeProtocolFile !== null && (
               <ProtocolView
-                key={active.id}
+                key={active.name}
                 protocolText={store.activeProtocolFile}
                 file={active}
                 protocolSources={protocolAttachSources}
@@ -720,18 +720,18 @@ export function App() {
                 // A protocol file is always a draft: it is a document you author, with no run behind
                 // it that editing it could contradict.
                 editable
-                onChangeProtocol={(text) => store.setProtocolText(active.id, text)}
+                onChangeProtocol={(text) => store.setProtocolText(active.name, text)}
                 // A standalone protocol has no `ProtocolName.txt` — its name *is* its file name, so
                 // the headline edits that, extension preserved.
                 name={splitFileName(active.name).base}
                 onRenameProtocol={(name) =>
-                  void store.renameFile(active.id, `${name}${splitFileName(active.name).ext}`)
+                  void store.renameFile(active.name, `${name}${splitFileName(active.name).ext}`)
                 }
-                autoFocusName={nameProtocolFor === active.id}
+                autoFocusName={nameProtocolFor === active.name}
                 onAutoFocusHandled={clearNameProtocol}
               />
             )}
-            {view === "raw" && <StandaloneRawView key={active.id} file={active} />}
+            {view === "raw" && <StandaloneRawView key={active.name} file={active} />}
           </>
         ) : !zpcr ? (
           <div className="app__gate">
@@ -751,7 +751,7 @@ export function App() {
                 run={activeRun!}
                 settings={settings}
                 identity={
-                  store.experiments.get(active.id) ?? {
+                  store.experiments.get(active.name) ?? {
                     name: active.name,
                     named: false,
                     date: null,
@@ -761,22 +761,22 @@ export function App() {
                 }
                 // Naming an experiment also names its file while it still carries the placeholder
                 // one it was created under — see `nameExperiment`.
-                onRename={(name) => nameExperiment(active.id, name)}
+                onRename={(name) => nameExperiment(active.name, name)}
                 // Only a `.zpcr` has an archive to write `zpcrweb.json` into; see
                 // `analysisPersist.ts`'s `resolve`.
                 namePersists={active.kind === "zpcr"}
                 pending={isPendingExperiment(active.kind, zpcr)}
                 plateSources={plateAttachSources}
                 protocolSources={protocolAttachSources}
-                onAttachPlate={(file) => void store.attachPlate(active.id, file)}
-                onAttachProtocol={(file) => void store.attachProtocol(active.id, file)}
-                onCreateProtocol={() => createProtocolFor(active.id)}
+                onAttachPlate={(file) => void store.attachPlate(active.name, file)}
+                onAttachProtocol={(file) => void store.attachProtocol(active.name, file)}
+                onCreateProtocol={() => createProtocolFor(active.name)}
                 onCloneExperiment={cloneExperiment}
-                onRenameFile={(name) => void store.renameFile(active.id, name)}
+                onRenameFile={(name) => void store.renameFile(active.name, name)}
                 onDownload={downloadActiveFile}
-                autoEditName={editNameFor === active.id}
+                autoEditName={editNameFor === active.name}
                 onAutoEditHandled={clearEditName}
-                autoFocusName={nameExperimentFor === active.id}
+                autoFocusName={nameExperimentFor === active.name}
                 onAutoFocusHandled={clearNameExperiment}
               />
             )}
@@ -791,13 +791,13 @@ export function App() {
                 protocolSources={protocolAttachSources}
                 addFiles={store.addFiles}
                 editable={isPendingExperiment(active.kind, zpcr)}
-                onChangeProtocol={(text) => store.setRunProtocolText(active.id, text)}
+                onChangeProtocol={(text) => store.setRunProtocolText(active.name, text)}
                 // The same `attachProtocol` the Overview tab's "replace protocol" calls — the view
                 // itself only offers it while the experiment is still pending.
-                onAttachProtocol={(file) => void store.attachProtocol(active.id, file)}
+                onAttachProtocol={(file) => void store.attachProtocol(active.name, file)}
                 name={zpcr.protocol()?.name ?? ""}
-                onRenameProtocol={(name) => void store.setRunProtocolName(active.id, name)}
-                autoFocusName={nameProtocolFor === active.id}
+                onRenameProtocol={(name) => void store.setRunProtocolName(active.name, name)}
+                autoFocusName={nameProtocolFor === active.name}
                 onAutoFocusHandled={clearNameProtocol}
               />
             )}
@@ -824,9 +824,9 @@ export function App() {
             )}
             {view === "plates" && (
               <PlatesView
-                key={active.id}
+                key={active.name}
                 zpcr={zpcr}
-                fileId={active.id}
+                fileName={active.name}
                 attachPlate={store.attachPlate}
                 plateSources={plateAttachSources}
                 addFiles={store.addFiles}
@@ -834,19 +834,19 @@ export function App() {
             )}
             {view === "raw" && active.kind === "pcrd" && (
               <PcrdRawView
-                key={active.id}
+                key={active.name}
                 zpcr={zpcr}
                 documentXml={activeRun?.documentXml ?? ""}
                 fileName={active.name}
               />
             )}
             {view === "raw" && active.kind === "zpcr" && (
-              <RawFilesView key={active.id} zpcr={zpcr} settings={settings} />
+              <RawFilesView key={active.name} zpcr={zpcr} settings={settings} />
             )}
             {/* A Biomeme run is a single JSON document rather than an archive, which is exactly
                 the shape the standalone viewer handles. */}
             {view === "raw" && active.kind === "biomeme" && (
-              <StandaloneRawView key={active.id} file={active} />
+              <StandaloneRawView key={active.name} file={active} />
             )}
             {/* The instrument, driven by this experiment — a lens on the selected file like every
                 other tab, which is why it lives in this block rather than in a branch of its own

@@ -42,7 +42,7 @@ function RunComplete({
   onOpen,
   onNew,
 }: {
-  finished: { name: string; totalS: number; fileId: string };
+  finished: { name: string; totalS: number; fileName: string };
   onOpen: () => void;
   onNew: () => void;
 }) {
@@ -129,9 +129,9 @@ export function InstrumentRun({
    * say something in that window, since the run is neither un-started nor yet running. */
   pending: boolean;
   /** A run this session watched finish, or null (`state/useRunWatch.ts`). */
-  finished: { name: string; totalS: number; fileId: string } | null;
+  finished: { name: string; totalS: number; fileName: string } | null;
   /** "Open run": jump to that run's curves. */
-  onOpenFinishedRun: (fileId: string) => void;
+  onOpenFinishedRun: (fileName: string) => void;
   /** Dismiss the "Run complete" banner. */
   onNewRun: () => void;
   /** Clone this run into a fresh pending experiment — offered when it already has results. */
@@ -149,7 +149,7 @@ export function InstrumentRun({
     {finished && (
       <RunComplete
         finished={finished}
-        onOpen={() => onOpenFinishedRun(finished.fileId)}
+        onOpen={() => onOpenFinishedRun(finished.fileName)}
         onNew={onNewRun}
       />
     )}

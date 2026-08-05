@@ -79,20 +79,20 @@ export function plateSources(
 ): AttachSource[] {
   const sources: AttachSource[] = [];
   for (const f of files) {
-    if (f.id === excludeId) continue;
+    if (f.name === excludeId) continue;
     if (f.kind === "pltd" || f.kind === "csv") {
       sources.push({
-        key: f.id,
+        key: f.name,
         label: f.name,
         file: () => new File([fileBytes(f).slice()], f.name),
       });
       continue;
     }
-    const zpcr = runs.get(f.id)?.zpcr;
+    const zpcr = runs.get(f.name)?.zpcr;
     if (!zpcr) continue;
     for (const entry of zpcr.plates(password)) {
       const source = plateFromRun(zpcr, entry.name, entry.pltd.plate);
-      if (source) sources.push({ key: `${f.id}:${entry.name}`, from: f.name, ...source });
+      if (source) sources.push({ key: `${f.name}:${entry.name}`, from: f.name, ...source });
     }
   }
   return sources;
@@ -113,21 +113,21 @@ export function protocolSources(
 ): AttachSource[] {
   const sources: AttachSource[] = [];
   for (const f of files) {
-    if (f.id === excludeId) continue;
+    if (f.name === excludeId) continue;
     if (f.kind === "prcl") {
       sources.push({
-        key: f.id,
+        key: f.name,
         label: f.name,
         file: () => new File([fileBytes(f).slice()], f.name),
       });
       continue;
     }
-    const zpcr = runs.get(f.id)?.zpcr;
+    const zpcr = runs.get(f.name)?.zpcr;
     const text = zpcr?.protocolText;
     if (!zpcr || !text) continue;
     const name = zpcr.protocol()?.name?.trim() || "";
     sources.push({
-      key: `${f.id}:protocol`,
+      key: `${f.name}:protocol`,
       label: name || "Thermal protocol",
       from: f.name,
       file: () =>

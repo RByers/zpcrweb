@@ -48,7 +48,7 @@ import {
   type ZpcrArchive,
   type Zpcr,
 } from "@zpcrweb/core";
-import type { StoredFile } from "./db";
+import type { StoredContent } from "./db";
 
 /**
  * A loaded file's content, in one of the two forms above.
@@ -125,7 +125,11 @@ export function parseContent(content: FileContent): Zpcr {
 }
 
 /**
- * What the app reports as the file's size, and what its id is hashed from (`db.ts`'s `fileId`).
+ * What the app reports as the file's size.
+ *
+ * Reported only. A file is identified by its **name** (`db.ts`'s `FileIdentity`), so this is free
+ * to move as the content does — which it does constantly for a run being written to, and which is
+ * exactly why hashing it into a key was a mistake.
  *
  * For a zipped file this is the file's length, as it always was. For an exploded one it is what
  * its entries add up to — the run's actual content, and what it costs in IndexedDB — because the
@@ -140,9 +144,9 @@ export function contentSize(content: FileContent): number {
   return total;
 }
 
-/** Split a content into the two fields an IndexedDB record carries — see `StoredFile`. Copies out
+/** Split a content into the two fields an IndexedDB record carries — see `StoredContent`. Copies out
  * of the app's own buffers (`slice`), like every other write to the store. */
-export function toStoredContent(content: FileContent): Pick<StoredFile, "bytes" | "files"> {
+export function toStoredContent(content: FileContent): Omit<StoredContent, "name"> {
   if (!content.exploded) return { bytes: content.bytes.slice().buffer };
   const files: Record<string, ArrayBuffer> = {};
   for (const [name, bytes] of Object.entries(content.files)) files[name] = bytes.slice().buffer;
@@ -150,8 +154,8 @@ export function toStoredContent(content: FileContent): Pick<StoredFile, "bytes" 
 }
 
 /** Rebuild a content from a stored record — whichever of the two representations it was written
- * in (`StoredFile` sets exactly one). */
-export function fromStoredContent(stored: StoredFile): FileContent {
+ * in (`StoredContent` sets exactly one). */
+export function fromStoredContent(stored: StoredContent): FileContent {
   if (stored.files) {
     const files: ZpcrArchive = {};
     for (const [name, buffer] of Object.entries(stored.files)) files[name] = new Uint8Array(buffer);

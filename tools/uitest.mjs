@@ -190,10 +190,10 @@ async function makeSeed() {
 }
 
 /**
- * A same-name, *different-size* copy of the example — the only way to exercise the replace rule,
- * since `fileId()` hashes name+size and a byte-identical reload is simply the same id. Four
- * trailing zero bytes: a ZIP reader finds the end-of-central-directory by scanning backwards, so
- * the archive still parses.
+ * A same-name, *different-size* copy of the example. A file is keyed by its name alone, so the
+ * replace rule fires for a byte-identical reload too — this copy differs in size so the check can
+ * tell the replacement apart from the original by what the Files table reports. Four trailing zero
+ * bytes: a ZIP reader finds the end-of-central-directory by scanning backwards, so it still parses.
  */
 function makeDupe() {
   mkdirSync(dirname(DUPE), { recursive: true });
@@ -3298,26 +3298,20 @@ async function explodedStorageChecks(chrome, origin) {
   await emptyReload(cdp, origin);
 
   /**
-   * Every stored record, as the shape of its content rather than its content. The name comes from
-   * the `catalog` store and the shape from `files` — content and metadata are separate stores, so
-   * this joins them on the id they share (see `state/db.ts`).
+   * Every stored record, as the shape of its content rather than its content. A file's name is its
+   * key in both stores (see `state/db.ts`), so this needs no join.
    */
   const records = () =>
     cdp
       .eval(
         `new Promise((res) => { const q = indexedDB.open("zpcrweb");
            q.onsuccess = () => { const db = q.result;
-             const t = db.transaction(["files", "catalog"], "readonly");
-             const g = t.objectStore("files").getAll();
-             const c = t.objectStore("catalog").getAll();
-             t.oncomplete = () => {
-               const names = new Map(c.result.map((e) => [e.id, e.name]));
-               res(JSON.stringify(g.result.map((f) => ({
-                 name: names.get(f.id) ?? "",
-                 zipped: f.bytes ? f.bytes.byteLength : null,
-                 entries: f.files ? Object.keys(f.files).length : null,
-               }))));
-             }; }; })`,
+             const g = db.transaction("files", "readonly").objectStore("files").getAll();
+             g.onsuccess = () => res(JSON.stringify(g.result.map((f) => ({
+               name: f.name,
+               zipped: f.bytes ? f.bytes.byteLength : null,
+               entries: f.files ? Object.keys(f.files).length : null,
+             })))); }; })`,
         { awaitPromise: true },
       )
       .then(JSON.parse);

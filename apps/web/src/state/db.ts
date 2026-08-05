@@ -2,17 +2,17 @@
  * Thin IndexedDB wrapper — no dependencies. Two stores:
  *
  * - `files` — the bytes, and nothing else. A record holds either a file's raw bytes or, for a run
- *   still being written to, its archive entries individually — see {@link StoredFile} and
- *   `fileContent.ts`, which owns that choice. **Records are read one id at a time**
- *   ({@link getFileContent}), never all at once: the content of a file only enters memory when that
+ *   still being written to, its archive entries individually — see {@link StoredContent} and
+ *   `fileContent.ts`, which owns that choice. **Records are read one file at a time**
+ *   ({@link getContent}), never all at once: the content of a file only enters memory when that
  *   file is loaded (see `useZpcrStore`'s loaded set, and `apps/web/ARCHITECTURE.md`'s "Files,
  *   loaded files, and the one selection").
- * - `catalog` — one small record per file ({@link StoredEntry}): its identity, a cached
+ * - `catalog` — one small record per file ({@link StoredFile}): its identity, a cached
  *   {@link FileSummary} of what the *content* turned out to say, the two per-file flags that must
- *   outlive a reload ({@link StoredEntry.modified} and {@link StoredEntry.loaded}), and — for a
+ *   outlive a reload ({@link StoredFile.modified} and {@link StoredFile.loaded}), and — for a
  *   loaded file only — its {@link StoredView} display state.
  *
- * **Why content is a separate store.** {@link getAllEntries} reads the whole catalog in one
+ * **Why content is a separate store.** {@link getAllFiles} reads the whole catalog in one
  * `getAll()`, which is what lets the Files table list thousands of files — names, dates, protocol
  * and plate names, read counts — without decoding, or even reading, a single archive. IndexedDB has
  * no way to fetch part of a record, so a store holding both would structured-clone every archive in
@@ -32,19 +32,28 @@
 
 const DB_NAME = "zpcrweb";
 /** Bumping this **erases the database**. See {@link openDb}. */
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 const FILES = "files";
 const CATALOG = "catalog";
 
 type FileKindName = "zpcr" | "pcrd" | "biomeme" | "pltd" | "csv" | "prcl";
 
 /** A file's identity — everything about it that is knowable without reading its bytes, and the
- * half of a {@link StoredEntry} that {@link putFile} owns. */
+ * half of a {@link StoredFile} that {@link putFile} owns. */
 export interface FileIdentity {
-  id: string;
+  /**
+   * The file's name, and its key in both stores.
+   *
+   * The app has always required names to be unique — adding a file supersedes any file already
+   * holding its name, `lib/cloneName.ts` invents `(2)`/`(3)` precisely to avoid a collision, and
+   * `#file=` addresses a file by name — so a separate id was a second identity layered over one
+   * the app already maintained. Worse, the id it derived hashed the file's *size*, which moves
+   * whenever the content does: a run in progress took a new key on every plate read, and with it a
+   * deleted record, a freshly written one, and the loss of everything else keyed by the old id.
+   */
   name: string;
   /** The size the app reports for this file — its byte length when stored as
-   * {@link StoredFile.bytes}, and the total of its entries when stored as {@link StoredFile.files}.
+   * {@link StoredContent.bytes}, and the total of its entries when stored as {@link StoredContent.files}.
    * See `fileContent.ts`'s `contentSize`. */
   size: number;
   /** When the file was loaded into this browser, epoch ms. */
@@ -56,10 +65,10 @@ export interface FileIdentity {
   kind: FileKindName;
 }
 
-/** A stored file's content — exactly one of the two representations, keyed by the same id as its
- * {@link StoredEntry}. */
-export interface StoredFile {
-  id: string;
+/** A stored file's content — exactly one of the two representations, keyed by the same name as its
+ * {@link StoredFile}. */
+export interface StoredContent {
+  name: string;
   /**
    * The file's bytes. Exactly one of this and {@link files} is set.
    *
@@ -127,7 +136,7 @@ export interface FileSummary {
 /**
  * A file's **display** state: which channels/wells/fluorophores are shown, log vs. linear, which
  * protocol step, whether to draw baselines. A per-person view onto a run, and the one part of a
- * {@link StoredEntry} that is not kept for every file — see {@link StoredEntry.view}.
+ * {@link StoredFile} that is not kept for every file — see {@link StoredFile.view}.
  *
  * Sets are stored as arrays. Structured clone would round-trip a `Set` directly, but the persisted
  * shape is worth keeping plain: it is what a person reads in the browser's storage inspector, and
@@ -187,11 +196,11 @@ export interface StoredView {
 
 /**
  * One record per file, holding everything the app can say about it **without reading its bytes**.
- * This is what the whole catalog is listed from ({@link getAllEntries}) while the archives stay on
+ * This is what the whole catalog is listed from ({@link getAllFiles}) while the archives stay on
  * disk, so it must stay small: {@link view} is the largest thing on it, and it is kept only for the
  * handful of files that are loaded.
  */
-export interface StoredEntry extends FileIdentity {
+export interface StoredFile extends FileIdentity {
   /** See {@link FileSummary} — absent until the file has been loaded at least once. */
   summary?: FileSummary;
   /**
@@ -241,8 +250,8 @@ function openDb(): Promise<IDBDatabase> {
     req.onupgradeneeded = () => {
       const db = req.result;
       for (const name of Array.from(db.objectStoreNames)) db.deleteObjectStore(name);
-      db.createObjectStore(FILES, { keyPath: "id" });
-      db.createObjectStore(CATALOG, { keyPath: "id" });
+      db.createObjectStore(FILES, { keyPath: "name" });
+      db.createObjectStore(CATALOG, { keyPath: "name" });
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
@@ -271,33 +280,29 @@ function tx<T>(
   );
 }
 
-/** Stable id derived from name + size (cheap dedupe of the same file). */
-export function fileId(name: string, size: number): string {
-  return `${name}:${size}`;
-}
-
-/** In-flight catalog writes, per file id — see {@link serializeCatalog}. */
-const catalogWrites = new Map<string, Promise<unknown>>();
+/** In-flight writes, per file name — see {@link serializeWrites}. */
+const writes = new Map<string, Promise<unknown>>();
 
 /**
- * Run a catalog read-modify-write after any already in flight for the same id.
+ * Run a write after any already in flight for the same file.
  *
- * Every write to a `catalog` record merges into what is already stored, and the app fires several
- * at once on one file — releasing it writes the flags, the summary and the dropped view from three
- * places in the same tick. Without this, two of them could read the same "before" record and the
- * later write would silently undo the earlier one. Per id, so unrelated files still write in
- * parallel.
+ * Every write here is a read-modify-write — a catalog write merges into what is already stored —
+ * and the app fires several at once on one file: releasing it writes the flags, the summary and
+ * the dropped view from three places in the same tick. Without this, two of them could read the
+ * same "before" record and the later write would silently undo the earlier one. Deletes and
+ * renames join the same chain, or a delete racing a put would leave the row it just removed
+ * resurrected by the put's merge. Per file, so unrelated files still write in parallel.
  */
-function serializeCatalog<T>(id: string, run: () => Promise<T>): Promise<T> {
-  const result = (catalogWrites.get(id) ?? Promise.resolve()).then(run, run);
-  // The chain must survive a rejection, or one failed write would wedge that id forever.
+function serializeWrites<T>(name: string, run: () => Promise<T>): Promise<T> {
+  const result = (writes.get(name) ?? Promise.resolve()).then(run, run);
+  // The chain must survive a rejection, or one failed write would wedge that file forever.
   const settled = result.then(
     () => {},
     () => {},
   );
-  catalogWrites.set(id, settled);
+  writes.set(name, settled);
   void settled.then(() => {
-    if (catalogWrites.get(id) === settled) catalogWrites.delete(id);
+    if (writes.get(name) === settled) writes.delete(name);
   });
   return result;
 }
@@ -305,10 +310,15 @@ function serializeCatalog<T>(id: string, run: () => Promise<T>): Promise<T> {
 /**
  * Write a file's content **and** its identity, so the two can never disagree about a file's name,
  * size or kind. Everything else on the catalog record — the summary, the flags, the view — belongs
- * to whoever last wrote it ({@link updateEntry}) and is carried over untouched; a file being seen
+ * to whoever last wrote it ({@link updateFile}) and is carried over untouched; a file being seen
  * for the first time starts unmodified and loaded, which is what adding a file means.
  *
- * The content record is held to "one representation, never both" (see {@link StoredFile}):
+ * Carrying the rest over is what lets a run in progress be re-put every cycle without losing the
+ * display settings, the summary or the modified flag it accumulated — the record is the file's,
+ * not this snapshot's. A *different* file arriving under a used name is a replacement rather than
+ * another snapshot, and the store resets those fields explicitly (see `useZpcrStore`'s `install`).
+ *
+ * The content record is held to "one representation, never both" (see {@link StoredContent}):
  * whichever of `bytes`/`files` the caller supplied wins and the other is cleared. Callers build
  * records by spreading an existing one, so a run that has just been collapsed to a ZIP would
  * otherwise keep its exploded entries alongside the bytes — twice the storage, and two answers to
@@ -316,18 +326,18 @@ function serializeCatalog<T>(id: string, run: () => Promise<T>): Promise<T> {
  */
 export async function putFile(
   identity: FileIdentity,
-  content: Omit<StoredFile, "id">,
+  content: Omit<StoredContent, "name">,
 ): Promise<void> {
-  const record: StoredFile = content.files
-    ? { id: identity.id, files: content.files }
-    : { id: identity.id, bytes: content.bytes };
-  await tx(FILES, "readwrite", (s) => s.put(record));
-  await serializeCatalog(identity.id, async () => {
-    const existing = await tx<StoredEntry | undefined>(CATALOG, "readonly", (s) =>
-      s.get(identity.id),
+  const record: StoredContent = content.files
+    ? { name: identity.name, files: content.files }
+    : { name: identity.name, bytes: content.bytes };
+  await serializeWrites(identity.name, async () => {
+    await tx(FILES, "readwrite", (s) => s.put(record));
+    const existing = await tx<StoredFile | undefined>(CATALOG, "readonly", (s) =>
+      s.get(identity.name),
     );
     await tx(CATALOG, "readwrite", (s) =>
-      s.put({ modified: false, loaded: true, ...existing, ...identity } satisfies StoredEntry),
+      s.put({ modified: false, loaded: true, ...existing, ...identity } satisfies StoredFile),
     );
   });
 }
@@ -335,40 +345,51 @@ export async function putFile(
 /**
  * Change part of a file's catalog record, leaving the rest as it stands — how the summary, the two
  * flags and the view are all written. A key set to `undefined` is **removed**, which is how
- * releasing a file drops its {@link StoredEntry.view}.
+ * releasing a file drops its {@link StoredFile.view}.
  *
- * A no-op for an id with no record, which can only mean the file was deleted mid-flight.
+ * A no-op for a name with no record, which can only mean the file was deleted mid-flight.
  */
-export async function updateEntry(
-  id: string,
-  patch: Partial<Omit<StoredEntry, "id">>,
+export async function updateFile(
+  name: string,
+  patch: Partial<Omit<StoredFile, "name">>,
 ): Promise<void> {
-  await serializeCatalog(id, async () => {
-    const existing = await tx<StoredEntry | undefined>(CATALOG, "readonly", (s) => s.get(id));
+  await serializeWrites(name, async () => {
+    const existing = await tx<StoredFile | undefined>(CATALOG, "readonly", (s) => s.get(name));
     if (!existing) return;
     const next = { ...existing, ...patch };
     for (const [key, value] of Object.entries(patch)) {
       if (value === undefined) delete (next as Record<string, unknown>)[key];
     }
-    await tx(CATALOG, "readwrite", (s) => s.put(next satisfies StoredEntry));
+    await tx(CATALOG, "readwrite", (s) => s.put(next satisfies StoredFile));
   });
 }
 
 /** The whole catalog — no archive bytes are read. This is the query the Files table is built on,
  * and the reason a browser holding thousands of files still starts instantly. */
-export function getAllEntries(): Promise<StoredEntry[]> {
-  return tx<StoredEntry[]>(CATALOG, "readonly", (s) => s.getAll());
+export function getAllFiles(): Promise<StoredFile[]> {
+  return tx<StoredFile[]>(CATALOG, "readonly", (s) => s.getAll());
 }
 
-/** One file's stored content, by id — the only way a file's content enters memory. Handed back as
+/** One file's stored content, by name — the only way a file's content enters memory. Handed back as
  * the whole record so the caller can read whichever representation it was stored in (`bytes` or
  * `files`; see `fileContent.ts`'s `fromStoredContent`). Resolves to `undefined` for a file that
  * has since been deleted. */
-export function getFileContent(id: string): Promise<StoredFile | undefined> {
-  return tx<StoredFile | undefined>(FILES, "readonly", (s) => s.get(id));
+export function getContent(name: string): Promise<StoredContent | undefined> {
+  return tx<StoredContent | undefined>(FILES, "readonly", (s) => s.get(name));
 }
 
-export async function deleteFile(id: string): Promise<void> {
-  await tx(FILES, "readwrite", (s) => s.delete(id));
-  await tx(CATALOG, "readwrite", (s) => s.delete(id));
+export async function deleteFile(name: string): Promise<void> {
+  await serializeWrites(name, async () => {
+    await tx(FILES, "readwrite", (s) => s.delete(name));
+    await tx(CATALOG, "readwrite", (s) => s.delete(name));
+  });
 }
+
+// A rename is a write under the new name followed by a delete of the old — see `useZpcrStore`'s
+// `renameFile`, which does exactly that. It stays there rather than becoming a primitive here
+// because the record it writes has to carry the file's *current* analysis settings, which only the
+// store knows about.
+//
+// > **Future:** a rename moves the file's records only because the name is the key. An opaque id,
+// > with the name kept as a catalog lookup, would make it a single catalog write — worth doing if
+// > renames ever stop being rare, or once the schema is migrated rather than dropped.

@@ -40,7 +40,7 @@ export interface AnalysisPersisterOptions {
   /** Resolve a file id to its current archive + analysis settings, or `null` when it can't be
    * written — an unknown id, or a format with no archive to put an entry in (`.pcrd` and the
    * standalone plate formats; see the store for what that means for the user). */
-  resolve: (fileId: string) => AnalysisFlushTarget | null;
+  resolve: (fileName: string) => AnalysisFlushTarget | null;
   /** Overridable for tests. */
   now?: () => number;
   onError?: (error: unknown) => void;
@@ -54,8 +54,8 @@ export class AnalysisPersister {
       minIntervalMs: MIN_INTERVAL_MS,
       ...(options.now ? { now: options.now } : {}),
       ...(options.onError ? { onError: options.onError } : {}),
-      write: async (fileId) => {
-        const target = options.resolve(fileId);
+      write: async (fileName) => {
+        const target = options.resolve(fileName);
         // Not writable (a `.pcrd`, or a file that's since been removed): drop the pending edit
         // rather than retrying forever. The in-memory value stays live for this session.
         if (!target) return;
@@ -63,7 +63,7 @@ export class AnalysisPersister {
           writeZpcrwebSettings(target.files, zpcrwebFromAnalysis(target.settings)),
         );
         // `size` is deliberately left at the stored value rather than the rewritten length: it is
-        // the size of the file the user loaded (what the UI labels, and what `fileId()` hashes),
+        // the size of the file the user loaded (what the UI labels, and what `fileName()` hashes),
         // and re-adding that same file from disk should still resolve to this record instead of
         // creating a duplicate that differs only by however many bytes of settings we added.
         await putFile(target.identity, toStoredContent(content));
@@ -72,13 +72,13 @@ export class AnalysisPersister {
   }
 
   /** Record that a file's analysis settings changed, and schedule the write. */
-  markDirty(fileId: string): void {
-    this.#throttle.markDirty(fileId);
+  markDirty(fileName: string): void {
+    this.#throttle.markDirty(fileName);
   }
 
   /** Write one file now, if it has anything pending. Resolves once IndexedDB has the bytes. */
-  flush(fileId: string): Promise<void> {
-    return this.#throttle.flush(fileId);
+  flush(fileName: string): Promise<void> {
+    return this.#throttle.flush(fileName);
   }
 
   /** Write every pending file now — the page-teardown path, and used when the active file
@@ -88,8 +88,8 @@ export class AnalysisPersister {
   }
 
   /** Forget a file (it was removed) without writing it. */
-  forget(fileId: string): void {
-    this.#throttle.forget(fileId);
+  forget(fileName: string): void {
+    this.#throttle.forget(fileName);
   }
 
   /** Subscribe to the page-teardown events; see {@link WriteThrottle.attach}. */
