@@ -17,6 +17,7 @@ import { dirname, join } from "node:path";
 import {
   REPO,
   activeTab,
+  buildCore,
   cfxPassword,
   loadFile,
   openPage,
@@ -3356,6 +3357,10 @@ async function main() {
   }
 
   const t0 = Date.now();
+  // Before anything is spawned: {@link makeSeed} builds its fixture out of core's `dist/`, and a
+  // stale one surfaces hundreds of checks later as a missing export. Fail here, with a real
+  // reason, rather than there.
+  await buildCore();
   const dev = await startDevServer();
   const chrome = await startChrome(join(REPO, "tools/.uishot/testprofile"));
   try {

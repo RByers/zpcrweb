@@ -188,7 +188,7 @@ every view you touched in one run. Controlling what it costs:
 
 ### `tools/uitest.mjs` (`npm run test:ui`) — assert it
 
-It takes ~35s and needs Chrome, so it is deliberately **not** part of `npm test`. Run it when you
+It takes ~100s and needs Chrome, so it is deliberately **not** part of `npm test`. Run it when you
 touch `state/urlHash.ts`, `state/useHeaderFit.ts`, `state/pltdPassword.ts`,
 `components/curves/ChipBar.tsx`, `components/curves/CurveTable.tsx`, `components/curves/CqRange.tsx`,
 `components/instrument/InstrumentRun.tsx`, `state/useRunStaging.ts`, `state/useRunNaming.ts`,

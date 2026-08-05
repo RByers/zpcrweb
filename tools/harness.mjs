@@ -143,6 +143,32 @@ export class Cdp {
   }
 }
 
+/**
+ * Rebuild `@zpcrweb/core`'s `dist/`, and fail loudly if it doesn't work.
+ *
+ * The app under test doesn't need this — `vite.config.ts` aliases `@zpcrweb/core` to its
+ * TypeScript *source*, so the browser always runs current code. But a test script that builds a
+ * fixture by importing the library from Node gets `dist/` instead, which nothing else in the repo
+ * keeps current and which `.gitignore` excludes. That splits one run across two versions of core:
+ * the page on today's source, the fixture on whatever was last built. It fails as
+ * `<symbol> is not a function` — a stale build, reported as if the export had been deleted.
+ *
+ * Importing the source here instead would close the gap at its root, but Node's type stripping
+ * can't resolve the `.js` specifiers core's source uses to import itself. So: build first, every
+ * run. `tsup` is about a second against the ~35s the suite already takes.
+ */
+export async function buildCore() {
+  const proc = spawn("npm", ["run", "build", "-w", "@zpcrweb/core"], {
+    cwd: REPO,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let log = "";
+  proc.stdout.on("data", (d) => (log += d));
+  proc.stderr.on("data", (d) => (log += d));
+  const code = await new Promise((r) => proc.on("exit", r));
+  if (code !== 0) throw new Error(`building @zpcrweb/core failed (exit ${code}):\n${log}`);
+}
+
 /** Start the Vite dev server on a random free port; resolve with its base URL and a stop handle. */
 export async function startDevServer() {
   const port = randomPort();
