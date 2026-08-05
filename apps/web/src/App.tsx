@@ -14,6 +14,7 @@ import { usePltdPassword } from "./state/pltdPassword";
 import { formatLoadHash } from "./state/urlHash";
 import { cloneFileName, splitFileName } from "./lib/cloneName";
 import { isPendingExperiment } from "./lib/experiment";
+import { plateSources, protocolSources } from "./lib/attachSources";
 import { plateCsvFileName } from "./lib/plateNames";
 import { downloadBytes } from "./lib/download";
 import { useHeaderFit } from "./state/useHeaderFit";
@@ -481,6 +482,21 @@ export function App() {
     () => (active ? enabledViewsFor(active.kind, store.runs.get(active.id)?.zpcr) : []),
     [active, store.runs],
   );
+
+  /**
+   * What the attach/replace menus may offer, resolved here rather than in each view: every plate
+   * and every protocol this browser is holding, wherever it lives, minus the active file's own
+   * (see `lib/attachSources.ts`). Three views show one of these menus and they must all offer the
+   * same things, so the list is built once from the store the menus would otherwise each re-derive.
+   */
+  const plateAttachSources = useMemo(
+    () => plateSources(store.loaded, store.runs, active?.id ?? null, pltdPassword || undefined),
+    [store.loaded, store.runs, active, pltdPassword],
+  );
+  const protocolAttachSources = useMemo(
+    () => protocolSources(store.loaded, store.runs, active?.id ?? null),
+    [store.loaded, store.runs, active],
+  );
   /**
    * A row in the full files table: select the file — which **loads** it if it wasn't (see
    * `useZpcrStore`'s `setActive`), and leaves the Files tab since `store.view` changes under it —
@@ -699,7 +715,7 @@ export function App() {
                 key={active.id}
                 protocolText={store.activeProtocolFile}
                 file={active}
-                files={store.loaded}
+                protocolSources={protocolAttachSources}
                 addFiles={store.addFiles}
                 // A protocol file is always a draft: it is a document you author, with no run behind
                 // it that editing it could contradict.
@@ -750,7 +766,8 @@ export function App() {
                 // `analysisPersist.ts`'s `resolve`.
                 namePersists={active.kind === "zpcr"}
                 pending={isPendingExperiment(active.kind, zpcr)}
-                files={store.loaded}
+                plateSources={plateAttachSources}
+                protocolSources={protocolAttachSources}
                 onAttachPlate={(file) => void store.attachPlate(active.id, file)}
                 onAttachProtocol={(file) => void store.attachProtocol(active.id, file)}
                 onCreateProtocol={() => createProtocolFor(active.id)}
@@ -771,7 +788,7 @@ export function App() {
                 // executed has one, which is what the thermal-profile section is about.
                 report={zpcr.runReports()[0]?.alf ?? null}
                 file={active}
-                files={store.loaded}
+                protocolSources={protocolAttachSources}
                 addFiles={store.addFiles}
                 editable={isPendingExperiment(active.kind, zpcr)}
                 onChangeProtocol={(text) => store.setRunProtocolText(active.id, text)}
@@ -811,7 +828,7 @@ export function App() {
                 zpcr={zpcr}
                 fileId={active.id}
                 attachPlate={store.attachPlate}
-                files={store.loaded}
+                plateSources={plateAttachSources}
                 addFiles={store.addFiles}
               />
             )}

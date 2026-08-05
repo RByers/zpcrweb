@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import type { LoadedFile } from "../../state/useZpcrStore";
+import type { AttachSource } from "../../lib/attachSources";
 import { UploadIcon } from "../ViewIcons";
 
 interface Props {
-  /** Every loaded file — filtered down to `.prcl.txt` entries to list. */
-  files: LoadedFile[];
+  /** Every protocol this browser is holding — standalone `.prcl.txt` files *and* the protocol
+   * inside any other loaded run; see `lib/attachSources.ts`. */
+  sources: AttachSource[];
   compactLabel: string;
   /** Bare icon in a box instead of a labelled chip, with the label as its tooltip — see
    * `AttachPlateMenu`'s `iconOnly`, which this mirrors. */
@@ -12,10 +13,8 @@ interface Props {
   /** True when a protocol is already attached, so choosing another discards it — the menu asks
    * for confirmation first, exactly as `AttachPlateMenu` does for a plate. */
   confirmReplace: boolean;
-  /** Attach one of the already-loaded protocol files. */
-  onSelect: (file: LoadedFile) => void;
-  /** Attach a protocol picked fresh from disk. */
-  onUpload: (file: File) => void;
+  /** Attach these bytes, whether they came off the list or off the disk. */
+  onAttach: (file: File) => void;
 }
 
 /** A choice awaiting confirmation before it's actually applied. */
@@ -27,7 +26,9 @@ interface Pending {
 /**
  * "Attach/replace protocol" control — the protocol-side mirror of `plate/AttachPlateMenu.tsx`, and
  * deliberately the same `<details>` menu with the same options, so attaching either half of an
- * experiment works the same way.
+ * experiment works the same way. That includes what it lists: **protocols, not protocol files** —
+ * the one inside a run that has already happened is offered by name, which is the common case,
+ * since re-running a protocol is what a past run's protocol is for.
  *
  * This is the "use a protocol I already have" half of getting one. Writing a new one is its own
  * button beside this (`OverviewView`'s `ExperimentParts`) rather than an item in here: it used to be
@@ -36,17 +37,15 @@ interface Pending {
  * anything to name.
  */
 export function AttachProtocolMenu({
-  files,
+  sources,
   compactLabel,
   iconOnly,
   confirmReplace,
-  onSelect,
-  onUpload,
+  onAttach,
 }: Props) {
   const detailsRef = useRef<HTMLDetailsElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const [pending, setPending] = useState<Pending | null>(null);
-  const protocolFiles = files.filter((f) => f.kind === "prcl");
 
   const close = () => {
     if (detailsRef.current) detailsRef.current.open = false;
@@ -112,19 +111,20 @@ export function AttachProtocolMenu({
           </>
         ) : (
           <>
-            {protocolFiles.length === 0 ? (
+            {sources.length === 0 ? (
               <button className="dlmenu__item mono" disabled>
-                No protocol files loaded yet
+                No other protocols loaded yet
               </button>
             ) : (
-              protocolFiles.map((f) => (
+              sources.map((s) => (
                 <button
-                  key={f.id}
+                  key={s.key}
                   className="dlmenu__item mono"
-                  title={f.name}
-                  onClick={() => choose(f.name, () => onSelect(f))}
+                  title={s.from ? `${s.label} — in ${s.from}` : s.label}
+                  onClick={() => choose(s.label, () => onAttach(s.file()))}
                 >
-                  {f.name}
+                  {s.label}
+                  {s.from && <span className="dlmenu__from">in {s.from}</span>}
                 </button>
               ))
             )}
@@ -142,7 +142,7 @@ export function AttachProtocolMenu({
         onChange={(e) => {
           const file = e.target.files?.[0];
           e.target.value = "";
-          if (file) choose(file.name, () => onUpload(file));
+          if (file) choose(file.name, () => onAttach(file));
         }}
       />
     </details>

@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import type { LoadedFile } from "../../state/useZpcrStore";
+import type { AttachSource } from "../../lib/attachSources";
 import { UploadIcon } from "../ViewIcons";
 
 interface Props {
-  /** Every loaded file — filtered down to `.pltd`/`.plt.csv` entries to list. */
-  files: LoadedFile[];
+  /** Every plate this browser is holding — standalone files *and* plates inside other loaded
+   * runs; see `lib/attachSources.ts`, which builds the list and owns what "a plate" means here. */
+  sources: AttachSource[];
   compactLabel: string;
   /** Shrink the trigger to a bare icon in a box, the shape every other button on a view's toolbar
    * has (`raw__download`) — the label survives as the tooltip. For the Plates/Protocol toolbars,
@@ -18,10 +19,9 @@ interface Props {
    * asks for confirmation first. False for "attach plate" on a run with no plate yet, where
    * there's nothing to lose and the choice takes effect immediately. */
   confirmReplace: boolean;
-  /** Attach one of the already-loaded plate files. */
-  onSelect: (file: LoadedFile) => void;
-  /** Attach a plate picked fresh from disk. */
-  onUpload: (file: File) => void;
+  /** Attach these bytes — one call for both routes in, since a plate picked off the list and one
+   * picked off the disk are the same act by the time they get here. */
+  onAttach: (file: File) => void;
 }
 
 /** A choice awaiting confirmation before it's actually applied. */
@@ -32,29 +32,32 @@ interface Pending {
 
 /**
  * "Attach/replace plate" control: a `<details>` menu (styled like `PlateDownloadButton`'s)
- * offering every already-loaded standalone plate file (`.pltd`/`.plt.csv`) plus an upload
- * option, in place of the old plain file-picker `DropZone`. Cloning a plate out of a run (see
- * `PlateDownloadButton`'s Clone button) is what typically populates the list this reads from.
+ * offering every plate already in the browser plus an upload option, in place of the old plain
+ * file-picker `DropZone`.
  *
- * When `confirmReplace` is set, picking a file (from the list or via upload) doesn't attach it
+ * **What it lists is plates, not plate files.** A plate sitting inside a loaded run is offered
+ * alongside the standalone `.pltd`/`.plt.csv` files, labelled by its own name with the run it
+ * lives in beneath — see `lib/attachSources.ts`. Cloning a plate out of a run first (see
+ * `PlateDownloadButton`'s Clone button) still makes a genuinely independent file, but it is no
+ * longer the toll you pay to re-use a layout.
+ *
+ * When `confirmReplace` is set, picking a source (from the list or via upload) doesn't attach it
  * right away — it swaps the list for a "replace with this?" prompt, since attaching overwrites
  * whatever plate layout is already there with no way to get it back short of re-attaching the
  * old one.
  */
 export function AttachPlateMenu({
-  files,
+  sources,
   compactLabel,
   iconOnly,
   disabled,
   disabledTitle,
   confirmReplace,
-  onSelect,
-  onUpload,
+  onAttach,
 }: Props) {
   const detailsRef = useRef<HTMLDetailsElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const [pending, setPending] = useState<Pending | null>(null);
-  const plateFiles = files.filter((f) => f.kind === "pltd" || f.kind === "csv");
 
   const close = () => {
     if (detailsRef.current) detailsRef.current.open = false;
@@ -138,19 +141,20 @@ export function AttachPlateMenu({
           </>
         ) : (
           <>
-            {plateFiles.length === 0 ? (
+            {sources.length === 0 ? (
               <button className="dlmenu__item mono" disabled>
-                No plate files loaded yet
+                No other plates loaded yet
               </button>
             ) : (
-              plateFiles.map((f) => (
+              sources.map((s) => (
                 <button
-                  key={f.id}
+                  key={s.key}
                   className="dlmenu__item mono"
-                  title={f.name}
-                  onClick={() => choose(f.name, () => onSelect(f))}
+                  title={s.from ? `${s.label} — in ${s.from}` : s.label}
+                  onClick={() => choose(s.label, () => onAttach(s.file()))}
                 >
-                  {f.name}
+                  {s.label}
+                  {s.from && <span className="dlmenu__from">in {s.from}</span>}
                 </button>
               ))
             )}
@@ -168,7 +172,7 @@ export function AttachPlateMenu({
         onChange={(e) => {
           const file = e.target.files?.[0];
           e.target.value = "";
-          if (file) choose(file.name, () => onUpload(file));
+          if (file) choose(file.name, () => onAttach(file));
         }}
       />
     </details>

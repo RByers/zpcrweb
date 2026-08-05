@@ -1983,6 +1983,39 @@ async function instrumentRunChecks(chrome, origin) {
     JSON.stringify(protoTools),
   );
 
+  // …and what that Replace offers is *protocols*, not protocol files: the ones inside the other
+  // loaded runs, by name, with the run they live in beneath. Nothing in this session has ever
+  // written a standalone `.prcl.txt`, so a menu listing only top-level files would be empty here —
+  // which is exactly the ceremony (open the run, clone its protocol out, come back) this removes.
+  await cdp.eval(
+    `document.querySelector(".overview__blocktools .dlmenu > summary").click(), undefined`,
+  );
+  await sleep(200);
+  const offered = await cdp
+    .eval(
+      `JSON.stringify([...document.querySelectorAll(".overview__blocktools .dlmenu__item")]
+         .filter((b) => !b.disabled && b.textContent.trim() !== "Upload…")
+         .map((b) => ({
+           label: b.firstChild?.textContent?.trim() ?? "",
+           from: b.querySelector(".dlmenu__from")?.textContent.trim() ?? null,
+         })))`,
+    )
+    .then(JSON.parse);
+  await cdp.eval(
+    `document.querySelector(".overview__blocktools .dlmenu > summary").click(), undefined`,
+  );
+  check(
+    "replace protocol offers the protocols inside other loaded runs, named and attributed",
+    offered.length > 0 && offered.every((o) => o.label) && offered.some((o) => /^in \S/.test(o.from ?? "")),
+    JSON.stringify(offered),
+  );
+  check(
+    "…and never this experiment's own protocol, which would be a no-op behind a warning",
+    // The file this experiment was renamed to above — see the date-and-name check.
+    !offered.some((o) => /Cloned_RVP/.test(o.from ?? "")),
+    JSON.stringify(offered.map((o) => o.from)),
+  );
+
   // Starting it is blocked only by things that are actually missing — and a plate is not one of
   // them. An experiment may deliberately be run without one (the curves simply carry no target or
   // sample names), so that is a warning rather than a blocker.

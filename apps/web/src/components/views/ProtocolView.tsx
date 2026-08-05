@@ -10,7 +10,8 @@ import { CloneIcon } from "../CloneIcon";
 import { RenameIcon } from "../RenameIcon";
 import { downloadText } from "../../lib/download";
 import { protocolFileBase } from "../../lib/protocolFileBase";
-import { fileBytes, type AddFilesOptions, type LoadedFile } from "../../state/useZpcrStore";
+import type { AttachSource } from "../../lib/attachSources";
+import type { AddFilesOptions } from "../../state/useZpcrStore";
 
 /**
  * The Protocol tab — for a standalone `.prcl.txt` and for a run's own protocol alike.
@@ -47,7 +48,7 @@ export function ProtocolView({
   steps,
   report,
   file,
-  files,
+  protocolSources,
   addFiles,
   editable,
   onChangeProtocol,
@@ -70,9 +71,10 @@ export function ProtocolView({
   report?: AlfReport | null;
   /** Only its `name` is used, as the download/clone filename's fallback base. */
   file: { name: string };
-  /** Every loaded file, so Replace can offer already-loaded `.prcl.txt` files instead of only a
-   * fresh upload — the same list `PlatesView` passes to `AttachPlateMenu`. */
-  files: LoadedFile[];
+  /** Every protocol the browser is holding that isn't this file's own — standalone `.prcl.txt`
+   * files and the protocols inside other loaded runs alike (`lib/attachSources.ts`), so Replace
+   * can offer any of them instead of only a fresh upload. */
+  protocolSources: AttachSource[];
   /** Adds the cloned `.prcl.txt` to the file list — see the Clone button below. */
   addFiles: (files: FileList | File[], options?: AddFilesOptions) => Promise<string | null>;
   /** This protocol is a draft rather than a record, so it may be changed here — a standalone
@@ -129,15 +131,14 @@ export function ProtocolView({
     <>
       {editable && onAttachProtocol && (
         <AttachProtocolMenu
-          files={files}
+          sources={protocolSources}
           compactLabel={protocolText ? "replace protocol" : "attach protocol"}
           // Icon-only when it rides the heading line beside download and clone; labelled in the
           // no-protocol state, where it stands alone and is the only thing there is to do. Same
           // split `PlatesView` makes, for the same reason.
           iconOnly={!!protocolText}
           confirmReplace={!!protocolText}
-          onSelect={(f) => onAttachProtocol(new File([fileBytes(f).slice()], f.name))}
-          onUpload={onAttachProtocol}
+          onAttach={onAttachProtocol}
         />
       )}
       {protocolText && (

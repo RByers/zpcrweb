@@ -397,8 +397,9 @@ alongside `"zpcr"`/`"pcrd"`:
   (`components/plate/AttachPlateMenu.tsx`), enabled only for a run that has a file archive to add
   an entry to (so: a `.zpcr`; a `.pcrd` gets the control disabled with an explanatory title, since
   it has no archive). Unlike the plain file-picker `DropZone` it replaced, it is a `<details>`
-  menu (styled like `PlateDownloadButton`'s) offering every already-loaded `.pltd`/`.plt.csv`
-  `LoadedFile` by name, plus an "Upload…" row for a fresh file from disk. When the run already
+  menu (styled like `PlateDownloadButton`'s) offering every plate the browser is holding, plus an
+  "Upload…" row for a fresh file from disk. **Plates, not plate files** — see "What the attach
+  menus offer" below. When the run already
   has a plate (`confirmReplace`), picking either doesn't attach it right away — the menu swaps
   its list for a "replace with this?" prompt first, since attaching overwrites the current layout
   with no undo; a run with no plate yet skips the prompt, as there's nothing to lose. The menu
@@ -421,6 +422,26 @@ alongside `"zpcr"`/`"pcrd"`:
   This is also how "download the run with its attached plate" works — `FileBar`'s per-chip
   download button just downloads `LoadedFile.bytes` as-is, which already includes anything
   attached.
+- **What the attach menus offer** (`lib/attachSources.ts`) — an `AttachSource[]`, built once in
+  `App.tsx` and handed to all three views that show one of these menus, so they cannot drift into
+  offering different things. The list is **every plate (or protocol) in the browser, not every
+  plate file**: a plate embedded in a loaded run appears beside the standalone `.pltd`/`.plt.csv`
+  files, labelled by its own name with the run it lives in on a second line. Offering only
+  top-level files meant re-using last week's layout took opening that run, cloning its plate out
+  to a file, and coming back — ceremony around bytes that were already here. The active file's own
+  plate/protocol is excluded, since attaching a file its own plate back is a no-op behind a
+  confirmation prompt.
+
+  A source names the item and defers the bytes: `file()` is called only for the one that gets
+  picked, so a menu of a dozen plates renders a dozen labels rather than serializing a dozen CSVs.
+  What it hands back is the same two forms `attachPlate` already accepted — the original `.pltd`
+  bytes when the run's archive has them (verbatim, encrypted or not: re-encoding through
+  `plateToCsv` would drop what the CSV form doesn't carry), else a `.plt.csv` written from the
+  decoded plate, which is what a `.pcrd`'s embedded `plateSetup2` gives. A protocol source is
+  always the one-line run definition wrapped as `.prcl.txt`, named after the *protocol* rather
+  than its containing file, because that name is what `attachProtocol` stores as
+  `ProtocolName.txt`. Both menus therefore take one `onAttach(file: File)` rather than a
+  select/upload pair: by the time bytes exist, where they came from stops mattering.
 - **`PlateDownloadButton`** (`components/plate/PlateDownloadButton.tsx`) is the two-option
   download menu (`.pltd` / `.plt.csv`) shared by `PlatesView` and `StandalonePlateView`: "Download
   .pltd" is only enabled when real `.pltd` bytes exist (a real archive entry, or a standalone

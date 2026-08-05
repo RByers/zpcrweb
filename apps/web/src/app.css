@@ -2198,6 +2198,17 @@
   opacity: 0.4;
   cursor: default;
 }
+/* Where an offered plate/protocol lives, under its own name — the run it is embedded in, for the
+   items that aren't a file of their own. Its own line rather than a suffix, so a long run filename
+   truncates without eating the name that identifies the thing being picked. */
+.dlmenu__from {
+  display: block;
+  margin-top: 2px;
+  font-size: 10px;
+  color: var(--ink-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 /* The "replace this plate?" prompt `AttachPlateMenu` swaps the file list for — the message
    itself, plus its destructive confirm action, coloured like the file table's armed delete
    button (`.ftbl__del.is-armed`) so a plate-discarding action reads the same as any other. */

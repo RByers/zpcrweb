@@ -8,7 +8,8 @@ import { RenameIcon } from "../RenameIcon";
 import { usePltdPassword } from "../../state/pltdPassword";
 import { runEncryptionStatus } from "../../lib/encryptionStatus";
 import { useRunAnalysis } from "../../lib/runAnalysis";
-import { fileBytes, type FileSettings, type LoadedFile, type RunResult } from "../../state/useZpcrStore";
+import type { AttachSource } from "../../lib/attachSources";
+import type { FileSettings, RunResult } from "../../state/useZpcrStore";
 import type { ExperimentIdentity } from "../../lib/experiment";
 
 /**
@@ -35,7 +36,8 @@ export function OverviewView({
   onRename,
   namePersists,
   pending,
-  files,
+  plateSources,
+  protocolSources,
   onAttachPlate,
   onAttachProtocol,
   onCreateProtocol,
@@ -67,9 +69,11 @@ export function OverviewView({
   /** This experiment hasn't been run yet (`lib/experiment.ts`'s `isPendingExperiment`), so it is
    * still being assembled: the name is required, and the missing halves can be attached. */
   pending: boolean;
-  /** Every loaded file, so the attach menus can offer ones already open rather than only a fresh
-   * upload — the same list `PlatesView` passes to `AttachPlateMenu`. */
-  files: LoadedFile[];
+  /** Every plate and protocol the browser is holding that isn't this file's own, so the attach
+   * menus can offer what is already open rather than only a fresh upload — the same lists the
+   * Plates and Protocol tabs pass their own copies of the menus (`lib/attachSources.ts`). */
+  plateSources: AttachSource[];
+  protocolSources: AttachSource[];
   onAttachPlate: (file: File) => void;
   onAttachProtocol: (file: File) => void;
   /** "new protocol": write the default protocol into this experiment and go edit it. */
@@ -212,7 +216,8 @@ export function OverviewView({
         <ExperimentParts
           hasProtocol={!!zpcr.protocolText}
           hasPlate={!!plate}
-          files={files}
+          plateSources={plateSources}
+          protocolSources={protocolSources}
           onAttachPlate={onAttachPlate}
           onAttachProtocol={onAttachProtocol}
           onCreateProtocol={onCreateProtocol}
@@ -246,14 +251,16 @@ export function OverviewView({
 function ExperimentParts({
   hasProtocol,
   hasPlate,
-  files,
+  plateSources,
+  protocolSources,
   onAttachPlate,
   onAttachProtocol,
   onCreateProtocol,
 }: {
   hasProtocol: boolean;
   hasPlate: boolean;
-  files: LoadedFile[];
+  plateSources: AttachSource[];
+  protocolSources: AttachSource[];
   onAttachPlate: (file: File) => void;
   onAttachProtocol: (file: File) => void;
   onCreateProtocol: () => void;
@@ -287,11 +294,10 @@ function ExperimentParts({
               </button>
             )}
             <AttachProtocolMenu
-              files={files}
+              sources={protocolSources}
               compactLabel={hasProtocol ? "replace protocol" : "attach protocol"}
               confirmReplace={hasProtocol}
-              onSelect={(f) => onAttachProtocol(new File([fileBytes(f).slice()], f.name))}
-              onUpload={onAttachProtocol}
+              onAttach={onAttachProtocol}
             />
           </div>
         </div>
@@ -311,11 +317,10 @@ function ExperimentParts({
                 "or sample names."}
           </p>
           <AttachPlateMenu
-            files={files}
+            sources={plateSources}
             compactLabel={hasPlate ? "replace plate" : "attach plate"}
             confirmReplace={hasPlate}
-            onSelect={(f) => onAttachPlate(new File([fileBytes(f).slice()], f.name))}
-            onUpload={onAttachPlate}
+            onAttach={onAttachPlate}
           />
         </div>
       </div>
