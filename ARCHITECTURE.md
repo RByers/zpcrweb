@@ -211,7 +211,7 @@ independent of `zpcr` — the app's only way to browse subtrees this module does
 
 ## A third, non-CFX input: Biomeme
 
-`parseBiomeme` (`biomeme.ts`) reads a Biomeme handheld device's run-export JSON (Franklin/
+`parseBiomeme` (`biomeme.ts`) reads a Biomeme handheld device's `.bmrun` run export (Franklin/
 Two3/Three9) into the same `Zpcr` shape as `parseZpcr`/`parsePcrd` — but the source instrument
 is different enough that the mapping isn't the field-for-field translation `.pcrd` gets above:
 

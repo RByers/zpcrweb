@@ -27,7 +27,7 @@
 import type { RunMetadata } from "./types.js";
 
 /** Extensions this project loads, longest-first so `.plt.csv` isn't read as `.csv`. */
-const EXTENSIONS = [".prcl.txt", ".plt.csv", ".zpcr", ".pcrd", ".pltd", ".json", ".csv"];
+const EXTENSIONS = [".prcl.txt", ".plt.csv", ".zpcr", ".pcrd", ".pltd", ".bmrun", ".csv"];
 
 /** Strip one known extension, or (for anything else) whatever follows the last dot. */
 function stripExtension(fileName: string): string {

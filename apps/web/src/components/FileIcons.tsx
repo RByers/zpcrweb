@@ -32,7 +32,7 @@ function Svg({ children }: { children: React.ReactNode }) {
   );
 }
 
-/** A run (`.zpcr`, `.pcrd`, Biomeme `.json`): an amplification sigmoid on its axes — the thing a
+/** A run (`.zpcr`, `.pcrd`, Biomeme `.bmrun`): an amplification sigmoid on its axes — the thing a
  * run uniquely has, since the other two kinds describe a run that hasn't happened yet. */
 export function RunFileIcon() {
   return (

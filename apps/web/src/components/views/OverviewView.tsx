@@ -13,7 +13,7 @@ import type { FileSettings, RunResult } from "../../state/useZpcrStore";
 import type { ExperimentIdentity } from "../../lib/experiment";
 
 /**
- * The Overview tab for a run (`.zpcr`/`.pcrd`/Biomeme `.json`).
+ * The Overview tab for a run (`.zpcr`/`.pcrd`/Biomeme `.bmrun`).
  *
  * The shared {@link OverviewPanel} plus the things a run adds to it: its editable name as the
  * headline, the "still going" banner, and the run's own facts appended to the info table — then its

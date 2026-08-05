@@ -50,7 +50,7 @@ Read the call site and walk backward through every variable that ends up in the 
 query string, or headers, until you reach either a literal/constant or a dead end you can't
 resolve. Ask: does any of it derive from —
 
-- bytes read from a user-supplied file (`.zpcr`/`.pcrd`/`.pltd`/`.plt.csv`/Biomeme `.json`)
+- bytes read from a user-supplied file (`.zpcr`/`.pcrd`/`.pltd`/`.plt.csv`/Biomeme `.bmrun`)
 - anything decoded from those bytes (curves, Cq values, well/sample/target/protocol names,
   timestamps, calibration data, run reports, USB traffic logs)
 - filenames or paths the user chose

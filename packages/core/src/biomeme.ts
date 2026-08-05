@@ -1,6 +1,6 @@
 /**
- * Biomeme's exported run JSON (Franklin/Two3/Three9 handheld devices) — the third input format
- * alongside `.zpcr`/`.pcrd`, and a genuinely different instrument: a handheld real-time PCR
+ * Biomeme's exported run file, `.bmrun` (Franklin/Two3/Three9 handheld devices) — the third input
+ * format alongside `.zpcr`/`.pcrd`, and a genuinely different instrument: a handheld real-time PCR
  * device with a handful of tube positions in a single strip (three, six or nine on the devices
  * this was reverse-engineered from) rather than a 96-well block, reporting fluorescence directly
  * per fluorophore rather than per optical channel (see {@link Zpcr.dyeSpace}).
@@ -93,26 +93,6 @@ interface BiomemeRun {
   device?: string;
   location?: string;
   targets?: BiomemeTarget[];
-}
-
-/**
- * Sniff a buffer for the Biomeme run JSON shape, cheaply: valid JSON, an object, and a non-empty
- * `targets` array whose first element carries `rawData`/`baselineData` — the two fields no other
- * supported format's JSON (there is none) or coincidental JSON blob would have together. Used by
- * the web app to route a dropped `.json` file here without a file-extension-only guess.
- */
-export function isBiomemeJson(data: Uint8Array | ArrayBuffer): boolean {
-  try {
-    const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
-    const run = JSON.parse(new TextDecoder("utf-8").decode(bytes)) as unknown;
-    if (typeof run !== "object" || run === null || !("targets" in run)) return false;
-    const targets = (run as BiomemeRun).targets;
-    if (!Array.isArray(targets) || targets.length === 0) return false;
-    const first = targets[0] as BiomemeTarget;
-    return Array.isArray(first.rawData) && Array.isArray(first.baselineData);
-  } catch {
-    return false;
-  }
 }
 
 /**
@@ -213,7 +193,15 @@ const EMPTY_ARCHIVE: ArchiveAccess = {
  */
 export function parseBiomeme(data: Uint8Array | ArrayBuffer): Zpcr {
   const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
-  const run = JSON.parse(new TextDecoder("utf-8").decode(bytes)) as BiomemeRun;
+  // A `.bmrun` is routed here on its extension alone, so this is where a file that isn't one is
+  // caught — a JSON syntax error from deep inside a parse says nothing useful to the person who
+  // dropped it.
+  let run: BiomemeRun;
+  try {
+    run = JSON.parse(new TextDecoder("utf-8").decode(bytes)) as BiomemeRun;
+  } catch {
+    throw new Error("Not a valid Biomeme run export: not JSON");
+  }
   const targets = run.targets ?? [];
   if (targets.length === 0) throw new Error("Not a valid Biomeme run export: no targets");
 
@@ -340,7 +328,7 @@ export function parseBiomeme(data: Uint8Array | ArrayBuffer): Zpcr {
     meta: {},
   };
   const plateContainer: PltdContainer = {
-    innerName: run.name ?? "biomeme.json",
+    innerName: run.name ?? "biomeme.bmrun",
     compressionMethod: 0,
     encrypted: false,
     crc32: 0,
@@ -348,7 +336,7 @@ export function parseBiomeme(data: Uint8Array | ArrayBuffer): Zpcr {
     uncompressedSize: bytes.length,
   };
   const plateEntries: PltdEntry[] = [
-    { name: run.name ?? "biomeme.json", pltd: { container: plateContainer, plate } },
+    { name: run.name ?? "biomeme.bmrun", pltd: { container: plateContainer, plate } },
   ];
 
   const cycleCount = curves.reduce((m, c) => Math.max(m, c.cycles.length), 0);

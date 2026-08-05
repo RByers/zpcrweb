@@ -1,9 +1,9 @@
-# Biomeme run export JSON
+# `.bmrun` — Biomeme run export
 
 A [Biomeme](https://biomeme.com/) handheld device (Franklin/Two3/Three9) is a genuinely
 different instrument from a Bio-Rad CFX: a handful of tube positions rather than a 96-well
 block, and fluorescence reported directly per fluorophore rather than per optical channel that
-needs unmixing. Its app exports one run as a single JSON document. This is not a Bio-Rad
+needs unmixing. Its app exports one run as a single `.bmrun` file — one JSON document. This is not a Bio-Rad
 format and has no relation to `.zpcr`/`.pcrd`'s binary/ZIP/XML containers — it's documented
 here, rather than reverse-engineered field-by-field the way `plateread.md`/`pcrd.md` are,
 because the JSON is already self-describing (named keys, no offsets or byte layout to recover).
@@ -54,7 +54,7 @@ one JSON document, with no archive to hold a `zpcrweb.json`.
 holders, not a plate — `details.strip` is a physical fact about which sub-strip a tube sits in
 (informational, and unused for layout), but `parseBiomeme` places every well at row 0 and
 assigns the column by rank among the run's distinct `details.wellNumber`s, in ascending order.
-On the committed sample (`samples/biomeme-2024-01-17.json`, a 9-tube device) that numbering is
+On the committed sample (`samples/biomeme-2024-01-17.bmrun`, a 9-tube device) that numbering is
 already global across strips (strip A holds wellNumber 0–2, B holds 3–5, C holds 6–8), so the
 result is a single row of 9 columns — 3 or 6 for a device using fewer strips, an arbitrary count
 driven by the data rather than a fixed shape. `Zpcr.metadata.numberPlateRows`/`PlateDefinition.

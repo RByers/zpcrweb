@@ -11,7 +11,7 @@
  * its own tail — `plate.plt.csv` has to split as `plate` + `.plt.csv`, not `plate.plt` + `.csv`,
  * or the index lands in the middle of the extension.
  */
-const EXTENSIONS = [".plt.csv", ".prcl.txt", ".zpcr", ".pcrd", ".pltd", ".prcl", ".json", ".csv", ".txt"];
+const EXTENSIONS = [".plt.csv", ".prcl.txt", ".zpcr", ".pcrd", ".pltd", ".prcl", ".bmrun", ".csv", ".txt"];
 
 /** Split `name` into its stem and one of the {@link EXTENSIONS}, or the whole name and `""` when
  * it ends in none of them. */

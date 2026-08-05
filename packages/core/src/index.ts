@@ -147,7 +147,7 @@ export type {
 } from "./alf.js";
 export { parseDcal, findDcalBlock, isDcalName, dyeChannelLookup } from "./dcal.js";
 export { parsePcrd, isPcrdName, pcrdFromBlob } from "./pcrd.js";
-export { parseBiomeme, isBiomemeJson } from "./biomeme.js";
+export { parseBiomeme } from "./biomeme.js";
 export { fileCategory, fileKindDescription } from "./fileKind.js";
 export {
   buildDyeResponseCurve,

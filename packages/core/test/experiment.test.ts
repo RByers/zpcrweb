@@ -131,10 +131,10 @@ describe("experiment identity of the sample runs", () => {
   });
 
   it("a Biomeme export names its own run", () => {
-    const run = parseBiomeme(readSample("biomeme-2024-01-17.json"));
+    const run = parseBiomeme(readSample("biomeme-2024-01-17.bmrun"));
     expect(run.metadata.experimentName).toBe("2024-01-17-22220147");
     expect(
-      resolveExperimentName({ metadata: run.metadata, fileName: "biomeme-2024-01-17.json" }),
+      resolveExperimentName({ metadata: run.metadata, fileName: "biomeme-2024-01-17.bmrun" }),
     ).toBe("2024-01-17-22220147");
   });
 });

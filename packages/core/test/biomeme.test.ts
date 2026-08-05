@@ -2,23 +2,24 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { ANALYSIS_BASELINE_MODE, computeCqTable, isBiomemeJson, parseBiomeme } from "../src/index.js";
+import { ANALYSIS_BASELINE_MODE, computeCqTable, parseBiomeme } from "../src/index.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const BIOMEME_PATH = resolve(here, "../../../samples/biomeme-2024-01-17.json");
+const BIOMEME_PATH = resolve(here, "../../../samples/biomeme-2024-01-17.bmrun");
 
 function readBiomemeBytes(): Uint8Array {
   const buf = readFileSync(BIOMEME_PATH);
   return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
 }
 
-describe("isBiomemeJson", () => {
-  it("recognizes a Biomeme run export", () => {
-    expect(isBiomemeJson(readBiomemeBytes())).toBe(true);
+describe("parseBiomeme rejects a file that isn't one", () => {
+  // A `.bmrun` is routed on its extension alone, so parsing is where a misnamed file is caught.
+  it("rejects bytes that aren't JSON", () => {
+    expect(() => parseBiomeme(new TextEncoder().encode("PKnot json"))).toThrow(/not JSON/);
   });
 
-  it("rejects arbitrary JSON", () => {
-    expect(isBiomemeJson(new TextEncoder().encode(JSON.stringify({ a: 1 })))).toBe(false);
+  it("rejects JSON with no targets", () => {
+    expect(() => parseBiomeme(new TextEncoder().encode(JSON.stringify({ a: 1 })))).toThrow(/no targets/);
   });
 });
 

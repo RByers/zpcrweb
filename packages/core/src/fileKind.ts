@@ -3,7 +3,7 @@
  *
  * This library reads six file formats, but they are only three kinds of thing: a whole **run**, a
  * **plate** map, or a thermal **protocol**. Each of those has more than one encoding — a run
- * arrives as a `.zpcr`, a `.pcrd` or a Biomeme `.json`; a plate as an encrypted `.pltd` or a
+ * arrives as a `.zpcr`, a `.pcrd` or a Biomeme `.bmrun`; a plate as an encrypted `.pltd` or a
  * `.plt.csv`; a protocol as a `.prcl` or this project's `.prcl.txt` — and which encoding it came
  * in is, for most purposes, an implementation detail of the parse. A consumer asking "can this be
  * the plate half of a run?" or "which icon does this get?" is asking about the category, so the
@@ -47,7 +47,7 @@ const CATEGORY_LABEL: Record<FileCategory, string> = {
 const DESCRIPTION: Record<FileKind, string> = {
   zpcr: "Bio-Rad CFX instrument raw output",
   pcrd: "Bio-Rad CFX Manager saved experiment",
-  biomeme: "biomeme json results",
+  biomeme: "Biomeme handheld device results",
   pltd: "Bio-Rad format",
   csv: "zpcrweb comma-separated values",
   prcl: "Bio-Rad CFX thermal-cycling protocol",

@@ -35,7 +35,7 @@ const GRADIENT_ZPCR = join(REPO, "samples/20260725_GRADIENTTEST.zpcr");
 const PLTD = join(REPO, "samples/QuickPlate_96 wells_All Channels.pltd");
 /** The Biomeme run export — the one input format that isn't Bio-Rad's, and the one that names
  * its own run rather than encoding the name in a filename. */
-const BIOMEME = join(REPO, "samples/biomeme-2024-01-17.json");
+const BIOMEME = join(REPO, "samples/biomeme-2024-01-17.bmrun");
 /** The run whose `.pcrd` persists a hand-set FAM threshold — see {@link persistedThresholdChecks}. */
 const RVP_PCRD = join(REPO, "samples/20260726_S183-S185_RVP.pcrd");
 const EXAMPLE = "20260726_S183-S185_RVP.zpcr";
@@ -2486,7 +2486,7 @@ async function experimentNameChecks(chrome, origin) {
     .then(JSON.parse);
   check(
     "a Biomeme run has a Raw tab showing its JSON, in the standalone (no file list) viewer",
-    raw.fname === "biomeme-2024-01-17.json" &&
+    raw.fname === "biomeme-2024-01-17.bmrun" &&
       raw.label.includes("JSON") &&
       raw.list === 0 &&
       /"id"\s*:/.test(raw.body),

@@ -87,7 +87,7 @@ Still open:
       Biomeme's baseline-*placement* pass, stay on pure jitter — only the already-placed final
       noise/threshold would blend). Fixes the reported file (all green/red curves correctly go to
       no-Cq, orange keeps its Cq within ~1 cycle of the device's own). **But regresses the
-      committed regression sample** (`samples/biomeme-2024-01-17.json`,
+      committed regression sample** (`samples/biomeme-2024-01-17.bmrun`,
       `packages/core/test/biomeme.test.ts`): amplified/not agreement drops 19/27 → 16/27, and the
       sample's one known true-positive well (well 4, TexRedX, file Cq 23.24) disappears — that
       channel's real positives in this sample are themselves gentle continuous rises from cycle 1

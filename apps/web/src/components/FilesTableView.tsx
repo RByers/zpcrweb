@@ -64,7 +64,7 @@ interface Props {
 const EXTENSION_TEXT: Record<FileKind, string> = {
   zpcr: "zpcr",
   pcrd: "pcrd",
-  biomeme: "json",
+  biomeme: "bmrun",
   pltd: "pltd",
   csv: "plt.csv",
   prcl: "prcl.txt",

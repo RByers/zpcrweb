@@ -1,7 +1,7 @@
 # Web app architecture
 
 The web app (`@zpcrweb/web`) is a browser UI over [`@zpcrweb/core`](../../packages/core). It
-holds a catalog of files — `.zpcr`, `.pcrd`, a Biomeme run export (`.json`, see "A third format:
+holds a catalog of files — `.zpcr`, `.pcrd`, a Biomeme run export (`.bmrun`, see "A third format:
 Biomeme" below), a standalone plate file (`.pltd` or zpcrweb's own `.plt.csv`, see "Standalone
 plate entries and attach" below) or a thermal protocol (`.prcl.txt`) — **loads** some of them,
 **selects exactly one** of those, and explores it through up to eight views: Overview, Protocol,
@@ -1120,7 +1120,7 @@ what `exportBytes` writes into a downloaded copy, modulo the write-time `updated
 ### `StandaloneRawView` (one file, no archive)
 
 The third raw view, and the smallest: a viewer with no file list beside it, for a top-level entry
-that *is* a single file — a standalone `.pltd`/`.plt.csv`, and a Biomeme run's JSON. Same toolbar
+that *is* a single file — a standalone `.pltd`/`.plt.csv`, and a Biomeme `.bmrun`. Same toolbar
 and Text/Hex modes as `RawFilesView`, with the text tab named for what it holds ("XML" for a
 `.pltd`'s decrypted payload, "JSON" for a Biomeme run, "Text" otherwise), and the same
 `looksLikeXml` sniffing deciding between the XML tree and the flat dump.
@@ -1265,13 +1265,13 @@ and, on top of those, the run's **Cq table**.
 
 ## A third format: Biomeme
 
-`@zpcrweb/core`'s `parseBiomeme` decodes a Biomeme handheld instrument's run-export JSON into the
-same `Zpcr` shape `parseZpcr`/`parsePcrd` produce (see the root
+`@zpcrweb/core`'s `parseBiomeme` decodes a Biomeme handheld instrument's `.bmrun` run export into
+the same `Zpcr` shape `parseZpcr`/`parsePcrd` produce (see the root
 [`ARCHITECTURE.md`](../../ARCHITECTURE.md#a-third-non-cfx-input-biomeme) and
 [`biomeme.md`](../../biomeme.md)), so `useZpcrStore` routes it through the exact same
-`RunResult`/`useRunAnalysis` pipeline every other run uses — a `.json` file only reaches
-`parseBiomeme` after `isBiomemeJson()` sniffs its content (the extension alone is too generic a
-signal; see `fileKind()` in `state/useZpcrStore.ts`), and from there on almost nothing in the app
+`RunResult`/`useRunAnalysis` pipeline every other run uses — `.bmrun` names the format, so
+`fileKind()` (`state/useZpcrStore.ts`) routes on the extension like every other format bar `.txt`,
+and from there on almost nothing in the app
 needs to know it isn't a `.zpcr`. Two real differences do surface, both because they're
 capability checks rather than format checks:
 

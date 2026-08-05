@@ -9,7 +9,6 @@ import {
   buildExperimentArchive,
   formatRunDefinitionText,
   hasZpcrwebSettings,
-  isBiomemeJson,
   markExperimentBegun,
   parseBiomeme,
   parsePcrd,
@@ -649,18 +648,16 @@ function fromStored(e: StoredEntry): FileSettings {
   };
 }
 
-/** True for file names this app knows how to load. A `.json` is only accepted once its content
- * actually looks like a Biomeme run export (see {@link isBiomemeJson}) — the extension alone is
- * too generic a signal to route into the app's parse/validate path on. */
+/** True for file names this app knows how to load. */
 function fileKind(name: string, bytes?: Uint8Array): FileKind | null {
   if (/\.zpcr$/i.test(name)) return "zpcr";
   if (/\.pcrd$/i.test(name)) return "pcrd";
   if (/\.pltd$/i.test(name)) return "pltd";
   if (/\.csv$/i.test(name)) return "csv";
-  if (/\.json$/i.test(name) && bytes && isBiomemeJson(bytes)) return "biomeme";
+  if (/\.bmrun$/i.test(name)) return "biomeme";
   // `.txt` is far too generic an extension to route on, so it is admitted only when the content
-  // really is a run definition (`prcl.md` §3.1) — the same content-sniffing rule `.json` gets
-  // above. That also lets an instrument's own `ProtocolRunDefinition.txt` in unrenamed.
+  // really is a run definition (`prcl.md` §3.1), unlike every extension above, which names its
+  // format. That also lets an instrument's own `ProtocolRunDefinition.txt` in unrenamed.
   if (/\.txt$/i.test(name) && bytes && looksLikeProtocolText(bytes)) return "prcl";
   return null;
 }
@@ -1359,9 +1356,9 @@ export function useZpcrStore(): ZpcrStore {
 
   const addFiles = useCallback(
     async (input: FileList | File[], options?: AddFilesOptions) => {
-      // `.json`'s kind can only be known after reading its bytes (see `fileKind`), so every file
+      // `.txt`'s kind can only be known after reading its bytes (see `fileKind`), so every file
       // is read up front rather than filtered by extension first the way the other formats are.
-      const candidates = Array.from(input).filter((file) => /\.(zpcr|pcrd|pltd|csv|json|txt)$/i.test(file.name));
+      const candidates = Array.from(input).filter((file) => /\.(zpcr|pcrd|pltd|csv|bmrun|txt)$/i.test(file.name));
       let lastId: string | null = null;
       let lastKind: FileKind | null = null;
       for (const file of candidates) {
@@ -1375,7 +1372,7 @@ export function useZpcrStore(): ZpcrStore {
                 ? // The name got this far, so say what was wrong with the *content* rather than
                   // repeating the extension list — a `.txt` is only ever rejected for that.
                   "not a thermal protocol (.prcl.txt)"
-                : "not a .zpcr, .pcrd, .pltd, .csv, .prcl.txt or Biomeme .json file",
+                : "not a .zpcr, .pcrd, .pltd, .csv, .prcl.txt or .bmrun file",
             );
           }
           // Validate the container eagerly so obviously-bad files are rejected up front; a
@@ -1486,10 +1483,10 @@ export function useZpcrStore(): ZpcrStore {
     async (url: string) => {
       const name = fileNameFromUrl(url);
       try {
-        // `.json`'s kind needs its bytes (see `fileKind`); only the extension is checked here,
-        // and `addFiles` below does the real (content-based) validation once it has them.
-        if (!/\.(zpcr|pcrd|pltd|csv|json)$/i.test(name)) {
-          throw new Error("not a .zpcr, .pcrd, .pltd, .csv or Biomeme .json file");
+        // Only the extension is checked here; `addFiles` below does the real (content-based)
+        // validation once it has the bytes.
+        if (!/\.(zpcr|pcrd|pltd|csv|bmrun)$/i.test(name)) {
+          throw new Error("not a .zpcr, .pcrd, .pltd, .csv or .bmrun file");
         }
         const res = await fetch(url, { credentials: "omit" });
         if (!res.ok) throw new Error(`fetch failed (HTTP ${res.status})`);
