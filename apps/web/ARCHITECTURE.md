@@ -740,6 +740,14 @@ so every call site keeps writing one `onChange({ … })` regardless of where the
   never back into `files` state, where they would re-parse the run and rebuild every derived
   value on each save. `size` is deliberately left at the loaded file's size so `fileId()` still
   dedupes a re-add of the same file.
+- **Every other write carries them too.** Because the in-memory archive never holds the settings
+  entry, a write made for some *other* reason — a rename, a protocol edit, a plate read arriving —
+  would otherwise store an archive with `zpcrweb.json` missing and silently drop the run's name and
+  thresholds. So the single write choke point, `useZpcrStore`'s `persistFile`, layers the file's
+  current settings in on the way out (`contentToStore`), and skips the work entirely when there is
+  nothing to write. Naming a pending experiment is the case that made this necessary: the name is
+  itself a file-backed setting, and typing it renames the file in the same breath (`nameExperiment`),
+  so the record written under the new name has to carry the settings from the old one.
 - **Downloads** go through `ZpcrStore.exportBytes`, which re-zips on demand, so a copy saved from
   the Overview view carries the thresholds it was read with. It is also what clears the file's
   `modified` flag ("Deleting an edited file", above) — the edits are on disk now. Otherwise a

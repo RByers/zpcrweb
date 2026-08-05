@@ -8,6 +8,7 @@ import {
   attachProtocol as attachProtocolToArchive,
   buildExperimentArchive,
   formatRunDefinitionText,
+  hasZpcrwebSettings,
   isBiomemeJson,
   markExperimentBegun,
   parseBiomeme,
@@ -342,9 +343,38 @@ function identityOf(file: LoadedFile): FileIdentity {
 
 /** Persist a loaded file — the one place a `db.ts` write is assembled from a {@link LoadedFile}, so
  * the choice of storage representation is made once (`toStoredContent`) rather than at each of
- * the dozen call sites that persist a file. */
-function persistFile(file: LoadedFile): Promise<void> {
-  return putFile(identityOf(file), toStoredContent(file.content));
+ * the dozen call sites that persist a file. `analysis` is the file's file-backed settings, layered
+ * in on the way out; see {@link contentToStore} for why every write has to carry them. */
+function persistFile(file: LoadedFile, analysis?: AnalysisSettings): Promise<void> {
+  return putFile(identityOf(file), toStoredContent(contentToStore(file, analysis)));
+}
+
+/**
+ * What actually gets stored for a file: its archive with the app's own `zpcrweb.json` layered in.
+ *
+ * A loaded `.zpcr`'s in-memory archive deliberately carries **no** settings entry — the run's name
+ * and its thresholds live in `analysisMap`, and are written into the archive only on the way out
+ * (`analysisPersist.ts` for the throttled save, `exportBytes` for a download). That split means any
+ * write of the file's *content* for some other reason — a rename, a protocol edit, a plate read
+ * arriving — would store an archive with the entry missing, and silently drop them. Naming a
+ * pending experiment did exactly that: the name renames the file in the same breath (`App.tsx`'s
+ * `nameExperiment`), and the renamed record was written from the settings-free copy, so the name
+ * was gone on the next reload.
+ *
+ * Free for a run held open (one more entry in an object). An unzip and a re-zip for a finished one,
+ * which is what editing a finished archive costs anyway — and skipped entirely when there is
+ * nothing to write, which is the case for every file that is merely being loaded or released.
+ */
+function contentToStore(file: LoadedFile, analysis: AnalysisSettings | undefined): FileContent {
+  if (file.kind !== "zpcr" || !analysis) return file.content;
+  const doc = zpcrwebFromAnalysis(analysis);
+  if (!hasZpcrwebSettings(doc)) return file.content;
+  try {
+    return runContent(writeZpcrwebSettings(contentFiles(file.content), doc));
+  } catch {
+    // Not an archive this build can rewrite: store what we have rather than losing the write.
+    return file.content;
+  }
 }
 
 /**
@@ -1014,7 +1044,7 @@ export function useZpcrStore(): ZpcrStore {
       write: async (id) => {
         const file = loadedRef.current.find((f) => f.id === id);
         if (!file || (file.kind !== "prcl" && file.kind !== "zpcr")) return;
-        await persistFile(file);
+        await persistFile(file, analysisRef.current[id]);
       },
       onError: (e) => setError(e instanceof Error ? e.message : String(e)),
     });
@@ -1276,7 +1306,10 @@ export function useZpcrStore(): ZpcrStore {
       const superseded = entriesRef.current.filter((f) => f.name === file.name && f.id !== file.id);
       for (const old of superseded) await forget(old.id);
       const supersededIds = new Set(superseded.map((f) => f.id));
-      await persistFile(file);
+      // Normally nothing to layer in — a file arriving from disk hasn't been seeded yet, and its
+      // own `zpcrweb.json` (if it has one) is already in the bytes. A file re-added under an id
+      // that is already here keeps whatever was typed against it.
+      await persistFile(file, analysisRef.current[file.id]);
       const entry: FileEntry = {
         id: file.id,
         name: file.name,
@@ -1314,7 +1347,7 @@ export function useZpcrStore(): ZpcrStore {
    */
   const commitContent = useCallback(
     async (next: LoadedFile) => {
-      await persistFile(next);
+      await persistFile(next, analysisRef.current[next.id]);
       setLoadedFiles((prev) => {
         loadedRef.current = replaceFile(prev, next);
         return loadedRef.current;
@@ -1677,7 +1710,10 @@ export function useZpcrStore(): ZpcrStore {
       // Renaming onto a name (+size) that collides with an already-loaded file supersedes it,
       // the same way `addFiles` handles a same-named re-upload.
       for (const old of loadedRef.current.filter((f) => f.id === newId)) await forget(old.id);
-      await persistFile({ ...file, id: newId, name });
+      // Under the *old* id: the settings move to `newId` below, but the record being written is
+      // this file's, and dropping them here is what used to lose the name of an experiment that
+      // had just been named (naming one renames its file — `App.tsx`'s `nameExperiment`).
+      await persistFile({ ...file, id: newId, name }, analysisRef.current[id]);
       await deleteFile(id);
       setLoadedFiles((prev) => {
         loadedRef.current = prev.map((f) => (f.id === id ? { ...f, id: newId, name } : f));

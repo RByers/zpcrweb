@@ -1928,6 +1928,34 @@ async function instrumentRunChecks(chrome, origin) {
     JSON.stringify(named),
   );
 
+  // The name is only really *given* if it outlives the session — it lives in the file's own
+  // `zpcrweb.json`, not in this browser. This is the pending-experiment case specifically, and it
+  // is the one that used to fail: naming one renames its file in the same breath, and the record
+  // written under the new name was assembled from the in-memory archive, which deliberately carries
+  // no settings entry. So the name went back to being required on the next load, and with it the
+  // red field and the "required" badge (`useZpcrStore`'s `contentToStore`).
+  await sleep(700); // the archive rewrite is immediate but asynchronous (`analysisPersist.ts`)
+  await cdp.send("Page.navigate", {
+    url: `${origin}#file=${encodeURIComponent(named.file)}&view=overview`,
+  });
+  await tabBecomes(cdp, "Overview");
+  await waitFor(() => cdp.eval(`!!document.querySelector(".overview__name")`), {
+    what: "the reloaded name field",
+  });
+  const afterReload = await cdp.eval(`(() => {
+    const el = document.querySelector(".overview__name");
+    return {
+      name: el?.value ?? null,
+      stillRequired: !!el?.required,
+      badge: !!document.querySelector(".overview__namerequired"),
+    };
+  })()`);
+  check(
+    "…and the name outlives the reload, rather than going back to required",
+    afterReload.name === "Cloned RVP" && !afterReload.stillRequired && !afterReload.badge,
+    JSON.stringify(afterReload),
+  );
+
   // A pending experiment's Protocol tab is an *editor*, not a record — that is the difference the
   // pending state buys, and what makes "write a protocol from scratch" possible without authoring a
   // separate file first. A run that has happened gets the read-only listing instead.
