@@ -1442,10 +1442,10 @@ only pieces the two views share.
 
 - **Selection:** a channel bar (6 dye-labelled toggles) and a well matrix (`WellMatrix`, 8×12 for
   a CFX plate, sized to the run's actual plate otherwise — see "A third format: Biomeme" above)
-  whose row and column headers toggle whole rows/columns, plus an all/none corner. Hovering
-  follows the same grain as clicking: a cell highlights its own well, a row/column header
-  highlights every well it would toggle (outlining them in the grid and peeking at them on the
-  chart, as one `"wells"` `HighlightMatch` — see "Rail hover highlight" below). Once the
+  whose row and column headers toggle whole rows/columns, plus an all/none corner. Hovering and
+  double-clicking follow the same grain as clicking: a cell highlights or isolates its own well,
+  a row/column header every well it would toggle (outlining them in the grid and peeking at them
+  on the chart, as one `"wells"` `HighlightMatch` — see "Rail hover highlight" below). Once the
   plate definition is available (password permitting), each cell is tinted by
   `SAMPLE_TYPE_META` (see **Plates** below) so selection state reads alongside sample type; a
   reset button next to the "Wells" label restores the selection to exactly the plate's
@@ -1649,9 +1649,13 @@ only pieces the two views share.
   in `visibleChannel`/`fluorCurveVisible`/`sampleVisible` (only its own dimension's check — hovering
   a disabled target doesn't also reveal wells the user turned off), so the "peek" a hover implies
   actually shows the curve instead of just dimming everyone else.
-  Double-clicking a chip/cell (`onSolo`/`onSoloWell` on each of the four components) isolates it
-  within its own dimension — `CurvesView`'s `soloChannel`/`soloFluor`/`soloWell`/`soloSample`
-  reset that dimension's enabled/disabled set so only the double-clicked item remains on.
+  Double-clicking a chip/cell (`onSolo`/`onSoloWells` on each of the four components) isolates it
+  within its own dimension — `CurvesView`'s `soloChannel`/`soloFluor`/`soloWells`/`soloSample`
+  reset that dimension's enabled/disabled set so only the double-clicked item remains on. In
+  `WellMatrix` that gesture runs at the same grain as click and hover do: `onSoloWells` takes a
+  *list* of well keys, so a cell sends its own and a row/column header sends the whole row or
+  column, isolating exactly the wells its click would have toggled. `uitest.mjs`'s
+  `wellHeaderChecks` covers both headers.
 - **X axis:** integer cycles only — a tick per cycle, gridline + label every 5.
 - **Hover/tap tooltip:** a uPlot cursor plugin finds the nearest series (well curve, dark,
   factory overlay, or temperature) and reports its label, channel/dye, cycle, and

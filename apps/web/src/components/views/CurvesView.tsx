@@ -728,7 +728,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
     onChange({ disabledFluors: next });
   };
 
-  const soloWell = (row: number, col: number) => onChange({ enabledWells: new Set([wellKey(row, col)]) });
+  const soloWells = (keys: string[]) => onChange({ enabledWells: new Set(keys) });
 
   const soloSample = (name: string) => {
     const next = new Set(sampleList);
@@ -1057,7 +1057,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
             wellTypes={wellTypes}
             positiveWells={positiveWells}
             onHoverWells={(labels) => setHoverHighlight(labels ? { kind: "wells", labels } : null)}
-            onSoloWell={soloWell}
+            onSoloWells={soloWells}
             cardData={cardForWell}
           />
         </div>

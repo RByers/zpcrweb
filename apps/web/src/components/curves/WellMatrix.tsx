@@ -28,8 +28,10 @@ interface Props {
    * one well. Labels, not row/col pairs, because that is what a curve carries — see {@link
    * cellLabel}. */
   onHoverWells?: (labels: string[] | null) => void;
-  /** Double-clicking a well cell — isolates it: only this well stays enabled. */
-  onSoloWell?: (row: number, col: number) => void;
+  /** Double-clicking part of the grid — isolates what was double-clicked: only these wells stay
+   * enabled. A cell sends its own key, a row or column header every key in that row/column, so
+   * the same grain that governs clicking and hovering governs soloing too. */
+  onSoloWells?: (keys: string[]) => void;
   /** Hover-card content for a well's label (see {@link cellLabel}), or `null`/undefined to show
    * none. */
   cardData?: (label: string) => HoverCardData | null | undefined;
@@ -81,8 +83,8 @@ function cellLabel(row: number, col: number, rows: number): string {
  * arbitrary, possibly single-row, shape for a Biomeme run — see {@link Props.rows}/`cols`).
  * Cells toggle a single well; the row and column headers toggle a whole row/column (the row
  * header is omitted for a single-row plate — see {@link cellLabel}); the corner toggles all
- * wells. Hovering follows the same grain as clicking: a cell highlights its own well, a header
- * highlights every well it would toggle. The reference row is shown separately, in the
+ * wells. Hovering and double-clicking follow the same grain as clicking: a cell highlights or
+ * isolates its own well, a header every well it would toggle. The reference row is shown separately, in the
  * Reference view.
  */
 export function WellMatrix({
@@ -93,7 +95,7 @@ export function WellMatrix({
   wellTypes,
   positiveWells,
   onHoverWells,
-  onSoloWell,
+  onSoloWells,
   cardData,
 }: Props) {
   const { show, hide, node } = useHoverCard(cardData ?? (() => null));
@@ -158,6 +160,7 @@ export function WellMatrix({
       <button
         className="wm-head"
         onClick={() => toggleGroup(rowKeys(r))}
+        onDoubleClick={() => onSoloWells?.(rowKeys(r))}
         {...groupHover(rowKeys(r), rowLabels(r))}
         title={singleRow ? "Toggle all wells" : `Toggle row ${String.fromCharCode(65 + r)}`}
       >
@@ -187,7 +190,7 @@ export function WellMatrix({
                 : undefined
             }
             onClick={() => toggleWell(r, c)}
-            onDoubleClick={() => onSoloWell?.(r, c)}
+            onDoubleClick={() => onSoloWells?.([key])}
             onMouseEnter={(e) => {
               onHoverWells?.([label]);
               show(label, e.currentTarget);
@@ -244,6 +247,7 @@ export function WellMatrix({
           key={`col${c}`}
           className="wm-head"
           onClick={() => toggleGroup(colKeys(c))}
+          onDoubleClick={() => onSoloWells?.(colKeys(c))}
           {...groupHover(colKeys(c), colLabels(c))}
           title={`Toggle column ${c + 1}`}
         >

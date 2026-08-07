@@ -1227,13 +1227,13 @@ async function referenceChecks(chrome, origin) {
 }
 
 /**
- * The Wells grid's row/column headers as *hover* targets: hovering one peeks at that whole
- * row/column of wells on the chart, the same way hovering a single cell peeks at one well, and
- * marks the wells it covers in the grid. Invisible to a screenshot — the peek is transient, and
- * a chart with more curves on it looks the same however they got there.
+ * The Wells grid's row/column headers as hover and double-click targets: hovering one peeks at
+ * that whole row/column of wells on the chart, and double-clicking it isolates them — the same
+ * two gestures a single cell offers for one well. Invisible to a screenshot — the peek is
+ * transient, and a chart with more curves on it looks the same however they got there.
  */
-async function wellHeaderHoverChecks(chrome, origin) {
-  console.log("\ncurves rail (well row/column header hover)");
+async function wellHeaderChecks(chrome, origin) {
+  console.log("\ncurves rail (well row/column headers)");
   const cdp = await openPage(chrome.base, origin);
   await sleep(600);
   await loadFile(cdp, ZPCR);
@@ -1320,6 +1320,26 @@ async function wellHeaderHoverChecks(chrome, origin) {
 
   // The selection itself is untouched: hovering shows wells, it never turns them on.
   check("…without changing which wells are selected", (await cellsOn()) === soloWells);
+
+  // Double-click follows the same grain as hover: a header isolates its whole row/column, exactly
+  // as a cell isolates one well. The pair of clicks a double-click also fires toggles the group on
+  // and straight back off, so the solo is what survives.
+  const dblclick = async (sel) => {
+    await cdp.eval(`(${sel}.dispatchEvent(new MouseEvent("dblclick", { bubbles: true })), undefined)`);
+    await sleep(300);
+  };
+  await dblclick(rowHead(grid.row));
+  check(
+    "double-clicking a row header isolates that row",
+    (await cellsOn()) === grid.cols,
+    `${await cellsOn()} wells on, expected ${grid.cols}`,
+  );
+  await dblclick(colHead(grid.col));
+  check(
+    "double-clicking a column header isolates that column",
+    (await cellsOn()) === grid.rows,
+    `${await cellsOn()} wells on, expected ${grid.rows}`,
+  );
 
   cdp.close();
 }
@@ -3768,7 +3788,7 @@ async function main() {
     await tablePickChecks(chrome, origin);
     await persistedThresholdChecks(chrome, origin, pw);
     await cqFilterChecks(chrome, origin);
-    await wellHeaderHoverChecks(chrome, origin);
+    await wellHeaderChecks(chrome, origin);
     await referenceChecks(chrome, origin);
     await calibrationChecks(chrome, origin);
     await passwordChecks(chrome, origin, pw);
