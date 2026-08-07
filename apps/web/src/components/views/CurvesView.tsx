@@ -290,7 +290,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
   const cellLabel = (row: number, col: number) =>
     plateRows === 1 ? String(col + 1) : wellLabel(row, col);
   const isHoveredWell = (row: number, col: number) =>
-    hoverHighlight?.kind === "well" && hoverHighlight.label === cellLabel(row, col);
+    hoverHighlight?.kind === "wells" && hoverHighlight.labels.includes(cellLabel(row, col));
   const isHoveredChannel = (channel: number) =>
     hoverHighlight?.kind === "channel" && hoverHighlight.channel === channel;
   const isHoveredSample = (sample: string | undefined) =>
@@ -921,7 +921,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
     setHoverHighlight(
       calibrationOn
         ? { kind: "curve", label: c.wellLabel, fluor: g.fluor }
-        : { kind: "well", label: c.wellLabel },
+        : { kind: "wells", labels: [c.wellLabel] },
     );
     setHoverThreshold(calibrationOn ? { fluor: g.fluor, curveKey: c.key, regions: true } : null);
   };
@@ -1056,7 +1056,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
             onChange={(next) => onChange({ enabledWells: next })}
             wellTypes={wellTypes}
             positiveWells={positiveWells}
-            onHoverWell={(label) => setHoverHighlight(label ? { kind: "well", label } : null)}
+            onHoverWells={(labels) => setHoverHighlight(labels ? { kind: "wells", labels } : null)}
             onSoloWell={soloWell}
             cardData={cardForWell}
           />

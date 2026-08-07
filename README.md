@@ -258,7 +258,7 @@ It walks the requested views and writes **one labelled contact-sheet PNG** —
 console errors, uncaught exceptions and failed page loads, which catch breakage a screenshot
 can't show.
 
-**`tools/uitest.mjs` (`npm run test:ui`) — assert it.** 227 browser assertions covering what
+**`tools/uitest.mjs` (`npm run test:ui`) — assert it.** 231 browser assertions covering what
 nothing else can catch: the two URL contracts — hash routing (deep links, back/forward,
 unknown-file and invalid-view fallbacks) and password handling (stripped from both URL forms,
 never leaked into the routing hash, an encrypted `.pcrd` still decrypting) — plus `#load=`, the
@@ -266,7 +266,8 @@ rule that every XML view uses the shared collapsible tree rather than a flat dum
 one-right-axis invariant (temperatures and LED currents can never both be on), the Calibration
 view's default selection (only the run's in-use `.Dcal` files of the 28 it ships, the rest a click
 away), and the rail chips' shared interaction contract (double-click solos, hovering a disabled
-chip peeks at it only while hovered) plus the Reference view's overlay toggles and x-axis modes —
+chip peeks at it only while hovered — including the Wells grid's row and column headers, which
+peek at the whole row/column) plus the Reference view's overlay toggles and x-axis modes —
 including that hiding the factory line doesn't break the ΔRFU baseline computed from the same
 values, and that its min/max bands draw under that baseline but drop out (with a note) on the
 column axis, where a point is a run mean with no spread of its own — and the Curves table's sort

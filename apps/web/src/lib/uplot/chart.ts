@@ -241,7 +241,8 @@ export interface FactoryCurve {
   mean: number[];
 }
 
-/** A target/fluor chip or well-grid cell to highlight — dims every other series to match the
+/** A target/fluor chip, or a well-grid cell or row/column header, to highlight — dims every
+ * other series to match the
  * cursor-proximity dimming `focus.alpha` already does for a single hovered curve, but driven by
  * hovering the rail's legend/well-grid instead of the plot itself. */
 export type HighlightMatch =
@@ -249,7 +250,9 @@ export type HighlightMatch =
   | { kind: "fluor"; fluor: string }
   /** One curve: a single well/fluorophore pair, the finest grain the chart can isolate. */
   | { kind: "curve"; label: string; fluor: string }
-  | { kind: "well"; label: string }
+  /** One or more whole wells, by display label — a single hovered well-grid cell, or every well
+   * in a row/column when its header is hovered. */
+  | { kind: "wells"; labels: string[] }
   | { kind: "channel"; channel: number }
   | { kind: "sample"; sample: string }
   /** One plate column — the Reference view's R1–R12 chips, which select columns rather than
@@ -874,7 +877,7 @@ export function applyHighlight(u: uPlot, meta: SeriesMeta[], match: HighlightMat
     const isMatch =
       !match ||
       (m.kind === "well" &&
-        ((match.kind === "well" && m.label === match.label) ||
+        ((match.kind === "wells" && match.labels.includes(m.label)) ||
           (match.kind === "target" && m.dyeLabel === match.dyeLabel) ||
           (match.kind === "fluor" && m.fluor === match.fluor) ||
           (match.kind === "curve" && m.label === match.label && m.fluor === match.fluor) ||

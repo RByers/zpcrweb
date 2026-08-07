@@ -1791,8 +1791,16 @@
   display: block;
   pointer-events: none;
 }
-.wm-cell:hover {
+/* Hover cue. The outline, not the border color, is what actually carries it: a cell with a
+   sample type sets `border-color` inline, which outranks any rule here, so a colored cell would
+   otherwise show nothing at all. `is-peek` is the same cue applied to a whole row or column from
+   its hovered header — see `WellMatrix`'s `groupHover` — so a header and a cell mark their wells
+   identically. */
+.wm-cell:hover,
+.wm-cell.is-peek {
   border-color: var(--border-strong);
+  outline: 1px solid var(--ink-muted);
+  outline-offset: 1px;
 }
 .wm-cell.is-on {
   background: var(--neon-cyan-dim);

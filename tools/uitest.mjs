@@ -1226,6 +1226,104 @@ async function referenceChecks(chrome, origin) {
   cdp.close();
 }
 
+/**
+ * The Wells grid's row/column headers as *hover* targets: hovering one peeks at that whole
+ * row/column of wells on the chart, the same way hovering a single cell peeks at one well, and
+ * marks the wells it covers in the grid. Invisible to a screenshot — the peek is transient, and
+ * a chart with more curves on it looks the same however they got there.
+ */
+async function wellHeaderHoverChecks(chrome, origin) {
+  console.log("\ncurves rail (well row/column header hover)");
+  const cdp = await openPage(chrome.base, origin);
+  await sleep(600);
+  await loadFile(cdp, ZPCR);
+  await waitFor(() => cdp.eval(`!!document.querySelector(".wm-cell")`), { what: "the well grid" });
+
+  /** Plotted-curve count, off the rail's own count line ("N / M curves"). */
+  const curveCount = async () =>
+    Number(
+      /^(\d+)/.exec((await cdp.eval(`document.querySelector(".rail__stat").textContent`)).trim())?.[1] ??
+        -1,
+    );
+  const cellsOn = () => cdp.eval(`document.querySelectorAll(".wm-cell.is-on").length`);
+  const peeked = () => cdp.eval(`document.querySelectorAll(".wm-cell.is-peek").length`);
+
+  /**
+   * The grid's shape, one loaded well to isolate, and a *second* loaded well whose row and column
+   * are the ones to hover. Both come from the plate rather than being hardcoded: this sample
+   * loads four wells out of the 96, so an arbitrary row or column is usually empty — hovering
+   * that marks its cells but adds no curves, which is correct behavior and a useless assertion.
+   * Peeking at a row/column holding a well that is *not* the isolated one is what makes "more
+   * curves appeared" mean something, whatever shape the loaded set happens to be.
+   */
+  const grid = await cdp.eval(`(() => {
+    const rowEls = [...document.querySelectorAll(".wm-row")];
+    const cols = rowEls[0].children.length - 1;
+    const on = [...document.querySelectorAll(".wm-cell")]
+      .map((c, i) => (c.className.includes("is-on") ? i : -1)).filter((i) => i >= 0);
+    return {
+      rows: rowEls.length, cols, loaded: on.length, solo: on[0] ?? -1,
+      row: Math.floor((on[1] ?? -1) / cols), col: (on[1] ?? -1) % cols,
+    };
+  })()`);
+  /** `.wm-head` runs every column header first, then one per row. */
+  const colHead = (c) => `document.querySelectorAll(".wm-head")[${c}]`;
+  const rowHead = (r) => `document.querySelectorAll(".wm-head")[${grid.cols} + ${r}]`;
+  // See `referenceChecks`' own `hover`: React needs a real over/out pair, so the peek only fires
+  // for an actual `Input.dispatchMouseEvent`.
+  const hover = async (sel) => {
+    let x = 5;
+    let y = 5;
+    if (sel) {
+      const box = await cdp.eval(`(() => { ${sel}.scrollIntoView({ block: "center" });
+          const r = ${sel}.getBoundingClientRect();
+          return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
+      ({ x, y } = box);
+    }
+    await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y, buttons: 0 });
+    await sleep(250);
+  };
+
+  // Isolate one loaded well, so the curves a hovered header adds are unambiguously the peek's.
+  await cdp.eval(`(document.querySelectorAll(".wm-cell")[${grid.solo}]
+      .dispatchEvent(new MouseEvent("dblclick", { bubbles: true })), undefined)`);
+  await sleep(300);
+  const soloWells = await cellsOn();
+  const soloCurves = await curveCount();
+  check(
+    "double-clicking a well isolates it",
+    soloWells === 1 && soloCurves > 0 && grid.loaded > 1,
+    `${soloWells} wells on, ${soloCurves} curves, ${grid.loaded} wells loaded`,
+  );
+
+  await hover(rowHead(grid.row));
+  const rowCurves = await curveCount();
+  const rowMarked = await peeked();
+  await hover(null);
+  const afterRow = await curveCount();
+  check(
+    "hovering a row header peeks at the whole row, and only while hovered",
+    rowCurves > soloCurves && rowMarked === grid.cols && afterRow === soloCurves,
+    `${soloCurves} → ${rowCurves} curves (${rowMarked} cells marked) → ${afterRow}`,
+  );
+
+  await hover(colHead(grid.col));
+  const colCurves = await curveCount();
+  const colMarked = await peeked();
+  await hover(null);
+  const afterCol = await curveCount();
+  check(
+    "hovering a column header peeks at the whole column, and only while hovered",
+    colCurves > soloCurves && colMarked === grid.rows && afterCol === soloCurves,
+    `${soloCurves} → ${colCurves} curves (${colMarked} cells marked) → ${afterCol}`,
+  );
+
+  // The selection itself is untouched: hovering shows wells, it never turns them on.
+  check("…without changing which wells are selected", (await cellsOn()) === soloWells);
+
+  cdp.close();
+}
+
 async function passwordChecks(chrome, origin, pw) {
   console.log("\npassword handling");
 
@@ -3670,6 +3768,7 @@ async function main() {
     await tablePickChecks(chrome, origin);
     await persistedThresholdChecks(chrome, origin, pw);
     await cqFilterChecks(chrome, origin);
+    await wellHeaderHoverChecks(chrome, origin);
     await referenceChecks(chrome, origin);
     await calibrationChecks(chrome, origin);
     await passwordChecks(chrome, origin, pw);

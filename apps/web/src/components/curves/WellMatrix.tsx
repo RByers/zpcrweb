@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { SampleType } from "@zpcrweb/core";
 import { wellKey } from "../../state/useZpcrStore";
 import { SAMPLE_TYPE_META } from "../../lib/sampleType";
@@ -21,9 +22,12 @@ interface Props {
    * {@link plusOpacity} so an early, strongly-positive well stands out from a late marginal one.
    * Wells with no positive curve are simply absent. */
   positiveWells?: Map<string, number>;
-  /** Hovering a well cell (by its label — see {@link cellLabel} — or `null` on leave) — drives
-   * the curve-chart highlight. */
-  onHoverWell?: (label: string | null) => void;
+  /** Hovering part of the grid (`null` on leave) — drives the curve-chart highlight. A cell
+   * sends its own label; a row or column header sends every label in that row/column, so
+   * hovering "A" or "3" isolates the whole line of wells exactly as hovering one cell isolates
+   * one well. Labels, not row/col pairs, because that is what a curve carries — see {@link
+   * cellLabel}. */
+  onHoverWells?: (labels: string[] | null) => void;
   /** Double-clicking a well cell — isolates it: only this well stays enabled. */
   onSoloWell?: (row: number, col: number) => void;
   /** Hover-card content for a well's label (see {@link cellLabel}), or `null`/undefined to show
@@ -77,7 +81,9 @@ function cellLabel(row: number, col: number, rows: number): string {
  * arbitrary, possibly single-row, shape for a Biomeme run — see {@link Props.rows}/`cols`).
  * Cells toggle a single well; the row and column headers toggle a whole row/column (the row
  * header is omitted for a single-row plate — see {@link cellLabel}); the corner toggles all
- * wells. The reference row is shown separately, in the Reference view.
+ * wells. Hovering follows the same grain as clicking: a cell highlights its own well, a header
+ * highlights every well it would toggle. The reference row is shown separately, in the
+ * Reference view.
  */
 export function WellMatrix({
   rows = 8,
@@ -86,12 +92,16 @@ export function WellMatrix({
   onChange,
   wellTypes,
   positiveWells,
-  onHoverWell,
+  onHoverWells,
   onSoloWell,
   cardData,
 }: Props) {
   const { show, hide, node } = useHoverCard(cardData ?? (() => null));
   const singleRow = rows === 1;
+  /** Well keys the pointer is over as a group, i.e. the row or column whose header is hovered.
+   * A cell marks itself with CSS `:hover`; a header sits outside the cells it covers, so which
+   * ones it lights up has to be tracked here. */
+  const [peek, setPeek] = useState<Set<string> | null>(null);
   const sampleKeys = () => {
     const keys: string[] = [];
     for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) keys.push(wellKey(r, c));
@@ -107,6 +117,20 @@ export function WellMatrix({
 
   const rowKeys = (r: number) => Array.from({ length: cols }, (_, c) => wellKey(r, c));
   const colKeys = (c: number) => Array.from({ length: rows }, (_, r) => wellKey(r, c));
+  const rowLabels = (r: number) => Array.from({ length: cols }, (_, c) => cellLabel(r, c, rows));
+  const colLabels = (c: number) => Array.from({ length: rows }, (_, r) => cellLabel(r, c, rows));
+
+  /** Hover handlers for a header, over the same wells its click would toggle. */
+  const groupHover = (keys: string[], labels: string[]) => ({
+    onMouseEnter: () => {
+      setPeek(new Set(keys));
+      onHoverWells?.(labels);
+    },
+    onMouseLeave: () => {
+      setPeek(null);
+      onHoverWells?.(null);
+    },
+  });
 
   const toggleGroup = (keys: string[]) => {
     const allOn = keys.every((k) => enabled.has(k));
@@ -134,6 +158,7 @@ export function WellMatrix({
       <button
         className="wm-head"
         onClick={() => toggleGroup(rowKeys(r))}
+        {...groupHover(rowKeys(r), rowLabels(r))}
         title={singleRow ? "Toggle all wells" : `Toggle row ${String.fromCharCode(65 + r)}`}
       >
         {singleRow ? "" : String.fromCharCode(65 + r)}
@@ -151,7 +176,7 @@ export function WellMatrix({
         return (
           <button
             key={`w${r}-${c}`}
-            className={"wm-cell" + (on ? " is-on" : "")}
+            className={"wm-cell" + (on ? " is-on" : "") + (peek?.has(key) ? " is-peek" : "")}
             style={
               meta
                 ? {
@@ -164,11 +189,11 @@ export function WellMatrix({
             onClick={() => toggleWell(r, c)}
             onDoubleClick={() => onSoloWell?.(r, c)}
             onMouseEnter={(e) => {
-              onHoverWell?.(label);
+              onHoverWells?.([label]);
               show(label, e.currentTarget);
             }}
             onMouseLeave={() => {
-              onHoverWell?.(null);
+              onHoverWells?.(null);
               hide();
             }}
             aria-pressed={on}
@@ -219,6 +244,7 @@ export function WellMatrix({
           key={`col${c}`}
           className="wm-head"
           onClick={() => toggleGroup(colKeys(c))}
+          {...groupHover(colKeys(c), colLabels(c))}
           title={`Toggle column ${c + 1}`}
         >
           {c + 1}

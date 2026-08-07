@@ -1442,7 +1442,10 @@ only pieces the two views share.
 
 - **Selection:** a channel bar (6 dye-labelled toggles) and a well matrix (`WellMatrix`, 8×12 for
   a CFX plate, sized to the run's actual plate otherwise — see "A third format: Biomeme" above)
-  whose row and column headers toggle whole rows/columns, plus an all/none corner. Once the
+  whose row and column headers toggle whole rows/columns, plus an all/none corner. Hovering
+  follows the same grain as clicking: a cell highlights its own well, a row/column header
+  highlights every well it would toggle (outlining them in the grid and peeking at them on the
+  chart, as one `"wells"` `HighlightMatch` — see "Rail hover highlight" below). Once the
   plate definition is available (password permitting), each cell is tinted by
   `SAMPLE_TYPE_META` (see **Plates** below) so selection state reads alongside sample type; a
   reset button next to the "Wells" label restores the selection to exactly the plate's
@@ -1607,7 +1610,9 @@ only pieces the two views share.
 - **Rail hover highlight and hover cards:** hovering a chip/cell in any rail section (channel,
   fluorophore/target, well, sample, or reference column) dims every plotted curve that doesn't
   match, via `HighlightMatch`/`applyHighlight` (`lib/uplot/chart.ts`) — `"sample"` and
-  `"refcol"` match variants join the pre-existing `"target"`/`"well"`/`"channel"` ones, the
+  `"refcol"` match variants join the pre-existing `"target"`/`"wells"`/`"channel"` ones —
+  `"wells"` carries a *list* of well labels, so one hovered cell and a hovered row/column header
+  take the identical path, differing only in how many labels they send — the
   former keyed by the well's `PlotCurve.sample` (which
   `CurvesView` fills in from the `wellSample` map alongside every other per-curve field). Each of
   `ChannelBar`/`FluorBar`/`WellMatrix`/`SampleBar` also renders a small floating hover card (see
