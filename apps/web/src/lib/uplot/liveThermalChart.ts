@@ -24,9 +24,17 @@ export function liveThermalData(samples: LiveThermalSample[]): uPlot.AlignedData
   return [samples.map((s) => s.atSeconds), samples.map((s) => s.blockTempC)] as uPlot.AlignedData;
 }
 
+/**
+ * Where the x-axis ends when the run's length isn't known yet — long enough that the first minute
+ * of a run doesn't draw a wildly-rescaling axis, short enough to be an honest placeholder.
+ */
+const FALLBACK_SPAN_S = 600;
+
 export function buildLiveThermalChart(cfg: {
   width: number;
   height: number;
+  /** The run's expected total length (`useLiveThermalHistory`), or null while it's unknown. */
+  estimatedTotalS: number | null;
   onHover: (t: LiveThermalTooltipData | null) => void;
 }): uPlot.Options {
   return {
@@ -34,7 +42,19 @@ export function buildLiveThermalChart(cfg: {
     height: cfg.height,
     series: [{ label: "t" }, { label: "block", stroke: TRACE_COLOR, width: 2, points: { show: false } }],
     scales: {
-      x: { time: false },
+      x: {
+        time: false,
+        /**
+         * The whole run, from zero, rather than just the part of it that has happened — so the
+         * trace advances across a still frame and its position reads as progress, instead of the
+         * axis restretching every poll to keep the line filling the plot.
+         *
+         * `max` still wins if the run outlives its estimate: the estimate runs optimistic (see
+         * `LiveThermalHistory.estimatedTotalS`), and a trace running off the right edge would be
+         * worse than an axis that grows late in a long run.
+         */
+        range: (_u, _min, max) => [0, Math.max(cfg.estimatedTotalS ?? FALLBACK_SPAN_S, max)],
+      },
       y: {
         range: (_u, min, max) => {
           const pad = Math.max(2, (max - min) * 0.15);

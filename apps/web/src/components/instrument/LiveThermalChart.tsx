@@ -6,14 +6,18 @@ import {
   type LiveThermalTooltipData,
 } from "../../lib/uplot/liveThermalChart";
 import { elapsedLabel } from "../../lib/uplot/thermalChart";
-import type { LiveThermalSample } from "../../state/useLiveThermalHistory";
+import type { LiveThermalHistory } from "../../state/useLiveThermalHistory";
 
 /**
  * Block temperature against elapsed time for the run in progress, in the Instrument rail's Status
  * section — same uPlot lifecycle as `ThermalProfileChart` (rebuild on data change, `ResizeObserver`
  * for sizing), but fed a growing live series instead of a finished run's `.alf` profile.
+ *
+ * The x-axis spans the whole expected run (`history.estimatedTotalS`), so the trace crosses a
+ * fixed frame as the run proceeds rather than always filling one.
  */
-export function LiveThermalChart({ samples }: { samples: LiveThermalSample[] }) {
+export function LiveThermalChart({ history }: { history: LiveThermalHistory }) {
+  const { samples, estimatedTotalS } = history;
   const hostRef = useRef<HTMLDivElement>(null);
   const plotRef = useRef<uPlot | null>(null);
   const [tip, setTip] = useState<LiveThermalTooltipData | null>(null);
@@ -28,6 +32,7 @@ export function LiveThermalChart({ samples }: { samples: LiveThermalSample[] }) 
     const options = buildLiveThermalChart({
       width: Math.max(160, Math.floor(rect.width)),
       height: Math.max(100, Math.floor(rect.height)),
+      estimatedTotalS,
       onHover: setTip,
     });
 
@@ -38,7 +43,7 @@ export function LiveThermalChart({ samples }: { samples: LiveThermalSample[] }) 
       plotRef.current?.destroy();
       plotRef.current = null;
     };
-  }, [data]);
+  }, [data, estimatedTotalS]);
 
   useEffect(() => {
     const host = hostRef.current;

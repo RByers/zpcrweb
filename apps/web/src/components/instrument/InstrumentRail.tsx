@@ -359,7 +359,7 @@ export function InstrumentRail({
                   </div>
                 </div>
               )}
-              {status.running && <LiveThermalChart samples={instrument.liveThermal} />}
+              {status.running && <LiveThermalChart history={instrument.liveThermal} />}
               {/* Reserved row, always mounted so its height doesn't come and go with the flags
                   themselves — otherwise everything below (temperatures, Actions' Stop/Pause/Start
                   buttons) shifts up and down as status bits flip. */}

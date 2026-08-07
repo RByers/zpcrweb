@@ -2730,7 +2730,19 @@ Four components, under `components/instrument/`:
   handle hands it (`instrument.liveThermal`). Buffering it in the rail instead meant the history
   belonged to a mounted component: opening Curves, or picking another file, unmounted the view and
   the chart came back empty on a run that was still going — a history is worth having only if it
-  spans the whole run, so it lives with the connection, which `App` mounts once for the session. There is no ramp/hold/read decomposition to draw, since `STATUS?` reports a
+  spans the whole run, so it lives with the connection, which `App` mounts once for the session.
+
+  **The x-axis spans the whole expected run, not the part that has happened.** The hook latches an
+  `estimatedTotalS` alongside the samples — `elapsedS + remainingS` from the first poll of the run
+  that reported a remaining time — and the chart's x scale is pinned to `[0, that]`. So the trace
+  advances across a still frame, and where it has got to reads as progress; letting uPlot fit the
+  data instead redrew a full-width line every poll, which showed nothing about how far along the
+  run was. The estimate is latched rather than recomputed because it is the drifting one described
+  above (it doesn't count plate reads or lid preheat), so `elapsed + remaining` creeps upward and a
+  per-poll reading would give back the stretching axis in slow motion. Two escapes: the data's own
+  max wins if the run outlives its estimate, since a trace leaving the plot would be worse than a
+  late-growing axis, and a 10-minute placeholder span covers the polls before any remaining time is
+  reported. There is no ramp/hold/read decomposition to draw, since `STATUS?` reports a
   temperature and an elapsed second, not a step or a phase — `lib/uplot/liveThermalChart.ts` is a
   one-line chart sharing only axis styling and the time-tick spacing (`timeSplits`, exported from
   `thermalChart.ts`) with the after-the-run version.
