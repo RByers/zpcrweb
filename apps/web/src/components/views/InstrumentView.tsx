@@ -16,7 +16,8 @@
  * | Active file | This view |
  * | ----------- | --------- |
  * | a pending experiment (no results yet) | starts it — Start is armed once it has a protocol |
- * | a run with results (in progress, or over) | won't start it; offers to clone it instead |
+ * | a run in progress | won't start it; says it is running, and offers a clone for the next one |
+ * | a run that is over | won't start it; offers to clone it instead |
  * | anything else, or nothing loaded | says so, and points at where experiments come from |
  *
  * Layout reuses the Curves view's rail + content grid so it reads as the same kind of surface:
@@ -50,6 +51,13 @@ export interface InstrumentExperiment {
   zpcr: Zpcr;
   /** No results yet and never started — the only state Start applies to (`isPendingExperiment`). */
   pending: boolean;
+  /**
+   * Started and not yet finished, read from the file's own markers (`runFolder.ts`'s
+   * `runProgressFromNames`). Neither startable nor over: a run in progress is why the view has to
+   * say more than "pending or done", since telling someone watching their run that it "has already
+   * been run" is simply false while the block is still cycling.
+   */
+  inProgress: boolean;
 }
 
 export function InstrumentView({

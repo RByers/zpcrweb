@@ -142,7 +142,11 @@ export function InstrumentRun({
   const plate = zpcr?.plates()[0]?.pltd.plate ?? null;
   // A run with results is not startable, and this is where that is discovered — so the panel says
   // why and offers the fix, rather than leaving a disabled button in the rail to explain itself.
+  // A run still going is in that same not-startable state but is not *over*, so it says something
+  // else: its results are arriving, and a clone is for the *next* run rather than a repeat of one
+  // that finished.
   const hasResults = !!experiment && !experiment.pending;
+  const running = !!experiment?.inProgress;
 
   return (
     <>
@@ -176,8 +180,9 @@ export function InstrumentRun({
         {hasResults && (
           <div className="instrument__completeactions">
             <span className="devrun__hint">
-              This experiment has already been run — its results are part of the file now. Clone it
-              to run the same protocol and plate again.
+              {running
+                ? "This experiment is running — its results are being written into this file as they arrive. Clone it to set up the same protocol and plate for another run."
+                : "This experiment has already been run — its results are part of the file now. Clone it to run the same protocol and plate again."}
             </span>
             <button className="btn" onClick={onCloneExperiment}>
               Clone experiment

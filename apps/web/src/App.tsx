@@ -3,6 +3,7 @@ import {
   plateToCsv,
   ProtocolBuilder,
   runFileBaseName,
+  runProgressFromNames,
   type ZpcrArchive,
   type RunPlan,
   type Zpcr,
@@ -549,6 +550,9 @@ export function App() {
       named: identity?.named ?? false,
       zpcr,
       pending: isPendingExperiment(active.kind, zpcr),
+      // Derived from the file's own markers, so it stays true across a reload mid-run and doesn't
+      // depend on this app being the one that started it (`runFolder.ts`).
+      inProgress: runProgressFromNames(zpcr.archive.entries).inProgress,
     };
   }, [active, activeRun, store.experiments]);
 

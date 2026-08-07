@@ -2304,20 +2304,24 @@ some other run's identity. The three-slot selection, the override badges, the re
 for tapping a chip, the typed name and its lock/phase machinery (`state/useRunNaming.ts`) are all
 gone with it.
 
-**What this view can do is a property of the active file**, and there are exactly three cases
-(`InstrumentView`'s `InstrumentExperiment`, built by `App` from the active file and
-`lib/experiment.ts`'s `isPendingExperiment`):
+**What this view can do is a property of the active file**, and there are exactly four cases
+(`InstrumentView`'s `InstrumentExperiment`, built by `App` from the active file,
+`lib/experiment.ts`'s `isPendingExperiment` and `runProgressFromNames`):
 
 | Active file | This view |
 | ----------- | --------- |
 | a **pending** experiment — no results, never started | starts it; Start arms once it has a name and a protocol |
-| a run **with results** — in progress, or over | won't start it, and offers the clone that is the way to run it again |
+| a run **in progress** — `begun`, not `ended` | won't start it; says it is running and its results are still arriving, and offers a clone for the *next* run |
+| a run that is **over** | won't start it, and offers the clone that is the way to run it again |
 | a `.zpcr` that hasn't decoded | says so, and names where experiments come from (the tab is disabled for every other kind, so this is the only remaining case) |
 
-Refusing the second case is the point of it rather than a limitation: re-running a file that already
-holds results would either overwrite them or contradict them, so the fix is a new experiment, and the
-panel offers exactly that. Nothing needs to record "already run" — a plate read or a `begun` marker
-in the archive *is* the record (see "A pending experiment" below).
+Refusing the two started cases is the point of it rather than a limitation: re-running a file that
+already holds results would either overwrite them or contradict them, so the fix is a new experiment,
+and the panel offers exactly that. Nothing needs to record "already run" — a plate read or a `begun`
+marker in the archive *is* the record (see "A pending experiment" below). The two are kept apart in
+what they *say*, though: telling someone watching their run that it "has already been run" is false
+while the block is still cycling, and the in-progress wording is derived from the file's own markers,
+so it survives a reload and holds for a run this app never started.
 
 **A plate is optional.** `planRun`'s `plate` is optional and its absence is a `warning`, never an
 `error` (`usb/runPlan.ts`), so an experiment can be started without one — the curves simply carry no

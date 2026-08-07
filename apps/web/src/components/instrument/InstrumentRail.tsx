@@ -94,19 +94,23 @@ export function InstrumentRail({
    *
    * A run that already has results is the one case that isn't a missing piece but a wrong object:
    * re-running it would either overwrite what it holds or contradict it, so the fix is a new
-   * experiment, and `InstrumentRun` offers the clone that makes one.
+   * experiment, and `InstrumentRun` offers the clone that makes one. A run still going gets its
+   * own line ahead of that one — it is equally unstartable, but "already been run" is untrue while
+   * the block is still cycling, and the honest answer is also the more useful one.
    */
   const unstartable = !experiment
     ? "Select or create an experiment first."
-    : !experiment.pending
-      ? "This experiment has already been run — clone it to run the same protocol again."
-      : !experiment.named
-        ? "Name this experiment on its Overview tab first."
-        : !experiment.zpcr.protocolText
-          ? "This experiment has no protocol yet — write one on the Protocol tab."
-          : !connected
-            ? "Connect to the instrument first."
-            : null;
+    : experiment.inProgress
+      ? "This experiment is running right now — its results are still arriving."
+      : !experiment.pending
+        ? "This experiment has already been run — clone it to run the same protocol again."
+        : !experiment.named
+          ? "Name this experiment on its Overview tab first."
+          : !experiment.zpcr.protocolText
+            ? "This experiment has no protocol yet — write one on the Protocol tab."
+            : !connected
+              ? "Connect to the instrument first."
+              : null;
   const missing =
     unstartable ??
     // A protocol that is present but unparseable plans to nothing (`InstrumentView`), which is
