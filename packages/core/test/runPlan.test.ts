@@ -100,6 +100,8 @@ function plateUsing(channels: (number | undefined)[]): PlateDefinition {
 
 const ALL_CHANNELS = "METHOD CALC;HOTLID 105,30;VOLUME 25;TEMP 95.0,60;TEMP 60.0,30;PLATEREAD #h3F;GOTO 2,44;END;";
 const FAST_SCAN = "METHOD CALC;HOTLID 105,30;VOLUME 25;TEMP 95.0,60;TEMP 60.0,30;PLATEREAD #h81;GOTO 2,44;END;";
+/** A run that uses the block as a heated surface and never reads the plate — an RT incubation. */
+const NO_READ = "METHOD CALC;HOTLID 105,30;VOLUME 25;TEMP 50.0,600;TEMP 95.0,120;END;";
 
 describe("checkRunPlan — PLATEREAD against the plate", () => {
   it("passes a six-channel mask reading a plate that uses channel 1 only, with a note", () => {
@@ -127,10 +129,27 @@ describe("checkRunPlan — PLATEREAD against the plate", () => {
     expect(checks).toEqual([]);
   });
 
-  it("errors on a protocol that never reads the plate", () => {
-    const noRead = "METHOD CALC;HOTLID 105,30;VOLUME 25;TEMP 95.0,60;GOTO 1,10;END;";
-    const checks = checkRunPlan(parseRunDefinition(noRead), plateUsing([1]));
-    expect(checks.find((c) => c.code === "no-plate-read")?.severity).toBe("error");
+  it("warns, but does not block, a protocol that never reads the plate", () => {
+    // An incubation or RT hold is exactly this protocol, and the instrument runs it fine — the
+    // resulting run just has no curves. Worth saying; never a reason to refuse to start.
+    const checks = checkRunPlan(parseRunDefinition(NO_READ), plateUsing([1]));
+    expect(checks.find((c) => c.code === "no-plate-read")?.severity).toBe("warning");
+    expect(checks.some((c) => c.severity === "error")).toBe(false);
+  });
+
+  it("warns about a missing plate only when the protocol would read one", () => {
+    expect(checkRunPlan(parseRunDefinition(ALL_CHANNELS), null).map((c) => c.code)).toEqual([
+      "no-plate",
+    ]);
+    expect(checkRunPlan(parseRunDefinition(NO_READ), null).map((c) => c.code)).toEqual([
+      "no-plate-read",
+    ]);
+  });
+
+  it("still checks the protocol itself when there is no plate", () => {
+    const checks = checkRunPlan(parseRunDefinition("METHOD WARP;END;"), null);
+    expect(checks.map((c) => c.code)).toContain("no-steps");
+    expect(checks.map((c) => c.code)).toContain("method-unknown");
   });
 
   it("says nothing about a fluor whose channel is unknown", () => {
@@ -306,6 +325,13 @@ describe("planRun", () => {
     );
     expect(plan.startable).toBe(true);
     expect(plan.uploads.some((u) => u.name.endsWith(".plt.csv"))).toBe(false);
+  });
+
+  /** An incubation or RT hold: no plate, no plate read, and nothing standing in its way. */
+  it("allows starting a protocol that never reads the plate", () => {
+    const plan = planRun({ runDefinition: NO_READ, name: "RT incubation" });
+    expect(plan.startable).toBe(true);
+    expect(plan.checks.map((c) => c.code)).toEqual(["no-plate-read"]);
   });
 });
 

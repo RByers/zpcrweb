@@ -260,7 +260,7 @@ It walks the requested views and writes **one labelled contact-sheet PNG** —
 console errors, uncaught exceptions and failed page loads, which catch breakage a screenshot
 can't show.
 
-**`tools/uitest.mjs` (`npm run test:ui`) — assert it.** 231 browser assertions covering what
+**`tools/uitest.mjs` (`npm run test:ui`) — assert it.** 242 browser assertions covering what
 nothing else can catch: the two URL contracts — hash routing (deep links, back/forward,
 unknown-file and invalid-view fallbacks) and password handling (stripped from both URL forms,
 never leaked into the routing hash, an encrypted `.pcrd` still decrypting) — plus `#load=`, the
@@ -308,7 +308,10 @@ archive's own `.Plateread` entries, a claim spanning two file types that nothing
 and the thermal profile that same report implies, plotted under a run's Protocol tab, where the
 assertable part is the read numbering: all three numbers on a 3-read run, thinned to what fits on
 a 45-read one but never losing the first or the last, and no section at all for a `.pcrd`, which
-carries no report to plot —
+carries no report to plot — and a run that **never reads the plate at all** (an incubation or an
+RT hold, whose protocol carries no `PLATEREAD` and which therefore writes no `.Plateread` files):
+it opens on Overview with only Curves, Reference and Calibration greyed out, is not mistaken for a
+run that stopped short, and neither view says anything about readings that don't exist —
 
 and what happens when a file with unsaved edits is deleted — an edited file (a rename is enough)
 wears a dot and its ✕ arms into a waste bin that takes a second click, Escape disarms it, neither

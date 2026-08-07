@@ -104,6 +104,109 @@ async function makeShortRun() {
   writeFileSync(SHORT_ZPCR, Buffer.from(zipArchive(archive)));
 }
 
+/** A finished run that never read the plate — an incubation or reverse-transcription hold, whose
+ * protocol carries no `PLATEREAD` and which therefore produces no `.Plateread` files at all.
+ * Built rather than committed, like {@link SHORT_ZPCR}: this project has no such capture yet, and
+ * what is being tested is the *absence* of readings, which any real run's files can stand in for
+ * once they are taken out. */
+const NO_READ_ZPCR = join(REPO, "tools/.uishot/dupe/20260725-RT_Incubation.zpcr");
+
+/** Write {@link NO_READ_ZPCR}: a sample's own files, minus every plate read, with a protocol that
+ * never asks for one — which is what makes it a run that finished exactly as written rather than
+ * one that was cut short (`runCompleteness` declines to guess at a protocol with no PLATEREAD). */
+async function makeNoReadRun() {
+  const { zpcrFromRunFiles, unzipArchive, zipArchive } = await import("../packages/core/dist/index.js");
+  const files = unzipArchive(
+    new Uint8Array(readFileSync(join(REPO, "samples/20260725_GRADIENTTEST.zpcr"))),
+  );
+  const enc = new TextEncoder();
+  for (const name of Object.keys(files)) {
+    if (/\.Plateread$/i.test(name)) delete files[name];
+    // The run report is the instrument's log of what it executed, and it lists every plate read
+    // (`alf.md` §7.5) — so it has to be replaced along with the protocol, or the archive would
+    // claim reads whose files aren't there.
+    if (/\.alf$/i.test(name)) {
+      files[name] = enc.encode(
+        "\\Storage Card\\Recent\\RT_Incubation**RN050773*A*CFX96*Jul 25, 2026*21:18:16*21:31:05*" +
+          "00:12:49*105.0*20.0**CT019138*CT019138*\n" +
+          "METHOD CALC*HOTLID 105,30*VOLUME 20*TEMP 50.0,600*TEMP 95.0,120*END\n" +
+          " No errors reported. *0:*False*False*False*False*None*False*\n" +
+          "-1*1*1*.00*50.0*600*07/25/2026 21:18:24*False*0*\n" +
+          "-1*1*2*.05*95.0*120*07/25/2026 21:28:30*False*0*\n",
+      );
+    }
+  }
+  files["ProtocolRunDefinition.txt"] = enc.encode(
+    "METHOD CALC;HOTLID 105,30;VOLUME 20;TEMP 50.0,600;TEMP 95.0,120;END;\n",
+  );
+  const { archive } = zpcrFromRunFiles(files, { fileName: "20260725-RT_Incubation" });
+  mkdirSync(dirname(NO_READ_ZPCR), { recursive: true });
+  writeFileSync(NO_READ_ZPCR, Buffer.from(zipArchive(archive)));
+}
+
+/**
+ * A run with no plate reads in it opens, and only the views that need readings are withheld.
+ *
+ * The case the app used to have no answer for: a heat-block or RT run is a legitimate use of the
+ * instrument, and its `.zpcr` is a complete record with no fluorescence in it. Everything that
+ * doesn't need a reading — Overview, Protocol, Plates, Raw — has to work, Curves/Reference/
+ * Calibration have to be greyed out rather than rendering an empty frame, and the run must not be
+ * mistaken for one that stopped short or for a pending experiment.
+ */
+async function noPlateReadRunChecks(chrome, origin) {
+  console.log("\na run that never reads the plate");
+  await makeNoReadRun();
+  const cdp = await openPage(chrome.base, origin);
+  await emptyReload(cdp, origin);
+  await loadFile(cdp, NO_READ_ZPCR);
+  await waitFor(() => chipPresent(cdp, "RT Incubation"), { what: "the no-read run's chip" });
+
+  const tabs = await cdp
+    .eval(
+      `JSON.stringify(Object.fromEntries([...document.querySelectorAll('.viewbar [role="tab"]')]
+         .map((b) => [b.textContent.trim(), !b.disabled])))`,
+    )
+    .then(JSON.parse);
+  check(
+    "the views that need readings are disabled, and the rest are not",
+    tabs.Curves === false &&
+      tabs.Reference === false &&
+      tabs.Calibration === false &&
+      tabs.Overview === true &&
+      tabs.Protocol === true &&
+      tabs.Plates === true &&
+      tabs.Raw === true,
+    JSON.stringify(tabs),
+  );
+
+  // It landed somewhere real rather than on a blank Curves view, and said nothing about a run
+  // stopping short — a protocol that never reads cannot be short of reads.
+  const landed = await activeTab(cdp);
+  const accused = await cdp.eval(`document.querySelectorAll(".filechip__date--incomplete").length`);
+  check("it opens on Overview, unaccused", landed === "Overview" && accused === 0, `${landed}, ${accused} flagged`);
+
+  // The read-derived row is gone rather than reading "—", and the run's own facts are still there.
+  const overview = await cdp.eval(
+    `[...document.querySelectorAll(".overview__infotable dt")].map((e) => e.textContent.trim()).join("|")`,
+  );
+  check(
+    "Overview drops the last-block-temp row and keeps the run's own facts",
+    !overview.includes("Last block temp") && overview.includes("Cycles") && overview.includes("Block"),
+    overview,
+  );
+
+  await clickTab(cdp, "Protocol");
+  const protocolText = await cdp.eval(
+    `(document.querySelector(".overview")?.textContent ?? "").replace(/\\s+/g, " ")`,
+  );
+  check(
+    "Protocol renders the profile without pointing at plate reads that aren't drawn",
+    protocolText.includes("TEMP 50.0,600") && !protocolText.includes("Plate reads"),
+    protocolText.slice(0, 200),
+  );
+  cdp.close();
+}
+
 /**
  * A run that stopped short of its protocol says so, in the two places that matter.
  *
@@ -3880,6 +3983,7 @@ async function main() {
     await instrumentRunChecks(chrome, origin);
     await runSeedChecks(chrome, origin);
     await incompleteRunChecks(chrome, origin);
+    await noPlateReadRunChecks(chrome, origin);
     await explodedStorageChecks(chrome, origin);
     await experimentNameChecks(chrome, origin);
     await deleteConfirmChecks(chrome, origin);

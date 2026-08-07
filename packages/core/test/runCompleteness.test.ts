@@ -102,6 +102,45 @@ describe("runCompleteness", () => {
   });
 });
 
+/**
+ * A run that never reads the plate — an incubation, a reverse-transcription hold, the block used
+ * as a heated surface. Its protocol carries no `PLATEREAD`, so the instrument writes no
+ * `.Plateread` files at all, and the archive is a finished run with no fluorescence in it.
+ *
+ * Built from a committed sample's own archive rather than from scratch, so everything that isn't
+ * the plate reads — `RunInfo.xml`, the markers, the calibration set — is exactly what the
+ * instrument writes.
+ */
+describe("a run with no plate reads at all", () => {
+  const noReadRun = () => {
+    const files = unzipArchive(readGradientBytes());
+    for (const name of Object.keys(files)) {
+      if (/\.Plateread$/i.test(name)) delete files[name];
+    }
+    files["ProtocolRunDefinition.txt"] = new TextEncoder().encode(
+      "METHOD CALC;HOTLID 105,30;VOLUME 20;TEMP 50.0,600;TEMP 95.0,120;END;\n",
+    );
+    return parseZpcrArchive(files);
+  };
+
+  it("parses as a run, with nothing to say about curves", () => {
+    const zpcr = noReadRun();
+    expect(zpcr.reads).toEqual([]);
+    expect(zpcr.steps()).toEqual([]);
+    // Everything that isn't a reading still decodes — this is a run to look at, not a broken file.
+    expect(zpcr.protocolText).toContain("TEMP 50.0,600");
+    expect(zpcr.calibrations().length).toBeGreaterThan(0);
+    expect(zpcr.runReports().length).toBeGreaterThan(0);
+  });
+
+  it("is not accused of stopping short", () => {
+    // `expectedPlateReads` declines to answer for a protocol with no PLATEREAD, which is what
+    // keeps a run that was never going to read anything from reading as a cancelled one.
+    const c = runCompleteness(noReadRun());
+    expect(c).toMatchObject({ expected: null, actual: 0, incomplete: false });
+  });
+});
+
 /** Rebuild a sample's archive with its last `n` plate reads (and optionally `ended`) removed. */
 function withoutLastReads(
   bytes: Uint8Array,

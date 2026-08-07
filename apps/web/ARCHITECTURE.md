@@ -2544,6 +2544,13 @@ that run completes, reports nothing wrong, and yields an archive in which those 
 doesn't use) costs only time and is a warning. The messages render between the protocol and the
 plate rather than in the rail, because the fix is to change one of those two files.
 
+A protocol with **no `PLATEREAD` at all** is a warning too, not an error: an incubation or a
+reverse-transcription hold uses the block as a heated surface on purpose, and the instrument runs
+it happily. Such a run produces no `.Plateread` files, so its `.zpcr` has no curves — `runViews`
+(`App.tsx`) then leaves Curves, Reference and Calibration disabled, and the rest of the app treats
+it as the finished run it is. A missing plate is only worth mentioning when the protocol would
+actually read one, so that warning is suppressed for these.
+
 ### Following a run
 
 `state/useRunWatch.ts`, and it follows `usb.md` §7.5 rather than polling the filesystem hopefully:

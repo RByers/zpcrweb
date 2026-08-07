@@ -224,10 +224,19 @@ export function ProtocolView({
             than against the protocol above. Each step slopes up or down while the block travels to
             its setpoint, then runs flat for the hold at it, so the time a temperature change cost
             is the width of the slope.{" "}
-            <span className="thermal__key thermal__key--read">Plate reads</span> are numbered in the
-            order they were taken; every read is a point, though only as many numbers are drawn as
-            fit. The very first approach isn't drawn — nothing records what the block was at before
-            the run started.
+            {/* Omitted for a run that never read the plate — an incubation or RT hold, whose
+                protocol carries no PLATEREAD — where the legend key it points at isn't drawn
+                either, and the sentence would send the reader looking for marks that don't
+                exist. */}
+            {report.plateReadCount > 0 && (
+              <>
+                <span className="thermal__key thermal__key--read">Plate reads</span> are numbered in
+                the order they were taken; every read is a point, though only as many numbers are
+                drawn as fit.{" "}
+              </>
+            )}
+            The very first approach isn't drawn — nothing records what the block was at before the
+            run started.
           </p>
           <ThermalProfileChart report={report} />
         </section>

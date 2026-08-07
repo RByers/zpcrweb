@@ -1542,7 +1542,7 @@ The earlier `x^16 + 1` hypothesis is therefore **wrong**, and so is the name: `C
 | `status.ts` | §3 — typed views over `*IDN?`, `STATUS?` and `RTSTATUS?`. Names every field §3.2/§3.3 give a meaning to, including the status register (field 7, decoded into `CfxStatusFlags` plus a derived `phase`), the four clocks (8–12) and `RTSTATUS?`'s shuttle/ambient temperatures and fault list — the raw `fields` array stays alongside them for the three still-unestablished ones (13's redundancy with field 7's paused bit aside, field 18's sensor reading has no known meaning). |
 | `transport.ts` | §1 — the endpoint/interface constants and `UsbDeviceLike`, the structural interface both environments satisfy. |
 | `crc.ts` | §7.4 — the upload checksum and its wire format. Its byte order is measured, §9.2. |
-| `runPlan.ts` | §7.2–§7.4 as *data*: `planRun()` turns a run definition plus a plate into the exact command lines, the `RemoteRun` line and the files that would be deposited, and `checkRunPlan()` is the plate↔`PLATEREAD` compatibility check below. Pure — no device involved — which is what lets a UI review a run before any of it is sent. |
+| `runPlan.ts` | §7.2–§7.4 as *data*: `planRun()` turns a run definition plus a plate (optional — a run may have none) into the exact command lines, the `RemoteRun` line and the files that would be deposited, and `checkRunPlan()` is the plate↔`PLATEREAD` compatibility check below. Pure — no device involved — which is what lets a UI review a run before any of it is sent. |
 | `device.ts` | §3–§5 and §7 — the read pump, the command queue, the typed operations, `sendFile()` (§5's upload cycle), `startRun()` (§7.1–§7.4) and `acknowledgeRun()` (§7.6). |
 
 **Starting a run is implemented, and its shape follows §7 rather than §5's.** `startRun()` clears
@@ -1559,7 +1559,9 @@ guessed. Sending it after `RemoteRun` would silently skip the run's first step.
 on. That combination is the one way a run goes wrong *silently*: it completes, reports no error,
 and produces an archive in which those dyes are flat zero — indistinguishable afterwards from a
 failed reaction. Reading channels the plate doesn't use is only a warning, since a deliberately
-broad mask costs nothing but time.
+broad mask costs nothing but time. So is a protocol with no `PLATEREAD` at all: an incubation or a
+reverse-transcription hold is one on purpose, and the instrument runs it as readily as any other —
+it simply produces no `.Plateread` files, and so a run with no fluorescence data in it.
 
 **One implementation serves both a browser and Node.** node-usb ships a WebUSB implementation, so
 a browser `USBDevice` and node-usb's satisfy the same structural interface and the environments

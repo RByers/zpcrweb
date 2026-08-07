@@ -263,14 +263,17 @@ const list = (items: (string | number)[]) => items.join(", ");
  * would do the same job faster. `#h81`/`#h01` (channel 1) and `#h3F` (all 6) are the only mask
  * configurations this project has exercised, so for any other plate subset an all-6 mask is the
  * right thing to send and there is nothing to report.
+ *
+ * `plate` is nullable because an experiment may legitimately have none — the mask comparisons are
+ * then simply unanswerable, and everything that is about the protocol alone is still checked.
  */
 export function checkRunPlan(
   program: RunDefinitionProgram,
-  plate: PlateDefinition,
+  plate: PlateDefinition | null,
 ): RunCheck[] {
   const checks: RunCheck[] = [];
   const reads = program.directives.filter((d) => d.verb === "PLATEREAD");
-  const used = plateChannels(plate);
+  const used = plate ? plateChannels(plate) : [];
 
   if (program.steps.length === 0) {
     checks.push({
@@ -292,13 +295,36 @@ export function checkRunPlan(
     });
   }
 
+  // Worth saying, but never a blocker: an incubation, a reverse-transcription step or any other
+  // use of the block as a heated surface is a protocol with no PLATEREAD on purpose, and the
+  // instrument runs it perfectly well. Such a run produces no `.Plateread` files, so its `.zpcr`
+  // has no curves to show and the app disables the views that would need them (`App`'s
+  // `runViews`) — which is the honest outcome, not a failure.
   if (reads.length === 0) {
     checks.push({
-      severity: "error",
+      severity: "warning",
       code: "no-plate-read",
       message:
-        "This protocol never reads the plate: it has no PLATEREAD step, so the run would " +
-        "produce temperature cycling and no fluorescence data at all.",
+        "This protocol never reads the plate: it has no PLATEREAD step, so the run will cycle " +
+        "temperatures and record no fluorescence at all. That is what an incubation or " +
+        "reverse-transcription run wants; a qPCR run needs a plate read.",
+    });
+    // Nothing below applies: there is no mask to compare against the plate, and a run that reads
+    // nothing has no fluorescence for a plate's well mapping to describe, so a missing plate is
+    // not worth mentioning either.
+    return checks;
+  }
+
+  // A run that *does* read the plate, with no plate attached: the readings still happen and are
+  // still kept, they just arrive with nothing saying which well held what. Recoverable after the
+  // fact — a plate can be attached to the finished `.zpcr` — so it is advice, not a blocker.
+  if (!plate) {
+    checks.push({
+      severity: "warning",
+      code: "no-plate",
+      message:
+        "No plate is attached, so this run will record no well, target or sample mapping — " +
+        "just raw fluorescence. Attach one before starting, or later once it's running.",
     });
     return checks;
   }
@@ -459,17 +485,7 @@ export function planRun(options: PlanRunOptions): RunPlan {
   // here rather than in `checkRunPlan` — but it is an `error` like any other, which is what makes
   // Start run refuse an unnamed run without the UI needing a rule of its own. First in the list:
   // it is the check the operator can act on before the run exists at all.
-  const checks = plate
-    ? checkRunPlan(program, plate)
-    : [
-        {
-          severity: "warning" as const,
-          code: "no-plate" as const,
-          message:
-            "No plate is attached, so this run will record no well, target or sample mapping — " +
-            "just raw fluorescence. Attach one before starting, or later once it's running.",
-        },
-      ];
+  const checks = checkRunPlan(program, plate ?? null);
   if (!experimentName) {
     checks.unshift({
       severity: "error",

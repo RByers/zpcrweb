@@ -151,7 +151,13 @@ export function OverviewView({
           },
         ]),
     { label: "Protocol", value: protocolName || (pending ? "not set yet" : "—") },
-    ...(pending ? [] : [{ label: "Last block temp", value: lastTemp != null ? `${lastTemp.toFixed(1)} °C` : "—" }]),
+    // Only when there is a read to have been at a temperature. A run with none — a pending
+    // experiment, or a protocol that never reads the plate (an incubation, an RT hold) — has no
+    // last read to report the block temperature of, and the row would read as a lost value rather
+    // than an absent question. The Cycles row above stays and says 0, which is the fact.
+    ...(pending || zpcr.reads.length === 0
+      ? []
+      : [{ label: "Last block temp", value: lastTemp != null ? `${lastTemp.toFixed(1)} °C` : "—" }]),
     { label: "Encrypted", value: <EncryptedValue status={encStatus} /> },
     ...(pending ? [] : [{ label: "Identifier", value: m.identifier || "—" }]),
     // Only a `.zpcr` has inner files to count. A `.pcrd` is one XML document and gets
