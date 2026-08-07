@@ -464,18 +464,50 @@ function toHex(bytes: Uint8Array): string {
   return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join(" ");
 }
 
-/** A response's hex (in bytes) or decoded text (in characters) beyond this is elided — a
- * `GETFILE` reply's ~50 KB plate read would otherwise turn "one line per record" into one line
- * the size of a screen's scrollback. Requests aren't elided: everything the client sends is a
- * short command, so the cutoff only ever bites the replies it's aimed at. */
-const MAX_RESPONSE_PREVIEW = 64;
+/**
+ * A response's hex (in bytes) or decoded text (in characters) beyond this is elided.
+ *
+ * One hexdump line's worth, deliberately: a `GETFILE` reply is a whole ~50 KB file, and rendering
+ * it in full turns "one line per record" into one line the size of a screen's scrollback — which
+ * swamps the very view the log exists to make readable, and does it in exactly the case (a big
+ * transfer) where the surrounding lines matter most. A single line is enough to recognise a
+ * payload by its opening bytes and no more, which is all this rendering is for; the record keeps
+ * every byte either way.
+ *
+ * Requests aren't elided: everything the client sends is a short command, so the cutoff only ever
+ * bites the replies it's aimed at.
+ */
+export const USB_PREVIEW_UNITS = 16;
 
-/** `s`, or its first {@link MAX_RESPONSE_PREVIEW} units plus how many were left out — used for
+/** `s`, or its first {@link USB_PREVIEW_UNITS} units plus how many were left out — used for
  * both the hex (units = bytes) and the decoded text (units = characters) of a long response. */
 function elide(s: string, total: number): string {
-  return total <= MAX_RESPONSE_PREVIEW
-    ? s
-    : `${s} … (+${total - MAX_RESPONSE_PREVIEW} more elided)`;
+  return total <= USB_PREVIEW_UNITS ? s : `${s} … (+${total - USB_PREVIEW_UNITS} more elided)`;
+}
+
+/**
+ * The hex and decoded text of one message as a log line shows them — whole for anything short,
+ * previewed for a long response (see {@link USB_PREVIEW_UNITS}).
+ *
+ * Exported because there are two renderings of the same traffic and they must cut in the same
+ * place: {@link formatUsbTrafficLog} below, and the app's live console, which builds its lines as
+ * messages arrive rather than from stored records (`state/useCfxDevice.ts`). Eliding at that end
+ * also keeps the whole of a fetched file out of React state, where a few of them would otherwise
+ * sit in the display buffer as megabytes of hex nobody can read.
+ */
+export function usbTrafficPreview(msg: {
+  direction: "in" | "out";
+  payload: Uint8Array;
+  /** The device's own decode, or null when there isn't one. A trailing newline is trimmed. */
+  text: string | null;
+}): { hex: string; text: string | null } {
+  const long = msg.direction === "in" && msg.payload.length > USB_PREVIEW_UNITS;
+  const hex = long
+    ? elide(toHex(msg.payload.subarray(0, USB_PREVIEW_UNITS)), msg.payload.length)
+    : toHex(msg.payload);
+  if (msg.text === null) return { hex, text: null };
+  const trimmed = msg.text.replace(/\r?\n$/, "");
+  return { hex, text: long ? elide(trimmed.slice(0, USB_PREVIEW_UNITS), trimmed.length) : trimmed };
 }
 
 /**
@@ -486,10 +518,10 @@ function elide(s: string, total: number): string {
  * shown decoded as `text=...`: the decode is a best-effort guess ({@link usbTrafficText}, latin1,
  * "every byte printable or not") and a trailing `\r`/`\n` is trimmed from it, so for a payload
  * this is meant to help *decode*, the raw bytes are the ground truth and the text is a convenience
- * alongside them, never a replacement for them. A response longer than {@link MAX_RESPONSE_PREVIEW}
- * has its hex and text previewed rather than spelled out in full — the byte count at the front of
- * the line still says how much was left out, and the complete bytes are always still in the
- * archived record, only this rendering of them is shortened.
+ * alongside them, never a replacement for them. A response longer than {@link USB_PREVIEW_UNITS}
+ * has its hex and text previewed rather than spelled out in full ({@link usbTrafficPreview}) — the
+ * byte count at the front of the line still says how much was left out, and the complete bytes are
+ * always still in the archived record, only this rendering of them is shortened.
  */
 export function formatUsbTrafficLog(records: readonly UsbTrafficRecord[]): string {
   const rows = records.map((l) => {
@@ -503,21 +535,9 @@ export function formatUsbTrafficLog(records: readonly UsbTrafficRecord[]): strin
     }
     const dir = l.direction === "out" ? "->" : "<-";
     const flag = l.unsolicited ? " (unsolicited)" : "";
-    const long = l.direction === "in" && l.payload.length > MAX_RESPONSE_PREVIEW;
-    const hex = long
-      ? elide(toHex(l.payload.subarray(0, MAX_RESPONSE_PREVIEW)), l.payload.length)
-      : toHex(l.payload);
-    const text =
-      l.text !== null
-        ? (() => {
-            const trimmed = l.text.replace(/\r?\n$/, "");
-            const shown = long
-              ? elide(trimmed.slice(0, MAX_RESPONSE_PREVIEW), trimmed.length)
-              : trimmed;
-            return ` text=${JSON.stringify(shown)}`;
-          })()
-        : "";
-    return `${at} ${dir} ch${l.channel}${flag} [${l.payload.length}B] ${hex}${text}`;
+    const { hex, text } = usbTrafficPreview(l);
+    const decoded = text === null ? "" : ` text=${JSON.stringify(text)}`;
+    return `${at} ${dir} ch${l.channel}${flag} [${l.payload.length}B] ${hex}${decoded}`;
   });
   return rows.length === 0 ? "" : rows.join("\n") + "\n";
 }

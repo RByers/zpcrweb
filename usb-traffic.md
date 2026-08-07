@@ -113,14 +113,22 @@ A message line **always** carries `[<n>B] <hex>`, even when it also shows `text=
 best-effort guess (§2) and a trailing `\r`/`\n` is trimmed from it; for a payload this log exists to
 help *decode*, the bytes are the ground truth and the text is a convenience beside them.
 
-A **response** (`direction: "in"`) longer than 64 bytes has its `hex` and `text` previewed instead
-of spelled out in full: the first 64 bytes or characters, then `… (+n more elided)`. This is a
+A **response** (`direction: "in"`) longer than 16 bytes has its `hex` and `text` previewed instead
+of spelled out in full: the first 16 bytes or characters, then `… (+n more elided)`. This is a
 rendering choice only — the byte count at the front of the line still says how much there really
 was, and the archived record keeps every byte regardless of what this rendering shows. It exists
 because a `GETFILE` reply is tens of kilobytes, and printing all of it as hex would turn "one line
 per record" into one line as long as the payload — unreadable in exactly the case (a big transfer)
-where the log is most worth reading. Requests aren't elided: everything the client sends is a short
-command, so the cutoff only ever applies to the replies it targets.
+where the log is most worth reading. Sixteen is one hexdump line: enough to recognise a payload by
+its opening bytes, which is all this rendering is for. Requests aren't elided: everything the
+client sends is a short command, so the cutoff only ever applies to the replies it targets.
+
+The cut lives in `usbTrafficPreview(msg)`, exported alongside the constant, because there are two
+renderings of the same traffic and they must agree: this one, and the app's **live console**, which
+builds its lines as messages arrive rather than from stored records
+(`apps/web/src/state/useCfxDevice.ts`). Eliding at that end also keeps a fetched file's bytes out of
+React state, where a few transfers would otherwise sit in the display buffer as megabytes of hex
+nobody can read.
 
 `packages/core/test/usbTraffic.test.ts` pins the round trip against this rendering rather than
 against field equality: what a session records and what a reader sees must be the same log, line

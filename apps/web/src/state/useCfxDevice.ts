@@ -6,6 +6,14 @@
  * session* adds on top: obtaining the device through `navigator.usb`, a poll timer, a bounded
  * traffic log for the debug console, and the React state the view renders.
  *
+ * **Everything accumulated from the poll lives here, not in the view.** The traffic recording
+ * below and {@link useCfxDevice.liveThermal} are both histories built one status at a time, and a
+ * history is only worth having if it spans the whole run — so both belong to the hook, which App
+ * mounts once for the session, rather than to a component that unmounts the moment someone opens
+ * Curves or picks another file. The block-temperature chart used to buffer inside the Instrument
+ * rail and so restarted empty every time the view was left, which is precisely the thing a live
+ * chart must not do.
+ *
  * The traffic log is kept in two forms, and the difference matters. The **recording** is core's
  * `UsbTrafficRecorder` (`usb-traffic.md`) — every message and transfer error of the session, as
  * compact binary records, always on, and what the console downloads or a run's `.zpcr` carries.
@@ -31,6 +39,7 @@ import {
   CFX_CURRENT_RUN_DIR,
   UsbTrafficRecorder,
   formatUsbTrafficBytes,
+  usbTrafficPreview,
   CFX_DIRECTORIES,
   CFX_USB_FILTER,
   CfxDevice,
@@ -46,6 +55,7 @@ import {
   type RunProgress,
   type UsbDeviceLike,
 } from "@zpcrweb/core";
+import { useLiveThermalHistory } from "./useLiveThermalHistory";
 
 /** How many messages the debug console keeps. A 1.5 s poll writes six lines a minute; this is
  * roughly an hour of idle polling, and bounds memory on a session left open overnight. */
@@ -112,10 +122,6 @@ export interface ActionResult {
   code: string;
   raw: string;
   at: number;
-}
-
-function toHex(bytes: Uint8Array): string {
-  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join(" ");
 }
 
 /** WebUSB is Chromium-only and needs a secure context; `navigator.usb` is simply absent
@@ -244,11 +250,17 @@ export function useCfxDevice() {
 
   const onTraffic = useCallback(
     (e: CfxTrafficEvent) => {
-      const text = e.text === null ? null : e.text.replace(/\r?\n$/, "");
-      const poll = classifyPoll(e.direction, text);
-      // The recorder takes the event as the device reported it — `e.text`, not the trimmed `text`
-      // above, since what it stores is "did the device offer a decode at all" and the trailing
-      // newline is a display nicety re-applied at format time.
+      // What the console *shows*: the trimmed decode and the hex, both cut to one line for a long
+      // response (core's `usbTrafficPreview`, shared with the text rendering so the two agree).
+      // A `GETFILE` reply is a whole file, and putting it in a console line verbatim swamped the
+      // panel and parked megabytes of unreadable hex in React state; the recorder below still
+      // takes every byte, so nothing is lost but the display of it.
+      const shown = usbTrafficPreview(e);
+      const poll = classifyPoll(e.direction, shown.text);
+      // The recorder takes the event as the device reported it — `e.text` and the whole payload,
+      // not the previewed pair above: what it stores is every byte, plus "did the device offer a
+      // decode at all", and both the trimming and the elision are display choices re-applied at
+      // format time.
       recorder.current.message({
         at: e.at,
         direction: e.direction,
@@ -265,8 +277,8 @@ export function useCfxDevice() {
         direction: e.direction,
         channel: e.channel,
         unsolicited: e.unsolicited,
-        text,
-        hex: toHex(e.payload),
+        text: shown.text,
+        hex: shown.hex,
         bytes: e.payload.length,
         poll,
       });
@@ -705,7 +717,13 @@ export function useCfxDevice() {
     [runFolder],
   );
 
+  /** Block temperature against run time, buffered from the same polls — session-scoped for the
+   * reason in the module comment, so the chart the Instrument view draws covers the run and not
+   * the time since the view was last opened. */
+  const liveThermal = useLiveThermalHistory(status);
+
   return {
+    liveThermal,
     connection,
     error,
     info,

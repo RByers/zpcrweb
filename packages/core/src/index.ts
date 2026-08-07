@@ -173,6 +173,8 @@ export {
   isUsbTrafficName,
   parseUsbTrafficLog,
   usbTrafficText,
+  usbTrafficPreview,
+  USB_PREVIEW_UNITS,
 } from "./usbTraffic.js";
 export type {
   UsbTrafficRecord,

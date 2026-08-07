@@ -362,7 +362,9 @@ stored as binary records rather than the text it renders to — an hour of the s
 of records against 1.3 MB of text, and ~1 KB against ~41 KB once the ZIP has deflated either — which
 is what makes keeping a session's whole wire log with the run cost single-digit KB. The app records
 one always and attaches it only when asked; `formatUsbTrafficLog` is the single text rendering, used
-by both the console's download button and the Raw files view.
+by both the console's download button and the Raw files view, and `usbTrafficPreview` is the cut it
+applies to a long reply — exported so the app's live console, which builds its lines as messages
+arrive rather than from stored records, stops a payload in the same place.
 
 ### Did the run finish? Count its reads (`runCompleteness`)
 

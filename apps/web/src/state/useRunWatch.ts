@@ -314,18 +314,29 @@ export function useRunWatch(
   // finished yesterday presents exactly the same status, and acknowledging that one would both
   // send an unasked-for command and drag a 400 KB archive nobody requested into the file bar —
   // the same reason a first listing that turns out to be that stale finished run is never pulled.
+  //
+  // "This session watched it running" is remembered **by name, for the whole page session**, and
+  // deliberately survives a disconnect. A run that finishes while the cable is out comes back as
+  // exactly the status this acknowledges — IDLE, still holding the run — and a latch reset on
+  // disconnect would take the reconnected session for a stranger and leave the run held forever:
+  // no final plate read, no `ended` marker, no `.alf`, and a file stuck reading as in progress
+  // with nothing in the app able to release it. Keyed by name rather than a boolean so the
+  // reconnected session still refuses a *different* run it never saw cycling. A page reload is
+  // still a stranger by design — memory is all there is to go on, and a reload has none.
   const acknowledged = useRef<string | null>(null);
-  const sawRunning = useRef(false);
+  const watchedRuns = useRef<Set<string>>(new Set());
   // Tracks `status.running` purely to catch its false→true edge — see the module comment and
-  // `onRun`'s `freshStart`. Distinct from `sawRunning`, which latches true for the rest of the
-  // session (`acknowledgeFinishedRun` below needs that); this one un-latches so the next start
-  // is caught too.
+  // `onRun`'s `freshStart`. Distinct from `watchedRuns`, which remembers every run seen cycling
+  // for the rest of the session (`acknowledgeFinishedRun` below needs that); this one un-latches
+  // so the next start is caught too.
   const wasRunning = useRef(false);
   // The instrument's own elapsed-time counter (`CfxStatus.elapsedS`), captured while it's still
   // running: once `status.running` goes false the field itself is no longer meaningful (it's
   // reset for the next run), so this is the only place a completed run's total time can be read
   // from. Held across the whole run, not just its last poll, purely so the "Run complete" banner
-  // below has a number to show.
+  // below has a number to show — and across a disconnect too, where it is the last time seen
+  // before the cable went rather than the true total. Under-reporting the duration of a run
+  // nobody was watching the end of beats showing zero for it.
   const lastElapsed = useRef<number | null>(null);
   useEffect(() => {
     if (connection !== "connected" || !watching || !status) return;
@@ -335,7 +346,7 @@ export function useRunWatch(
       // already going) is what actually surfaces it — see the module comment.
       if (status.running) {
         acknowledged.current = null;
-        sawRunning.current = true;
+        if (status.runName) watchedRuns.current.add(status.runName);
         if (!wasRunning.current) {
           freshStart.current = true;
           setFinished(null); // a new run starting retires the previous one's banner
@@ -348,7 +359,7 @@ export function useRunWatch(
       return;
     }
     wasRunning.current = false;
-    if (!sawRunning.current) return;
+    if (!watchedRuns.current.has(status.runName)) return;
     if (acknowledged.current === status.runName) return;
     acknowledged.current = status.runName;
     const finishedName = status.runName;
@@ -375,14 +386,19 @@ export function useRunWatch(
     void check();
   }, [connection, watching, check]);
 
-  // A disconnect ends the run's identity here: the next connection re-establishes a baseline
-  // rather than diffing against a folder it hasn't looked at in the meantime.
+  // A disconnect ends the *listing's* identity here: the next connection re-establishes a baseline
+  // rather than diffing against a folder it hasn't looked at in the meantime, and re-fetches the
+  // folder rather than trusting bytes cached against a run it stopped watching.
+  //
+  // What it deliberately does not end is what this session knows about the run itself:
+  // `watchedRuns` and `acknowledged` are page-session facts, not connection facts (see the §7.6
+  // block above). Reconnecting to a run that finished in the meantime then takes the ordinary
+  // path — the first listing sees a folder still in progress and pulls it, and the finished-run
+  // effect acknowledges it, collecting the last read exactly as it would have live.
   useEffect(() => {
     if (connection === "connected") return;
     signature.current = null;
     lastStep.current = null;
-    acknowledged.current = null;
-    sawRunning.current = false;
     wasRunning.current = false;
     freshStart.current = false;
     cache.current.clear();

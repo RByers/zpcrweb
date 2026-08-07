@@ -17,6 +17,7 @@ import {
   parseUsbTrafficLog,
   usbTrafficText,
   type UsbTrafficMessage,
+  USB_PREVIEW_UNITS,
 } from "../src/usbTraffic.js";
 
 const bytes = (s: string) => new TextEncoder().encode(s);
@@ -214,8 +215,11 @@ describe("usb traffic log — round trip", () => {
     expect(inLine).toContain(`[${bigPayload.length}B]`);
     // Both the hex and the decoded text are shortened, not just one — the hex elision note comes
     // before `text=`, the text elision note inside its quoted value.
-    expect(inLine).toContain(`+${bigPayload.length - 64} more elided) text=`);
-    expect(inLine).toContain(`+${trimmedLen - 64} more elided)"`);
+    expect(inLine).toContain(`+${bigPayload.length - USB_PREVIEW_UNITS} more elided) text=`);
+    expect(inLine).toContain(`+${trimmedLen - USB_PREVIEW_UNITS} more elided)"`);
+    // One hexdump line and no more: the cut is what keeps a `GETFILE` reply from filling the
+    // view it is being read in.
+    expect(inLine.split("] ")[1].split(" …")[0].split(" ")).toHaveLength(USB_PREVIEW_UNITS);
   });
 
   it("knows both names a log is stored under", () => {

@@ -2458,7 +2458,17 @@ the transition rule structurally can't catch — the **final** read, whose trans
 `IDLE` with the run's name still attached) it goes out automatically, because the last read and
 `ended` only appear after it, and that is the one instrument-actuating command the app sends on its
 own, with `useCfxDevice` re-checking the status immediately before sending it since the same
-`CANCEL` aborts a run still cycling. One further listing establishes a baseline when the connection
+`CANCEL` aborts a run still cycling. It goes out only for a run **this page session watched
+cycling**, remembered by name in `watchedRuns` — an instrument left holding a run that finished
+yesterday presents an identical status, and acknowledging that one would send an unasked-for
+command and drag a 400 KB archive nobody requested into the file bar. That memory deliberately
+**survives a disconnect**: a run that finishes while the cable is out comes back as exactly this
+status, and treating the reconnected session as a stranger left the run held forever — no final
+plate read, no `ended`, no `.alf`, and a file permanently reading as in progress with nothing in
+the app able to release it. What a disconnect does clear is the *listing* state (signature, step,
+cached bytes), so the next connection re-establishes a baseline rather than diffing against a
+folder it stopped watching. A page reload is still a stranger, by design: memory is all there is
+to go on and a reload has none. One further listing establishes a baseline when the connection
 is made — see "The first listing is never pulled" below for why that one is pulled immediately
 rather than diffed against, on the one path where it isn't a stale finished run. Nothing lists on a
 run merely *starting*: `STATUS?`'s `running` flag already says that live, and the marker files
@@ -2588,7 +2598,11 @@ Four components, under `components/instrument/`:
   finished run's `.alf` report. `useLiveThermalHistory` is the one place that turns the poll loop's
   overwrite-each-tick `CfxStatus` into a series: it appends a sample whenever `status.running` and
   starts a fresh one when `runName` changes or `elapsedS` goes backwards, either of which means a
-  new run has begun. There is no ramp/hold/read decomposition to draw, since `STATUS?` reports a
+  new run has begun. It is called **from `useCfxDevice`**, and the rail only renders what the
+  handle hands it (`instrument.liveThermal`). Buffering it in the rail instead meant the history
+  belonged to a mounted component: opening Curves, or picking another file, unmounted the view and
+  the chart came back empty on a run that was still going — a history is worth having only if it
+  spans the whole run, so it lives with the connection, which `App` mounts once for the session. There is no ramp/hold/read decomposition to draw, since `STATUS?` reports a
   temperature and an elapsed second, not a step or a phase — `lib/uplot/liveThermalChart.ts` is a
   one-line chart sharing only axis styling and the time-tick spacing (`timeSplits`, exported from
   `thermalChart.ts`) with the after-the-run version.
@@ -2684,6 +2698,14 @@ Four components, under `components/instrument/`:
   un-hide, and decoding the session-long recording to recover the last few hundred of them would
   be work proportional to the whole session for a window of 400. `Clear` empties that buffer,
   which is how the rebuild honours it without tracking an offset.
+
+  **A long reply is cut to one line of bytes.** A `GETFILE` response is a whole file, and putting
+  it in a console line verbatim swamped the panel with a single line the size of its scrollback —
+  in exactly the case the surrounding lines matter most — besides parking megabytes of unreadable
+  hex in React state. Lines are built through core's `usbTrafficPreview` (`usb-traffic.md` §4),
+  the same cut the text rendering applies, so the console and a downloaded log agree on where a
+  payload stops. Only responses are cut; a request is a short command. The recording is untouched
+  by any of it and keeps every byte.
 
   **Recording is unconditional; "save log" decides only what is *kept*.** Every message and
   transfer error goes into core's `UsbTrafficRecorder` (`usb-traffic.md`) for the whole session,
