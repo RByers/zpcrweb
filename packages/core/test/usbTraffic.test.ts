@@ -207,7 +207,9 @@ describe("usb traffic log — round trip", () => {
       unsolicited: false,
       poll: false,
     });
-    const [out, inLine] = formatUsbTrafficBytes(rec.bytes()).split("\n");
+    const lines = formatUsbTrafficBytes(rec.bytes()).split("\n");
+    const out = lines[0] ?? "";
+    const inLine = lines[1] ?? "";
     const trimmedLen = bigText.trim().length;
     expect(out).toContain(`[${bigPayload.length}B]`);
     expect(out).not.toContain("elided");
@@ -219,7 +221,8 @@ describe("usb traffic log — round trip", () => {
     expect(inLine).toContain(`+${trimmedLen - USB_PREVIEW_UNITS} more elided)"`);
     // One hexdump line and no more: the cut is what keeps a `GETFILE` reply from filling the
     // view it is being read in.
-    expect(inLine.split("] ")[1].split(" …")[0].split(" ")).toHaveLength(USB_PREVIEW_UNITS);
+    const hexRun = inLine.split("] ")[1]?.split(" …")[0]?.split(" ") ?? [];
+    expect(hexRun).toHaveLength(USB_PREVIEW_UNITS);
   });
 
   it("knows both names a log is stored under", () => {
