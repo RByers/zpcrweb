@@ -680,7 +680,8 @@ Wells are addressed as `(channel, row, col)`:
   for the raw message log). Needs the optional `usb` dependency and a built core. Every subcommand
   is a named `CfxDevice` operation; there is no "send this command line" escape hatch, in the CLI
   or the library (`usb.md` §10).
-- **`tools/zpcr.mjs`** (`node tools/zpcr.mjs <file> results|curves`) — `results` prints a run's
+- **`tools/zpcr.mjs`** (`node tools/zpcr.mjs <run> results|curves`, where `<run>` is a `.zpcr`,
+  a `.pcrd` or a `.bmrun` — one boundary for all three, as `parseRun` is in the app) — `results` prints a run's
   results table (the web app's Curves view Table mode / CSV download) to stdout; `curves` writes
   the amplification curves as a PNG, the Curves chart's Relative view with its colors, its dark
   background and a ring at each Cq, filtered by `--wells`/`--rows`/`--cols`/`--fluors`. Both go

@@ -2,9 +2,12 @@
 /**
  * `zpcr` — a command-line face on `@zpcrweb/core`'s run-analysis pipeline.
  *
- *   node tools/zpcr.mjs <file.zpcr> results [--password <pw>] [--step <n>]
- *   node tools/zpcr.mjs <file.zpcr> curves  [--wells A1,B2-D5] [--rows A-C] [--cols 1,5]
- *                                          [--fluors FAM,HEX] [-o out.png] [--size WxH]
+ *   node tools/zpcr.mjs <run> results [--password <pw>] [--step <n>]
+ *   node tools/zpcr.mjs <run> curves  [--wells A1,B2-D5] [--rows A-C] [--cols 1,5]
+ *                                     [--fluors FAM,HEX] [-o out.png] [--size WxH]
+ *
+ * `<run>` is any of the three run formats — a CFX `.zpcr` or `.pcrd`, or a Biomeme `.bmrun`
+ * (see {@link runFromFile}).
  *
  * `results` prints a run's results table — the same one the web app's Curves view shows in
  * Table mode and downloads as CSV — as CSV on stdout: one row per loaded well/fluorophore pair,
@@ -35,10 +38,12 @@ import {
   computeRunAnalysis,
   curveColor,
   curveKey,
+  parseBiomeme,
+  parsePcrd,
+  parseZpcr,
   parseZpcrwebSettings,
   runAnalysisSettingsFromZpcrweb,
   wellKey,
-  zpcrFromFile,
 } from "../packages/core/dist/index.js";
 import {
   createCanvas,
@@ -59,12 +64,39 @@ function readCfxPassword() {
   return JSON.parse(readFileSync(path, "utf-8")).cfxPassword;
 }
 
+/**
+ * Read a run from disk, whichever of the three run formats it is: a CFX `.zpcr` archive, a CFX
+ * `.pcrd`, or a Biomeme `.bmrun`. All three parse to the same {@link Zpcr} document, which is
+ * what makes one command work across them — the same boundary the web app keeps in its
+ * `parseRun`, and the reason `computeRunAnalysis` below never asks where a run came from.
+ *
+ * Routed on the extension, exactly as the app routes a dropped file: each of the three names its
+ * own format, so there is nothing to sniff. This used to call `zpcrFromFile` unconditionally,
+ * which meant a `.bmrun` — JSON, not a zip — failed with "invalid zip data".
+ */
+async function runFromFile(path, password) {
+  const bytes = new Uint8Array(readFileSync(path));
+  if (/\.bmrun$/i.test(path)) return parseBiomeme(bytes);
+  if (/\.pcrd$/i.test(path)) {
+    const pcrd = parsePcrd(bytes, password ? { password } : undefined);
+    if (pcrd.needsPassword) {
+      throw new Error(
+        `${path}: this file is encrypted. Pass --password, or set cfxPassword in secrets.json.`,
+      );
+    }
+    if (!pcrd.zpcr) throw new Error(`${path}: ${pcrd.error ?? "could not be decoded"}`);
+    return pcrd.zpcr;
+  }
+  return parseZpcr(bytes);
+}
+
 function usage() {
   console.error(
-    "usage: zpcr <file> results [--password <pw>] [--step <n>]\n" +
-      "       zpcr <file> curves  [--password <pw>] [--step <n>] [-o <out.png>]\n" +
+    "usage: zpcr <run> results [--password <pw>] [--step <n>]\n" +
+      "       zpcr <run> curves  [--password <pw>] [--step <n>] [-o <out.png>]\n" +
       "                           [--wells A1,B2-D5] [--rows A-C] [--cols 1,5-8]\n" +
       "                           [--fluors FAM,HEX] [--size 1100x620] [--channels]\n\n" +
+      "<run> is a CFX .zpcr or .pcrd, or a Biomeme .bmrun.\n\n" +
       "results  the run's results table (the web app's Curves view Table mode) as CSV\n" +
       "curves   the run's amplification curves as a PNG, as the Curves chart draws them\n\n" +
       "Well selection: --wells/--rows/--cols are a union (any match plots the well); each\n" +
@@ -379,13 +411,13 @@ async function main() {
     else usage();
   }
 
-  const zpcr = await zpcrFromFile(file);
+  // The password is needed *before* parsing a `.pcrd`, whose whole document sits inside an
+  // encrypted zip entry — unlike a `.zpcr`, where only the plate data is encrypted and the
+  // password can wait until `plates()` below.
+  if (password == null) password = readCfxPassword();
+  const zpcr = await runFromFile(file, password);
 
   let plateEntry = zpcr.plates(password)[0];
-  if (plateEntry?.pltd.needsPassword && password == null) {
-    password = readCfxPassword();
-    if (password != null) plateEntry = zpcr.plates(password)[0];
-  }
   if (plateEntry?.pltd.needsPassword) {
     console.error(
       `${file}: plate data is password-protected. Pass --password, or set cfxPassword in secrets.json.`,
