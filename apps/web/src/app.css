@@ -3728,6 +3728,56 @@
   background: transparent !important;
 }
 
+/* A rail button that has asked before doing something to a run in progress — stopping it, pausing
+   it, skipping its step, opening the lid on it (`InstrumentRail`'s `ActionButton`). Filled with
+   the danger colour, exactly like the file table's armed delete (`.ftbl__del.is-armed`), so "the
+   next click is the one that does it" looks the same wherever the app asks it.
+
+   Note the name: `--armed` a few rules above means something unrelated here (a button keeping its
+   enabled look through a brief busy window), so the confirm state is `is-confirming`. */
+.instrument__rail .btn.is-confirming,
+.instrument__rail .btn.is-confirming:hover {
+  border-color: var(--danger) !important;
+  background: var(--danger) !important;
+  color: #fff !important;
+}
+
+/* The run sitting on the instrument that this browser doesn't have. Boxed and tinted rather than
+   another `rail__note`, because unlike everything else in this section it is not a readout — it
+   is the one thing here the user is being asked to act on. */
+.instrument__offer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0 8px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--neon-cyan);
+  border-radius: 4px;
+  background: var(--raised);
+}
+.instrument__offertext {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--ink-2);
+}
+.instrument__offername {
+  display: block;
+  margin-top: 2px;
+  font-size: 10px;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.instrument__offerreads {
+  display: block;
+  font-size: 10px;
+  color: var(--ink-muted);
+}
+
 /* Actions. The `?` badge marks a command name this protocol was never observed using — the
    button is real, but the instrument is expected to reject it, so it must not look as settled as
    the ones beside it. */

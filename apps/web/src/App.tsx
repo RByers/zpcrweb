@@ -163,14 +163,14 @@ export function App() {
   /**
    * Keep a `.zpcr` of the run in progress up to date in the file list.
    *
-   * Activating the refreshed copy only when the user was already on it: every snapshot is a new
-   * file id (see `AddFilesOptions.activate`), so following unconditionally would yank the view
-   * back to the running experiment every cycle. Following it when they *are* on it is the whole
-   * point — that is what makes the Curves view grow a cycle at a time.
+   * Activating the refreshed copy only when the user was already on it: following unconditionally
+   * would yank the view back to the running experiment every cycle. Following it when they *are*
+   * on it is the whole point — that is what makes the Curves view grow a cycle at a time.
    *
-   * A `freshStart` — the run began during this session, rather than being found already going —
-   * always activates regardless: the run the instrument just started is what someone watching it
-   * begin wants on screen, and there's no previous view of *this* run to preserve.
+   * The watcher's own `activate` overrides that, for the two files someone just caused to exist:
+   * a run that began during this session, and a run they clicked Download run for. Neither has a
+   * previous view of *this* run to preserve, and both are what the person who acted wants on
+   * screen (see `useRunWatch`'s `onRun`).
    */
   /**
    * The names of the experiment this session started, pinned at the click on Start.
@@ -193,11 +193,11 @@ export function App() {
       async (
         run: { name: string; archive: ZpcrArchive; whole: boolean },
         previousId: string | null,
-        freshStart: boolean,
+        activate: boolean,
       ) => {
         const wasWatchingIt = store.activeName !== null && store.activeName === previousId;
         return store.addRunArchive(run.name, run.archive, {
-          activate: wasWatchingIt || freshStart,
+          activate: wasWatchingIt || activate,
           modified: true,
           // What the instrument just wrote, laid over the run's file — not the run re-assembled.
           merge: !run.whole,

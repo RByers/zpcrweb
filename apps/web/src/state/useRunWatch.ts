@@ -22,7 +22,7 @@
  * purely to tell a run *starting* from one *found* already going (a reconnect, or a page load
  * mid-run) — the two produce an identical listing, but only the live `running` false→true
  * transition tells them apart, which is what lets the file that transition's next listing
- * eventually produces be selected unconditionally (see `onRun`'s `freshStart` below).
+ * eventually produces be selected unconditionally (see `onRun`'s `activate` below).
  *
  * When a listing turns out to differ from the last one, whatever is new is pulled and handed to
  * the store, which merges it into the file of that name (see `onRun` below — what goes over is
@@ -148,6 +148,25 @@ export interface RunWatchState {
   finished: { name: string; totalS: number; fileName: string } | null;
   /** Dismiss the banner — the Instrument view's "New run" button. */
   clearFinished: () => void;
+  /**
+   * A run sitting on the instrument that this browser **isn't holding** — what it is called and
+   * how far it got. Null whenever the folder's run is already in the file bar, or holds no run at
+   * all.
+   *
+   * This is the answer to "I connected after the run finished, where is it?". A finished run in
+   * the folder is deliberately never pulled on sight (see the module comment: it is usually the
+   * *previous* run, and a surprise 400 KB transfer plus an unrequested file is not what connecting
+   * asks for) — but saying nothing about it left the only way in as the Files panel's "Open run",
+   * behind a collapsed disclosure titled as a storage browser. So the fact is offered instead of
+   * acted on: the rail says a run is there and unheld, and {@link downloadAvailable} is the click.
+   *
+   * Costs the same ~8 KB identity read a pass already does (`runIdentityFileNames`), once per
+   * connection, and answers exactly — the run's own `RunInfo.xml` against the file's
+   * (`isSameRun`), not a guess from the name.
+   */
+  available: { name: string; plateReads: number; inProgress: boolean } | null;
+  /** Download the run {@link available} describes, whole, and put it in the file bar. */
+  downloadAvailable: () => Promise<void>;
 }
 
 export function useRunWatch(
@@ -174,17 +193,21 @@ export function useRunWatch(
    *
    * `previousId` is the file this one supersedes, so the caller
    * can decide whether to follow the new copy (the user was looking at it) or leave the selection
-   * alone (they were looking at something else). `freshStart` is true when this file is the
-   * result of a run that began while this session was watching — the `running` false→true edge
-   * below — as opposed to one already going when the folder was first listed (a reconnect, or a
-   * page load mid-run); the two look identical in the listing itself, so only that live edge
-   * tells them apart, and it's what the caller uses to decide whether to select the new file
-   * unconditionally. Returns the new file's id.
+   * alone (they were looking at something else). `activate` overrides that: select this file
+   * whatever the user was looking at. It is true for the two files someone just *caused to exist*
+   * and expects to be looking at —
+   *
+   * - a run that **began while this session was watching**, as opposed to one already going when
+   *   the folder was first listed (a reconnect, or a page load mid-run). The two look identical in
+   *   the listing itself, so only the live `running` false→true edge tells them apart.
+   * - a run the user asked for by clicking **Download run** ({@link RunWatchState.available}).
+   *
+   * Returns the new file's id.
    */
   onRun: (
     run: { name: string; archive: ZpcrArchive; whole: boolean },
     previousId: string | null,
-    freshStart: boolean,
+    activate: boolean,
   ) => Promise<string | null>,
   /**
    * Read back the entries of a run this app is holding, or `null` if it isn't holding that file.
@@ -217,6 +240,7 @@ export function useRunWatch(
   const [finished, setFinished] = useState<{ name: string; totalS: number; fileName: string } | null>(
     null,
   );
+  const [available, setAvailable] = useState<RunWatchState["available"]>(null);
 
   // Whether this connection has established *which file* the run in the folder belongs to. Not a
   // copy of anything: the answer is a name, and the run itself lives only in that file. Cleared on
@@ -227,8 +251,8 @@ export function useRunWatch(
   // Names only — it says what the instrument's folder holds, not what is in any of it.
   const lastNames = useRef<readonly string[] | null>(null);
   // Set on the `running` false→true edge below, and consumed by the next successful `pull()` —
-  // that pull is the file this fresh start produced.
-  const freshStart = useRef(false);
+  // that pull is the file it belongs to.
+  const activateNext = useRef(false);
   // A run being pulled must not have a second pull started on top of it: the fetch is slow (many
   // sequential commands) and both the timer and the status watcher can ask at once.
   const pulling = useRef(false);
@@ -248,6 +272,35 @@ export function useRunWatch(
 
   const { connection, status, refreshRunFolder, fetchDirectoryFiles, acknowledgeFinishedRun, trafficLogForRun } =
     instrument;
+
+  /**
+   * Is the run in the folder one this browser is holding? Sets {@link RunWatchState.available} to
+   * what it would download if not.
+   *
+   * The same identity read a pass does, for the case where there will be no pass: a folder holding
+   * a run that is over is left alone (see `check`), so without this the app would know a run is
+   * there — the rail says `finished`, with a plate-read count — and never say whose it is or that
+   * it could be had. Answering costs ~8 KB and one round trip, once per connection.
+   */
+  const checkAvailable = useCallback(
+    async (names: string[]): Promise<void> => {
+      const idNames = runIdentityFileNames(names);
+      if (idNames.length === 0) {
+        setAvailable(null); // not a run folder at all — nothing to offer
+        return;
+      }
+      const files = await fetchDirectoryFiles(CFX_CURRENT_RUN_DIR, idNames);
+      if (!files) return; // a failed read leaves the last answer standing; the rail reports it
+      const progress = runProgressFromNames(names);
+      const name = zpcrNameFromRunFiles(files, namingRef.current);
+      setAvailable(
+        isSameRun(heldRunRef.current(name), files)
+          ? null
+          : { name, plateReads: progress.plateReads, inProgress: progress.inProgress },
+      );
+    },
+    [fetchDirectoryFiles],
+  );
 
   /**
    * Fetch whatever this listing holds that the run's own file doesn't, and hand it over.
@@ -309,8 +362,8 @@ export function useRunWatch(
           fetched[USB_TRAFFIC_LOG_NAME] = log;
         }
       }
-      const fresh = freshStart.current;
-      freshStart.current = false;
+      const activate = activateNext.current;
+      activateNext.current = false;
       try {
         // Handed over as the archive it already is, not as zipped bytes: the store keeps a run in
         // progress open and appends to it (see its `addRunArchive` and `state/fileContent.ts`), so
@@ -331,9 +384,11 @@ export function useRunWatch(
         const id = await onRunRef.current(
           { name: run.name, archive: update, whole },
           fileNameRef.current,
-          fresh,
+          activate,
         );
         setFileName(id);
+        // Whatever was on offer is now in the file bar — this pass is what installed it.
+        if (id) setAvailable(null);
         const reads = names.filter((n) => /\.Plateread$/i.test(n)).length;
         setNote(`Updated at ${new Date().toLocaleTimeString()} — ${reads} plate reads`);
         return id;
@@ -381,6 +436,9 @@ export function useRunWatch(
             return await pull(dir.names);
           }
           setNote("Watching for changes to the current run.");
+          // Not pulling it doesn't mean not mentioning it: if this is a run the app doesn't have,
+          // that is worth saying, with a button (see `RunWatchState.available`).
+          await checkAvailable(dir.names);
           return null;
         }
         if (changed || force) return await pull(dir.names, finalAssembly);
@@ -389,8 +447,25 @@ export function useRunWatch(
         pulling.current = false;
       }
     },
-    [refreshRunFolder, pull],
+    [refreshRunFolder, pull, checkAvailable],
   );
+
+  /**
+   * Download the run on offer, whole — the rail's button.
+   *
+   * A forced pass: it lists, and pulls whatever the identity read says we don't have, which for a
+   * run this browser has never seen is all of it. `identified` is cleared first so the pass
+   * re-derives which file the folder's run belongs to rather than trusting an answer from before
+   * the user asked.
+   */
+  const downloadAvailable = useCallback(async () => {
+    identified.current = false;
+    // Asked for, so it is what the user wants to be looking at when it lands — the same override
+    // a run starting during this session gets (see `onRun`'s `activate`).
+    activateNext.current = true;
+    setNote("Downloading the run on the instrument…");
+    await check(true);
+  }, [check]);
 
   // --- the step-transition rule (§7.5) -------------------------------------------------------
   const lastStep = useRef<string | null>(null);
@@ -431,7 +506,7 @@ export function useRunWatch(
   const acknowledged = useRef<string | null>(null);
   const watchedRuns = useRef<Set<string>>(new Set());
   // Tracks `status.running` purely to catch its false→true edge — see the module comment and
-  // `onRun`'s `freshStart`. Distinct from `watchedRuns`, which remembers every run seen cycling
+  // `onRun`'s `activate`. Distinct from `watchedRuns`, which remembers every run seen cycling
   // for the rest of the session (`acknowledgeFinishedRun` below needs that); this one un-latches
   // so the next start is caught too.
   const wasRunning = useRef(false);
@@ -453,7 +528,7 @@ export function useRunWatch(
         acknowledged.current = null;
         if (status.runName) watchedRuns.current.add(status.runName);
         if (!wasRunning.current) {
-          freshStart.current = true;
+          activateNext.current = true;
           setFinished(null); // a new run starting retires the previous one's banner
         }
         wasRunning.current = true;
@@ -506,8 +581,11 @@ export function useRunWatch(
     lastNames.current = null;
     lastStep.current = null;
     wasRunning.current = false;
-    freshStart.current = false;
+    activateNext.current = false;
     identified.current = false;
+    // The offer belongs to a connection: it describes what is in the instrument's folder right
+    // now, and with the cable out there is nothing to download it from.
+    setAvailable(null);
   }, [connection]);
 
   // The seed is this run's first file, so the watcher treats it exactly as one of its own
@@ -515,5 +593,15 @@ export function useRunWatch(
   const adopt = useCallback((id: string) => setFileName(id), []);
   const clearFinished = useCallback(() => setFinished(null), []);
 
-  return { watching, setWatching, note, fileName, adopt, finished, clearFinished };
+  return {
+    watching,
+    setWatching,
+    note,
+    fileName,
+    adopt,
+    finished,
+    clearFinished,
+    available,
+    downloadAvailable,
+  };
 }

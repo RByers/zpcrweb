@@ -714,8 +714,9 @@ export interface AddFilesOptions {
    * The run watcher passes false ordinarily. It writes to the in-progress run every time a cycle
    * completes, so activating unconditionally would drag the user back to the running experiment
    * every minute or two no matter what they had opened. It passes true instead for the pass that
-   * comes from a run *starting* in this session (`App.tsx`'s `freshStart`) — that one file the
-   * user watching it begin wants selected, superseding whatever was active before.
+   * comes from a run *starting* in this session, and for one the user asked to download
+   * (`useRunWatch`'s `activate`) — files the person who acted wants selected, superseding whatever
+   * was active before.
    */
   activate?: boolean;
   /**

@@ -34,6 +34,67 @@ function Stat({
 const temp = (v: number | null | undefined, digits = 1) =>
   v == null ? "—" : `${v.toFixed(digits)} °C`;
 
+/**
+ * A button that asks twice — the first click arms it, the second does the thing.
+ *
+ * The app's existing idiom for a destructive click (`FilesTableView`'s delete), reused here for
+ * everything that would disturb a run that is *cycling*: stopping it, pausing it, skipping the
+ * step it is on, lifting the lid off the plate. Those are minutes-to-hours of thermal cycling and
+ * a plate of consumed reagent, and the rail's buttons sit a few pixels from ones that are
+ * harmless — Flash indicator, Close lid — so a misclick has to be recoverable by not clicking
+ * again.
+ *
+ * `confirm` is what makes that conditional: the same Open lid button asks nothing when the block
+ * is idle, because then there is no run to disturb. Moving the pointer away cancels the question,
+ * so a waiting button never sits there to be triggered by a click meant for something else.
+ *
+ * The class is `is-confirming`, not `is-armed`: this rail already spells `--armed` for something
+ * else entirely — a button that *keeps* its enabled look through a brief busy window
+ * (`.instrument__stop--armed`) — and two meanings of "armed" a few lines apart would be a trap.
+ */
+function ActionButton({
+  className,
+  disabled,
+  title,
+  confirm,
+  confirmLabel,
+  onAct,
+  children,
+}: {
+  className: string;
+  disabled?: boolean;
+  title?: string;
+  /** Ask for a second click. False for the same action when nothing is at stake. */
+  confirm: boolean;
+  /** What the button says once it has asked — a question naming what the next click does. */
+  confirmLabel: string;
+  onAct: () => void;
+  children: React.ReactNode;
+}) {
+  const [asked, setAsked] = useState(false);
+  // A run that ends while the question is on screen takes the question with it.
+  useEffect(() => {
+    if (!confirm) setAsked(false);
+  }, [confirm]);
+  const asking = asked && confirm;
+  return (
+    <button
+      className={className + (asking ? " is-confirming" : "")}
+      disabled={disabled}
+      title={asking ? `${confirmLabel} Click again, or move away to cancel.` : title}
+      onMouseLeave={() => setAsked(false)}
+      onClick={() => {
+        if (!confirm || asked) {
+          setAsked(false);
+          onAct();
+        } else setAsked(true);
+      }}
+    >
+      {asking ? confirmLabel : children}
+    </button>
+  );
+}
+
 /** `mm:ss`, or `h:mm:ss` past an hour — deliberately not sub-second, since none of `STATUS?`'s
  * clocks warrant that precision (`usb.md` §3.2). */
 export function duration(seconds: number | null | undefined): string {
@@ -403,9 +464,13 @@ export function InstrumentRail({
               says why): Stop drives `usb.md` §7.8's whole sequence and Pause is one half of a
               state read back from the status register, so each needs its own label, its own
               enabled rule and its own report. They appear only while there is a run to act on. */}
+          {/* Both ask twice while a run is actually cycling (see `ActionButton`). Stopping is
+              unrecoverable and pausing holds a plate at whatever temperature it reached, so
+              neither should be one click away from Start. Resuming a paused run asks nothing: it
+              puts the run back the way it was. */}
           {showRunControls && (
             <div className="instrument__runcontrols">
-              <button
+              <ActionButton
                 className={
                   "btn instrument__stop" + (busyBriefly ? " instrument__stop--armed" : "")
                 }
@@ -414,11 +479,13 @@ export function InstrumentRail({
                   "Stop the run in progress. Waits for a plate read in flight to finish, so the " +
                   "cycle already under way isn't thrown away (usb.md §7.8)."
                 }
-                onClick={() => void stop()}
+                confirm={runUnderway}
+                confirmLabel="Stop the run?"
+                onAct={() => void stop()}
               >
                 {busy === "Stopping the run" ? "Stopping…" : "Stop run"}
-              </button>
-              <button
+              </ActionButton>
+              <ActionButton
                 className={
                   "btn instrument__pause" + (busyBriefly ? " instrument__pause--armed" : "")
                 }
@@ -430,10 +497,12 @@ export function InstrumentRail({
                       : "Suspend the running protocol (PAUSE). The block holds where it is."
                     : "There is no running protocol to pause."
                 }
-                onClick={() => void instrument.setRunPaused(!paused)}
+                confirm={runUnderway && !paused}
+                confirmLabel="Pause the run?"
+                onAct={() => void instrument.setRunPaused(!paused)}
               >
                 {paused ? "Resume run" : "Pause run"}
-              </button>
+              </ActionButton>
             </div>
           )}
           {showRunControls && paused && (
@@ -454,24 +523,31 @@ export function InstrumentRail({
           )}
           {/* No tooltips here: each spec's `note` is provenance written for whoever maintains the
               command table — it cites `usb.md` sections, which mean nothing to an operator — and
-              the labels already say what the buttons do. */}
+              the labels already say what the buttons do.
+
+              Which of these would disturb a cycling run is the command table's own answer
+              (`disruptsRun`), not a list kept here: Skip step advances the protocol, Open lid
+              takes the seal off a plate mid-cycle, and both are one click from Flash indicator in
+              the same grid. While a run is underway those ask twice; idle, they don't. */}
           <div className="instrument__actions">
             {(Object.keys(CFX_COMMANDS) as CfxCommandName[]).map((name) => {
               const spec = CFX_COMMANDS[name];
               const unverified = spec.confidence === "unverified";
               return (
-                <button
+                <ActionButton
                   key={name}
                   className={
                     "btn instrument__action" +
                     (unverified ? " instrument__action--unverified" : "")
                   }
                   disabled={!!busy}
-                  onClick={() => void instrument.runAction(name, spec)}
+                  confirm={runUnderway && spec.disruptsRun === true}
+                  confirmLabel={`${spec.label}?`}
+                  onAct={() => void instrument.runAction(name, spec)}
                 >
                   {spec.label}
                   {unverified && <span className="instrument__badge">?</span>}
-                </button>
+                </ActionButton>
               );
             })}
           </div>
@@ -538,6 +614,34 @@ export function InstrumentRail({
             </>
           ) : (
             <div className="rail__stat">—</div>
+          )}
+          {/* The run the instrument is holding that this browser hasn't got — the answer to
+              connecting after a run has finished, which is otherwise a dead end: a finished run is
+              never pulled on sight (`useRunWatch`), so without this the rail would report
+              "finished, 45 plate reads" about a run the user has no way of knowing they could
+              have. Offered rather than taken: the transfer is ~400 KB over a slow channel and
+              lands a file in the bar, which is a thing to be asked for. */}
+          {runWatch.available && (
+            <div className="instrument__offer">
+              <div className="instrument__offertext">
+                {runWatch.available.inProgress
+                  ? "A run is in progress here and isn't in your files yet."
+                  : "The instrument is holding a finished run you don't have."}
+                <span className="instrument__offername mono">{runWatch.available.name}</span>
+                <span className="instrument__offerreads">
+                  {runWatch.available.plateReads} plate read
+                  {runWatch.available.plateReads === 1 ? "" : "s"}
+                </span>
+              </div>
+              <button
+                className="btn btn--primary btn--sm"
+                disabled={!!busy}
+                title="Retrieve every file of this run from the instrument and open it as a .zpcr."
+                onClick={() => void runWatch.downloadAvailable()}
+              >
+                Download run
+              </button>
+            </div>
           )}
           <div className="rail__note instrument__footnote">
             {runWatch.note ??

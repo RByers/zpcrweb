@@ -136,6 +136,20 @@ export interface CfxCommandSpec {
   note?: string;
   /** True when running it changes instrument state rather than just reporting it. */
   actuates?: boolean;
+  /**
+   * True when sending it *while a run is cycling* changes that run — its results, or its thermal
+   * profile — rather than merely doing something to the instrument alongside it.
+   *
+   * A fact about the command, recorded here beside its provenance rather than left for each client
+   * to know: `PROCEED` advances the protocol past the step it is on (§7.5, measured), and
+   * `LID OPEN` lifts the heated lid off a plate mid-cycle (§3). Flashing the indicator or closing
+   * a lid that is already closed does neither.
+   *
+   * What a client does about it is the client's business — the web app asks for a second click —
+   * but *which* commands warrant it is not a judgement worth making twice, and a new command added
+   * to this table has to answer the question to be written down at all.
+   */
+  disruptsRun?: boolean;
 }
 
 /**
@@ -184,6 +198,9 @@ export const CFX_COMMANDS: Record<CfxCommandName, CfxCommandSpec> = {
     confidence: "observed",
     note: "usb.md §3.",
     actuates: true,
+    // Lifting the lid off a plate mid-run: the seal goes, the wells cool, and the run cycles on
+    // regardless.
+    disruptsRun: true,
   },
   lidClose: {
     command: "LID CLOSE",
@@ -202,5 +219,6 @@ export const CFX_COMMANDS: Record<CfxCommandName, CfxCommandSpec> = {
       "to step 2 within 1.1 s. Despite the name it neither starts nor resumes anything — an " +
       "earlier reading of the capture had it as a start confirmation, which it is not.",
     actuates: true,
+    disruptsRun: true,
   },
 };

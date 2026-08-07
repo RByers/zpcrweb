@@ -2543,7 +2543,7 @@ run merely *starting*: `STATUS?`'s `running` flag already says that live, and th
 state, so they can wait for whichever real edge lists next. That flag's false→true edge is watched
 anyway, though, purely to tell a run *starting* apart from one *found* already going on connect —
 the two listings are identical, so only the live transition tells them apart — which is what the
-`freshStart` flag below rides on.
+`activate` flag below rides on.
 
 On each changed listing the watcher reads back the run's file, fetches what the folder holds that
 the file lacks, checks and names the result with `zpcrFromRunFiles`, and hands what it *fetched* to
@@ -2587,16 +2587,30 @@ Three economies make the once-a-cycle refresh affordable:
   after the run had already started, presents a first listing that is itself `begun` and not yet
   `ended`; `runProgressFromNames` tells the two cases apart, and an in-progress first sighting is
   pulled right away instead of waiting for the next transition or the 30 s backstop.
+
+  **Not pulling it is not the same as not mentioning it.** That rule used to make connecting after
+  a run had finished a dead end: the rail reported `finished, 45 plate reads` and the only way to
+  actually get the run was **Open run**, inside a collapsed panel titled as a storage browser. So
+  the first listing now also asks whether the run in the folder is one this browser *has* — the
+  same ~8 KB identity read a pass does (`runIdentityFileNames`, then `isSameRun` against the file's
+  own `RunInfo.xml`, so the answer is exact rather than a guess from the name) — and when it isn't,
+  `RunWatchState.available` names it and the rail offers **Download run** beside its plate-read
+  count. Offered, not taken: it is a ~400 KB transfer over a slow channel that lands a file in the
+  bar. Clicking it runs an ordinary forced pass, which downloads the whole run because the app is
+  holding none of it. The offer is a property of the connection — it clears when the run lands, and
+  on disconnect — so a run deleted later reappears as an offer on the next connect rather than
+  being watched for continuously.
 - **The refresh doesn't steal the selection — except for the run's first file.** `addRunArchive`
   takes an `activate` option: ordinarily the refreshed file becomes active only if the user was already on the one it
   supersedes, which is what makes the Curves view grow a cycle at a time without dragging anyone
   back from whatever else they had open. But the pull that follows a run *starting* during this
-  session — the `running` false→true edge above — always activates: `useRunWatch` passes `onRun` a
-  `freshStart` flag, set on that edge and consumed by the next successful pull (typically the first
-  plate read's), and `App.tsx` ORs it into the `activate` decision. Someone watching a run start
-  wants it on screen, and there is no prior view of *that* run to preserve. (A run *found* already
-  going on connect, which looks identical in the listing, does not set the flag — only the live
-  transition does.)
+  session — the `running` false→true edge above — always activates: `useRunWatch` passes `onRun` an
+  `activate` flag, set on that edge and consumed by the next successful pull (typically the first
+  plate read's), and `App.tsx` ORs it into the store's own `activate` decision. Someone watching a
+  run start wants it on screen, and there is no prior view of *that* run to preserve. (A run
+  *found* already going on connect, which looks identical in the listing, does not set the flag —
+  only the live transition does.) A run pulled by clicking **Download run** sets it too, for the
+  same reason: it is a file the user just asked to exist.
 
 **The whole bar locks to the running file, but only inside the Instrument view.** `App.tsx`'s
 `runActive` (`instrument.connection === "connected" && !!instrument.status?.running`) scopes both
@@ -2817,6 +2831,22 @@ to do what it says. All five currently offered — `BLOCKID 1` (flash the indica
 presented as a feature; the instrument's result code is reported either way. The badge and its
 footnote are driven off the tag rather than hardcoded, so adding an unverified command surfaces
 the warning on its own.
+
+**Anything that would disturb a cycling run asks twice.** Stop, Pause, Skip step and Open lid arm
+on the first click and act on the second (`InstrumentRail`'s `ActionButton`, styled like the file
+table's armed delete so "the next click does it" looks the same wherever the app asks it); moving
+the pointer away cancels the question, and a run that ends takes it with it. The cost of a misclick
+here is hours of cycling and a plate of reagent, and these buttons sit in the same grid as ones
+that cost nothing — Flash indicator, Close lid — which is exactly why the *same* button asks
+nothing when the block is idle. Resuming a paused run asks nothing either: it puts the run back the
+way it was.
+
+Which commands warrant it is the command table's own answer, not a list kept in the view:
+`CfxCommandSpec.disruptsRun` marks `PROCEED` (advances the protocol past the step it is on, §7.5)
+and `LID OPEN` (takes the seal off a plate mid-cycle, §3). A new action command has to answer the
+question to be added at all. Start is not in this scheme — it is already gated by every check in
+`RunPlan` and can't fire while a run is going, and its footnote says plainly that there is no
+second confirmation.
 
 That provenance is for whoever maintains the table, though, so **the buttons carry no tooltip**:
 each spec's `note` cites `usb.md` sections, which mean nothing to an operator, and the labels say
