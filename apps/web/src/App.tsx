@@ -458,9 +458,9 @@ export function App() {
    * a lens on the selection. It used to lock the selection while a run was live, so that leaving
    * the running file couldn't abandon the tab that was following it, and to snap the selection to
    * the running file on arrival so that the tab had something to show. Neither is needed now that
-   * that view resolves its own target ({@link instrumentTargetName}): a run is followed by
-   * `useRunWatch` whatever is selected, and the view shows the run it is driving without moving
-   * the app's selection to do it.
+   * that view is no longer a lens on the selection at all: a run is followed by `useRunWatch`
+   * whatever is selected, so nothing is abandoned by switching, and the view simply shows the
+   * selected experiment or none ({@link instrumentExperiment}).
    *
    * From About, picking a chip also *leaves* About for Overview. About is file-independent — it
    * survives a selection change (see `view` below) — so without this the click would land on a
@@ -536,57 +536,39 @@ export function App() {
   };
 
   /**
-   * The file the Instrument view acts on, in three rungs.
+   * The experiment the Instrument view acts on: **the selected file, when it is a decoded run**,
+   * and otherwise nothing.
    *
-   * There is **no second file picker** for this: the file bar is the app's one selection and stays
-   * the only one, so rung 2 is simply what is selected. What the other two rungs add is that the
-   * answer doesn't evaporate when the selection is something an instrument could never run.
+   * That is the whole rule, and the simplicity is the feature. The file bar is the app's one file
+   * picker, so this view needs none of its own; and when the selection isn't a run — a standalone
+   * plate or protocol, an undecoded run, nothing loaded at all — the view says so rather than
+   * showing some *other* run, which would be the one answer guaranteed to be wrong. Showing
+   * nothing costs nothing: connecting, reading status, opening the lid and every other action live
+   * in the rail, which needs no file at all (`InstrumentRail`), and Start disables itself with
+   * "Select or create an experiment first."
    *
-   * 1. **A run live on this instrument** wins outright: while the cycler is running a run this
-   *    session is following, that run is what the view is *about*, and offering to start something
-   *    else while the block is hot would be offering something the instrument would refuse anyway.
-   *    This is what the old snap-the-selection effect was for, done without moving the app's
-   *    selection — the file bar stays wherever the user left it.
-   * 2. **The selected file**, when it is a loaded run.
-   * 3. **Whatever this resolved to last**, which is what keeps the tab from being a lens by the
-   *    back door: selecting a `.prcl.txt` or a plate file while sitting on this view would
-   *    otherwise empty the panel, and "I selected a protocol file" is not a statement about which
-   *    experiment the instrument should run.
-   */
-  const lastInstrumentTarget = useRef<string | null>(null);
-  const instrumentTargetName = useMemo(() => {
-    const running = instrument.connection === "connected" && !!instrument.status?.running;
-    if (running && runWatch.fileName && store.runs.has(runWatch.fileName)) return runWatch.fileName;
-    if (active && store.runs.has(active.name)) return active.name;
-    const last = lastInstrumentTarget.current;
-    return last && store.runs.has(last) ? last : null;
-  }, [instrument.connection, instrument.status, runWatch.fileName, store.runs, active]);
-  // Written during render rather than in an effect: it is a memo of the render above it, not a
-  // state change, and an effect would leave one render resolving to null before it caught up.
-  lastInstrumentTarget.current = instrumentTargetName;
-
-  /**
-   * That file as the Instrument view sees it: an experiment, or null when there is nothing to
-   * point at (nothing loaded, or a selection that is a standalone plate or protocol, or a run that
-   * hasn't decoded). Computed here because `App` is what knows the loaded runs and their identities.
+   * Earlier versions had this resolve through as many as four rungs — a live run, a pick made in
+   * the view, the selection, the last thing resolved — each defensible on its own and adding up to
+   * a view whose subject you couldn't name by looking at the file bar. What made them seem
+   * necessary was the tab pretending to be a lens on the selection (which cost a lock on that bar
+   * and a snap of the selection on arrival, both since deleted); once it stopped pretending, the
+   * plain answer was enough.
    */
   const instrumentExperiment = useMemo(() => {
-    if (!instrumentTargetName) return null;
-    const file = store.loaded.find((f) => f.name === instrumentTargetName);
-    const zpcr = store.runs.get(instrumentTargetName)?.zpcr;
-    if (!file || !zpcr) return null;
-    const identity = store.experiments.get(file.name);
+    if (!active || !activeRun?.zpcr) return null;
+    const zpcr = activeRun.zpcr;
+    const identity = store.experiments.get(active.name);
     return {
-      fileName: file.name,
-      name: identity?.name ?? file.name,
+      fileName: active.name,
+      name: identity?.name ?? active.name,
       named: identity?.named ?? false,
       zpcr,
-      pending: isPendingExperiment(file.kind, zpcr),
+      pending: isPendingExperiment(active.kind, zpcr),
       // Derived from the file's own markers, so it stays true across a reload mid-run and doesn't
       // depend on this app being the one that started it (`runFolder.ts`).
       inProgress: runProgressFromNames(zpcr.archive.entries).inProgress,
     };
-  }, [instrumentTargetName, store.loaded, store.runs, store.experiments]);
+  }, [active, activeRun, store.experiments]);
 
 
   if (store.loading) {

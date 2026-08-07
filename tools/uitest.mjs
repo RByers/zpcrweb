@@ -422,7 +422,7 @@ async function loadChecks(chrome, origin) {
     fromEmpty.chips === 0 &&
       fromEmpty.connect &&
       fromEmpty.live.join(",") === "Files,Instrument" &&
-      /No experiment to start/.test(fromEmpty.says),
+      /No experiment selected/.test(fromEmpty.says),
     JSON.stringify(fromEmpty),
   );
   // Back to the welcome screen for the example-link checks below — the view is sticky, and this
@@ -1962,20 +1962,36 @@ async function instrumentRunChecks(chrome, origin) {
   await sleep(400);
   const loadedTab = await activeTab(cdp);
 
-  // …and the whole point of this tab not being a lens: go back to it with the protocol file still
-  // selected, and it is still about the experiment it was about. A file bar selection is not a
-  // statement about what the instrument should run, so changing it — to a kind that could never be
-  // an experiment, no less — must not empty the panel or silently re-aim the Start button. This is
-  // the behaviour the old selection lock and snap-on-arrival existed to fake.
+  // …and the rule the whole view now rests on: with a `.prcl.txt` selected there is no experiment,
+  // so the panel shows *nothing* rather than the run that happens to have been there before. A run
+  // it names must always be the run the file bar has lit — showing a different one would be the
+  // single answer guaranteed to be wrong. The instrument itself is unaffected, which is why this
+  // costs nothing: the rail is still there, with its connect button.
   await cdp.eval(`window.location.hash = "view=instrument", undefined`);
-  await waitFor(() => cdp.eval(`!!document.querySelector(".devrun")`), { what: "the run panel" });
+  await waitFor(() => cdp.eval(`!!document.querySelector(".instrument__rail")`), {
+    what: "the instrument rail",
+  });
   await sleep(300);
-  const afterProtocol = await shown();
+  const afterProtocol = await cdp.eval(`(() => ({
+    named: document.querySelector(".instrument__panelhead .devrun__hint")?.textContent.trim() ?? null,
+    parts: document.querySelectorAll(".devrun__part").length,
+    says: document.querySelector(".instrument__empty")?.textContent.trim() || "",
+    connect: !![...document.querySelectorAll("button")].find((b) => /Connect over USB/i.test(b.textContent)),
+    lit: [...document.querySelectorAll(".filebar .filechip")]
+      .filter((c) => c.classList.contains("is-active"))
+      .map((c) => c.querySelector(".filechip__name").textContent.trim()),
+  }))()`);
   check(
-    "…and the Instrument view keeps its experiment when the file bar moves to a .prcl.txt",
-    afterProtocol.named === first.named &&
-      afterProtocol.chips.find((c) => c.on)?.name !== first.chips.find((c) => c.on)?.name,
-    JSON.stringify({ named: afterProtocol.named, chips: afterProtocol.chips }),
+    "…and with a .prcl.txt selected it shows no experiment at all, not some other run",
+    afterProtocol.named === null &&
+      afterProtocol.parts === 0 &&
+      /No experiment selected/.test(afterProtocol.says) &&
+      afterProtocol.lit.join(",") === "Gradient",
+    JSON.stringify(afterProtocol),
+  );
+  check(
+    "…while the instrument itself stays usable, which is why showing nothing costs nothing",
+    afterProtocol.connect === true,
   );
   // The bar itself is free while this view is up — no locked chips, which is what the removal of
   // `activeLocked` has to actually mean on screen.

@@ -4,9 +4,9 @@
  *
  * **It is named here, not chosen here.** Which experiment this view is about is the file bar's
  * one selection like everywhere else in the app (see {@link InstrumentView}); a picker of its own
- * would be a second control saying the same thing, free to disagree with the chips. What this
- * view adds is only that the answer *sticks* when the selection wanders off onto something that
- * could never be started.
+ * would be a second control saying the same thing, free to disagree with the chips. When the
+ * selection is not a run, this panel shows nothing rather than some other run — the rail carries
+ * on regardless, since only Start needs a file.
  *
  * Both halves come from that one file — this panel renders a file it does not own. It used to
  * render a three-slot staging selection instead, where each half could be overridden by some
@@ -190,9 +190,9 @@ export function InstrumentRun({
       {!experiment ? (
         <div className="instrument__empty mono">
           <p>
-            No experiment to start. An experiment is a file — it holds the protocol to run and the
+            No experiment selected. An experiment is a file — it holds the protocol to run and the
             plate map to record it against — so select one in the bar above, clone an existing run
-            from its Overview, or make a new one.
+            from its Overview, or make a new one. Everything else here works without one.
           </p>
           <button className="btn" onClick={onNewExperiment}>
             New experiment

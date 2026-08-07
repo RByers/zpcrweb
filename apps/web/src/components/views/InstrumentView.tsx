@@ -8,15 +8,15 @@
  * files starts.
  *
  * It does still need **an experiment** to start, since a protocol comes from a file and the
- * instrument has no library of its own (`usb.md` §5.1), and that experiment is the app's ordinary
- * selection — the file bar, which is the app's one file picker and stays the only one. What this
- * view adds is that the answer *sticks*: `App` resolves it as the run live on this instrument,
- * else the selected file when that is a run, else whatever resolved last, so wandering onto a
- * `.prcl.txt` or a plate file doesn't empty the panel (`instrumentTargetName`).
+ * instrument has no library of its own (`usb.md` §5.1). That experiment is the app's ordinary
+ * selection and nothing else: the selected file when it is a decoded run, otherwise none, and the
+ * panel says so rather than showing a different run than the one lit in the bar. The file bar is
+ * the app's one file picker and stays the only one.
  *
- * That last rung is the whole of what replaced the two contortions this tab used to need while it
- * sat among the file views: a lock on the file bar (no switching files during a run) and a snap
- * that moved the app's selection when you arrived here.
+ * **Nothing selected is a perfectly good state here**, and the reason this tab can afford so plain
+ * a rule: connecting, status, the instrument's own files, the traffic and every action but Start
+ * live in the rail, which needs no file at all. Someone can plug in a cycler, open the lid and
+ * read its status with an empty browser.
  *
  * Older still, and worth not re-proposing: a run assembled from a **three-slot staging selection**
  * over every loaded file, where a `.prcl.txt` or `.plt.csv` could override half of some other run,
@@ -48,11 +48,12 @@ import type { CfxDeviceHandle } from "../../state/useCfxDevice";
 import type { RunWatchState } from "../../state/useRunWatch";
 
 /**
- * The experiment this view would start — whichever file `App` resolved as its target.
+ * The experiment this view would start: the selected file, once it has turned out to be a decoded
+ * run at all.
  *
- * Null when there is nothing to point at: nothing loaded, or a selection that is a standalone
- * plate or protocol or an unreadable run and no other pick. The view still renders, it just has
- * nothing to start, and says where experiments come from.
+ * Null when it hasn't — a standalone plate or protocol, a run behind the password prompt, or
+ * nothing selected. The view still renders and the instrument is still fully usable; there is
+ * simply nothing to start, and the panel says where experiments come from.
  */
 export interface InstrumentExperiment {
   fileName: string;
@@ -88,8 +89,8 @@ export function InstrumentView({
    * from `onOpenRun`: that one adds a *new* file (an offloaded archive dropped in from outside);
    * this one just switches to a file the watcher already put in the store. */
   onOpenFinishedRun: (fileName: string) => void;
-  /** The experiment this view is pointed at, or null when there is nothing to point at; see the
-   * type. Resolved by `App` from the selection — see `instrumentTargetName` there. */
+  /** The selected experiment, or null when the selection isn't one; see the type. Built by `App`
+   * from the active file — see `instrumentExperiment` there. */
   experiment: InstrumentExperiment | null;
   /** Make a new pending experiment and stay here — the way out of "nothing to start" when the
    * browser is holding nothing to point at. */

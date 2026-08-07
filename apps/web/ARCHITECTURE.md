@@ -541,11 +541,10 @@ and a protocol comes from a file. Both halves of that are still true — but *ne
 input* is not *being a lens on the selected file*, and only the second belongs in that group. The
 difference showed up as two contortions in `App` whose only job was to hide it: `activeLocked`,
 which stopped the file bar switching files while a run was live, and an effect that snapped the
-app's selection to the running file on arriving at the tab. Both are gone, and nothing replaced
-them in the UI: **the file bar is still the only file picker**, and the experiment this view starts
-is still the selected one. What changed is only that the answer no longer evaporates —
-`instrumentTargetName` resolves the live run first, the selection second, and what it last resolved
-to third. See "The Instrument view" below.
+app's selection to the running file on arriving at the tab. Both are gone, and **nothing replaced
+them**: the file bar is still the only file picker, the experiment this view starts is still simply
+the selected one, and when the selection isn't a run the view shows no run at all. See "The
+Instrument view" below.
 
 ## State & persistence
 
@@ -2359,20 +2358,23 @@ with nothing loaded at all. Starting a run does still need a protocol, and a pro
 from a file, since the instrument has no library of its own to pick from (`usb.md` §5.1) — but
 *needing a file as input* is not *being a lens on the selected file*.
 
-**Which experiment it would start is the selected one**, and there is deliberately no picker here
-to say so a second time — the file bar is the app's one file picker, and a control beside it could
-only agree with the chips or contradict them. What the view adds is that the answer *sticks*, in
-three rungs (`App`'s `instrumentTargetName`):
+**Which experiment it would start is the selected one, and that is the whole rule** (`App`'s
+`instrumentExperiment`): the selected file when it is a decoded run, otherwise none. There is no
+picker here to say it a second time — the file bar is the app's one file picker, and a control
+beside it could only agree with the chips or contradict them — and no fallback to a *different*
+run when the selection isn't one, which would be the single answer guaranteed to be wrong.
 
-| Rung | Wins when | Why |
-| ---- | --------- | --- |
-| the run live on this instrument | connected, `status.running`, and the watcher has a file for it | while the block is cycling that run *is* what this view is about — and pointing at it here, rather than moving the app's selection to it, is what retired the old snap-on-arrival effect |
-| the selected file | it is a loaded run | the ordinary answer, and the only one a user gives |
-| whatever resolved last | — | the selection can be a `.prcl.txt` or a plate file, which no instrument can run; the panel goes on showing the experiment it was showing rather than emptying, since "I selected a protocol file" says nothing about what should be started |
+Showing nothing costs nothing, which is what lets the rule stay this plain: connecting, status, the
+instrument's filesystem, the traffic console and every action but Start live in the rail and need no
+file at all. Plug in a cycler with an empty browser and you can still open the lid; Start disables
+itself with "Select or create an experiment first."
 
-Nothing needs pinning at the click on Start: the run watcher activates the file it started
-(`AddFilesOptions.activate`), so the selection *is* that run, and the second rung has it — including
-after it finishes, with its "clone me" offer intact.
+Earlier versions resolved this through as many as four rungs — a live run, a pick made in the view,
+the selection, the last thing resolved — each defensible alone and adding up to a view whose subject
+you could not name by looking at the file bar. What made them seem necessary was the tab pretending
+to be a lens; once it stopped, the plain answer was enough. Nothing needs pinning at the click on
+Start either: the run watcher activates the file it started (`AddFilesOptions.activate`), so the
+selection *is* that run.
 
 One consequence of the tab being reachable with nothing loaded: the welcome screen's "Connect an
 instrument over USB" button just **goes there**, creating nothing. It used to have to invent an
