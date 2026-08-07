@@ -772,6 +772,146 @@ async function tableSortChecks(chrome, origin) {
 }
 
 /**
+ * Table mode's Well/Sample/Target pickers: clicking one of those three values leaves the table
+ * for the Target view charting just that well, sample or target. What's checked is the *state*
+ * each click leaves behind — which mode is active and which rail chips survive — since a chart
+ * with fewer curves on it looks the same however the curves were chosen.
+ */
+async function tablePickChecks(chrome, origin) {
+  console.log("\ncurves table mode (well/sample/target pickers)");
+  const cdp = await openPage(chrome.base, origin);
+  await sleep(600);
+  await loadFile(cdp, ZPCR);
+  await waitFor(() => cdp.eval(`!!document.querySelector(".chanbar")`), { what: "curves rail" });
+
+  const toTable = async () => {
+    await cdp.eval(
+      `(() => { [...document.querySelectorAll(".segmented__item")]
+          .find((b) => b.textContent.trim() === "Table")?.click(); })()`,
+    );
+    await waitFor(() => cdp.eval(`!!document.querySelector(".atbl")`), { what: "the analysis table" });
+  };
+  /** The first row's three picker buttons, in column order: Well, Sample, Target. */
+  const pickers = () =>
+    cdp.eval(`[...document.querySelector(".atbl tbody tr").querySelectorAll(".atbl__pick")]
+        .map((b) => b.textContent.trim())`);
+  const clickPicker = async (i) => {
+    await cdp.eval(
+      `(() => { document.querySelector(".atbl tbody tr").querySelectorAll(".atbl__pick")[${i}].click(); })()`,
+    );
+    await sleep(400);
+  };
+  /** Active view mode, plus each rail bar's chips marked `*` when enabled. */
+  const state = () =>
+    cdp.eval(`(() => {
+      // Scoped to the View toggle's own four options: segmented__item is the app's generic
+      // segmented control, and the file tabs and the Relative/Linear toggles use it too.
+      const mode = [...document.querySelectorAll(".segmented__item")]
+        .filter((b) => ["Channel", "Fluorophore", "Target", "Table"].includes(b.textContent.trim()))
+        .filter((b) => b.className.includes("is-active"))
+        .map((b) => b.textContent.trim());
+      const bar = (name) => {
+        const s = [...document.querySelectorAll(".rail__section")]
+          .find((e) => (e.querySelector(".rail__title")?.textContent || "").includes(name));
+        return s ? [...s.querySelectorAll(".chanchip")]
+          .map((b) => b.textContent.trim().replace(/\\s+/g, " ") + (b.className.includes("is-on") ? "*" : "")) : null;
+      };
+      return {
+        mode,
+        wells: [...document.querySelectorAll(".wm-cell.is-on")].length,
+        charting: !document.querySelector(".atbl"),
+        targets: bar("Target") ?? bar("Fluoro"),
+        samples: bar("Sample"),
+      };
+    })()`);
+  /** The Wells reset button, to undo an isolate — the rail's bars follow the enabled wells, so a
+   * one-well selection would otherwise mask what the target/sample picks did. */
+  const resetWells = async () => {
+    await cdp.eval(
+      `(() => { [...document.querySelectorAll(".rail__section")]
+          .find((s) => (s.querySelector(".rail__title")?.textContent || "").includes("Wells"))
+          ?.querySelector(".rail__icon-btn").click(); })()`,
+    );
+    await sleep(400);
+  };
+
+  await toTable();
+  const cells = await pickers();
+  check(
+    "Well, Sample, Target and the three result numbers are pickers",
+    cells.length === 6,
+    cells.join(" | "),
+  );
+  check(
+    "…and they carry a pointer cursor",
+    (await cdp.eval(
+      `getComputedStyle(document.querySelector(".atbl tbody tr .atbl__pick")).cursor`,
+    )) === "pointer",
+  );
+
+  await clickPicker(0);
+  const afterWell = await state();
+  check("clicking a Well leaves the table for the chart", afterWell.charting && !!afterWell.mode);
+  check("…in Target view", JSON.stringify(afterWell.mode) === '["Target"]', JSON.stringify(afterWell.mode));
+  check("…with that one well selected", afterWell.wells === 1, `${afterWell.wells} wells`);
+
+  await resetWells();
+  await toTable();
+  await clickPicker(1);
+  await resetWells();
+  const afterSample = await state();
+  check(
+    "clicking a Sample isolates it in Target view",
+    JSON.stringify(afterSample.mode) === '["Target"]' &&
+      afterSample.samples.filter((s) => s.endsWith("*")).length === 1 &&
+      afterSample.samples.length > 1,
+    JSON.stringify(afterSample.samples),
+  );
+  check(
+    "…and leaves the other dimensions alone",
+    afterSample.targets.every((t) => t.endsWith("*")),
+    JSON.stringify(afterSample.targets),
+  );
+
+  await toTable();
+  await clickPicker(2);
+  await resetWells();
+  const afterTarget = await state();
+  check(
+    "clicking a Target isolates it in Target view",
+    JSON.stringify(afterTarget.mode) === '["Target"]' &&
+      afterTarget.targets.filter((t) => t.endsWith("*")).length === 1 &&
+      afterTarget.targets.length > 1,
+    JSON.stringify(afterTarget.targets),
+  );
+
+  // The three result numbers isolate a *curve* — both dimensions at once — rather than one of
+  // them, which is the whole difference between them and the Well/Target pickers above.
+  await toTable();
+  const rowIdentity = await cdp.eval(
+    `[...document.querySelector(".atbl tbody tr").querySelectorAll(".atbl__pick")].slice(0, 3)
+        .map((b) => b.textContent.trim())`,
+  );
+  await clickPicker(3);
+  const afterCq = await state();
+  check(
+    "clicking a Cq charts that one curve: its well alone…",
+    JSON.stringify(afterCq.mode) === '["Target"]' && afterCq.wells === 1,
+    `${afterCq.wells} wells, mode ${JSON.stringify(afterCq.mode)}`,
+  );
+  await resetWells();
+  const afterCqReset = await state();
+  check(
+    "…and its target alone",
+    afterCqReset.targets.filter((t) => t.endsWith("*")).length === 1 &&
+      afterCqReset.targets.find((t) => t.endsWith("*"))?.startsWith(rowIdentity[2]),
+    `${rowIdentity[2]} → ${JSON.stringify(afterCqReset.targets)}`,
+  );
+
+  cdp.close();
+}
+
+/**
  * The Curves rail's Cq range filter: that its two handles really do bound the shown set, that
  * they can't cross, and — the part that isn't a plain min/max — that the top stop is where the
  * curves with *no* Cq live, so pulling the upper handle off it hides them and parking the lower
@@ -3527,6 +3667,7 @@ async function main() {
     await routingChecks(chrome, origin, pw);
     await rightAxisChecks(chrome, origin);
     await tableSortChecks(chrome, origin);
+    await tablePickChecks(chrome, origin);
     await persistedThresholdChecks(chrome, origin, pw);
     await cqFilterChecks(chrome, origin);
     await referenceChecks(chrome, origin);

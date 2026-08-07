@@ -3018,6 +3018,41 @@
 .atbl__none {
   color: var(--ink-muted);
 }
+/* Well, Sample and Target are pickers as much as values — clicking one leaves the table for the
+   Target view charting just that well/sample/target. The button carries no chrome of its own:
+   the value keeps its existing chip, and the affordance is the pointer cursor plus a brightening
+   on hover, so three clickable columns don't turn the table into a wall of buttons. */
+.atbl__pick {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.atbl__pick:hover {
+  color: var(--ink);
+}
+/* In the right-aligned result columns the button is the cell's whole content, so it has to carry
+   the alignment itself — an inline-flex box would otherwise sit left of the numbers above it. */
+.atbl__num .atbl__pick {
+  justify-content: flex-end;
+  width: 100%;
+}
+.atbl__pick:hover .atbl__well,
+.atbl__pick:hover .atbl__chip {
+  background: color-mix(in srgb, var(--c, var(--rowc)) 26%, transparent);
+  color: var(--ink);
+}
+.atbl__pick:focus-visible {
+  outline: 1px solid var(--neon-cyan);
+  outline-offset: 2px;
+}
 .atbl__baseline {
   color: var(--ink-muted);
   font-size: 11px;

@@ -736,6 +736,35 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
     onChange({ disabledSamples: next });
   };
 
+  // Clicking a Well/Target/Sample value in table mode: isolate what was clicked — exactly the
+  // rail's own double-click solo — and leave the table for the Target view, so the answer to
+  // "what does this row look like?" is the chart of that one thing. Only the clicked dimension
+  // is touched; the other two keep whatever the rail already had.
+  const pickWell = (row: number, col: number) => {
+    onChange({ fluorViewMode: "target", enabledWells: new Set([wellKey(row, col)]) });
+  };
+  const pickTarget = (key: string) => {
+    const next = new Set(chipItems.map((c) => c.key));
+    next.delete(key);
+    onChange({ fluorViewMode: "target", disabledFluors: next });
+  };
+  const pickSample = (name: string) => {
+    const next = new Set(sampleList);
+    next.delete(name);
+    onChange({ fluorViewMode: "target", disabledSamples: next });
+  };
+  // The row's result numbers name one curve, not one dimension: isolating both the well and the
+  // target leaves exactly the curve those numbers were measured on.
+  const pickCurve = (row: number, col: number, key: string) => {
+    const fluors = new Set(chipItems.map((c) => c.key));
+    fluors.delete(key);
+    onChange({
+      fluorViewMode: "target",
+      enabledWells: new Set([wellKey(row, col)]),
+      disabledFluors: fluors,
+    });
+  };
+
   // ---- Table mode / CSV export -------------------------------------------------------------
   // One row per visible (target, well) pair, filtered by exactly the same rail state as the chart
   // and reading the same Cq table (see `lib/analysisRows.ts`). Built in every view mode, not only
@@ -1370,7 +1399,15 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
 
       {tableMode ? (
         <section className="analysis__table-wrap">
-          <CurveTable rows={tableRows} usingTargets={usingTargets} cycleCount={cycleCount} />
+          <CurveTable
+            rows={tableRows}
+            usingTargets={usingTargets}
+            cycleCount={cycleCount}
+            onPickWell={pickWell}
+            onPickTarget={pickTarget}
+            onPickSample={pickSample}
+            onPickCurve={pickCurve}
+          />
         </section>
       ) : (
         <section className="curves__plot">

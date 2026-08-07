@@ -1739,6 +1739,19 @@ is: a per-target curve needs channel→dye color separation (`calibration.md`).
   state, not a settings/URL key: it's a way of reading the table, not a property of the run.
   Covered by `tools/uitest.mjs` (`tableSortChecks`), since row order is exactly what a screenshot
   can't check.
+- **Six cells per row are pickers, not just values** (`PickCell` / `.atbl__pick`): clicking one
+  isolates what it names and swaps the table for the **Target** view charting it, which is the
+  table's answer to "what does this row actually look like?". Well, Sample and Target each isolate
+  their own dimension — the same thing double-clicking that chip in the rail does, leaving the
+  other two dimensions as they were. The three *result* numbers (Cq, ΔRFU, End RFU) instead isolate
+  the single curve they were measured on: well **and** target together, since all three describe
+  that one curve rather than a group of them. `CurvesView`'s `pickWell`/`pickTarget`/`pickSample`/
+  `pickCurve` do the work, so the isolation goes through the same `enabledWells`/`disabledFluors`/
+  `disabledSamples` settings every other control writes; nothing about the selection is special to
+  the table. The button carries no chrome of its own — the value keeps its chip, and the affordance
+  is the pointer cursor plus a hover brightening — because six buttons' worth of borders would bury
+  the numbers they sit on. Covered by `tools/uitest.mjs` (`tablePickChecks`): which mode is active
+  and which chips survive a click is state no screenshot can show.
 - **Colour is borrowed, never invented.** Fluor and Target render as chips in the optical-channel
   hue (`channelColor`) their curve is drawn in, so a row matches its line in the chart; the Type
   chip and the row's background wash use `SAMPLE_TYPE_META`, the same palette the plate map paints

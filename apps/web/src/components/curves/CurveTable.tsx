@@ -11,6 +11,37 @@ interface Props {
   /** Whether the plate assigns targets at all — when it doesn't, the group *is* the fluorophore
    * and the Target column would just repeat the Fluor one. */
   usingTargets: boolean;
+  /** Clicking a Well cell — isolates that well and leaves the table for the chart. */
+  onPickWell: (row: number, col: number) => void;
+  /** Clicking a Target cell — isolates that target. */
+  onPickTarget: (target: string) => void;
+  /** Clicking a Sample cell — isolates that sample. A row with no sample gets no picker. */
+  onPickSample: (sample: string) => void;
+  /** Clicking one of the row's result numbers (Cq, ΔRFU, End RFU) — isolates the single curve
+   * the row measures, i.e. its well *and* its target together. */
+  onPickCurve: (row: number, col: number, target: string) => void;
+}
+
+/**
+ * A table value that is also a way in: clicking it isolates what it names and swaps the table
+ * for the chart drawing it. A plain `<button>` wrapping the existing chip, so the value keeps
+ * its own styling and the affordance is the pointer cursor, a hover lift and a focus ring (see
+ * `.atbl__pick` in app.css).
+ */
+function PickCell({
+  title,
+  onClick,
+  children,
+}: {
+  title: string;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button type="button" className="atbl__pick" onClick={onClick} title={title}>
+      {children}
+    </button>
+  );
 }
 
 /** The columns that can be sorted on, i.e. all of them. */
@@ -218,7 +249,15 @@ const cqInk = (t: number) => Math.round(100 - t * 65);
  * curve never crosses its threshold (`threshold.md` §6 — the only cause there is, now that the
  * quality gates are gone) stays visible instead of silently vanishing from the table.
  */
-export function CurveTable({ rows, usingTargets, cycleCount }: Props) {
+export function CurveTable({
+  rows,
+  usingTargets,
+  cycleCount,
+  onPickWell,
+  onPickTarget,
+  onPickSample,
+  onPickCurve,
+}: Props) {
   const [sortKey, setSortKey] = useState<SortKey>("target");
   const [dir, setDir] = useState<1 | -1>(1);
 
@@ -277,6 +316,12 @@ export function CurveTable({ rows, usingTargets, cycleCount }: Props) {
         {sorted.map((r) => {
           const color = channelColor(r.channel);
           const typeMeta = SAMPLE_TYPE_META[r.sampleType];
+          // The row's three result numbers all name the same thing — this well's curve for this
+          // target — so all three isolate that one curve and chart it.
+          const pickCurve = {
+            title: `Chart ${r.wellLabel} · ${r.target} on its own`,
+            onClick: () => onPickCurve(r.row, r.col, r.target),
+          };
           return (
             <tr
               key={`${r.target}-${r.wellLabel}-${r.fluor}`}
@@ -285,9 +330,25 @@ export function CurveTable({ rows, usingTargets, cycleCount }: Props) {
               style={{ "--rowc": typeMeta.color } as React.CSSProperties}
             >
               <td>
-                <span className="atbl__well mono">{r.wellLabel}</span>
+                <PickCell
+                  title={`Chart well ${r.wellLabel} on its own`}
+                  onClick={() => onPickWell(r.row, r.col)}
+                >
+                  <span className="atbl__well mono">{r.wellLabel}</span>
+                </PickCell>
               </td>
-              <td>{r.sample || <span className="atbl__none">—</span>}</td>
+              <td>
+                {r.sample ? (
+                  <PickCell
+                    title={`Chart sample ${r.sample} on its own`}
+                    onClick={() => onPickSample(r.sample)}
+                  >
+                    {r.sample}
+                  </PickCell>
+                ) : (
+                  <span className="atbl__none">—</span>
+                )}
+              </td>
               <td>
                 <ValueChip color={typeMeta.color} mono={false} title={r.sampleType}>
                   {typeMeta.label}
@@ -301,36 +362,50 @@ export function CurveTable({ rows, usingTargets, cycleCount }: Props) {
               </td>
               {usingTargets && (
                 <td>
-                  <ValueChip color={color} mono={false}>
-                    {r.target}
-                  </ValueChip>
+                  <PickCell
+                    title={`Chart target ${r.target} on its own`}
+                    onClick={() => onPickTarget(r.target)}
+                  >
+                    <ValueChip color={color} mono={false}>
+                      {r.target}
+                    </ValueChip>
+                  </PickCell>
                 </td>
               )}
               <td className="mono atbl__baseline">{r.baselineFormula}</td>
               <td className="mono atbl__num">{formatRfu(r.threshold)}</td>
               <td className="atbl__num">
-                <CqCell cq={r.cq} cycleCount={cycleCount} color={color} />
+                <PickCell {...pickCurve}>
+                  <CqCell cq={r.cq} cycleCount={cycleCount} color={color} />
+                </PickCell>
               </td>
               <td className="atbl__num">
-                <span className="atbl__delta">
-                  <span className="atbl__deltanum mono">{formatRfu(r.deltaRfu)}</span>
-                  <span className="atbl__deltabar">
-                    <span
-                      className="atbl__deltafill"
-                      style={{
-                        width: maxDelta > 0 ? `${(Math.abs(r.deltaRfu) / maxDelta) * 100}%` : 0,
-                        background: color,
-                      }}
-                    />
+                <PickCell {...pickCurve}>
+                  <span className="atbl__delta">
+                    <span className="atbl__deltanum mono">{formatRfu(r.deltaRfu)}</span>
+                    <span className="atbl__deltabar">
+                      <span
+                        className="atbl__deltafill"
+                        style={{
+                          width: maxDelta > 0 ? `${(Math.abs(r.deltaRfu) / maxDelta) * 100}%` : 0,
+                          background: color,
+                        }}
+                      />
+                    </span>
                   </span>
-                </span>
+                </PickCell>
               </td>
               {/* The instrument's own end-point number: the mean of the corrected curve's last
                   five cycles (`threshold.md` §7). Sits beside ΔRFU rather than replacing it —
                   ΔRFU is a rise from the baseline, this is an absolute plateau level, and on a
                   still-climbing well they differ by hundreds of RFU. */}
-              <td className="mono atbl__num" title="End-point RFU: mean of the last five cycles">
-                {formatRfu(r.endRfu)}
+              <td className="mono atbl__num">
+                <PickCell
+                  {...pickCurve}
+                  title="End-point RFU: mean of the last five cycles — click to chart this curve"
+                >
+                  {formatRfu(r.endRfu)}
+                </PickCell>
               </td>
             </tr>
           );
