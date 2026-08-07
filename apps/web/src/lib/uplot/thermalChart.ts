@@ -21,6 +21,7 @@
  */
 
 import uPlot from "uplot";
+import { formatDuration } from "@zpcrweb/core";
 import type { ThermalProfile, ThermalSegment } from "@zpcrweb/core";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -62,12 +63,9 @@ export interface BuildThermalChartConfig {
 
 /** `h:mm:ss` past the start of the run, or `m:ss` for a run under an hour. */
 export function elapsedLabel(seconds: number, withHours: boolean): string {
-  const s = Math.max(0, Math.round(seconds));
-  const mm = Math.floor((s % 3600) / 60);
-  const ss = s % 60;
-  return withHours
-    ? `${Math.floor(s / 3600)}:${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")}`
-    : `${mm}:${String(ss).padStart(2, "0")}`;
+  // Hours are forced for the whole axis rather than left to the value, so ticks don't grow a
+  // field partway along a run that crosses the hour.
+  return formatDuration(Math.max(0, seconds), { hours: withHours });
 }
 
 /** Tick spacings that read as times rather than as round numbers of seconds. */

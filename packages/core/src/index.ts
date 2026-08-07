@@ -100,6 +100,8 @@ export {
   SCAN_MASK_CHANNELS,
   SCAN_MASK_FLYOVER_BIT,
 } from "./runDefinition.js";
+/** How every user-visible length of time is spelled — `45:00`, not `2700 s`. */
+export { formatDuration } from "./duration.js";
 /** The editable counterpart of `runDefinition.ts` — see `protocol.md` §10. */
 export {
   ProtocolBuilder,

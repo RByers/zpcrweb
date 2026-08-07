@@ -187,7 +187,10 @@ than let that difference leak into every consumer, `parsePcrd` decodes straight 
   — which is what keeps the web app's protocol views free of format knowledge. The XML step list
   gets the same treatment from `describeProtocolStep()`, and `parseScanMask()` decodes the
   `PLATEREAD` operand (`usb.md` §3.1) for the text form, `.Plateread`'s `CHANNELMASK` and
-  `RunInfo.xml`'s `ScanMask` alike.
+  `RunInfo.xml`'s `ScanMask` alike. Every duration in those descriptions is written as clock time
+  by `formatDuration` (`duration.ts`) — `45:00`, not `2700 s` — which is also what the web app's
+  thermal-profile tooltip, its time axis and its `.alf` step table call, so one length of time has
+  one spelling wherever it appears.
 - **`ProtocolBuilder`** (`protocolBuilder.ts`, [`protocol.md`](./protocol.md) §10) — the same
   language in the other direction: a protocol as a header plus typed steps, immutable, and the
   library's only writer of directive text. It exists so an editor can be built without one

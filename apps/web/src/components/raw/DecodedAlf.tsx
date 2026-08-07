@@ -1,5 +1,11 @@
 import { useMemo } from "react";
-import { parseAlf, parseRunDefinition, type AlfReport, type AlfStep } from "@zpcrweb/core";
+import {
+  formatDuration,
+  parseAlf,
+  parseRunDefinition,
+  type AlfReport,
+  type AlfStep,
+} from "@zpcrweb/core";
 import { ProtocolDecoded } from "./DecodedView";
 import { Pair } from "./Pair";
 
@@ -31,14 +37,7 @@ export function DecodedAlfFile({ text }: { text: string }) {
 
 /** `hh:mm:ss` / `m:ss` for a count of seconds. */
 function duration(seconds: number | null | undefined): string {
-  if (seconds == null) return "—";
-  const s = Math.abs(Math.round(seconds));
-  const parts = [Math.floor(s / 3600), Math.floor((s % 3600) / 60), s % 60];
-  const text =
-    parts[0]! > 0
-      ? `${parts[0]}:${String(parts[1]).padStart(2, "0")}:${String(parts[2]).padStart(2, "0")}`
-      : `${parts[1]}:${String(parts[2]).padStart(2, "0")}`;
-  return seconds < 0 ? `−${text}` : text;
+  return seconds == null ? "—" : formatDuration(seconds);
 }
 
 /** The clock part of a step's `MM/DD/YYYY HH:MM:SS`, which is all that changes down the log. */

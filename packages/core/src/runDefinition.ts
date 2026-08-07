@@ -14,6 +14,8 @@
  * (`prcl.md` §1.1, §3.1).
  */
 
+import { formatDuration } from "./duration.js";
+
 // ---------------------------------------------------------------------------
 // The PLATEREAD scan mask (usb.md §3.1)
 // ---------------------------------------------------------------------------
@@ -314,7 +316,12 @@ const num = (s: string | undefined): number => {
 /** `95` → `95`, `95.0` → `95` — the grammar writes trailing zeros the reader doesn't need. */
 const degrees = (v: number): string => (Number.isFinite(v) ? String(v) : "?");
 
-const seconds = (v: number): string => (Number.isFinite(v) ? `${v} s` : "? s");
+/**
+ * Every hold in the grammar is a count of seconds, but a description is read by a person, so it
+ * says the clock time instead: `TEMP 95.0,2700` describes itself as a 45:00 hold, not a 2700 s
+ * one. {@link formatDuration} is shared with the views that show the same times elsewhere.
+ */
+const seconds = (v: number): string => formatDuration(v);
 
 /**
  * `INC` and `EXT` may ride inside a `TEMP`/`GRAD` directive as extra comma-separated operands
@@ -337,7 +344,7 @@ function inlineModifiers(extra: string[]): { incrementC?: number; extendSeconds?
 function describeInlineModifiers(m: { incrementC?: number; extendSeconds?: number }): string {
   const parts: string[] = [];
   if (m.incrementC !== undefined) parts.push(`${degrees(m.incrementC)} °C`);
-  if (m.extendSeconds !== undefined) parts.push(`${m.extendSeconds} s`);
+  if (m.extendSeconds !== undefined) parts.push(seconds(m.extendSeconds));
   return parts.length > 0 ? `, then ${parts.join(" and ")} more on each pass` : "";
 }
 

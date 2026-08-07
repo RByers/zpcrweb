@@ -23,6 +23,7 @@ import {
   splitRunDefinition,
   type RunDefinitionProgram,
 } from "./runDefinition.js";
+import { formatDuration } from "./duration.js";
 
 /** A `TemperatureStep`: hold one temperature. */
 export interface TemperatureStep {
@@ -244,16 +245,16 @@ export function describeProtocolStep(step: ProtocolStep): string {
     case "temperature":
       return step.holdSeconds === 0
         ? `Hold ${step.tempC} °C indefinitely`
-        : `Hold ${step.tempC} °C for ${step.holdSeconds} s`;
+        : `Hold ${step.tempC} °C for ${formatDuration(step.holdSeconds)}`;
     case "gradient":
       return (
         `Gradient ${step.lowTempC}–${step.highTempC} °C across the block's rows ` +
-        `for ${step.holdSeconds} s`
+        `for ${formatDuration(step.holdSeconds)}`
       );
     case "melt":
       return (
         `Melt from ${step.startTempC} °C to ${step.endTempC ?? "?"} °C in ` +
-        `+${step.incrementC} °C steps, holding ${step.holdSeconds} s at each`
+        `+${step.incrementC} °C steps, holding ${formatDuration(step.holdSeconds)} at each`
       );
     case "goto":
       return (

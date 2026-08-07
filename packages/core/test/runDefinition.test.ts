@@ -102,7 +102,7 @@ describe("parseRunDefinition", () => {
     expect(p.unknownVerbs).toEqual([]);
     const ext = p.directives.find((d) => d.verb === "EXT")!;
     expect(ext.stepNumber).toBeUndefined();
-    expect(ext.description).toBe("Extend the previous step's hold by 5 s on each pass");
+    expect(ext.description).toBe("Extend the previous step's hold by 0:05 on each pass");
     expect(p.directives.find((d) => d.verb === "BEEP")!.stepNumber).toBeUndefined();
 
     const melt = p.directives.find((d) => d.verb === "MELT")!;
@@ -119,7 +119,7 @@ describe("parseRunDefinition", () => {
     const temp = p.steps[0]!;
     expect(temp.verb).toBe("TEMP");
     expect(temp).toMatchObject({ tempC: 95, holdSeconds: 10, incrementC: 0.5, extendSeconds: 5 });
-    expect(temp.description).toBe("Hold 95 °C for 10 s, then 0.5 °C and 5 s more on each pass");
+    expect(temp.description).toBe("Hold 95 °C for 0:10, then 0.5 °C and 0:05 more on each pass");
     expect(p.unknownVerbs).toEqual([]);
   });
 
@@ -135,7 +135,7 @@ describe("parseRunDefinition", () => {
     expect(p.scanMasks.map((m) => m.raw)).toEqual([0x3f]);
 
     const temp = p.steps[0]!;
-    expect(temp.description).toBe("Hold 95 °C for 60 s");
+    expect(temp.description).toBe("Hold 95 °C for 1:00");
     expect(p.directives.every((d) => d.description.length > 0)).toBe(true);
   });
 

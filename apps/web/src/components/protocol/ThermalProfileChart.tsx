@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import uPlot from "uplot";
-import { alfThermalProfile, type AlfReport } from "@zpcrweb/core";
+import { alfThermalProfile, formatDuration, type AlfReport } from "@zpcrweb/core";
 import {
   buildThermalChart,
   elapsedLabel,
@@ -141,6 +141,7 @@ const PHASE_COLOR = {
   read: "#ff4fa3",
 } as const;
 
+/** A hold or an elapsed time in the tooltip — same clock spelling as the listing above the plot. */
 function secondsLabel(seconds: number | null | undefined): string {
-  return seconds == null ? "—" : `${seconds} s`;
+  return seconds == null ? "—" : formatDuration(seconds);
 }
