@@ -2217,6 +2217,12 @@ use it.
 
 ### A dye's colour is the dye's, not the channel's
 
+The two palettes themselves live in the library (`@zpcrweb/core`'s `colors.ts`), not in the app:
+`tools/zpcr.mjs curves` draws the same curves as a PNG from Node, and a green FAM in the browser
+has to be the same green on the command line. `lib/channelColors.ts` and `lib/fluorColors.ts`
+re-export them and stay the app's import path; what remains app-only is `crosstalkColor`, the
+Calibration view's dye-hue-tinged-by-read-channel blend.
+
 `lib/fluorColors.ts` maps a **dye name** to a colour, and everything dye-shaped reads it: plate
 well dots and per-fluor target text (`PlateViewer`), dye/target chips (`FluorBar`, via
 `FluorChip.fluor`), target chips on file cards and Overview, dye-space curve strokes, baselines,

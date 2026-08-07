@@ -231,6 +231,15 @@ export {
   computeRunAnalysis,
 } from "./runAnalysis.js";
 export {
+  CHANNEL_INFO,
+  NEUTRAL_COLOR,
+  channelColor,
+  fluorColor,
+  isKnownFluor,
+  curveColor,
+  type ChannelInfo,
+} from "./colors.js";
+export {
   channelLabel,
   csvRow,
   buildAnalysisRows,

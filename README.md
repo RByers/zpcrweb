@@ -209,6 +209,8 @@ access over USB, and browser-automation checks for the web app:
 
 ```sh
 node tools/zpcr.mjs samples/20260720_FirstQualification.zpcr results   # results table as CSV
+node tools/zpcr.mjs samples/20260720_FirstQualification.zpcr curves \
+  --wells B3 -o b3.png                                                 # curves as a PNG
 node tools/cfx.mjs info                                                # talk to a live instrument
 node tools/uishot.mjs                                                  # screenshot the web app
 ```
