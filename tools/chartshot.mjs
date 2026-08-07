@@ -115,8 +115,16 @@ html, body { margin: 0; padding: 0; background: #0b0e14; }
  * `config` is a `BuildChartConfig` minus its `onHover` — `wellCurves` and the display mode,
  * exactly as the web app passes them, plus `width`/`height`. Everything in it must survive
  * `JSON.stringify`, which the run's analysis records already do: plain numbers and arrays.
+ *
+ * `dpr` (default 1) is the device pixel ratio to render at, the one thing here that has no
+ * counterpart in `BuildChartConfig`: the chart is laid out at `width`×`height` CSS pixels and
+ * captured at `dpr` times that many device pixels. It is not a zoom — uPlot reads
+ * `devicePixelRatio` to size its canvas backing store, so `dpr: 2` is the same chart a retina
+ * browser draws, text and hairlines included, rather than the different (smaller-lettered)
+ * chart that asking for twice the CSS width would lay out.
  */
 export async function renderChartPng(config) {
+  const dpr = config.dpr ?? 1;
   const bundle = await bundleChart();
   const css = readFileSync(require.resolve("uplot/dist/uPlot.min.css"), "utf-8");
   const dir = mkdtempSync(join(tmpdir(), "zpcr-chartshot-"));
@@ -134,7 +142,7 @@ export async function renderChartPng(config) {
     await cdp.send("Emulation.setDeviceMetricsOverride", {
       width: config.width,
       height: config.height,
-      deviceScaleFactor: 1,
+      deviceScaleFactor: dpr,
       mobile: false,
     });
     await cdp.eval(

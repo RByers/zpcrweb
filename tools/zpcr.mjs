@@ -4,7 +4,7 @@
  *
  *   node tools/zpcr.mjs <run> results [--password <pw>] [--step <n>]
  *   node tools/zpcr.mjs <run> curves  [--wells A1,B2-D5] [--rows A-C] [--cols 1,5]
- *                                     [--fluors FAM,HEX] [-o out.png] [--size WxH]
+ *                                     [--fluors FAM,HEX] [-o out.png] [--size WxH] [--dpr N]
  *
  * `<run>` is any of the three run formats — a CFX `.zpcr` or `.pcrd`, or a Biomeme `.bmrun`
  * (see {@link runFromFile}).
@@ -89,14 +89,18 @@ function usage() {
     "usage: zpcr <run> results [--password <pw>] [--step <n>]\n" +
       "       zpcr <run> curves  [--password <pw>] [--step <n>] [-o <out.png>]\n" +
       "                           [--wells A1,B2-D5] [--rows A-C] [--cols 1,5-8]\n" +
-      "                           [--fluors FAM,HEX] [--size 1100x620] [--channels]\n\n" +
+      "                           [--fluors FAM,HEX] [--size 1100x620] [--dpr 1]\n" +
+      "                           [--channels]\n\n" +
       "<run> is a CFX .zpcr or .pcrd, or a Biomeme .bmrun.\n\n" +
       "results  the run's results table (the web app's Curves view Table mode) as CSV\n" +
       "curves   the run's amplification curves as a PNG, as the Curves chart draws them\n\n" +
       "Well selection: --wells/--rows/--cols are a union (any match plots the well); each\n" +
       "accepts a comma-separated list whose items may be ranges. A well range spans the\n" +
       "rectangle between its ends, so --wells A1-B3 is six wells. With none given, every well\n" +
-      "the plate loads is drawn. --fluors then narrows that to the named dyes.",
+      "the plate loads is drawn. --fluors then narrows that to the named dyes.\n\n" +
+      "--size is CSS pixels; --dpr multiplies them into device pixels the way a retina\n" +
+      "display would. --size 640x360 --dpr 2 writes a 1280x720 PNG of the chart laid out\n" +
+      "at 640 wide — sharper, not zoomed out.",
   );
   process.exit(1);
 }
@@ -225,7 +229,7 @@ function collectCurves(run, { select, fluors, channels }) {
  * threshold row is hovered. The Cq rings are neither optional nor configured: `buildChart` draws
  * one per curve that has a Cq.
  */
-function chartConfig(curves, { width, height }) {
+function chartConfig(curves, { width, height, dpr }) {
   return {
     wellCurves: curves,
     darkCurves: [],
@@ -240,6 +244,7 @@ function chartConfig(curves, { width, height }) {
     bands: false,
     width,
     height,
+    dpr,
   };
 }
 
@@ -267,6 +272,7 @@ async function main() {
     else if (cmd === "curves" && flag === "--cols") opts.cols = rest[++i];
     else if (cmd === "curves" && flag === "--fluors") opts.fluors = rest[++i];
     else if (cmd === "curves" && flag === "--size") opts.size = rest[++i];
+    else if (cmd === "curves" && flag === "--dpr") opts.dpr = rest[++i];
     else if (cmd === "curves" && flag === "--channels") opts.channels = true;
     else usage();
   }
@@ -314,6 +320,10 @@ async function main() {
   const [width, height] = (opts.size ?? "1100x620")
     .split("x")
     .map((n) => Math.max(200, Number(n) || 0));
+  // `--size` is CSS pixels and `--dpr` multiplies them into device pixels, exactly as a browser
+  // on a retina display would: `--size 640x360 --dpr 2` is a 1280×720 file of the chart laid out
+  // at 640 wide, not the smaller-lettered chart `--size 1280x720` would lay out.
+  const dpr = Math.min(4, Math.max(1, Number(opts.dpr) || 1));
   // An empty selection would render a blank rectangle — the app has a rail and an empty-state
   // message to explain itself with, a PNG on disk has neither. Say so and write nothing.
   if (curves.length === 0) {
@@ -325,11 +335,12 @@ async function main() {
 
   const out = opts.out ?? `${basename(file, extname(file))}-curves.png`;
   const { renderChartPng } = await import("./chartshot.mjs");
-  writeFileSync(out, await renderChartPng(chartConfig(curves, { width, height })));
+  writeFileSync(out, await renderChartPng(chartConfig(curves, { width, height, dpr })));
   const cqs = curves.filter((c) => c.analysis?.cq != null).length;
   console.error(
     `${out}: ${curves.length} curve${curves.length === 1 ? "" : "s"} ` +
-      `(${dyeSpace ? "dye space" : "channel space"}, ${cqs} with a Cq), ${width}×${height}`,
+      `(${dyeSpace ? "dye space" : "channel space"}, ${cqs} with a Cq), ${width}×${height}` +
+      (dpr === 1 ? "" : ` @${dpr}x = ${width * dpr}×${height * dpr}`),
   );
 }
 
