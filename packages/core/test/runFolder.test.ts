@@ -1,5 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { zipArchive, zpcrFromRunFiles, zpcrNameFromRunFiles, parseZpcr } from "../src/index.js";
+import {
+  zipArchive,
+  zpcrFromRunFiles,
+  zpcrNameFromRunFiles,
+  runFilesToFetch,
+  runIdentityFileNames,
+  isSameRun,
+  parseZpcr,
+} from "../src/index.js";
 import { unzipArchive } from "../src/archive.js";
 import { readSampleBytes } from "./sample.js";
 
@@ -91,5 +99,75 @@ describe("zpcrFromRunFiles", () => {
   it("refuses a set of files with no RunInfo.xml", () => {
     const { "RunInfo.xml": _drop, ...rest } = runFiles;
     expect(() => zpcrFromRunFiles(rest)).toThrow(/RunInfo\.xml/);
+  });
+});
+
+/**
+ * What a caller following a live run downloads, and what it doesn't — the rules that let the run's
+ * own file be the only record of what has already been fetched (`useRunWatch`).
+ */
+describe("what a run's archive still needs from the folder", () => {
+  const runFiles = unzipArchive(readSampleBytes());
+  const names = Object.keys(runFiles);
+  const plateName = names.find((n) => /\.(pltd|plt\.csv)$/i.test(n))!;
+  const readName = names.find((n) => /\.Plateread$/i.test(n))!;
+
+  it("fetches everything when nothing is held", () => {
+    expect(runFilesToFetch(null, names)).toEqual(names);
+    expect(runFilesToFetch(undefined, names)).toEqual(names);
+  });
+
+  it("fetches only what the archive is missing", () => {
+    const { [readName]: _missing, ...held } = runFiles;
+    expect(runFilesToFetch(held, names)).toEqual([readName]);
+    expect(runFilesToFetch(runFiles, names)).toEqual([]);
+  });
+
+  it("re-reads the files the instrument rewrites, when asked", () => {
+    const rewritten = new Set(["runlog.xml", "lastplatereadstatus"]);
+    const wanted = runFilesToFetch(runFiles, names, rewritten);
+    expect(wanted.map((n) => n.toLowerCase()).sort()).toEqual([...rewritten].sort());
+  });
+
+  it("leaves a replaced plate alone — it does not re-fetch the folder's copy", () => {
+    // What the app's archive looks like after the user swaps the plate of a run in progress: the
+    // folder's own plate is gone from it, replaced by one under a name the folder has never
+    // heard of.
+    const { [plateName]: _replaced, ...rest } = runFiles;
+    const swapped = { ...rest, "corrected.plt.csv": new Uint8Array([1, 2, 3]) };
+    expect(runFilesToFetch(swapped, names)).toEqual([]);
+    // Still true on the end-of-run pass, which is where the whole run used to be re-read.
+    expect(runFilesToFetch(swapped, names, new Set(["runlog.xml"]))).toEqual(["runlog.xml"]);
+  });
+
+  it("does fetch the plate for an archive that has none", () => {
+    const { [plateName]: _none, ...plateless } = runFiles;
+    expect(runFilesToFetch(plateless, names)).toEqual([plateName]);
+  });
+});
+
+describe("is the folder still holding the run we have?", () => {
+  const runFiles = unzipArchive(readSampleBytes());
+
+  it("matches an archive of the same run", () => {
+    expect(isSameRun(runFiles, runFiles)).toBe(true);
+    expect(isSameRun({ ...runFiles }, { ...runFiles })).toBe(true);
+  });
+
+  it("refuses a different run, and anything with no RunInfo.xml to compare", () => {
+    const other = { ...runFiles, "RunInfo.xml": new TextEncoder().encode("<RunInfo/>") };
+    expect(isSameRun(other, runFiles)).toBe(false);
+    const { "RunInfo.xml": _drop, ...rest } = runFiles;
+    expect(isSameRun(rest, runFiles)).toBe(false);
+    expect(isSameRun(runFiles, rest)).toBe(false);
+    expect(isSameRun(null, runFiles)).toBe(false);
+  });
+
+  it("names the two files that answer the question", () => {
+    expect(runIdentityFileNames(Object.keys(runFiles))).toEqual(["RunInfo.xml"]);
+    expect(runIdentityFileNames(["zpcrweb.json", "Read00001.Plateread", "RunInfo.xml"])).toEqual([
+      "zpcrweb.json",
+      "RunInfo.xml",
+    ]);
   });
 });

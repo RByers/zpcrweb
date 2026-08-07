@@ -11,6 +11,8 @@
 
 import type { ZpcrArchive } from "./archive.js";
 import { runFileBaseName } from "./experiment.js";
+import { isPlateCsvName } from "./plateCsv.js";
+import { isPltdName } from "./pltd.js";
 import { expectedPlateReads } from "./runDefinition.js";
 import type { Zpcr } from "./types.js";
 import { parseRunInfo, parseRunInfoRaw } from "./runinfo.js";
@@ -246,4 +248,79 @@ export function zpcrFromRunFiles(
     throw new Error(`Can't assemble a .zpcr: no ${RUNINFO_NAME} among the run's files`);
   }
   return { name: zpcrNameFromRunFiles(files, naming), archive: files };
+}
+
+/**
+ * The entries that say *which run* a folder holds: `RunInfo.xml`, which every run has and which
+ * {@link zpcrNameFromRunFiles} names it from, and the `zpcrweb.json` this app deposits when it
+ * starts one.
+ *
+ * Two of the folder's forty files, and small (~8 KB against ~400 KB), which is the point: a caller
+ * that already has an archive of a run can read these first, decide whether the folder still holds
+ * *that* run, and fetch nothing else if it does. Filtered against a listing rather than returned
+ * as constants because neither is guaranteed to be there — `RunInfo.xml` is deposited a moment
+ * after the run starts, and a run begun at the instrument's own touchscreen never gets a
+ * `zpcrweb.json` at all.
+ */
+export function runIdentityFileNames(names: readonly string[]): string[] {
+  return names.filter((n) => n === RUNINFO_NAME || n === ZPCRWEB_SETTINGS_NAME);
+}
+
+/**
+ * Is `held` an archive of the run these folder files describe?
+ *
+ * `RunInfo.xml` is the run's own identity record — its identifier, its start time, the file name
+ * CFX Manager would give it — and the instrument clears the run folder when a run starts, so a
+ * folder whose `RunInfo.xml` differs byte for byte from an archive's is a *different* run that
+ * happens to be in the same place. Answering `false` costs the caller a full download; answering
+ * `true` wrongly would append one run's plate reads to another run's file, so the comparison is
+ * exact and an archive with no `RunInfo.xml` at all is never a match.
+ */
+export function isSameRun(held: ZpcrArchive | null | undefined, folder: ZpcrArchive): boolean {
+  const mine = held?.[RUNINFO_NAME];
+  const theirs = folder[RUNINFO_NAME];
+  if (mine === undefined || theirs === undefined) return false;
+  if (mine === theirs) return true;
+  if (mine.length !== theirs.length) return false;
+  return mine.every((b, i) => b === theirs[i]);
+}
+
+/**
+ * Which of a run folder's files an archive of that run still needs — the download list for a
+ * caller following a run as it happens (the app's `useRunWatch`).
+ *
+ * **The run's own file is the only copy there is.** Nothing else remembers what has been
+ * downloaded, so this answers it from the archive itself, which is what makes the app's copy of a
+ * run and what it has fetched the same fact: delete the file and every byte is fetched again, keep
+ * it and only what the instrument has newly written is.
+ *
+ * Three rules:
+ *
+ * - **No archive** — nothing is held, so everything is wanted. A run this app has never seen, or
+ *   one whose file the user deleted.
+ * - **An entry the archive already has is not fetched again.** A file the instrument has written
+ *   is final, and a new plate read arrives under a new name, so a cycle's download is exactly the
+ *   one ~22 KB read that cycle produced. `rewritten` is the exception: the handful of files the
+ *   instrument *revises* as a run goes on (`runlog.xml` grows an entry per event,
+ *   `lastplatereadstatus` counts the reads), which a caller re-reads once at the end of the run,
+ *   where the archive has to be complete.
+ * - **A plate is not fetched into an archive that already has one.** Alone among a run's files, a
+ *   plate's *entry name* is not fixed — a `.pltd` from the instrument, a `.plt.csv` written here —
+ *   so a user who replaces the plate of a run in progress leaves the folder's copy looking like a
+ *   file the archive is missing. It isn't: the folder's plate is the one this app deposited there
+ *   when it started the run, so an archive that already carries a plate has nothing to learn by
+ *   re-reading it, and re-reading it would put back the plate the user replaced.
+ */
+export function runFilesToFetch(
+  held: ZpcrArchive | null | undefined,
+  names: readonly string[],
+  rewritten?: ReadonlySet<string>,
+): string[] {
+  if (!held) return [...names];
+  const hasPlate = Object.keys(held).some((n) => isPltdName(n) || isPlateCsvName(n));
+  return names.filter((name) => {
+    if (hasPlate && (isPltdName(name) || isPlateCsvName(name))) return false;
+    if (held[name] === undefined) return true;
+    return rewritten?.has(name.toLowerCase()) === true;
+  });
 }

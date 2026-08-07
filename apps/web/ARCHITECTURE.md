@@ -581,17 +581,17 @@ This also keeps the largest field off the records in the one query that has to s
 **A write costs what changed, not what the file is.** `putFile` takes the set of entries the caller
 actually touched (`fileContent.ts`'s `changedEntries`) and leaves the rest of the records alone, so
 appending a plate read is *one* ~22 KB put rather than forty. The set is derived **by reference**:
-entry bytes are never mutated in place — `useRunWatch` caches entry bytes by name and rebuilds only
-the wrapper object, and every writer in `packages/core` builds a new archive by spread — so an
-untouched entry is the same `Uint8Array` object it was, and a cycle is ~41 pointer comparisons and
-one real change. It is derived rather than declared on purpose: each caller does know what it
+entry bytes are never mutated in place — a run being followed grows by the entries the instrument
+just wrote laid over the ones its file already held, and every writer in `packages/core` builds a
+new archive by spread — so an untouched entry is the same `Uint8Array` object it was, and a cycle is
+~41 pointer comparisons and one real change. It is derived rather than declared on purpose: each caller does know what it
 touched, but a caller that forgot to mention something would silently fail to persist it.
 
 It is an optimization and only an optimization. *Which entries exist* is read from IndexedDB itself
 (`getAllKeys` over the file's range — keys only, no values cloned), so an entry the store is missing
-is written whatever the change set says, and being wrong can only cost a redundant put. The first
-snapshot after a reload writes the whole archive, because the run watcher's cache is empty and every
-array is genuinely new.
+is written whatever the change set says, and being wrong can only cost a redundant put. A run
+downloaded whole — because the app wasn't holding it — writes every record, since every array is
+genuinely new.
 
 `addRunArchive` flushes any pending analysis write before installing a snapshot — otherwise a
 threshold edit flushing afterwards would be working from an archive without the plate read that
@@ -601,23 +601,37 @@ just arrived. Same precedent as `renameFile` and `setRunProtocolName`.
 
 A pass of the run watcher hands the store **the entries the instrument just wrote**, not the run
 re-assembled: one plate read, and at the end of a run the last read plus `ended`, the `.alf` report
-and the four files the instrument rewrites (`useRunWatch`'s `REFETCH_AT_END`). `addRunArchive`'s
+and the three files the instrument rewrites (`useRunWatch`'s `REFETCH_AT_END`). `addRunArchive`'s
 `merge` lays them over the file of that name and leaves every other entry as it stands.
 
-It used to hand over the whole folder as rebuilt from the watcher's own cache — which is the
-instrument's copy of the run, and knows nothing of what the app has added on top. Anything the user
-changed about a run *while it ran* was therefore reverted by the next cycle: swap the plate for a
-corrected one and the instrument's original came back, most visibly at the end of the run, where
-the final pass is forced and so lands even if nothing else would have. Sending only what the
-instrument wrote means an entry it never touched cannot be overwritten by it, and the end of a run
-does what it says — adds the last plate read and the run's own closing files.
+It used to hand over the whole folder — which is the instrument's copy of the run, and knows
+nothing of what the app has added on top. Anything the user changed about a run *while it ran* was
+therefore reverted by the next cycle: swap the plate for a corrected one and the instrument's
+original came back, most visibly at the end of the run, where the final pass is forced and so lands
+even if nothing else would have. Sending only what the instrument wrote means an entry it never
+touched cannot be overwritten by it, and the end of a run does what it says — adds the last plate
+read and the run's own closing files.
 
-Two cases still send the whole folder, both of them "there is nothing to merge into": the first
-pull of the session or of a new run under this name (the watcher's cache is empty), and a pass
-whose name doesn't match the file the watcher last wrote — the file renamed or deleted mid-run, a
-derived name that moved when `RunInfo.xml` was re-read, or a previous pass that failed to install.
-That check runs every pass, so a run whose file goes away is whole again on the next cycle rather
-than accumulating updates against nothing.
+**The file is also the record of what has been downloaded.** The watcher keeps no copy of the run:
+each pass reads back the archive the app is holding (`App.tsx`'s `heldRun`) and fetches what the
+folder has that it lacks (core's `runFilesToFetch`). It used to keep its own name→bytes map of the
+folder — the same ~400 KB held twice, and free to disagree with the file the user actually has —
+so deleting a run mid-way left the watcher believing it still had every byte, and the file never
+came back. Now "what do we have?" has one answer: delete the file and the next pass downloads the
+run from the top, finished or not; keep it and the pass costs one plate read.
+
+Two questions follow from having no memory of its own, and both are answered by ~8 KB: **which
+file is this folder's run in?** and **is the file we have still that run?** The entries that name a
+run — `RunInfo.xml` and the `zpcrweb.json` this app deposits (`runIdentityFileNames`) — are read
+first whenever the answer isn't already known, and `RunInfo.xml` has to match the file's copy byte
+for byte (`isSameRun`) before anything is appended to it, since the instrument clears the folder
+when a run starts. That question is re-asked on every connection and whenever a name disappears
+from the listing, which is what stops one run's reads being appended to another run's file.
+
+A pass sends the whole folder when there is nothing to merge into: a run the app isn't holding, or
+one whose file has just been renamed out from under it (the derived name can move when
+`RunInfo.xml` is re-read at the end of a run). Then everything the pass has goes over — including
+whatever the user had added to the file it was reading from.
 
 Every write here is a read-modify-write — a catalog write merges into what is stored, and a content
 write reads back the entry keys it should delete — and several fire at once on one file: releasing
@@ -2512,9 +2526,10 @@ command and drag a 400 KB archive nobody requested into the file bar. That memor
 **survives a disconnect**: a run that finishes while the cable is out comes back as exactly this
 status, and treating the reconnected session as a stranger left the run held forever — no final
 plate read, no `ended`, no `.alf`, and a file permanently reading as in progress with nothing in
-the app able to release it. What a disconnect does clear is the *listing* state (signature, step,
-cached bytes), so the next connection re-establishes a baseline rather than diffing against a
-folder it stopped watching. A page reload is still a stranger, by design: memory is all there is
+the app able to release it. What a disconnect does clear is the *listing* state (the last listing,
+the last step, and which file the folder's run belongs to), so the next connection re-establishes a
+baseline rather than diffing against a folder it stopped watching — and asks again which file this
+run is, since a different run may have been started and finished while the cable was out. A page reload is still a stranger, by design: memory is all there is
 to go on and a reload has none. One further listing establishes a baseline when the connection
 is made — see "The first listing is never pulled" below for why that one is pulled immediately
 rather than diffed against, on the one path where it isn't a stale finished run. Nothing lists on a
@@ -2525,14 +2540,15 @@ anyway, though, purely to tell a run *starting* apart from one *found* already g
 the two listings are identical, so only the live transition tells them apart — which is what the
 `freshStart` flag below rides on.
 
-Each changed listing is pulled, checked and named with `zpcrFromRunFiles`, and what it *fetched* is
-handed to `store.addRunArchive` as entries to merge into the run's file — the same validate →
-IndexedDB path a drop takes, minus the ZIP: the store holds a `.zpcr` as its entries (see "A
-`.zpcr` is stored as its entries, never as a ZIP"), so a cycle's cost is the one plate read that
-arrived rather than a re-zip of the whole run. The passes are all one file under one name, so they
-are one record, rewritten in place. Sending only what the instrument wrote is also what leaves a
-plate (or a protocol) the user changed *during* the run alone — see "A run's file grows by what the
-instrument wrote" for what that fixed and for the two cases that still send the whole folder.
+On each changed listing the watcher reads back the run's file, fetches what the folder holds that
+the file lacks, checks and names the result with `zpcrFromRunFiles`, and hands what it *fetched* to
+`store.addRunArchive` as entries to merge into that file — the same validate → IndexedDB path a
+drop takes, minus the ZIP: the store holds a `.zpcr` as its entries (see "A `.zpcr` is stored as
+its entries, never as a ZIP"), so a cycle's cost is the one plate read that arrived rather than a
+re-zip of the whole run. The passes are all one file under one name, so they are one record,
+rewritten in place. Both halves of that — the file being the only copy of the run, and only the
+instrument's own writes going back to it — are in "A run's file grows by what the instrument
+wrote", along with what they fixed.
 
 **What the snapshot is called** is decided by `core`'s `runFolder.ts`, in three rungs: the file
 name typed in the Instrument view, then `<YYYYMMDD>-<experiment name>` derived from the folder's
@@ -2546,15 +2562,19 @@ the pull.
 
 Three economies make the once-a-cycle refresh affordable:
 
-- **Only uncached names are fetched.** 28 of a `CurrentRun`'s ~40 files are the `.Dcal` set and
-  never change during a run; re-pulling them every cycle would push megabytes over a
-  64-byte-packet bulk endpoint for nothing. A name already held is never fetched again — what the
-  instrument has written is final, and a new plate read arrives under a new name — so a cycle's
-  update is exactly one 22 KB plate read. The four files that *are* rewritten as the run goes
-  (`REFETCH_AT_END`: `runlog.xml`, which reaches 31 KB, `lastplatereadstatus`, plus `RunInfo.xml`
-  and `ProtocolName.txt` for the reasons given there) are re-read once, on the end-of-run pass,
-  which is the only one that has to be complete; mid-run snapshots carry the copy first seen.
-  (A name *disappearing* means a different run, and clears the cache.)
+- **Only what the run's file lacks is fetched.** 28 of a `CurrentRun`'s ~40 files are the `.Dcal`
+  set and never change during a run; re-pulling them every cycle would push megabytes over a
+  64-byte-packet bulk endpoint for nothing. The archive the app is holding for the run says what
+  has already been downloaded (core's `runFilesToFetch`), and an entry it has is not fetched again
+  — what the instrument has written is final, and a new plate read arrives under a new name — so a
+  cycle's update is exactly one 22 KB plate read. The three files that *are* rewritten as the run
+  goes (`REFETCH_AT_END`: `runlog.xml`, which reaches 31 KB, `lastplatereadstatus`, plus
+  `RunInfo.xml` for the reason given there) are re-read once, on the end-of-run pass, which is the
+  only one that has to be complete; mid-run the file carries the copy first seen. A plate is the
+  one exception in the other direction: it is never fetched into a run that already has one, since
+  the folder's copy is the one this app deposited and re-reading it would put back a plate the user
+  had replaced. (A name *disappearing* means a different run, and sends the watcher back to asking
+  which file the folder's run belongs to.)
 - **The first listing is never pulled — unless it's already running.** `CurrentRun` usually still
   holds the previous run when you connect — finished, `ended` and all — so the first sighting
   ordinarily only records a baseline to diff against, rather than surprising the user with a
@@ -2562,9 +2582,8 @@ Three economies make the once-a-cycle refresh affordable:
   after the run had already started, presents a first listing that is itself `begun` and not yet
   `ended`; `runProgressFromNames` tells the two cases apart, and an in-progress first sighting is
   pulled right away instead of waiting for the next transition or the 30 s backstop.
-- **The refresh doesn't steal the selection — except for the run's first file.** Every snapshot is
-  a new file id (ids hash name+size, and the archive grows), so `addFiles` takes an `activate`
-  option: ordinarily the new copy becomes active only if the user was already on the one it
+- **The refresh doesn't steal the selection — except for the run's first file.** `addRunArchive`
+  takes an `activate` option: ordinarily the refreshed file becomes active only if the user was already on the one it
   supersedes, which is what makes the Curves view grow a cycle at a time without dragging anyone
   back from whatever else they had open. But the pull that follows a run *starting* during this
   session — the `running` false→true edge above — always activates: `useRunWatch` passes `onRun` a

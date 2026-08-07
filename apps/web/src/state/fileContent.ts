@@ -151,13 +151,13 @@ export function fromStoredContent(stored: FileBytes): FileContent {
  * read cost one record instead of forty.
  *
  * **By reference.** Entry bytes are never mutated in place (see the module comment), so an entry
- * the app didn't touch is the *same* `Uint8Array` object it was: `useRunWatch` caches entry bytes
- * by name and rebuilds only the wrapper object, and every writer in `packages/core` builds a new
- * archive by spread. A cycle is therefore ~41 pointer comparisons and one real change.
+ * the app didn't touch is the *same* `Uint8Array` object it was: a run being followed grows by the
+ * entries the instrument just wrote laid over the ones the file already had (`useZpcrStore`'s
+ * `addRunArchive`), and every writer in `packages/core` builds a new archive by spread. A cycle is
+ * therefore ~41 pointer comparisons and one real change.
  *
  * `undefined` means "no previous version to compare against" — write everything. That is a fresh
- * drop, and also the first snapshot after a reload, where the run watcher's cache is empty and
- * every array is genuinely new.
+ * drop, and a run being downloaded whole because the app wasn't holding it.
  *
  * Derived rather than declared on purpose: each caller does know what it touched, but a caller that
  * forgot to mention something would silently fail to persist it, and that is a worse failure than a

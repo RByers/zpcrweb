@@ -205,6 +205,16 @@ export function App() {
       },
       [store],
     ),
+    // What the app is holding for a run — the watcher's only record of what it has already
+    // downloaded, so that the file the user has and the bytes the watcher believes in are the same
+    // thing (see `useRunWatch`'s `heldRun`). A file that isn't loaded reads as nothing held.
+    useCallback(
+      (fileName: string) => {
+        const file = store.loaded.find((f) => f.name === fileName);
+        return file && file.content.archive ? file.content.files : null;
+      },
+      [store.loaded],
+    ),
     startedRun ?? undefined,
   );
   // Where "← back" on the About page (and the Files table's own ✕) return to, so opening either

@@ -356,6 +356,14 @@ which is already the name Manager would have saved it under.
 This is what lets the web app's Instrument view open a run off a connected instrument as an ordinary
 file (see [`apps/web/ARCHITECTURE.md`](./apps/web/ARCHITECTURE.md)).
 
+Three smaller functions here serve a caller following a run *as it happens*, where the folder is
+read over and over and the archive it already has is the only record of what it downloaded:
+`runIdentityFileNames` picks the two entries that say which run a folder holds, `isSameRun`
+compares an archive against them, and `runFilesToFetch` answers what an archive still needs — with
+the one rule that isn't "do I have this name?": a plate is never fetched into an archive that
+already carries one, because a plate's entry name is not fixed and the folder's copy is the one the
+app deposited there.
+
 One entry in such an archive did not come off the instrument: `usb-traffic.bin`, the log of the
 conversation that produced the run (`usbTraffic.ts`, [`usb-traffic.md`](./usb-traffic.md)). It is
 stored as binary records rather than the text it renders to — an hour of the status poll is 237 KB

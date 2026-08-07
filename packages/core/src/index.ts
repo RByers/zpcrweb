@@ -60,6 +60,9 @@ export type { ZpcrArchive } from "./archive.js";
 export {
   zpcrFromRunFiles,
   zpcrNameFromRunFiles,
+  runIdentityFileNames,
+  isSameRun,
+  runFilesToFetch,
   runProgressFromNames,
   runCompleteness,
   markExperimentBegun,
