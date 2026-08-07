@@ -193,14 +193,6 @@ export function App() {
   const [startedRun, setStartedRun] = useState<{ experimentName: string; fileName: string } | null>(
     null,
   );
-  /**
-   * Which experiment the Instrument view is pointed at, when the user has said so.
-   *
-   * Null means "no choice made", and {@link instrumentTargetName} then falls back to the selected
-   * file. Holding a *name* rather than the resolved file keeps this honest across a reload of the
-   * file's content and across the run watcher rewriting a run under the same name once a cycle.
-   */
-  const [instrumentTarget, setInstrumentTarget] = useState<string | null>(null);
   const runWatch = useRunWatch(
     instrument,
     useCallback(
@@ -406,11 +398,6 @@ export function App() {
       if (!id) return;
       const started = await store.beginExperiment(id);
       if (!started) return;
-      // Pin the view to the file it just started, under the name `beginExperiment` settled on —
-      // the date restamp can have renamed it. Without this the view would fall back to the
-      // selection the moment the run stopped being live, and swap the finished run (and its
-      // "clone me" offer) for whatever chip happened to be lit.
-      setInstrumentTarget(started.name);
       setStartedRun({
         experimentName: plan.name,
         fileName: started.name.replace(/\.zpcr$/i, ""),
@@ -471,9 +458,9 @@ export function App() {
    * a lens on the selection. It used to lock the selection while a run was live, so that leaving
    * the running file couldn't abandon the tab that was following it, and to snap the selection to
    * the running file on arrival so that the tab had something to show. Neither is needed now that
-   * the view holds its own target ({@link instrumentTarget}): a run is followed by `useRunWatch`
-   * whatever is selected, and the view shows the run it is driving without moving the app's
-   * selection to do it.
+   * that view resolves its own target ({@link instrumentTargetName}): a run is followed by
+   * `useRunWatch` whatever is selected, and the view shows the run it is driving without moving
+   * the app's selection to do it.
    *
    * From About, picking a chip also *leaves* About for Overview. About is file-independent — it
    * survives a selection change (see `view` below) — so without this the click would land on a
@@ -551,17 +538,18 @@ export function App() {
   /**
    * The file the Instrument view acts on, in three rungs.
    *
+   * There is **no second file picker** for this: the file bar is the app's one selection and stays
+   * the only one, so rung 2 is simply what is selected. What the other two rungs add is that the
+   * answer doesn't evaporate when the selection is something an instrument could never run.
+   *
    * 1. **A run live on this instrument** wins outright: while the cycler is running a run this
    *    session is following, that run is what the view is *about*, and offering to start something
    *    else while the block is hot would be offering something the instrument would refuse anyway.
    *    This is what the old snap-the-selection effect was for, done without moving the app's
    *    selection — the file bar stays wherever the user left it.
-   * 2. **What they picked here**, if it still exists.
-   * 3. **The selected file**, when it is a loaded run, so arriving from an experiment's Overview
-   *    lands on that experiment with nothing to re-pick. A default, not a lens: the picker in the
-   *    view names it, and choosing anything there pins rung 2 over it.
-   * 4. **Whatever this resolved to last**, which is what keeps rung 3 a *default* rather than a
-   *    lens by the back door: selecting a `.prcl.txt` or a plate while sitting on this view would
+   * 2. **The selected file**, when it is a loaded run.
+   * 3. **Whatever this resolved to last**, which is what keeps the tab from being a lens by the
+   *    back door: selecting a `.prcl.txt` or a plate file while sitting on this view would
    *    otherwise empty the panel, and "I selected a protocol file" is not a statement about which
    *    experiment the instrument should run.
    */
@@ -569,11 +557,10 @@ export function App() {
   const instrumentTargetName = useMemo(() => {
     const running = instrument.connection === "connected" && !!instrument.status?.running;
     if (running && runWatch.fileName && store.runs.has(runWatch.fileName)) return runWatch.fileName;
-    if (instrumentTarget && store.runs.has(instrumentTarget)) return instrumentTarget;
     if (active && store.runs.has(active.name)) return active.name;
     const last = lastInstrumentTarget.current;
     return last && store.runs.has(last) ? last : null;
-  }, [instrument.connection, instrument.status, runWatch.fileName, instrumentTarget, store.runs, active]);
+  }, [instrument.connection, instrument.status, runWatch.fileName, store.runs, active]);
   // Written during render rather than in an effect: it is a memo of the render above it, not a
   // state change, and an effect would leave one render resolving to null before it caught up.
   lastInstrumentTarget.current = instrumentTargetName;
@@ -601,25 +588,6 @@ export function App() {
     };
   }, [instrumentTargetName, store.loaded, store.runs, store.experiments]);
 
-  /**
-   * What the view's experiment picker offers: every loaded `.zpcr`, newest last, as the bar orders
-   * them. Only that kind — it is the one the app can carry to an instrument and the one an
-   * instrument produces; a `.pcrd` or a Biomeme export is somebody else's finished record. Runs
-   * that already have results are listed too rather than filtered out, because the view has
-   * something to say about each of them (it offers the clone that is how you run one again), and a
-   * picker that silently omitted the file you were looking at would be the more confusing object.
-   */
-  const instrumentCandidates = useMemo(
-    () =>
-      store.loaded
-        .filter((f) => f.kind === "zpcr")
-        .map((f) => ({
-          fileName: f.name,
-          name: store.experiments.get(f.name)?.name ?? f.name,
-          pending: store.pendingIds.has(f.name),
-        })),
-    [store.loaded, store.experiments, store.pendingIds],
-  );
 
   if (store.loading) {
     return <div className="splash mono">initializing…</div>;
@@ -724,14 +692,9 @@ export function App() {
             onOpenRun={openRun}
             onOpenFinishedRun={openFinishedRun}
             experiment={instrumentExperiment}
-            candidates={instrumentCandidates}
-            onPickExperiment={setInstrumentTarget}
-            onNewExperiment={() => {
-              // Point the view at what it just made: an earlier pick would otherwise still win
-              // the second rung of `instrumentTargetName`, and the new experiment would be
-              // created, activated in the bar, and yet not be the one on screen here.
-              void createExperiment({}, "instrument").then((id) => id && setInstrumentTarget(id));
-            }}
+            // Creating one selects it, which is the second rung — so it lands on screen here with
+            // nothing extra to tell this view about it.
+            onNewExperiment={() => void createExperiment({}, "instrument")}
             instrument={instrument}
             runWatch={runWatch}
             onStartExperiment={startExperiment}

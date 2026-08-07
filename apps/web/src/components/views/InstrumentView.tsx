@@ -8,12 +8,15 @@
  * files starts.
  *
  * It does still need **an experiment** to start, since a protocol comes from a file and the
- * instrument has no library of its own (`usb.md` §5.1). That experiment is named *here*, by the
- * picker in its panel (`InstrumentRun`), and `App` resolves which file that is: a run
- * live on this instrument, else the one picked here, else the selected file as a default. Reading
- * it off the selection alone is what this replaced — that made the tab a lens in every respect but
- * name, and cost the file bar a lock (no switching files during a run) and a snap (arriving here
- * moved the app's selection) to keep the pretence up.
+ * instrument has no library of its own (`usb.md` §5.1), and that experiment is the app's ordinary
+ * selection — the file bar, which is the app's one file picker and stays the only one. What this
+ * view adds is that the answer *sticks*: `App` resolves it as the run live on this instrument,
+ * else the selected file when that is a run, else whatever resolved last, so wandering onto a
+ * `.prcl.txt` or a plate file doesn't empty the panel (`instrumentTargetName`).
+ *
+ * That last rung is the whole of what replaced the two contortions this tab used to need while it
+ * sat among the file views: a lock on the file bar (no switching files during a run) and a snap
+ * that moved the app's selection when you arrived here.
  *
  * Older still, and worth not re-proposing: a run assembled from a **three-slot staging selection**
  * over every loaded file, where a `.prcl.txt` or `.plt.csv` could override half of some other run,
@@ -70,22 +73,10 @@ export interface InstrumentExperiment {
   inProgress: boolean;
 }
 
-/** One row of the experiment picker: a loaded `.zpcr` this view could be pointed at. */
-export interface InstrumentCandidate {
-  fileName: string;
-  /** What it is called (`ZpcrStore.experiments`), falling back to the file name. */
-  name: string;
-  /** Never started and holding no results — the ones Start actually applies to, marked as such so
-   * a list holding both kinds says which is which. */
-  pending: boolean;
-}
-
 export function InstrumentView({
   onOpenRun,
   onOpenFinishedRun,
   experiment,
-  candidates,
-  onPickExperiment,
   onNewExperiment,
   instrument,
   runWatch,
@@ -98,12 +89,8 @@ export function InstrumentView({
    * this one just switches to a file the watcher already put in the store. */
   onOpenFinishedRun: (fileName: string) => void;
   /** The experiment this view is pointed at, or null when there is nothing to point at; see the
-   * type. Resolved by `App` — this view names the choice, `App` decides what it resolves to. */
+   * type. Resolved by `App` from the selection — see `instrumentTargetName` there. */
   experiment: InstrumentExperiment | null;
-  /** Every loaded `.zpcr` the picker offers, in file-bar order. */
-  candidates: readonly InstrumentCandidate[];
-  /** Point the view at one of them. `App` holds the pick, so it survives leaving the tab. */
-  onPickExperiment: (fileName: string) => void;
   /** Make a new pending experiment and stay here — the way out of "nothing to start" when the
    * browser is holding nothing to point at. */
   onNewExperiment: () => void;
@@ -183,8 +170,6 @@ export function InstrumentView({
       <div className="instrument__content">
         <InstrumentRun
           experiment={experiment}
-          candidates={candidates}
-          onPickExperiment={onPickExperiment}
           onNewExperiment={onNewExperiment}
           plan={plan}
           status={instrument.status}

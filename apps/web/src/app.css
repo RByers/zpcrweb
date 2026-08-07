@@ -3946,37 +3946,6 @@ summary.instrument__panelhead {
   margin: 0 0 10px;
 }
 
-/* The experiment picker (`InstrumentRun`) — the panel head's right-hand side, where the file name
-   used to be shown read-only. Sized to the head rather than the panel: it is one choice, not a
-   form. */
-.devrun__pick {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  min-width: 0;
-}
-.devrun__picklabel {
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--ink-2);
-}
-.devrun__pickselect {
-  max-width: 32ch;
-  padding: 3px 6px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--raised);
-  color: var(--fg);
-  font-size: 12px;
-}
-.devrun__pickselect:hover {
-  border-color: var(--neon-magenta-dim);
-}
-.devrun__pickselect:focus-visible {
-  outline: 1px solid var(--neon-magenta);
-  outline-offset: 1px;
-}
 
 /* File browser */
 .instrument__dirs {

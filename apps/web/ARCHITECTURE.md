@@ -541,10 +541,11 @@ and a protocol comes from a file. Both halves of that are still true — but *ne
 input* is not *being a lens on the selected file*, and only the second belongs in that group. The
 difference showed up as two contortions in `App` whose only job was to hide it: `activeLocked`,
 which stopped the file bar switching files while a run was live, and an effect that snapped the
-app's selection to the running file on arriving at the tab. Both are gone. Which experiment a run
-would start is now asked **in the view**, by a picker in its own panel, and `App` resolves that
-pick against the live run and the current selection (`instrumentTargetName`, four rungs, documented
-there). See "The Instrument view" below.
+app's selection to the running file on arriving at the tab. Both are gone, and nothing replaced
+them in the UI: **the file bar is still the only file picker**, and the experiment this view starts
+is still the selected one. What changed is only that the answer no longer evaporates —
+`instrumentTargetName` resolves the live run first, the selection second, and what it last resolved
+to third. See "The Instrument view" below.
 
 ## State & persistence
 
@@ -2364,20 +2365,20 @@ with nothing loaded at all. Starting a run does still need a protocol, and a pro
 from a file, since the instrument has no library of its own to pick from (`usb.md` §5.1) — but
 *needing a file as input* is not *being a lens on the selected file*.
 
-**Which experiment it would start is chosen here**, by a picker in the run panel over every loaded
-`.zpcr`, and `App` resolves that choice in four rungs (`instrumentTargetName`):
+**Which experiment it would start is the selected one**, and there is deliberately no picker here
+to say so a second time — the file bar is the app's one file picker, and a control beside it could
+only agree with the chips or contradict them. What the view adds is that the answer *sticks*, in
+three rungs (`App`'s `instrumentTargetName`):
 
 | Rung | Wins when | Why |
 | ---- | --------- | --- |
 | the run live on this instrument | connected, `status.running`, and the watcher has a file for it | while the block is cycling that run *is* what this view is about — and pointing at it here, rather than moving the app's selection to it, is what retired the old snap-on-arrival effect |
-| the pick made in this view | it still names a loaded run | the explicit answer, held in `App` so it survives leaving the tab |
-| the selected file | it is a loaded run | a default, so arriving from an experiment's Overview needs no re-picking |
-| whatever resolved last | — | keeps the rung above a *default* rather than a lens by the back door: selecting a `.prcl.txt` while sitting here must not empty the panel, since "I selected a protocol file" says nothing about what the instrument should run |
+| the selected file | it is a loaded run | the ordinary answer, and the only one a user gives |
+| whatever resolved last | — | the selection can be a `.prcl.txt` or a plate file, which no instrument can run; the panel goes on showing the experiment it was showing rather than emptying, since "I selected a protocol file" says nothing about what should be started |
 
-Starting pins the pick to the file that was started, under the name `beginExperiment` settled on
-(the date restamp can rename it). Without that the view would fall back to the selection the moment
-the run stopped being live, swapping the finished run and its "clone me" offer for whatever chip
-happened to be lit.
+Nothing needs pinning at the click on Start: the run watcher activates the file it started
+(`AddFilesOptions.activate`), so the selection *is* that run, and the second rung has it — including
+after it finishes, with its "clone me" offer intact.
 
 One consequence of the tab being reachable with nothing loaded: the welcome screen's "Connect an
 instrument over USB" button just **goes there**, creating nothing. It used to have to invent an

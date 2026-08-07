@@ -1851,14 +1851,13 @@ async function instrumentRunChecks(chrome, origin) {
         note: p.querySelector(".devrun__source")?.textContent.trim() || null,
         text: p.textContent,
       }));
-      const pick = document.querySelector(".devrun__pickselect");
       return {
         protocol: parts.find((p) => p.title === "Protocol") || null,
         plate: parts.find((p) => p.title === "Plate") || null,
         title: document.querySelector(".instrument__paneltitle")?.textContent.trim() || "",
-        hint: document.querySelector(".devrun__hint")?.textContent.trim() || "",
-        picked: pick ? pick.options[pick.selectedIndex]?.textContent.trim() ?? "" : null,
-        options: pick ? [...pick.options].map((o) => o.textContent.trim()) : [],
+        // The panel head names the experiment read-only; there is no picker here, on purpose —
+        // the file bar is the app's one file picker.
+        named: document.querySelector(".instrument__panelhead .devrun__hint")?.textContent.trim() ?? null,
         chips: [...document.querySelectorAll(".filebar .filechip")].map((c) => ({
           name: c.querySelector(".filechip__name").textContent.trim(),
           on: c.classList.contains("is-active"),
@@ -1866,15 +1865,17 @@ async function instrumentRunChecks(chrome, origin) {
       };
     })()`);
 
-  // Which experiment this view is about is asked *here*, in its own picker, because the view is not
-  // a lens on the file bar (see `ViewBar`). It defaults to the selected file, which is why this
-  // reads the loaded run without anything being picked first.
+  // The experiment this view is about is the app's ordinary selection — no second picker (see
+  // `InstrumentRun`), so what the panel names must be exactly what the file bar has lit.
   const first = await shown();
   check(
-    "the Instrument view names its own experiment, defaulting to the selected file",
-    first.picked !== null &&
-      first.picked.startsWith(first.chips.find((c) => c.on)?.name ?? "\u0000"),
-    JSON.stringify({ picked: first.picked, chips: first.chips }),
+    "the Instrument view starts the selected experiment, naming it rather than re-picking it",
+    first.named !== null && first.named === (first.chips.find((c) => c.on)?.name ?? "\u0000"),
+    JSON.stringify({ named: first.named, chips: first.chips }),
+  );
+  check(
+    "…and offers no picker of its own, the file bar being the app's one file picker",
+    (await cdp.eval(`document.querySelectorAll(".instrument select").length`)) === 0,
   );
   check(
     "a run supplies both halves of what would be started, from the one file",
@@ -1972,9 +1973,9 @@ async function instrumentRunChecks(chrome, origin) {
   const afterProtocol = await shown();
   check(
     "…and the Instrument view keeps its experiment when the file bar moves to a .prcl.txt",
-    afterProtocol.picked === first.picked &&
+    afterProtocol.named === first.named &&
       afterProtocol.chips.find((c) => c.on)?.name !== first.chips.find((c) => c.on)?.name,
-    JSON.stringify({ picked: afterProtocol.picked, chips: afterProtocol.chips }),
+    JSON.stringify({ named: afterProtocol.named, chips: afterProtocol.chips }),
   );
   // The bar itself is free while this view is up — no locked chips, which is what the removal of
   // `activeLocked` has to actually mean on screen.
@@ -2373,25 +2374,15 @@ async function instrumentRunChecks(chrome, origin) {
   await cdp.eval(`window.location.hash = "view=instrument", undefined`);
   await waitFor(() => cdp.eval(`!!document.querySelector(".devrun")`), { what: "the run panel" });
   await sleep(400);
-  const pendingPanel = await cdp.eval(`(() => {
-    const pick = document.querySelector(".devrun__pickselect");
-    return {
-      title: document.querySelector(".instrument__paneltitle")?.textContent.trim() || "",
-      // The name is the picker's own value now — this view names its experiment rather than
-      // inheriting one, so what it is pointed at and what it is called are the same control.
-      picked: pick ? pick.options[pick.selectedIndex]?.textContent.trim() ?? "" : null,
-      cloneOffered: [...document.querySelectorAll("button")].some((b) =>
-        /Clone experiment/.test(b.textContent)),
-    };
-  })()`);
+  const pendingPanel = await cdp.eval(`(() => ({
+    title: document.querySelector(".instrument__paneltitle")?.textContent.trim() || "",
+    named: document.querySelector(".instrument__panelhead .devrun__hint")?.textContent.trim() || "",
+    cloneOffered: [...document.querySelectorAll("button")].some((b) =>
+      /Clone experiment/.test(b.textContent)),
+  }))()`);
   check(
     "a pending experiment reads as one to start, under its own name",
-    /Experiment to start/.test(pendingPanel.title) && /Cloned RVP/.test(pendingPanel.picked ?? ""),
-    JSON.stringify(pendingPanel),
-  );
-  check(
-    "…and the picker marks which of the loaded experiments still have results",
-    !/has results/.test(pendingPanel.picked ?? "\u0000"),
+    /Experiment to start/.test(pendingPanel.title) && /Cloned RVP/.test(pendingPanel.named),
     JSON.stringify(pendingPanel),
   );
   check(
