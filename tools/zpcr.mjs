@@ -45,7 +45,10 @@ import {
   runAnalysisSettingsFromZpcrweb,
   wellKey,
 } from "../packages/core/dist/index.js";
-import { renderChartPng } from "./chartshot.mjs";
+// `chartshot.mjs` is imported where `curves` needs it, not here: it pulls in esbuild and the
+// Chrome harness, and `results` — the reason to reach for this tool on a machine with nothing on
+// it — has no use for either. A static import would make the CSV path fail on a checkout that
+// can render no chart at all.
 
 /** The local, gitignored CFX ZipCrypto password — see `AGENTS.md`'s Secrets section and
  * `packages/core/test/secrets.ts`, which this mirrors. `undefined` when there's no `secrets.json`. */
@@ -321,6 +324,7 @@ async function main() {
   }
 
   const out = opts.out ?? `${basename(file, extname(file))}-curves.png`;
+  const { renderChartPng } = await import("./chartshot.mjs");
   writeFileSync(out, await renderChartPng(chartConfig(curves, { width, height })));
   const cqs = curves.filter((c) => c.analysis?.cq != null).length;
   console.error(
