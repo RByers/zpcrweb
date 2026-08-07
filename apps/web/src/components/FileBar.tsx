@@ -71,13 +71,6 @@ interface Props {
    * reads than their protocol asks for: one was started and stopped short, the other hasn't run.
    */
   pendingIds: Set<string>;
-  /**
-   * True while a run in progress on a connected instrument owns the whole bar — passed only by
-   * the Instrument view's bar (see `App.tsx`'s `runActive`/`selectFile`), since that's the one
-   * place a chip click could otherwise walk away from the run that view is following. Locks every
-   * chip but the active one.
-   */
-  activeLocked?: boolean;
   /** What each file is called and when it ran, keyed by id (`ZpcrStore.experiments`). A chip
    * leads with the name and carries the timestamp underneath; the file name moves to the hover
    * card, where it is still one glance away. */
@@ -263,7 +256,6 @@ function FileChip({
   isRunning,
   isIncomplete,
   isPending,
-  activeLocked,
   onSelect,
   onUnload,
 }: {
@@ -281,15 +273,12 @@ function FileChip({
   isIncomplete: boolean;
   /** See {@link Props.pendingIds} — the experiment has not been started. */
   isPending: boolean;
-  /** See {@link Props.activeLocked}. */
-  activeLocked: boolean;
   onSelect: (id: string) => void;
   onUnload: (id: string) => void;
 }) {
   const mainRef = useRef<HTMLButtonElement>(null);
   const [cardPos, setCardPos] = useState<{ top: number; left: number } | null>(null);
   const encStatus = fileEncryptionStatus(f, run, plateFile, password);
-  const clickLocked = activeLocked && !isActive;
 
   return (
     <div
@@ -297,8 +286,7 @@ function FileChip({
         "filechip" +
         (isActive ? " is-active" : "") +
         (isModified ? " is-modified" : "") +
-        (isRunning ? " is-running" : "") +
-        (clickLocked ? " is-locked" : "")
+        (isRunning ? " is-running" : "")
       }
     >
       <button
@@ -306,14 +294,7 @@ function FileChip({
         className="filechip__main"
         role="tab"
         aria-selected={isActive}
-        title={
-          clickLocked
-            ? "Can't switch files while a run is in progress and connected via USB"
-            : undefined
-        }
-        onClick={() => {
-          if (!clickLocked) onSelect(f.name);
-        }}
+        onClick={() => onSelect(f.name)}
         onMouseEnter={() => {
           const r = mainRef.current?.getBoundingClientRect();
           if (r) setCardPos({ top: r.bottom + 6, left: r.left });
@@ -384,7 +365,6 @@ export function FileBar({
   inProgressIds,
   incompleteIds,
   pendingIds,
-  activeLocked,
   experiments,
 }: Props) {
   const [password] = usePltdPassword();
@@ -415,7 +395,6 @@ export function FileBar({
           isRunning={inProgressIds.has(f.name)}
           isIncomplete={incompleteIds.has(f.name)}
           isPending={pendingIds.has(f.name)}
-          activeLocked={!!activeLocked}
           onSelect={onSelect}
           onUnload={onUnload}
         />

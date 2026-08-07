@@ -397,6 +397,39 @@ async function loadChecks(chrome, origin) {
   const cdp = await openPage(chrome.base, origin);
   await sleep(600);
 
+  // 0. The other thing the welcome screen offers: an instrument, with nothing loaded and nothing
+  //    created. The Instrument tab is not a lens on a file (see `ViewBar`), so it is reachable
+  //    from an empty browser — this used to have to invent an experiment first just to have a
+  //    file for the tab to hang off. What has to be true afterwards is that the real view is up,
+  //    the strip is there with Instrument live, and the catalog is still empty.
+  await cdp.eval(
+    `(() => { [...document.querySelectorAll("button")]
+        .find((b) => /Connect an instrument/i.test(b.textContent)).click(); })()`,
+  );
+  await waitFor(() => cdp.eval(`!!document.querySelector(".instrument__rail")`), {
+    what: "the Instrument view from an empty browser",
+  });
+  const fromEmpty = await cdp.eval(`(() => ({
+    chips: document.querySelectorAll(".filebar .filechip").length,
+    live: [...document.querySelectorAll('.viewbar [role="tab"]')]
+      .filter((b) => !b.disabled).map((b) => b.textContent.trim()),
+    connect: !![...document.querySelectorAll("button")]
+      .find((b) => /Connect over USB/i.test(b.textContent)),
+    says: document.querySelector(".instrument__empty")?.textContent.trim() || "",
+  }))()`);
+  check(
+    "the welcome screen's instrument button opens the view itself, creating no file",
+    fromEmpty.chips === 0 &&
+      fromEmpty.connect &&
+      fromEmpty.live.join(",") === "Files,Instrument" &&
+      /No experiment to start/.test(fromEmpty.says),
+    JSON.stringify(fromEmpty),
+  );
+  // Back to the welcome screen for the example-link checks below — the view is sticky, and this
+  // browser is still empty.
+  await emptyReload(cdp, origin);
+  await sleep(400);
+
   // 1. The welcome screen offers the example as a real link (so "Copy link address" works),
   //    and clicking it loads it.
   const clicked = await cdp.eval(
@@ -1368,8 +1401,11 @@ async function passwordChecks(chrome, origin, pw) {
   check(
     "a locked run keeps the tab strip, with every file view disabled",
     lockedStrip.length === 9 &&
-      lockedStrip.filter((t) => t.off).length === 8 &&
-      !lockedStrip.find((t) => t.label === "Files").off,
+      lockedStrip.filter((t) => t.off).length === 7 &&
+      !lockedStrip.find((t) => t.label === "Files").off &&
+      // Instrument is not a lens on this file — or any file — so a run this browser can't open
+      // has no bearing on whether there is a cycler to talk to (`ViewBar`).
+      !lockedStrip.find((t) => t.label === "Instrument").off,
     JSON.stringify(lockedStrip),
   );
   locked.close();
@@ -1815,11 +1851,14 @@ async function instrumentRunChecks(chrome, origin) {
         note: p.querySelector(".devrun__source")?.textContent.trim() || null,
         text: p.textContent,
       }));
+      const pick = document.querySelector(".devrun__pickselect");
       return {
         protocol: parts.find((p) => p.title === "Protocol") || null,
         plate: parts.find((p) => p.title === "Plate") || null,
         title: document.querySelector(".instrument__paneltitle")?.textContent.trim() || "",
         hint: document.querySelector(".devrun__hint")?.textContent.trim() || "",
+        picked: pick ? pick.options[pick.selectedIndex]?.textContent.trim() ?? "" : null,
+        options: pick ? [...pick.options].map((o) => o.textContent.trim()) : [],
         chips: [...document.querySelectorAll(".filebar .filechip")].map((c) => ({
           name: c.querySelector(".filechip__name").textContent.trim(),
           on: c.classList.contains("is-active"),
@@ -1827,15 +1866,15 @@ async function instrumentRunChecks(chrome, origin) {
       };
     })()`);
 
-  // The file bar means one thing everywhere now: the cyan chip is the active file, and on this tab
-  // that file is the experiment to start. There is no second, magenta kind of selection — the
-  // three-slot staging model that put one here is gone (see `InstrumentView`), and with it the
-  // possibility of the bar meaning something different depending on which tab you were on.
+  // Which experiment this view is about is asked *here*, in its own picker, because the view is not
+  // a lens on the file bar (see `ViewBar`). It defaults to the selected file, which is why this
+  // reads the loaded run without anything being picked first.
   const first = await shown();
   check(
-    "the Instrument view reads the app's ordinary file bar, with one selection",
-    first.chips.length === 1 && first.chips[0].on,
-    JSON.stringify(first.chips),
+    "the Instrument view names its own experiment, defaulting to the selected file",
+    first.picked !== null &&
+      first.picked.startsWith(first.chips.find((c) => c.on)?.name ?? "\u0000"),
+    JSON.stringify({ picked: first.picked, chips: first.chips }),
   );
   check(
     "a run supplies both halves of what would be started, from the one file",
@@ -1921,6 +1960,31 @@ async function instrumentRunChecks(chrome, origin) {
   await waitFor(() => chipPresent(cdp, "Gradient"), { what: "the .prcl.txt chip" });
   await sleep(400);
   const loadedTab = await activeTab(cdp);
+
+  // …and the whole point of this tab not being a lens: go back to it with the protocol file still
+  // selected, and it is still about the experiment it was about. A file bar selection is not a
+  // statement about what the instrument should run, so changing it — to a kind that could never be
+  // an experiment, no less — must not empty the panel or silently re-aim the Start button. This is
+  // the behaviour the old selection lock and snap-on-arrival existed to fake.
+  await cdp.eval(`window.location.hash = "view=instrument", undefined`);
+  await waitFor(() => cdp.eval(`!!document.querySelector(".devrun")`), { what: "the run panel" });
+  await sleep(300);
+  const afterProtocol = await shown();
+  check(
+    "…and the Instrument view keeps its experiment when the file bar moves to a .prcl.txt",
+    afterProtocol.picked === first.picked &&
+      afterProtocol.chips.find((c) => c.on)?.name !== first.chips.find((c) => c.on)?.name,
+    JSON.stringify({ picked: afterProtocol.picked, chips: afterProtocol.chips }),
+  );
+  // The bar itself is free while this view is up — no locked chips, which is what the removal of
+  // `activeLocked` has to actually mean on screen.
+  const locked = await cdp.eval(`document.querySelectorAll(".filechip.is-locked").length`);
+  check("…with no chip locked by this view being open", locked === 0, `${locked} locked chips`);
+  // Back to where the protocol file's own checks below carry on from.
+  await cdp.eval(`window.location.hash = "file=Gradient.prcl.txt&view=overview", undefined`);
+  await waitFor(() => cdp.eval(`!!document.querySelector(".overview__infotable")`), {
+    what: "the protocol file's Overview",
+  });
   // Opening a protocol shows what it *is*, not the staging panel: a `.prcl.txt` is a document
   // first, and Instrument is where you go when you mean to start a run.
   check("loading a .prcl.txt lands on the Overview view", loadedTab === "Overview", loadedTab);
@@ -1938,8 +2002,9 @@ async function instrumentRunChecks(chrome, origin) {
     )
     .then(JSON.parse);
   check(
-    "a .prcl.txt enables Overview, Protocol and Raw (plus the catalog tab), nothing else",
-    protoTabs.filter((t) => !t.off).map((t) => t.label).join(",") === "Files,Overview,Protocol,Raw",
+    "a .prcl.txt enables Overview, Protocol and Raw (plus the two file-independent tabs)",
+    protoTabs.filter((t) => !t.off).map((t) => t.label).join(",") ===
+      "Files,Overview,Protocol,Raw,Instrument",
     JSON.stringify(protoTabs.filter((t) => !t.off).map((t) => t.label)),
   );
 
@@ -2308,15 +2373,25 @@ async function instrumentRunChecks(chrome, origin) {
   await cdp.eval(`window.location.hash = "view=instrument", undefined`);
   await waitFor(() => cdp.eval(`!!document.querySelector(".devrun")`), { what: "the run panel" });
   await sleep(400);
-  const pendingPanel = await cdp.eval(`(() => ({
-    title: document.querySelector(".instrument__paneltitle")?.textContent.trim() || "",
-    hint: document.querySelector(".devrun__hint")?.textContent.trim() || "",
-    cloneOffered: [...document.querySelectorAll("button")].some((b) =>
-      /Clone experiment/.test(b.textContent)),
-  }))()`);
+  const pendingPanel = await cdp.eval(`(() => {
+    const pick = document.querySelector(".devrun__pickselect");
+    return {
+      title: document.querySelector(".instrument__paneltitle")?.textContent.trim() || "",
+      // The name is the picker's own value now — this view names its experiment rather than
+      // inheriting one, so what it is pointed at and what it is called are the same control.
+      picked: pick ? pick.options[pick.selectedIndex]?.textContent.trim() ?? "" : null,
+      cloneOffered: [...document.querySelectorAll("button")].some((b) =>
+        /Clone experiment/.test(b.textContent)),
+    };
+  })()`);
   check(
     "a pending experiment reads as one to start, under its own name",
-    /Experiment to start/.test(pendingPanel.title) && /Cloned RVP/.test(pendingPanel.hint),
+    /Experiment to start/.test(pendingPanel.title) && /Cloned RVP/.test(pendingPanel.picked ?? ""),
+    JSON.stringify(pendingPanel),
+  );
+  check(
+    "…and the picker marks which of the loaded experiments still have results",
+    !/has results/.test(pendingPanel.picked ?? "\u0000"),
     JSON.stringify(pendingPanel),
   );
   check(
@@ -2766,8 +2841,8 @@ async function experimentNameChecks(chrome, origin) {
   const offLabels = (s) => s.filter((t) => t.off).map((t) => t.label);
   const bio = await strip();
   check(
-    "a Biomeme run keeps all nine tabs, greying out the three it can't answer",
-    bio.length === 9 && offLabels(bio).join(",") === "Reference,Calibration,Instrument",
+    "a Biomeme run keeps all nine tabs, greying out the two it can't answer",
+    bio.length === 9 && offLabels(bio).join(",") === "Reference,Calibration",
     JSON.stringify(bio),
   );
 
@@ -2837,8 +2912,8 @@ async function loadedSetChecks(chrome, origin) {
   await waitFor(async () => (await chips()) === 0, { what: "the chip to go" });
   const empty = await strip();
   check(
-    "with nothing selected every file view is disabled, and only Files is left",
-    empty.filter((t) => !t.off).map((t) => t.label).join(",") === "Files",
+    "with nothing selected every file view is disabled, and only Files and Instrument are left",
+    empty.filter((t) => !t.off).map((t) => t.label).join(",") === "Files,Instrument",
     JSON.stringify(empty.filter((t) => !t.off).map((t) => t.label)),
   );
   const chrome_ = await cdp.eval(

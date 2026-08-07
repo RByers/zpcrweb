@@ -136,9 +136,10 @@ export function InstrumentRail({
   /**
    * Start the experiment: writes the `begun` marker into its own file and then sends the run
    * (`App`'s `startExperiment`). Unlike the seeding it replaced, this creates no file — the
-   * experiment already exists, so there is nothing to write first and nothing to name.
+   * experiment already exists, so there is nothing to write first and nothing to name. The file is
+   * named explicitly rather than taken from the app's selection, which this view no longer follows.
    */
-  onStart: (plan: RunPlan) => Promise<void> | void;
+  onStart: (plan: RunPlan, fileName: string) => Promise<void> | void;
 }) {
   const { connection, info, status, rtStatus, busy, lastAction, runProgress, runPending } = instrument;
   const connected = connection === "connected";
@@ -244,11 +245,11 @@ export function InstrumentRail({
   };
 
   const start = async () => {
-    if (!plan || !canStart) return;
+    if (!plan || !canStart || !experiment) return;
     // Marking the file begun and sending the run are one action, in that order — the same order the
     // seeding this replaced used, and for the same reason: the run is about to exist whether or not
     // every upload lands, so the file has to say so first (`App`'s `startExperiment`).
-    await onStart(plan);
+    await onStart(plan, experiment.fileName);
     const result = await instrument.startRun(plan);
     setStartNote(result ? result.uploadErrors : null);
   };

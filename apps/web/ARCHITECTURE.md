@@ -4,10 +4,11 @@ The web app (`@zpcrweb/web`) is a browser UI over [`@zpcrweb/core`](../../packag
 holds a catalog of files — `.zpcr`, `.pcrd`, a Biomeme run export (`.bmrun`, see "A third format:
 Biomeme" below), a standalone plate file (`.pltd` or zpcrweb's own `.plt.csv`, see "Standalone
 plate entries and attach" below) or a thermal protocol (`.prcl.txt`) — **loads** some of them,
-**selects exactly one** of those, and explores it through up to eight views: Overview, Protocol,
-Curves, Plates, Reference, Calibration, Raw and Instrument (a standalone plate file only gets
-Overview, Plates and Raw; a standalone protocol file only Overview, Protocol and Raw; a Biomeme
-run only Overview, Protocol, Curves, Plates and Raw — see below).
+**selects exactly one** of those, and explores it through up to seven views: Overview, Protocol,
+Curves, Plates, Reference, Calibration and Raw (a standalone plate file only gets Overview, Plates
+and Raw; a standalone protocol file only Overview, Protocol and Raw; a Biomeme run only Overview,
+Protocol, Curves, Plates and Raw — see below). Two further tabs are about no file at all: **Files**,
+the catalog, and **Instrument**, a live cycler over USB.
 
 Those three sets — the catalog, the loaded files, the one selection — are the app's spine; see
 "Files, loaded files, and the one selection" below before changing anything that touches them.
@@ -283,9 +284,10 @@ things:
   `parseRunDefinition`'s (`protocol.md`) — the view reads nothing out of the text itself.
 - **Raw** (`StandaloneRawView`, shared with `.pltd`/`.plt.csv`/Biomeme) — the file's own bytes
   verbatim, since a `.prcl.txt` is already plain UTF-8 text with nothing to decrypt.
-A `.prcl.txt` has **no Instrument tab**: it is not something that can be started, only attached to an
-experiment that can (see "The Instrument view"). It used to list one, from when a protocol file was
-staged directly into a run.
+A `.prcl.txt` is not something that can be **started**, only attached to an experiment that can
+(see "The Instrument view"). The Instrument tab is still reachable while one is selected — it is
+reachable always, being about no file — but selecting a protocol file says nothing about what the
+instrument should run, and the view goes on showing the experiment it was already pointed at.
 
 Enabling Overview is what removed the old special case in `App.tsx`, where a `.prcl.txt` selected
 on any tab was forced into the Instrument view because it had no file-backed view to render. It
@@ -503,9 +505,10 @@ under it (`components/FileBar.tsx`).
    Three situations produce the same empty answer, because they are the same fact — no tab has a
    file to be a lens on: nothing selected, the selected file's bytes still arriving, or a run that
    hasn't decoded (locked behind the password prompt, or failed). The strip still renders; it is
-   simply all disabled but **Files**, which is a lens on the catalog and therefore always live. So
-   are the wordmark (About) and the load button, which are not lenses on a file at all — with
-   nothing selected, those are the ways out.
+   simply all disabled but **Files**, a lens on the catalog, and **Instrument**, a lens on a
+   machine — the two tabs that were never about the selection. So are the wordmark (About) and the
+   load button, which are not lenses on a file at all — with nothing selected, those are the ways
+   out.
 4. **The selection is always a loaded file, or nothing.** Selecting a released file loads it
    (`setActive` → `setLoaded(id, true)`); releasing the selected one moves the selection to another
    loaded file or clears it. There is no third state where the app is pointed at bytes it doesn't
@@ -526,14 +529,22 @@ under it (`components/FileBar.tsx`).
 - Clicking a **row** selects the file, loading it if needed, and lands on its own first enabled
   tab; the Protocol/Plate/Reads cells land on that view instead.
 
-### Instrument is a file view
+### Instrument is not a file view
 
-The Instrument tab sits in the view bar's file-view group like any other, and is enabled for a
-`.zpcr` and nothing else. It used to sit apart, on the argument that a cycler is not a file — but
-what it actually does is start *the selected experiment* and report on the run that comes out of
-it, which makes it exactly as file-backed as Protocol is. Keeping it outside meant the strip had a
-tab whose meaning didn't move with the selection, which is the one thing this bar must not have.
-See "The Instrument view" below.
+The Instrument tab has a group of its own at the far end of the strip, beside — not among — the
+lenses, and is **always enabled**, like Files. What it shows is the machine on the other end of
+the cable: a connection, a status, a filesystem, a traffic log and the run being driven, none of
+which stop existing because the selection moved.
+
+It spent a while inside the file-view group, on the argument that starting a run needs a protocol
+and a protocol comes from a file. Both halves of that are still true — but *needing a file as
+input* is not *being a lens on the selected file*, and only the second belongs in that group. The
+difference showed up as two contortions in `App` whose only job was to hide it: `activeLocked`,
+which stopped the file bar switching files while a run was live, and an effect that snapped the
+app's selection to the running file on arriving at the tab. Both are gone. Which experiment a run
+would start is now asked **in the view**, by a picker in its own panel, and `App` resolves that
+pick against the live run and the current selection (`instrumentTargetName`, four rungs, documented
+there). See "The Instrument view" below.
 
 ## State & persistence
 
@@ -944,8 +955,8 @@ so every call site keeps writing one `onChange({ … })` regardless of where the
   plate's target list — it is long enough to wrap to several lines, and every target it names is
   already visible in the grid below.
 - **Raw** — `RawFilesView` for `.zpcr`, `PcrdRawView` for `.pcrd` (see "Raw views" below).
-- **Instrument** — a live instrument over USB, driven by the selected experiment; enabled for a
-  `.zpcr` only. See "The Instrument view" below.
+- **Instrument** — a live instrument over USB, pointed at an experiment it names itself; always
+  enabled, and not a lens on the selected file. See "The Instrument view" below.
 - **About** — `AboutView` (`components/views/AboutView.tsx`): one card carrying both the credits
   (name, the "nothing leaves your device" line, author and GitHub links) *and* the large
   `DropZone` plus the "Load an example file" link. About and the welcome screen used to be two
@@ -2330,9 +2341,9 @@ response curves, not channel numbers.
 
 ## The Instrument view
 
-A lens on the selected experiment that happens to talk to hardware: it connects to a CFX96 over
-WebUSB and shows the instrument — identity, live status, its filesystem, and the decoded protocol
-traffic — in the service of starting *this* experiment and following the run that comes out of it. Everything it
+A view of the machine rather than of a file: it connects to a CFX96 over WebUSB and shows the
+instrument — identity, live status, its filesystem, and the decoded protocol traffic — in the
+service of starting an experiment and following the run that comes out of it. Everything it
 knows about the protocol comes from `@zpcrweb/core`'s `CfxDevice` (see the root
 [`ARCHITECTURE.md`](../../ARCHITECTURE.md#talking-to-an-instrument-not-a-file-srcusb) and
 [`usb.md`](../../usb.md)), per the standing rule that logic lives in the library — the app side is
@@ -2340,18 +2351,33 @@ knows about the protocol comes from `@zpcrweb/core`'s `CfxDevice` (see the root
 `navigator.usb`, a poll timer, the traffic recording and its bounded display window, and the React
 state the components render.
 
-**Its tab is an ordinary file view.** It sits in the view bar's file-view group with every other
-lens on the selected file, and is enabled for a `.zpcr` and nothing else (`App.tsx`'s
-`enabledViewsFor`). It used to sit in a group of its own, on the argument that a cycler is not a
-file — but starting a run needs a protocol, and that comes from a file, since the instrument has no
-protocol library of its own to pick from (`usb.md` §5.1). The tab's meaning moves with the
-selection exactly like Protocol's does, so it is grouped like Protocol's. What stays set apart is
-the view's own surface, which uses magenta where the rest of the chrome uses cyan.
+**Its tab stands apart, and is always enabled** — a group of its own at the end of the strip, in
+the magenta the view itself uses, never greyed out (see "Instrument is not a file view" above for
+the argument; `enabledViewsFor` no longer answers for it). It renders with nothing selected, and
+with nothing loaded at all. Starting a run does still need a protocol, and a protocol still comes
+from a file, since the instrument has no library of its own to pick from (`usb.md` §5.1) — but
+*needing a file as input* is not *being a lens on the selected file*.
 
-One consequence: with nothing selected there is no Instrument tab to reach, so the welcome screen's
-"Connect an instrument over USB" button **creates the experiment first** and lands on its Instrument
-tab (`App.tsx`'s `createExperiment(parts, "instrument")`). Someone with a cycler and no files starts
-by making the experiment they mean to run, which is what they were going to do anyway.
+**Which experiment it would start is chosen here**, by a picker in the run panel over every loaded
+`.zpcr`, and `App` resolves that choice in four rungs (`instrumentTargetName`):
+
+| Rung | Wins when | Why |
+| ---- | --------- | --- |
+| the run live on this instrument | connected, `status.running`, and the watcher has a file for it | while the block is cycling that run *is* what this view is about — and pointing at it here, rather than moving the app's selection to it, is what retired the old snap-on-arrival effect |
+| the pick made in this view | it still names a loaded run | the explicit answer, held in `App` so it survives leaving the tab |
+| the selected file | it is a loaded run | a default, so arriving from an experiment's Overview needs no re-picking |
+| whatever resolved last | — | keeps the rung above a *default* rather than a lens by the back door: selecting a `.prcl.txt` while sitting here must not empty the panel, since "I selected a protocol file" says nothing about what the instrument should run |
+
+Starting pins the pick to the file that was started, under the name `beginExperiment` settled on
+(the date restamp can rename it). Without that the view would fall back to the selection the moment
+the run stopped being live, swapping the finished run and its "clone me" offer for whatever chip
+happened to be lit.
+
+One consequence of the tab being reachable with nothing loaded: the welcome screen's "Connect an
+instrument over USB" button just **goes there**, creating nothing. It used to have to invent an
+experiment first, because the tab was a lens and so unreachable without a file — connecting is its
+own act, and the experiment to run is made from inside the view ("New experiment") if and when
+there is one to make.
 
 **One experiment, one file.** This is the model the whole view rests on, and it replaced a
 considerably larger one. A run used to be assembled here from a **three-slot staging selection** — a
@@ -2370,16 +2396,16 @@ some other run's identity. The three-slot selection, the override badges, the re
 for tapping a chip, the typed name and its lock/phase machinery (`state/useRunNaming.ts`) are all
 gone with it.
 
-**What this view can do is a property of the active file**, and there are exactly four cases
-(`InstrumentView`'s `InstrumentExperiment`, built by `App` from the active file,
+**What this view can do is a property of the experiment it is pointed at**, and there are exactly
+four cases (`InstrumentView`'s `InstrumentExperiment`, built by `App` from the resolved target,
 `lib/experiment.ts`'s `isPendingExperiment` and `runProgressFromNames`):
 
-| Active file | This view |
+| The experiment | This view |
 | ----------- | --------- |
 | a **pending** experiment — no results, never started | starts it; Start arms once it has a name and a protocol |
 | a run **in progress** — `begun`, not `ended` | won't start it; says it is running and its results are still arriving, and offers a clone for the *next* run |
 | a run that is **over** | won't start it, and offers the clone that is the way to run it again |
-| a `.zpcr` that hasn't decoded | says so, and names where experiments come from (the tab is disabled for every other kind, so this is the only remaining case) |
+| nothing to point at — nothing loaded, or a selection that is a standalone plate or protocol or a run that hasn't decoded | says so, and offers the "New experiment" that is where one comes from |
 
 Refusing the two started cases is the point of it rather than a limitation: re-running a file that
 already holds results would either overwrite them or contradict them, so the fix is a new experiment,

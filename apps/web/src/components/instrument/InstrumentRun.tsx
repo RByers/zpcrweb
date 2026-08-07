@@ -1,11 +1,16 @@
 /**
- * The experiment that would be started: its thermal protocol and its plate map, side by side.
+ * The experiment that would be started: which one it is, then its thermal protocol and its plate
+ * map side by side.
  *
- * Both halves come from the **one experiment file** the app is on — this panel renders a file it
- * does not own (see {@link InstrumentView} for how that file is chosen, and what the three cases
- * are). It used to render a three-slot staging selection instead, where each half could be
- * overridden by some other loaded file; there are no overrides any more, so a half is either in
- * the experiment or it isn't, and there is no source to name beyond the file itself.
+ * **Choosing it is part of this panel**, because this view is not a lens on the file bar's
+ * selection (see {@link InstrumentView}) — so the one question the panel has to answer before any
+ * of the rest means anything is *which experiment is this about*. The picker names it, and the
+ * heading carries it; `App` resolves the pick against a live run and the current selection.
+ *
+ * Both halves come from that one file — this panel renders a file it does not own. It used to
+ * render a three-slot staging selection instead, where each half could be overridden by some
+ * other loaded file; there are no overrides any more, so a half is either in the experiment or it
+ * isn't, and there is no source to name beyond the file itself.
  *
  * What is shown for the protocol is the **ASCII run definition**, not a decoded step table,
  * because that text is the artifact that would actually be sent (`prcl.md` §3). Reviewing anything
@@ -28,7 +33,7 @@ import type { CfxStatus, RunPlan } from "@zpcrweb/core";
 import { ProtocolDecoded } from "../raw/DecodedView";
 import { PlateViewer } from "../plate/PlateViewer";
 import { duration } from "./InstrumentRail";
-import type { InstrumentExperiment } from "../views/InstrumentView";
+import type { InstrumentCandidate, InstrumentExperiment } from "../views/InstrumentView";
 
 /**
  * A run this session watched finish, shown until "Open run" or "New run" dismisses it.
@@ -108,6 +113,9 @@ function RunChecks({ plan }: { plan: RunPlan }) {
 
 export function InstrumentRun({
   experiment,
+  candidates,
+  onPickExperiment,
+  onNewExperiment,
   plan,
   status,
   pending,
@@ -116,8 +124,15 @@ export function InstrumentRun({
   onNewRun,
   onCloneExperiment,
 }: {
-  /** The experiment the active file is, or null when it isn't one ({@link InstrumentExperiment}). */
+  /** The experiment this view is pointed at, or null when there is nothing to point at
+   * ({@link InstrumentExperiment}). */
   experiment: InstrumentExperiment | null;
+  /** What the picker offers — every loaded `.zpcr` ({@link InstrumentCandidate}). */
+  candidates: readonly InstrumentCandidate[];
+  /** Point the view at one of them. */
+  onPickExperiment: (fileName: string) => void;
+  /** Make a new pending experiment, for when there is nothing worth pointing at. */
+  onNewExperiment: () => void;
   /** The experiment as it would be sent, or null when it has no protocol yet. */
   plan: RunPlan | null;
   /** The instrument's live status (`InstrumentView`), or null when disconnected. Used only to
@@ -135,7 +150,7 @@ export function InstrumentRun({
   /** Dismiss the "Run complete" banner. */
   onNewRun: () => void;
   /** Clone this run into a fresh pending experiment — offered when it already has results. */
-  onCloneExperiment: () => void;
+  onCloneExperiment: (fileName: string) => void;
 }) {
   const zpcr = experiment?.zpcr ?? null;
   const protocolText = zpcr?.protocolText || null;
@@ -167,13 +182,45 @@ export function InstrumentRun({
             status?.running && <span className="instrument__runbadge">running</span>
           )}
         </h2>
-        {experiment && <span className="devrun__hint mono">{experiment.name}</span>}
+        {/* The picker, not a label: this view has no selection to inherit, so which experiment it
+            is about has to be both visible and changeable in the one place it matters. A plain
+            <select> because that is what this is — one choice from a list this browser is holding
+            — and it stays put while a run is live, where changing it is answered by the rail
+            (Start is refused for a run that already has results, which a live one does). */}
+        {candidates.length > 0 && (
+          <label className="devrun__pick">
+            <span className="devrun__picklabel">Experiment</span>
+            <select
+              className="devrun__pickselect mono"
+              // The file name, since the option text is the *experiment* name and the two differ.
+              title={experiment?.fileName ?? undefined}
+              value={experiment?.fileName ?? ""}
+              onChange={(e) => onPickExperiment((e.target as HTMLSelectElement).value)}
+            >
+              {/* Only while there is genuinely no target — an empty option that lingered would
+                  offer "point this at nothing", which is not a thing anyone wants to do. */}
+              {!experiment && <option value="">— pick an experiment —</option>}
+              {candidates.map((c) => (
+                <option key={c.fileName} value={c.fileName}>
+                  {c.name}
+                  {c.pending ? "" : " (has results)"}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
       </div>
 
       {!experiment ? (
         <div className="instrument__empty mono">
-          No experiment selected. Create one from the About page, clone an existing run from its
-          Overview, or select an experiment in the bar above.
+          <p>
+            No experiment to start
+            {candidates.length > 0 ? " — pick one above." : "."} An experiment is a file: it holds
+            the protocol to run and the plate map to record it against.
+          </p>
+          <button className="btn" onClick={onNewExperiment}>
+            New experiment
+          </button>
         </div>
       ) : (
         <>
@@ -184,7 +231,7 @@ export function InstrumentRun({
                 ? "This experiment is running — its results are being written into this file as they arrive. Clone it to set up the same protocol and plate for another run."
                 : "This experiment has already been run — its results are part of the file now. Clone it to run the same protocol and plate again."}
             </span>
-            <button className="btn" onClick={onCloneExperiment}>
+            <button className="btn" onClick={() => onCloneExperiment(experiment.fileName)}>
               Clone experiment
             </button>
           </div>

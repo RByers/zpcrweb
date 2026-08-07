@@ -1,19 +1,29 @@
 /**
  * The Instrument view — a live CFX96 over WebUSB, and the one place an experiment is started.
  *
- * Unlike every other view it is not a lens on the active file — but it is not file-independent
- * either: starting a run needs a protocol, and that comes from the **one experiment file** the app
- * is currently on. There is no selection of its own to make here any more. A run used to be
- * assembled from a three-slot staging selection over every loaded file, with a `.prcl.txt` or
- * `.plt.csv` able to override half of some other run — which meant a chip in the file bar meant
- * something different on this tab than on every other one, and the run about to start existed
- * nowhere until it was started. Now an experiment is a file first (created by "New experiment" or
- * "Clone experiment", named and filled in on Overview), and this view only starts the one in front
- * of it.
+ * **Not a lens on the selected file, and its tab is not in that group** (see `ViewBar`). What it
+ * shows is the machine: the connection, its status, its filesystem, the traffic, and the run it is
+ * driving — all of which go on existing while the selection moves around them. It renders with
+ * nothing selected and with nothing loaded at all, which is where someone with a cycler and no
+ * files starts.
  *
- * What it can do therefore depends on what that file is, and there are exactly three cases:
+ * It does still need **an experiment** to start, since a protocol comes from a file and the
+ * instrument has no library of its own (`usb.md` §5.1). That experiment is named *here*, by the
+ * picker in its panel (`InstrumentRun`), and `App` resolves which file that is: a run
+ * live on this instrument, else the one picked here, else the selected file as a default. Reading
+ * it off the selection alone is what this replaced — that made the tab a lens in every respect but
+ * name, and cost the file bar a lock (no switching files during a run) and a snap (arriving here
+ * moved the app's selection) to keep the pretence up.
  *
- * | Active file | This view |
+ * Older still, and worth not re-proposing: a run assembled from a **three-slot staging selection**
+ * over every loaded file, where a `.prcl.txt` or `.plt.csv` could override half of some other run,
+ * a chip meant something different on this tab than on any other, and the run about to start
+ * existed nowhere until it was started. An experiment is a file first now — created by "New
+ * experiment" or "Clone experiment", named and filled in on Overview.
+ *
+ * What this view can do depends on what that file is, and there are exactly three cases:
+ *
+ * | The experiment | This view |
  * | ----------- | --------- |
  * | a pending experiment (no results yet) | starts it — Start is armed once it has a protocol |
  * | a run in progress | won't start it; says it is running, and offers a clone for the next one |
@@ -35,11 +45,11 @@ import type { CfxDeviceHandle } from "../../state/useCfxDevice";
 import type { RunWatchState } from "../../state/useRunWatch";
 
 /**
- * The experiment this view would start: the active file, once it has turned out to be one at all.
+ * The experiment this view would start — whichever file `App` resolved as its target.
  *
- * Null when the active file is a standalone plate or protocol, an unreadable run, or there is no
- * file at all — the view still renders (it is reachable with nothing loaded, which is where someone
- * with a cycler and no files starts), it just has nothing to start.
+ * Null when there is nothing to point at: nothing loaded, or a selection that is a standalone
+ * plate or protocol or an unreadable run and no other pick. The view still renders, it just has
+ * nothing to start, and says where experiments come from.
  */
 export interface InstrumentExperiment {
   fileName: string;
@@ -60,10 +70,23 @@ export interface InstrumentExperiment {
   inProgress: boolean;
 }
 
+/** One row of the experiment picker: a loaded `.zpcr` this view could be pointed at. */
+export interface InstrumentCandidate {
+  fileName: string;
+  /** What it is called (`ZpcrStore.experiments`), falling back to the file name. */
+  name: string;
+  /** Never started and holding no results — the ones Start actually applies to, marked as such so
+   * a list holding both kinds says which is which. */
+  pending: boolean;
+}
+
 export function InstrumentView({
   onOpenRun,
   onOpenFinishedRun,
   experiment,
+  candidates,
+  onPickExperiment,
+  onNewExperiment,
   instrument,
   runWatch,
   onStartExperiment,
@@ -74,8 +97,16 @@ export function InstrumentView({
    * from `onOpenRun`: that one adds a *new* file (an offloaded archive dropped in from outside);
    * this one just switches to a file the watcher already put in the store. */
   onOpenFinishedRun: (fileName: string) => void;
-  /** The experiment the active file is, or null when it isn't one; see the type. */
+  /** The experiment this view is pointed at, or null when there is nothing to point at; see the
+   * type. Resolved by `App` — this view names the choice, `App` decides what it resolves to. */
   experiment: InstrumentExperiment | null;
+  /** Every loaded `.zpcr` the picker offers, in file-bar order. */
+  candidates: readonly InstrumentCandidate[];
+  /** Point the view at one of them. `App` holds the pick, so it survives leaving the tab. */
+  onPickExperiment: (fileName: string) => void;
+  /** Make a new pending experiment and stay here — the way out of "nothing to start" when the
+   * browser is holding nothing to point at. */
+  onNewExperiment: () => void;
   /** The connection, owned by `App` so it outlives this view — see its comment there. */
   instrument: CfxDeviceHandle;
   /** The follow-the-running-run machinery, likewise owned by `App`. */
@@ -86,10 +117,11 @@ export function InstrumentView({
    * creates no file — the experiment already exists, which is the whole point of the pending
    * state.
    */
-  onStartExperiment: (plan: RunPlan) => Promise<void> | void;
+  onStartExperiment: (plan: RunPlan, fileName: string) => Promise<void> | void;
   /** Copy this run's protocol and plate into a fresh pending experiment — the way to run one
-   * again, offered here because "this already has results" is where that need is discovered. */
-  onCloneExperiment: () => void;
+   * again, offered here because "this already has results" is where that need is discovered. The
+   * file is named explicitly: it is this view's target, not necessarily the app's selection. */
+  onCloneExperiment: (fileName: string) => void;
 }) {
   /**
    * The experiment reduced to exactly what would be sent — commands, files, and the checks that
@@ -151,6 +183,9 @@ export function InstrumentView({
       <div className="instrument__content">
         <InstrumentRun
           experiment={experiment}
+          candidates={candidates}
+          onPickExperiment={onPickExperiment}
+          onNewExperiment={onNewExperiment}
           plan={plan}
           status={instrument.status}
           pending={instrument.runPending}

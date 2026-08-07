@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import {
   plateToCsv,
   ProtocolBuilder,
@@ -66,6 +66,14 @@ const PROTOCOL_VIEWS = ["overview", "protocol", "raw"] as const;
 const isStandaloneKind = (kind: string) => kind === "pltd" || kind === "csv";
 
 /**
+ * The views that are not lenses on the selected file, and so survive a selection that supports
+ * nothing — including no selection at all. Files is the catalog, About is the app itself, and
+ * Instrument is a machine on the other end of a cable (see `ViewBar`); none of the three has a
+ * reason to be swapped out from under the user because a chip changed.
+ */
+const FILE_INDEPENDENT_VIEWS = new Set<ViewId>(["files", "about", "instrument"]);
+
+/**
  * The view-bar tabs a given file supports. The tabs it leaves out are still drawn — greyed out,
  * see `ViewBar` — so this decides what is *enabled*, not what exists.
  *
@@ -78,11 +86,9 @@ function enabledViewsFor(kind: string, zpcr?: Zpcr | null): readonly ViewId[] {
   if (kind === "biomeme") return BIOMEME_VIEWS;
   if (kind === "prcl") return PROTOCOL_VIEWS;
   if (!zpcr) return [];
-  // Instrument is a lens on this file like any other tab: it starts *this* experiment, or reports
-  // on the run this file is a snapshot of. Only a `.zpcr` qualifies — that is the one kind the app
-  // can carry to an instrument and the one kind an instrument produces (a `.pcrd` or a Biomeme
-  // export is somebody else's finished record).
-  return kind === "zpcr" ? [...runViews(zpcr), "instrument"] : runViews(zpcr);
+  // Instrument isn't here: it is not a lens on this file, or on any file (see `ViewBar`). Which
+  // experiment it would *start* is asked in the view itself — `instrumentExperiment` below.
+  return runViews(zpcr);
 }
 
 /**
@@ -187,6 +193,14 @@ export function App() {
   const [startedRun, setStartedRun] = useState<{ experimentName: string; fileName: string } | null>(
     null,
   );
+  /**
+   * Which experiment the Instrument view is pointed at, when the user has said so.
+   *
+   * Null means "no choice made", and {@link instrumentTargetName} then falls back to the selected
+   * file. Holding a *name* rather than the resolved file keeps this honest across a reload of the
+   * file's content and across the run watcher rewriting a run under the same name once a cycle.
+   */
+  const [instrumentTarget, setInstrumentTarget] = useState<string | null>(null);
   const runWatch = useRunWatch(
     instrument,
     useCallback(
@@ -284,9 +298,10 @@ export function App() {
   const createExperiment = useCallback(
     async (parts: Parameters<typeof store.createExperiment>[0], landOn: ViewId = "overview") => {
       const id = await store.createExperiment(parts);
-      if (!id) return;
+      if (!id) return null;
       store.setView(landOn);
       setNameExperimentFor(id);
+      return id;
     },
     [store],
   );
@@ -301,8 +316,11 @@ export function App() {
    * comes across as *re-serialized CSV* (`plateToCsv`) rather than the archive's own bytes, which is
    * what lets this work identically for a `.pcrd` or a Biomeme run that has no plate entry to copy.
    */
-  const cloneExperiment = useCallback(() => {
-    const zpcr = activeRun?.zpcr;
+  const cloneExperiment = useCallback((fileName: string) => {
+    // The file to clone is named by the caller, never read from the selection: Overview means the
+    // file it is showing, and the Instrument view means the experiment *it* is pointed at, which
+    // since that view stopped being a lens on the selection need not be the selected one at all.
+    const zpcr = store.runs.get(fileName)?.zpcr;
     if (!zpcr) return;
     const plate = zpcr.plates(pltdPassword || undefined)[0]?.pltd.plate ?? null;
     void createExperiment({
@@ -316,7 +334,7 @@ export function App() {
           }
         : undefined,
     });
-  }, [activeRun, pltdPassword, createExperiment]);
+  }, [store, pltdPassword, createExperiment]);
 
   /**
    * Name an experiment, which also names its file.
@@ -381,11 +399,18 @@ export function App() {
    * every later snapshot on the same file.
    */
   const startExperiment = useCallback(
-    async (plan: RunPlan) => {
-      const id = store.activeName;
+    async (plan: RunPlan, fileName: string) => {
+      // Named by the caller rather than read from the selection: the Instrument view holds its own
+      // target now, and the file bar may well be pointed somewhere else entirely.
+      const id = fileName;
       if (!id) return;
       const started = await store.beginExperiment(id);
       if (!started) return;
+      // Pin the view to the file it just started, under the name `beginExperiment` settled on —
+      // the date restamp can have renamed it. Without this the view would fall back to the
+      // selection the moment the run stopped being live, and swap the finished run (and its
+      // "clone me" offer) for whatever chip happened to be lit.
+      setInstrumentTarget(started.name);
       setStartedRun({
         experimentName: plan.name,
         fileName: started.name.replace(/\.zpcr$/i, ""),
@@ -435,28 +460,20 @@ export function App() {
   }, [store]);
 
   /**
-   * A run happening right now, live on the instrument and connected over USB — as opposed to
-   * merely `inProgressIds` (a loaded file missing its `ended` marker), which stays true for an
-   * archive nobody is watching any more. Elsewhere this drives the rail's own state; here it's
-   * what scopes the Instrument view's selection lock below.
-   */
-  const runActive = instrument.connection === "connected" && !!instrument.status?.running;
-  /**
    * What a file chip does: the one thing it always meant — *show me this file* — which is the app's
    * primary selection, `activeName`, drawn in the bar's usual cyan. Every kind can hold it: a run, a
    * standalone plate, and (since it has an Overview of its own) a `.prcl.txt`.
    *
    * It used to mean something else on the Instrument view, where the chips split into a primary run
-   * plus auxiliary protocol/plate "overrides" staged over it — the machinery this refactor removed
-   * (`useRunStaging`). One bar, one meaning, everywhere: the Instrument view now simply starts
-   * whichever experiment is selected, so selecting one there is the same act as selecting it
-   * anywhere else.
-   *
-   * The one refusal left: a run **live on the instrument** owns the selection while the Instrument
-   * view is showing it, because switching away would abandon watching the run in progress from the
-   * very tab that is following it. Everywhere else switching is never blocked — reading Curves while
-   * a run cycles is the headline use of the connection staying open across tabs (see `instrument`
-   * above), and it would defeat that to pin the selection.
+   * plus auxiliary protocol/plate "overrides" staged over it — the machinery a previous refactor
+   * removed (`useRunStaging`). One bar, one meaning, everywhere, and **no refusals**: a chip is
+   * clickable on every view including Instrument, which is the point of that view no longer being
+   * a lens on the selection. It used to lock the selection while a run was live, so that leaving
+   * the running file couldn't abandon the tab that was following it, and to snap the selection to
+   * the running file on arrival so that the tab had something to show. Neither is needed now that
+   * the view holds its own target ({@link instrumentTarget}): a run is followed by `useRunWatch`
+   * whatever is selected, and the view shows the run it is driving without moving the app's
+   * selection to do it.
    *
    * From About, picking a chip also *leaves* About for Overview. About is file-independent — it
    * survives a selection change (see `view` below) — so without this the click would land on a
@@ -465,24 +482,10 @@ export function App() {
    * every other "here is a file, go look at it" path lands.
    */
   const selectFile = (id: string) => {
-    if (store.view === "instrument" && runActive) return;
     if (!store.files.some((f) => f.name === id)) return;
     store.setActive(id);
     if (store.view === "about") store.setView("overview");
   };
-  /**
-   * Arriving at the Instrument view while a run is live snaps the selection to it, even if the
-   * user had been looking at something else — that's the one file this view can usefully show
-   * while a run owns the selection (see `selectFile` above). `runWatch.fileName` rather than
-   * `store.activeName` because the two can have drifted apart: a snapshot pulled while the user was
-   * elsewhere doesn't activate itself (`AddFilesOptions.activate`), so the store's `activeName` may
-   * still be a stale one from before they left. Keyed off `store.view` alone, not `runWatch.fileName`
-   * too, so a later snapshot of the *same* run doesn't re-snap someone who has moved on.
-   */
-  useEffect(() => {
-    if (store.view !== "instrument" || !runActive || !runWatch.fileName) return;
-    if (store.activeName !== runWatch.fileName) store.setActive(runWatch.fileName);
-  }, [store.view]);
 
   /**
    * Which tabs the active file supports. Computed once per file rather than per render, and
@@ -546,36 +549,90 @@ export function App() {
   };
 
   /**
-   * The active file as the Instrument view sees it: an experiment, or null when the active file
-   * isn't one (a standalone plate or protocol, a run that hasn't decoded, or nothing loaded).
+   * The file the Instrument view acts on, in three rungs.
    *
-   * This is the whole of what that view gets — no selection of its own, no staging — and it is
-   * computed here because `App` is what knows the active file, its decoded run and its identity.
+   * 1. **A run live on this instrument** wins outright: while the cycler is running a run this
+   *    session is following, that run is what the view is *about*, and offering to start something
+   *    else while the block is hot would be offering something the instrument would refuse anyway.
+   *    This is what the old snap-the-selection effect was for, done without moving the app's
+   *    selection — the file bar stays wherever the user left it.
+   * 2. **What they picked here**, if it still exists.
+   * 3. **The selected file**, when it is a loaded run, so arriving from an experiment's Overview
+   *    lands on that experiment with nothing to re-pick. A default, not a lens: the picker in the
+   *    view names it, and choosing anything there pins rung 2 over it.
+   * 4. **Whatever this resolved to last**, which is what keeps rung 3 a *default* rather than a
+   *    lens by the back door: selecting a `.prcl.txt` or a plate while sitting on this view would
+   *    otherwise empty the panel, and "I selected a protocol file" is not a statement about which
+   *    experiment the instrument should run.
+   */
+  const lastInstrumentTarget = useRef<string | null>(null);
+  const instrumentTargetName = useMemo(() => {
+    const running = instrument.connection === "connected" && !!instrument.status?.running;
+    if (running && runWatch.fileName && store.runs.has(runWatch.fileName)) return runWatch.fileName;
+    if (instrumentTarget && store.runs.has(instrumentTarget)) return instrumentTarget;
+    if (active && store.runs.has(active.name)) return active.name;
+    const last = lastInstrumentTarget.current;
+    return last && store.runs.has(last) ? last : null;
+  }, [instrument.connection, instrument.status, runWatch.fileName, instrumentTarget, store.runs, active]);
+  // Written during render rather than in an effect: it is a memo of the render above it, not a
+  // state change, and an effect would leave one render resolving to null before it caught up.
+  lastInstrumentTarget.current = instrumentTargetName;
+
+  /**
+   * That file as the Instrument view sees it: an experiment, or null when there is nothing to
+   * point at (nothing loaded, or a selection that is a standalone plate or protocol, or a run that
+   * hasn't decoded). Computed here because `App` is what knows the loaded runs and their identities.
    */
   const instrumentExperiment = useMemo(() => {
-    if (!active || !activeRun?.zpcr) return null;
-    const zpcr = activeRun.zpcr;
-    const identity = store.experiments.get(active.name);
+    if (!instrumentTargetName) return null;
+    const file = store.loaded.find((f) => f.name === instrumentTargetName);
+    const zpcr = store.runs.get(instrumentTargetName)?.zpcr;
+    if (!file || !zpcr) return null;
+    const identity = store.experiments.get(file.name);
     return {
-      fileName: active.name,
-      name: identity?.name ?? active.name,
+      fileName: file.name,
+      name: identity?.name ?? file.name,
       named: identity?.named ?? false,
       zpcr,
-      pending: isPendingExperiment(active.kind, zpcr),
+      pending: isPendingExperiment(file.kind, zpcr),
       // Derived from the file's own markers, so it stays true across a reload mid-run and doesn't
       // depend on this app being the one that started it (`runFolder.ts`).
       inProgress: runProgressFromNames(zpcr.archive.entries).inProgress,
     };
-  }, [active, activeRun, store.experiments]);
+  }, [instrumentTargetName, store.loaded, store.runs, store.experiments]);
+
+  /**
+   * What the view's experiment picker offers: every loaded `.zpcr`, newest last, as the bar orders
+   * them. Only that kind — it is the one the app can carry to an instrument and the one an
+   * instrument produces; a `.pcrd` or a Biomeme export is somebody else's finished record. Runs
+   * that already have results are listed too rather than filtered out, because the view has
+   * something to say about each of them (it offers the clone that is how you run one again), and a
+   * picker that silently omitted the file you were looking at would be the more confusing object.
+   */
+  const instrumentCandidates = useMemo(
+    () =>
+      store.loaded
+        .filter((f) => f.kind === "zpcr")
+        .map((f) => ({
+          fileName: f.name,
+          name: store.experiments.get(f.name)?.name ?? f.name,
+          pending: store.pendingIds.has(f.name),
+        })),
+    [store.loaded, store.experiments, store.pendingIds],
+  );
 
   if (store.loading) {
     return <div className="splash mono">initializing…</div>;
   }
 
-  if (store.files.length === 0) {
+  if (store.files.length === 0 && store.view !== "instrument") {
     // Nothing in the browser at all, so About *is* the welcome screen — it carries the drop
     // target. There's no previous view to go back to, hence no `onBack`, and no view bar: with an
     // empty catalog even the Files tab has nothing to list.
+    //
+    // Except the Instrument tab, which is why this is not simply "no files". A cycler exists
+    // whether or not this browser is holding anything, so "connect an instrument" below leads
+    // straight there, and the ordinary chrome renders around an empty file bar.
     return (
       <div className="app app--empty">
         <header className="app__brand">
@@ -589,11 +646,11 @@ export function App() {
           onNewExperiment={() => void createExperiment({})}
         />
         <div className="app__welcomeinstrument">
-          {/* The Instrument tab is a lens on an experiment now (see `enabledViewsFor`), so there
-              is no such tab to send someone to while nothing exists. Someone with a cycler and no
-              files starts by making the experiment they mean to run — this is that, plus landing
-              on the tab that talks to the instrument rather than on Overview. */}
-          <button className="btn" onClick={() => void createExperiment({}, "instrument")}>
+          {/* Straight to the tab that talks to the instrument, creating nothing. It used to have to
+              invent an experiment first, because the tab was a lens on a file and so unreachable
+              without one; connecting is now its own act, and the experiment to run is made from
+              inside the view if and when there is one to make. */}
+          <button className="btn" onClick={() => store.setView("instrument")}>
             Connect an instrument over USB
           </button>
         </div>
@@ -623,11 +680,10 @@ export function App() {
   // `store.view` is global (not per-file), so switching entries can land on a view this file has
   // no answer for (e.g. "calibration" on a Biomeme run) — fall back to its first enabled tab
   // then. The tab is drawn either way, just disabled, so this is about where the *content* goes.
-  // "about" and "files" are both file-independent, so they survive regardless.
+  // "about", "files" and "instrument" are all file-independent, so they survive regardless.
   const view =
     enabledViews.length > 0 &&
-    store.view !== "about" &&
-    store.view !== "files" &&
+    !FILE_INDEPENDENT_VIEWS.has(store.view) &&
     !enabledViews.includes(store.view)
       ? enabledViews[0]!
       : store.view;
@@ -652,14 +708,36 @@ export function App() {
         inProgressIds={store.inProgressIds}
         incompleteIds={store.incompleteIds}
         pendingIds={store.pendingIds}
-        activeLocked={view === "instrument" && runActive}
         onSelect={selectFile}
         onUnload={(id) => void store.setLoaded(id, false)}
         experiments={store.experiments}
       />
 
       <main className="app__main">
-        {view === "files" ? (
+        {/* The instrument, and the experiment *it* is pointed at — not a lens on the selected file,
+            which is why it branches out here beside Files rather than inside the block below that
+            needs one (see `ViewBar`). It renders with nothing selected, and with nothing loaded at
+            all: someone with a cycler and no files can connect, watch, and start a run whose file
+            they make from here. */}
+        {view === "instrument" ? (
+          <InstrumentView
+            onOpenRun={openRun}
+            onOpenFinishedRun={openFinishedRun}
+            experiment={instrumentExperiment}
+            candidates={instrumentCandidates}
+            onPickExperiment={setInstrumentTarget}
+            onNewExperiment={() => {
+              // Point the view at what it just made: an earlier pick would otherwise still win
+              // the second rung of `instrumentTargetName`, and the new experiment would be
+              // created, activated in the bar, and yet not be the one on screen here.
+              void createExperiment({}, "instrument").then((id) => id && setInstrumentTarget(id));
+            }}
+            instrument={instrument}
+            runWatch={runWatch}
+            onStartExperiment={startExperiment}
+            onCloneExperiment={cloneExperiment}
+          />
+        ) : view === "files" ? (
           <FilesTableView
             files={store.files}
             activeName={store.activeName}
@@ -787,7 +865,7 @@ export function App() {
                 onAttachPlate={(file) => void store.attachPlate(active.name, file)}
                 onAttachProtocol={(file) => void store.attachProtocol(active.name, file)}
                 onCreateProtocol={() => createProtocolFor(active.name)}
-                onCloneExperiment={cloneExperiment}
+                onCloneExperiment={() => cloneExperiment(active.name)}
                 onRenameFile={(name) => void store.renameFile(active.name, name)}
                 onDownload={downloadActiveFile}
                 autoEditName={editNameFor === active.name}
@@ -863,20 +941,6 @@ export function App() {
                 the shape the standalone viewer handles. */}
             {view === "raw" && active.kind === "biomeme" && (
               <StandaloneRawView key={active.name} file={active} />
-            )}
-            {/* The instrument, driven by this experiment — a lens on the selected file like every
-                other tab, which is why it lives in this block rather than in a branch of its own
-                (see `enabledViewsFor`). */}
-            {view === "instrument" && (
-              <InstrumentView
-                onOpenRun={openRun}
-                onOpenFinishedRun={openFinishedRun}
-                experiment={instrumentExperiment}
-                instrument={instrument}
-                runWatch={runWatch}
-                onStartExperiment={startExperiment}
-                onCloneExperiment={cloneExperiment}
-              />
             )}
           </>
         )}

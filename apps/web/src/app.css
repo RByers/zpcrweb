@@ -373,11 +373,6 @@
   border-color: var(--neon-cyan);
   box-shadow: 0 0 0 1px var(--neon-cyan-dim), 0 0 16px var(--neon-cyan-dim);
 }
-/* A run in progress on a connected instrument owns the primary selection (`App.tsx`'s
-   `activeLocked`) — the chip stays fully visible (hover card and all), just not clickable. */
-.filechip.is-locked .filechip__main {
-  cursor: not-allowed;
-}
 /* A run that is still being written to by an instrument — `begun` present, `ended` absent among
    its own archive entries (see core's `runProgressFromNames`). The bar's chips are otherwise flat
    against the page, so a lit background is the one thing here that says "this file is not
@@ -3419,16 +3414,16 @@
 }
 
 /* ---- Instrument view ---------------------------------------------------------
-   A live instrument over WebUSB — driven, though, by the one selected experiment, which is why its
-   tab sits in the view bar's file-view group with every other lens on that file. What stays set
-   apart is the view itself: it uses magenta where the rest of the chrome uses cyan — the palette's
-   second accent, already meaning "this is a different kind of thing" on the rail's switches.
-   Layout is the Curves view's rail + content grid (`.curves`), so the surfaces read the same even
-   though the content doesn't. */
+   A live instrument over WebUSB, and not a lens on any file — which is why its tab has a group of
+   its own at the end of the strip rather than sitting among the file views. The view uses magenta
+   where the rest of the chrome uses cyan — the palette's second accent, already meaning "this is a
+   different kind of thing" on the rail's switches — and the tab now carries that same magenta, so
+   the strip says which surface it opens. Layout is the Curves view's rail + content grid
+   (`.curves`), so the surfaces read the same even though the content doesn't. */
 
-/* The view bar is two groups rather than one control: Files, then the file views. The gap plus
-   the separate borders are the whole visual argument that the file selection doesn't apply to the
-   first one — see `ViewBar.tsx`. */
+/* The view bar is three groups rather than one control: Files, the file views, then Instrument.
+   The gaps plus the separate borders are the whole visual argument that the file selection applies
+   to the middle one only — see `ViewBar.tsx`. */
 .viewbar {
   display: inline-flex;
   align-items: center;
@@ -3449,6 +3444,18 @@
 .segmented--files .segmented__item.is-active {
   background: var(--good-dim);
   box-shadow: inset 0 -2px 0 var(--good);
+}
+
+/* Instrument (`InstrumentView.tsx`): the machine on the other end of the cable rather than a lens
+   on the selected file, so it gets a group of its own at the far end of the strip — and magenta
+   (`--neon-magenta`), the accent that already means "instrument" on the view's own rail. The two
+   bracketing groups are the two tabs that were never about the selection. */
+.segmented--instrument {
+  border-color: var(--neon-magenta-dim);
+}
+.segmented--instrument .segmented__item.is-active {
+  background: var(--neon-magenta-dim);
+  box-shadow: inset 0 -2px 0 var(--neon-magenta);
 }
 
 /* Files exist but none is selected — every one released, or a `#file=` this browser can't
@@ -3933,6 +3940,42 @@ summary.instrument__panelhead {
   padding: 14px;
   color: var(--ink-muted);
   font-size: 12px;
+}
+/* The "nothing to point at" state carries a button, so it stacks rather than being one line. */
+.instrument__empty p {
+  margin: 0 0 10px;
+}
+
+/* The experiment picker (`InstrumentRun`) — the panel head's right-hand side, where the file name
+   used to be shown read-only. Sized to the head rather than the panel: it is one choice, not a
+   form. */
+.devrun__pick {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.devrun__picklabel {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+.devrun__pickselect {
+  max-width: 32ch;
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--raised);
+  color: var(--fg);
+  font-size: 12px;
+}
+.devrun__pickselect:hover {
+  border-color: var(--neon-magenta-dim);
+}
+.devrun__pickselect:focus-visible {
+  outline: 1px solid var(--neon-magenta);
+  outline-offset: 1px;
 }
 
 /* File browser */
