@@ -229,6 +229,129 @@ Additional typed parsers for the archive files currently reachable only via the 
       IndexedDB. `state/urlHash.ts` was built to extend (more keys in the same query string) if
       sharing a specific chart view becomes useful.
 
+## Performance
+
+From a whole-project performance review (2026-08-07). Nothing here is implemented yet.
+
+**How the numbers were obtained.** `--cpu-prof` over the real pipeline on the committed samples,
+plus wall-clock timing of `parseZpcr`/`parsePcrd`/`computeRunAnalysis` averaged over repeated
+runs. Items marked **measured** were prototyped, timed, and reverted — the figure is what the
+prototype actually produced, with all 509 core tests still passing (including
+`cfxExport.test.ts`, so the numbers are bit-identical to today's). Items marked **estimated** are
+read off the profile without a prototype and should be re-measured before anyone trusts them.
+
+Baseline, `computeRunAnalysis` on a 96-well / 45-cycle run
+(`samples/20260726_S183-S185_RVP.zpcr`): **41.3 ms**, with parse a further 10.9 ms. This matters
+because that function re-runs on **every** threshold-slider drag, multiplier change, baseline/Cq
+source toggle and step switch in the Curves view (`lib/runAnalysis.ts`'s `useMemo`) — it is the
+app's interactive inner loop, not a load-time cost.
+
+### Win-win — less code *and* faster
+
+- [ ] **Hoist the calibration pseudo-inverse out of the per-well, per-cycle solve loop.**
+      **Measured: `computeRunAnalysis` 41.3 ms → 16.1 ms (−61%)**; the other samples move
+      34.1 → 14.5, 40.2 → 25.6, 64.7 → 48.7 ms. `separateChannels`
+      (`packages/core/src/calibration.ts`) calls `pseudoInverse` on `matrix.values` on every
+      invocation, and `computeFluorCurves` (`runAnalysis.ts`) invokes it once per well per cycle
+      — ~4,300 times per analysis — for a matrix that is *constant across the whole loop*. Each
+      call runs a full Jacobi eigen-decomposition; together they were **45% of total profile
+      time**. The fix is not a cache bolted on the side: `CalibrationMatrix` is already an
+      immutable value object built once per step (`runAnalysis.ts`'s "One representative matrix
+      per step" comment), so the inverse belongs to it as a field computed in
+      `buildCalibrationMatrix`. That leaves `separateChannels` as a plain dot product, deletes
+      `linalg`'s only hot call site, and makes the existing "one matrix per step" comment
+      structurally true instead of merely aspirational. **Complexity: negative** — one more
+      field on a type that already carries four derived ones, and one less thing to reason about
+      in the loop. Watch the `hasSignal` all-zeros guard, which currently re-scans the matrix per
+      call and should move with it.
+
+- [ ] **Parse each loaded run once, not all of them on every change.** **Estimated: removes
+      ~11 ms per loaded `.zpcr` (~49 ms per `.pcrd`) from every keystroke in the protocol
+      editor.** `useZpcrStore.ts`'s `runs` memo is keyed on `[loadedFiles, password]` and rebuilds
+      the whole map by re-parsing *every* loaded run whenever that array's identity changes. But
+      `setProtocolText` calls `replaceFile` on each keystroke, and `replaceFile` returns a new
+      array — so typing one character in the protocol editor re-parses every unrelated run in the
+      catalog too. With three or four runs open that is tens of ms of pure waste per keypress, on
+      the UI thread. Keying the parse per file (a `Map` from the `LoadedFile.content` identity to
+      its `RunResult`, so only the file whose bytes actually changed re-parses) is both faster and
+      a more honest statement of the dependency. **Complexity: roughly neutral** — the memo body
+      shrinks, one cache map appears.
+
+- [ ] **`median` sorts through a JS comparator.** **Measured: a further −24% on top of the
+      pseudo-inverse fix (16.1 → 12.2 ms)**, making it 23.7% of self time in the post-fix profile.
+      `threshold.ts`'s `median` does `values.slice().sort((a, b) => a - b)`; every comparison is a
+      JS callback. `Float64Array.from(values).sort()` is numeric by default — no comparator, no
+      boxing — and is a one-line change with identical results (all tests pass). It is called for
+      every curve, twice per `computeCqTable` pass, via `baselineNoise`. **Complexity: none** —
+      the line gets shorter.
+
+  Together the three above take the interactive analysis from **41.3 ms to 12.2 ms, a 3.4×
+  speedup**, with less code than today.
+
+- [ ] **Don't parse a dropped file twice.** `useZpcrStore.ts`'s add path parses eagerly to
+      validate the container (`parsePcrd(bytes)` / `parseContent(content)`), throws the result
+      away, and then `runs` parses it again to actually use it. For a `.pcrd` that is ~49 ms
+      spent twice on the one interaction where the user is already waiting. Keeping the
+      validation parse's result and seeding the cache from it removes the second parse *and* the
+      "validate by parsing and discarding" idiom. **Complexity: neutral-to-negative**, and it
+      composes with the per-file cache above — do them together.
+
+### Perf win, but genuinely more complexity — judgment calls
+
+- [ ] **Use `fflate` for standard DEFLATE, keep the local inflater for DEFLATE64 only.**
+      **Estimated ~20–25% off `.pcrd` parse** (48.7 ms today). `inflate.ts` is a bit-at-a-time
+      `puff.c`-style decoder and is **29% of `.pcrd` parse profile time** (`inflateRaw` 20.3%
+      self, plus `decodeSymbol` and `bits`); `fflate`'s table-driven inflater is already a
+      dependency and is several times faster. **But** `inflate.ts`'s header explicitly rejects
+      this: it exists so there is *one* inflater rather than a special case for the DEFLATE64
+      payloads CFX uses for larger `.pltd` entries. Taking the win means dispatching on the ZIP
+      method — method 8 to `fflate`, method 9 to the local decoder — which is exactly the
+      two-libraries branch that comment declined. **Complexity: a real increase.** Worth it only
+      if `.pcrd` open time becomes a felt problem; note the doc would need updating in the same
+      commit.
+
+- [ ] **`zipCryptoDecrypt` is 16% of `.pcrd` parse.** Byte-at-a-time CRC update over the whole
+      payload. A precomputed CRC table (if it isn't already) and avoiding per-byte function-call
+      overhead would likely halve it — **estimated ~8% off `.pcrd` parse**. Small, contained,
+      slightly more code. Measure before doing it; it may already be table-driven and simply
+      bound by the byte count.
+
+- [ ] **XML scanning is ~29% of `.pcrd` parse.** `xmlLite.ts`'s `splitElements` plus its element
+      regex, `parseAttrs` and `unescapeXml`. A hand-written single-pass scanner would beat the
+      regex, but `xmlLite` is deliberately small and readable, and `.pcrd` is the one format
+      that leans on it. **Low priority** — the win is real but this is the least pleasant code to
+      make faster and the easiest to get subtly wrong.
+
+- [ ] **Code-split the initial bundle.** Today: **one 451 KB chunk (153 KB gzip)**, everything
+      eager. Attributed by sourcemap: `uplot` 51.7 KB, core `usb/` 23.1 KB, `CurvesView` 17.4 KB,
+      `useZpcrStore` 16.6 KB, `lib/uplot/chart.ts` 14.3 KB, `InstrumentRail` 11.5 KB,
+      `protocolBuilder` 10.1 KB. The honest candidates are the **Instrument stack** (core `usb/` +
+      `InstrumentRail` + `useCfxDevice` + the instrument components, ~50 KB — needed only when a
+      device is connected, and WebUSB is Chrome-only anyway), the **Raw views** (~15 KB) and the
+      **protocol editor** (~20 KB incl. `protocolBuilder`). That is ~85 KB raw / **~28 KB gzip,
+      roughly 18% off first load**. `uplot` itself is not a candidate — Curves is the view people
+      come for. **Complexity: moderate** (lazy boundaries, suspense/fallback states, and
+      `uitest.mjs` coverage for views that now load asynchronously) for a payload that is already
+      respectable. **Lowest priority of anything here** unless first-load latency is a complaint.
+
+- [ ] **Move analysis off the UI thread.** Once the win-wins land, `computeRunAnalysis` is ~12 ms
+      — comfortably inside a frame, so a Web Worker would buy little and cost a lot (structured
+      cloning the run, an async seam through `useRunAnalysis` that every consumer feels). Recorded
+      as **deliberately not planned**, so it doesn't get re-proposed: revisit only if plate sizes
+      or cycle counts grow by an order of magnitude.
+
+### Already fast — leave alone
+
+Noted so a future review doesn't "optimize" them again:
+
+- **Chart hover.** `lib/uplot/chart.ts`'s `applyHighlight` and the threshold overlay both call
+  `u.redraw(false, false)` — no series or path rebuild — and `CurveChart.tsx` isolates highlight
+  changes in their own effect, so hovering never reconstructs the plot. This is the right shape.
+- **Write-behind persistence.** `state/writeThrottle.ts` is a rate limiter, not a debounce, with
+  `visibilitychange`/`pagehide` flushes; a dragged slider costs one rewrite per window.
+- **Archives held open.** `state/fileContent.ts` keeps a run's archive unzipped across edits
+  instead of re-zipping hundreds of KB per change.
+
 ## Cleanups
 
 Simplification / dead-code removal, from a whole-project review (2026-07-27). Items marked
