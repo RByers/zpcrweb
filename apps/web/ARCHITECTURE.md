@@ -1427,6 +1427,14 @@ only pieces the two views share.
   fluors[].channel` — the channels the plate configuration actually assigns a dye to — rather
   than a hardcoded 1–5. The same button resets dye-space mode by clearing `disabledFluors`
   instead, since there every fluor/target is enabled by default already.
+  - **The Targets/Fluorophores and Samples lists follow the enabled wells.** Both bars are
+    filtered to what the currently enabled wells can actually show: `visibleChipItems` keeps only
+    chips whose key some enabled well produces (its loaded dyes run through `labelForFluorCurve`,
+    or every plate dye when "Unloaded" is on), and `visibleSampleList` keeps only sample names
+    sitting in an enabled well — so narrowing the plate selection narrows the rail with it, and
+    the Samples section disappears entirely when no enabled well names a sample. Double-click
+    solo still works off the *unfiltered* `chipItems`/`sampleList`, so isolating one chip also
+    disables the ones currently hidden rather than leaving them to reappear when wells come back.
 - **Baseline is always automatic — no mode or region is user-configurable.** Every curve is
   baseline-corrected with `packages/core/src/baseline.ts`'s `LinearBaseLineNormalized` over the
   region `threshold.md` §3 derives: cycle 3 to the last cycle for a well with no Cq, or to
@@ -1518,7 +1526,7 @@ only pieces the two views share.
     (`selectAux`), so a series' color doesn't shift as its neighbours are toggled — the positional
     temperature ramp would otherwise recolor lines behind the user's back.
 - **Samples:** a collapsible rail section (collapsed by default, like Temperatures) listing every
-  distinct `WellDefinition.sample` name actually assigned to a well on the plate (`pltd.md`'s
+  distinct `WellDefinition.sample` name assigned to an *enabled* well on the plate (`pltd.md`'s
   `conditionName` — despite the XML attribute name, this is the sample name CFX Manager's UI
   shows). `SampleBar` chips toggle an opt-out set (`disabledSamples`, all shown by default,
   mirroring `disabledFluors`); a well with no `sample` set is never hidden by this filter, since

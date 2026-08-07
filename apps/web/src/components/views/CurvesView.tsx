@@ -323,6 +323,39 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
     [groupByTarget, groupInfos, usingTargets, fluorCals, dyeSpace],
   );
 
+  /** The chip keys the *enabled* wells can actually produce — every dye those wells load, mapped
+   * through the same labelling the curves themselves use. With "Unloaded" on, a well can draw any
+   * of the plate's dyes, so every chip stays reachable. */
+  const wellReachableKeys = useMemo(() => {
+    const keys = new Set<string>();
+    if (!plate) return keys;
+    for (const w of plate.wells) {
+      if (!settings.enabledWells.has(wellKey(w.row, w.col))) continue;
+      const dyes = settings.showUnloadedFluors
+        ? plate.fluors.map((f) => f.fluor)
+        : (w.fluors?.map((f) => f.fluor) ?? []);
+      for (const dye of dyes) keys.add(labelForFluorCurve(w.row, w.col, dye));
+    }
+    return keys;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    plate,
+    settings.enabledWells,
+    settings.showUnloadedFluors,
+    groupByTarget,
+    hasNoTargetGroup,
+    wellFluorTargets,
+  ]);
+
+  /** What the rail actually lists: only targets/fluorophores some enabled well can show. Turning
+   * a well off takes its target off the bar with it, so the list describes the selection on
+   * screen rather than the whole plate. The unfiltered `chipItems` still backs double-click
+   * solo, so isolating one target also disables the ones currently hidden. */
+  const visibleChipItems = useMemo(
+    () => chipItems.filter((c) => wellReachableKeys.has(c.key)),
+    [chipItems, wellReachableKeys],
+  );
+
   // Distinct sample names actually assigned to a well on this plate, in plate order — declared
   // names with no well (`plate.samples`) are left out since there'd be nothing to toggle.
   const sampleList = useMemo(() => {
@@ -338,6 +371,21 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
     }
     return list;
   }, [plate]);
+
+  /** The same list, narrowed to samples sitting in an enabled well — see `visibleChipItems`. */
+  const visibleSampleList = useMemo(() => {
+    const seen = new Set<string>();
+    const list: string[] = [];
+    if (plate) {
+      for (const w of plate.wells) {
+        if (!w.sample || seen.has(w.sample)) continue;
+        if (!settings.enabledWells.has(wellKey(w.row, w.col))) continue;
+        seen.add(w.sample);
+        list.push(w.sample);
+      }
+    }
+    return list;
+  }, [plate, settings.enabledWells]);
 
   const sampleVisible = (row: number, col: number): boolean => {
     const sample = wellSample.get(wellKey(row, col));
@@ -1007,7 +1055,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
           {calibrationOn ? (
             <>
               <FluorBar
-                items={chipItems}
+                items={visibleChipItems}
                 disabled={settings.disabledFluors}
                 onToggle={toggleFluor}
                 onHover={(key) => setHoverHighlight(key ? { kind: "target", dyeLabel: key } : null)}
@@ -1035,7 +1083,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
           )}
         </div>
 
-        {sampleList.length > 0 && (
+        {visibleSampleList.length > 0 && (
           <details className="rail__section rail__details">
             <summary className="rail__title">
               <span>
@@ -1060,7 +1108,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
               </button>
             </summary>
             <SampleBar
-              items={sampleList}
+              items={visibleSampleList}
               disabled={settings.disabledSamples}
               onToggle={toggleSample}
               onHover={(sample) => setHoverHighlight(sample ? { kind: "sample", sample } : null)}
