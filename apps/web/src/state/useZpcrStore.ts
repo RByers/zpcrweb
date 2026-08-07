@@ -711,10 +711,9 @@ export interface AddFilesOptions {
    * Whether the last file added becomes the active one. Default true — dropping a file means
    * wanting to look at it.
    *
-   * The run watcher passes false ordinarily. It re-adds the in-progress run every time a cycle
-   * completes, and each snapshot is a *new* file id (ids hash name+size, and the archive grows),
-   * so activating unconditionally would drag the user back to the running experiment every
-   * minute or two no matter what they had opened. It passes true instead for the snapshot that
+   * The run watcher passes false ordinarily. It writes to the in-progress run every time a cycle
+   * completes, so activating unconditionally would drag the user back to the running experiment
+   * every minute or two no matter what they had opened. It passes true instead for the pass that
    * comes from a run *starting* in this session (`App.tsx`'s `freshStart`) — that one file the
    * user watching it begin wants selected, superseding whatever was active before.
    */
@@ -893,19 +892,25 @@ export interface ZpcrStore {
    * without the ZIP in the middle, and otherwise identical: the archive is validated, superseded
    * against the same name, persisted, loaded and activated exactly as a dropped file is.
    *
-   * This is how a run being followed reaches the store (`useRunWatch`). Each cycle re-assembles the
-   * run's whole folder, and zipping that only for the store to unzip it again to read it was the
-   * bulk of what a plate read cost. A run in progress is then also *kept* open (`fileContent.ts`),
-   * so the next cycle appends to it, and the end-of-run snapshot — the first carrying `ended` — is
-   * the one that becomes an ordinary zipped `.zpcr`.
+   * This is how a run being followed reaches the store (`useRunWatch`), and how a new experiment
+   * and a run pulled off the instrument by hand do. A `.zpcr` is held as its entries
+   * (`fileContent.ts`), so nothing is zipped on either side of this call.
    *
-   * Returns the new file's id, or `null` if the archive wouldn't parse (the reason lands in
+   * `merge` says the entries are an **update** to the file of this name rather than the whole of
+   * it: they are laid over whatever that file already holds, and every other entry is left as it
+   * stands. That is what a run being followed sends after its first pull — the plate read that
+   * just arrived, and at the end of the run the `ended` marker, the `.alf` report and the handful
+   * of files the instrument rewrites — and it is what keeps a plate the user swapped in mid-run
+   * from being replaced by the instrument's copy on the next cycle. Without a file of that name to
+   * merge into, the entries are the file, which is the same thing as `merge: false`.
+   *
+   * Returns the new file's id, or `null` if the result wouldn't parse (the reason lands in
    * {@link error}, as with `addFiles`).
    */
   addRunArchive: (
     name: string,
     archive: ZpcrArchive,
-    options?: AddFilesOptions,
+    options?: AddFilesOptions & { merge?: boolean },
   ) => Promise<string | null>;
   /**
    * Ids of the loaded runs that are still running on an instrument — `begun` present, `ended`
@@ -1464,12 +1469,22 @@ export function useZpcrStore(): ZpcrStore {
 
   /** See {@link ZpcrStore.addRunArchive}. */
   const addRunArchive = useCallback(
-    async (name: string, archive: ZpcrArchive, options?: AddFilesOptions): Promise<string | null> => {
+    async (
+      name: string,
+      archive: ZpcrArchive,
+      options?: AddFilesOptions & { merge?: boolean },
+    ): Promise<string | null> => {
       try {
-        // `archiveContent` is what makes the end of a run the moment the file becomes an ordinary
-        // zipped `.zpcr`: every snapshot before it carries no `ended` marker and stays open, and
-        // the last one — the end-of-run pass, which is the first to carry it — zips, once.
-        const content = archiveContent(archive);
+        // An update is laid over the file it updates; the entries it doesn't mention keep whatever
+        // is already there, including anything the app itself put in the archive — a swapped-in
+        // plate, an edited protocol. Spread by reference, so an entry that didn't change is the
+        // same array it was and `changedEntries` still writes one record per plate read.
+        const held = options?.merge
+          ? loadedRef.current.find((f) => f.name === name)?.content
+          : undefined;
+        const content = archiveContent(
+          held?.archive ? { ...held.files, ...archive } : archive,
+        );
         parseContent(content);
         const size = contentSize(content);
         // A run's snapshots are one file getting longer under one name, so they are one record,

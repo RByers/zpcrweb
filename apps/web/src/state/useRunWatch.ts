@@ -24,9 +24,10 @@
  * transition tells them apart, which is what lets the file that transition's next listing
  * eventually produces be selected unconditionally (see `onRun`'s `freshStart` below).
  *
- * When a listing turns out to differ from the last one, the folder is pulled and handed to the
- * store as the `.zpcr` archive it is, which replaces the previous snapshot under the same name.
- * Nothing is zipped on the way: a run still going is kept open and appended to, and only the
+ * When a listing turns out to differ from the last one, whatever is new is pulled and handed to
+ * the store, which merges it into the file of that name (see `onRun` below — what goes over is
+ * what the instrument just wrote, not the folder re-assembled). Nothing is zipped on the way: a
+ * run still going is kept open and appended to, and only the
  * end-of-run snapshot becomes an ordinary `.zpcr` file (see `state/fileContent.ts`). What that name is comes from
  * `runFolder.ts`: the file name typed in the Instrument view for a run this app started, and
  * otherwise whatever the run itself says it is called.
@@ -143,7 +144,25 @@ export interface RunWatchState {
 export function useRunWatch(
   instrument: CfxDeviceHandle,
   /**
-   * Hand an assembled run to the app. `previousId` is the file this one supersedes, so the caller
+   * Hand what the instrument has written to the app.
+   *
+   * **`archive` is what this pass wrote, not the whole run** — normally one plate read, and at the
+   * end of a run the last read plus `ended`, the `.alf` report and the four `REFETCH_AT_END`
+   * files. The store merges it into the file of this name (`addRunArchive`'s `merge`), so a run
+   * being followed grows by exactly what arrived and everything else about the file is left alone.
+   *
+   * `whole: true` marks the one pass that *is* the whole folder — the first of the session, or the
+   * first after the folder was cleared for a different run — where there is nothing to merge into
+   * and the archive stands as the file's entire content.
+   *
+   * That split is what keeps a plate attached to a run in progress attached. Every pass used to
+   * hand over the folder as re-assembled from this watcher's cache, which is the instrument's copy
+   * of the run and knows nothing of anything the app added on top: the next plate read — or, most
+   * visibly, the end-of-run pass — put the instrument's own plate back and dropped the one the
+   * user had swapped in. Handing over only what the instrument actually wrote means an entry it
+   * never touched cannot be overwritten by it.
+   *
+   * `previousId` is the file this one supersedes, so the caller
    * can decide whether to follow the new copy (the user was looking at it) or leave the selection
    * alone (they were looking at something else). `freshStart` is true when this file is the
    * result of a run that began while this session was watching — the `running` false→true edge
@@ -153,7 +172,7 @@ export function useRunWatch(
    * unconditionally. Returns the new file's id.
    */
   onRun: (
-    run: { name: string; archive: ZpcrArchive },
+    run: { name: string; archive: ZpcrArchive; whole: boolean },
     previousId: string | null,
     freshStart: boolean,
   ) => Promise<string | null>,
@@ -216,6 +235,11 @@ export function useRunWatch(
           break;
         }
       }
+      // An empty cache means this pass reads the folder from scratch: the first pull of the
+      // session, or the first of a new run under this name. That is one of the two things that
+      // make a pass `whole` — see `onRun` for why every other pass hands over just what it fetched,
+      // and below for the other.
+      const rebuilt = cache.current.size === 0;
       const wanted = names.filter(
         (n) => !cache.current.has(n) || (finalAssembly && REFETCH_AT_END.has(n.toLowerCase())),
       );
@@ -225,9 +249,13 @@ export function useRunWatch(
         for (const [name, bytes] of Object.entries(fetched)) cache.current.set(name, bytes);
       }
       const files = Object.fromEntries(cache.current);
+      const written = new Set(wanted);
       if (finalAssembly) {
         const log = trafficLogForRun();
-        if (log) files[USB_TRAFFIC_LOG_NAME] = log;
+        if (log) {
+          files[USB_TRAFFIC_LOG_NAME] = log;
+          written.add(USB_TRAFFIC_LOG_NAME);
+        }
       }
       const fresh = freshStart.current;
       freshStart.current = false;
@@ -235,8 +263,26 @@ export function useRunWatch(
         // Handed over as the archive it already is, not as zipped bytes: the store keeps a run in
         // progress open and appends to it (see its `addRunArchive` and `state/fileContent.ts`), so
         // a cycle costs the one plate read that arrived and no ZIP work at either end.
+        //
+        // The whole folder is what names the run (`zpcrFromRunFiles`) and what proves it is one;
+        // what goes *to the store* is only what this pass wrote, unless the folder was read from
+        // scratch.
         const run = zpcrFromRunFiles(files, namingRef.current);
-        const id = await onRunRef.current(run, fileNameRef.current, fresh);
+        // The other way a pass is whole: there is nothing of ours under this name to update. An
+        // update is only a run when laid over the rest of one, so a name we haven't written — the
+        // file renamed or deleted while the run went on, a derived name that moved when the
+        // instrument's `RunInfo.xml` was re-read, or a previous pass that failed to install —
+        // takes the whole folder instead. Every pass re-checks it, so a run whose file goes away
+        // mid-run is whole again on the next cycle rather than lost.
+        const whole = rebuilt || run.name !== fileNameRef.current;
+        const update = whole
+          ? run.archive
+          : Object.fromEntries(Object.entries(files).filter(([n]) => written.has(n)));
+        const id = await onRunRef.current(
+          { name: run.name, archive: update, whole },
+          fileNameRef.current,
+          fresh,
+        );
         setFileName(id);
         const reads = names.filter((n) => /\.Plateread$/i.test(n)).length;
         setNote(`Updated at ${new Date().toLocaleTimeString()} — ${reads} plate reads`);

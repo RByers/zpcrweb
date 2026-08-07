@@ -593,10 +593,31 @@ is written whatever the change set says, and being wrong can only cost a redunda
 snapshot after a reload writes the whole archive, because the run watcher's cache is empty and every
 array is genuinely new.
 
-Two writers each hand the store a *complete* archive, so whichever lands second decides which
-entries exist. `addRunArchive` therefore flushes any pending analysis write before installing a
-snapshot — otherwise a threshold edit flushing afterwards would be working from an archive without
-the plate read that just arrived. Same precedent as `renameFile` and `setRunProtocolName`.
+`addRunArchive` flushes any pending analysis write before installing a snapshot — otherwise a
+threshold edit flushing afterwards would be working from an archive without the plate read that
+just arrived. Same precedent as `renameFile` and `setRunProtocolName`.
+
+### A run's file grows by what the instrument wrote
+
+A pass of the run watcher hands the store **the entries the instrument just wrote**, not the run
+re-assembled: one plate read, and at the end of a run the last read plus `ended`, the `.alf` report
+and the four files the instrument rewrites (`useRunWatch`'s `REFETCH_AT_END`). `addRunArchive`'s
+`merge` lays them over the file of that name and leaves every other entry as it stands.
+
+It used to hand over the whole folder as rebuilt from the watcher's own cache — which is the
+instrument's copy of the run, and knows nothing of what the app has added on top. Anything the user
+changed about a run *while it ran* was therefore reverted by the next cycle: swap the plate for a
+corrected one and the instrument's original came back, most visibly at the end of the run, where
+the final pass is forced and so lands even if nothing else would have. Sending only what the
+instrument wrote means an entry it never touched cannot be overwritten by it, and the end of a run
+does what it says — adds the last plate read and the run's own closing files.
+
+Two cases still send the whole folder, both of them "there is nothing to merge into": the first
+pull of the session or of a new run under this name (the watcher's cache is empty), and a pass
+whose name doesn't match the file the watcher last wrote — the file renamed or deleted mid-run, a
+derived name that moved when `RunInfo.xml` was re-read, or a previous pass that failed to install.
+That check runs every pass, so a run whose file goes away is whole again on the next cycle rather
+than accumulating updates against nothing.
 
 Every write here is a read-modify-write — a catalog write merges into what is stored, and a content
 write reads back the entry keys it should delete — and several fire at once on one file: releasing
@@ -685,8 +706,9 @@ unpacked archive (`ZpcrArchive`), every writer takes and returns one (`attachPla
 zipping is a separate step — `zipArchive` — that only a caller wanting a *file* takes. `parseZpcr`
 is the one byte-level entry point kept, since bytes are how a `.zpcr` arrives from disk;
 `parseZpcrArchive` is what this app uses. A run being followed therefore goes from the wire into
-the store without ever being packed: `useRunWatch` hands the store what `zpcrFromRunFiles` returned,
-`addRunArchive` keeps it, and a cycle's cost is the one plate read that arrived.
+the store without ever being packed: `useRunWatch` hands the store the entries the instrument just
+wrote, `addRunArchive` merges them into the run's file, and a cycle's cost is the one plate read
+that arrived.
 
 ### Editing what has already happened
 
@@ -2490,11 +2512,14 @@ anyway, though, purely to tell a run *starting* apart from one *found* already g
 the two listings are identical, so only the live transition tells them apart — which is what the
 `freshStart` flag below rides on.
 
-Each changed listing is pulled with `zpcrFromRunFiles` and handed to `store.addRunArchive`
-as the archive it already is — the same validate → IndexedDB path a drop takes, minus the ZIP: the
-store holds a `.zpcr` as its entries (see "A `.zpcr` is stored as its entries, never as a ZIP"), so
-a cycle's cost is the one plate read that arrived rather than a re-zip of the whole run. The
-snapshots are all one file under one name, so they are one record, rewritten in place.
+Each changed listing is pulled, checked and named with `zpcrFromRunFiles`, and what it *fetched* is
+handed to `store.addRunArchive` as entries to merge into the run's file — the same validate →
+IndexedDB path a drop takes, minus the ZIP: the store holds a `.zpcr` as its entries (see "A
+`.zpcr` is stored as its entries, never as a ZIP"), so a cycle's cost is the one plate read that
+arrived rather than a re-zip of the whole run. The passes are all one file under one name, so they
+are one record, rewritten in place. Sending only what the instrument wrote is also what leaves a
+plate (or a protocol) the user changed *during* the run alone — see "A run's file grows by what the
+instrument wrote" for what that fixed and for the two cases that still send the whole folder.
 
 **What the snapshot is called** is decided by `core`'s `runFolder.ts`, in three rungs: the file
 name typed in the Instrument view, then `<YYYYMMDD>-<experiment name>` derived from the folder's

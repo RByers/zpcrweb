@@ -191,7 +191,7 @@ export function App() {
     instrument,
     useCallback(
       async (
-        run: { name: string; archive: ZpcrArchive },
+        run: { name: string; archive: ZpcrArchive; whole: boolean },
         previousId: string | null,
         freshStart: boolean,
       ) => {
@@ -199,6 +199,8 @@ export function App() {
         return store.addRunArchive(run.name, run.archive, {
           activate: wasWatchingIt || freshStart,
           modified: true,
+          // What the instrument just wrote, laid over the run's file — not the run re-assembled.
+          merge: !run.whole,
         });
       },
       [store],
