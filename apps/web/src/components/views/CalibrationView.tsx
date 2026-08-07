@@ -217,7 +217,9 @@ export function CalibrationView({ zpcr, settings, onChange }: Props) {
         key: f.key,
         label: f.dye,
         sublabel: channelLabel(f.primaryChannel),
-        channel: f.primaryChannel,
+        // A calibration file *is* a pure dye, so the chip colors from the dye like every other
+        // dye chip in the app — not from the channel that happens to read it.
+        fluor: f.dye,
         // Every file here has real data by construction; the dimmed "no calibration" state the
         // Curves view uses this flag for has no counterpart in a list *of* calibrations.
         calibrated: true,
