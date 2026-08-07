@@ -13,22 +13,23 @@
  * Table mode and downloads as CSV — as CSV on stdout: one row per loaded well/fluorophore pair,
  * Cq and all.
  *
- * `curves` draws the amplification curves as a PNG: the web app's Curves chart in its default
- * Relative mode, with the same colors, the same dark background and a ring at each curve's Cq.
- * See {@link renderCurves} for what it deliberately leaves out.
+ * `curves` writes those same curves as a PNG of the web app's Curves chart, in its default
+ * Relative mode: not a picture that resembles the chart but one drawn *by* it, since the picture
+ * is rendered by the app's own `buildChart` in headless Chrome (`tools/chartshot.mjs`). See
+ * {@link chartConfig} for the display settings it asks for, and `chartshot.mjs`'s own header for
+ * why the chart is run rather than reimplemented.
  *
  * Every number here comes straight from `computeRunAnalysis`/`buildAnalysisRows`/`analysisCsv`
  * (`packages/core/src/runAnalysis.ts` and `analysisRows.ts`) — the library's own derivation, not
- * a second copy of it. This file is wiring: argv parsing, the password fallback, well selection,
- * and turning already-computed values into pixels. Nothing here touches a Cq, a threshold, or a
- * baseline; the colors come from the library too (`colors.ts`), so a curve is the same green here
- * as it is in the browser.
+ * a second copy of it. This file is wiring: argv parsing, the password fallback, and well
+ * selection. Nothing here touches a Cq, a threshold, a baseline or a color.
  *
- * Needs a built core (`npm run build`) — this runs with plain Node, no bundler, so it resolves
- * `@zpcrweb/core` to `packages/core/dist` the same way any other consumer of the published
- * package would (see `tools/cfx.mjs`'s own note).
+ * The two commands need different things installed, which is worth knowing before reaching for
+ * one on a bare machine: `results` is plain Node over a built core (`npm run build`), the same
+ * way `cfx.mjs` is, while `curves` also needs Chrome and the web app's source, because that is
+ * where the chart lives.
  */
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, extname } from "node:path";
 import {
   analysisCsv,
@@ -36,7 +37,6 @@ import {
   channelCurveKey,
   channelLabel,
   computeRunAnalysis,
-  curveColor,
   curveKey,
   parseBiomeme,
   parsePcrd,
@@ -45,16 +45,7 @@ import {
   runAnalysisSettingsFromZpcrweb,
   wellKey,
 } from "../packages/core/dist/index.js";
-import {
-  createCanvas,
-  drawText,
-  strokeCircle,
-  strokePolyline,
-  strokeSegment,
-  textHeight,
-  textWidth,
-  writePng,
-} from "./png.mjs";
+import { renderChartPng } from "./chartshot.mjs";
 
 /** The local, gitignored CFX ZipCrypto password — see `AGENTS.md`'s Secrets section and
  * `packages/core/test/secrets.ts`, which this mirrors. `undefined` when there's no `secrets.json`. */
@@ -158,184 +149,21 @@ function wellSelector({ wells, rows, cols }) {
     colRanges.some((r) => between(col, r.from.col, r.to.col));
 }
 
-// ---- Chart --------------------------------------------------------------------------------
+// ---- Curves ------------------------------------------------------------------------------
 
 /**
- * The Curves chart's own colors, read off the web app so the two pictures match: the panel the
- * chart sits on (`--panel`), the axis ink (`--ink-2`) and the two blue-tinged hairline strengths
- * the grid and ticks use. Curve colors are not here — those come from the library's `curveColor`,
- * which is the same call the browser chart makes.
- */
-const BG = "#0b0e14";
-const AXIS_INK = "#8aa0c0";
-const GRID = "#78c8ff";
-const GRID_ALPHA = 0.06;
-const TICK_ALPHA = 0.12;
-/** Cq ring geometry, matching the SVG circle the browser chart overlays on each curve. */
-const CQ_RADIUS = 4.5;
-const CQ_WIDTH = 1.75;
-/** A reference-row curve is dashed, in the chart's own pattern. */
-const REF_DASH = [3, 3];
-
-/** Tick steps a reader can do arithmetic on: 1, 2, 2.5, 5 and their decades — the same ladder
- * uPlot climbs. Rounded *down* to the nearest of them, which errs toward a slightly denser axis
- * than the target asked for; rounding up jumps straight from 500 to 1000 and leaves a five-tick
- * axis where the browser chart draws thirteen. */
-function niceStep(rough) {
-  const mag = 10 ** Math.floor(Math.log10(rough));
-  const norm = rough / mag;
-  return (norm >= 10 ? 10 : norm >= 5 ? 5 : norm >= 2.5 ? 2.5 : norm >= 2 ? 2 : 1) * mag;
-}
-
-/**
- * A y range and its tick positions: the data's own extent, padded a little so no curve touches
- * the frame, then rounded outward to whole ticks. Degenerate input (one flat curve, or none at
- * all) still yields a usable range rather than a zero-height axis.
- */
-function yAxisTicks(min, max, target = 7) {
-  if (!Number.isFinite(min) || !Number.isFinite(max)) [min, max] = [0, 1];
-  if (min === max) [min, max] = [min - 1, max + 1];
-  const pad = (max - min) * 0.06;
-  const step = niceStep((max - min + 2 * pad) / target);
-  const lo = Math.floor((min - pad) / step) * step;
-  const hi = Math.ceil((max + pad) / step) * step;
-  const ticks = [];
-  // Accumulating with a multiply rather than repeated addition keeps 0.1-sized steps from
-  // drifting into 0.30000000000000004 by the time they reach the axis labels.
-  for (let i = 0; lo + i * step <= hi + step * 1e-6; i++) ticks.push(lo + i * step);
-  return { lo, hi, ticks, step };
-}
-
-/** Label a y tick with just enough decimals for its step to be visible, and group the thousands —
- * RFU runs to five figures, and the browser chart groups them for the same reason. */
-function tickLabel(v, step) {
-  const decimals = Math.max(0, Math.min(6, Math.ceil(-Math.log10(step) + 0.2)));
-  const text = v.toFixed(decimals);
-  if (text === "-0" || text === `-0.${"0".repeat(decimals)}`) return (0).toFixed(decimals);
-  const [whole, frac] = text.split(".");
-  const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-  return frac ? `${grouped}.${frac}` : grouped;
-}
-
-/**
- * Draw the curves, and return the canvas.
- *
- * This is the browser chart's **Relative** view (`threshold.md` §4) with the defaults the app
- * opens on: each curve is plotted as its analysis' `correctedValues` — the very array its Cq was
- * measured against — on a linear axis, and each curve with a Cq gets a ring where it crosses.
- * Nothing is re-derived here; every value is read off the run's single analysis, which is what
- * keeps the ring on the curve.
- *
- * Deliberately not drawn, because they are all interactive or secondary in the app and a still
- * image is neither: the hover tooltip and whisker, the min/max envelope bands, the "draw
- * baseline" overlay, the dark-curve and right-hand instrument axes, and the threshold line
- * (which the app only shows while a threshold row is hovered).
- */
-function renderCurves(curves, { width, height, yLabel }) {
-  const cv = createCanvas(width, height, BG);
-  const cycles = curves[0]?.cycles ?? [];
-  const padTop = 12;
-  const padRight = 14;
-  // Left gutter: the axis label reading upward, then the tick values, then the plot. Bottom:
-  // tick values under the axis, then the "Cycle" label under those.
-  const tickText = textHeight();
-  const padBottom = tickText * 2 + 14;
-
-  let yMin = Infinity;
-  let yMax = -Infinity;
-  for (const c of curves) {
-    for (const v of c.values) {
-      if (!Number.isFinite(v)) continue;
-      if (v < yMin) yMin = v;
-      if (v > yMax) yMax = v;
-    }
-  }
-  // The ticks depend only on the plot's *height*, which the left gutter can't change — so they
-  // can be chosen first and the gutter then sized to whatever the widest label turned out to be
-  // ("-1,000" is twice the width of "0"). One tick per ~60px of axis is about the density uPlot
-  // lands on, and about as close as labels this size can sit without crowding.
-  const plotHeight = height - padTop - padBottom;
-  const y = yAxisTicks(yMin, yMax, Math.max(3, Math.round(plotHeight / 60)));
-  const widest = Math.max(...y.ticks.map((t) => textWidth(tickLabel(t, y.step))));
-  const plot = {
-    x0: tickText + 6 + widest + 8,
-    y0: padTop,
-    x1: width - padRight,
-    y1: height - padBottom,
-  };
-  const xMin = cycles.length ? cycles[0] : 1;
-  const xMax = cycles.length ? cycles[cycles.length - 1] : 2;
-  const toX = (c) => plot.x0 + ((c - xMin) / (xMax - xMin || 1)) * (plot.x1 - plot.x0);
-  const toY = (v) => plot.y1 - ((v - y.lo) / (y.hi - y.lo || 1)) * (plot.y1 - plot.y0);
-
-  // Grid and ticks first, so every curve draws over them — the same stacking uPlot uses.
-  for (const t of y.ticks) {
-    const py = Math.round(toY(t)) + 0.5;
-    strokeSegment(cv, plot.x0, py, plot.x1, py, GRID, 1, GRID_ALPHA);
-    strokeSegment(cv, plot.x0 - 4, py, plot.x0, py, GRID, 1, TICK_ALPHA);
-    drawText(cv, plot.x0 - 8, py - (tickText - 1) / 2, tickLabel(t, y.step), AXIS_INK, {
-      align: "right",
-    });
-  }
-  // The cycle axis ticks every cycle but labels and grids only every fifth: labelling all forty
-  // would be unreadable, which is the call the browser chart makes too.
-  for (const c of cycles) {
-    const px = Math.round(toX(c)) + 0.5;
-    strokeSegment(cv, px, plot.y1, px, plot.y1 + 5, GRID, 1, TICK_ALPHA);
-    if (c % 5 !== 0) continue;
-    strokeSegment(cv, px, plot.y0, px, plot.y1, GRID, 1, GRID_ALPHA);
-    drawText(cv, px, plot.y1 + 9, String(c), AXIS_INK, { align: "center" });
-  }
-  strokeSegment(cv, plot.x0 + 0.5, plot.y0, plot.x0 + 0.5, plot.y1, AXIS_INK, 1, 0.35);
-  strokeSegment(cv, plot.x0, plot.y1 + 0.5, plot.x1, plot.y1 + 0.5, AXIS_INK, 1, 0.35);
-  drawText(cv, (plot.x0 + plot.x1) / 2, height - tickText - 3, "Cycle", AXIS_INK, {
-    align: "center",
-  });
-  drawText(cv, 3, (plot.y0 + plot.y1) / 2, yLabel, AXIS_INK, { align: "center", rotate: -90 });
-
-  for (const c of curves) {
-    const points = c.values.map((v, i) =>
-      Number.isFinite(v) ? [toX(c.cycles[i]), toY(v)] : null,
-    );
-    strokePolyline(cv, points, c.color, { width: 1, dash: c.isReference ? REF_DASH : null });
-  }
-  // Cq rings last so a dense plate doesn't bury them under the curves drawn after.
-  for (const c of curves) {
-    if (c.cqPoint == null) continue;
-    strokeCircle(cv, toX(c.cqPoint.cycle), toY(c.cqPoint.value), CQ_RADIUS, c.color, CQ_WIDTH);
-  }
-  if (curves.length === 0) {
-    drawText(cv, (plot.x0 + plot.x1) / 2, (plot.y0 + plot.y1) / 2, "no curves selected", AXIS_INK, {
-      align: "center",
-    });
-  }
-  return cv;
-}
-
-/** Linear interpolation of a per-cycle series at a fractional cycle — a Cq lands between two
- * reads, and this is where on the curve it lands. Mirrors the browser chart's own marker
- * placement: the ring sits on `correctedValues`, never on the threshold. */
-function interpolateAt(cycles, values, cycle) {
-  for (let i = 0; i + 1 < cycles.length; i++) {
-    const c0 = cycles[i];
-    const c1 = cycles[i + 1];
-    if (cycle < c0 || cycle > c1) continue;
-    const v0 = values[i];
-    const v1 = values[i + 1];
-    if (v0 == null || v1 == null) return null;
-    return c1 === c0 ? v0 : v0 + ((cycle - c0) / (c1 - c0)) * (v1 - v0);
-  }
-  return null;
-}
-
-/**
- * The run's curves, filtered and reduced to what the renderer needs.
+ * The run's curves, in the shape the web app's chart takes them: one `PlotCurve` per plotted
+ * series, carrying its analysis record rather than anything derived from it.
  *
  * Dye space when the run has a calibration to separate colors with, channel space otherwise —
  * the same automatic choice the Curves view makes (`settings.calibration ?? calibrationAvailable`),
  * and `--channels` forces the raw channels for a run that could do either. In dye space a well is
  * drawn for the dyes the plate actually loads it with; a pair the plate never loads has no curve
- * worth showing (the app hides them behind its "Unloaded" toggle).
+ * worth showing (the app hides those behind its "Unloaded" toggle).
+ *
+ * The `dyeLabel` here is always the dye's own name — the app's Target mode relabels a curve by
+ * the target assigned to its well, which changes what the rail groups and what a tooltip says,
+ * and this picture has neither. Color reads from `fluor`, so it is the same either way.
  */
 function collectCurves(run, { select, fluors, channels }) {
   const dyeSpace = channels ? false : run.calibrationAvailable && run.allFluorCurves.length > 0;
@@ -347,40 +175,69 @@ function collectCurves(run, { select, fluors, channels }) {
     ? run.allFluorCurves
         .filter((c) => run.wellFluors.get(wellKey(c.row, c.col))?.has(c.dye) ?? false)
         .map((c) => ({
-          ...c,
+          channel: c.channel,
+          dyeLabel: c.dye,
           fluor: c.dye,
-          label: `${c.wellLabel} · ${c.dye}`,
+          row: c.row,
+          col: c.col,
+          wellLabel: c.wellLabel,
+          isReference: c.isReference,
+          cycles: c.cycles,
+          mean: c.mean,
           analysis: run.cqTable.get(curveKey(c.row, c.col, c.dye)),
         }))
     : run.allCurves
         .filter((c) => run.available.includes(c.channel))
         .map((c) => ({
-          ...c,
-          fluor: undefined,
-          label: `${c.wellLabel} · ${channelLabel(c.channel)}`,
+          channel: c.channel,
+          dyeLabel: channelLabel(c.channel),
+          row: c.row,
+          col: c.col,
+          wellLabel: c.wellLabel,
+          isReference: c.isReference,
+          cycles: c.cycles,
+          mean: c.mean,
+          // Channel space is the only space with a real spread to show — see `PlotCurve.std`.
+          std: c.std,
+          min: c.min,
+          max: c.max,
           analysis: run.plainBaselines.get(channelCurveKey(c.row, c.col, c.channel)),
         }));
 
-  const curves = [];
-  for (const c of source) {
-    if (!select(c.row, c.col)) continue;
-    if (wanted && !wanted.has((c.fluor ?? channelLabel(c.channel)).toLowerCase())) continue;
-    // Relative view: plot the analysis' corrected values, the array the Cq was measured against.
-    // A curve the run has no record for (nothing to baseline against) falls back to its raw mean,
-    // which is what "absolute" would have drawn.
-    const values = c.analysis?.correctedValues ?? c.mean;
-    const cq = c.analysis?.cq ?? null;
-    const at = cq == null ? null : interpolateAt(c.cycles, values, cq);
-    curves.push({
-      label: c.label,
-      color: curveColor({ fluor: c.fluor, channel: c.channel }),
-      isReference: c.isReference,
-      cycles: c.cycles,
-      values,
-      cqPoint: at == null ? null : { cycle: cq, value: at },
-    });
-  }
+  const curves = source.filter(
+    (c) =>
+      select(c.row, c.col) &&
+      (!wanted || wanted.has((c.fluor ?? channelLabel(c.channel)).toLowerCase())),
+  );
+  for (const c of curves) c.sample = run.wellSample.get(wellKey(c.row, c.col));
   return { curves, dyeSpace };
+}
+
+/**
+ * What the chart is asked to draw: the Curves view's own defaults, as the app opens on them.
+ *
+ * Relative mode (`threshold.md` §4) on a linear axis, with the overlays that are either
+ * interactive or off by default left out — the dark curves, the right-hand instrument axis, the
+ * min/max bands, the "draw baseline" overlay, and the threshold line the app only shows while a
+ * threshold row is hovered. The Cq rings are neither optional nor configured: `buildChart` draws
+ * one per curve that has a Cq.
+ */
+function chartConfig(curves, { width, height }) {
+  return {
+    wellCurves: curves,
+    darkCurves: [],
+    factoryCurves: [],
+    drawFactory: false,
+    // An axis with no curves on it hides itself, so these labels are never drawn.
+    aux: { label: "", unit: "", rowLabel: "", decimals: 1, tipDecimals: 1, curves: [] },
+    baseline: "raw",
+    curveView: "relative",
+    drawBaseline: false,
+    scale: "linear",
+    bands: false,
+    width,
+    height,
+  };
 }
 
 // ---- CLI ----------------------------------------------------------------------------------
@@ -454,10 +311,18 @@ async function main() {
   const [width, height] = (opts.size ?? "1100x620")
     .split("x")
     .map((n) => Math.max(200, Number(n) || 0));
+  // An empty selection would render a blank rectangle — the app has a rail and an empty-state
+  // message to explain itself with, a PNG on disk has neither. Say so and write nothing.
+  if (curves.length === 0) {
+    console.error(
+      `${file}: nothing to plot — no ${dyeSpace ? "loaded well/dye pair" : "channel curve"} matches that selection.`,
+    );
+    process.exit(1);
+  }
+
   const out = opts.out ?? `${basename(file, extname(file))}-curves.png`;
-  const cv = renderCurves(curves, { width, height, yLabel: "RFU (linear baseline)" });
-  writePng(out, cv);
-  const cqs = curves.filter((c) => c.cqPoint != null).length;
+  writeFileSync(out, await renderChartPng(chartConfig(curves, { width, height })));
+  const cqs = curves.filter((c) => c.analysis?.cq != null).length;
   console.error(
     `${out}: ${curves.length} curve${curves.length === 1 ? "" : "s"} ` +
       `(${dyeSpace ? "dye space" : "channel space"}, ${cqs} with a Cq), ${width}×${height}`,
