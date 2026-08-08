@@ -15,13 +15,16 @@
  * a second, differently-behaved narrow layout. There is one interaction model either way: click a
  * directory to see its files, click its chevron to open it in the tree.
  *
- * **Click selects, double-click opens** — the gesture a file browser has always used, and the
- * reason a row here behaves differently from a row of the catalog table above it. Browsing a folder
- * means clicking through a lot of files to find the one you want; if the first click left for that
+ * **Click opens or closes, double-click goes there** — and the reason a row here behaves
+ * differently from a row of the catalog table above it. Browsing a folder means clicking through a
+ * lot of files to decide which ones you want the app to hold; if the first click left for that
  * file's own view every time, the tree would throw you out of the folder you are reading. So a
- * click here makes the file the selection and stays put, and a double-click is what goes to its
- * Overview. A file that is only on disk has nothing to select yet, so its double-click reads it off
- * disk first — the same thing its checkbox does, plus the trip to Overview.
+ * click here is the checkbox — it ticks the file open, or unticks it closed — and stays put, and a
+ * double-click is what goes to the file's Overview. Closing is the safe half of that: these files
+ * are written back to disk as they change, so an unticked file has lost nothing.
+ *
+ * The single click is held for a moment (see `CLICK_DELAY_MS`) so that the first half of a
+ * double-click doesn't tick the file the user is on their way to opening.
  *
  * **A closed branch has not been read.** The tree lists lazily, one directory level per expansion,
  * because a folder handed to the app may hold a career's worth of runs. What opens by itself is only
@@ -32,6 +35,7 @@
  * else won't appear on its own. The ↻ re-reads. (Files that are *loaded* do refresh by themselves;
  * those are watched one by one.)
  */
+import { useEffect, useRef } from "react";
 import { fileKindDescription } from "@zpcrweb/core";
 import type { DiskSource } from "../state/db";
 import type { DiskTree } from "../state/useDiskTree";
@@ -49,16 +53,20 @@ interface Props {
   entries: FileEntry[];
   /** Close a file the app has open — see `ZpcrStore.closeFile`. */
   onCloseFile: (id: string) => void | Promise<void>;
-  /** The selection, so the row a click just picked says so. */
+  /** The selection — opening a file makes it the selected one, and its row says so. */
   activeName: string | null;
   /** Open files straight off disk. `goToFile` also lands on the file's Overview, which is what a
    * double-click on a file the app hasn't got open asks for. */
   onAddDiskFiles: (sources: DiskSource[], goToFile?: boolean) => void;
-  /** Make this file the selection, without leaving the Files view — a single click. */
-  onSelectFile: (id: string) => void;
   /** Select it *and* go look at it, on Overview — a double click. */
   onOpenFile: (id: string) => void;
 }
+
+/** How long a click on a file's name waits before it ticks the file open or closed. Long enough
+ * that a double-click's first click doesn't act, short enough that a single click still feels
+ * like a click. Chrome will report a slower pair as a double-click too, so `FileRow`'s
+ * double-click handler copes with the toggle having already run. */
+const CLICK_DELAY_MS = 250;
 
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -72,7 +80,6 @@ export function FolderSection({
   activeName,
   onCloseFile,
   onAddDiskFiles,
-  onSelectFile,
   onOpenFile,
 }: Props) {
   return (
@@ -157,7 +164,6 @@ export function FolderSection({
                       activeName={activeName}
                       onCloseFile={onCloseFile}
                       onAddDiskFiles={onAddDiskFiles}
-                      onSelectFile={onSelectFile}
                       onOpenFile={onOpenFile}
                     />
                   </div>
@@ -278,7 +284,6 @@ function FilePane({
   activeName,
   onCloseFile,
   onAddDiskFiles,
-  onSelectFile,
   onOpenFile,
 }: {
   tree: DiskTree;
@@ -323,7 +328,6 @@ function FilePane({
               activeName={activeName}
               onCloseFile={onCloseFile}
               onAddDiskFiles={onAddDiskFiles}
-              onSelectFile={onSelectFile}
               onOpenFile={onOpenFile}
             />
           ))}
@@ -341,7 +345,6 @@ function FileRow({
   activeName,
   onCloseFile,
   onAddDiskFiles,
-  onSelectFile,
   onOpenFile,
 }: {
   label: string;
@@ -351,6 +354,25 @@ function FileRow({
   const source: DiskSource = { folder: label, path: [...path, entry.name] };
   const name = diskFileName(source);
   const open = entries.find((e) => e.name === name);
+  // The pending single click, and — once it has run — whatever closing the file is still doing,
+  // so that a double-click that arrives after it can wait for the close before re-opening rather
+  // than racing it out of IndexedDB.
+  const clickTimer = useRef<number | null>(null);
+  const closing = useRef<Promise<void> | null>(null);
+
+  useEffect(() => () => window.clearTimeout(clickTimer.current ?? undefined), []);
+
+  // Exactly what the checkbox does, and for the same reason: opening reads and decodes the file
+  // (which is also what tells the app what kind of file it is), closing lets go of it and leaves
+  // the file on disk exactly as it is.
+  const toggleLoaded = () => {
+    if (open) closing.current = Promise.resolve(onCloseFile(name));
+    else {
+      closing.current = null;
+      onAddDiskFiles([source]);
+    }
+  };
+
   return (
     <li>
       <div
@@ -364,12 +386,7 @@ function FileRow({
           checked={!!open}
           title={open ? "Close this file. Nothing on disk is deleted." : "Open this file"}
           aria-label={open ? `Close ${entry.name}` : `Open ${entry.name}`}
-          onChange={(e) => {
-            // Opening reads and decodes the file, which is also what tells the app what kind of
-            // file it is; closing lets go of it and leaves the file on disk exactly as it is.
-            if (e.target.checked) onAddDiskFiles([source]);
-            else void onCloseFile(name);
-          }}
+          onChange={toggleLoaded}
         />
         <span className="folders__kind" title={open ? fileKindDescription(open.kind) : undefined}>
           {open && <FileKindIcon kind={open.kind} />}
@@ -377,19 +394,35 @@ function FileRow({
         <button
           className="folders__name mono"
           title={
-            open ? `${name} — double-click to open` : `${name} — double-click to open it off disk`
+            open
+              ? `${name} — click to close it, double-click to go to it`
+              : `${name} — click to open it off disk, double-click to go to it`
           }
-          // `detail` is the click count, so the single-click branch runs once per gesture rather
-          // than again as the first half of a double-click. A file the app hasn't got open has
-          // nothing to select, so for it only the double-click — which reads it off disk — means
-          // anything.
+          // `detail` is the click count, so the single-click branch is armed once per gesture
+          // rather than again as the first half of a double-click.
           onClick={(e) => {
             if (e.detail > 1) return;
-            if (open) onSelectFile(name);
+            window.clearTimeout(clickTimer.current ?? undefined);
+            clickTimer.current = window.setTimeout(() => {
+              clickTimer.current = null;
+              toggleLoaded();
+            }, CLICK_DELAY_MS);
           }}
           onDoubleClick={() => {
-            if (open) onOpenFile(name);
-            else onAddDiskFiles([source], true);
+            const armed = clickTimer.current !== null;
+            window.clearTimeout(clickTimer.current ?? undefined);
+            clickTimer.current = null;
+            // The usual case: the click is still waiting, so the file is as this render found it.
+            if (armed && open) {
+              onOpenFile(name);
+              return;
+            }
+            // Otherwise either the file isn't open, or the pair was slow enough that the toggle
+            // already closed it. Both end the same way — read it off disk and go look at it —
+            // once whatever the close is doing has finished.
+            const after = closing.current;
+            closing.current = null;
+            void Promise.resolve(after).then(() => onAddDiskFiles([source], true));
           }}
         >
           {entry.name}

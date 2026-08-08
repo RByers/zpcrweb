@@ -4532,9 +4532,10 @@ async function folderChecks(chrome, origin) {
       { awaitPromise: true },
     ).then(JSON.parse);
 
-  // ── Click selects, double-click opens ──────────────────────────────────────────────────────
-  // A folder is browsed by clicking through it, so a click must not throw you out of the Files
-  // view the way the catalog table's rows do; the double-click is what leaves, for Overview.
+  // ── Click ticks it open or closed, double-click opens ──────────────────────────────────────
+  // A folder is browsed by clicking through it deciding what the app should hold, so a click is
+  // the row's checkbox and must not throw you out of the Files view the way the catalog table's
+  // rows do; the double-click is what leaves, for Overview.
   const nameBtn = (name) =>
     `[...document.querySelectorAll(".folders__name")].find((b) => b.textContent.trim() === ${JSON.stringify(name)})`;
   const rowSelected = (name) =>
@@ -4542,26 +4543,50 @@ async function folderChecks(chrome, origin) {
       `(() => { const b = ${nameBtn(name)};
          return !!b?.closest(".folders__file")?.classList.contains("is-selected"); })()`,
     );
+  const rowLoaded = (name) =>
+    cdp.eval(
+      `(() => { const b = ${nameBtn(name)};
+         return !!b?.closest(".folders__file")?.querySelector(".folders__check")?.checked; })()`,
+    );
+  // Open at this point (its checkbox was ticked above), so the first click closes it.
   await cdp.eval(`(${nameBtn("nested.zpcr")}?.click(), undefined)`);
-  await waitFor(() => rowSelected("nested.zpcr"), { what: "the clicked row to be selected" });
+  await waitFor(async () => !(await rowLoaded("nested.zpcr")), {
+    what: "the clicked row to be unticked",
+  });
   check(
-    "Clicking a file in the folder tree selects it and stays in Files",
-    (await activeTab(cdp)) === "Files" && (await rowSelected("nested.zpcr")),
+    "Clicking a loaded file in the folder tree closes it, and stays in Files",
+    (await activeTab(cdp)) === "Files" && !(await rowLoaded("nested.zpcr")),
+    await activeTab(cdp),
+  );
+  await cdp.eval(`(${nameBtn("nested.zpcr")}?.click(), undefined)`);
+  await waitFor(() => rowLoaded("nested.zpcr"), { what: "the clicked row to be ticked again" });
+  check(
+    "…and clicking it again reads it back off disk and selects it, still in Files",
+    (await activeTab(cdp)) === "Files" &&
+      (await rowLoaded("nested.zpcr")) &&
+      (await rowSelected("nested.zpcr")),
     await activeTab(cdp),
   );
 
   const before = await diskFile(["runs", "2026", "nested.zpcr"]);
   // Renaming the experiment rewrites the archive's own settings entry — an ordinary edit, and one
   // that has to reach the file on disk rather than IndexedDB. It is done on Overview, so go there
-  // the way a user would: double-click the file in the tree.
+  // the way a user would: double-click the file in the tree. The whole sequence a browser sends,
+  // not just the `dblclick` — the two clicks are what arm and then disarm the pending toggle, so a
+  // bare `dblclick` would skip the path that has to *not* close the file on the way to Overview.
   await cdp.eval(
-    `(${nameBtn("nested.zpcr")}?.dispatchEvent(new MouseEvent("dblclick", { bubbles: true, detail: 2 })), undefined)`,
+    `(() => { const b = ${nameBtn("nested.zpcr")}; if (!b) return;
+       for (const [type, detail] of [["click", 1], ["click", 2], ["dblclick", 2]])
+         b.dispatchEvent(new MouseEvent(type, { bubbles: true, detail }));
+     })()`,
   );
   const opened2 = await tabBecomes(cdp, "Overview");
+  // Still held: the first of the two clicks must not have ticked it closed on the way here.
+  const chipsAfterDbl = await cdp.eval(`document.querySelectorAll(".filechip").length`);
   check(
-    "…and double-clicking it opens that file on Overview",
-    opened2 === "Overview",
-    opened2,
+    "…and double-clicking it opens that file on Overview, still loaded",
+    opened2 === "Overview" && chipsAfterDbl === 1,
+    JSON.stringify({ tab: opened2, chips: chipsAfterDbl }),
   );
   await waitFor(
     () => cdp.eval(`!!document.querySelector(".overview__name, .overview__nameeditbtn")`),

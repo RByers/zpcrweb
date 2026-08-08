@@ -31,7 +31,8 @@
  * Clicking a row anywhere else selects that file and closes this view, landing on the file's own
  * first enabled tab — the same "click a file, go look at it" the bar has always done. The folder
  * pane below deliberately does *not*: a row there is a file on disk you may be browsing past, so a
- * click selects and stays, and a double-click is what leaves. See `FolderSection.tsx`.
+ * click ticks it open or closed and stays, and a double-click is what leaves. See
+ * `FolderSection.tsx`.
  */
 import { useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -61,9 +62,6 @@ interface Props {
    * when given, overrides the usual first-enabled-tab landing spot — the Protocol/Plate/Reads cells
    * use it to go straight to that view rather than Overview. */
   onSelectFile: (id: string, view?: ViewId) => void;
-  /** Make a file the selection *without* leaving this view — the folder tree's single click, which
-   * has to stay put so that browsing a folder is possible at all (see `FolderSection.tsx`). */
-  onSelectInPlace: (id: string) => void;
   /** Close the file — see `ZpcrStore.closeFile`. */
   onCloseFile: (id: string) => void | Promise<void>;
   /** Leave the Files view. */
@@ -382,7 +380,6 @@ export function FilesTableView({
   plateFiles,
   experiments,
   onSelectFile,
-  onSelectInPlace,
   onCloseFile,
   onClose,
   tree,
@@ -503,7 +500,6 @@ export function FilesTableView({
             activeName={activeName}
             onCloseFile={onCloseFile}
             onAddDiskFiles={onAddDiskFiles}
-            onSelectFile={onSelectInPlace}
             onOpenFile={(id) => onSelectFile(id, "overview")}
           />
         </div>

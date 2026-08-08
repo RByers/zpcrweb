@@ -984,13 +984,19 @@ sizes, one set of components, and one piece of shared state (which directory is 
 folder). Clicking a directory's name selects it *and* opens it in the tree; its chevron opens it
 without changing what the file pane shows.
 
-A **file** row in that pane obeys the file-browser gesture rather than the table's: a click selects
-the file and stays in the Files view, and a **double-click** opens it on Overview. That divergence
-is deliberate — the table's rows are files already open, so clicking one to go look at it is the
-whole point, while the folder pane is something you read *through*, and a click that left the view
-every time would make a folder of a hundred runs unbrowsable. A file the app hasn't got open has
-nothing to select, so only its double-click means anything: it reads the file off disk (what its
-checkbox does) and then lands on Overview.
+A **file** row in that pane answers a different question from the table's, so its click means
+something different: a click is the row's checkbox — it opens the file off disk, or closes it
+again — and stays in the Files view, while a **double-click** opens it on Overview. That divergence
+is deliberate. The table's rows are files already open, so clicking one to go look at it is the
+whole point; the folder pane is something you read *through*, deciding what the app should hold, and
+a click that left the view every time would make a folder of a hundred runs unbrowsable. Closing on
+a click is safe because these files are written back to disk as they change, so an unticked file has
+lost nothing.
+
+The single click is deferred by `FolderSection.tsx`'s `CLICK_DELAY_MS` so a double-click's first
+click doesn't tick a file on the way to opening it; because Chrome will still report a slower pair
+as a double-click, the double-click handler also copes with the toggle having already run, waiting
+on the close it started before re-reading the file off disk.
 
 The folder's header stands in for the tree row its own root doesn't have — clicking the name shows
 the files at the top level — which is why it is a plain header with buttons rather than a

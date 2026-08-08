@@ -813,9 +813,6 @@ export function App() {
             plateFiles={store.plateFiles}
             experiments={store.experiments}
             onSelectFile={selectFromTable}
-            // The folder tree's single click: select without leaving Files, so that clicking down
-            // a folder full of runs stays in the folder (see `FolderSection.tsx`).
-            onSelectInPlace={store.setActive}
             onCloseFile={store.closeFile}
             onClose={leaveFiles}
             tree={diskTree}
