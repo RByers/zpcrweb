@@ -204,16 +204,25 @@ address bar the moment it reads it, so a URL copied afterwards can be shared saf
 
 ## Tools
 
-Standalone scripts in [`tools/`](./tools/README.md) — a CLI for the results table, live-instrument
-access over USB, and browser-automation checks for the web app:
+Standalone scripts in [`tools/`](./tools/README.md) — a CLI for the results table and for setting
+up a run, live-instrument access over USB, and browser-automation checks for the web app:
 
 ```sh
 node tools/zpcr.mjs samples/20260720_FirstQualification.zpcr results   # results table as CSV
 node tools/zpcr.mjs samples/20260720_FirstQualification.zpcr curves \
   --wells B3 -o b3.png                                                 # curves as a PNG
+node tools/zpcr.mjs 20260810_RVP.zpcr new --name "S190 RVP" \
+  --protocol Luna_qPCR.prcl.txt --plate S190.plt.csv                   # a new experiment
 node tools/cfx.mjs info                                                # talk to a live instrument
 node tools/uishot.mjs                                                  # screenshot the web app
 ```
+
+`zpcr.mjs new` writes a **pending experiment**: a `.zpcr` holding the protocol, the experiment's
+name and (optionally) the plate, with no plate reads in it yet. That is exactly what the web app's
+"New experiment" creates, so the file opens there as a run waiting to be started — edit the
+protocol in place if you like, then start it from the Instrument view. `--plate` may be left out
+and attached later; `--force` overwrites an existing file, which the command otherwise refuses to
+do.
 
 See [`tools/README.md`](./tools/README.md) for what each script does; `zpcr.mjs`/`cfx.mjs` need a
 built core first (`npm run build`).

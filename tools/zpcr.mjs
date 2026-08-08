@@ -5,9 +5,12 @@
  *   node tools/zpcr.mjs <run> results [--password <pw>] [--step <n>]
  *   node tools/zpcr.mjs <run> curves  [--wells A1,B2-D5] [--rows A-C] [--cols 1,5]
  *                                     [--fluors FAM,HEX] [-o out.png] [--size WxH] [--dpr N]
+ *   node tools/zpcr.mjs <out.zpcr> new --name <name> --protocol <p.prcl.txt>
+ *                                      [--plate <p.plt.csv>] [--force]
  *
  * `<run>` is any of the three run formats — a CFX `.zpcr` or `.pcrd`, or a Biomeme `.bmrun`
- * (see {@link runFromFile}).
+ * (see {@link runFromFile}). `new` is the one command whose file argument is written rather than
+ * read: it is always a `.zpcr`, and it must not exist yet.
  *
  * `results` prints a run's results table — the same one the web app's Curves view shows in
  * Table mode and downloads as CSV — as CSV on stdout: one row per loaded well/fluorophore pair,
@@ -24,26 +27,37 @@
  * a second copy of it. This file is wiring: argv parsing, the password fallback, and well
  * selection. Nothing here touches a Cq, a threshold, a baseline or a color.
  *
- * The two commands need different things installed, which is worth knowing before reaching for
- * one on a bare machine: `results` is plain Node over a built core (`npm run build`), the same
- * way `cfx.mjs` is, while `curves` also needs Chrome and the web app's source, because that is
- * where the chart lives.
+ * `new` writes a **pending experiment** — a `.zpcr` holding a protocol, optionally a plate, and
+ * the run's name, with no plate reads and no `begun` marker — which is what the app's "New
+ * experiment" makes and what its Instrument view starts. It is the same
+ * `buildExperimentArchive` the app calls (`packages/core/src/experimentArchive.ts`); this file
+ * only reads the two input files off disk and zips the result.
+ *
+ * The commands need different things installed, which is worth knowing before reaching for one
+ * on a bare machine: `results` and `new` are plain Node over a built core (`npm run build`), the
+ * same way `cfx.mjs` is, while `curves` also needs Chrome and the web app's source, because that
+ * is where the chart lives.
  */
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, extname } from "node:path";
 import {
   analysisCsv,
   buildAnalysisRows,
+  buildExperimentArchive,
   channelCurveKey,
   channelLabel,
   computeRunAnalysis,
   curveKey,
   parseBiomeme,
   parsePcrd,
+  parsePlateCsv,
   parseZpcr,
   parseZpcrwebSettings,
   runAnalysisSettingsFromZpcrweb,
   wellKey,
+  writeZpcrwebSettings,
+  zipArchive,
+  ZPCRWEB_SETTINGS_VERSION,
 } from "../packages/core/dist/index.js";
 // `chartshot.mjs` is imported where `curves` needs it, not here: it pulls in esbuild and the
 // Chrome harness, and `results` — the reason to reach for this tool on a machine with nothing on
@@ -90,10 +104,15 @@ function usage() {
       "       zpcr <run> curves  [--password <pw>] [--step <n>] [-o <out.png>]\n" +
       "                           [--wells A1,B2-D5] [--rows A-C] [--cols 1,5-8]\n" +
       "                           [--fluors FAM,HEX] [--size 1100x620] [--dpr 1]\n" +
-      "                           [--channels]\n\n" +
-      "<run> is a CFX .zpcr or .pcrd, or a Biomeme .bmrun.\n\n" +
+      "                           [--channels]\n" +
+      "       zpcr <out.zpcr> new --name <name> --protocol <p.prcl.txt>\n" +
+      "                           [--plate <p.plt.csv>] [--force]\n\n" +
+      "<run> is a CFX .zpcr or .pcrd, or a Biomeme .bmrun. <out.zpcr> is written, not read.\n\n" +
       "results  the run's results table (the web app's Curves view Table mode) as CSV\n" +
-      "curves   the run's amplification curves as a PNG, as the Curves chart draws them\n\n" +
+      "curves   the run's amplification curves as a PNG, as the Curves chart draws them\n" +
+      "new      a pending experiment — a .zpcr with a protocol, a name and no reads yet,\n" +
+      "         ready to open in the app and start on an instrument. --plate is optional;\n" +
+      "         --force overwrites an existing file.\n\n" +
       "Well selection: --wells/--rows/--cols are a union (any match plots the well); each\n" +
       "accepts a comma-separated list whose items may be ranges. A well range spans the\n" +
       "rectangle between its ends, so --wells A1-B3 is six wells. With none given, every well\n" +
@@ -248,13 +267,70 @@ function chartConfig(curves, { width, height, dpr }) {
   };
 }
 
+// ---- new (a pending experiment) ------------------------------------------------------------
+
+/**
+ * Write a pending experiment to `out`: the protocol text from a `.prcl.txt`, optionally a plate
+ * from a `.plt.csv`, and the experiment's name.
+ *
+ * The archive itself is `buildExperimentArchive`'s, unaltered — so a file written here is
+ * byte-for-byte the kind of file "New experiment" creates in the app, and the app can open it,
+ * edit the protocol in place and start it on an instrument. The name goes into `zpcrweb.json`
+ * (`experimentName`), the one place any format has for it; the protocol file's own base name
+ * becomes the protocol's name, exactly as attaching that file in the app does.
+ *
+ * Both input files are validated before anything is written — `buildExperimentArchive` parses the
+ * run definition, and a `.csv` plate is parsed here — so a typo in a protocol fails with a parse
+ * error rather than producing a `.zpcr` the app can't open.
+ */
+function createExperiment(out, { name, protocolPath, platePath, force }) {
+  if (!name?.trim()) throw new Error("new: --name is required");
+  if (!protocolPath) throw new Error("new: --protocol <file.prcl.txt> is required");
+  if (existsSync(out) && !force) {
+    throw new Error(`${out}: already exists — pass --force to overwrite it`);
+  }
+
+  const protocol = {
+    runDefinition: readFileSync(protocolPath, "utf-8"),
+    // `foo.prcl.txt` → protocol "foo", the same derivation the app's "attach a protocol" uses.
+    name: basename(protocolPath).replace(/\.prcl\.txt$/i, ""),
+  };
+
+  let plate;
+  if (platePath) {
+    const bytes = new Uint8Array(readFileSync(platePath));
+    // Parsed for its errors, not its value: the archive stores the file's own bytes.
+    if (/\.csv$/i.test(platePath)) parsePlateCsv(new TextDecoder().decode(bytes));
+    plate = { name: basename(platePath), bytes };
+  }
+
+  const archive = writeZpcrwebSettings(buildExperimentArchive({ protocol, plate }), {
+    version: ZPCRWEB_SETTINGS_VERSION,
+    generator: "zpcrweb",
+    updatedAt: new Date().toISOString(),
+    experimentName: name.trim(),
+  });
+  writeFileSync(out, zipArchive(archive));
+
+  // Read back what was just written, through the same parser the app opens a file with — a
+  // one-line proof that the result is a run, and cheap on an archive this small.
+  const zpcr = parseZpcr(new Uint8Array(readFileSync(out)));
+  const steps = zpcr.protocol()?.program.steps.length ?? 0;
+  const wells = zpcr.plates()[0]?.pltd.plate?.wells.length;
+  console.error(
+    `${out}: "${name.trim()}" — protocol "${protocol.name}" (${steps} step${steps === 1 ? "" : "s"})` +
+      (plate ? `, plate ${plate.name}${wells == null ? "" : ` (${wells} wells)`}` : ", no plate") +
+      ", no reads yet",
+  );
+}
+
 // ---- CLI ----------------------------------------------------------------------------------
 
 async function main() {
   const argv = process.argv.slice(2);
   const [file, cmd, ...rest] = argv;
   if (!file || !cmd) usage();
-  if (cmd !== "results" && cmd !== "curves") {
+  if (cmd !== "results" && cmd !== "curves" && cmd !== "new") {
     console.error(`unknown command: ${cmd}`);
     usage();
   }
@@ -264,8 +340,12 @@ async function main() {
   let step;
   for (let i = 0; i < rest.length; i++) {
     const flag = rest[i];
-    if (flag === "--password") password = rest[++i];
-    else if (flag === "--step") step = Number(rest[++i]);
+    if (cmd === "new" && flag === "--name") opts.name = rest[++i];
+    else if (cmd === "new" && flag === "--protocol") opts.protocolPath = rest[++i];
+    else if (cmd === "new" && flag === "--plate") opts.platePath = rest[++i];
+    else if (cmd === "new" && flag === "--force") opts.force = true;
+    else if (cmd !== "new" && flag === "--password") password = rest[++i];
+    else if (cmd !== "new" && flag === "--step") step = Number(rest[++i]);
     else if (cmd === "curves" && (flag === "-o" || flag === "--out")) opts.out = rest[++i];
     else if (cmd === "curves" && flag === "--wells") opts.wells = rest[++i];
     else if (cmd === "curves" && flag === "--rows") opts.rows = rest[++i];
@@ -275,6 +355,13 @@ async function main() {
     else if (cmd === "curves" && flag === "--dpr") opts.dpr = rest[++i];
     else if (cmd === "curves" && flag === "--channels") opts.channels = true;
     else usage();
+  }
+
+  // `new` writes its file argument rather than reading it, so it branches ahead of everything
+  // below — there is no run to load, no plate to decrypt and no analysis to settle.
+  if (cmd === "new") {
+    createExperiment(file, opts);
+    return;
   }
 
   // The password is needed *before* parsing a `.pcrd`, whose whole document sits inside an
