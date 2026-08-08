@@ -170,6 +170,13 @@ export interface DiskEntry {
 }
 
 const listings = new Map<string, DiskEntry[]>();
+/**
+ * Listings currently being read, so two callers asking for the same directory at the same moment
+ * read it once. That happens routinely now that a directory can be both *expanded* in the tree and
+ * *selected* for the file pane by one click — without this, the second caller would start its own
+ * `entries()` walk before the first had populated the cache.
+ */
+const inFlight = new Map<string, Promise<DiskEntry[]>>();
 
 const cacheKey = (label: string, path: readonly string[]): string =>
   JSON.stringify([label, ...path]);
@@ -187,6 +194,18 @@ export async function listDirectory(label: string, path: readonly string[]): Pro
   const key = cacheKey(label, path);
   const cached = listings.get(key);
   if (cached) return cached;
+  const pending = inFlight.get(key);
+  if (pending) return pending;
+  const read = readDirectory(label, path, key).finally(() => inFlight.delete(key));
+  inFlight.set(key, read);
+  return read;
+}
+
+async function readDirectory(
+  label: string,
+  path: readonly string[],
+  key: string,
+): Promise<DiskEntry[]> {
   const dir = await resolveDirectory(label, path);
   const entries: DiskEntry[] = [];
   for await (const [name, handle] of dir.entries()) {

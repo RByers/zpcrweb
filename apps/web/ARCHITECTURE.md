@@ -481,7 +481,7 @@ invariant rather than left to be inferred from the store.
 | **the selection** | exactly one loaded file, or none | the cyan chip; every tab of the **view bar** | `ZpcrStore.activeName` / `active` |
 
 There is a fourth set, outside all three: the files sitting in a **granted folder** on disk that
-the app has *not* opened. They appear in the Files view's folder trees and nowhere else, they have
+the app has *not* opened. They appear in the Files view's lower pane and nowhere else, they have
 no catalog record, and the app knows nothing about them beyond a name, a size and an mtime read
 from the directory listing. Ticking one moves it into the catalog and the loaded set at once. See
 "Disk-backed files and folders" below.
@@ -904,7 +904,7 @@ changes. The file on disk *is* the file, so `modified` never comes on for it.
 
 `state/diskFolders.ts` owns the handles and every operation on them (a module singleton, like
 `db.ts`); `state/useDiskTree.ts` owns the tree's expansion and listings;
-`components/FolderSection.tsx` draws it above the catalog table in the Files view; the store branches
+`components/FolderSection.tsx` draws them in the Files view's lower pane; the store branches
 in exactly one place, `persistFile`. `db.ts` stores the granted folder handles — they are
 structured-cloneable, which is what lets a grant outlive a reload — and `FileIdentity.source`
 (a `DiskSource`) is the whole definition of "disk-backed".
@@ -913,11 +913,33 @@ structured-cloneable, which is what lets a grant outlive a reload — and `FileI
 its bytes are on disk and IndexedDB holds only its catalog row. The exception is a run the
 instrument is still writing.
 
+### The Files view is two panes
+
+The catalog table and the granted folders answer different questions — what this browser is
+holding, and what is on the disk — and are different lengths, so they are two panes that scroll
+independently rather than one long column. The folders pane is sized to its content and capped at
+55% of the view, so two folders don't cost half the window and thirty don't push the table out of
+it. With no folder granted there is only the table, exactly as before.
+
+Inside the folders pane each folder is a stacked section, and each section is itself split: the
+**directory tree** on one side, the **files of the directory you picked** on the other. Side by side
+once `.filesview` is wide enough (a container query at 700px), stacked — tree above, files below —
+when it isn't. That is a layout switch and nothing more: there is one interaction model at both
+sizes, one set of components, and one piece of shared state (which directory is selected, per
+folder). Clicking a directory's name selects it *and* opens it in the tree; its chevron opens it
+without changing what the file pane shows.
+
+The folder's header stands in for the tree row its own root doesn't have — clicking the name shows
+the files at the top level — which is why it is a plain header with buttons rather than a
+`<summary>`: it carries three separate actions (collapse, select the root, and the refresh/remove
+buttons) and a `<summary>` would swallow all of them into "toggle".
+
 ### Nothing is walked up front
 
 A folder handed to the app may be an entire lab archive, so there is no recursive scan anywhere.
 `listDirectory` reads **one** directory level and caches it, and the tree calls it as nodes are
-opened. What opens by itself is derived from the catalog, not from the disk: the ancestors of the
+opened. It also de-duplicates listings in flight, because selecting a directory and expanding it are
+now one click and both want the same read. What opens by itself is derived from the catalog, not from the disk: the ancestors of the
 disk-backed files that are already loaded, so the work in progress is in front of the user and every
 other branch stays shut and unread. A directory row therefore shows no child count — counting means
 descending, which is the thing being avoided.

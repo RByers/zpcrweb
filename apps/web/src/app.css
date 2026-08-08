@@ -726,19 +726,37 @@
 }
 
 /* ---- FilesTableView ------------------------------------------------------ */
-/* Fills `<main>` in place of whatever view was showing (see `App.tsx`'s `store.view === "files"`) —
-   just a scrolling table; the "Files" tab already labels it, so there's no separate heading. */
+/* Fills `<main>` in place of whatever view was showing (see `App.tsx`'s `store.view === "files"`).
+   Up to two panes stacked, each scrolling on its own: the catalog table, and — only when a folder
+   has been granted — the folders on disk. With no folders the first pane is the whole view, which
+   is the plain scrolling table this used to be.
+
+   Its own container for the folder panes' side-by-side query below: `app__main` is a container too,
+   but the question here is how much room *this view* has, and it is the thing that will grow a
+   sidebar or a split next. */
 .filesview {
   display: flex;
   flex-direction: column;
   height: 100%;
   min-height: 0;
+  container-type: inline-size;
 }
-.filesview__scroll {
-  flex: 1 1 auto;
+.filesview__pane {
   min-height: 0;
   overflow: auto;
   padding: 0 12px 12px;
+}
+/* The catalog takes whatever the folders don't. Two granted folders should not cost half the
+   window, and thirty should not push the table off it — so the lower pane is sized to its content
+   and capped, and scrolls once it hits the cap. */
+.filesview__pane--catalog {
+  flex: 1 1 auto;
+}
+.filesview__pane--folders {
+  flex: 0 1 auto;
+  max-height: 55%;
+  border-top: 1px solid var(--border-strong);
+  padding-top: 8px;
 }
 .filesview__tbl {
   width: 100%;
@@ -854,14 +872,13 @@
 }
 
 /* ---- FolderSection -------------------------------------------------------- */
-/* The granted folders, as directory trees above the catalog table in the Files view. A row here is
-   a file on disk, which the catalog table's rows are not — see `FolderSection.tsx`. Indentation is
-   an inline `padding-left` per depth rather than nested padding, so a deep row's hover and its
-   focus ring still span the full width of the panel. */
-.folders {
-  flex: 0 0 auto;
-  padding: 0 12px;
-}
+/* The granted folders, stacked in the Files view's lower pane. Each is a header plus two panes of
+   its own: the directory tree, and the files of whichever directory is picked — side by side when
+   there is room, stacked when there isn't. A row here is a file on *disk*, which the catalog
+   table's rows are not; see `FolderSection.tsx`.
+
+   Tree indentation is an inline `padding-left` per depth rather than nested padding, so a deep
+   row's hover and its selected background still span the full width of the pane. */
 .folders__folder {
   margin-bottom: 8px;
   border: 1px solid var(--border);
@@ -871,31 +888,42 @@
 .folders__head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 7px 10px;
-  cursor: pointer;
-  list-style: none;
-}
-.folders__head::-webkit-details-marker {
-  display: none;
-}
-.folders__folder[open] > .folders__head {
+  gap: 4px;
+  padding: 5px 8px;
   border-bottom: 1px solid var(--border);
 }
-.folders__folder[open] > .folders__head > .folders__title > .rail__chevron {
-  transform: rotate(90deg);
+.folders__collapse,
+.folders__twisty {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 16px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--ink-muted);
+  cursor: pointer;
 }
 .folders__title {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  min-width: 0;
+  border: 0;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  font: inherit;
   font-size: 11px;
   color: var(--ink);
-  min-width: 0;
+  cursor: pointer;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.folders__title:hover {
+  background: var(--raised-2);
 }
 .folders__icon {
   display: inline-flex;
@@ -906,46 +934,137 @@
   align-items: center;
   gap: 6px;
   flex: 0 0 auto;
+  margin-left: auto;
 }
+
+/* Stacked by default — tree above, files below — and side by side once the view is wide enough to
+   give each a usable column. One layout switch, no second interaction model: it is the same tree
+   and the same file list either way. */
+.folders__body {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.folders__tree {
+  padding: 4px 0;
+  overflow: auto;
+  /* Stacked, the tree must not push the files it exists to reach off the bottom of the pane. */
+  max-height: 34cqh;
+}
+.folders__files {
+  padding: 4px 0 6px;
+  border-top: 1px solid var(--border);
+  overflow: auto;
+  min-height: 0;
+}
+@container (min-width: 700px) {
+  .folders__body {
+    flex-direction: row;
+    align-items: stretch;
+  }
+  .folders__tree {
+    flex: 0 0 clamp(160px, 26cqi, 320px);
+    max-height: none;
+    border-right: 1px solid var(--border);
+  }
+  .folders__files {
+    flex: 1 1 auto;
+    border-top: 0;
+  }
+}
+
 .folders__list {
   list-style: none;
   margin: 0;
   padding: 0;
 }
 .folders__note {
-  padding: 5px 10px;
+  padding: 4px 10px;
   font-size: 10px;
   color: var(--ink-muted);
 }
 .folders__note--error {
   color: var(--danger);
 }
-.folders__dir,
+
+/* The breadcrumb above the file pane: what you are looking at, and every step back up. */
+.folders__crumbs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  padding: 2px 10px 5px;
+  font-size: 10px;
+  color: var(--ink-muted);
+}
+.folders__crumb {
+  border: 0;
+  padding: 0 2px;
+  background: transparent;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.folders__crumb:hover {
+  color: var(--neon-cyan);
+}
+.folders__crumbsep {
+  opacity: 0.5;
+}
+
+.folders__dirrow {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding-right: 8px;
+}
+.folders__dirrow:hover {
+  background: var(--raised-2);
+}
+/* Which directory the file pane is showing — the one piece of state tying the two panes together,
+   so it uses the app's existing "this one is active" idiom rather than a colour of its own. */
+.folders__dirrow.is-selected {
+  background: color-mix(in srgb, var(--neon-cyan) 12%, transparent);
+  color: var(--neon-cyan);
+}
+/* The header stands in for a tree row the root doesn't have, so it marks the same state — but in
+   text alone. Every folder starts on its own root, and a stack of five filled pills would read as
+   five active things when it only means "each is showing its top level". The file pane's
+   breadcrumb is the unambiguous answer either way. */
+.folders__title.is-selected {
+  color: var(--neon-cyan);
+}
+.folders__dir {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 0;
+  padding: 3px 0;
+  background: transparent;
+  font: inherit;
+  font-size: 11px;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The chevron turns on the row's own state, since a lazily-listed node is not a <details> — its
+   children do not exist until it is opened. */
+.rail__chevron.is-open {
+  transform: rotate(90deg);
+}
 .folders__file {
   display: flex;
   align-items: center;
   gap: 6px;
   width: 100%;
-  padding-top: 3px;
-  padding-bottom: 3px;
-  padding-right: 10px;
+  padding: 3px 10px;
   font-size: 11px;
   text-align: left;
-  border: 0;
-  background: transparent;
   color: var(--ink);
 }
-.folders__dir {
-  cursor: pointer;
-}
-.folders__dir:hover,
 .folders__file:hover {
   background: var(--raised-2);
-}
-/* The chevron rotates on the row's own state here, since a lazily-listed node is not a <details>
-   — its children don't exist until it is opened. */
-.folders__dir > .rail__chevron.is-open {
-  transform: rotate(90deg);
 }
 .folders__check {
   flex: 0 0 auto;

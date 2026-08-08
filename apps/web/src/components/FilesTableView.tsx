@@ -3,6 +3,12 @@
  * column. It is the "Files" tab of the view bar — the one tab that is not a lens on the selected
  * file — and fills `<main>` while it's open.
  *
+ * The view is **two independently scrolling panes**: this table on top, and — only once a folder on
+ * disk has been granted — `FolderSection`'s folder trees underneath. They answer different
+ * questions, "what is this browser holding" and "what is on the disk", and are different lengths,
+ * so scrolling one to the bottom must not push the other off screen. With no folders there is only
+ * the table.
+ *
  * **Every cell here comes from a file's cached summary** (`state/db.ts`'s `FileSummary`, written
  * by `lib/fileSummary.ts` each time a file is loaded), never from a decoded archive. That is what
  * makes a catalog of thousands of files cost nothing to list: no bytes are read to draw this
@@ -482,15 +488,11 @@ export function FilesTableView({
         if (e.key === "Escape") onClose();
       }}
     >
-      <div className="filesview__scroll">
-        <FolderSection
-          tree={tree}
-          entries={files}
-          loadedNames={loadedIds}
-          onSetLoaded={onSetLoaded}
-          onAddDiskFiles={onAddDiskFiles}
-          onSelectFile={onSelectFile}
-        />
+      {/* Two panes, each scrolling on its own: what this browser is holding, and what is on the
+          disk. They answer different questions and are different lengths, so scrolling one to the
+          bottom must not push the other off screen. The lower pane is absent entirely when no
+          folder has been granted, which leaves the catalog exactly the full-height table it was. */}
+      <div className="filesview__pane filesview__pane--catalog">
         <table className="filesview__tbl">
           <thead>
             <tr>
@@ -544,6 +546,18 @@ export function FilesTableView({
         </table>
         {files.length === 0 && <div className="filesview__empty mono">No files.</div>}
       </div>
+      {tree.supported && tree.folders.length > 0 && (
+        <div className="filesview__pane filesview__pane--folders">
+          <FolderSection
+            tree={tree}
+            entries={files}
+            loadedNames={loadedIds}
+            onSetLoaded={onSetLoaded}
+            onAddDiskFiles={onAddDiskFiles}
+            onSelectFile={onSelectFile}
+          />
+        </div>
+      )}
     </div>
   );
 }

@@ -4251,16 +4251,30 @@ async function folderChecks(chrome, origin) {
     cdp
       .eval(
         `JSON.stringify({
-           dirs: [...document.querySelectorAll(".folders__dir")].map((b) => b.textContent.replace("▸","").trim()),
+           dirs: [...document.querySelectorAll(".folders__dir")].map((b) => b.textContent.trim()),
            files: [...document.querySelectorAll(".folders__name")].map((b) => b.textContent.trim()),
+           crumbs: [...document.querySelectorAll(".folders__crumb")].map((b) => b.textContent.trim()),
+           selected: [...document.querySelectorAll(".folders__dirrow.is-selected .folders__dir")]
+             .map((b) => b.textContent.trim()),
            reads: window.__reads,
          })`,
       )
       .then(JSON.parse);
 
+  /** Where the tree pane sits relative to the file pane — side by side, or stacked. Read from the
+   * boxes themselves rather than from a class, so the container query is what is actually tested. */
+  const paneLayout = () =>
+    cdp
+      .eval(
+        `(() => { const t = document.querySelector(".folders__tree")?.getBoundingClientRect();
+           const f = document.querySelector(".folders__files")?.getBoundingClientRect();
+           if (!t || !f) return "none";
+           return f.left >= t.right - 1 ? "side-by-side" : "stacked"; })()`,
+      );
+
   const first = await rows();
   check(
-    "Adding a folder lists its top level — directories and openable files",
+    "Adding a folder lists its top level — subdirectories in the tree, files beside it",
     first.dirs.includes("2026") && first.dirs.includes("attic") && first.files.includes("top.zpcr"),
     JSON.stringify(first),
   );
@@ -4273,6 +4287,31 @@ async function folderChecks(chrome, origin) {
     "…without reading a single subdirectory: a big folder costs one listing to show",
     first.reads["2026"] === undefined && first.reads["attic"] === undefined,
     JSON.stringify(first.reads),
+  );
+  // The tree lists directories and the file pane lists files; neither may show the other's rows,
+  // which is the whole basis of the split.
+  check(
+    "…with directories and files in their own panes rather than one interleaved list",
+    !first.dirs.includes("top.zpcr") && !first.files.includes("2026"),
+    JSON.stringify({ dirs: first.dirs, files: first.files }),
+  );
+
+  // ── The two panes are side by side when there is room, stacked when there isn't ────────────
+  const wide = await paneLayout();
+  await cdp.send("Emulation.setDeviceMetricsOverride", {
+    width: 560,
+    height: 760,
+    deviceScaleFactor: 1,
+    mobile: false,
+  });
+  await sleep(400);
+  const narrow = await paneLayout();
+  await cdp.send("Emulation.clearDeviceMetricsOverride");
+  await sleep(400);
+  check(
+    "The tree sits beside the files when the view is wide, and above them when it isn't",
+    wide === "side-by-side" && narrow === "stacked",
+    JSON.stringify({ wide, narrow }),
   );
 
   // ── Expanding reads exactly one level ──────────────────────────────────────────────────────
@@ -4288,6 +4327,40 @@ async function folderChecks(chrome, origin) {
     expanded.reads["2026"] === 1 && expanded.reads["attic"] === undefined,
     JSON.stringify(expanded.reads),
   );
+  check(
+    "…and shows its files, and only its files, in the pane beside it",
+    expanded.files.length === 1 && expanded.files[0] === "nested.zpcr",
+    JSON.stringify(expanded.files),
+  );
+  check(
+    "…marking it as the one being shown, with a breadcrumb saying where that is",
+    expanded.selected.includes("2026") && expanded.crumbs.join("/") === "runs/2026",
+    JSON.stringify({ selected: expanded.selected, crumbs: expanded.crumbs }),
+  );
+
+  // The breadcrumb is the way back up, and going up must not re-read anything.
+  await cdp.eval(
+    `[...document.querySelectorAll(".folders__crumb")].find((b) => b.textContent.trim() === "runs")?.click()`,
+  );
+  await waitFor(async () => (await rows()).files.includes("top.zpcr"), { what: "the root's files" });
+  const backUp = await rows();
+  check(
+    "A breadcrumb click goes back up to that directory's files, from cache",
+    backUp.files.includes("top.zpcr") &&
+      !backUp.files.includes("nested.zpcr") &&
+      // Still the single read that adding the folder cost. Selecting a directory and expanding it
+      // both want the same listing, so this also pins the in-flight de-duplication in
+      // `listDirectory` — without it one click would read the same directory twice.
+      backUp.reads["runs"] === 1,
+    JSON.stringify({ files: backUp.files, reads: backUp.reads }),
+  );
+  // …and back down again, so the rest of the checks are looking at the nested file.
+  await cdp.eval(
+    `[...document.querySelectorAll(".folders__dir")].find((b) => /2026/.test(b.textContent))?.click()`,
+  );
+  await waitFor(async () => (await rows()).files.includes("nested.zpcr"), {
+    what: "the nested directory again",
+  });
 
   // ── Opening a file off disk ────────────────────────────────────────────────────────────────
   const tickFile = (name) =>
@@ -4308,6 +4381,23 @@ async function folderChecks(chrome, origin) {
        })`,
     )
     .then(JSON.parse);
+  const panes = await cdp
+    .eval(
+      `JSON.stringify([...document.querySelectorAll(".filesview__pane")].map((p) => ({
+         cls: p.className.replace("filesview__pane ", ""),
+         scrolls: getComputedStyle(p).overflowY,
+       })))`,
+    )
+    .then(JSON.parse);
+  check(
+    "The catalog and the folders are two panes that scroll independently",
+    panes.length === 2 &&
+      panes.every((p) => p.scrolls === "auto" || p.scrolls === "scroll") &&
+      panes[0].cls.includes("catalog") &&
+      panes[1].cls.includes("folders"),
+    JSON.stringify(panes),
+  );
+
   check(
     "A file opened from a folder is named by its path within that folder",
     opened.titles.includes("runs/2026/nested.zpcr"),

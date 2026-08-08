@@ -176,9 +176,11 @@ is no second copy in the browser to go stale, and nothing to remember to downloa
 another program and the app picks it up and refreshes on its own. Nothing in the folder is ever
 deleted by the app: removing a file from the app, or the folder itself, only forgets it.
 
-The folder's tree appears in the **Files** tab, above the catalog table, and reads one directory at
-a time as you open it — so pointing the app at a folder holding years of runs costs nothing until
-you go looking. Newly-added files show up when you reopen the tab or press the folder's ↻.
+The **Files** tab splits in two, scrolling independently: what this browser is holding on top, your
+folders underneath. Each folder shows its directory tree next to the files of whichever directory
+you've picked — one above the other if the window is narrow — and reads one directory at a time as
+you open it, so pointing the app at a folder holding years of runs costs nothing until you go
+looking. Newly-added files show up when you reopen the tab or press the folder's ↻.
 
 Two limits worth knowing. Browsers don't tell a web page where a folder actually is, only what it's
 called, so files are named by their path *within* the folder (`runs/2026-07/a.zpcr`) rather than by

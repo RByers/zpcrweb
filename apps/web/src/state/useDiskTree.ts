@@ -62,6 +62,17 @@ export interface DiskTree {
   nodes: Map<string, DiskNode>;
   open: ReadonlySet<string>;
   toggle: (label: string, path: readonly string[]) => void;
+  /**
+   * The directory whose files are showing, per folder — the right-hand pane's subject. Each folder
+   * keeps its own, so switching between two folders doesn't lose your place in either. Absent means
+   * the folder's own root.
+   */
+  selected: ReadonlyMap<string, readonly string[]>;
+  /** Show this directory's files. Lists it if it hasn't been read, exactly as expanding does. */
+  select: (label: string, path: readonly string[]) => void;
+  /** Folders whose body is hidden. Stacked folders would otherwise push each other off the pane. */
+  collapsed: ReadonlySet<string>;
+  toggleFolder: (label: string) => void;
   /** Re-read everything currently open in this folder. */
   refresh: (label: string) => void;
   /** Ask for a folder and add it. Must be called from a user gesture. */
@@ -85,6 +96,8 @@ export function useDiskTree(
   const [folders, setFolders] = useState<FolderView[]>([]);
   const [nodes, setNodes] = useState<Map<string, DiskNode>>(new Map());
   const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
+  const [selected, setSelected] = useState<ReadonlyMap<string, readonly string[]>>(new Map());
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
   /**
    * What has already been auto-opened, so re-rendering doesn't re-open a branch the user has since
@@ -111,6 +124,13 @@ export function useDiskTree(
     }
   }, []);
 
+  /** Every directory node currently on screen: the expanded ones plus each folder's selected one.
+   * What a re-read has to cover. */
+  const liveNodes = useCallback(
+    () => new Set([...open, ...[...selected].map(([label, path]) => nodeKey(label, path))]),
+    [open, selected],
+  );
+
   const readFolders = useCallback(async () => {
     if (!supported) return;
     const stored = await listFolders();
@@ -132,7 +152,9 @@ export function useDiskTree(
     invalidateListings();
     retryFailedWatches();
     void readFolders();
-    for (const key of open) {
+    // The expanded nodes *and* the selected ones: a directory picked for the file pane isn't
+    // necessarily expanded in the tree, and it is the one whose contents are actually on screen.
+    for (const key of liveNodes()) {
       const [label, ...path] = JSON.parse(key) as string[];
       void load(label!, path);
     }
@@ -147,11 +169,14 @@ export function useDiskTree(
     if (!supported) return;
     const known = new Set(folders.map((f) => f.label));
     const toOpen: string[] = [];
+    /** Where each folder's file pane should start out. */
+    const toSelect = new Map<string, readonly string[]>();
     for (const folder of folders) {
       const mark = `folder:${folder.label}`;
       if (expanded.current.has(mark)) continue;
       expanded.current.add(mark);
       toOpen.push(nodeKey(folder.label, []));
+      toSelect.set(folder.label, []);
     }
     for (const source of loadedSources) {
       if (!known.has(source.folder)) continue;
@@ -162,14 +187,39 @@ export function useDiskTree(
       for (let i = 1; i < source.path.length; i++) {
         toOpen.push(nodeKey(source.folder, source.path.slice(0, i)));
       }
+      // …and land the file pane on the directory that file is actually in, so the work in progress
+      // is what's showing rather than whatever happens to be at the top of the folder.
+      toSelect.set(source.folder, source.path.slice(0, -1));
     }
     if (toOpen.length === 0) return;
     setOpen((prev) => new Set([...prev, ...toOpen]));
-    for (const key of new Set(toOpen)) {
+    setSelected((prev) => {
+      const next = new Map(prev);
+      for (const [label, path] of toSelect) next.set(label, path);
+      return next;
+    });
+    for (const key of new Set([...toOpen, ...[...toSelect].map(([l, p]) => nodeKey(l, p))])) {
       const [label, ...path] = JSON.parse(key) as string[];
       void load(label!, path);
     }
   }, [folders, loadedSources, supported, load]);
+
+  const select = useCallback(
+    (label: string, path: readonly string[]) => {
+      setSelected((prev) => new Map(prev).set(label, path));
+      void load(label, path);
+    },
+    [load],
+  );
+
+  const toggleFolder = useCallback((label: string) => {
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(label)) next.delete(label);
+      else next.add(label);
+      return next;
+    });
+  }, []);
 
   const toggle = useCallback(
     (label: string, path: readonly string[]) => {
@@ -192,12 +242,12 @@ export function useDiskTree(
       invalidateListings(label);
       retryFailedWatches();
       void readFolders();
-      for (const key of open) {
+      for (const key of liveNodes()) {
         const [keyLabel, ...path] = JSON.parse(key) as string[];
         if (keyLabel === label) void load(keyLabel, path);
       }
     },
-    [open, load, readFolders],
+    [liveNodes, load, readFolders],
   );
 
   const add = useCallback(async () => {
@@ -218,7 +268,7 @@ export function useDiskTree(
         invalidateListings(label);
         retryFailedWatches();
         await readFolders();
-        for (const key of open) {
+        for (const key of liveNodes()) {
           const [keyLabel, ...path] = JSON.parse(key) as string[];
           if (keyLabel === label) void load(keyLabel, path);
         }
@@ -226,7 +276,7 @@ export function useDiskTree(
         setError(e instanceof Error ? e.message : String(e));
       }
     },
-    [readFolders, open, load],
+    [readFolders, liveNodes, load],
   );
 
   const remove = useCallback(
@@ -236,10 +286,35 @@ export function useDiskTree(
         if (k === `folder:${label}` || k.startsWith(`file:["${label}"`)) expanded.current.delete(k);
       }
       setOpen((prev) => new Set([...prev].filter((k) => (JSON.parse(k) as string[])[0] !== label)));
+      setSelected((prev) => {
+        const next = new Map(prev);
+        next.delete(label);
+        return next;
+      });
+      setCollapsed((prev) => {
+        const next = new Set(prev);
+        next.delete(label);
+        return next;
+      });
       await readFolders();
     },
     [readFolders],
   );
 
-  return { supported, folders, nodes, open, toggle, refresh, add, grant, remove, error };
+  return {
+    supported,
+    folders,
+    nodes,
+    open,
+    toggle,
+    selected,
+    select,
+    collapsed,
+    toggleFolder,
+    refresh,
+    add,
+    grant,
+    remove,
+    error,
+  };
 }
