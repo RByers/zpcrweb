@@ -243,8 +243,19 @@ read off the profile without a prototype and should be re-measured before anyone
 Baseline, `computeRunAnalysis` on a 96-well / 45-cycle run
 (`samples/20260726_S183-S185_RVP.zpcr`): **41.3 ms**, with parse a further 10.9 ms. This matters
 because that function re-runs on **every** threshold-slider drag, multiplier change, baseline/Cq
-source toggle and step switch in the Curves view (`lib/runAnalysis.ts`'s `useMemo`) — it is the
-app's interactive inner loop, not a load-time cost.
+source toggle, Cq-marker drag and step switch in the Curves view (`lib/runAnalysis.ts`'s `useMemo`)
+— it is the app's interactive inner loop, not a load-time cost.
+
+Since confirmed **in the browser**, by CPU-profiling a 2.3 s drag of a Cq marker in a headless
+Chrome (`tools/harness.mjs`) — the harshest case there is, since one gesture sets a threshold on
+every animation frame. It ran at **~27 fps** (46 of 68 frames over 32 ms; a real desktop Chrome
+will do better, so read the ratios rather than the absolute rate), and the profile named the same
+two functions this section already does:
+`median` (`threshold.ts`) at 13% of self time and the color-separation linear algebra
+(`symmetricEigenDecomposition`, `pseudoInverse`, `multiply`, `transpose`, `identity`) at ~24%
+between them. uPlot barely registered (~2%) — **the plot is not the bottleneck, the analysis is**,
+and the frame budget is spent re-deriving a whole plate's dye separation that the changed threshold
+cannot possibly have affected.
 
 ### Win-win — less code *and* faster
 
@@ -297,6 +308,29 @@ app's interactive inner loop, not a load-time cost.
       composes with the per-file cache above — do them together.
 
 ### Perf win, but genuinely more complexity — judgment calls
+
+- [ ] **Don't re-separate the dyes when only a threshold changed — but not yet; the three win-wins
+      above make it unnecessary.** A threshold override changes no measurement: color separation,
+      the calibration matrix and every raw dye curve are identical before and after. Yet
+      `computeRunAnalysis` re-runs all of it, because `useRunAnalysis` memoizes the whole
+      derivation on one dependency list and any settings change invalidates it. Splitting it into a
+      separation stage (keyed on step, password and `calibrationNormalization`) feeding a Cq stage
+      (keyed on the thresholds) would leave a drag re-running only the cheap half.
+
+      **Deliberately not planned now.** The three win-wins above take the *whole* analysis from
+      41.3 ms to 12.2 ms without any new structure — comfortably inside a frame, which turns the
+      ~27 fps drag above into a smooth one and makes the split buy nothing a user could feel. And
+      the split has real cost: `runAnalysis.ts`'s single-derivation shape is the thing that keeps
+      the chart, the hover cards and the table from disagreeing (see `apps/web/ARCHITECTURE.md`,
+      "One analysis per run"), and two cache keys is two chances for one of them to be wrong in a
+      way that shows up as a stale Cq rather than as a crash. **Do the win-wins first and
+      re-measure**; only revisit this if a drag is still visibly slow afterwards, or if plate sizes
+      grow enough that even the cheap half doesn't fit in a frame.
+
+      Meanwhile the *symptom* is handled where it was cheap to handle: a Cq drag takes the plot out
+      of the mouse's way for its duration (`CurveChart.tsx`'s `suppressCursor`), so the cursor rule,
+      hover points and tooltip are no longer re-created on every one of those frames — which is what
+      made the frame rate visible as flicker in the first place.
 
 - [ ] **Use `fflate` for standard DEFLATE, keep the local inflater for DEFLATE64 only.**
       **Estimated ~20–25% off `.pcrd` parse** (48.7 ms today). `inflate.ts` is a bit-at-a-time
