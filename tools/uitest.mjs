@@ -1257,11 +1257,47 @@ async function cqDragChecks(chrome, origin) {
     `ring at ${JSON.stringify(landed[0])}, grabbed at ${JSON.stringify(target)}`,
   );
 
+  // While the gesture runs, the plot's own cursor apparatus is off: uPlot sees a mouse crossing
+  // the plot and would otherwise track it — a vertical rule, a hover point on every series and the
+  // tooltip — all of it re-created on each of the frames the drag rebuilds, which flickered.
+  const quiet = await cdp.eval(`({
+    overEvents: getComputedStyle(document.querySelector(".u-over")).pointerEvents,
+    points: [...document.querySelectorAll(".u-cursor-pt")]
+      .filter((p) => getComputedStyle(p).display !== "none").length,
+    rules: [...document.querySelectorAll(".u-cursor-x, .u-cursor-y")]
+      .filter((l) => getComputedStyle(l).display !== "none").length,
+    tooltip: !!document.querySelector(".chart__tip"),
+  })`);
+  check(
+    "the drag silences the chart's own cursor",
+    quiet.overEvents === "none" && quiet.points === 0 && quiet.rules === 0 && !quiet.tooltip,
+    JSON.stringify(quiet),
+  );
+
   await mouse("mouseReleased", target.x, target.y - DY);
   await sleep(300);
   check(
     "releasing ends the drag",
     (await cdp.eval(`document.body.classList.contains("is-cqdrag")`)) === false,
+  );
+  // The other half of that: a drag must not leave the plot permanently deaf to the mouse.
+  await cdp.send("Input.dispatchMouseEvent", {
+    type: "mouseMoved",
+    x: target.x - 40,
+    y: target.y,
+    buttons: 0,
+  });
+  await sleep(300);
+  const revived = await cdp.eval(`({
+    overEvents: getComputedStyle(document.querySelector(".u-over")).pointerEvents,
+    points: [...document.querySelectorAll(".u-cursor-pt")]
+      .filter((p) => getComputedStyle(p).display !== "none").length,
+    tooltip: !!document.querySelector(".chart__tip"),
+  })`);
+  check(
+    "…and hovering the plot works again",
+    revived.overEvents !== "none" && revived.points > 0 && revived.tooltip,
+    JSON.stringify(revived),
   );
   check(
     "…and clears the row's drag marker",

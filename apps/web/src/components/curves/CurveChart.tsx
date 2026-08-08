@@ -125,6 +125,24 @@ export function CurveChart({
   curvesRef.current = curves;
   const cqHandlersRef = useRef({ onCqDragStart, onCqDrag, onCqDragEnd });
   cqHandlersRef.current = { onCqDragStart, onCqDrag, onCqDragEnd };
+  /**
+   * Whether a Cq drag is in progress — which is also the switch that takes the plot **out of the
+   * mouse's way** for the duration (`suppressCursor` below).
+   *
+   * A drag is a gesture on one ring, but uPlot sees only a mouse moving across the plot: it tracks
+   * the cursor, draws its vertical rule, puts a hover point on every series and feeds the tooltip.
+   * Under a drag that whole apparatus is re-created on each frame along with the plot, so it
+   * flickers, and it answers a question ("what is under the pointer?") nobody is asking while the
+   * pointer is holding a handle.
+   */
+  const cqDraggingRef = useRef(false);
+  /** Take the plot's hit-testing surface out of the mouse's way, or put it back. `pointerEvents:
+   * none` rather than any uPlot cursor option, because it is the *whole* apparatus that has to
+   * stop, and because it survives being re-applied to each rebuilt instance. */
+  const suppressCursor = (on: boolean) => {
+    const over = plotRef.current?.over;
+    if (over) over.style.pointerEvents = on ? "none" : "";
+  };
 
   // (Re)build the plot whenever the data or options change.
   useEffect(() => {
@@ -148,11 +166,16 @@ export function CurveChart({
       bands,
       width,
       height,
-      onHover: setTip,
+      // A drag rebuilds the plot on every frame; a tooltip from before it started would sit there
+      // through all of them, and the drag's own pointer must not raise a new one.
+      onHover: (t) => setTip(cqDraggingRef.current ? null : t),
     });
 
     plotRef.current?.destroy();
     plotRef.current = new uPlot(options, data, host);
+    // Each rebuilt instance comes with a live cursor of its own, so a drag has to re-suppress it —
+    // otherwise the apparatus this is meant to silence comes back one frame later.
+    if (cqDraggingRef.current) suppressCursor(true);
     metaRef.current = meta;
     cqMarkersRef.current = cqMarkers;
     thresholdLineStateRef.current = thresholdLineState;
@@ -276,6 +299,8 @@ export function CurveChart({
     const stop = () => {
       if (!dragging) return;
       dragging = null;
+      cqDraggingRef.current = false;
+      suppressCursor(false);
       pendingTop = null;
       if (frame) cancelAnimationFrame(frame);
       frame = 0;
@@ -295,6 +320,11 @@ export function CurveChart({
       e.stopPropagation();
       e.preventDefault();
       dragging = target;
+      // Silence the plot's own cursor for the gesture, and clear whatever the hover that led to
+      // this grab had already put on screen.
+      cqDraggingRef.current = true;
+      suppressCursor(true);
+      setTip(null);
       window.addEventListener("mousemove", onMove);
       window.addEventListener("mouseup", onUp);
       window.addEventListener("keydown", onKey);

@@ -1914,6 +1914,15 @@ is: a per-target curve needs channel→dye color separation (`calibration.md`).
     `hoverThreshold` state a rail hover sets is set too, so the threshold line and the curve's
     baseline-region diagnostic are drawn while the drag lasts. A threshold set invisibly would be
     indistinguishable from the chart misbehaving.
+  - **The plot stops watching the mouse for the duration** (`pointerEvents: "none"` on `u.over`,
+    re-applied to each rebuilt instance, plus a tooltip that refuses to raise while
+    `cqDraggingRef` is set). uPlot sees only a mouse crossing a chart and tracks it — a vertical
+    rule, a hover point on every series, the tooltip — and under a drag all of that is re-created
+    on every frame, so it flickered. It is also answering a question ("what is under the
+    pointer?") nobody is asking while the pointer is holding a handle. `pointerEvents` rather than
+    a uPlot cursor option because the whole apparatus has to stop at once and the switch has to
+    survive being re-applied to a fresh instance; the `mouseout` it triggers is what clears the
+    cursor already on screen.
   - **`mousedown` is taken in the capture phase on the chart host**, an *ancestor* of uPlot's own
     `.u-over` listener, so grabbing a ring can `stopPropagation` and suppress uPlot's drag-to-zoom.
     Two listeners on `.u-over` itself would fire in registration order — uPlot's first — whatever
