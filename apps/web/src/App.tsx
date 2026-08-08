@@ -788,10 +788,20 @@ export function App() {
             plateFiles={store.plateFiles}
             experiments={store.experiments}
             onSelectFile={selectFromTable}
+            // The folder tree's single click: select without leaving Files, so that clicking down
+            // a folder full of runs stays in the folder (see `FolderSection.tsx`).
+            onSelectInPlace={store.setActive}
             onCloseFile={store.closeFile}
             onClose={leaveFiles}
             tree={diskTree}
-            onAddDiskFiles={(sources) => void store.addDiskFiles(sources)}
+            // `goToFile` is a double-click on a file the app hasn't got open: read it off disk —
+            // which selects it — and then go look at it. Overview because that is where every
+            // "open this file" lands, whatever kind it turns out to be.
+            onAddDiskFiles={(sources, goToFile) =>
+              void store.addDiskFiles(sources).then((name) => {
+                if (goToFile && name) store.setView("overview");
+              })
+            }
           />
         ) : view === "about" ? (
           <AboutView

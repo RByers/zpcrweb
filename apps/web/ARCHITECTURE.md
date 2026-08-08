@@ -969,6 +969,14 @@ sizes, one set of components, and one piece of shared state (which directory is 
 folder). Clicking a directory's name selects it *and* opens it in the tree; its chevron opens it
 without changing what the file pane shows.
 
+A **file** row in that pane obeys the file-browser gesture rather than the table's: a click selects
+the file and stays in the Files view, and a **double-click** opens it on Overview. That divergence
+is deliberate — the table's rows are files already open, so clicking one to go look at it is the
+whole point, while the folder pane is something you read *through*, and a click that left the view
+every time would make a folder of a hundred runs unbrowsable. A file the app hasn't got open has
+nothing to select, so only its double-click means anything: it reads the file off disk (what its
+checkbox does) and then lands on Overview.
+
 The folder's header stands in for the tree row its own root doesn't have — clicking the name shows
 the files at the top level — which is why it is a plain header with buttons rather than a
 `<summary>`: it carries three separate actions (collapse, select the root, and the refresh/remove

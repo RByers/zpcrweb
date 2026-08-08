@@ -1064,6 +1064,11 @@
 .folders__file:hover {
   background: var(--raised-2);
 }
+/* The file a click has selected — the same "this one is active" idiom as the directory row above,
+   since a click here selects rather than navigating away (see `FolderSection.tsx`). */
+.folders__file.is-selected {
+  background: color-mix(in srgb, var(--neon-cyan) 12%, transparent);
+}
 .folders__check {
   flex: 0 0 auto;
   margin: 0;
@@ -1074,6 +1079,8 @@
   width: 14px;
   color: var(--ink-muted);
 }
+/* Every file name here is a target: a click selects it, a double-click opens it — including one
+   that is only on disk, which the double-click reads first. */
 .folders__name {
   border: 0;
   padding: 0;
@@ -1085,10 +1092,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-/* A file the app is holding can be gone to; one merely sitting on disk cannot, so it reads as
-   plain text rather than offering a click that would do nothing. */
-.folders__name:not(:disabled) {
   cursor: pointer;
   text-decoration: underline dotted;
   text-underline-offset: 2px;

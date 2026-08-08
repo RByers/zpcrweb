@@ -29,7 +29,9 @@
  * Plate → Plates, Reads → Curves — so the table doubles as a way in to the thing the cell names.
  *
  * Clicking a row anywhere else selects that file and closes this view, landing on the file's own
- * first enabled tab — the same "click a file, go look at it" the bar has always done.
+ * first enabled tab — the same "click a file, go look at it" the bar has always done. The folder
+ * pane below deliberately does *not*: a row there is a file on disk you may be browsing past, so a
+ * click selects and stays, and a double-click is what leaves. See `FolderSection.tsx`.
  */
 import { useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -59,6 +61,9 @@ interface Props {
    * when given, overrides the usual first-enabled-tab landing spot — the Protocol/Plate/Reads cells
    * use it to go straight to that view rather than Overview. */
   onSelectFile: (id: string, view?: ViewId) => void;
+  /** Make a file the selection *without* leaving this view — the folder tree's single click, which
+   * has to stay put so that browsing a folder is possible at all (see `FolderSection.tsx`). */
+  onSelectInPlace: (id: string) => void;
   /** Close the file — see `ZpcrStore.closeFile`. */
   onCloseFile: (id: string) => void | Promise<void>;
   /** Leave the Files view. */
@@ -67,7 +72,7 @@ interface Props {
    * the table because they are a different question: the table is what the app is holding, the
    * trees are what is on the disk. */
   tree: DiskTree;
-  onAddDiskFiles: (sources: DiskSource[]) => void;
+  onAddDiskFiles: (sources: DiskSource[], goToFile?: boolean) => void;
 }
 
 /** The extension a kind is actually decoded as — independent of what the source file was named.
@@ -377,6 +382,7 @@ export function FilesTableView({
   plateFiles,
   experiments,
   onSelectFile,
+  onSelectInPlace,
   onCloseFile,
   onClose,
   tree,
@@ -494,9 +500,11 @@ export function FilesTableView({
           <FolderSection
             tree={tree}
             entries={files}
+            activeName={activeName}
             onCloseFile={onCloseFile}
             onAddDiskFiles={onAddDiskFiles}
-            onSelectFile={onSelectFile}
+            onSelectFile={onSelectInPlace}
+            onOpenFile={(id) => onSelectFile(id, "overview")}
           />
         </div>
       )}

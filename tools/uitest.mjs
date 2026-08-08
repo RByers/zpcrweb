@@ -4523,12 +4523,37 @@ async function folderChecks(chrome, origin) {
       { awaitPromise: true },
     ).then(JSON.parse);
 
+  // ── Click selects, double-click opens ──────────────────────────────────────────────────────
+  // A folder is browsed by clicking through it, so a click must not throw you out of the Files
+  // view the way the catalog table's rows do; the double-click is what leaves, for Overview.
+  const nameBtn = (name) =>
+    `[...document.querySelectorAll(".folders__name")].find((b) => b.textContent.trim() === ${JSON.stringify(name)})`;
+  const rowSelected = (name) =>
+    cdp.eval(
+      `(() => { const b = ${nameBtn(name)};
+         return !!b?.closest(".folders__file")?.classList.contains("is-selected"); })()`,
+    );
+  await cdp.eval(`(${nameBtn("nested.zpcr")}?.click(), undefined)`);
+  await waitFor(() => rowSelected("nested.zpcr"), { what: "the clicked row to be selected" });
+  check(
+    "Clicking a file in the folder tree selects it and stays in Files",
+    (await activeTab(cdp)) === "Files" && (await rowSelected("nested.zpcr")),
+    await activeTab(cdp),
+  );
+
   const before = await diskFile(["runs", "2026", "nested.zpcr"]);
   // Renaming the experiment rewrites the archive's own settings entry — an ordinary edit, and one
   // that has to reach the file on disk rather than IndexedDB. It is done on Overview, so go there
-  // the way a user would: click the file's row, which selects it and leaves the table.
-  await cdp.eval(`window.location.hash = "view=overview", undefined`);
-  await tabBecomes(cdp, "Overview");
+  // the way a user would: double-click the file in the tree.
+  await cdp.eval(
+    `(${nameBtn("nested.zpcr")}?.dispatchEvent(new MouseEvent("dblclick", { bubbles: true, detail: 2 })), undefined)`,
+  );
+  const opened2 = await tabBecomes(cdp, "Overview");
+  check(
+    "…and double-clicking it opens that file on Overview",
+    opened2 === "Overview",
+    opened2,
+  );
   await waitFor(
     () => cdp.eval(`!!document.querySelector(".overview__name, .overview__nameeditbtn")`),
     { what: "the Overview name control" },
@@ -4658,6 +4683,34 @@ async function folderChecks(chrome, origin) {
     "…with the branches that hold nothing open still unread",
     reloaded.reads["attic"] === undefined,
     JSON.stringify(reloaded.reads),
+  );
+
+  // ── Double-clicking a file the app has never seen ──────────────────────────────────────────
+  // The gesture has to work on a file that is only on disk too, which means reading it before
+  // there is anything to open. `top.zpcr` has been sitting in the root untouched all along.
+  await cdp.eval(
+    `[...document.querySelectorAll(".folders__crumb")].find((b) => b.textContent.trim() === "runs")?.click()`,
+  );
+  await waitFor(async () => (await rows()).files.includes("top.zpcr"), { what: "the root's files" });
+  await cdp.eval(
+    `(${nameBtn("top.zpcr")}?.dispatchEvent(new MouseEvent("dblclick", { bubbles: true, detail: 2 })), undefined)`,
+  );
+  const openedDisk = await tabBecomes(cdp, "Overview", 15000);
+  // Which file that is, asked back in the tree: the row it was opened from is now both loaded and
+  // the selection, which no other row is.
+  await clickTab(cdp, "Files");
+  await waitFor(() => cdp.eval(`!!document.querySelector(".folders__folder")`), {
+    what: "the folder section again",
+  });
+  const openedRow = await cdp.eval(
+    `(() => { const b = ${nameBtn("top.zpcr")}; const r = b?.closest(".folders__file");
+       return JSON.stringify({ loaded: !!r?.classList.contains("is-loaded"),
+         selected: !!r?.classList.contains("is-selected") }); })()`,
+  );
+  check(
+    "Double-clicking a file that is only on disk reads it and opens it on Overview",
+    openedDisk === "Overview" && JSON.parse(openedRow).loaded && JSON.parse(openedRow).selected,
+    JSON.stringify({ tab: openedDisk, row: openedRow }),
   );
 
   cdp.close();

@@ -15,6 +15,14 @@
  * a second, differently-behaved narrow layout. There is one interaction model either way: click a
  * directory to see its files, click its chevron to open it in the tree.
  *
+ * **Click selects, double-click opens** — the gesture a file browser has always used, and the
+ * reason a row here behaves differently from a row of the catalog table above it. Browsing a folder
+ * means clicking through a lot of files to find the one you want; if the first click left for that
+ * file's own view every time, the tree would throw you out of the folder you are reading. So a
+ * click here makes the file the selection and stays put, and a double-click is what goes to its
+ * Overview. A file that is only on disk has nothing to select yet, so its double-click reads it off
+ * disk first — the same thing its checkbox does, plus the trip to Overview.
+ *
  * **A closed branch has not been read.** The tree lists lazily, one directory level per expansion,
  * because a folder handed to the app may hold a career's worth of runs. What opens by itself is only
  * the branch containing files that are already loaded, and the file pane starts on that directory.
@@ -41,9 +49,15 @@ interface Props {
   entries: FileEntry[];
   /** Close a file the app has open — see `ZpcrStore.closeFile`. */
   onCloseFile: (id: string) => void | Promise<void>;
-  /** Open files straight off disk. */
-  onAddDiskFiles: (sources: DiskSource[]) => void;
+  /** The selection, so the row a click just picked says so. */
+  activeName: string | null;
+  /** Open files straight off disk. `goToFile` also lands on the file's Overview, which is what a
+   * double-click on a file the app hasn't got open asks for. */
+  onAddDiskFiles: (sources: DiskSource[], goToFile?: boolean) => void;
+  /** Make this file the selection, without leaving the Files view — a single click. */
   onSelectFile: (id: string) => void;
+  /** Select it *and* go look at it, on Overview — a double click. */
+  onOpenFile: (id: string) => void;
 }
 
 function formatSize(bytes: number): string {
@@ -55,9 +69,11 @@ function formatSize(bytes: number): string {
 export function FolderSection({
   tree,
   entries,
+  activeName,
   onCloseFile,
   onAddDiskFiles,
   onSelectFile,
+  onOpenFile,
 }: Props) {
   return (
     <>
@@ -138,9 +154,11 @@ export function FolderSection({
                       label={folder.label}
                       path={selected}
                       entries={entries}
+                      activeName={activeName}
                       onCloseFile={onCloseFile}
                       onAddDiskFiles={onAddDiskFiles}
                       onSelectFile={onSelectFile}
+                      onOpenFile={onOpenFile}
                     />
                   </div>
                 </div>
@@ -257,9 +275,11 @@ function FilePane({
   label,
   path,
   entries,
+  activeName,
   onCloseFile,
   onAddDiskFiles,
   onSelectFile,
+  onOpenFile,
 }: {
   tree: DiskTree;
   label: string;
@@ -300,9 +320,11 @@ function FilePane({
               path={path}
               entry={entry}
               entries={entries}
+              activeName={activeName}
               onCloseFile={onCloseFile}
               onAddDiskFiles={onAddDiskFiles}
               onSelectFile={onSelectFile}
+              onOpenFile={onOpenFile}
             />
           ))}
         </ul>
@@ -316,9 +338,11 @@ function FileRow({
   path,
   entry,
   entries,
+  activeName,
   onCloseFile,
   onAddDiskFiles,
   onSelectFile,
+  onOpenFile,
 }: {
   label: string;
   path: readonly string[];
@@ -329,7 +353,11 @@ function FileRow({
   const open = entries.find((e) => e.name === name);
   return (
     <li>
-      <div className={"folders__file" + (open ? " is-loaded" : "")}>
+      <div
+        className={
+          "folders__file" + (open ? " is-loaded" : "") + (name === activeName ? " is-selected" : "")
+        }
+      >
         <input
           type="checkbox"
           className="folders__check"
@@ -348,11 +376,21 @@ function FileRow({
         </span>
         <button
           className="folders__name mono"
-          // Only a file the app has open has anything to select; one merely sitting on disk has no
-          // views yet, so its name is plain text until the checkbox opens it.
-          disabled={!open}
-          title={name}
-          onClick={() => onSelectFile(name)}
+          title={
+            open ? `${name} — double-click to open` : `${name} — double-click to open it off disk`
+          }
+          // `detail` is the click count, so the single-click branch runs once per gesture rather
+          // than again as the first half of a double-click. A file the app hasn't got open has
+          // nothing to select, so for it only the double-click — which reads it off disk — means
+          // anything.
+          onClick={(e) => {
+            if (e.detail > 1) return;
+            if (open) onSelectFile(name);
+          }}
+          onDoubleClick={() => {
+            if (open) onOpenFile(name);
+            else onAddDiskFiles([source], true);
+          }}
         >
           {entry.name}
         </button>
