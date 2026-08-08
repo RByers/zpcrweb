@@ -816,11 +816,12 @@ export function App() {
             onCloseFile={store.closeFile}
             onClose={leaveFiles}
             tree={diskTree}
-            // `goToFile` is a double-click on a file the app hasn't got open: read it off disk —
-            // which selects it — and then go look at it. Overview because that is where every
-            // "open this file" lands, whatever kind it turns out to be.
+            // Reading a file off disk selects it. `goToFile` also goes and looks at it, on
+            // Overview, because that is where every "open this file" lands whatever kind it turns
+            // out to be. The promise comes back so that a double-click in the folder tree can wait
+            // for its own first click to finish opening the file before following it there.
             onAddDiskFiles={(sources, goToFile) =>
-              void store.addDiskFiles(sources).then((name) => {
+              store.addDiskFiles(sources).then((name) => {
                 if (goToFile && name) store.setView("overview");
               })
             }

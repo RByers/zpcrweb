@@ -20,11 +20,16 @@
  * lot of files to decide which ones you want the app to hold; if the first click left for that
  * file's own view every time, the tree would throw you out of the folder you are reading. So a
  * click here is the checkbox — it ticks the file open, or unticks it closed — and stays put, and a
- * double-click is what goes to the file's Overview. Closing is the safe half of that: these files
- * are written back to disk as they change, so an unticked file has lost nothing.
+ * double-click on a file the app hasn't got open opens it *and* goes to it. Closing is the safe
+ * half of that: these files are written back to disk as they change, so an unticked file has lost
+ * nothing.
  *
- * The single click is held for a moment (see `CLICK_DELAY_MS`) so that the first half of a
- * double-click doesn't tick the file the user is on their way to opening.
+ * The click acts at once rather than waiting to find out whether a second one is coming, so the
+ * two gestures compose rather than one deferring to the other: the first click of a double-click
+ * has already ticked the file, and the `dblclick` only follows it to the file's Overview. Which
+ * means **double-clicking a file that is already open just closes it** — the click unticks it, and
+ * there is then nothing to go to. That is the honest consequence of an instant checkbox, and the
+ * gesture that matters is the other one, on a file you are opening for the first time.
  *
  * **A closed branch has not been read.** The tree lists lazily, one directory level per expansion,
  * because a folder handed to the app may hold a career's worth of runs. What opens by itself is only
@@ -35,7 +40,7 @@
  * else won't appear on its own. The ↻ re-reads. (Files that are *loaded* do refresh by themselves;
  * those are watched one by one.)
  */
-import { useEffect, useRef } from "react";
+import { useRef } from "react";
 import { fileKindDescription } from "@zpcrweb/core";
 import type { DiskSource } from "../state/db";
 import type { DiskTree } from "../state/useDiskTree";
@@ -55,18 +60,13 @@ interface Props {
   onCloseFile: (id: string) => void | Promise<void>;
   /** The selection — opening a file makes it the selected one, and its row says so. */
   activeName: string | null;
-  /** Open files straight off disk. `goToFile` also lands on the file's Overview, which is what a
-   * double-click on a file the app hasn't got open asks for. */
-  onAddDiskFiles: (sources: DiskSource[], goToFile?: boolean) => void;
+  /** Open files straight off disk. Resolves once they are open, which is what lets a double-click
+   * wait for its own first click before going to the file. `goToFile` also lands on the file's
+   * Overview — used where the app is doing the opening rather than a gesture. */
+  onAddDiskFiles: (sources: DiskSource[], goToFile?: boolean) => void | Promise<void>;
   /** Select it *and* go look at it, on Overview — a double click. */
   onOpenFile: (id: string) => void;
 }
-
-/** How long a click on a file's name waits before it ticks the file open or closed. Long enough
- * that a double-click's first click doesn't act, short enough that a single click still feels
- * like a click. Chrome will report a slower pair as a double-click too, so `FileRow`'s
- * double-click handler copes with the toggle having already run. */
-const CLICK_DELAY_MS = 250;
 
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -354,23 +354,18 @@ function FileRow({
   const source: DiskSource = { folder: label, path: [...path, entry.name] };
   const name = diskFileName(source);
   const open = entries.find((e) => e.name === name);
-  // The pending single click, and — once it has run — whatever closing the file is still doing,
-  // so that a double-click that arrives after it can wait for the close before re-opening rather
-  // than racing it out of IndexedDB.
-  const clickTimer = useRef<number | null>(null);
-  const closing = useRef<Promise<void> | null>(null);
-
-  useEffect(() => () => window.clearTimeout(clickTimer.current ?? undefined), []);
+  // What the click of this gesture did: which way it left the file, and when that has finished.
+  // A `dblclick` arrives after its own two clicks have been handled and after `open` was last
+  // rendered, so it has nothing else to go on.
+  const gesture = useRef<{ open: boolean; settled: Promise<unknown> } | null>(null);
 
   // Exactly what the checkbox does, and for the same reason: opening reads and decodes the file
   // (which is also what tells the app what kind of file it is), closing lets go of it and leaves
   // the file on disk exactly as it is.
   const toggleLoaded = () => {
-    if (open) closing.current = Promise.resolve(onCloseFile(name));
-    else {
-      closing.current = null;
-      onAddDiskFiles([source]);
-    }
+    gesture.current = open
+      ? { open: false, settled: Promise.resolve(onCloseFile(name)) }
+      : { open: true, settled: Promise.resolve(onAddDiskFiles([source])) };
   };
 
   return (
@@ -395,34 +390,22 @@ function FileRow({
           className="folders__name mono"
           title={
             open
-              ? `${name} — click to close it, double-click to go to it`
+              ? `${name} — click to close it`
               : `${name} — click to open it off disk, double-click to go to it`
           }
-          // `detail` is the click count, so the single-click branch is armed once per gesture
-          // rather than again as the first half of a double-click.
+          // `detail` is the click count, so the toggle runs once per gesture rather than again as
+          // the second half of a double-click.
           onClick={(e) => {
             if (e.detail > 1) return;
-            window.clearTimeout(clickTimer.current ?? undefined);
-            clickTimer.current = window.setTimeout(() => {
-              clickTimer.current = null;
-              toggleLoaded();
-            }, CLICK_DELAY_MS);
+            toggleLoaded();
           }}
           onDoubleClick={() => {
-            const armed = clickTimer.current !== null;
-            window.clearTimeout(clickTimer.current ?? undefined);
-            clickTimer.current = null;
-            // The usual case: the click is still waiting, so the file is as this render found it.
-            if (armed && open) {
-              onOpenFile(name);
-              return;
-            }
-            // Otherwise either the file isn't open, or the pair was slow enough that the toggle
-            // already closed it. Both end the same way — read it off disk and go look at it —
-            // once whatever the close is doing has finished.
-            const after = closing.current;
-            closing.current = null;
-            void Promise.resolve(after).then(() => onAddDiskFiles([source], true));
+            // The click that opened this gesture has already run, so `open` is a render behind:
+            // `gesture` is what the file is on its way to being.
+            const g = gesture.current;
+            gesture.current = null;
+            if (!(g ? g.open : !!open)) return;
+            void Promise.resolve(g?.settled).then(() => onOpenFile(name));
           }}
         >
           {entry.name}

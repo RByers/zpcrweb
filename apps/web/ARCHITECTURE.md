@@ -993,10 +993,14 @@ a click that left the view every time would make a folder of a hundred runs unbr
 a click is safe because these files are written back to disk as they change, so an unticked file has
 lost nothing.
 
-The single click is deferred by `FolderSection.tsx`'s `CLICK_DELAY_MS` so a double-click's first
-click doesn't tick a file on the way to opening it; because Chrome will still report a slower pair
-as a double-click, the double-click handler also copes with the toggle having already run, waiting
-on the close it started before re-reading the file off disk.
+The click acts immediately rather than waiting to see whether a second one follows, so the two
+gestures compose instead of one deferring to the other: a double-click's first click has already
+ticked the file open, and the `dblclick` only follows it to Overview — waiting on the promise that
+click returned, since the file is still being read when it arrives. The consequence is that
+**double-clicking an already-open file just closes it**: the click unticks it and there is then
+nothing to go to. That is accepted rather than worked around; the gesture that matters is the other
+one, on a file being opened for the first time. `FileRow` keeps the click's outcome in a ref because
+`dblclick` arrives after `open` was last rendered, so the prop is a render behind by then.
 
 The folder's header stands in for the tree row its own root doesn't have — clicking the name shows
 the files at the top level — which is why it is a plain header with buttons rather than a

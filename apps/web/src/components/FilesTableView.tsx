@@ -70,7 +70,8 @@ interface Props {
    * the table because they are a different question: the table is what the app is holding, the
    * trees are what is on the disk. */
   tree: DiskTree;
-  onAddDiskFiles: (sources: DiskSource[], goToFile?: boolean) => void;
+  /** Resolves once the files are open — `FolderSection.tsx`'s double-click waits on it. */
+  onAddDiskFiles: (sources: DiskSource[], goToFile?: boolean) => void | Promise<void>;
 }
 
 /** The extension a kind is actually decoded as — independent of what the source file was named.

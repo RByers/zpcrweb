@@ -3550,6 +3550,12 @@ async function closeConfirmChecks(chrome, origin) {
   // Download it: the edits are on disk now, so the ✕ stops asking.
   await cdp.eval(`window.location.hash = "view=overview", undefined`);
   await tabBecomes(cdp, "Overview");
+  // The tab is current before its toolbar is painted, so waiting for the button is the difference
+  // between this passing and throwing on a null.
+  await waitFor(
+    () => cdp.eval(`!!document.querySelector(".overview__toolbar .overview__downloadbtn")`),
+    { what: "Overview's download button" },
+  );
   await cdp.eval(`(() => { document.querySelector(".overview__toolbar .overview__downloadbtn").click(); })()`);
   await waitFor(async () => (await chip()).modified === false, { what: "the flag to clear" });
   check("downloading the file clears the modified state", (await chip()).modified === false);
@@ -4557,8 +4563,8 @@ async function folderChecks(chrome, origin) {
 
   // ── Click ticks it open or closed, double-click opens ──────────────────────────────────────
   // A folder is browsed by clicking through it deciding what the app should hold, so a click is
-  // the row's checkbox and must not throw you out of the Files view the way the catalog table's
-  // rows do; the double-click is what leaves, for Overview.
+  // the row's checkbox, acts at once, and must not throw you out of the Files view the way the
+  // catalog table's rows do; the double-click is what leaves, for Overview.
   const nameBtn = (name) =>
     `[...document.querySelectorAll(".folders__name")].find((b) => b.textContent.trim() === ${JSON.stringify(name)})`;
   const rowSelected = (name) =>
@@ -4591,23 +4597,39 @@ async function folderChecks(chrome, origin) {
     await activeTab(cdp),
   );
 
+  // The whole sequence a browser sends, not just the `dblclick`: the click acts at once, so what
+  // the pair does is the click's outcome plus the `dblclick`'s, and a bare `dblclick` would test
+  // neither.
+  const doubleClick = (name) =>
+    cdp.eval(
+      `(() => { const b = ${nameBtn(name)}; if (!b) return;
+         for (const [type, detail] of [["click", 1], ["click", 2], ["dblclick", 2]])
+           b.dispatchEvent(new MouseEvent(type, { bubbles: true, detail }));
+       })()`,
+    );
+  // On a file that is already open the click unticks it and the dblclick then has nothing to go
+  // to — the accepted consequence of a checkbox that acts immediately.
+  await doubleClick("nested.zpcr");
+  await waitFor(async () => !(await rowLoaded("nested.zpcr")), {
+    what: "the double-clicked row to be unticked",
+  });
+  check(
+    "Double-clicking a file that is already open just closes it, staying in Files",
+    (await activeTab(cdp)) === "Files" && !(await rowLoaded("nested.zpcr")),
+    await activeTab(cdp),
+  );
+
   const before = await diskFile(["runs", "2026", "nested.zpcr"]);
   // Renaming the experiment rewrites the archive's own settings entry — an ordinary edit, and one
   // that has to reach the file on disk rather than IndexedDB. It is done on Overview, so go there
-  // the way a user would: double-click the file in the tree. The whole sequence a browser sends,
-  // not just the `dblclick` — the two clicks are what arm and then disarm the pending toggle, so a
-  // bare `dblclick` would skip the path that has to *not* close the file on the way to Overview.
-  await cdp.eval(
-    `(() => { const b = ${nameBtn("nested.zpcr")}; if (!b) return;
-       for (const [type, detail] of [["click", 1], ["click", 2], ["dblclick", 2]])
-         b.dispatchEvent(new MouseEvent(type, { bubbles: true, detail }));
-     })()`,
-  );
+  // the way a user would: double-click the file, which is closed again after the check above.
+  await doubleClick("nested.zpcr");
   const opened2 = await tabBecomes(cdp, "Overview");
-  // Still held: the first of the two clicks must not have ticked it closed on the way here.
+  // The click read it off disk and the dblclick followed it there, which means it waited: a file
+  // that is still being decoded has nothing to show.
   const chipsAfterDbl = await cdp.eval(`document.querySelectorAll(".filechip").length`);
   check(
-    "…and double-clicking it opens that file on Overview, still loaded",
+    "…and double-clicking a file that isn't open opens it and lands on its Overview",
     opened2 === "Overview" && chipsAfterDbl === 1,
     JSON.stringify({ tab: opened2, chips: chipsAfterDbl }),
   );
@@ -4749,9 +4771,7 @@ async function folderChecks(chrome, origin) {
     `[...document.querySelectorAll(".folders__crumb")].find((b) => b.textContent.trim() === "runs")?.click()`,
   );
   await waitFor(async () => (await rows()).files.includes("top.zpcr"), { what: "the root's files" });
-  await cdp.eval(
-    `(${nameBtn("top.zpcr")}?.dispatchEvent(new MouseEvent("dblclick", { bubbles: true, detail: 2 })), undefined)`,
-  );
+  await doubleClick("top.zpcr");
   const openedDisk = await tabBecomes(cdp, "Overview", 15000);
   // Which file that is, asked back in the tree: the row it was opened from is now both loaded and
   // the selection, which no other row is.
