@@ -25,6 +25,12 @@ There is also limited support for `.pltd` and `.pcrd` files as produced by CFX s
 
 To minimize the hassle of working with encrypted plate definition files, this package define a simple `.plt.csv` file format for plates which can be exported, modified and imported back and linked into a `.zpcr` file, documented in [`pltcsv.md`](./pltcsv.md). 
 
+A standalone **`.alf` run report** opens as a file in its own right too. That is what a protocol
+with no `PLATEREAD` — an incubation, a reverse-transcription hold — produces: the instrument keeps
+no run folder for one (`usb.md` §7.10), so there is no `.zpcr` to make, and the report is the whole
+record of the run. Such a protocol is startable straight from a `.prcl.txt` in the Instrument view,
+and its report lands in the file bar when it finishes.
+
 The app also opens **Biomeme run exports** (`.bmrun`, from the Franklin/Two3/Three9 handheld
 devices) — a genuinely different instrument (a handful of tube positions, fluorescence
 reported directly per dye rather than per optical channel) that shares no bytes with a CFX

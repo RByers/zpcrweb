@@ -305,6 +305,15 @@ their definitions:
   immediately if `usb.opened` has already gone false) before failing pending commands and calling
   `onClose` — see the constants and logging at the top of `readLoop` in `device.ts`.
 
+**A run without a `PLATEREAD` is a different shape of run, not a degenerate one.** The instrument
+builds no `CurrentRun` folder for an incubation or an RT hold — measured, the folder is unchanged
+from before the run to after the acknowledgement (`usb.md` §7.10) — so `planRun` marks such a plan
+`producesRunFile: false` and gives it **no uploads at all**: §7.4's deposit exists to complete a run
+folder, and with none coming the files would only land in the *previous* run's folder for its next
+puller to carry off. What such a run does leave is its `.alf`, which `CfxDevice.runReport` collects
+from `\Storage Card\PCRunReport` — unambiguously this run's, since §7.1 empties that directory at
+every start.
+
 Driving the real instrument is also what corrected four claims the packet captures had gotten
 wrong — `usb.md` §10 collects them. That is the argument for keeping the CLI: a protocol
 reverse-engineered from captures is a hypothesis until something speaks it.
@@ -639,7 +648,7 @@ raw bytes ─▶ fflate.unzipSync ─▶ { name: Uint8Array }
 - **`zpcr.ts`** — orchestrates the above into the public `Zpcr` object (the `.zpcr` path;
   `pcrd.ts` builds the equivalent object directly for `.pcrd`).
 - **`fileKind.ts`** — the accepted encodings (`FileKind`) and what each one *is*
-  (`fileCategory()`: a run, a plate map or a thermal protocol; `fileKindDescription()`: a one-line
+  (`fileCategory()`: a run, a plate map, a thermal protocol or a run report; `fileKindDescription()`: a one-line
   "Category: what it is" string, e.g. `"Plate: Bio-Rad format"`). No bytes: it exists so consumers
   stop re-deriving "a `.pltd` and a `.plt.csv` are both a plate" from file extensions. The web
   app's file-chip icons and which half of an experiment a file can be attached as are both driven by

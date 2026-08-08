@@ -148,8 +148,12 @@ export function InstrumentRun({
   onCloneExperiment: (fileName: string) => void;
 }) {
   const zpcr = experiment?.zpcr ?? null;
-  const protocolText = zpcr?.protocolText || null;
+  const protocolText = experiment?.protocolText || null;
   const plate = zpcr?.plates()[0]?.pltd.plate ?? null;
+  // A run that will leave nothing behind is worth saying *before* it is started rather than after
+  // — someone who ran an incubation and then went looking for its file is the person this whole
+  // path exists for. `planRun` decides it, from the protocol (`RunPlan.producesRunFile`).
+  const thermalOnly = !!plan && !plan.producesRunFile;
   // A run with results is not startable, and this is where that is discovered — so the panel says
   // why and offers the fix, rather than leaving a disabled button in the rail to explain itself.
   // A run still going is in that same not-startable state but is not *over*, so it says something
@@ -233,6 +237,14 @@ export function InstrumentRun({
             <PartHead title="Plate" note={plate ? null : "none"} />
             {plate ? (
               <PlateViewer plate={plate} compact />
+            ) : thermalOnly ? (
+              // Not a missing piece here: a protocol that never reads the plate has nothing to map
+              // wells onto, so asking for one would be asking for a file that would go unused.
+              <div className="instrument__empty mono">
+                No plate needed — this protocol never reads one. The instrument keeps no run folder
+                for such a run, so it produces a run report rather than a run file, and that report
+                is what lands in the file bar when it finishes.
+              </div>
             ) : (
               <div className="instrument__empty mono">
                 No plate attached. This run will record no well, target or sample mapping — attach

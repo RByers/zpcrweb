@@ -830,6 +830,9 @@ Six phases, and the shape is not what §5's upload machinery suggests:
 A seventh path leaves the same way early: **§7.8, stopping a run in progress** — the same `CANCEL`,
 with different rules about when to send it and what is left to collect.
 
+Phases 4, 5 and 6 assume there is a run folder at all, and **a protocol with no `PLATEREAD` never
+produces one** — see §7.10, which is its own short path through the same six phases.
+
 Throughout all six, the §3 polling loop — `STATUS?`, `ERRORLIST A`, `RTSTATUS?`, about once a
 second — never stops. Everything below is interleaved into it, not substituted for it.
 
@@ -1408,6 +1411,61 @@ case `RemoteRun` starts the run immediately (§7.3, measured).
   (`protocol.md` §3.2) and is reported as an ordinary running step — pause bit clear, block active,
   a step text whose hold operand is `0`. The way out of one is `PROCEED`, not `RESUME`, and a
   client showing "paused" for it would be lying to the user.
+
+### 7.10 A run with no `PLATEREAD` writes no run folder
+
+Everything above §7.4 assumes the run produces a `CurrentRun` folder to deposit into and pull back.
+**A protocol with no `PLATEREAD` does not.** An incubation, a reverse-transcription hold, any use
+of the block as a heated surface — the instrument runs it perfectly well and leaves
+`\Storage Card\CurrentRun` completely untouched.
+
+Measured directly, on a CFX96 (`CT019138`), by running
+
+```
+METHOD BLOCK;TEMP 37.0,30;END
+```
+
+as `RemoteRun … "AGBLK1","admin","","True","BLOCK"` and listing the folder throughout:
+
+| Moment | `CurrentRun` |
+|---|---|
+| before the run | 86 entries |
+| during (`RUNNING — TEMP 37.0,30`) | 86 entries, unchanged |
+| after the protocol completed | 86 entries, unchanged |
+| after the §7.6 `CANCEL` | 86 entries, unchanged — nothing added, nothing removed |
+
+Not one entry appeared or disappeared, no marker was rewritten, and afterwards
+`ProtocolRunDefinition.txt` still read the **previous** run's `METHOD CALC; … PLATEREAD #h3F;
+GOTO 2,44`, with `RunInfo.xml`'s `RunStartTime` still that run's. The folder is simply the last
+`PLATEREAD` run's, sitting where it was left.
+
+Three consequences for a client:
+
+- **Do not deposit the §7.4 files.** They land in the previous run's folder, where the next client
+  to pull that folder carries them off as though they belonged to it. `planRun` gives a plan with
+  no `PLATEREAD` an empty upload list (`usb/runPlan.ts`, `RunPlan.producesRunFile`).
+- **Do not pull the folder at the finish.** §7.6's forced listing is the one place a stale folder
+  is mistaken for the run that just ended — a 45-cycle qPCR archive can be assembled out of a
+  two-minute incubation this way, which is exactly how one sample in `samples/` came to hold
+  another run's plate reads. An unchanged listing at the finish is the signal: a real run's finish
+  always adds the last read, `ended` and the report in the same moment.
+- **Collect the report instead.** The one thing such a run does write is its `.alf`, in
+  `\Storage Card\PCRunReport` — and since §7.1 empties that directory at every start, what is in
+  it afterwards is this run's and only this run's (`CfxDevice.runReport`). The whole of the
+  measured run above:
+
+  ```
+  AGBLK1*admin*RN050773*A*CFX96*Aug 07, 2026*23:13:26*23:16:02*00:02:36*105.0*10.0**CT019138*CT019138*
+  METHOD BLOCK*HOTLID 105,30*VOLUME 10*TEMP 37.0,30*END
+   No errors reported. *0:*False*False*False*False*None*False*
+  -1*1*1*.00*37.0*30*08/07/2026 23:13:27*False*0*
+  -1*0*0*.00*0*0*08/07/2026 23:16:02 Protocol completed.*False*0*
+  ```
+
+  Note lines 1–2: the instrument supplied `HOTLID 105,30` and `VOLUME 10` itself, neither of which
+  was sent. **The heated lid runs regardless** — measured, the block sat at ambient ~20.6 °C for
+  the first ~90 s while the lid climbed 32 → 104 °C, then ramped to 37.00 and held its 30 s. A
+  client watching block temperature for signs of life will mistake that opening minute for a hang.
 
 ## 8. Tooling
 

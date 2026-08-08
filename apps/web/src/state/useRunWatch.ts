@@ -149,6 +149,18 @@ export interface RunWatchState {
   /** Dismiss the banner — the Instrument view's "New run" button. */
   clearFinished: () => void;
   /**
+   * Say that the run about to be started will leave no run folder behind, so this watcher should
+   * expect its `.alf` report and nothing else (`App`'s `startExperiment`, for a thermal-only
+   * protocol — see `RunPlan.producesRunFile`).
+   *
+   * An optimisation of honesty rather than of bytes: {@link collectReport} is reached anyway when
+   * the end-of-run listing turns out unchanged, so a thermal-only run started from the instrument's
+   * own touchscreen gets the same treatment. Saying so in advance only skips the listing that would
+   * discover it, and stops the run's last moments being spent fetching a folder we already know
+   * isn't ours.
+   */
+  expectReportOnly: () => void;
+  /**
    * A run sitting on the instrument that this browser **isn't holding** — what it is called and
    * how far it got. Null whenever the folder's run is already in the file bar, or holds no run at
    * all.
@@ -210,6 +222,15 @@ export function useRunWatch(
     activate: boolean,
   ) => Promise<string | null>,
   /**
+   * Put a finished run's `.alf` report in the file bar, selected, and hand back its id.
+   *
+   * The counterpart to {@link onRun} for a run that produced no run folder — see
+   * {@link RunWatchState.expectReportOnly}. Kept separate rather than folded into `onRun` because
+   * the two hand over different things: `onRun` merges an archive into a run's own file, and this
+   * adds a plain file of a different kind, through the same path a dropped file takes.
+   */
+  onReport: (name: string, bytes: Uint8Array) => Promise<string | null>,
+  /**
    * Read back the entries of a run this app is holding, or `null` if it isn't holding that file.
    *
    * **This is the watcher's only memory of what it has downloaded.** The run's file is the app's
@@ -256,10 +277,17 @@ export function useRunWatch(
   // A run being pulled must not have a second pull started on top of it: the fetch is slow (many
   // sequential commands) and both the timer and the status watcher can ask at once.
   const pulling = useRef(false);
+  // Set by the end-of-run pass when the folder turned out not to be this run's — see `check`.
+  const staleAtFinish = useRef(false);
+  // Armed by `expectReportOnly` when the run being started is known in advance to write no run
+  // folder. Cleared as each run starts, so it never carries over to the next one.
+  const reportOnly = useRef(false);
   // The callback changes identity on every App render; the effects below must not restart for
   // that, so they read the latest through refs.
   const onRunRef = useRef(onRun);
   onRunRef.current = onRun;
+  const onReportRef = useRef(onReport);
+  onReportRef.current = onReport;
   // Read through a ref for the same reason: it closes over the loaded files, so it changes
   // identity whenever any of them does — including on every pass this hook itself causes.
   const heldRunRef = useRef(heldRun);
@@ -270,8 +298,15 @@ export function useRunWatch(
   const fileNameRef = useRef<string | null>(null);
   fileNameRef.current = fileName;
 
-  const { connection, status, refreshRunFolder, fetchDirectoryFiles, acknowledgeFinishedRun, trafficLogForRun } =
-    instrument;
+  const {
+    connection,
+    status,
+    refreshRunFolder,
+    fetchDirectoryFiles,
+    acknowledgeFinishedRun,
+    fetchRunReport,
+    trafficLogForRun,
+  } = instrument;
 
   /**
    * Is the run in the folder one this browser is holding? Sets {@link RunWatchState.available} to
@@ -441,6 +476,22 @@ export function useRunWatch(
           await checkAvailable(dir.names);
           return null;
         }
+        // **The end-of-run pass is the one place a stale folder gets mistaken for a run.** It is
+        // forced, so it would otherwise pull whatever is in `CurrentRun` whether or not this run
+        // put it there — and a thermal-only run puts nothing there at all, leaving the *previous*
+        // run's complete folder sitting where the pull would find it. That is how a 45-cycle qPCR
+        // run once came back as the archive of a reverse-transcription incubation.
+        //
+        // A real run's finish always changes the listing: the last plate read, the `ended` marker
+        // and the `.alf` all land in the moment §7.6's acknowledgement releases them. So an
+        // unchanged listing here is proof the folder is not this run's, and the caller collects
+        // the run's own report instead (see `staleAtFinish`).
+        if (finalAssembly && !changed) {
+          staleAtFinish.current = true;
+          setNote("This run wrote no run folder — collecting its report instead.");
+          return null;
+        }
+        staleAtFinish.current = false;
         if (changed || force) return await pull(dir.names, finalAssembly);
         return null;
       } finally {
@@ -448,6 +499,37 @@ export function useRunWatch(
       }
     },
     [refreshRunFolder, pull, checkAvailable],
+  );
+
+  /**
+   * Fetch the finished run's `.alf` report and put it in the file bar, selected.
+   *
+   * What a thermal-only run produces instead of a `.zpcr` — the instrument writes one report per
+   * run to `\Storage Card\PCRunReport` and clears that directory at the start of every run
+   * (`usb.md` §7.1/§7.10), so the report waiting there afterwards is this run's. It is a real file
+   * of the user's from that point on: an ordinary entry in the bar, in the catalog and in
+   * IndexedDB, which they can read, keep or delete like any other.
+   *
+   * Selected on arrival for the same reason a run this session watched start is: it is the thing
+   * that just came into existence because they pressed Start, and it is the only record that the
+   * run happened at all.
+   */
+  const collectReport = useCallback(
+    async (runName: string): Promise<string | null> => {
+      const report = await fetchRunReport();
+      if (!report) {
+        setNote(`Run "${runName}" finished, and left no report on the instrument.`);
+        return null;
+      }
+      const id = await onReportRef.current(report.name, report.bytes);
+      setNote(
+        id
+          ? `Run "${runName}" finished — its report is in the file bar.`
+          : `Run "${runName}" finished, but its report could not be opened.`,
+      );
+      return id;
+    },
+    [fetchRunReport],
   );
 
   /**
@@ -544,16 +626,36 @@ export function useRunWatch(
     acknowledged.current = status.runName;
     const finishedName = status.runName;
     const totalS = lastElapsed.current;
+    // Consumed here: it described *this* run, and the next one gets to say for itself.
+    const expectReport = reportOnly.current;
+    reportOnly.current = false;
     void (async () => {
-      setNote(`Run "${finishedName}" finished — collecting the last read.`);
+      setNote(
+        expectReport
+          ? `Run "${finishedName}" finished — collecting its report.`
+          : `Run "${finishedName}" finished — collecting the last read.`,
+      );
+      // Sent either way: the acknowledgement is what releases the instrument from holding the
+      // finished run, and a thermal-only run is held exactly as a qPCR one is.
       await acknowledgeFinishedRun();
       // Forced: the final read and `ended` land as part of this same moment, and waiting for the
       // signature to differ would just add a round trip. This is also the run's last `.zpcr`, so
       // the USB traffic log is attached here, if "save log" asks for one (see `finalAssembly`).
-      const id = await check(true, true);
-      if (id) setFinished({ name: finishedName, totalS: totalS ?? 0, fileName: id });
+      //
+      // Skipped outright when the run was known in advance to write no folder — there is nothing
+      // to list for. Otherwise the listing itself answers it: `check` declines a stale folder and
+      // says so through `staleAtFinish`, which is what catches a thermal-only run started at the
+      // instrument's own touchscreen.
+      const id = expectReport ? null : await check(true, true);
+      if (id) {
+        setFinished({ name: finishedName, totalS: totalS ?? 0, fileName: id });
+        return;
+      }
+      if (!expectReport && !staleAtFinish.current) return; // a failed pass, retried by the next edge
+      const reportId = await collectReport(finishedName);
+      if (reportId) setFinished({ name: finishedName, totalS: totalS ?? 0, fileName: reportId });
     })();
-  }, [connection, watching, status, acknowledgeFinishedRun, check]);
+  }, [connection, watching, status, acknowledgeFinishedRun, check, collectReport]);
 
   // --- the baseline listing on connect --------------------------------------------------------
   //
@@ -590,8 +692,22 @@ export function useRunWatch(
 
   // The seed is this run's first file, so the watcher treats it exactly as one of its own
   // snapshots from here on (see `RunWatchState.adopt`).
-  const adopt = useCallback((id: string) => setFileName(id), []);
+  // Adopting a seed is the opposite claim to `expectReportOnly`'s — this run *has* a file — so it
+  // also disarms it, which is what keeps a thermal-only start that never ran (cancelled, or the
+  // send failed) from being remembered against the next run.
+  const adopt = useCallback((id: string) => {
+    reportOnly.current = false;
+    setFileName(id);
+  }, []);
   const clearFinished = useCallback(() => setFinished(null), []);
+  const expectReportOnly = useCallback(() => {
+    reportOnly.current = true;
+    // Nothing of this run will land in a file of ours, so the watcher stops speaking for whatever
+    // file it was last following — otherwise the previous run's id would be reported as this run's
+    // when it ends.
+    setFileName(null);
+    setFinished(null);
+  }, []);
 
   return {
     watching,
@@ -601,6 +717,7 @@ export function useRunWatch(
     adopt,
     finished,
     clearFinished,
+    expectReportOnly,
     available,
     downloadAvailable,
   };

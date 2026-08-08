@@ -824,6 +824,28 @@ export class CfxDevice {
   }
 
   /**
+   * Collect the `.alf` report the finished run wrote to `\Storage Card\PCRunReport` (`usb.md`
+   * §7.10), or null if there isn't one.
+   *
+   * **This is the whole output of a thermal-only run.** A protocol with no `PLATEREAD` leaves
+   * `CurrentRun` untouched (see {@link RunPlan.producesRunFile}), so its report is the only record
+   * that it happened — its name, who started it, the protocol as the instrument actually executed
+   * it, the start and end times, and whether it completed.
+   *
+   * Takes the sole entry rather than matching a name: {@link clearRunReports} empties the
+   * directory at §7.1 of every start, so what is in there afterwards is this run's and only this
+   * run's. When several are somehow present — a start whose housekeeping failed — the last by name
+   * is taken, which is the newest, since the firmware names them `<yyyymmdd>_<hhmmss>_…`.
+   */
+  async runReport(): Promise<{ name: string; bytes: Uint8Array } | null> {
+    const dir = await this.listFiles(CFX_RUN_REPORT_DIR);
+    const reports = dir.names.filter((n) => /\.alf$/i.test(n)).sort();
+    const name = reports[reports.length - 1];
+    if (!name) return null;
+    return { name, bytes: await this.getFile(`${CFX_RUN_REPORT_DIR}\\${name}`) };
+  }
+
+  /**
    * Run a protocol, start to started (`usb.md` §7).
    *
    * The order is the capture's, and it is **not** the one §5's upload machinery suggests. The
@@ -840,6 +862,11 @@ export class CfxDevice {
    *      ADDCYCLES 0                            a no-op the capture sends as ordinary setup
    * 7.4  the files                              deposited into the run folder, after the start
    * ```
+   *
+   * §7.4 is skipped entirely for a thermal-only protocol, because there is no run folder to
+   * deposit into — `planRun` gives such a plan no uploads at all, and the loop below simply has
+   * nothing to do. See {@link RunPlan.producesRunFile}, and {@link runReport} for what that run
+   * leaves behind instead.
    *
    * **There is no confirmation step.** An earlier reading of the capture had `PROCEED` as the
    * "operator has closed the lid" confirmation; §7.5 measured it as *skip to the next step*,

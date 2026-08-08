@@ -333,6 +333,50 @@ describe("planRun", () => {
     expect(plan.startable).toBe(true);
     expect(plan.checks.map((c) => c.code)).toEqual(["no-plate-read"]);
   });
+
+  /**
+   * Measured against the instrument (`usb.md` §7.10): a `METHOD BLOCK` protocol with no
+   * `PLATEREAD` leaves `\Storage Card\CurrentRun` byte-identical from before the run to after the
+   * acknowledgement. So there is no run folder for the §7.4 deposit to complete — and depositing
+   * anyway drops this run's files into the *previous* run's folder, where the next pull carries
+   * them off as though they belonged to it.
+   */
+  it("deposits nothing for a protocol that produces no run folder", () => {
+    const thermal = planRun({
+      runDefinition: NO_READ,
+      name: "RT incubation",
+      protocolName: "YouSeq_RT",
+    });
+    expect(thermal.producesRunFile).toBe(false);
+    expect(thermal.uploads).toEqual([]);
+    // Still a real run: the commands and the start are untouched by any of this.
+    expect(thermal.commands[0]).toBe("PROTOCOL 'PCRUN'");
+    expect(thermal.remoteRun).toContain('"RT incubation"');
+
+    const qpcr = planRun({
+      runDefinition: ALL_CHANNELS,
+      plate: plateUsing([1]),
+      name: "RVP",
+      protocolName: "YouSeq_RP",
+    });
+    expect(qpcr.producesRunFile).toBe(true);
+    expect(qpcr.uploads.map((u) => u.name)).toEqual([
+      "YouSeq_RP.prcl.txt",
+      "ProtocolName.txt",
+      "plate.plt.csv",
+      "zpcrweb.json",
+    ]);
+  });
+
+  /** The name is still required without a run file — it is what the instrument files its own
+   * report under — but saying it names a file that is never coming would send someone looking. */
+  it("asks for a name in terms of the report when there will be no run file", () => {
+    const anon = planRun({ runDefinition: NO_READ });
+    expect(anon.startable).toBe(false);
+    expect(anon.checks[0]).toMatchObject({ code: "no-experiment-name", severity: "error" });
+    expect(anon.checks[0]!.message).toContain("run report");
+    expect(anon.checks[0]!.message).not.toContain("file is named");
+  });
 });
 
 describe("runProgressFromNames — the begun/ended markers", () => {

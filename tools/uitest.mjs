@@ -208,6 +208,73 @@ async function noPlateReadRunChecks(chrome, origin) {
 }
 
 /**
+ * A standalone `.alf` run report opens as a file of its own.
+ *
+ * This is what a thermal-only run produces instead of a `.zpcr` — the instrument writes no run
+ * folder for a protocol with no `PLATEREAD` (`usb.md` §7.10), so the app collects the report and
+ * puts it in the bar. The sample is a real one, off the instrument: a 2:36 `METHOD BLOCK` hold.
+ *
+ * Three things have to hold. It has to be *admitted* at all, which is a file-kind question and the
+ * one this used to fail on. Only Overview and Raw may be enabled — a report has no curves, no
+ * plate and no protocol to edit, and every other tab rendering an empty frame is the failure this
+ * app greys tabs out to avoid. And Overview has to show the report itself rather than a bare
+ * identity card, since there is no second tab for it to live on.
+ */
+async function reportFileChecks(chrome, origin) {
+  console.log("\na standalone .alf run report");
+  const cdp = await openPage(chrome.base, origin);
+  await emptyReload(cdp, origin);
+  await loadFile(cdp, join(REPO, "samples/20260807_231326_CT019138_AGBLK1.alf"));
+  // The chip shows the file bar's tidied name ("CT019138 AGBLK1"), not the file's own.
+  await waitFor(() => chipPresent(cdp, "AGBLK1"), { what: "the report's chip" });
+
+  const tabs = await cdp
+    .eval(
+      `JSON.stringify(Object.fromEntries([...document.querySelectorAll('.viewbar [role="tab"]')]
+         .map((b) => [b.textContent.trim(), !b.disabled])))`,
+    )
+    .then(JSON.parse);
+  check(
+    "only Overview and Raw are enabled — a report has nothing for the other tabs",
+    tabs.Overview === true &&
+      tabs.Raw === true &&
+      tabs.Curves === false &&
+      tabs.Plates === false &&
+      tabs.Protocol === false &&
+      tabs.Reference === false &&
+      tabs.Calibration === false,
+    JSON.stringify(tabs),
+  );
+
+  const landed = await activeTab(cdp);
+  check("it opens on Overview", landed === "Overview", landed);
+
+  const overview = await cdp.eval(
+    `(document.querySelector(".overview")?.textContent ?? "").replace(/\\s+/g, " ")`,
+  );
+  check(
+    "the identity card names it as a report and states the run, time and outcome",
+    overview.includes("Report:") &&
+      overview.includes("AGBLK1") &&
+      overview.includes("00:02:36") &&
+      overview.includes("No errors reported"),
+    overview.slice(0, 220),
+  );
+  check(
+    "…and the decoded report itself is on it, protocol as executed and all",
+    overview.includes("Protocol as executed") && overview.includes("TEMP 37.0,30"),
+    overview.slice(0, 400),
+  );
+
+  await clickTab(cdp, "Raw");
+  const raw = await cdp.eval(
+    `(document.querySelector(".raw__dump")?.textContent ?? "").slice(0, 120)`,
+  );
+  check("Raw shows the report's own bytes", raw.includes("AGBLK1*admin*"), raw);
+  cdp.close();
+}
+
+/**
  * A run that stopped short of its protocol says so, in the two places that matter.
  *
  * The archive is a genuine 3-read gradient run with two reads deleted, so the app has to reach
@@ -4612,6 +4679,7 @@ async function main() {
     await runSeedChecks(chrome, origin);
     await incompleteRunChecks(chrome, origin);
     await noPlateReadRunChecks(chrome, origin);
+    await reportFileChecks(chrome, origin);
     await explodedStorageChecks(chrome, origin);
     await experimentNameChecks(chrome, origin);
     await deleteConfirmChecks(chrome, origin);

@@ -3,11 +3,12 @@
 The web app (`@zpcrweb/web`) is a browser UI over [`@zpcrweb/core`](../../packages/core). It
 holds a catalog of files — `.zpcr`, `.pcrd`, a Biomeme run export (`.bmrun`, see "A third format:
 Biomeme" below), a standalone plate file (`.pltd` or zpcrweb's own `.plt.csv`, see "Standalone
-plate entries and attach" below) or a thermal protocol (`.prcl.txt`) — **loads** some of them,
+plate entries and attach" below), a thermal protocol (`.prcl.txt`) or an instrument run report
+(`.alf`, see "A run report on its own" below) — **loads** some of them,
 **selects exactly one** of those, and explores it through up to seven views: Overview, Protocol,
 Curves, Plates, Reference, Calibration and Raw (a standalone plate file only gets Overview, Plates
-and Raw; a standalone protocol file only Overview, Protocol and Raw; a Biomeme run only Overview,
-Protocol, Curves, Plates and Raw — see below). Two further tabs are about no file at all: **Files**,
+and Raw; a standalone protocol file only Overview, Protocol and Raw; a run report only Overview and
+Raw; a Biomeme run only Overview, Protocol, Curves, Plates and Raw — see below). Two further tabs are about no file at all: **Files**,
 the catalog, and **Instrument**, a live cycler over USB.
 
 Those three sets — the catalog, the loaded files, the one selection — are the app's spine; see
@@ -19,8 +20,9 @@ Those three sets — the catalog, the loaded files, the one selection — are th
 observation.**
 
 Concretely, outside `RawFilesView`/`PcrdRawView`, the `App.tsx` line that chooses between them,
-and the capability checks that disable `ViewBar` tabs for a standalone plate or protocol
-entry or a Biomeme run (`isStandalonePlate`/`isStandaloneProtocol`/`isBiomeme` in `App.tsx` — a real capability difference: a
+and the capability checks that disable `ViewBar` tabs for a standalone plate, protocol or report
+entry or a Biomeme run (`isStandalonePlate`/`isStandaloneProtocol`/`isStandaloneReport`/`isBiomeme`
+in `App.tsx` — a real capability difference: a
 Biomeme `Zpcr` has no reference row or `.Dcal` calibrations for Reference/Calibration to show,
 same as a standalone plate has no curves), no component may:
 
@@ -122,10 +124,10 @@ carries `documentXml` for a successfully-decoded `.pcrd` — the full raw docume
 of `RunResult` is neutral by construction.
 
 A chip leads with an icon that says two things at once (`components/FileIcons.tsx`): its **shape**
-is what the file is — a run, a plate map or a thermal protocol — and its **color** is the
+is what the file is — a run, a plate map, a thermal protocol or a run report — and its **color** is the
 encryption status above. The shape comes from core's `fileCategory()` (`fileKind.ts`), not from the
 extension, which is why the two plate encodings (`.pltd`, `.plt.csv`) and the two protocol ones
-(`.prcl`, `.prcl.txt`) each draw as one icon: the bar shows the six accepted formats as the three
+(`.prcl`, `.prcl.txt`) each draw as one icon: the bar shows the seven accepted formats as the four
 kinds of thing they actually are — the same grouping that decides which half of an experiment a file
 can be attached as. The icon replaced a plain colored dot, which carried the encryption half alone; a
 protocol chip's "proto" badge went with it, the icon now being what tells a protocol from a plate at a
@@ -284,16 +286,48 @@ things:
   `parseRunDefinition`'s (`protocol.md`) — the view reads nothing out of the text itself.
 - **Raw** (`StandaloneRawView`, shared with `.pltd`/`.plt.csv`/Biomeme) — the file's own bytes
   verbatim, since a `.prcl.txt` is already plain UTF-8 text with nothing to decrypt.
-A `.prcl.txt` is not something that can be **started**, only attached to an experiment that can
-(see "The Instrument view"). The Instrument tab is still reachable while one is selected — it is
-reachable always, being about no file — but selecting a protocol file says nothing about what the
-instrument should run, and the view goes on showing the experiment it was already pointed at.
+A `.prcl.txt` **with a `PLATEREAD` in it** is not something that can be started, only attached to
+an experiment that can (see "The Instrument view"): the run it would produce wants the name, plate
+and identity an experiment file carries. The Instrument tab is still reachable while one is
+selected — it is reachable always, being about no file — but selecting such a protocol says nothing
+about what the instrument should run, and the view goes on showing the experiment it was already
+pointed at.
+
+**A protocol with no `PLATEREAD` is the exception, and is started as itself.** The instrument
+builds no run folder for one (`usb.md` §7.10), so there is no `.zpcr` coming and an experiment file
+would be a container for results that never arrive. `App`'s `instrumentExperiment` therefore makes
+such a `.prcl.txt` the Instrument view's subject directly, named after the file, and
+`startExperiment` sends it without marking anything begun. What comes back is the run's `.alf`
+report — see "A run report on its own" below.
 
 Enabling Overview is what removed the old special case in `App.tsx`, where a `.prcl.txt` selected
 on any tab was forced into the Instrument view because it had no file-backed view to render. It
 now falls back like every other file, to the first tab its kind enables — and **loading one lands
 on Overview** (`addFiles`), because opening a protocol is asking what it is; Instrument is where
 you go when you mean to start a run.
+
+## A run report on its own
+
+An `.alf` (`alf.md`) is the fourth kind of top-level file, `LoadedFile.kind === "alf"` — and the
+first whose `fileCategory` is neither run, plate nor protocol but **`report`**. That distinction is
+load-bearing: a report says a protocol executed, when, for how long and whether it completed, and
+carries no fluorescence, no plate and no editable protocol. Categorising it as a run would offer it
+everywhere a run belongs, and every one of those places would find it empty.
+
+It enables **two** tabs, `["overview","raw"]`:
+
+- **Overview** (`StandaloneReportOverview`) — unlike a `.prcl.txt`, whose Overview is the bare
+  identity card because its content lives on Protocol, a report *is* its content and there is no
+  second tab for it to live on. So the shared `OverviewPanel` gets four extra rows (the run's name,
+  when it ran, how long it took, the outcome it reports) and `DecodedAlf` in its `children` slot —
+  the same decode an in-archive report gets in the Raw view, unchanged.
+- **Raw** (`StandaloneRawView`, shared with `.pltd`/`.plt.csv`/`.prcl.txt`/Biomeme) — the report's
+  own text, which is already plain UTF-8.
+
+Reports arrive two ways: dropped in like any other file, or collected from the instrument at the
+end of a **thermal-only run**, which produces one instead of a `.zpcr` (`state/useRunWatch.ts`'s
+`collectReport`). Either way it is an ordinary file of the user's from that moment — in the bar, in
+the catalog, in IndexedDB, renameable and deletable like any other.
 
 ### One Protocol view (`ProtocolView`)
 
@@ -2790,6 +2824,29 @@ state, so they can wait for whichever real edge lists next. That flag's false→
 anyway, though, purely to tell a run *starting* apart from one *found* already going on connect —
 the two listings are identical, so only the live transition tells them apart — which is what the
 `activate` flag below rides on.
+
+#### A run that writes no run folder
+
+**The end-of-run pass is the one place a stale folder gets mistaken for a run**, because it is
+forced: it pulls whatever `CurrentRun` holds without waiting for the listing to change. That is
+fine for a qPCR run, whose finish always adds the last read, `ended` and the report in the same
+moment — and wrong for a **thermal-only** one, which leaves the folder completely untouched
+(`usb.md` §7.10, measured). The previous run's complete folder is then sitting exactly where the
+pull would find it, which is how one committed sample came to be a two-minute incubation carrying
+another run's 45 plate reads and its `.alf`.
+
+So an **unchanged listing at the finish is treated as proof the folder is not this run's**
+(`check`'s `finalAssembly` branch, reported through `staleAtFinish`), and the watcher collects the
+run's own `.alf` from `\Storage Card\PCRunReport` instead — `collectReport`, which adds it as an
+ordinary file through the same `addFiles` path a drop takes, and selects it, because it is the only
+record that the run happened at all. `CfxDevice.clearRunReports` empties that directory at the
+start of every run (§7.1), so the report waiting there afterwards is unambiguously this run's.
+
+Deriving it from the listing rather than from the protocol is what makes it hold for a thermal-only
+run started at the instrument's **own touchscreen**, which this app never planned. When the app
+*did* plan it, `startExperiment` says so in advance via `expectReportOnly` — that only skips the
+listing that would otherwise discover the same thing, and stops the run's last moments being spent
+fetching a folder already known not to be ours.
 
 On each changed listing the watcher reads back the run's file, fetches what the folder holds that
 the file lacks, checks and names the result with `zpcrFromRunFiles`, and hands what it *fetched* to

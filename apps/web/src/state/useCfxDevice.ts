@@ -560,6 +560,21 @@ export function useCfxDevice() {
   }, [withBusy]);
 
   /**
+   * Collect the `.alf` report the run that just finished wrote — `CfxDevice.runReport`.
+   *
+   * The whole output of a thermal-only run, which builds no run folder at all (see
+   * `RunPlan.producesRunFile`), so this is what the watcher fetches in place of a `.zpcr`. Returns
+   * null when the directory holds no report, or when the read fails: a report that doesn't arrive
+   * is worth nothing more than a note in the rail, since by then the run itself is over and
+   * nothing about it can be lost by this failing.
+   */
+  const fetchRunReport = useCallback(
+    async () =>
+      (await withBusy("Fetching the run report", (d) => d.runReport())) ?? null,
+    [withBusy],
+  );
+
+  /**
    * Stop the run in progress — `usb.md` §7.8, driven by `CfxDevice.cancelRun`.
    *
    * Everything about *how* to stop safely lives in core; this adds the two things a browser
@@ -755,6 +770,7 @@ export function useCfxDevice() {
     cancelRun,
     setRunPaused,
     acknowledgeFinishedRun,
+    fetchRunReport,
     refreshRunFolder,
     runFolder,
     runProgress,

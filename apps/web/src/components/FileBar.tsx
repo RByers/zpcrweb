@@ -18,6 +18,7 @@ const CATEGORY_TEXT: Record<FileCategory, string> = {
   run: "Run",
   plate: "Plate map",
   protocol: "Thermal protocol",
+  report: "Run report",
 };
 const ENCRYPTION_TEXT: Record<EncryptionStatus["kind"], string> = {
   none: "not encrypted",
@@ -94,8 +95,9 @@ function fileEncryptionStatus(
 ): EncryptionStatus {
   if (f.kind === "pltd" || f.kind === "csv") return plateFileEncryptionStatus(plateFile, password);
   // A `.prcl.txt` is plaintext by definition — it is admitted only once it has parsed as one
-  // (`useZpcrStore`'s `fileKind`), so there is no locked or failed state to show.
-  if (f.kind === "prcl") return { kind: "none" };
+  // (`useZpcrStore`'s `fileKind`), so there is no locked or failed state to show. An `.alf` report
+  // is the same: plain text, admitted only once `parseAlf` has read it.
+  if (f.kind === "prcl" || f.kind === "alf") return { kind: "none" };
   return runEncryptionStatus(run, password);
 }
 
@@ -118,7 +120,8 @@ function wellsText(f: LoadedFile, plateFile: PlateFileResult | undefined): strin
 function meta(f: LoadedFile, run: RunResult | undefined, plateFile: PlateFileResult | undefined): string {
   // A protocol has no well count to report, and no longer needs the word "proto" either: the
   // chip's icon is what tells the two override kinds apart at a glance in the Instrument view.
-  if (f.kind === "prcl") return "";
+  // A report has none either, and its own detail is its Overview.
+  if (f.kind === "prcl" || f.kind === "alf") return "";
   if (f.kind === "pltd" || f.kind === "csv") {
     if (plateFile?.plate) return "";
     return plateFile?.needsPassword ? "🔒" : plateFile?.error ? "⚠" : "…";

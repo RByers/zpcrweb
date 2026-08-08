@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import {
+  parseRunDefinition,
   plateToCsv,
   ProtocolBuilder,
   runFileBaseName,
@@ -36,6 +37,7 @@ import { StandalonePlateView } from "./components/views/StandalonePlateView";
 import { StandalonePlateOverviewView } from "./components/views/StandalonePlateOverviewView";
 import { StandaloneRawView } from "./components/views/StandaloneRawView";
 import { StandaloneProtocolOverview } from "./components/views/StandaloneProtocolOverview";
+import { StandaloneReportOverview } from "./components/views/StandaloneReportOverview";
 import { ProtocolView } from "./components/views/ProtocolView";
 import { AboutView } from "./components/views/AboutView";
 import { InstrumentView } from "./components/views/InstrumentView";
@@ -62,6 +64,11 @@ const BIOMEME_VIEWS = ["overview", "protocol", "curves", "plates", "raw"] as con
  * no curves and no plate, and no longer lists Instrument: a protocol file is not something that
  * can be started, only attached to an experiment that can (see {@link InstrumentView}). */
 const PROTOCOL_VIEWS = ["overview", "protocol", "raw"] as const;
+/** An `.alf` run report is a record of a run that happened, holding no fluorescence, no plate and
+ * no protocol to edit — so Overview (which is where the decoded report itself is, see
+ * {@link StandaloneReportOverview}) and Raw, and nothing else. It is what a thermal-only run
+ * produces instead of a `.zpcr` (`state/useRunWatch.ts`). */
+const REPORT_VIEWS = ["overview", "raw"] as const;
 
 /** A `.pltd`/`.plt.csv` uploaded on its own, rather than a run — only these three tabs apply. */
 const isStandaloneKind = (kind: string) => kind === "pltd" || kind === "csv";
@@ -86,6 +93,7 @@ function enabledViewsFor(kind: string, zpcr?: Zpcr | null): readonly ViewId[] {
   if (isStandaloneKind(kind)) return STANDALONE_VIEWS;
   if (kind === "biomeme") return BIOMEME_VIEWS;
   if (kind === "prcl") return PROTOCOL_VIEWS;
+  if (kind === "alf") return REPORT_VIEWS;
   if (!zpcr) return [];
   // Instrument isn't here: it is not a lens on this file, or on any file (see `ViewBar`). Which
   // experiment it would *start* is asked in the view itself — `instrumentExperiment` below.
@@ -228,6 +236,18 @@ export function App() {
           merge: !run.whole,
         });
       },
+      [store],
+    ),
+    // A thermal-only run's whole output: the instrument's `.alf` report, added exactly as a
+    // dropped file would be — validated, persisted and selected — so it is a file of the user's
+    // from the moment it lands rather than a special case the rest of the app has to know about.
+    // Marked modified: like every file this app makes rather than reads, it exists only in the
+    // browser until it is saved.
+    useCallback(
+      async (name: string, bytes: Uint8Array) =>
+        store.addFiles([new File([bytes.slice()], name, { lastModified: Date.now() })], {
+          modified: true,
+        }),
       [store],
     ),
     // What the app is holding for a run — the watcher's only record of what it has already
@@ -408,6 +428,12 @@ export function App() {
    * therefore differ from the one we started with. That id is what the watcher adopts, so its first
    * snapshot supersedes this file rather than landing beside it, and the pinned names are what keep
    * every later snapshot on the same file.
+   *
+   * **A thermal-only run skips all of that.** It has no run folder coming
+   * (`RunPlan.producesRunFile`), so there is nothing for the watcher to adopt and nothing for a
+   * `begun` marker to mean — and the file it was started from is a `.prcl.txt`, a document rather
+   * than a record of this run, which marking would quietly rewrite. So the run is simply sent, and
+   * what comes back is the instrument's own report (`useRunWatch`'s `collectReport`).
    */
   const startExperiment = useCallback(
     async (plan: RunPlan, fileName: string) => {
@@ -415,6 +441,10 @@ export function App() {
       // target now, and the file bar may well be pointed somewhere else entirely.
       const id = fileName;
       if (!id) return;
+      if (!plan.producesRunFile) {
+        runWatch.expectReportOnly();
+        return;
+      }
       const started = await store.beginExperiment(id);
       if (!started) return;
       setStartedRun({
@@ -574,6 +604,36 @@ export function App() {
    * plain answer was enough.
    */
   const instrumentExperiment = useMemo(() => {
+    // A standalone `.prcl.txt` is startable as itself, but only when it never reads the plate.
+    // Such a run leaves the instrument's run folder untouched and so produces no `.zpcr`
+    // (`RunPlan.producesRunFile`), which is exactly why it needs no experiment file: there would
+    // be nothing to write into it. A protocol *with* a `PLATEREAD` does produce a run, and a run
+    // wants the name, plate and identity an experiment carries — so that one still goes through
+    // "New experiment" as before, and this returns nothing for it.
+    if (active?.kind === "prcl" && store.activeProtocolFile) {
+      const runDefinition = store.activeProtocolFile;
+      const readsPlate = (() => {
+        try {
+          return parseRunDefinition(runDefinition).directives.some((d) => d.verb === "PLATEREAD");
+        } catch {
+          return true; // unreadable: don't offer to start it bare
+        }
+      })();
+      if (readsPlate) return null;
+      // Named after the file, and `named` regardless: there is no Overview field to fill in for a
+      // protocol file, and the name's only job here is to be the run's — which is what the
+      // instrument files its report under.
+      const base = splitFileName(active.name).base;
+      return {
+        fileName: active.name,
+        name: base,
+        named: !!base,
+        zpcr: null,
+        protocolText: runDefinition,
+        pending: true,
+        inProgress: false,
+      };
+    }
     if (!active || !activeRun?.zpcr) return null;
     const zpcr = activeRun.zpcr;
     const identity = store.experiments.get(active.name);
@@ -582,12 +642,13 @@ export function App() {
       name: identity?.name ?? active.name,
       named: identity?.named ?? false,
       zpcr,
+      protocolText: zpcr.protocolText || null,
       pending: isPendingExperiment(active.kind, zpcr),
       // Derived from the file's own markers, so it stays true across a reload mid-run and doesn't
       // depend on this app being the one that started it (`runFolder.ts`).
       inProgress: runProgressFromNames(zpcr.archive.entries).inProgress,
     };
-  }, [active, activeRun, store.experiments]);
+  }, [active, activeRun, store.experiments, store.activeProtocolFile]);
 
 
   if (store.loading) {
@@ -633,9 +694,14 @@ export function App() {
 
   const isStandalonePlate = !!active && isStandaloneKind(active.kind);
   const isStandaloneProtocol = active?.kind === "prcl";
-  const zpcr = isStandalonePlate || isStandaloneProtocol ? null : activeRun?.zpcr ?? null;
+  const isStandaloneReport = active?.kind === "alf";
+  const zpcr =
+    isStandalonePlate || isStandaloneProtocol || isStandaloneReport
+      ? null
+      : activeRun?.zpcr ?? null;
   /** The run is here but not open yet: the password prompt, or a decode that failed. */
-  const gated = !!active && !zpcr && !isStandalonePlate && !isStandaloneProtocol;
+  const gated =
+    !!active && !zpcr && !isStandalonePlate && !isStandaloneProtocol && !isStandaloneReport;
   /**
    * What the view bar enables. Three cases collapse to the same empty answer, because they are
    * the same fact — no tab has a file to be a lens on:
@@ -798,6 +864,20 @@ export function App() {
                 }
                 autoFocusName={nameProtocolFor === active.name}
                 onAutoFocusHandled={clearNameProtocol}
+              />
+            )}
+            {view === "raw" && <StandaloneRawView key={active.name} file={active} />}
+          </>
+        ) : isStandaloneReport ? (
+          <>
+            {view === "overview" && (
+              <StandaloneReportOverview
+                file={active}
+                onRenameFile={(name) => void store.renameFile(active.name, name)}
+                onDownload={downloadActiveFile}
+                onClone={() => void cloneActiveFile()}
+                autoEditName={editNameFor === active.name}
+                onAutoEditHandled={clearEditName}
               />
             )}
             {view === "raw" && <StandaloneRawView key={active.name} file={active} />}

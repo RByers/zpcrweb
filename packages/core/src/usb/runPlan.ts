@@ -137,8 +137,29 @@ export interface RunPlan {
   commands: string[];
   /** The `RemoteRun` line that starts the authored protocol. */
   remoteRun: string;
-  /** The files to upload, in the order they are sent. */
+  /** The files to upload, in the order they are sent. Empty when {@link producesRunFile} is
+   * false — see there. */
   uploads: RunUpload[];
+  /**
+   * Will this run leave a `.zpcr` behind?
+   *
+   * True for a protocol with a `PLATEREAD`, which is the only kind the instrument builds a run
+   * folder for. **Measured**: starting a `METHOD BLOCK` protocol with no `PLATEREAD` leaves
+   * `\Storage Card\CurrentRun` untouched from first command to last — same 86 entries before the
+   * run, during it and after the §7.6 acknowledgement, with the previous run's `RunInfo.xml`,
+   * `ProtocolRunDefinition.txt`, plate reads and `ended` marker all still in place (`usb.md`
+   * §7.10). A run folder pulled back after such a run is therefore somebody else's run, not this
+   * one, which is exactly how a `.zpcr` came to be assembled out of a stale folder.
+   *
+   * The one thing such a run does write is its `.alf` report, in `\Storage Card\PCRunReport`.
+   *
+   * It also decides {@link uploads}: the §7.4 deposit exists to make the *run folder* a
+   * self-contained experiment, so with no folder being written there is nothing for it to
+   * complete — and the files would land in the previous run's folder, where they are pollution
+   * that the next run to be pulled would carry away. So a thermal-only plan deposits nothing and
+   * the run is purely the commands.
+   */
+  producesRunFile: boolean;
   /** What the plate and protocol say about each other — see {@link checkRunPlan}. */
   checks: RunCheck[];
   /** True when no check is an `error`, i.e. this plan may be started. */
@@ -297,9 +318,10 @@ export function checkRunPlan(
 
   // Worth saying, but never a blocker: an incubation, a reverse-transcription step or any other
   // use of the block as a heated surface is a protocol with no PLATEREAD on purpose, and the
-  // instrument runs it perfectly well. Such a run produces no `.Plateread` files, so its `.zpcr`
-  // has no curves to show and the app disables the views that would need them (`App`'s
-  // `runViews`) — which is the honest outcome, not a failure.
+  // instrument runs it perfectly well. It also builds no run folder for one (see
+  // `RunPlan.producesRunFile`), so the run leaves behind its report and nothing else — which is
+  // the honest outcome, not a failure, but it is a surprise worth stating before the start rather
+  // than after.
   if (reads.length === 0) {
     checks.push({
       severity: "warning",
@@ -307,7 +329,8 @@ export function checkRunPlan(
       message:
         "This protocol never reads the plate: it has no PLATEREAD step, so the run will cycle " +
         "temperatures and record no fluorescence at all. That is what an incubation or " +
-        "reverse-transcription run wants; a qPCR run needs a plate read.",
+        "reverse-transcription run wants; a qPCR run needs a plate read. The instrument keeps no " +
+        "run folder for such a run, so it will produce a short run report rather than a run file.",
     });
     // Nothing below applies: there is no mask to compare against the plate, and a run that reads
     // nothing has no fluorescence for a plate's well mapping to describe, so a missing plate is
@@ -402,6 +425,11 @@ export function planRun(options: PlanRunOptions): RunPlan {
     ...splitRunDefinition(runDefinition),
   ];
 
+  // Whether the instrument will build a run folder for this at all — see `RunPlan.producesRunFile`
+  // for the measurement. Everything deposited below is deposited *into* that folder, so a plan
+  // that won't get one deposits nothing.
+  const producesRunFile = program.directives.some((d) => d.verb === "PLATEREAD");
+
   // The deposited files keep the protocol's and the plate's own names, never the run's — see
   // `PlanRunOptions.plateName` for why the three namespaces stay separate.
   const protocolBase = uploadBase(options.protocolName, "protocol");
@@ -490,7 +518,12 @@ export function planRun(options: PlanRunOptions): RunPlan {
     checks.unshift({
       severity: "error",
       code: "no-experiment-name",
-      message: "Name this experiment before starting it — the run's file is named after it.",
+      // A thermal-only run has no file to be named after it, but the name is still what the
+      // instrument's own report is filed under, so it is still required — just for a different
+      // reason, and saying the wrong one would send someone looking for a file that never comes.
+      message: producesRunFile
+        ? "Name this experiment before starting it — the run's file is named after it."
+        : "Name this run before starting it — the instrument's run report is filed under it.",
     });
   }
   return {
@@ -498,8 +531,10 @@ export function planRun(options: PlanRunOptions): RunPlan {
     program,
     commands,
     remoteRun,
-    uploads,
+    // Deposited into the run folder, so only when there will be one. See `producesRunFile`.
+    uploads: producesRunFile ? uploads : [],
     checks,
+    producesRunFile,
     startable: !checks.some((c) => c.severity === "error"),
   };
 }

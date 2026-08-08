@@ -91,9 +91,10 @@ export function DecodedAlf({ report }: { report: AlfReport }) {
           <Pair k="Volume" v={h.sampleVolumeUl != null ? `${h.sampleVolumeUl} µL` : "—"} />
           <Pair k="Finished" v={report.completionPhrase ?? "— (no sentinel line)"} />
         </dl>
+        {/* alf.md §4: the header states no zone, so the times are the instrument's own clock. */}
         <p className="decoded__hint">
           The instrument's own record of the run, independent of <code>RunInfo.xml</code> — times
-          are the instrument's local clock, with no zone stated (alf.md §4).
+          are the instrument's local clock, with no time zone stated.
         </p>
       </section>
 
@@ -110,19 +111,21 @@ export function DecodedAlf({ report }: { report: AlfReport }) {
           <Flag k="Critical" on={e.criticalError} />
           <Pair k="Emulation" v={e.emulationUsed ? e.emulationMode || "yes" : "no"} />
         </dl>
+        {/* alf.md §6: every sample is clean, so only the shape of the flags is certain. */}
         <p className="decoded__hint">
           Worth checking before trusting the curves: a run that lost power or was aborted has
           later cycles that may not mean what they seem. Every sample the format was decoded from
-          was clean, so the failure encodings are unverified (alf.md §6) — a flag is read as set
+          was clean, so the failure encodings have never been seen set — a flag is read as raised
           only for the literal <code>True</code>.
         </p>
       </section>
 
       <section className="decoded__block">
         <h3 className="decoded__h">Protocol as executed</h3>
+        {/* alf.md §5 and protocol.md §8: the report's copy is post-expansion. */}
         <p className="decoded__hint">
           What actually ran, with the real scan mask — the archive's <code>.prcl</code> holds what
-          was <em>authored</em> instead (alf.md §5, protocol.md §8).
+          was <em>authored</em> instead.
         </p>
         <ProtocolDecoded text={report.runDefinition} />
       </section>
@@ -132,10 +135,11 @@ export function DecodedAlf({ report }: { report: AlfReport }) {
           Execution log — {report.steps.length} steps, {report.plateReadCount} plate reads
           {stages > 1 ? `, ${stages} stages` : ""}
         </h3>
+        {/* alf.md §7.4 for the timestamp meaning, §7.1 for GOTO never being logged. */}
         <p className="decoded__hint">
           One line per step <em>execution</em>. A timestamp is when the step began, so "took" is
-          the next step's start minus this one's — the only place a ramp cost is measurable (alf.md
-          §7.4). <code>GOTO</code> is never logged, which is why the step numbers jump (§7.1).
+          the next step's start minus this one's — the only place a ramp cost is measurable.{" "}
+          <code>GOTO</code> is never logged, which is why the step numbers jump.
         </p>
         <div className="decoded__gridwrap">
           <table className="decoded__tbl decoded__alf mono">

@@ -1,8 +1,9 @@
 /**
- * The glyph on a file chip, saying **what the file is**: a run, a plate map, or a thermal
- * protocol. Not what it is encoded as — a `.pltd` and a `.plt.csv` are both a plate and get the
- * same icon, which is the point: the file bar shows the six accepted formats as the three kinds of
- * thing they actually are. The mapping is the library's ({@link fileCategory}), not this file's.
+ * The glyph on a file chip, saying **what the file is**: a run, a plate map, a thermal protocol,
+ * or a run report. Not what it is encoded as — a `.pltd` and a `.plt.csv` are both a plate and get
+ * the same icon, which is the point: the file bar shows the seven accepted formats as the four
+ * kinds of thing they actually are. The mapping is the library's ({@link fileCategory}), not this
+ * file's.
  *
  * Colour is not part of the shape: the icon draws in `currentColor`, and `FileBar` sets that from
  * the chip's *encryption* status — the meaning the dot these replaced used to carry alone. Shape
@@ -72,6 +73,17 @@ export function ProtocolFileIcon() {
   );
 }
 
+/** A run report (`.alf`): a page with ruled lines, since that is what it is — the instrument's
+ * written account of a run rather than any of the run's data. */
+export function ReportFileIcon() {
+  return (
+    <Svg>
+      <path d="M3.5 1.5h6l3 3v10h-9z" />
+      <path d="M5.5 7.5h5M5.5 10h5M5.5 12.5h3" />
+    </Svg>
+  );
+}
+
 /** The icon for a loaded file, chosen by what the file is rather than how it is encoded. */
 export function FileKindIcon({ kind }: { kind: FileKind }) {
   switch (fileCategory(kind)) {
@@ -79,6 +91,8 @@ export function FileKindIcon({ kind }: { kind: FileKind }) {
       return <PlateFileIcon />;
     case "protocol":
       return <ProtocolFileIcon />;
+    case "report":
+      return <ReportFileIcon />;
     default:
       return <RunFileIcon />;
   }

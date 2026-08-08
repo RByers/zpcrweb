@@ -9,8 +9,10 @@ import {
   buildExperimentArchive,
   formatRunDefinitionText,
   hasZpcrwebSettings,
+  isAlfName,
   markExperimentBegun,
   matchesSupportedExtension,
+  parseAlf,
   parseBiomeme,
   parsePcrd,
   parsePlateCsv,
@@ -723,6 +725,7 @@ function fileKind(name: string, bytes?: Uint8Array): FileKind | null {
   if (/\.pltd$/i.test(name)) return "pltd";
   if (/\.csv$/i.test(name)) return "csv";
   if (/\.bmrun$/i.test(name)) return "biomeme";
+  if (isAlfName(name)) return "alf";
   // `.txt` is far too generic an extension to route on, so it is admitted only when the content
   // really is a run definition (`prcl.md` §3.1), unlike every extension above, which names its
   // format. That also lets an instrument's own `ProtocolRunDefinition.txt` in unrenamed.
@@ -763,7 +766,7 @@ function decodeFile(name: string, bytes: Uint8Array): { kind: FileKind; content:
         ? // The name got this far, so say what was wrong with the *content* rather than repeating
           // the extension list — a `.txt` is only ever rejected for that.
           "not a thermal protocol (.prcl.txt)"
-        : "not a .zpcr, .pcrd, .pltd, .csv, .prcl.txt or .bmrun file",
+        : "not a .zpcr, .pcrd, .pltd, .csv, .prcl.txt, .alf or .bmrun file",
     );
   }
   if (kind === "zpcr") {
@@ -776,6 +779,9 @@ function decodeFile(name: string, bytes: Uint8Array): { kind: FileKind; content:
   else if (kind === "pltd") parsePltd(bytes);
   // Already validated by `fileKind`'s content sniff — parsing again would only repeat it.
   else if (kind === "prcl") void 0;
+  // A report is validated by parsing it, the same as every binary format above: an `.alf` that
+  // doesn't decode is not a report this app can show anything of.
+  else if (kind === "alf") parseAlf(new TextDecoder().decode(bytes));
   else parsePlateCsv(new TextDecoder().decode(bytes));
   return { kind, content: plainContent(bytes) };
 }

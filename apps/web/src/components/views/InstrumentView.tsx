@@ -29,9 +29,16 @@
  * | The experiment | This view |
  * | ----------- | --------- |
  * | a pending experiment (no results yet) | starts it — Start is armed once it has a protocol |
+ * | a standalone `.prcl.txt` with no `PLATEREAD` | starts it directly — no experiment file at all |
  * | a run in progress | won't start it; says it is running, and offers a clone for the next one |
  * | a run that is over | won't start it; offers to clone it instead |
  * | anything else, or nothing loaded | says so, and points at where experiments come from |
+ *
+ * The second row is the exception the rest of the rule is worth stating around. A thermal-only
+ * protocol — an incubation, a reverse transcription — makes the instrument no run folder and so
+ * leaves no `.zpcr` (`RunPlan.producesRunFile`), which means wrapping it in an experiment file
+ * would be inventing a container for results that are never coming. So such a protocol is started
+ * as itself, and what comes back is the instrument's own run report (`useRunWatch`).
  *
  * Layout reuses the Curves view's rail + content grid so it reads as the same kind of surface:
  * the rail carries connection, identity, status and the commands that actuate the instrument
@@ -62,7 +69,15 @@ export interface InstrumentExperiment {
   /** True when that name was actually given rather than derived from the file name; an experiment
    * still carrying its bare-date placeholder can't be started (`lib/experiment.ts`). */
   named: boolean;
-  zpcr: Zpcr;
+  /**
+   * The decoded run, or **null for a standalone `.prcl.txt`** — a thermal-only protocol, which is
+   * startable on its own (see `App`'s `instrumentExperiment`). Everything this view needs of a
+   * protocol-only experiment is {@link protocolText}; there is no archive behind it, and there
+   * will be no run file after it either.
+   */
+  zpcr: Zpcr | null;
+  /** The ASCII run definition that would be sent — the run's own, or the `.prcl.txt`'s text. */
+  protocolText: string | null;
   /** No results yet and never started — the only state Start applies to (`isPendingExperiment`). */
   pending: boolean;
   /**
@@ -134,12 +149,12 @@ export function InstrumentView({
   const plan = useMemo(() => {
     if (!experiment) return null;
     const { zpcr } = experiment;
-    const runDefinition = zpcr.protocolText;
+    const runDefinition = experiment.protocolText;
     if (!runDefinition) return null;
     try {
       return planRun({
         runDefinition,
-        plate: zpcr.plates()[0]?.pltd.plate ?? undefined,
+        plate: zpcr?.plates()[0]?.pltd.plate ?? undefined,
         // The experiment's own name, as stored in the file. Never the protocol's: a protocol is
         // run many times, so that would give every run of it the same name.
         //
@@ -149,7 +164,9 @@ export function InstrumentView({
         // nothing stored one — because it is not being started and demanding a name for it would be
         // accusing a finished run of missing something it doesn't need.
         name: experiment.pending && !experiment.named ? "" : experiment.name,
-        protocolName: zpcr.protocol()?.name || undefined,
+        // A protocol-only experiment has no archive to hold a protocol name, so its file name is
+        // the protocol's name — which is also the run's, since the two are the same object there.
+        protocolName: zpcr?.protocol()?.name || experiment.name || undefined,
       });
     } catch {
       // A run definition this app can't parse can't be planned; the panel already renders the

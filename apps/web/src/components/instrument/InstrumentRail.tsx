@@ -171,7 +171,7 @@ export function InstrumentRail({
         ? "This experiment has already been run — clone it to run the same protocol again."
         : !experiment.named
           ? "Name this experiment on its Overview tab first."
-          : !experiment.zpcr.protocolText
+          : !experiment.protocolText
             ? "This experiment has no protocol yet — write one on the Protocol tab."
             : !connected
               ? "Connect to the instrument first."

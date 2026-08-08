@@ -82,6 +82,7 @@ const EXTENSION_TEXT: Record<FileKind, string> = {
   pltd: "pltd",
   csv: "plt.csv",
   prcl: "prcl.txt",
+  alf: "alf",
 };
 
 /** `12.3 kB` under 1000 kB, `1.24 MB` above — the same threshold a file manager uses, so a run

@@ -1,17 +1,25 @@
 /**
  * What a file *is*, as opposed to how it is encoded.
  *
- * This library reads six file formats, but they are only three kinds of thing: a whole **run**, a
- * **plate** map, or a thermal **protocol**. Each of those has more than one encoding — a run
- * arrives as a `.zpcr`, a `.pcrd` or a Biomeme `.bmrun`; a plate as an encrypted `.pltd` or a
- * `.plt.csv`; a protocol as a `.prcl` or this project's `.prcl.txt` — and which encoding it came
- * in is, for most purposes, an implementation detail of the parse. A consumer asking "can this be
- * the plate half of a run?" or "which icon does this get?" is asking about the category, so the
- * mapping belongs here rather than being re-derived from an extension at each call site.
+ * This library reads seven file formats, but they are only four kinds of thing: a whole **run**, a
+ * **plate** map, a thermal **protocol**, or a **report** of a run that happened. Each of those has
+ * more than one encoding — a run arrives as a `.zpcr`, a `.pcrd` or a Biomeme `.bmrun`; a plate as
+ * an encrypted `.pltd` or a `.plt.csv`; a protocol as a `.prcl` or this project's `.prcl.txt` —
+ * and which encoding it came in is, for most purposes, an implementation detail of the parse. A
+ * consumer asking "can this be the plate half of a run?" or "which icon does this get?" is asking
+ * about the category, so the mapping belongs here rather than being re-derived from an extension
+ * at each call site.
+ *
+ * A **report** is the odd one out, and deliberately not a run: an `.alf` says a protocol executed,
+ * when, for how long and whether it completed, and carries no fluorescence at all. It is what a
+ * thermal-only run leaves behind — the instrument writes one to `\Storage Card\PCRunReport` for
+ * every run, and for a protocol with no `PLATEREAD` it is the *only* thing that run produces (see
+ * `usb.md` §7.10). Categorising it as a run would offer it everywhere a run belongs, and every one
+ * of those places would then find it empty.
  *
  * The format docs, one per encoding: `zpcr` → `ARCHITECTURE.md`, `pcrd` → `pcrd.md`, `biomeme` →
  * `biomeme.md`, `pltd` → `pltd.md`, `csv` → `plateCsv.ts`, `prcl` → `prcl.md` (§3.1 for the text
- * form).
+ * form), `alf` → `alf.md`.
  *
  * {@link SUPPORTED_EXTENSIONS} is the other half of the same idea: the file *names* worth offering
  * to a decoder, kept here so a directory listing, a file picker and the loader all agree on what
@@ -19,11 +27,12 @@
  */
 
 /** One accepted encoding. `csv` is a `.plt.csv` plate table; `prcl` covers both `.prcl` and the
- * `.prcl.txt` text form. */
-export type FileKind = "zpcr" | "pcrd" | "biomeme" | "pltd" | "csv" | "prcl";
+ * `.prcl.txt` text form; `alf` is an instrument run report. */
+export type FileKind = "zpcr" | "pcrd" | "biomeme" | "pltd" | "csv" | "prcl" | "alf";
 
-/** What the file describes, independent of encoding. A run carries both other halves. */
-export type FileCategory = "run" | "plate" | "protocol";
+/** What the file describes, independent of encoding. A run carries the plate and protocol halves;
+ * a report carries none of them. */
+export type FileCategory = "run" | "plate" | "protocol" | "report";
 
 const CATEGORY: Record<FileKind, FileCategory> = {
   zpcr: "run",
@@ -32,6 +41,7 @@ const CATEGORY: Record<FileKind, FileCategory> = {
   pltd: "plate",
   csv: "plate",
   prcl: "protocol",
+  alf: "report",
 };
 
 /** The category a kind belongs to — the one place the encoding→thing mapping is written down. */
@@ -43,6 +53,7 @@ const CATEGORY_LABEL: Record<FileCategory, string> = {
   run: "Run",
   plate: "Plate",
   protocol: "Protocol",
+  report: "Report",
 };
 
 /** What each encoding actually is, in a few words — the second half of {@link fileKindDescription},
@@ -55,6 +66,7 @@ const DESCRIPTION: Record<FileKind, string> = {
   pltd: "Bio-Rad format",
   csv: "zpcrweb comma-separated values",
   prcl: "Bio-Rad CFX thermal-cycling protocol",
+  alf: "Bio-Rad CFX run report",
 };
 
 /** A one-line, human-facing description of a file's format — `"<Category>: <what it is>"`, e.g.
@@ -85,6 +97,7 @@ export const SUPPORTED_EXTENSIONS: readonly string[] = [
   ".pltd",
   ".csv",
   ".txt",
+  ".alf",
 ];
 
 /** Whether a file name ends in one of {@link SUPPORTED_EXTENSIONS}, case-insensitively. */
