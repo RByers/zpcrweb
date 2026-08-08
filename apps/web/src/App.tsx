@@ -20,6 +20,7 @@ import { plateCsvFileName } from "./lib/plateNames";
 import { downloadBytes } from "./lib/download";
 import { useHeaderFit } from "./state/useHeaderFit";
 import { DropZone } from "./components/DropZone";
+import { useDiskTree } from "./state/useDiskTree";
 import { FileBar } from "./components/FileBar";
 import { FilesTableView } from "./components/FilesTableView";
 import { ViewBar } from "./components/ViewBar";
@@ -157,6 +158,24 @@ export function App() {
   // the hook's own `ResizeObserver` catches.
   const { ref: headerRef, fit } = useHeaderFit([store.view]);
   const [pltdPassword, setPassword] = usePltdPassword();
+  /**
+   * The granted folders and their lazily-listed trees.
+   *
+   * The sources it is handed are the *loaded* disk-backed files, which is what decides the branches
+   * that open by themselves the first time a folder is shown — so the app never searches the disk
+   * to work out where to look, it reads that off the catalog it already has. See `useDiskTree`.
+   */
+  const loadedDiskSources = useMemo(
+    () => store.loaded.flatMap((f) => (f.source ? [f.source] : [])),
+    [store.loaded],
+  );
+  const diskTree = useDiskTree(loadedDiskSources, store.view === "files");
+  /** Grant a folder and go and look at it: its tree lives in the Files view, so landing anywhere
+   * else would make picking a folder look like it did nothing. */
+  const addFolder = useCallback(async () => {
+    await diskTree.add();
+    store.setView("files");
+  }, [diskTree, store]);
   /**
    * The instrument connection, held here rather than inside the Instrument view.
    *
@@ -575,7 +594,9 @@ export function App() {
     return <div className="splash mono">initializing…</div>;
   }
 
-  if (store.files.length === 0 && store.view !== "instrument") {
+  // A granted folder counts as having something, even before a file is opened out of it: the
+  // Files view is where its tree lives, and the welcome screen has nowhere to show one.
+  if (store.files.length === 0 && diskTree.folders.length === 0 && store.view !== "instrument") {
     // Nothing in the browser at all, so About *is* the welcome screen — it carries the drop
     // target. There's no previous view to go back to, hence no `onBack`, and no view bar: with an
     // empty catalog even the Files tab has nothing to list.
@@ -594,6 +615,7 @@ export function App() {
           exampleHref={exampleHref}
           onLoadExample={loadExample}
           onNewExperiment={() => void createExperiment({})}
+          onAddFolder={diskTree.supported ? () => void addFolder() : undefined}
         />
         <div className="app__welcomeinstrument">
           {/* Straight to the tab that talks to the instrument, creating nothing. It used to have to
@@ -646,7 +668,10 @@ export function App() {
           <ViewBar value={view} onChange={store.setView} enabled={enabledViews} />
         </div>
         <div className="app__header-spacer" />
-        <DropZone onFiles={store.addFiles} />
+        <DropZone
+          onFiles={store.addFiles}
+          onAddFolder={diskTree.supported ? () => void addFolder() : undefined}
+        />
       </header>
 
       <FileBar
@@ -695,6 +720,8 @@ export function App() {
             onSetLoaded={(id, on) => void store.setLoaded(id, on)}
             onDelete={store.remove}
             onClose={leaveFiles}
+            tree={diskTree}
+            onAddDiskFiles={(sources) => void store.addDiskFiles(sources)}
           />
         ) : view === "about" ? (
           <AboutView

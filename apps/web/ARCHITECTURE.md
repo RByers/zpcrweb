@@ -480,6 +480,12 @@ invariant rather than left to be inferred from the store.
 | **loaded files** | those whose bytes are in memory and decoded | the **file bar** (`FileBar`), one chip each | `ZpcrStore.loaded` — `LoadedFile[]`, with `bytes` |
 | **the selection** | exactly one loaded file, or none | the cyan chip; every tab of the **view bar** | `ZpcrStore.activeName` / `active` |
 
+There is a fourth set, outside all three: the files sitting in a **granted folder** on disk that
+the app has *not* opened. They appear in the Files view's folder trees and nowhere else, they have
+no catalog record, and the app knows nothing about them beyond a name, a size and an mtime read
+from the directory listing. Ticking one moves it into the catalog and the loaded set at once. See
+"Disk-backed files and folders" below.
+
 The two bars are named after those sets and are referred to by those names throughout the code:
 the **view bar** is the tab strip (`components/ViewBar.tsx`), the **file bar** is the row of chips
 under it (`components/FileBar.tsx`).
@@ -676,6 +682,20 @@ a `replacing` flag:
 A rename is the one edit that *moves* a file's records rather than rewriting them; `renameFile`
 writes the content under the new name and deletes the old, carrying the settings across.
 
+**A disk-backed file's name is a path.** `runs/2026-07/a.zpcr` — the granted folder's label, then
+the file's path inside it (`db.ts`'s `DiskSource` and `diskFileName`). Nothing about identity
+changes: it is still one unique string, still the key in both stores, still what `#file=` addresses.
+It just isn't a bare filename any more, which is what makes two runs called `plate.plt.csv` in
+different directories two different files. The folder label is made unique with the same `(2)`
+counter, so the whole name is too. Two consequences worth knowing:
+
+- What the run is **called** comes from the last path component, not the whole name
+  (`lib/experiment.ts`'s `baseName`) — `runs/2026-07/a.zpcr` is the run *a*.
+- **Rename is refused** for a disk-backed file. Its name is a real path, so renaming it would have
+  to rename the file on disk, and the File System Access API has no rename — only copy-then-delete,
+  with a window in between where a failure loses someone's run. `ZpcrStore.canRename` says so and
+  the Overview name editor doesn't offer it.
+
 ### The schema is not migrated
 
 A change to any stored shape bumps `DB_VERSION`, and `openDb`'s upgrade **drops every store and
@@ -686,7 +706,9 @@ grows into every type in `db.ts`.
 This is safe because nobody's data lives only here while the app is in development: a run is a file
 the user has on disk, and everything the app adds to one is written back into that file
 (`zpcrweb.json`, the archive rewrite). Wiping the database costs the user re-dropping their files
-and re-picking their view settings, and costs them nothing that isn't recoverable from disk.
+and re-picking their view settings, and costs them nothing that isn't recoverable from disk. That
+goes double for a disk-backed file, whose bytes were never in here to begin with — a wipe costs it
+the folder grant, which is one click to give back.
 
 > **Future:** once the app ships to people who keep files only in the browser, this becomes a real
 > upgrade path, and the stored types go back to tolerating older shapes.
@@ -871,6 +893,105 @@ so every call site keeps writing one `onChange({ … })` regardless of where the
 - **`.pcrd` and standalone plate files can't hold it.** A `.pcrd` is one encrypted XML document,
   not an archive (`pcrd.md` §1) — it has its own `dataAnalysisParameters` we decode but don't yet
   write back, so analysis edits to a `.pcrd` are live for the session and then gone.
+
+## Disk-backed files and folders
+
+Everything above describes a file the app holds a **copy** of: uploaded, unpacked into IndexedDB,
+and stale on disk from the first edit — which is what `modified` exists to nag about. On browsers
+with the File System Access API there is a second mode. The user grants the app a **folder**, and a
+file opened out of it is read from disk when it is loaded and written back to the same file when it
+changes. The file on disk *is* the file, so `modified` never comes on for it.
+
+`state/diskFolders.ts` owns the handles and every operation on them (a module singleton, like
+`db.ts`); `state/useDiskTree.ts` owns the tree's expansion and listings;
+`components/FolderSection.tsx` draws it above the catalog table in the Files view; the store branches
+in exactly one place, `persistFile`. `db.ts` stores the granted folder handles — they are
+structured-cloneable, which is what lets a grant outlive a reload — and `FileIdentity.source`
+(a `DiskSource`) is the whole definition of "disk-backed".
+
+**Whether a disk-backed file has `content` records is the interesting part.** Normally it has none:
+its bytes are on disk and IndexedDB holds only its catalog row. The exception is a run the
+instrument is still writing.
+
+### Nothing is walked up front
+
+A folder handed to the app may be an entire lab archive, so there is no recursive scan anywhere.
+`listDirectory` reads **one** directory level and caches it, and the tree calls it as nodes are
+opened. What opens by itself is derived from the catalog, not from the disk: the ancestors of the
+disk-backed files that are already loaded, so the work in progress is in front of the user and every
+other branch stays shut and unread. A directory row therefore shows no child count — counting means
+descending, which is the thing being avoided.
+
+The cost is that a file newly written into a folder does not announce itself. The tree re-reads when
+the Files view is opened, when a node is expanded, and on the folder's ↻. Loaded files *do* refresh
+by themselves, because those are watched one by one.
+
+### Watching is per file, and has to re-arm
+
+`watchDiskFile` puts one `FileSystemObserver` on each loaded disk-backed file. There is no directory
+observation at all — recursive or otherwise — because that would mean caring about a subtree the app
+has deliberately not read.
+
+Two behaviours measured against Chrome 151 shape the implementation:
+
+- Writing through `createWritable` fires `modified` at the app's own watch. Without suppression the
+  app would re-read what it just wrote, re-persist it, and write again, forever. So every write
+  records the resulting `{size, lastModified}` in an **echo map**, and a record matching it is
+  ignored.
+- Deleting an observed file emits `disappeared`, then `errored` — and **the observation is then
+  dead**: recreating the same path delivers nothing. An external tool saving atomically (write a
+  temp file, rename it over the original) looks exactly like delete-then-recreate, so a watch that
+  doesn't re-observe silently stops working after the first such save, while still looking live.
+  `rearmWatch` re-resolves the handle after ~300 ms and observes again, which does work.
+
+An external change re-reads the file and keeps its **display** state — hidden wells, log vs. linear
+— because it is the same file. It deliberately drops its **analysis** state and re-seeds from the
+new bytes: thresholds and the run's name live in the file's own `zpcrweb.json`, so the bytes that
+just arrived are the authority on them. Anything of the app's own still waiting to be written is
+flushed out first, so a pending edit wins over what is currently on disk rather than being
+discarded by it.
+
+### Writing
+
+`persistFile` stays the single choke point. For a disk-backed file it writes the catalog row and
+marks a third `WriteThrottle` dirty (`DISK_WRITE_INTERVAL_MS`, 3 s), whose write re-zips the archive
+with `zpcrweb.json` layered in exactly as a download does and hands the bytes to `writeDiskFile`. A
+disk write is always the *whole* file — there is no per-entry delta to exploit the way there is in
+IndexedDB — which is what the throttle is for.
+
+Three things this had to be careful about, each of which was a bug first:
+
+- **Opening a file must not write it.** `install` would otherwise re-zip a `.zpcr` the moment it was
+  read and write it straight back: different bytes, a moved mtime, an edit nobody made. `install`'s
+  `diskInSync` flag says "the disk already has this" and only the catalog row is written.
+- **`AnalysisPersister` is the one writer that reaches `putFile` without going through
+  `persistFile`.** For a disk-backed file it is skipped entirely, and `updateSettings` marks the
+  disk throttle instead — otherwise a copy of the run would accumulate in IndexedDB and be read in
+  preference to the disk on the next load.
+- **Deleting a file must not write it.** `forget` calls the throttle's `forget`, never `flush`:
+  dropping a file from the app is not an edit to it. Nothing here ever deletes anything on disk.
+
+### A run in progress is the exception
+
+While the instrument is writing a run, its plate reads go to IndexedDB exactly as any other file's
+would — one small record per read, the cheap append `changedEntries` exists for — and the file on
+disk is left alone. Writing a whole archive to disk forty-five times over a two-hour run would be a
+great deal of churn for a file nobody can use until it is finished.
+
+The moment the `ended` marker arrives the run stops being in progress, and an effect watching
+`inProgressIds` writes the finished run to disk once and drops the IndexedDB records with
+`deleteContent`. Disk sees a single write; a reload mid-run still recovers, because the buffer is
+there. `loadOne` therefore reads IndexedDB *first* even for a disk-backed file: if there are records,
+they are a run in progress and they are the current copy.
+
+### What this cannot do
+
+The API never discloses an absolute path. A directory handle knows its own leaf name (`runs`) and
+nothing above it, so a disk-backed file's name is folder-rooted rather than absolute — see "A file
+is its name". Rename is refused for the same family of reasons, recorded there. And a handle
+restored from IndexedDB usually comes back with its permission reset to `prompt`, so a folder's
+header carries a **Grant access** button: `requestPermission` needs a user gesture, and the click
+supplies one.
 
 ## Views
 

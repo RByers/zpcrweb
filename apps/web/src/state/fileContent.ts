@@ -92,6 +92,17 @@ export function contentFiles(content: FileContent): ZpcrArchive {
 }
 
 /**
+ * The names of the entries this content holds, or `[]` for a file that isn't an archive.
+ *
+ * The cheap question, kept separate from {@link contentFiles} because the expensive one is a very
+ * different thing to ask: this never unzips, so a caller that only wants to know *which* entries
+ * exist — is there an `ended` marker yet? — can ask on every plate read without cost.
+ */
+export function contentEntryNames(content: FileContent): string[] {
+  return content.archive ? Object.keys(content.files) : [];
+}
+
+/**
  * Parse a run's content into a {@link Zpcr}, without decompressing anything.
  *
  * The reason holding entries pays off twice over: the app re-parses a file on every change to it

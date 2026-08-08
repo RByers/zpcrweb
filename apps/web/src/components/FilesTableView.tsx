@@ -38,6 +38,9 @@ import type { FileSummary } from "../state/db";
 import { formatCompactDateTime } from "../lib/experiment";
 import { fluorColor } from "../lib/fluorColors";
 import { FileKindIcon } from "./FileIcons";
+import { FolderSection } from "./FolderSection";
+import type { DiskTree } from "../state/useDiskTree";
+import type { DiskSource } from "../state/db";
 import { TrashIcon } from "./TrashIcon";
 
 interface Props {
@@ -55,6 +58,11 @@ interface Props {
   onSetLoaded: (id: string, loaded: boolean) => void;
   onDelete: (id: string) => void | Promise<void>;
   onClose: () => void;
+  /** The granted folders and their lazily-listed trees — see `FolderSection.tsx`. Rendered above
+   * the table because they are a different question: the table is what the app is holding, the
+   * trees are what is on the disk. */
+  tree: DiskTree;
+  onAddDiskFiles: (sources: DiskSource[]) => void;
 }
 
 /** The extension a kind is actually decoded as — independent of what the source file was named.
@@ -423,6 +431,8 @@ export function FilesTableView({
   onSetLoaded,
   onDelete,
   onClose,
+  tree,
+  onAddDiskFiles,
 }: Props) {
   const [sortKey, setSortKey] = useState<SortKey>("date");
   const [dir, setDir] = useState<1 | -1>(-1);
@@ -473,6 +483,14 @@ export function FilesTableView({
       }}
     >
       <div className="filesview__scroll">
+        <FolderSection
+          tree={tree}
+          entries={files}
+          loadedNames={loadedIds}
+          onSetLoaded={onSetLoaded}
+          onAddDiskFiles={onAddDiskFiles}
+          onSelectFile={onSelectFile}
+        />
         <table className="filesview__tbl">
           <thead>
             <tr>

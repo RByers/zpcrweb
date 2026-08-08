@@ -12,6 +12,10 @@
  * The format docs, one per encoding: `zpcr` → `ARCHITECTURE.md`, `pcrd` → `pcrd.md`, `biomeme` →
  * `biomeme.md`, `pltd` → `pltd.md`, `csv` → `plateCsv.ts`, `prcl` → `prcl.md` (§3.1 for the text
  * form).
+ *
+ * {@link SUPPORTED_EXTENSIONS} is the other half of the same idea: the file *names* worth offering
+ * to a decoder, kept here so a directory listing, a file picker and the loader all agree on what
+ * counts as openable.
  */
 
 /** One accepted encoding. `csv` is a `.plt.csv` plate table; `prcl` covers both `.prcl` and the
@@ -59,4 +63,32 @@ const DESCRIPTION: Record<FileKind, string> = {
  * row) rather than re-deriving wording per kind, so a new encoding only needs an entry here. */
 export function fileKindDescription(kind: FileKind): string {
   return `${CATEGORY_LABEL[CATEGORY[kind]]}: ${DESCRIPTION[kind]}`;
+}
+
+/**
+ * Every extension worth handing to a decoder — what a file picker offers, what a directory listing
+ * shows, and what the loader will attempt.
+ *
+ * This is a *name* filter and nothing more: passing it does not mean a file will open. `.txt` is
+ * here because `.prcl.txt` is, and a `.txt` is admitted only if its bytes really are a run
+ * definition (`prcl.md` §3.1) — the loader's own sniff decides that, not this list. `.prcl` itself
+ * is absent because no reader for the binary form is wired up yet.
+ *
+ * Kept beside {@link FileKind} so the three places that need it — the picker's `accept`, the
+ * loader's prefilter, and the disk-folder directory lister — cannot drift apart, which they had by
+ * the time there were three of them.
+ */
+export const SUPPORTED_EXTENSIONS: readonly string[] = [
+  ".zpcr",
+  ".pcrd",
+  ".bmrun",
+  ".pltd",
+  ".csv",
+  ".txt",
+];
+
+/** Whether a file name ends in one of {@link SUPPORTED_EXTENSIONS}, case-insensitively. */
+export function matchesSupportedExtension(name: string): boolean {
+  const lower = name.toLowerCase();
+  return SUPPORTED_EXTENSIONS.some((ext) => lower.endsWith(ext));
 }

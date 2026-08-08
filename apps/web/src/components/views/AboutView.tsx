@@ -10,6 +10,9 @@ interface Props {
    * page is the app's empty state, and "I have a cycler and no files" is exactly who needs it —
    * the other way in is cloning a run you already have, which needs a run first. */
   onNewExperiment: () => void;
+  /** Grant the app a folder to open and save files in place — omitted on browsers without the
+   * File System Access API, which is where the whole feature is absent. */
+  onAddFolder?: () => void;
   /** Return to the previous view. Omitted on the welcome screen, where there's nothing to go
    * back to — with no file loaded this page *is* the empty state. */
   onBack?: () => void;
@@ -19,7 +22,14 @@ interface Props {
  * welcome screen itself. One view serves both: the credits sit above the drop target, so the
  * first thing a new user sees says what this is and that their data stays put. Needs no file to
  * render. */
-export function AboutView({ onFiles, exampleHref, onLoadExample, onNewExperiment, onBack }: Props) {
+export function AboutView({
+  onFiles,
+  exampleHref,
+  onLoadExample,
+  onNewExperiment,
+  onAddFolder,
+  onBack,
+}: Props) {
   return (
     <div className="about">
       <div className="about__card">
@@ -32,7 +42,7 @@ export function AboutView({ onFiles, exampleHref, onLoadExample, onNewExperiment
           Unofficial and likely buggy, use at your own risk
         </p>
 
-        <DropZone onFiles={onFiles} large />
+        <DropZone onFiles={onFiles} large onAddFolder={onAddFolder} />
         <a className="about__example mono" href={exampleHref} onClick={onLoadExample}>
           Load an example file
         </a>

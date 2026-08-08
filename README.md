@@ -167,6 +167,28 @@ Files persist in **IndexedDB** across reloads, along with which of them were loa
 a reported number is written into the run's own file instead, so it travels with it. Non-trivial logic lives in `@zpcrweb/core` —
 see the [web architecture notes](./apps/web/ARCHITECTURE.md).
 
+### Working in a folder on your disk
+
+The load button also offers **Add folder…**, which hands the app a directory and gets you out of the
+upload/download loop entirely. A file opened from that folder is read straight off your disk and
+written back to the same file when you change something — rename a run, drag a threshold — so there
+is no second copy in the browser to go stale, and nothing to remember to download. Change a file in
+another program and the app picks it up and refreshes on its own. Nothing in the folder is ever
+deleted by the app: removing a file from the app, or the folder itself, only forgets it.
+
+The folder's tree appears in the **Files** tab, above the catalog table, and reads one directory at
+a time as you open it — so pointing the app at a folder holding years of runs costs nothing until
+you go looking. Newly-added files show up when you reopen the tab or press the folder's ↻.
+
+Two limits worth knowing. Browsers don't tell a web page where a folder actually is, only what it's
+called, so files are named by their path *within* the folder (`runs/2026-07/a.zpcr`) rather than by
+a full disk path — and renaming one has to be done on disk, not in the app. And a run being recorded
+live from an instrument is buffered in the browser until it finishes, then written to disk once,
+rather than rewriting the whole archive after every cycle.
+
+This needs the File System Access API, so it's Chromium-only today; the option simply isn't shown
+where it's unavailable.
+
 ```sh
 npm run dev -w @zpcrweb/web      # start the dev server (http://localhost:5173)
 npm run build -w @zpcrweb/web    # production build
@@ -177,7 +199,8 @@ npm run build -w @zpcrweb/web    # production build
 The app is written against standard web APIs and intended to work on the latest version of any
 major browser. In practice, development and manual testing happen almost entirely on
 Chromium-based browsers (Chrome/Edge/etc.) — partly because the Instrument view's live USB
-connection depends on WebUSB, which only Chromium implements, and partly just because that's
+connection depends on WebUSB, and the disk-folder support above on the File System Access API,
+neither of which anyone but Chromium implements, and partly just because that's
 where the author tests. On first load, a non-Chromium browser gets a one-time dismissable
 warning to that effect (`components/BrowserWarningModal.tsx`); everything except the Instrument
 view is expected to work fine regardless.

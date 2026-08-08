@@ -153,7 +153,12 @@ export type {
 export { parseDcal, findDcalBlock, isDcalName, dyeChannelLookup } from "./dcal.js";
 export { parsePcrd, isPcrdName, pcrdFromBlob } from "./pcrd.js";
 export { parseBiomeme } from "./biomeme.js";
-export { fileCategory, fileKindDescription } from "./fileKind.js";
+export {
+  fileCategory,
+  fileKindDescription,
+  matchesSupportedExtension,
+  SUPPORTED_EXTENSIONS,
+} from "./fileKind.js";
 export {
   buildDyeResponseCurve,
   buildDyeReadingCurves,

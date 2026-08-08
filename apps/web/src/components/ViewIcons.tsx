@@ -132,6 +132,16 @@ export function FilesIcon() {
   );
 }
 
+/** Add folder: a folder with its tab, and a `+` where a file would go. */
+export function FolderIcon() {
+  return (
+    <Svg>
+      <path d="M2 4.5a1 1 0 0 1 1-1h3.2l1.3 1.6H13a1 1 0 0 1 1 1v6.4a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1z" />
+      <path d="M8 7.8v3.4M6.3 9.5h3.4" />
+    </Svg>
+  );
+}
+
 /** Load file: an arrow rising out of an open tray. */
 export function UploadIcon() {
   return (

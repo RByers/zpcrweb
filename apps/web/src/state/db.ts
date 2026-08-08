@@ -11,6 +11,16 @@
  *   {@link FileSummary} of what the *content* turned out to say, the two per-file flags that must
  *   outlive a reload ({@link StoredFile.modified} and {@link StoredFile.loaded}), and — for a
  *   loaded file only — its {@link StoredView} display state.
+ * - `folders` — the directories the user has granted access to ({@link StoredFolder}). A handle is
+ *   structured-cloneable, so keeping one here is how folder access survives a reload; see
+ *   `state/diskFolders.ts`.
+ *
+ * **A file whose bytes live on disk has no `content` records.** {@link FileIdentity.source} says a
+ * file is backed by a real file inside one of those folders, and then this module holds only its
+ * catalog row — the bytes are read from and written back to disk by `state/diskFolders.ts`. The one
+ * exception is a run still being written to by the instrument, which buffers its plate reads here
+ * until it completes and is then written to disk once; see `apps/web/ARCHITECTURE.md`,
+ * "Disk-backed files and folders".
  *
  * **Why content is a separate store.** {@link getAllFiles} reads the whole catalog in one
  * `getAll()`, which is what lets the Files table list thousands of files — names, dates, protocol
@@ -32,9 +42,10 @@
 
 const DB_NAME = "zpcrweb";
 /** Bumping this **erases the database**. See {@link openDb}. */
-const DB_VERSION = 5;
+const DB_VERSION = 6;
 const CONTENT = "content";
 const CATALOG = "catalog";
+const FOLDERS = "folders";
 
 /**
  * The entry name a plain file's bytes are stored under — a `.pcrd`, a `.pltd`, a `.prcl.txt`,
@@ -79,6 +90,42 @@ function normalize(bytes: Uint8Array): Uint8Array {
 
 type FileKindName = "zpcr" | "pcrd" | "biomeme" | "pltd" | "csv" | "prcl";
 
+/**
+ * Where a disk-backed file actually is: which granted folder, and the path to it within that
+ * folder. Its presence on a {@link FileIdentity} is the whole definition of "disk-backed".
+ *
+ * **Not an absolute path, and it cannot be.** The File System Access API never discloses one — a
+ * directory handle knows its own leaf name (`runs`) and nothing above it. So `folder` is the label
+ * the app gave the granted directory, which is its leaf name plus a `(2)` if two picked folders
+ * collided, and the file's *name* is the two joined: `runs/2026-07/a.zpcr`. That name is still the
+ * file's identity and its key here, exactly as for an uploaded file; it just has slashes in it.
+ */
+export interface DiskSource {
+  /** The granted folder's label — {@link StoredFolder.label}. */
+  folder: string;
+  /** Path components from the folder root down to the file, the last being its file name. */
+  path: string[];
+}
+
+/** The app's name for a disk-backed file: its folder label and path joined with `/`. The inverse
+ * doesn't exist — a name can't be split back into a source, because a folder label may itself
+ * contain a slash-free but otherwise arbitrary string, so the {@link DiskSource} is stored. */
+export function diskFileName(source: DiskSource): string {
+  return [source.folder, ...source.path].join("/");
+}
+
+/** One directory the user has granted the app access to. The handle is stored as itself: handles
+ * are structured-cloneable, and a stored one comes back able to re-open the same directory — though
+ * usually with its permission reset to `prompt`, which is why the UI has a "grant access" affordance
+ * (see `state/diskFolders.ts`). */
+export interface StoredFolder {
+  /** The folder's label, unique across granted folders — its key here, and the first component of
+   * every {@link DiskSource} beneath it. */
+  label: string;
+  handle: FileSystemDirectoryHandle;
+  addedAt: number;
+}
+
 /** A file's identity — everything about it that is knowable without reading its bytes, and the
  * half of a {@link StoredFile} that {@link putFile} owns. */
 export interface FileIdentity {
@@ -104,6 +151,12 @@ export interface FileIdentity {
    * mtime rather than claiming a new one. */
   lastModified: number;
   kind: FileKindName;
+  /**
+   * Set when this file's bytes live in a granted folder rather than in the `content` store — see
+   * {@link DiskSource}. An edit to a disk-backed file is written back to the file on disk, so its
+   * {@link StoredFile.modified} flag stays down: there is no second copy to go stale.
+   */
+  source?: DiskSource;
 }
 
 /**
@@ -287,6 +340,7 @@ function openDb(): Promise<IDBDatabase> {
       for (const name of Array.from(db.objectStoreNames)) db.deleteObjectStore(name);
       db.createObjectStore(CONTENT, { keyPath: ["name", "entry"] });
       db.createObjectStore(CATALOG, { keyPath: "name" });
+      db.createObjectStore(FOLDERS, { keyPath: "label" });
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
@@ -377,13 +431,31 @@ export async function putFile(
   }
   await serializeWrites(identity.name, async () => {
     await writeContent(identity.name, entries, changed);
-    const existing = await tx<StoredFile | undefined>(CATALOG, "readonly", (s) =>
-      s.get(identity.name),
-    );
-    await tx(CATALOG, "readwrite", (s) =>
-      s.put({ modified: false, loaded: true, ...existing, ...identity } satisfies StoredFile),
-    );
+    await writeIdentity(identity);
   });
+}
+
+/**
+ * Write a file's identity alone, leaving the `content` store untouched — what a **disk-backed**
+ * file's catalog row is written by, since its bytes are on the user's disk and there is nothing
+ * here to keep in step with them.
+ *
+ * Same merge as {@link putFile}: the summary, the flags and the view belong to whoever last wrote
+ * them, and a file seen for the first time starts unmodified and loaded.
+ */
+export async function putIdentity(identity: FileIdentity): Promise<void> {
+  await serializeWrites(identity.name, () => writeIdentity(identity));
+}
+
+/** The catalog half of {@link putFile} and the whole of {@link putIdentity}. Callers hold the
+ * per-file write lock. */
+async function writeIdentity(identity: FileIdentity): Promise<void> {
+  const existing = await tx<StoredFile | undefined>(CATALOG, "readonly", (s) =>
+    s.get(identity.name),
+  );
+  await tx(CATALOG, "readwrite", (s) =>
+    s.put({ modified: false, loaded: true, ...existing, ...identity } satisfies StoredFile),
+  );
 }
 
 /**
@@ -477,6 +549,34 @@ export async function deleteFile(name: string): Promise<void> {
     await tx(CONTENT, "readwrite", (s) => s.delete(fileRange(name)));
     await tx(CATALOG, "readwrite", (s) => s.delete(name));
   });
+}
+
+/**
+ * Drop a file's bytes but keep its catalog row — how a disk-backed run in progress lets go of the
+ * buffer it accumulated once the finished run has been written to disk. The file goes on existing;
+ * it is simply read from disk from now on.
+ */
+export async function deleteContent(name: string): Promise<void> {
+  await serializeWrites(name, async () => {
+    await tx(CONTENT, "readwrite", (s) => s.delete(fileRange(name)));
+  });
+}
+
+/** Every granted folder. Read once at startup by `state/diskFolders.ts`, which owns the handles
+ * from then on. */
+export function getFolders(): Promise<StoredFolder[]> {
+  return tx<StoredFolder[]>(FOLDERS, "readonly", (s) => s.getAll());
+}
+
+export async function putFolder(folder: StoredFolder): Promise<void> {
+  await tx(FOLDERS, "readwrite", (s) => s.put(folder));
+}
+
+/** Forget a granted folder. The files opened from it keep their catalog rows and go on being
+ * listed — they are simply unreadable until the folder is granted again, which is the same state a
+ * file whose permission lapsed is in. */
+export async function deleteFolder(label: string): Promise<void> {
+  await tx(FOLDERS, "readwrite", (s) => s.delete(label));
 }
 
 // A rename is a write under the new name followed by a delete of the old — see `useZpcrStore`'s

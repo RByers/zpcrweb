@@ -196,7 +196,11 @@ touch `state/urlHash.ts`, `state/useHeaderFit.ts`, `state/pltdPassword.ts`,
 Cq markers — the rings are drag handles for a curve's threshold),
 `components/instrument/InstrumentRun.tsx`, `state/useRunStaging.ts`, `state/useRunNaming.ts`,
 `components/instrument/InstrumentRail.tsx`, `state/fileContent.ts` (or `state/db.ts`'s
-`StoredFile`, or `useZpcrStore.ts`'s `addRunArchive`), `state/useCfxDevice.ts`'s `cancelRun`/`setRunPaused`
+`StoredFile`, or `useZpcrStore.ts`'s `addRunArchive`),
+`state/diskFolders.ts`, `state/useDiskTree.ts`, `components/FolderSection.tsx` or
+`components/DropZone.tsx` (the disk-backed folder route — and note the picker itself cannot be
+driven from CDP, so `folderChecks` substitutes an OPFS directory for it),
+`state/useCfxDevice.ts`'s `cancelRun`/`setRunPaused`
 (or core's `usb/device.ts` `cancelRun`), `lib/protocolSource.ts`,
 `lib/experiment.ts` (or core's `experiment.ts`), `components/ViewSelector.tsx` or `App.tsx`'s
 `enabledViewsFor`/`selectFile`, core's `runDefinition.ts`, `components/raw/DecodedView.tsx`'s

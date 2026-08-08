@@ -853,6 +853,155 @@
   color: #fff;
 }
 
+/* ---- FolderSection -------------------------------------------------------- */
+/* The granted folders, as directory trees above the catalog table in the Files view. A row here is
+   a file on disk, which the catalog table's rows are not — see `FolderSection.tsx`. Indentation is
+   an inline `padding-left` per depth rather than nested padding, so a deep row's hover and its
+   focus ring still span the full width of the panel. */
+.folders {
+  flex: 0 0 auto;
+  padding: 0 12px;
+}
+.folders__folder {
+  margin-bottom: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+}
+.folders__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 10px;
+  cursor: pointer;
+  list-style: none;
+}
+.folders__head::-webkit-details-marker {
+  display: none;
+}
+.folders__folder[open] > .folders__head {
+  border-bottom: 1px solid var(--border);
+}
+.folders__folder[open] > .folders__head > .folders__title > .rail__chevron {
+  transform: rotate(90deg);
+}
+.folders__title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--ink);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.folders__icon {
+  display: inline-flex;
+  color: var(--ink-muted);
+}
+.folders__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+.folders__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.folders__note {
+  padding: 5px 10px;
+  font-size: 10px;
+  color: var(--ink-muted);
+}
+.folders__note--error {
+  color: var(--danger);
+}
+.folders__dir,
+.folders__file {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding-top: 3px;
+  padding-bottom: 3px;
+  padding-right: 10px;
+  font-size: 11px;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+}
+.folders__dir {
+  cursor: pointer;
+}
+.folders__dir:hover,
+.folders__file:hover {
+  background: var(--raised-2);
+}
+/* The chevron rotates on the row's own state here, since a lazily-listed node is not a <details>
+   — its children don't exist until it is opened. */
+.folders__dir > .rail__chevron.is-open {
+  transform: rotate(90deg);
+}
+.folders__check {
+  flex: 0 0 auto;
+  margin: 0;
+  cursor: pointer;
+}
+.folders__kind {
+  display: inline-flex;
+  width: 14px;
+  color: var(--ink-muted);
+}
+.folders__name {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* A file the app is holding can be gone to; one merely sitting on disk cannot, so it reads as
+   plain text rather than offering a click that would do nothing. */
+.folders__name:not(:disabled) {
+  cursor: pointer;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+.folders__file.is-loaded .folders__name {
+  color: var(--neon-cyan);
+}
+.folders__meta {
+  margin-left: auto;
+  padding-left: 12px;
+  flex: 0 0 auto;
+  font-size: 10px;
+  color: var(--ink-muted);
+}
+/* The welcome screen's second route in, under "click to browse". */
+.dropzone__folderbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  font: inherit;
+  color: var(--neon-cyan);
+  cursor: pointer;
+}
+.dropzone__folderbtn:hover {
+  text-decoration: underline;
+}
+
 /* Larger tap targets for touch input. `pointer: coarse` never matches a mouse, so this never
    applies on desktop regardless of viewport width. */
 @media (pointer: coarse) {

@@ -4144,6 +4144,344 @@ async function explodedStorageChecks(chrome, origin) {
   cdp.close();
 }
 
+/**
+ * Folders on disk: the File System Access API route in (`state/diskFolders.ts`,
+ * `state/useDiskTree.ts`, `components/FolderSection.tsx`).
+ *
+ * **The picker cannot be automated, so it is replaced.** CDP intercepts `showDirectoryPicker`
+ * (`Page.setInterceptFileChooserDialog` sees the chooser open) but there is no command that can
+ * *fulfil* it with a directory — the call just rejects with `AbortError`. So the test overrides
+ * `window.showDirectoryPicker` with one that returns an **origin-private** directory it has filled
+ * itself. Everything downstream of the picker is then the real thing: an OPFS handle supports
+ * `entries`, `resolve`, `createWritable` and `queryPermission` (which answers `granted`), survives
+ * the IndexedDB round-trip the app stores it through, and delivers `FileSystemObserver` records
+ * including the delete-then-`errored` sequence the watch has to re-arm from. The override lives
+ * here, in the test; no code ships for it.
+ *
+ * **The fixture never crosses the wire.** The tree is built inside the page by `fetch`ing the
+ * example run the welcome screen already serves (`public/examples/`, a symlink to `samples/`), so a
+ * 400 kB archive costs nothing in the transcript.
+ *
+ * What this is really guarding, in order of how quietly it would break:
+ *
+ * - **The lazy listing.** A closed branch must not have been read. Asserted by counting the
+ *   directory reads the page performed, not by looking at the DOM.
+ * - **Write-through.** An edit in the app must change the bytes of the real file, which the test
+ *   reads back out of OPFS itself.
+ * - **The observer re-arm.** Deleting and recreating a watched file — what an external atomic save
+ *   looks like — must still refresh. This is the one that fails silently in production and the
+ *   reason `rearmWatch` exists.
+ * - **No echo loop.** The app's own write must not read itself back forever.
+ */
+async function folderChecks(chrome, origin) {
+  console.log("\ndisk folders");
+  const cdp = await openPage(chrome.base, origin);
+  await emptyReload(cdp, origin);
+
+  // Build the fixture in OPFS and hand it to the app in place of the native picker. `__reads`
+  // counts `entries()` calls per directory, which is how the lazy-listing claim is measured.
+  const install = async () => {
+    await cdp.eval(
+      `(async () => {
+         const root = await navigator.storage.getDirectory();
+         for await (const [n] of root.entries()) await root.removeEntry(n, { recursive: true });
+         const runs = await root.getDirectoryHandle("runs", { create: true });
+         const bytes = new Uint8Array(await (await fetch("/examples/${EXAMPLE}")).arrayBuffer());
+         const write = async (dir, name, data) => {
+           const h = await dir.getFileHandle(name, { create: true });
+           const w = await h.createWritable();
+           await w.write(data);
+           await w.close();
+         };
+         // Root level: one run and one thing the app must not offer.
+         await write(runs, "top.zpcr", bytes);
+         await write(runs, "notes.md", "ignore me");
+         // A nested level, which must stay unread until it is opened…
+         const y2026 = await runs.getDirectoryHandle("2026", { create: true });
+         await write(y2026, "nested.zpcr", bytes);
+         // …and a sibling of it, which must stay unread even then.
+         const attic = await runs.getDirectoryHandle("attic", { create: true });
+         await write(attic, "old.zpcr", bytes);
+
+         window.__opfs = root;
+         window.__reads = {};
+         // Count directory listings by wrapping \`entries\` on the prototype: the app's lister is
+         // the only caller, so this measures exactly what it read.
+         if (!window.__patched) {
+           window.__patched = true;
+           const real = FileSystemDirectoryHandle.prototype.entries;
+           FileSystemDirectoryHandle.prototype.entries = function (...a) {
+             window.__reads[this.name] = (window.__reads[this.name] ?? 0) + 1;
+             return real.apply(this, a);
+           };
+         }
+         window.showDirectoryPicker = async () => runs;
+         return true;
+       })()`,
+      { awaitPromise: true },
+    );
+  };
+  await install();
+
+  // ── Adding a folder ────────────────────────────────────────────────────────────────────────
+  const menuItems = () =>
+    cdp
+      .eval(
+        `JSON.stringify([...document.querySelectorAll(".dlmenu__item")].map((b) => b.textContent.trim()))`,
+      )
+      .then(JSON.parse);
+  // The welcome screen's large drop zone carries its own "add a folder" line rather than a menu.
+  const addFolder = () =>
+    cdp.eval(
+      `(() => { const b = document.querySelector(".dropzone__folderbtn")
+           ?? [...document.querySelectorAll(".dlmenu__item")].find((x) => /Add folder/.test(x.textContent));
+         if (!b) return "no control";
+         b.click(); return "ok"; })()`,
+    );
+  check(
+    "The welcome screen offers a folder as well as an upload",
+    (await cdp.eval(`!!document.querySelector(".dropzone__folderbtn")`)) === true,
+  );
+  await addFolder();
+  await waitFor(() => cdp.eval(`!!document.querySelector(".folders__folder")`), {
+    what: "the folder section",
+  });
+
+  const rows = () =>
+    cdp
+      .eval(
+        `JSON.stringify({
+           dirs: [...document.querySelectorAll(".folders__dir")].map((b) => b.textContent.replace("▸","").trim()),
+           files: [...document.querySelectorAll(".folders__name")].map((b) => b.textContent.trim()),
+           reads: window.__reads,
+         })`,
+      )
+      .then(JSON.parse);
+
+  const first = await rows();
+  check(
+    "Adding a folder lists its top level — directories and openable files",
+    first.dirs.includes("2026") && first.dirs.includes("attic") && first.files.includes("top.zpcr"),
+    JSON.stringify(first),
+  );
+  check(
+    "…and leaves out files it has no decoder for",
+    !first.files.includes("notes.md"),
+    JSON.stringify(first.files),
+  );
+  check(
+    "…without reading a single subdirectory: a big folder costs one listing to show",
+    first.reads["2026"] === undefined && first.reads["attic"] === undefined,
+    JSON.stringify(first.reads),
+  );
+
+  // ── Expanding reads exactly one level ──────────────────────────────────────────────────────
+  await cdp.eval(
+    `[...document.querySelectorAll(".folders__dir")].find((b) => /2026/.test(b.textContent))?.click()`,
+  );
+  await waitFor(async () => (await rows()).files.includes("nested.zpcr"), {
+    what: "the expanded directory",
+  });
+  const expanded = await rows();
+  check(
+    "Expanding a directory reads that directory, and only it",
+    expanded.reads["2026"] === 1 && expanded.reads["attic"] === undefined,
+    JSON.stringify(expanded.reads),
+  );
+
+  // ── Opening a file off disk ────────────────────────────────────────────────────────────────
+  const tickFile = (name) =>
+    cdp.eval(
+      `(() => { const row = [...document.querySelectorAll(".folders__file")]
+           .find((r) => r.querySelector(".folders__name")?.textContent.trim() === ${JSON.stringify(name)});
+         row?.querySelector(".folders__check")?.click(); return !!row; })()`,
+    );
+  await tickFile("nested.zpcr");
+  await waitFor(() => cdp.eval(`!!document.querySelector(".filechip")`), {
+    what: "the disk-backed file's chip",
+  });
+  const opened = await cdp
+    .eval(
+      `JSON.stringify({
+         names: [...document.querySelectorAll(".filesview__filename")].map((c) => c.textContent.trim()),
+         titles: [...document.querySelectorAll(".filesview__filename")].map((c) => c.title),
+       })`,
+    )
+    .then(JSON.parse);
+  check(
+    "A file opened from a folder is named by its path within that folder",
+    opened.titles.includes("runs/2026/nested.zpcr"),
+    JSON.stringify(opened.titles),
+  );
+
+  // Its bytes must not have been copied into IndexedDB — that is the whole point.
+  const contentKeys = await cdp
+    .eval(
+      `new Promise((res) => { const q = indexedDB.open("zpcrweb");
+         q.onsuccess = () => { const db = q.result;
+           const g = db.transaction("content", "readonly").objectStore("content").getAllKeys();
+           g.onsuccess = () => res(JSON.stringify(g.result.map((k) => k[0]))); }; })`,
+      { awaitPromise: true },
+    )
+    .then(JSON.parse);
+  check(
+    "…and is read from disk rather than copied into the browser's storage",
+    !contentKeys.some((k) => k === "runs/2026/nested.zpcr"),
+    JSON.stringify([...new Set(contentKeys)]),
+  );
+
+  // ── Write-through ──────────────────────────────────────────────────────────────────────────
+  const diskFile = (path) =>
+    cdp.eval(
+      `(async () => { let d = window.__opfs;
+         const parts = ${JSON.stringify(path)};
+         for (const p of parts.slice(0, -1)) d = await d.getDirectoryHandle(p);
+         const f = await (await d.getFileHandle(parts.at(-1))).getFile();
+         return JSON.stringify({ size: f.size, mtime: f.lastModified,
+           text: new TextDecoder().decode(await f.slice(0, 4).arrayBuffer()) }); })()`,
+      { awaitPromise: true },
+    ).then(JSON.parse);
+
+  const before = await diskFile(["runs", "2026", "nested.zpcr"]);
+  // Renaming the experiment rewrites the archive's own settings entry — an ordinary edit, and one
+  // that has to reach the file on disk rather than IndexedDB. It is done on Overview, so go there
+  // the way a user would: click the file's row, which selects it and leaves the table.
+  await cdp.eval(`window.location.hash = "view=overview", undefined`);
+  await tabBecomes(cdp, "Overview");
+  await waitFor(
+    () => cdp.eval(`!!document.querySelector(".overview__name, .overview__nameeditbtn")`),
+    { what: "the Overview name control" },
+  );
+  await setExperimentName(cdp, "Renamed On Disk");
+  await waitFor(
+    async () => (await diskFile(["runs", "2026", "nested.zpcr"])).mtime !== before.mtime,
+    { timeout: 15000, what: "the edit to reach the file on disk" },
+  );
+  const after = await diskFile(["runs", "2026", "nested.zpcr"]);
+  check(
+    "An edit in the app is written back to the real file on disk",
+    after.mtime !== before.mtime && after.size > 0,
+    JSON.stringify({ before: before.size, after: after.size }),
+  );
+  check(
+    "…still as a ZIP, not as loose entries",
+    after.text.startsWith("PK"),
+    JSON.stringify(after.text),
+  );
+
+  // ── The app's own write must not come back at it ───────────────────────────────────────────
+  // Writing the file fires the watch's `modified`, so without echo suppression the app would
+  // re-read what it just wrote, re-persist it, and write again — forever. Measured as "the file
+  // stops changing", which is the property that actually matters, rather than as a clean console.
+  await sleep(5000);
+  const settled = await diskFile(["runs", "2026", "nested.zpcr"]);
+  check(
+    "…once, and then stops: the app does not read its own write back as an external change",
+    settled.mtime === after.mtime,
+    JSON.stringify({ afterEdit: after.mtime, later: settled.mtime }),
+  );
+
+  // ── An external change refreshes the loaded file ───────────────────────────────────────────
+  /** Rewrite a file in OPFS from outside the app. `atomic` deletes it first, which is what an
+   * external editor's save-to-temp-then-rename looks like — and what kills a naive watch. */
+  const externalWrite = (path, name, atomic) =>
+    cdp.eval(
+      `(async () => { let d = window.__opfs;
+         for (const p of ${JSON.stringify(path)}) d = await d.getDirectoryHandle(p);
+         const bytes = new Uint8Array(await (await fetch("/examples/${EXAMPLE}")).arrayBuffer());
+         if (${atomic ? "true" : "false"}) { await d.removeEntry(${JSON.stringify(name)});
+           await new Promise((r) => setTimeout(r, 150)); }
+         const h = await d.getFileHandle(${JSON.stringify(name)}, { create: true });
+         const w = await h.createWritable();
+         await w.write(bytes);
+         await w.close();
+         return (await h.getFile()).lastModified; })()`,
+      { awaitPromise: true },
+    );
+
+  // The app currently shows "Renamed On Disk"; writing the pristine example back over the file
+  // means a refresh must show the example's own name again.
+  const shownName = () =>
+    cdp.eval(
+      `(() => document.querySelector(".filechip.is-active .filechip__name")?.textContent.trim() ?? "")()`,
+    );
+  await externalWrite(["runs", "2026"], "nested.zpcr", false);
+  let refreshed = "";
+  try {
+    await waitFor(async () => (refreshed = await shownName()) !== "Renamed On Disk", {
+      timeout: 10000,
+      what: "the app to notice the external write",
+    });
+  } catch {
+    /* fall through with whatever it settled on */
+  }
+  check(
+    "A change made to the file by another program refreshes it in the app",
+    refreshed !== "" && refreshed !== "Renamed On Disk",
+    JSON.stringify(refreshed),
+  );
+
+  // Now the shape that kills an un-re-armed watch. Rename again so there is something to undo.
+  await setExperimentName(cdp, "Second Rename");
+  await waitFor(async () => (await shownName()) === "Second Rename", { what: "the second rename" });
+  await sleep(3500); // let the throttled disk write land, so the refresh is unambiguous
+  await externalWrite(["runs", "2026"], "nested.zpcr", true);
+  let rearmed = "";
+  try {
+    await waitFor(async () => (rearmed = await shownName()) !== "Second Rename", {
+      timeout: 10000,
+      what: "the app to notice a delete-and-recreate save",
+    });
+  } catch {
+    /* fall through */
+  }
+  check(
+    "…and so does a save that replaces the file rather than editing it (the watch re-arms)",
+    rearmed !== "" && rearmed !== "Second Rename",
+    JSON.stringify(rearmed),
+  );
+
+  // ── Across a reload ────────────────────────────────────────────────────────────────────────
+  // Not `emptyReload` — the point is that the folder and the file survive the browser's storage
+  // being exactly as the app left it.
+  await cdp.send("Page.navigate", { url: "about:blank" });
+  await sleep(200);
+  await cdp.send("Page.navigate", { url: origin });
+  await waitFor(() => cdp.eval("document.readyState==='complete'"), { what: "reload" });
+  // The picker override and the read counter are page state, so they have to go back on.
+  await cdp.eval(
+    `(async () => { window.__opfs = await navigator.storage.getDirectory();
+       window.__reads = {};
+       const real = FileSystemDirectoryHandle.prototype.entries;
+       FileSystemDirectoryHandle.prototype.entries = function (...a) {
+         window.__reads[this.name] = (window.__reads[this.name] ?? 0) + 1;
+         return real.apply(this, a); };
+       return true; })()`,
+    { awaitPromise: true },
+  );
+  await clickTab(cdp, "Files");
+  await waitFor(() => cdp.eval(`!!document.querySelector(".folders__folder")`), {
+    what: "the folder after a reload",
+  });
+  await waitFor(async () => (await rows()).files.includes("nested.zpcr"), {
+    timeout: 10000,
+    what: "the auto-expanded branch",
+  });
+  const reloaded = await rows();
+  check(
+    "A granted folder, and the branch holding the open file, come back after a reload",
+    reloaded.files.includes("nested.zpcr") && reloaded.dirs.includes("2026"),
+    JSON.stringify(reloaded.files),
+  );
+  check(
+    "…with the branches that hold nothing open still unread",
+    reloaded.reads["attic"] === undefined,
+    JSON.stringify(reloaded.reads),
+  );
+
+  cdp.close();
+}
+
 async function main() {
   const pw = cfxPassword();
   if (!pw) {
@@ -4190,6 +4528,7 @@ async function main() {
     await protocolEditorChecks(chrome, origin);
     await cloneChecks(chrome, origin);
     await loadedSetChecks(chrome, origin);
+    await folderChecks(chrome, origin);
   } finally {
     chrome.stop();
     dev.stop();

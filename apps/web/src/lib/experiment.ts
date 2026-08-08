@@ -62,6 +62,12 @@ export function formatCompactDateTime(date: Date): string {
  * moment ago is already on the chip — the archive itself is only rewritten once a minute (see
  * `analysisPersist.ts`).
  */
+/** The last path component of a file's name. Everything but a disk-backed file (whose name is a
+ * folder-rooted path) is returned unchanged. */
+function baseName(name: string): string {
+  return name.slice(name.lastIndexOf("/") + 1);
+}
+
 export function experimentIdentity(
   file: LoadedFile,
   run: RunResult | undefined,
@@ -70,7 +76,11 @@ export function experimentIdentity(
   const metadata = run?.zpcr?.metadata ?? null;
   const date = metadata?.runStartDate ?? null;
   return {
-    name: resolveExperimentName({ stored: storedName, metadata, fileName: file.name }),
+    // A disk-backed file's name is its path within the granted folder (`state/db.ts`'s
+    // `DiskSource`), and what the run is *called* comes from the file's own name, not from the
+    // directories it happens to sit in — `runs/2026-07/a.zpcr` is the run `a`, not `runs/2026-07/a`.
+    // Harmless for an uploaded file, whose name never contains a slash.
+    name: resolveExperimentName({ stored: storedName, metadata, fileName: baseName(file.name) }),
     named: !!storedName?.trim() || !!metadata?.experimentName?.trim(),
     date,
     dateText: date ? formatCompactDateTime(date) : "",

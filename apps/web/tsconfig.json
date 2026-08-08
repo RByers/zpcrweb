@@ -2,7 +2,9 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "target": "ES2022",
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    // DOM.AsyncIterable is what declares `FileSystemDirectoryHandle.entries()`, which the
+    // disk-folder directory lister walks (`state/diskFolders.ts`).
+    "lib": ["ES2022", "DOM", "DOM.Iterable", "DOM.AsyncIterable"],
     "jsx": "react-jsx",
     "module": "ESNext",
     "moduleResolution": "Bundler",

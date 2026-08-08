@@ -10,6 +10,7 @@ import {
   formatRunDefinitionText,
   hasZpcrwebSettings,
   markExperimentBegun,
+  matchesSupportedExtension,
   parseBiomeme,
   parsePcrd,
   parsePlateCsv,
@@ -36,16 +37,27 @@ import {
 
 export { wellKey, type AnalysisSource };
 import {
+  deleteContent,
   deleteFile,
+  diskFileName,
   getAllFiles,
   getContent,
   putFile,
+  putIdentity,
   updateFile,
+  type DiskSource,
   type FileIdentity,
   type FileSummary,
   type StoredFile,
   type StoredView,
 } from "./db";
+import {
+  readDiskFile,
+  unwatchDiskFile,
+  watchDiskFile,
+  writeDiskFile,
+  type DiskFileEvent,
+} from "./diskFolders";
 import {
   ANALYSIS_KEYS,
   DEFAULT_THRESHOLD_MULTIPLIER,
@@ -58,6 +70,7 @@ import {
 import { AnalysisPersister } from "./analysisPersist";
 import {
   contentBytes,
+  contentEntryNames,
   contentFiles,
   contentSize,
   fromStoredContent,
@@ -91,6 +104,17 @@ export type { FileKind };
  * archive rewrite an analysis edit costs is spaced a minute apart instead (`analysisPersist.ts`).
  */
 const PROTOCOL_WRITE_INTERVAL_MS = 2_000;
+
+/**
+ * How often a disk-backed file may be rewritten to the user's disk.
+ *
+ * A disk write is always the *whole* file — there is no per-entry delta to exploit the way there is
+ * in IndexedDB (`db.ts`'s `changed`) — so this spaces out re-zipping and rewriting an archive while
+ * a threshold is being dragged. Shorter than the archive's 60 s IndexedDB rewrite
+ * (`analysisPersist.ts`) because this file is the one the user might reach for in another program a
+ * moment later, and a few seconds of staleness is the most that should cost them.
+ */
+const DISK_WRITE_INTERVAL_MS = 3_000;
 
 /** The two kinds a plate — standalone or attached to a run — can be uploaded as. */
 type PlateFileKind = "pltd" | "csv";
@@ -298,6 +322,9 @@ export interface FileEntry {
   lastModified: number;
   kind: FileKind;
   summary: FileSummary | null;
+  /** Where this file's bytes live, when they live on the user's disk rather than in IndexedDB —
+   * see `db.ts`'s {@link DiskSource}. */
+  source?: DiskSource;
 }
 
 /** A file loaded into memory — content only. Parsing is derived (see {@link ZpcrStore.runs}),
@@ -319,6 +346,9 @@ export interface LoadedFile {
   /** The source `File`'s own `lastModified` (its OS mtime, epoch ms) — see
    * `db.ts`'s `StoredFile.lastModified`. */
   lastModified: number;
+  /** See {@link FileEntry.source}. An edit to a file with this set is written back to the file on
+   * disk rather than to IndexedDB. */
+  source?: DiskSource;
 }
 
 /** A loaded file's bytes, zipping an open archive if that's how it's held — see
@@ -335,6 +365,7 @@ function identityOf(file: LoadedFile): FileIdentity {
     addedAt: file.addedAt,
     kind: file.kind,
     lastModified: file.lastModified,
+    ...(file.source ? { source: file.source } : {}),
   };
 }
 
@@ -347,14 +378,42 @@ function identityOf(file: LoadedFile): FileIdentity {
  * `previous` is the version this one replaces, when there is one — the entries it shares with this
  * write are already stored and are left alone (`changedEntries`). Omitting it writes the whole
  * file, which is what a file arriving for the first time needs.
+ *
+ * **A disk-backed file goes to disk instead** — the catalog row here, the bytes there, throttled
+ * (`markDiskDirty`). The exception is a run the instrument is still writing: those buffer into
+ * IndexedDB exactly like any other file until they finish, and are written to disk once, at the
+ * end. See `apps/web/ARCHITECTURE.md`, "Disk-backed files and folders".
+ *
+ * A `null` `markDiskDirty` means the file on disk is *already* what this write would produce, so
+ * only the catalog row is owed — which is the case for a file that has just been read off disk and
+ * not yet touched. Without it, opening a `.zpcr` from a folder would immediately re-zip it and
+ * write it back: a byte-for-byte different file, a moved mtime, and an edit the user never made.
  */
 function persistFile(
   file: LoadedFile,
-  analysis?: AnalysisSettings,
-  previous?: FileContent,
+  analysis: AnalysisSettings | undefined,
+  previous: FileContent | undefined,
+  markDiskDirty: ((name: string) => void) | null,
 ): Promise<void> {
+  if (file.source && !isRunInProgress(file)) {
+    markDiskDirty?.(file.name);
+    return putIdentity(identityOf(file));
+  }
   const content = toStoredContent(contentToStore(file, analysis));
   return putFile(identityOf(file), content, changedEntries(previous, content));
+}
+
+/**
+ * Whether this file is a run the instrument is still writing — the one case a disk-backed file is
+ * buffered in IndexedDB rather than written straight through.
+ *
+ * Read from the archive's own marker entries, the same way `inProgressIds` answers it for the UI,
+ * because the answer is already in the file and a second flag would only be something to keep in
+ * step. Entry *names* are enough, so this costs nothing per plate read.
+ */
+function isRunInProgress(file: LoadedFile): boolean {
+  if (file.kind !== "zpcr") return false;
+  return runProgressFromNames(contentEntryNames(file.content)).inProgress;
 }
 
 /**
@@ -682,6 +741,46 @@ function looksLikeProtocolText(bytes: Uint8Array): boolean {
 }
 
 /**
+ * Turn a name and some bytes into a kind and a {@link FileContent} — the whole of "can the app open
+ * this?", answered by actually opening it.
+ *
+ * Validation is eager on purpose: an obviously-bad file is rejected at the door rather than at the
+ * first render that touches it. A `.pcrd`/`.pltd`'s *payload* may still need a password, which is
+ * resolved reactively later (`runs`/`plateFiles`); what's checked here is the container.
+ *
+ * A `.zpcr` is unzipped exactly once, here, and the open archive it produces is both what validates
+ * it and what the app goes on holding — a run still being written to is never re-zipped just to be
+ * put away. See `fileContent.ts`.
+ *
+ * Shared by every way bytes arrive: an upload, a `#load=` URL, and a file read out of a granted
+ * folder. Throws with a message meant for the user.
+ */
+function decodeFile(name: string, bytes: Uint8Array): { kind: FileKind; content: FileContent } {
+  const kind = fileKind(name, bytes);
+  if (!kind) {
+    throw new Error(
+      /\.txt$/i.test(name)
+        ? // The name got this far, so say what was wrong with the *content* rather than repeating
+          // the extension list — a `.txt` is only ever rejected for that.
+          "not a thermal protocol (.prcl.txt)"
+        : "not a .zpcr, .pcrd, .pltd, .csv, .prcl.txt or .bmrun file",
+    );
+  }
+  if (kind === "zpcr") {
+    const content = archiveContent(unzipArchive(bytes));
+    parseContent(content);
+    return { kind, content };
+  }
+  if (kind === "pcrd") parsePcrd(bytes);
+  else if (kind === "biomeme") parseBiomeme(bytes);
+  else if (kind === "pltd") parsePltd(bytes);
+  // Already validated by `fileKind`'s content sniff — parsing again would only repeat it.
+  else if (kind === "prcl") void 0;
+  else parsePlateCsv(new TextDecoder().decode(bytes));
+  return { kind, content: plainContent(bytes) };
+}
+
+/**
  * The file name a `#load=` URL delivers: its last path segment, percent-decoded (query and
  * fragment dropped). The name is the app's user-facing identity for a file — it's what `#file=`
  * links to and what the file bar shows — so a URL-loaded file is named after its path, exactly
@@ -914,6 +1013,33 @@ export interface ZpcrStore {
     options?: AddFilesOptions & { merge?: boolean },
   ) => Promise<string | null>;
   /**
+   * Open files out of a granted folder — {@link addFiles} for files the app can read directly,
+   * and the only way a **disk-backed** file gets into the catalog.
+   *
+   * A file added this way keeps no copy in IndexedDB: it is read from disk when loaded and written
+   * back there when edited (see `state/diskFolders.ts`). Its name is its folder-rooted path,
+   * `runs/2026-07/a.zpcr`, so two same-named files in different folders are different files, which
+   * they weren't when everything was uploaded by base name.
+   *
+   * Returns the last file's id, or `null` if none could be read. Per-file failures land in
+   * {@link error}, as with `addFiles`.
+   */
+  addDiskFiles: (sources: DiskSource[], options?: AddFilesOptions) => Promise<string | null>;
+  /**
+   * Re-read a loaded disk-backed file, because it changed on disk.
+   *
+   * Called by the file's own watch, not by the UI. The file keeps its display settings and analysis
+   * state — it is the same file, edited elsewhere, not a new one — and any of the app's own edits
+   * still waiting to be written are flushed out first, so the app's pending intent wins over what
+   * is currently on disk rather than being silently discarded by it.
+   */
+  refreshDiskFile: (id: string) => Promise<void>;
+  /**
+   * Whether this file can be renamed. False for a disk-backed file: its name is its path on the
+   * user's disk, and the File System Access API cannot rename — see {@link renameFile}.
+   */
+  canRename: (id: string) => boolean;
+  /**
    * Ids of the loaded runs that are still running on an instrument — `begun` present, `ended`
    * absent among the archive's own entries (see core's `runProgressFromNames`).
    *
@@ -1018,6 +1144,66 @@ export function useZpcrStore(): ZpcrStore {
     names: Record<string, string | undefined>;
   }>({ runs: new Map(), plateFiles: new Map(), password: "", names: {} });
 
+  /**
+   * Keep the catalog in step with a change to a loaded file — its bytes (so its `size`) or its
+   * identity (a rename). The two lists describe the same files and must agree about them; the
+   * cached summary is refreshed separately, by the effect that watches the decoded run.
+   */
+  const patchEntry = useCallback((id: string, patch: Partial<FileEntry>) => {
+    setEntries((prev) => {
+      entriesRef.current = prev.map((e) => (e.name === id ? { ...e, ...patch } : e));
+      return entriesRef.current;
+    });
+  }, []);
+
+  // ── Disk-backed files ────────────────────────────────────────────────────────────────────
+  // A file opened out of a granted folder is written back to that file rather than into
+  // IndexedDB, so this is the equivalent of `persistFile`'s `putFile` for those — throttled,
+  // because a disk write is always the whole file and there is no per-entry delta to exploit.
+  //
+  // Nothing here decides *whether* a file is disk-backed; `persistFile` does, and only calls
+  // `markDirty` for the ones that are. A run the instrument is still writing is deliberately not
+  // among them — it buffers into IndexedDB and lands on disk once, when it finishes (see the
+  // completion effect further down).
+  const diskThrottle = useRef<WriteThrottle>();
+  if (!diskThrottle.current) {
+    diskThrottle.current = new WriteThrottle({
+      minIntervalMs: DISK_WRITE_INTERVAL_MS,
+      // Read the file at flush time, as the protocol throttle does, so coalesced edits write once
+      // with the latest bytes.
+      write: async (id) => {
+        const file = loadedRef.current.find((f) => f.name === id);
+        if (!file?.source) return;
+        // The run started while this write was pending: leave it to the completion effect rather
+        // than dropping a half-written run on the user's disk.
+        if (isRunInProgress(file)) return;
+        const bytes = contentBytes(contentToStore(file, analysisRef.current[id]));
+        const lastModified = await writeDiskFile(file.source, bytes);
+        // The file on disk really did just change, so unlike an in-place IndexedDB edit (see
+        // `withContent`) its mtime moves, and the catalog should say so.
+        patchEntry(id, { lastModified });
+        void updateFile(id, { lastModified });
+      },
+      onError: (e) => setError(e instanceof Error ? e.message : String(e)),
+    });
+  }
+  useEffect(() => diskThrottle.current!.attach(), []);
+  /** Stable across renders, so `persistFile` can be handed it from anywhere without rebuilding a
+   * throttle or a callback chain. */
+  const markDiskDirty = useCallback((id: string) => diskThrottle.current!.markDirty(id), []);
+
+  /**
+   * Where a watch's news about a file ends up. A ref because the handler needs `refreshDiskFile`,
+   * which is defined much further down and rebuilt as the store's state changes — while a watch,
+   * once started, has to go on delivering to whatever the current handler is.
+   */
+  const diskEventRef = useRef<(name: string, event: DiskFileEvent) => void>(() => {});
+  /** Start watching a loaded disk-backed file, so an edit made in another program shows up here.
+   * Stopping is `unwatchDiskFile`, called wherever a file stops being loaded. */
+  const startDiskWatch = useCallback((name: string, source: DiskSource) => {
+    watchDiskFile(name, source, (event) => diskEventRef.current(name, event));
+  }, []);
+
   const persister = useRef<AnalysisPersister>();
   if (!persister.current) {
     persister.current = new AnalysisPersister({
@@ -1028,6 +1214,11 @@ export function useZpcrStore(): ZpcrStore {
         // and a standalone plate file has no analysis at all — for those, edits are live for
         // the session and then gone, which is the honest behavior while the file can't hold them.
         if (!file || file.kind !== "zpcr") return null;
+        // A disk-backed file's settings travel to disk with the rest of it (`persistFile`), so
+        // this must not also write them into IndexedDB — the one write path that reaches `putFile`
+        // without going through `persistFile` is this one, and a copy left here would be read in
+        // preference to the disk on the next load (`loadOne`).
+        if (file.source) return null;
         const settings = analysisRef.current[id];
         if (!settings) return null;
         return { identity: identityOf(file), files: contentFiles(file.content), settings };
@@ -1055,7 +1246,7 @@ export function useZpcrStore(): ZpcrStore {
       write: async (id) => {
         const file = loadedRef.current.find((f) => f.name === id);
         if (!file || (file.kind !== "prcl" && file.kind !== "zpcr")) return;
-        await persistFile(file, analysisRef.current[id]);
+        await persistFile(file, analysisRef.current[id], undefined, markDiskDirty);
       },
       onError: (e) => setError(e instanceof Error ? e.message : String(e)),
     });
@@ -1074,18 +1265,42 @@ export function useZpcrStore(): ZpcrStore {
     if (loadedRef.current.some((f) => f.name === entry.name)) return null;
     setLoadingIds((prev) => new Set(prev).add(entry.name));
     try {
+      // IndexedDB first even for a disk-backed file: the one thing that puts a disk-backed file's
+      // bytes here is a run the instrument is still writing, and *that* copy is the current one —
+      // the file on disk is whatever the run looked like before it started.
       const stored = await getContent(entry.name);
-      if (!stored) return null;
-      const file: LoadedFile = {
-        name: entry.name,
-        size: entry.size,
-        addedAt: entry.addedAt,
-        kind: entry.kind,
-        // Either representation comes back as itself: a run stored open stays open (and so stays
-        // cheap to append to across a reload), a zipped one stays zipped. See `fileContent.ts`.
-        content: fromStoredContent(stored),
-        lastModified: entry.lastModified,
-      };
+      let file: LoadedFile;
+      if (stored) {
+        file = {
+          name: entry.name,
+          size: entry.size,
+          addedAt: entry.addedAt,
+          kind: entry.kind,
+          // Either representation comes back as itself: a run stored open stays open (and so stays
+          // cheap to append to across a reload), a zipped one stays zipped. See `fileContent.ts`.
+          content: fromStoredContent(stored),
+          lastModified: entry.lastModified,
+          ...(entry.source ? { source: entry.source } : {}),
+        };
+      } else if (entry.source) {
+        // Read from the user's disk and decode exactly as an upload would be — a file that has
+        // been edited or replaced since the app last saw it is simply the file as it is now.
+        const { bytes, lastModified } = await readDiskFile(entry.source);
+        const { kind, content } = decodeFile(entry.name, bytes);
+        file = {
+          name: entry.name,
+          size: contentSize(content),
+          addedAt: entry.addedAt,
+          kind,
+          content,
+          lastModified,
+          source: entry.source,
+        };
+        patchEntry(entry.name, { size: file.size, kind, lastModified });
+      } else {
+        return null;
+      }
+      if (file.source) startDiskWatch(file.name, file.source);
       loadedRef.current = [...loadedRef.current.filter((f) => f.name !== file.name), file];
       setLoadedFiles(loadedRef.current);
       return file;
@@ -1096,7 +1311,7 @@ export function useZpcrStore(): ZpcrStore {
         return next;
       });
     }
-  }, []);
+  }, [patchEntry, startDiskWatch]);
 
   // Hydrate from IndexedDB on mount: the whole catalog (metadata only — no archive is read, let
   // alone unzipped), then the bytes of just those files that were loaded when the session ended.
@@ -1114,6 +1329,7 @@ export function useZpcrStore(): ZpcrStore {
           kind: e.kind,
           lastModified: e.lastModified,
           summary: e.summary ?? null,
+          ...(e.source ? { source: e.source } : {}),
         }));
         catalog.sort((a, b) => a.addedAt - b.addedAt);
         const map: Record<string, FileSettings> = {};
@@ -1199,22 +1415,14 @@ export function useZpcrStore(): ZpcrStore {
     // from its own bytes if it's ever loaded again.
     persister.current!.forget(id);
     protocolThrottle.current!.forget(id);
+    // Deliberately `forget`, not `flush`: forgetting a disk-backed file must not write it out one
+    // last time. The file on disk is the user's, and dropping it from the app is not an edit to it.
+    diskThrottle.current!.forget(id);
+    unwatchDiskFile(id);
     seeded.current.delete(id);
     setAnalysisMap((prev) => {
       const { [id]: _drop, ...rest } = prev;
       return rest;
-    });
-  }, []);
-
-  /**
-   * Keep the catalog in step with a change to a loaded file — its bytes (so its `size`) or its
-   * identity (a rename). The two lists describe the same files and must agree about them; the
-   * cached summary is refreshed separately, by the effect that watches the decoded run.
-   */
-  const patchEntry = useCallback((id: string, patch: Partial<FileEntry>) => {
-    setEntries((prev) => {
-      entriesRef.current = prev.map((e) => (e.name === id ? { ...e, ...patch } : e));
-      return entriesRef.current;
     });
   }, []);
 
@@ -1275,6 +1483,9 @@ export function useZpcrStore(): ZpcrStore {
       // find out short of reading the archive again.
       await persister.current!.flush(id);
       await protocolThrottle.current!.flush(id);
+      await diskThrottle.current!.flush(id);
+      // Nothing left in memory to watch against, and re-loading the file starts a fresh watch.
+      unwatchDiskFile(id);
       const going = loadedRef.current.find((f) => f.name === id);
       if (going) {
         const { runs: r, plateFiles: pf, password: pw, names } = summaryInputs.current;
@@ -1320,7 +1531,7 @@ export function useZpcrStore(): ZpcrStore {
   const install = useCallback(
     async (
       file: LoadedFile,
-      options: { modified: boolean; replacing: boolean },
+      options: { modified: boolean; replacing: boolean; diskInSync?: boolean },
     ): Promise<string> => {
       const prior = entriesRef.current.find((f) => f.name === file.name);
       // The version this write replaces, read before the loaded set moves on — what tells the store
@@ -1353,6 +1564,7 @@ export function useZpcrStore(): ZpcrStore {
         // A snapshot keeps what the file's content last said; only a replacement has nothing to
         // say yet. Refreshed either way by the summary effect once the new content parses.
         summary: options.replacing ? null : prior?.summary ?? null,
+        ...(file.source ? { source: file.source } : {}),
       };
       // Normally nothing to layer in — a file arriving from disk hasn't been seeded yet, and its
       // own `zpcrweb.json` (if it has one) is already in the bytes. A snapshot of a run we are
@@ -1361,6 +1573,7 @@ export function useZpcrStore(): ZpcrStore {
         file,
         options.replacing ? undefined : analysisRef.current[file.name],
         previous,
+        options.diskInSync ? null : markDiskDirty,
       );
       setEntries((prev) => {
         entriesRef.current = [...prev.filter((f) => f.name !== file.name), entry];
@@ -1372,9 +1585,12 @@ export function useZpcrStore(): ZpcrStore {
       });
       setLoadedFlag(file.name, true);
       if (options.modified) setModifiedFlag(file.name, true);
+      // Every route to a loaded disk-backed file passes through here or through `loadOne`, and
+      // both have to start the watch — a file opened from the tree arrives by this one.
+      if (file.source) startDiskWatch(file.name, file.source);
       return file.name;
     },
-    [setModifiedFlag, setLoadedFlag],
+    [setModifiedFlag, setLoadedFlag, startDiskWatch],
   );
 
   /**
@@ -1385,7 +1601,7 @@ export function useZpcrStore(): ZpcrStore {
   const commitContent = useCallback(
     async (next: LoadedFile) => {
       const previous = loadedRef.current.find((f) => f.name === next.name)?.content;
-      await persistFile(next, analysisRef.current[next.name], previous);
+      await persistFile(next, analysisRef.current[next.name], previous, markDiskDirty);
       setLoadedFiles((prev) => {
         loadedRef.current = replaceFile(prev, next);
         return loadedRef.current;
@@ -1399,43 +1615,13 @@ export function useZpcrStore(): ZpcrStore {
     async (input: FileList | File[], options?: AddFilesOptions) => {
       // `.txt`'s kind can only be known after reading its bytes (see `fileKind`), so every file
       // is read up front rather than filtered by extension first the way the other formats are.
-      const candidates = Array.from(input).filter((file) => /\.(zpcr|pcrd|pltd|csv|bmrun|txt)$/i.test(file.name));
+      const candidates = Array.from(input).filter((file) => matchesSupportedExtension(file.name));
       let lastName: string | null = null;
       let lastKind: FileKind | null = null;
       for (const file of candidates) {
         try {
           const buf = await file.arrayBuffer();
-          const bytes = new Uint8Array(buf);
-          const kind = fileKind(file.name, bytes);
-          if (!kind) {
-            throw new Error(
-              /\.txt$/i.test(file.name)
-                ? // The name got this far, so say what was wrong with the *content* rather than
-                  // repeating the extension list — a `.txt` is only ever rejected for that.
-                  "not a thermal protocol (.prcl.txt)"
-                : "not a .zpcr, .pcrd, .pltd, .csv, .prcl.txt or .bmrun file",
-            );
-          }
-          // Validate the container eagerly so obviously-bad files are rejected up front; a
-          // .pcrd/.pltd's payload may still need a password, resolved reactively via `runs`/
-          // `plateFiles`.
-          //
-          // A `.zpcr` is unzipped exactly once here, and that same open archive is both what
-          // validates it and what it's stored as if the run is still being written to — a dropped
-          // run in progress never gets re-zipped just to be put away. See `fileContent.ts`.
-          let content: FileContent;
-          if (kind === "zpcr") {
-            content = archiveContent(unzipArchive(bytes));
-            parseContent(content);
-          } else {
-            if (kind === "pcrd") parsePcrd(bytes);
-            else if (kind === "biomeme") parseBiomeme(bytes);
-            else if (kind === "pltd") parsePltd(bytes);
-            // Already validated by `fileKind`'s content sniff — parsing again would only repeat it.
-            else if (kind === "prcl") void 0;
-            else parsePlateCsv(new TextDecoder().decode(bytes));
-            content = plainContent(bytes);
-          }
+          const { kind, content } = decodeFile(file.name, new Uint8Array(buf));
           // Dropping a file replaces whatever held its name, and counts as a *different* file:
           // the copy on disk is authoritative, and whatever the old one accumulated here — its
           // cached summary, its display settings, its modified flag — described something else.
@@ -1497,6 +1683,7 @@ export function useZpcrStore(): ZpcrStore {
         // threshold edit flushing after this one would be working from an archive without the plate
         // read that just arrived. Same precedent as `renameFile` and `setRunProtocolName`.
         await persister.current!.flush(name);
+        await diskThrottle.current!.flush(name);
         const previous = entriesRef.current.find((f) => f.name === name);
         const installed = await install(
           {
@@ -1520,6 +1707,97 @@ export function useZpcrStore(): ZpcrStore {
     },
     [install],
   );
+
+  /** See {@link ZpcrStore.addDiskFiles}. */
+  const addDiskFiles = useCallback(
+    async (sources: DiskSource[], options?: AddFilesOptions) => {
+      let lastName: string | null = null;
+      for (const source of sources) {
+        const name = diskFileName(source);
+        try {
+          const { bytes, lastModified } = await readDiskFile(source);
+          const { kind, content } = decodeFile(name, bytes);
+          // `replacing: true` for the same reason a drop is: whatever this name held before, the
+          // file on disk is the authority on what it is now.
+          await install(
+            {
+              name,
+              size: contentSize(content),
+              addedAt: Date.now(),
+              kind,
+              content,
+              lastModified,
+              source,
+            },
+            // These bytes came off the disk a moment ago; writing them straight back would only
+            // change the file for no reason.
+            { modified: options?.modified === true, replacing: true, diskInSync: true },
+          );
+          lastName = name;
+        } catch (e) {
+          setError(`${name}: ${e instanceof Error ? e.message : String(e)}`);
+        }
+      }
+      if (lastName && options?.activate !== false) setActiveName(lastName);
+      return lastName;
+    },
+    [install],
+  );
+
+  /** See {@link ZpcrStore.refreshDiskFile}. */
+  const refreshDiskFile = useCallback(
+    async (id: string) => {
+      const file = loadedRef.current.find((f) => f.name === id);
+      if (!file?.source) return;
+      // An edit of ours that hasn't reached disk yet would be silently overwritten by what's
+      // there. Send it first: last writer wins, and between the app and an external editor the
+      // app is the one whose intent is still pending.
+      await diskThrottle.current!.flush(id);
+      try {
+        const { bytes, lastModified } = await readDiskFile(file.source);
+        const { kind, content } = decodeFile(id, bytes);
+        // Not `install` with `replacing`: this is the *same* file, changed underneath us, so its
+        // *display* state — which wells are hidden, log vs. linear — stays exactly as it was.
+        const next: LoadedFile = { ...file, kind, content, size: contentSize(content), lastModified };
+        setLoadedFiles((prev) => {
+          loadedRef.current = replaceFile(prev, next);
+          return loadedRef.current;
+        });
+        // Its *analysis* state does not, and must not: thresholds and the run's name live in the
+        // file's own `zpcrweb.json`, so the bytes that just arrived are the authority on them.
+        // Dropping the seed mark lets the seeding effect read them back out of the new content —
+        // without this, a run renamed in another copy of the app would go on showing the name this
+        // one happened to be holding, and the next write would put it back.
+        seeded.current.delete(id);
+        setAnalysisMap((prev) => {
+          const { [id]: _drop, ...rest } = prev;
+          analysisRef.current = rest;
+          return rest;
+        });
+        patchEntry(id, { size: next.size, kind, lastModified });
+        void updateFile(id, { size: next.size, kind, lastModified });
+      } catch (e) {
+        setError(`${id}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    },
+    [patchEntry],
+  );
+
+  /** See {@link ZpcrStore.canRename}. Asked of the catalog, not the loaded set, so the Files table
+   * can answer for a released file too. */
+  const canRename = useCallback(
+    (id: string) => !entriesRef.current.find((e) => e.name === id)?.source,
+    [],
+  );
+
+  // Route a watch's news to the current `refreshDiskFile` — see `diskEventRef`. A file reported
+  // missing is left loaded and untouched: the bytes in memory are the last good copy of it, and
+  // the watch goes on trying to re-attach in case the file comes back.
+  useEffect(() => {
+    diskEventRef.current = (name, event) => {
+      if (event === "changed") void refreshDiskFile(name);
+    };
+  }, [refreshDiskFile]);
 
   /**
    * Fetch → `addFiles`, so a URL-loaded file goes through exactly the same validate/persist path
@@ -1578,6 +1856,7 @@ export function useZpcrStore(): ZpcrStore {
     (id: string) => {
       void persister.current!.flushAll();
       void protocolThrottle.current!.flushAll();
+      void diskThrottle.current!.flushAll();
       setActiveName(id);
       void setLoaded(id, true);
     },
@@ -1747,12 +2026,22 @@ export function useZpcrStore(): ZpcrStore {
    * the name is the key. Everything keyed by the old name moves with it here in memory; the
    * catalog record travels intact inside `db.ts`'s own re-key, so the file keeps its cached
    * summary, its display settings and its modified flag across the rename.
+   *
+   * **Not available for a disk-backed file** ({@link ZpcrStore.canRename}). A disk-backed file's
+   * name *is* its path on the user's disk, so renaming it would have to rename the real file — and
+   * the File System Access API has no rename: it would be a copy, then a delete of the original,
+   * with a window in between where a failure loses the file. Not worth risking someone's run data
+   * for; the app declines instead, and the UI doesn't offer it.
    */
   const renameFile = useCallback(
     async (from: string, rawName: string) => {
       const to = rawName.trim();
       const file = loadedRef.current.find((f) => f.name === from);
       if (!file || !to || to === from) return;
+      if (file.source) {
+        setError(`${from}: a file in a folder on disk is renamed on disk, not here`);
+        return;
+      }
       // Flush any pending archive rewrite for the old name first — once the rename lands, the
       // persister's `resolve` can no longer find a file under it and would silently drop the edit.
       await persister.current!.flush(from);
@@ -1765,7 +2054,7 @@ export function useZpcrStore(): ZpcrStore {
       // being written is this file's, and dropping it here is what used to lose the name of an
       // experiment that had just been named (naming one renames its file — `App.tsx`'s
       // `nameExperiment`).
-      await persistFile({ ...file, name: to }, analysisRef.current[from]);
+      await persistFile({ ...file, name: to }, analysisRef.current[from], undefined, markDiskDirty);
       await deleteFile(from);
       setLoadedFiles((prev) => {
         loadedRef.current = prev.map((f) => (f.name === from ? { ...f, name: to } : f));
@@ -1884,12 +2173,25 @@ export function useZpcrStore(): ZpcrStore {
           analysisRef.current = { ...prev, [activeName]: next };
           return analysisRef.current;
         });
-        // Rate-limited archive rewrite — see `analysisPersist.ts`.
-        persister.current!.markDirty(activeName);
-        // The analysis half is precisely what a download writes into the file (`exportBytes`), so
-        // an edit to it is what makes the copy on disk stale. Display state — which channels are
-        // shown, log vs. linear — never leaves this browser and so never counts.
-        setModifiedFlag(activeName, true);
+        // Rate-limited archive rewrite — see `analysisPersist.ts` — except for a disk-backed file,
+        // whose settings reach the same place by a different road: the whole file is written back
+        // to disk (`contentToStore` layers `zpcrweb.json` in on the way out), on a much shorter
+        // window because a disk write costs a re-zip either way and there is no per-entry delta to
+        // protect. Routed here rather than inside the persister so there is one answer to "where do
+        // this file's bytes go", and it is `persistFile`'s.
+        if (loadedRef.current.find((f) => f.name === activeName)?.source) {
+          markDiskDirty(activeName);
+        } else {
+          persister.current!.markDirty(activeName);
+          // The analysis half is precisely what a download writes into the file (`exportBytes`), so
+          // an edit to it is what makes the copy on disk stale. Display state — which channels are
+          // shown, log vs. linear — never leaves this browser and so never counts.
+          //
+          // A disk-backed file is the exception, and the reason the flag exists says why: what it
+          // warns about is the user's copy going stale, and for that file the app *is* writing the
+          // user's copy. There is nothing to lose by closing the tab.
+          setModifiedFlag(activeName, true);
+        }
       }
     },
     [activeName, setModifiedFlag],
@@ -2026,6 +2328,37 @@ export function useZpcrStore(): ZpcrStore {
     return ids;
   }, [runs]);
 
+  /**
+   * A disk-backed run that has just finished: write it to the user's disk, once, and let go of the
+   * buffer it accumulated.
+   *
+   * While a run is in progress its plate reads go to IndexedDB, one small record each, and the file
+   * on disk is left alone — writing a whole archive to disk forty-five times over a two-hour run
+   * would be a great deal of churn for a file nobody can use until it is finished. The moment the
+   * `ended` marker arrives it stops being in progress, and this writes the finished run out and
+   * drops the records, after which the file is read from and written to disk like any other.
+   */
+  const wasInProgress = useRef(new Set<string>());
+  useEffect(() => {
+    const finished = [...wasInProgress.current].filter((id) => !inProgressIds.has(id));
+    wasInProgress.current = new Set(inProgressIds);
+    for (const id of finished) {
+      const file = loadedRef.current.find((f) => f.name === id);
+      if (!file?.source) continue;
+      void (async () => {
+        diskThrottle.current!.markDirty(id);
+        await diskThrottle.current!.flush(id);
+        // A failed write leaves the entry dirty (`writeThrottle.ts` re-arms on throw). Dropping the
+        // buffer then would destroy the only copy of a run that never reached disk — a permission
+        // lapse mid-run, a full volume — so the records stay until a write actually lands.
+        if (diskThrottle.current!.isDirty(id)) return;
+        await deleteContent(id);
+        // The bytes on disk are now the run, so the copy the user has is not stale.
+        setModifiedFlag(id, false);
+      })();
+    }
+  }, [inProgressIds, setModifiedFlag]);
+
   /** See {@link ZpcrStore.incompleteIds} — the protocol's own read count, against the archive's. */
   const incompleteIds = useMemo(() => {
     const ids = new Set<string>();
@@ -2137,6 +2470,9 @@ export function useZpcrStore(): ZpcrStore {
     error,
     addFiles,
     addRunArchive,
+    addDiskFiles,
+    refreshDiskFile,
+    canRename,
     addUrl,
     setActive,
     remove,
