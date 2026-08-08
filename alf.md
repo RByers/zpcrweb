@@ -20,12 +20,18 @@ log: the only artifact in which the instrument, rather than the PC, says what ra
 > here.
 
 **Implemented by** `packages/core/src/alf.ts`, entry point `parseAlf(bytes)`; `zpcr.runReports()`
-decodes every `.alf` entry in an archive, and the web app's Raw files view renders one
-(`components/raw/DecodedAlf.tsx`). The decoder derives the three things the file only implies —
-per-step durations (§7.4), stage boundaries (§7.2) and plate-read indices (§7.5) — and carries
-the fourth step column through uninterpreted (§8), which is also why the app's table omits it.
-`alfThermalProfile()` builds on those to reconstruct the block-temperature-against-time trace
-(§7.6), which a run's Protocol tab plots beneath the protocol it ran.
+decodes every `.alf` entry in an archive. The decoder derives the three things the file only
+implies — per-step durations (§7.4), stage boundaries (§7.2) and plate-read indices (§7.5) — and
+carries the fourth step column through uninterpreted (§8). `alfThermalProfile()` builds on those to
+reconstruct the block-temperature-against-time trace (§7.6).
+
+The web app splits a report across two views. Its **identity and outcome** — the header of §4 and
+the error line of §6 — are `components/raw/DecodedAlf.tsx`, which renders both an in-archive report
+in the Raw files view and a standalone `.alf`'s Overview. **What ran and what it cost** is the
+Protocol tab (`components/views/ProtocolView.tsx`): line 2's protocol as the annotated directive
+listing, and the step log of §7 as the thermal profile. The per-step table the app used to draw is
+gone — the profile is the same derivation shown as a picture, and the literal fields stay one
+Text-mode click away.
 
 Related docs: [`protocol.md`](./protocol.md) owns the protocol language on line 2 and the step
 numbering the log uses (its Appendix A is measured from these files);

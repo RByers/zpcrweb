@@ -215,10 +215,10 @@ async function noPlateReadRunChecks(chrome, origin) {
  * puts it in the bar. The sample is a real one, off the instrument: a 2:36 `METHOD BLOCK` hold.
  *
  * Three things have to hold. It has to be *admitted* at all, which is a file-kind question and the
- * one this used to fail on. Only Overview and Raw may be enabled — a report has no curves, no
- * plate and no protocol to edit, and every other tab rendering an empty frame is the failure this
- * app greys tabs out to avoid. And Overview has to show the report itself rather than a bare
- * identity card, since there is no second tab for it to live on.
+ * one this used to fail on. Only Overview, Protocol and Raw may be enabled — a report has no
+ * curves and no plate, and every other tab rendering an empty frame is the failure this app greys
+ * tabs out to avoid. And the report's two halves have to land on the two tabs that claim them:
+ * identity and errors on Overview, what ran and what it cost on Protocol.
  */
 async function reportFileChecks(chrome, origin) {
   console.log("\na standalone .alf run report");
@@ -235,12 +235,12 @@ async function reportFileChecks(chrome, origin) {
     )
     .then(JSON.parse);
   check(
-    "only Overview and Raw are enabled — a report has nothing for the other tabs",
+    "Overview, Protocol and Raw are enabled — a report has nothing for the other tabs",
     tabs.Overview === true &&
+      tabs.Protocol === true &&
       tabs.Raw === true &&
       tabs.Curves === false &&
       tabs.Plates === false &&
-      tabs.Protocol === false &&
       tabs.Reference === false &&
       tabs.Calibration === false,
     JSON.stringify(tabs),
@@ -261,9 +261,39 @@ async function reportFileChecks(chrome, origin) {
     overview.slice(0, 220),
   );
   check(
-    "…and the decoded report itself is on it, protocol as executed and all",
-    overview.includes("Protocol as executed") && overview.includes("TEMP 37.0,30"),
+    "…and the report's header and error detail with it, but not the protocol it carries",
+    overview.includes("User aborted") &&
+      overview.includes("Executed") &&
+      !overview.includes("TEMP 37.0,30") &&
+      !overview.includes("Execution log"),
     overview.slice(0, 400),
+  );
+
+  // What ran and what it cost is the Protocol tab's, for a report exactly as for a run: the
+  // report's own copy of the protocol (post-expansion, `alf.md` §5) as the annotated listing, and
+  // its step log as the thermal profile. This is the tab a report never used to have.
+  await clickTab(cdp, "Protocol");
+  await waitFor(() => cdp.eval(`!!document.querySelector(".thermal canvas")`), {
+    what: "the report's thermal profile chart",
+  });
+  const protocol = await cdp
+    .eval(
+      `JSON.stringify({
+         text: (document.querySelector(".overview")?.textContent ?? "").replace(/\\s+/g, " "),
+         chart: !!document.querySelector(".thermal canvas"),
+       })`,
+    )
+    .then(JSON.parse);
+  check(
+    "Protocol shows the protocol the report says ran, marked as executed rather than authored",
+    protocol.text.includes("Thermal protocol as executed") &&
+      protocol.text.includes("TEMP 37.0,30"),
+    protocol.text.slice(0, 300),
+  );
+  check(
+    "…and the step log as the thermal profile, which is what replaced the execution table",
+    protocol.text.includes("Thermal profile as run") && protocol.chart,
+    JSON.stringify(protocol.chart),
   );
 
   await clickTab(cdp, "Raw");
@@ -1923,17 +1953,20 @@ async function xmlViewChecks(chrome, origin, pw) {
 }
 
 /**
- * The `.alf` run report's decoded view (`alf.md`, `components/raw/DecodedAlf.tsx`).
+ * The `.alf` run report's decoded view inside an archive (`alf.md`,
+ * `components/raw/DecodedAlf.tsx`).
  *
- * A screenshot shows the table; what it can't show is that the numbers in it are the *derived*
- * ones rather than fields copied out of the file, which is the whole reason the view exists:
+ * What this view is, now, is the run's *identity and outcome* — the header fields and error flags
+ * pulled apart and named. What it deliberately is not any more is a second rendering of the
+ * protocol or a nine-column table of step timestamps: both are the Protocol tab's, as the annotated
+ * listing and the thermal profile, and having them here as well meant one file read twice into two
+ * shapes that could only agree or be a bug.
  *
- * - the plate-read count matches the archive's own `.Plateread` entries (§7.5 — the check that
- *   would catch a missing read, and the one claim that spans two file types at once);
- * - "took" is the next step's start minus this one's (§7.4), so a 10 s hold reads as the ~20 s
- *   it really occupied — a column equal to the hold column would mean the derivation was lost;
- * - the fourth column of the file (§8) is *absent*, deliberately, and a future edit that helpfully
- *   adds it back should fail here rather than ship a number nobody can interpret.
+ * The derived numbers that table carried are still asserted, because losing them silently is the
+ * failure worth catching: `Executed` states the step and plate-read counts, and the read count has
+ * to match the archive's own `.Plateread` entries (§7.5 — the one claim that spans two file types
+ * at once). The per-step durations behind it are core's (`packages/core/test/alf.test.ts`), and the
+ * plot that now shows them is `thermalProfileChecks` below.
  */
 async function alfViewChecks(chrome, origin) {
   console.log("\n.alf run report");
@@ -1957,62 +1990,38 @@ async function alfViewChecks(chrome, origin) {
   await cdp.eval(
     `[...document.querySelectorAll('.raw__item')].find(b => /\\.alf$/i.test(b.textContent.trim())).click()`,
   );
-  await waitFor(() => cdp.eval(`!!document.querySelector('.decoded__alf tbody tr')`), {
-    what: "the decoded execution log",
+  await waitFor(() => cdp.eval(`!!document.querySelector('.raw__decoded .decoded__dl')`), {
+    what: "the decoded run report",
   });
 
-  const log = await cdp
+  const shown = await cdp
     .eval(
-      `JSON.stringify((() => {
-         // The headings are uppercased by CSS, not in the markup — match on the real text.
-         const head = [...document.querySelectorAll('.decoded__alf thead th')].map(t => t.textContent.trim());
-         const rows = [...document.querySelectorAll('.decoded__alf tbody tr')].map(r =>
-           [...r.querySelectorAll('td')].map(c => c.textContent.trim()));
-         const col = (name) => head.findIndex(h => h.toLowerCase() === name.toLowerCase());
-         const cell = (r, name) => r[col(name)];
-         const steps = rows.filter(r => r.length === head.length);
-         return {
-           head,
-           mode: document.querySelector('.raw__modes .segmented__item.is-active')?.textContent.trim(),
-           reads: steps.filter(r => cell(r, "READ") !== "").length,
-           lastRead: steps.filter(r => cell(r, "READ") !== "").map(r => cell(r, "READ")).pop(),
-           // A 10 s hold in this run's cycling loop, and what it actually occupied.
-           tenSecond: steps.filter(r => cell(r, "HOLD") === "0:10").map(r => cell(r, "TOOK")),
-           stages: [...new Set(steps.map(r => cell(r, "STAGE")))].length,
-         };
-       })())`,
+      `JSON.stringify({
+         mode: document.querySelector('.raw__modes .segmented__item.is-active')?.textContent.trim(),
+         text: (document.querySelector('.raw__decoded')?.textContent ?? "").replace(/\\s+/g, " "),
+         executed: [...document.querySelectorAll('.raw__decoded .decoded__pair')]
+           .find(p => p.querySelector('dt')?.textContent.trim() === 'Executed')
+           ?.querySelector('dd')?.textContent.trim(),
+         table: !!document.querySelector('.raw__decoded .decoded__tbl'),
+       })`,
     )
     .then(JSON.parse);
 
+  check("a .alf opens on its decoded run report, not a hex dump", shown.mode === "Decoded", shown.mode);
   check(
-    "a .alf opens on its decoded run report, not a hex dump",
-    log.mode === "Decoded",
-    log.mode,
+    "the report's plate-read count is 1:1 with the archive's .Plateread files (alf.md §7.5)",
+    !!shown.executed && shown.executed.includes(`${plateReads} plate reads`),
+    `${shown.executed} / ${plateReads} files`,
   );
   check(
-    "the execution log's plate reads are 1:1 with the archive's .Plateread files (alf.md §7.5)",
-    log.reads === plateReads && log.lastRead === String(plateReads),
-    `${log.reads} logged / ${plateReads} files, last index ${log.lastRead}`,
-  );
-  // A 10 s hold never occupies *less* than 10 s, and mostly occupies more — the surplus is the
-  // ramp, which exists in this column only because it is differenced timestamps rather than a
-  // copy of the file's hold field. Not "always more": this run's first pass holds 95 °C right
-  // after a 60 s hold at 95 °C, so there is no ramp to pay for and it comes to exactly 0:10.
-  const holds = log.tenSecond.map((t) => {
-    const [m, s] = t.split(":");
-    return Number(m) * 60 + Number(s);
-  });
-  check(
-    "a step's duration is measured from the next step's start, not read off the hold (alf.md §7.4)",
-    holds.length > 0 &&
-      holds.every((s) => s >= 10) &&
-      holds.filter((s) => s > 10).length > holds.length / 2,
-    `${holds.length} ten-second holds, took ${[...new Set(log.tenSecond)].sort().join(", ")}`,
+    "what the decoded view is: the run's identity and its error flags",
+    shown.text.includes("Base unit") && shown.text.includes("User aborted"),
+    shown.text.slice(0, 200),
   );
   check(
-    "the unexplained fourth column is not presented as a ramp time (alf.md §8)",
-    !log.head.some((h) => /ramp/i.test(h)),
-    log.head.join(" "),
+    "the protocol and the step table are not restated here — both are the Protocol tab's",
+    !shown.table && !shown.text.includes("Execution log") && !shown.text.includes("HOTLID"),
+    `table ${shown.table}`,
   );
   cdp.close();
 }

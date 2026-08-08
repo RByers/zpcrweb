@@ -1,23 +1,22 @@
-import { useMemo } from "react";
-import { parseAlf } from "@zpcrweb/core";
+import type { AlfReport } from "@zpcrweb/core";
 import { OverviewPanel, type OverviewPanelProps, type InfoRow } from "./OverviewPanel";
 import { DecodedAlf } from "../raw/DecodedAlf";
-import { fileBytes, type LoadedFile } from "../../state/useZpcrStore";
-
-const textDecoder = new TextDecoder("utf-8");
+import type { LoadedFile } from "../../state/useZpcrStore";
 
 /**
  * The Overview tab for a standalone `.alf` run report.
  *
- * A report is the whole file rather than a summary of one, so unlike a `.prcl.txt` — whose
- * Overview is the bare identity card because its content lives on the Protocol tab — this puts the
- * decoded report right here, in {@link OverviewPanel}'s `children` slot. There is no second tab
- * for it to live on: a report has no protocol to edit, no plate, and no curves.
+ * A report is the whole file rather than a summary of one, so this puts the decoded report right
+ * here, in {@link OverviewPanel}'s `children` slot: the identity card leads with the four things
+ * someone opening a report wants first — what the run was called, when it ran, how long it took,
+ * and whether it finished cleanly — and {@link DecodedAlf} follows with the rest of the header and
+ * the error flags, the same copy an in-archive report gets in the Raw view.
  *
- * What the shared identity card gains is the four things someone opening a report wants first —
- * what the run was called, when it ran, how long it took, and whether it finished cleanly. The
- * rest (the protocol as executed, the per-step log with its wall-clock durations) is
- * {@link DecodedAlf}'s, unchanged from the copy an in-archive report gets.
+ * What is deliberately *not* here is the protocol the report carries and the wall-clock cost of
+ * running it. Those are the Protocol tab's (`ProtocolView`), where the protocol reads as its
+ * annotated listing and the step log reads as a thermal profile against the clock. A report is the
+ * one file where the same tab could plausibly have held everything, and holding everything is what
+ * made it a scroll rather than an answer.
  *
  * This is what a thermal-only run leaves behind. The instrument writes no run folder for a
  * protocol with no plate read, so the app collects the report instead of a run file
@@ -25,23 +24,18 @@ const textDecoder = new TextDecoder("utf-8");
  */
 export function StandaloneReportOverview({
   file,
+  report,
   ...tools
 }: {
   file: LoadedFile;
+  /** The decoded report, or null when the file no longer parses as one — still worth the identity
+   * card, since Raw has its bytes either way. Parsed by the caller, which needs it for the
+   * Protocol tab too. */
+  report: AlfReport | null;
 } & Pick<
   OverviewPanelProps,
   "onRenameFile" | "onDownload" | "onClone" | "autoEditName" | "onAutoEditHandled"
 >) {
-  const report = useMemo(() => {
-    try {
-      return parseAlf(textDecoder.decode(fileBytes(file)));
-    } catch {
-      // A report that no longer parses is still a file worth showing the identity card for —
-      // Raw has its bytes either way.
-      return null;
-    }
-  }, [file]);
-
   const rows: InfoRow[] = [];
   if (report) {
     const { header, errors } = report;

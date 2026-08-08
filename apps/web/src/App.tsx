@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import {
+  parseAlf,
   parseRunDefinition,
   plateToCsv,
   ProtocolBuilder,
@@ -64,11 +65,17 @@ const BIOMEME_VIEWS = ["overview", "protocol", "curves", "plates", "raw"] as con
  * no curves and no plate, and no longer lists Instrument: a protocol file is not something that
  * can be started, only attached to an experiment that can (see {@link InstrumentView}). */
 const PROTOCOL_VIEWS = ["overview", "protocol", "raw"] as const;
-/** An `.alf` run report is a record of a run that happened, holding no fluorescence, no plate and
- * no protocol to edit — so Overview (which is where the decoded report itself is, see
- * {@link StandaloneReportOverview}) and Raw, and nothing else. It is what a thermal-only run
- * produces instead of a `.zpcr` (`state/useRunWatch.ts`). */
-const REPORT_VIEWS = ["overview", "raw"] as const;
+/** An `.alf` run report is a record of a run that happened, holding no fluorescence and no plate —
+ * so Overview (the identity card and the report's own header/error detail, see
+ * {@link StandaloneReportOverview}), Protocol, and Raw.
+ *
+ * Protocol is here because a report *carries* a protocol — the one the instrument actually ran,
+ * post-expansion and with the real scan mask (`alf.md` §5) — plus the only record of what that
+ * protocol cost in wall-clock time, which is the thermal profile {@link ProtocolView} plots. It is
+ * not editable: a report is a record of what happened, not a draft.
+ *
+ * A report is what a thermal-only run produces instead of a `.zpcr` (`state/useRunWatch.ts`). */
+const REPORT_VIEWS = ["overview", "protocol", "raw"] as const;
 
 /** A `.pltd`/`.plt.csv` uploaded on its own, rather than a run — only these three tabs apply. */
 const isStandaloneKind = (kind: string) => kind === "pltd" || kind === "csv";
@@ -653,6 +660,24 @@ export function App() {
     };
   }, [active, activeRun, store.experiments, store.activeProtocolFile]);
 
+  /**
+   * The decoded `.alf` when the selected file *is* one. Parsed here rather than inside either view
+   * because two tabs now read it — Overview's identity card and Protocol, which shows the report's
+   * own copy of what ran plus the thermal profile derived from its step log — and parsing the same
+   * file twice is how the two would drift apart.
+   *
+   * A report that no longer parses is still a file worth showing: the views fall back to the
+   * identity card and Raw, which has its bytes either way.
+   */
+  const activeReport = useMemo(() => {
+    if (active?.kind !== "alf") return null;
+    try {
+      return parseAlf(new TextDecoder("utf-8").decode(fileBytes(active)));
+    } catch {
+      return null;
+    }
+  }, [active]);
+
 
   if (store.loading) {
     return <div className="splash mono">initializing…</div>;
@@ -887,11 +912,33 @@ export function App() {
             {view === "overview" && (
               <StandaloneReportOverview
                 file={active}
+                report={activeReport}
                 onRenameFile={(name) => void store.renameFile(active.name, name)}
                 onDownload={downloadActiveFile}
                 onClone={() => void cloneActiveFile()}
                 autoEditName={editNameFor === active.name}
                 onAutoEditHandled={clearEditName}
+              />
+            )}
+            {view === "protocol" && (
+              <ProtocolView
+                key={active.name}
+                // The report's own copy of the protocol, which is the one that ran — see
+                // `executed` below for why that distinction is drawn in the view.
+                protocolText={activeReport?.runDefinition || null}
+                report={activeReport}
+                executed
+                file={active}
+                protocolSources={protocolAttachSources}
+                addFiles={store.addFiles}
+                // A report is a record of a run that already happened; there is nothing here to
+                // edit, and so no protocol to attach either.
+                editable={false}
+                onChangeProtocol={() => {}}
+                // The instrument files a run under a name, and that name is the protocol's as far
+                // as the report knows. Never editable, so the rename callback is never reached.
+                name={activeReport?.header.runName ?? ""}
+                onRenameProtocol={() => {}}
               />
             )}
             {view === "raw" && <StandaloneRawView key={active.name} file={active} />}

@@ -314,15 +314,23 @@ load-bearing: a report says a protocol executed, when, for how long and whether 
 carries no fluorescence, no plate and no editable protocol. Categorising it as a run would offer it
 everywhere a run belongs, and every one of those places would find it empty.
 
-It enables **two** tabs, `["overview","raw"]`:
+It enables **three** tabs, `["overview","protocol","raw"]`:
 
-- **Overview** (`StandaloneReportOverview`) — unlike a `.prcl.txt`, whose Overview is the bare
-  identity card because its content lives on Protocol, a report *is* its content and there is no
-  second tab for it to live on. So the shared `OverviewPanel` gets four extra rows (the run's name,
-  when it ran, how long it took, the outcome it reports) and `DecodedAlf` in its `children` slot —
-  the same decode an in-archive report gets in the Raw view, unchanged.
+- **Overview** (`StandaloneReportOverview`) — who ran what, and how it went. The shared
+  `OverviewPanel` gets four extra rows (the run's name, when it ran, how long it took, the outcome
+  it reports) and `DecodedAlf` in its `children` slot — the same decode an in-archive report gets in
+  the Raw view, unchanged.
+- **Protocol** (`ProtocolView`, the same component a run and a `.prcl.txt` use) — what actually ran,
+  and what it cost. A report carries a protocol of its own: line 2 is the run definition
+  post-expansion, with the scan mask the run really used (`alf.md` §5), so the view takes it with
+  `executed` set and heads it *Thermal protocol as executed*. Not editable — a report is a record.
+  Below it, the same **Thermal profile as run** section a `.zpcr` gets, since the report is exactly
+  what that section plots.
 - **Raw** (`StandaloneRawView`, shared with `.pltd`/`.plt.csv`/`.prcl.txt`/Biomeme) — the report's
   own text, which is already plain UTF-8.
+
+The report is parsed once, in `App.tsx` (`activeReport`), and handed to both views: Overview and
+Protocol read the same fields, and parsing it twice is how the two would drift.
 
 Reports arrive two ways: dropped in like any other file, or collected from the instrument at the
 end of a **thermal-only run**, which produces one instead of a `.zpcr` (`state/useRunWatch.ts`'s
@@ -331,8 +339,9 @@ the catalog, in IndexedDB, renameable and deletable like any other.
 
 ### One Protocol view (`ProtocolView`)
 
-**A protocol is rendered by one component wherever it lives** — a standalone `.prcl.txt` and a run's
-own protocol alike. There were two (`StandaloneProtocolView` and `ProtocolView`) and they had
+**A protocol is rendered by one component wherever it lives** — a standalone `.prcl.txt`, a run's
+own protocol, and the copy an `.alf` run report carries alike. There were two
+(`StandaloneProtocolView` and `ProtocolView`) and they had
 drifted in every way two components can: only one had an editor, only one had the download/clone
 pair, one led with a stat table of `Method`/`Lid`/`Volume`/`Steps`/`Plate reads`/`Scan` and the other
 didn't. But the thing on screen is the same directive text either way, so where it is stored changes
@@ -340,7 +349,13 @@ only two things, and both are props:
 
 - **whether it may be edited** — a standalone file and a *pending* experiment are drafts, a run that
   has happened is a record (see "Editing what has already happened");
-- **whether there is a thermal profile below it**, which only a run that actually executed has.
+- **whether there is a thermal profile below it**, which only a run that actually executed has;
+- **whether the text is the report's own copy of what ran** (`executed`) rather than an authored
+  protocol, which changes the heading and adds one line about the scan mask — the distinction
+  `alf.md` §5 draws, and the reason a report's protocol isn't allowed to pass for a `.prcl`'s.
+
+A standalone `.alf` is the third caller and the one that needs both of the last two: the report *is*
+the protocol and *is* the profile.
 
 Its replace/download/clone toolbar is the Plates tab's, mirrored — see `PlateDownloadButton` under
 "Plates and plate files" for the three buttons and the two places the protocol's set deliberately
@@ -1224,14 +1239,18 @@ supplies one.
   there the lid and volume are directives the annotated listing already explains, so showing
   them twice would be two views of one line.
 - **`.alf`** → `DecodedAlfFile` (`components/raw/DecodedAlf.tsx`) — the instrument's own run
-  report ([`alf.md`](../../alf.md)): run identity, the error summary's flags, the protocol as
-  *executed* (through the same `ProtocolDecoded`), and the execution log as one row per step.
-  The three columns that aren't fields in the file are what earn the view — **Took** (the next
-  step's start minus this one's, §7.4, the only measurable ramp cost), **Stage** (§7.2) and
-  **Read** (its index among the archive's `.Plateread` files, §7.5) — plus the directive text,
-  joined back on from line 2 of the same file so a bare step number reads as a step. The
-  fourth step column is left out on purpose: `alf.md` §8 rules out both readings of it, and
-  Text mode is one click away for anyone who wants the bytes.
+  report ([`alf.md`](../../alf.md)): run identity and the error summary's flags, plus one
+  `Executed` line counting the steps, stages and plate reads the log holds (none of the three is
+  a field — a stage boundary is where the repeat counter went backwards, §7.2, and a read's index
+  is its position among the `Plate Read` lines, §7.5).
+
+  It used to also render the protocol the report carries and a nine-column table of every step
+  execution. Both moved to the Protocol tab — the protocol as the annotated listing, the step log
+  as the thermal profile — because they are the same data plotted rather than tabulated, and the
+  derivation the table existed for (**Took** = the next step's start minus this one's, §7.4, the
+  only measurable ramp cost) is what the profile's slopes *are*. Text mode is one click away for
+  anyone who wants the literal fields, including the fourth step column `alf.md` §8 rules out both
+  readings of.
 - **other `.xml`** (e.g. `runlog.xml`) → the shared collapsible `XmlTreeFromString`
   (`lib/xmlTree.tsx` — see "Raw views" below).
 

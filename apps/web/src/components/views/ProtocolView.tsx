@@ -14,7 +14,8 @@ import type { AttachSource } from "../../lib/attachSources";
 import type { AddFilesOptions } from "../../state/useZpcrStore";
 
 /**
- * The Protocol tab — for a standalone `.prcl.txt` and for a run's own protocol alike.
+ * The Protocol tab — for a standalone `.prcl.txt`, a run's own protocol, and a standalone `.alf`
+ * run report alike.
  *
  * **One view, not two.** These used to be separate components (`StandaloneProtocolView` and this
  * one) that had drifted: only one had an editor, only one had the download/clone pair, one led with
@@ -27,6 +28,11 @@ import type { AddFilesOptions } from "../../state/useZpcrStore";
  *   are drafts, a run that has happened is a record;
  * - **whether there is a thermal profile to show**, which only a run that has actually executed has
  *   (its `.alf` report).
+ *
+ * A standalone `.alf` is the third caller and the reason the two props are separate: the report is
+ * both the protocol ({@link executed}, its own copy of what ran) and the profile. A thermal-only
+ * run leaves no `.zpcr` behind, so its report is the whole record, and this tab is where that
+ * record's protocol is read — the Overview keeps the identity card and the error summary.
  *
  * The protocol's own **Replace / Download / Clone** buttons ride the "Thermal protocol" heading
  * line in both modes, mirroring the three the Plates tab carries for a plate — see the `toolbar`
@@ -47,6 +53,7 @@ export function ProtocolView({
   protocolText,
   steps,
   report,
+  executed,
   file,
   protocolSources,
   addFiles,
@@ -69,6 +76,14 @@ export function ProtocolView({
   steps?: ProtocolStep[] | null;
   /** The run's `.alf` report, when it executed and recorded one — the thermal profile below. */
   report?: AlfReport | null;
+  /**
+   * {@link protocolText} is the report's own copy of the protocol rather than an authored one —
+   * true for a standalone `.alf`, where the report *is* the file. It is a different document from
+   * the `.prcl` an experiment carries even when it reads the same: the instrument writes down what
+   * it ran, post-expansion and with the real scan mask (`alf.md` §5, `protocol.md` §8), so the
+   * heading and its note say so rather than letting it pass for the authored version.
+   */
+  executed?: boolean;
   /** Only its `name` is used, as the download/clone filename's fallback base. */
   file: { name: string };
   /** Every protocol the browser is holding that isn't this file's own — standalone `.prcl.txt`
@@ -199,9 +214,19 @@ export function ProtocolView({
       ) : (
         <section className="overview__block">
           <div className="overview__blockhead">
-            <h2 className="overview__h">Thermal protocol</h2>
+            <h2 className="overview__h">
+              {executed ? "Thermal protocol as executed" : "Thermal protocol"}
+            </h2>
             <div className="overview__blocktools">{toolbar}</div>
           </div>
+          {/* alf.md §5 and protocol.md §8: a report's copy is post-expansion, so it is the
+              instrument's word on what ran rather than a second rendering of the authored file. */}
+          {executed && (
+            <p className="decoded__hint">
+              What actually ran, as the instrument recorded it — including the scan mask the run
+              really used, which the authored protocol in a saved experiment normalizes away.
+            </p>
+          )}
           {steps?.length ? (
             <ProtocolStepsTable steps={steps} />
           ) : (
