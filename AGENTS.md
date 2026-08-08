@@ -205,6 +205,8 @@ driven from CDP, so `folderChecks` substitutes an OPFS directory for it),
 `lib/experiment.ts` (or core's `experiment.ts`), `components/ViewSelector.tsx` or `App.tsx`'s
 `enabledViewsFor`/`selectFile`, core's `runDefinition.ts`, `components/raw/DecodedView.tsx`'s
 `ProtocolDecoded`, `components/views/StandaloneProtocolView.tsx`, `components/FileBar.tsx`,
+`components/FilesTableView.tsx` or `components/CloseFileButton.tsx` (closing a file is what removes
+it from IndexedDB — see `useZpcrStore.ts`'s `closeFile`),
 `components/FileIcons.tsx` (or core's `fileKind.ts`), `components/views/StandaloneRawView.tsx`,
 `components/protocol/` (the protocol editor) or core's `protocolBuilder.ts`,
 `components/raw/DecodedAlf.tsx`, `components/protocol/ThermalProfileChart.tsx`,

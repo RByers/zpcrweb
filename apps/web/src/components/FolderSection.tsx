@@ -2,11 +2,12 @@
  * The granted folders, in the lower half of the Files view: one stacked section each, and inside
  * each a **directory tree beside the files of the directory you have picked**.
  *
- * This is the *disk*, not the catalog: it lists what is in the folder, whether or not the app has
- * ever opened it. A file's checkbox is the same "loaded" switch the catalog table's is — ticking one
- * the app has never seen reads it off disk and opens it; ticking one it knows brings its bytes back.
- * Files opened here are written back to the same file on disk when they change, which is the whole
- * point of granting the folder (`state/diskFolders.ts`).
+ * This is the *disk*, not the app: it lists what is in the folder, whether or not the app has ever
+ * opened it. **A file's checkbox is whether it is open** — ticking one reads it off disk and opens
+ * it, unticking one closes it again, and closing is all it is: nothing on disk is touched. This is
+ * the only place a file is opened out of a folder. Files opened here are written back to the same
+ * file on disk when they change, which is the whole point of granting the folder
+ * (`state/diskFolders.ts`).
  *
  * **Two panes, one when it doesn't fit.** Side by side the tree stays put while you look through a
  * directory, which is what makes a folder of a hundred subdirectories navigable at all. Below a
@@ -36,12 +37,11 @@ import { FolderIcon } from "./ViewIcons";
 
 interface Props {
   tree: DiskTree;
-  /** The catalog, so a row can tell "in the app" from "on disk only". */
+  /** The open files, so a row can tell "in the app" from "on disk only". */
   entries: FileEntry[];
-  loadedNames: ReadonlySet<string>;
-  /** Bring an already-known file's bytes back, or let it go. */
-  onSetLoaded: (id: string, loaded: boolean) => void;
-  /** Open files the app has never seen, straight off disk. */
+  /** Close a file the app has open — see `ZpcrStore.closeFile`. */
+  onCloseFile: (id: string) => void | Promise<void>;
+  /** Open files straight off disk. */
   onAddDiskFiles: (sources: DiskSource[]) => void;
   onSelectFile: (id: string) => void;
 }
@@ -55,8 +55,7 @@ function formatSize(bytes: number): string {
 export function FolderSection({
   tree,
   entries,
-  loadedNames,
-  onSetLoaded,
+  onCloseFile,
   onAddDiskFiles,
   onSelectFile,
 }: Props) {
@@ -139,8 +138,7 @@ export function FolderSection({
                       label={folder.label}
                       path={selected}
                       entries={entries}
-                      loadedNames={loadedNames}
-                      onSetLoaded={onSetLoaded}
+                      onCloseFile={onCloseFile}
                       onAddDiskFiles={onAddDiskFiles}
                       onSelectFile={onSelectFile}
                     />
@@ -259,8 +257,7 @@ function FilePane({
   label,
   path,
   entries,
-  loadedNames,
-  onSetLoaded,
+  onCloseFile,
   onAddDiskFiles,
   onSelectFile,
 }: {
@@ -303,8 +300,7 @@ function FilePane({
               path={path}
               entry={entry}
               entries={entries}
-              loadedNames={loadedNames}
-              onSetLoaded={onSetLoaded}
+              onCloseFile={onCloseFile}
               onAddDiskFiles={onAddDiskFiles}
               onSelectFile={onSelectFile}
             />
@@ -320,8 +316,7 @@ function FileRow({
   path,
   entry,
   entries,
-  loadedNames,
-  onSetLoaded,
+  onCloseFile,
   onAddDiskFiles,
   onSelectFile,
 }: {
@@ -331,35 +326,31 @@ function FileRow({
 } & Omit<Props, "tree">) {
   const source: DiskSource = { folder: label, path: [...path, entry.name] };
   const name = diskFileName(source);
-  const known = entries.find((e) => e.name === name);
-  const loaded = loadedNames.has(name);
+  const open = entries.find((e) => e.name === name);
   return (
     <li>
-      <div className={"folders__file" + (loaded ? " is-loaded" : "")}>
+      <div className={"folders__file" + (open ? " is-loaded" : "")}>
         <input
           type="checkbox"
           className="folders__check"
-          checked={loaded}
-          title={loaded ? "Release this file" : "Open this file"}
-          aria-label={loaded ? `Release ${entry.name}` : `Open ${entry.name}`}
+          checked={!!open}
+          title={open ? "Close this file. Nothing on disk is deleted." : "Open this file"}
+          aria-label={open ? `Close ${entry.name}` : `Open ${entry.name}`}
           onChange={(e) => {
-            // A file the catalog already knows just gets its bytes back; one it has never seen has
-            // to be read and decoded first, which is what tells the app what kind of file it is.
-            if (known) onSetLoaded(name, e.target.checked);
-            else if (e.target.checked) onAddDiskFiles([source]);
+            // Opening reads and decodes the file, which is also what tells the app what kind of
+            // file it is; closing lets go of it and leaves the file on disk exactly as it is.
+            if (e.target.checked) onAddDiskFiles([source]);
+            else void onCloseFile(name);
           }}
         />
-        <span
-          className="folders__kind"
-          title={known ? fileKindDescription(known.kind) : undefined}
-        >
-          {known && <FileKindIcon kind={known.kind} />}
+        <span className="folders__kind" title={open ? fileKindDescription(open.kind) : undefined}>
+          {open && <FileKindIcon kind={open.kind} />}
         </span>
         <button
           className="folders__name mono"
-          // Only a file the app is holding has anything to select; one merely sitting on disk has
-          // no views yet, so its name is plain text until the checkbox opens it.
-          disabled={!known}
+          // Only a file the app has open has anything to select; one merely sitting on disk has no
+          // views yet, so its name is plain text until the checkbox opens it.
+          disabled={!open}
           title={name}
           onClick={() => onSelectFile(name)}
         >

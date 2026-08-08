@@ -813,22 +813,18 @@ async function persistedThresholdChecks(chrome, origin, pw) {
   // work to push a later check's fixed-delay reads past their deadline. Checks that load a file
   // beyond the shared fixture clean it up.
   //
-  // A chip's own ✕ only hides now (`FileBar.tsx`'s `HideButton`) — an actual delete lives in the
-  // full files table (the "Files" tab, `FilesTableView.tsx`), so cleanup goes there instead. ZPCR
-  // (the shared fixture, kept loaded across checks) is in there too by this point, so the RVP row
-  // has to be picked out by name rather than just grabbing the first ✕. Every table row's ✕
-  // always arms before it deletes, modified or not, so this takes two clicks.
+  // Closing a file is what takes it out of IndexedDB, and either ✕ does it — this uses the Files
+  // table's, since ZPCR (the shared fixture, kept open across checks) is in there too by this point
+  // and the RVP row has to be picked out by name rather than by grabbing the first chip. One click:
+  // the file is unedited, so nothing is at risk and nothing arms.
   await clickTab(cdp, "Files");
   await waitFor(() => cdp.eval(`!!document.querySelector(".filesview__row")`), { what: "the files table" });
-  const clickRvpDelete = () =>
-    cdp.eval(`(() => { const row = [...document.querySelectorAll(".filesview__row")]
+  await cdp.eval(`(() => { const row = [...document.querySelectorAll(".filesview__row")]
       .find((r) => /RVP/.test(r.textContent));
       row?.querySelector(".ftbl__del")?.click(); })()`);
-  await clickRvpDelete();
-  await clickRvpDelete();
   await waitFor(
     () => cdp.eval(`![...document.querySelectorAll(".filesview__row")].some((r) => /RVP/.test(r.textContent))`),
-    { what: "the RVP .pcrd to be deleted" },
+    { what: "the RVP .pcrd to close" },
   );
   await cdp.eval(`(() => { document.querySelector(".filesview__close")?.click(); })()`);
   await sleep(300);
@@ -2903,7 +2899,7 @@ async function instrumentRunChecks(chrome, origin) {
 
 /**
  * Type into the Overview header's name field and commit it — a rename, which is also the cheapest
- * way to make a file *modified* (see {@link deleteConfirmChecks}). The two halves are separate
+ * way to make a file *modified* (see {@link closeConfirmChecks}). The two halves are separate
  * turns on purpose: the field commits on blur from the *committed* draft state, so blurring in the
  * same tick as the input event would read the value React hasn't applied yet — which real typing
  * never does.
@@ -3243,22 +3239,22 @@ async function experimentNameChecks(chrome, origin) {
 
 
 /**
- * The catalog, the loaded set, and the one selection — the three-way split the whole app hangs on
- * (`apps/web/ARCHITECTURE.md`, "Files, loaded files, and the one selection").
+ * Open files, the one selection, and what closing a file actually does.
  *
  * Every claim here is invisible to a screenshot and to Vitest alike, because each is about what
  * survives a state change no single render shows:
  *
- * - releasing a file leaves its **row** intact, still describing the run — that is the cached
- *   summary in IndexedDB doing its job, and the failure it guards against is a Files table that
- *   goes blank (or, worse, silently re-reads every archive) the moment a file leaves memory;
- * - with nothing selected the view bar disables **every** file view and keeps Files, while the
- *   logo and the load button — which are not lenses on a file — stay live;
- * - a reload brings back the loaded set and nothing else, which is the property that makes a
- *   catalog of thousands of files affordable in the first place.
+ * - **closing a file removes it**, records and all: its catalog row is gone from IndexedDB before
+ *   the click is over, and a reload does not bring it back. There is no "in storage but not open"
+ *   state left to get wrong;
+ * - with nothing selected — a `#file=` naming a file this browser doesn't have, which is the one
+ *   way to reach that state while files are open — the view bar disables **every** file view and
+ *   keeps Files, while the logo and the load button stay live;
+ * - a reload comes back holding exactly what was open, described from the files themselves rather
+ *   than from anything cached about them.
  */
-async function loadedSetChecks(chrome, origin) {
-  console.log("\nfiles, loaded files, and the selection");
+async function openFilesChecks(chrome, origin) {
+  console.log("\nopen files and the selection");
   const cdp = await openPage(chrome.base, origin);
   await emptyReload(cdp, origin);
   await loadFile(cdp, join(REPO, "samples", EXAMPLE));
@@ -3278,14 +3274,34 @@ async function loadedSetChecks(chrome, origin) {
         `(() => { const r = document.querySelector(".filesview__row");
            if (!r) return "null";
            const tds = [...r.querySelectorAll("td")].map((td) => td.textContent.trim());
-           return JSON.stringify({ loaded: r.querySelector("input").checked, cells: tds }); })()`,
+           return JSON.stringify({ cells: tds }); })()`,
       )
       .then((v) => (v === "null" ? null : JSON.parse(v)));
 
-  // Release the one file from the chip's ✕. The selection has nowhere to go, which is exactly the
-  // state the strip has to handle.
-  await cdp.eval(`(() => { document.querySelector(".filebar .filechip__del").click(); })()`);
-  await waitFor(async () => (await chips()) === 0, { what: "the chip to go" });
+  // The table describes the file from the decoded file itself — there is no cached summary any
+  // more, so a row saying what the run is *is* the app reading the run it is holding.
+  await clickTab(cdp, "Files");
+  await waitFor(async () => !!(await row()), { what: "the open file's row" });
+  const listed = await row();
+  check(
+    "an open file's row describes the run, live from the file the app is holding",
+    listed.cells.some((c) => /S183/.test(c)) && listed.cells.some((c) => /^\d+$/.test(c)),
+    JSON.stringify(listed),
+  );
+
+  // "Nothing selected" while files are open: a `#file=` naming a file this browser doesn't have.
+  // The app says so rather than substituting another file, and the strip has to handle it.
+  //
+  // Via `about:blank`, because the page is already on this origin and a bare `Page.navigate` to a
+  // different fragment of the same URL is a same-document navigation — the hash listener would see
+  // a name it doesn't know and leave the selection exactly where it was. The claim is about how the
+  // app *starts up* on such a link.
+  await cdp.send("Page.navigate", { url: "about:blank" });
+  await sleep(200);
+  await cdp.send("Page.navigate", { url: `${origin}#file=nosuchfile.zpcr&view=overview` });
+  await waitFor(() => cdp.eval(`!!document.querySelector(".app__noselection")`), {
+    what: "the no-selection state",
+  });
   const empty = await strip();
   check(
     "with nothing selected every file view is disabled, and only Files and Instrument are left",
@@ -3297,45 +3313,60 @@ async function loadedSetChecks(chrome, origin) {
        logo: !!document.querySelector(".app__logo") && !document.querySelector(".app__logo").disabled,
        load: !!document.querySelector('.dropzone input[type="file"]'),
        says: document.querySelector(".app__noselection")?.textContent.trim() || "",
+       chips: document.querySelectorAll(".filebar .filechip").length,
      })`,
   ).then(JSON.parse);
   check(
-    "…while the About link and the load button, which are not lenses on a file, stay live",
-    chrome_.logo && chrome_.load && /No file selected/.test(chrome_.says),
+    "…while the About link, the load button and the file's own chip stay live",
+    chrome_.logo && chrome_.load && chrome_.chips === 1 && /No file selected/.test(chrome_.says),
     JSON.stringify(chrome_),
   );
 
-  // The row is still there, and still says what the run *is* — from the summary cached when the
-  // file was loaded, with no archive read to produce it.
-  await clickTab(cdp, "Files");
-  await waitFor(async () => !!(await row()), { what: "the released file's row" });
-  const released = await row();
+  /** Every file IndexedDB still has a catalog row for — what "closed" has to actually mean. */
+  const stored = () =>
+    cdp
+      .eval(
+        `new Promise((res) => { const q = indexedDB.open("zpcrweb");
+           q.onsuccess = () => { const db = q.result;
+             const g = db.transaction("catalog", "readonly").objectStore("catalog").getAllKeys();
+             g.onsuccess = () => { res(JSON.stringify(g.result)); db.close(); }; }; })`,
+        { awaitPromise: true },
+      )
+      .then(JSON.parse);
+
+  // Close the one file from the chip's ✕. It is unedited, so one click does it — and with nothing
+  // left in the browser at all, the app is back to its welcome screen, which is the truth.
+  await cdp.eval(`(() => { document.querySelector(".filebar .filechip__main").click(); })()`);
+  await waitFor(async () => (await chips()) === 1, { what: "the file selected again" });
+  await cdp.eval(`(() => { document.querySelector(".filebar .filechip__del").click(); })()`);
+  await waitFor(async () => (await chips()) === 0, { what: "the chip to go" });
+  await waitFor(async () => (await stored()).length === 0, { what: "the record to be deleted" });
   check(
-    "a released file keeps its row, still described from its cached summary",
-    released.loaded === false &&
-      released.cells.some((c) => /S183/.test(c)) &&
-      released.cells.some((c) => /^\d+$/.test(c)),
-    JSON.stringify(released),
+    "closing a file deletes its record then and there, not just its chip",
+    (await stored()).length === 0 && (await cdp.eval(`!!document.querySelector(".app--empty")`)) === true,
+    JSON.stringify(await stored()),
   );
 
-  // And a reload restores exactly that: the file is in the catalog, out of memory, unselected.
+  // And a reload proves it: nothing came back, because there was nothing left to come back.
   await cdp.eval(`window.location.reload()`);
   await sleep(1200);
-  await clickTab(cdp, "Files");
-  await waitFor(async () => !!(await row()), { what: "the row after a reload" });
-  const afterReload = await row();
   check(
-    "…and stays released across a reload, rather than every file loading on startup",
-    afterReload.loaded === false && (await chips()) === 0,
-    JSON.stringify({ row: afterReload, chips: await chips() }),
+    "…so a reload comes back with nothing, rather than re-listing what was closed",
+    (await chips()) === 0 && (await stored()).length === 0,
+    JSON.stringify({ chips: await chips(), stored: await stored() }),
   );
 
-  // Selecting it from the table loads it — the selection is by definition a loaded file.
-  await cdp.eval(`(() => { document.querySelector(".filesview__row").click(); })()`);
-  await waitFor(async () => (await chips()) === 1, { what: "the file to load on selection" });
+  // The other half of the same property: a file that *is* open comes back after a reload, selected
+  // and drawn, without being re-opened by hand.
+  await loadFile(cdp, join(REPO, "samples", EXAMPLE));
+  await waitFor(() => chipPresent(cdp, "S183"), { what: "the .zpcr chip again" });
+  await sleep(700);
+  await cdp.eval(`window.location.reload()`);
+  await sleep(1500);
+  await waitFor(async () => (await chips()) === 1, { what: "the open file after a reload" });
   const reopened = await strip();
   check(
-    "selecting a released file loads it, and the file views come back",
+    "a session reopens holding what it was left holding, with the file views back",
     reopened.filter((t) => !t.off).length > 1,
     JSON.stringify(reopened.filter((t) => !t.off).map((t) => t.label)),
   );
@@ -3351,47 +3382,49 @@ async function loadedSetChecks(chrome, origin) {
   const landed = await tabBecomes(cdp, "Overview");
   check("picking a file chip from About leaves it for that file's Overview", landed === "Overview", landed);
 
+  // Leave storage empty for the checks that follow.
+  await clickTab(cdp, "Files");
+  await waitFor(() => cdp.eval(`!!document.querySelector(".ftbl__del")`), { what: "the row's ✕" });
+  await cdp.eval(`(() => { document.querySelector(".ftbl__del").click(); })()`);
+  await sleep(300);
   cdp.close();
 }
 
 /**
- * Hiding a chip from the bar, and deleting a file for real, in the full files table.
+ * Closing a file, and the second click an edited one costs.
  *
- * A chip's ✕ only ever hides now (`FileSettings.visible`) — the file stays loaded, in IndexedDB,
- * and in the full files table opened from the bar's own toggle. The table is where a file is
- * actually deleted, and its ✕ always arms first (a red waste bin) regardless of whether the file
- * carries edits — the click after that is the one that deletes. The bar still wears the "unsaved"
- * dot on a modified chip — that part didn't move.
+ * Closing is the only way a file leaves the app now: bytes out of memory and records out of
+ * IndexedDB together. One control in two places — the chip's ✕ and the table row's ✕, both
+ * `CloseFileButton.tsx` — so the two must behave identically, which is half of what this checks.
+ * The other half is the confirmation: a file whose edits exist nowhere else arms first (a red waste
+ * bin) and takes a second click, and downloading it puts it back to one.
  *
- * All of it is state a screenshot can't judge: whether hiding really left the file in IndexedDB
- * (a reload not bringing it back would be a real delete in disguise), whether the modified flag
- * outlived a reload (it must — the stale copy is the one on disk), whether the first click on the
- * ✕ really didn't delete, or whether downloading the file left it any easier to delete (it
- * shouldn't — every row asks twice alike).
+ * All of it is state a screenshot can't judge: whether the first click on an armed ✕ really didn't
+ * close, whether closing really emptied IndexedDB (a row coming back after a reload would mean it
+ * hadn't), and whether the modified flag outlived a reload — it must, since the stale copy is the
+ * one on disk.
  */
-async function deleteConfirmChecks(chrome, origin) {
-  console.log("\ndelete confirmation");
+async function closeConfirmChecks(chrome, origin) {
+  console.log("\nclose confirmation");
   const cdp = await openPage(chrome.base, origin);
   await emptyReload(cdp, origin);
   await loadFile(cdp, join(REPO, "samples", EXAMPLE));
   await waitFor(() => chipPresent(cdp, "S183"), { what: "the .zpcr chip" });
 
   const chips = () => cdp.eval(`document.querySelectorAll(".filebar .filechip").length`);
-  const clickHide = () =>
-    cdp.eval(`(() => { document.querySelector(".filebar .filechip__del").click(); })()`);
   const openTable = () => clickTab(cdp, "Files");
   const tableRows = () => cdp.eval(`document.querySelectorAll(".filesview__row").length`);
-  const clickTableCheckbox = () =>
-    cdp.eval(`(() => { document.querySelector(".filesview__checkcol input").click(); })()`);
-  const clickTableDelete = () =>
+  const clickTableClose = () =>
     cdp.eval(`(() => { document.querySelector(".ftbl__del").click(); })()`);
+  const clickChipClose = () =>
+    cdp.eval(`(() => { document.querySelector(".filebar .filechip__del").click(); })()`);
   const tableDel = () =>
     cdp.eval(
       `(() => { const btn = document.querySelector(".ftbl__del");
          if (!btn) return "null";
          return JSON.stringify({ armed: btn.classList.contains("is-armed") }); })()`,
     ).then((v) => (v === "null" ? null : JSON.parse(v)));
-  /** The chip's own state: modified dot only — it no longer arms. */
+  /** The chip's own state: the modified dot, and whether its ✕ has armed into a waste bin. */
   const chip = () =>
     cdp
       .eval(
@@ -3413,33 +3446,21 @@ async function deleteConfirmChecks(chrome, origin) {
     JSON.stringify(untouched),
   );
 
-  // The chip's ✕ only hides — the file stays loaded, and shows up (unchecked) in the full table.
-  await clickHide();
-  await waitFor(async () => (await chips()) === 0, { what: "the chip to hide" });
-  check("…and its ✕ takes it off the bar without deleting it", (await chips()) === 0);
+  // An unedited file closes on one click, from the table's ✕ — nothing is at risk, since the copy
+  // it came from is still on the user's disk.
   await openTable();
-  await waitFor(async () => (await tableRows()) === 1, { what: "the hidden file's table row" });
-  const hiddenChecked = await cdp.eval(`document.querySelector(".filesview__checkcol input").checked`);
-  check("the hidden file's row is unchecked in the table", hiddenChecked === false);
+  await waitFor(async () => (await tableRows()) === 1, { what: "the file's table row" });
+  await clickTableClose();
+  await waitFor(async () => (await tableRows()) === 0, { what: "the unedited file to close" });
+  check("an unedited file's ✕ closes it on the first click", (await tableRows()) === 0);
+  check("…and takes its chip with it", (await chips()) === 0);
 
-  // Checking it back on brings the chip back.
-  await clickTableCheckbox();
-  await waitFor(async () => (await chips()) === 1, { what: "the chip to come back" });
-  check("re-checking the table row shows the chip again", (await chips()) === 1);
-
-  // Even an unedited file's table ✕ arms first — every row asks twice, not just a modified one.
-  await clickTableDelete();
-  const untouchedArmed = await tableDel();
-  await waitFor(async () => (await tableRows()) === 1, { what: "the row to still be there" });
-  check(
-    "an unedited file's table ✕ arms instead of deleting on the first click",
-    untouchedArmed.armed && (await tableRows()) === 1,
-    JSON.stringify(untouchedArmed),
-  );
-  await clickTableDelete();
-  await waitFor(async () => (await tableRows()) === 0, { what: "the unedited file to delete" });
-  check("…and the second click deletes it", (await tableRows()) === 0);
-  await cdp.eval(`(() => { document.querySelector(".filesview__close")?.click(); })()`);
+  // …and it is really gone from storage, not merely off the bar.
+  await cdp.eval(`window.location.reload()`);
+  await sleep(1200);
+  await clickTab(cdp, "Files");
+  await sleep(400);
+  check("…and does not come back after a reload", (await tableRows()) === 0);
 
   // Now edit one: a rename is the cheapest thing that changes what a download would contain.
   await loadFile(cdp, join(REPO, "samples", EXAMPLE));
@@ -3462,48 +3483,51 @@ async function deleteConfirmChecks(chrome, origin) {
   await waitFor(async () => (await chip())?.modified === true, { what: "the flag after a reload" });
   check("the modified state survives a reload", (await chip()).modified === true);
 
-  await openTable();
-  await waitFor(async () => (await tableRows()) === 1, { what: "the edited file's table row" });
-  await clickTableDelete();
-  const armed = await tableDel();
-  await waitFor(async () => (await tableRows()) === 1, { what: "the row to still be there" });
+  // The chip's ✕ on an edited file arms rather than closing — the same rule the table row follows,
+  // from the same component.
+  await clickChipClose();
+  const armedChip = await chip();
   check(
-    "the first click on an edited file's table ✕ arms it instead of deleting",
-    armed.armed && (await tableRows()) === 1,
-    JSON.stringify(armed),
+    "an edited file's chip ✕ arms into a waste bin instead of closing",
+    armedChip !== null && armedChip.bin === true && (await chips()) === 1,
+    JSON.stringify(armedChip),
   );
+  await clickChipClose();
+  await waitFor(async () => (await chips()) === 0, { what: "the confirmed close" });
+  check("…and the second click closes it", (await chips()) === 0);
 
-  await clickTableDelete();
-  await waitFor(async () => (await tableRows()) === 0, { what: "the confirmed delete" });
-  check("the second click deletes", (await tableRows()) === 0);
-  await cdp.eval(`(() => { document.querySelector(".filesview__close")?.click(); })()`);
-
-  // Download it: the edits are on disk now, but the ✕ still asks twice — that never depended on
-  // the modified flag in the first place.
+  // The same two-stage behaviour in the table, and then a download to prove it is the *edits* that
+  // ask twice rather than the row.
   await loadFile(cdp, join(REPO, "samples", EXAMPLE));
   await waitFor(() => chipPresent(cdp, "S183"), { what: "the .zpcr chip once more" });
   await cdp.eval(`window.location.hash = "view=overview", undefined`);
   await tabBecomes(cdp, "Overview");
   await setExperimentName(cdp, "Saved RVP");
   await waitFor(async () => (await chip()).modified === true, { what: "the modified flag" });
+  await openTable();
+  await waitFor(async () => (await tableRows()) === 1, { what: "the edited file's table row" });
+  await clickTableClose();
+  const armed = await tableDel();
+  await waitFor(async () => (await tableRows()) === 1, { what: "the row to still be there" });
+  check(
+    "the first click on an edited file's table ✕ arms it instead of closing",
+    armed.armed && (await tableRows()) === 1,
+    JSON.stringify(armed),
+  );
+
+  // Download it: the edits are on disk now, so the ✕ stops asking.
+  await cdp.eval(`window.location.hash = "view=overview", undefined`);
+  await tabBecomes(cdp, "Overview");
   await cdp.eval(`(() => { document.querySelector(".overview__toolbar .overview__downloadbtn").click(); })()`);
   await waitFor(async () => (await chip()).modified === false, { what: "the flag to clear" });
   check("downloading the file clears the modified state", (await chip()).modified === false);
   await openTable();
   await waitFor(async () => (await tableRows()) === 1, { what: "the saved file's table row" });
-  await clickTableDelete();
-  const savedArmed = await tableDel();
-  check(
-    "…and its ✕ still arms first, rather than deleting on one click now that it's saved",
-    savedArmed.armed && (await tableRows()) === 1,
-    JSON.stringify(savedArmed),
-  );
-  await clickTableDelete();
-  await waitFor(async () => (await tableRows()) === 0, { what: "the confirmed delete" });
-  check("…so the second click deletes it", (await tableRows()) === 0);
+  await clickTableClose();
+  await waitFor(async () => (await tableRows()) === 0, { what: "the saved file to close" });
+  check("…so its ✕ closes it on one click again", (await tableRows()) === 0);
   cdp.close();
 }
-
 
 /**
  * The protocol editor (`components/protocol/`, `protocol.md` §10).
@@ -4682,10 +4706,10 @@ async function main() {
     await reportFileChecks(chrome, origin);
     await explodedStorageChecks(chrome, origin);
     await experimentNameChecks(chrome, origin);
-    await deleteConfirmChecks(chrome, origin);
+    await closeConfirmChecks(chrome, origin);
     await protocolEditorChecks(chrome, origin);
     await cloneChecks(chrome, origin);
-    await loadedSetChecks(chrome, origin);
+    await openFilesChecks(chrome, origin);
     await folderChecks(chrome, origin);
   } finally {
     chrome.stop();

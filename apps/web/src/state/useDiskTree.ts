@@ -91,6 +91,13 @@ export function useDiskTree(
   /** True while the Files view is on screen. Opening it is the app's "look at the disk again"
    * moment: cached listings are dropped and watches that had nothing to attach to try again. */
   active: boolean,
+  /**
+   * Called when a folder's permission is granted back. The files the app has open inside that
+   * folder have been unreadable until this moment — a granted folder is exactly when they can be
+   * read in — so this is what makes them come back without the user having to click each one
+   * (`ZpcrStore.retryUnread`).
+   */
+  onGranted?: () => void,
 ): DiskTree {
   const supported = supportsDiskFolders();
   const [folders, setFolders] = useState<FolderView[]>([]);
@@ -272,11 +279,12 @@ export function useDiskTree(
           const [keyLabel, ...path] = JSON.parse(key) as string[];
           if (keyLabel === label) void load(keyLabel, path);
         }
+        onGranted?.();
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
       }
     },
-    [readFolders, liveNodes, load],
+    [readFolders, liveNodes, load, onGranted],
   );
 
   const remove = useCallback(

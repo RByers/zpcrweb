@@ -12,6 +12,7 @@ import {
 import type { ExperimentIdentity } from "../lib/experiment";
 import { fileCategory, fileKindDescription, plateTargets, type FileCategory } from "@zpcrweb/core";
 import { FileKindIcon } from "./FileIcons";
+import { CloseFileButton } from "./CloseFileButton";
 
 /** Tooltip wording for the chip icon — its shape, then its colour. */
 const CATEGORY_TEXT: Record<FileCategory, string> = {
@@ -36,15 +37,14 @@ interface Props {
   activeName: string | null;
   onSelect: (id: string) => void;
   /**
-   * A chip's ✕: **release** this file (`FileSettings.loaded = false`) — its bytes leave memory and
-   * its chip leaves the bar; the file itself stays in IndexedDB and in the full files table (the
-   * "Files" tab, `FilesTableView.tsx`), described there by its cached summary. There is no confirm,
-   * because nothing is at risk: the file is one click of that tab away from being back.
+   * A chip's ✕: **close** this file (`ZpcrStore.closeFile`) — its bytes leave memory and its
+   * records leave IndexedDB together. The same control as the Files table's ✕, and the same
+   * component (`CloseFileButton.tsx`).
    */
-  onUnload: (id: string) => void;
-  /** Files whose content has been edited since it was loaded and not since downloaded
-   * (`ZpcrStore.modifiedIds`). Deleting one of those throws work away that exists nowhere else,
-   * so its chip asks a second time first — see {@link DeleteButton}. */
+  onClose: (id: string) => void;
+  /** Files whose content has been edited since it was opened and not since downloaded
+   * (`ZpcrStore.modifiedIds`). Closing one of those throws work away that exists nowhere else,
+   * so its chip asks a second time first — see `CloseFileButton.tsx`. */
   modifiedIds: Set<string>;
   /**
    * Runs that are still going on an instrument (`ZpcrStore.inProgressIds`). Their chips glow
@@ -216,35 +216,6 @@ function HoverCard({
   );
 }
 
-/**
- * The chip's ✕: releases the file, nothing more — see {@link Props.onUnload}. There is no
- * confirm, unlike the old two-click delete this replaced, because there is nothing to lose: the
- * file stays in IndexedDB and in the full files table.
- *
- * Still carries the "unsaved" dot in the space under the ✕: a modified file announcing itself is
- * still useful here, it's just no longer what gates this particular button.
- */
-function UnloadButton({ name, onUnload }: { name: string; onUnload: () => void }) {
-  return (
-    <button
-      className="filechip__del"
-      aria-label={`Close ${name}`}
-      title="Close — releases the file from memory; it stays in storage, see the Files tab to reopen or delete it"
-      onClick={(e) => {
-        e.stopPropagation();
-        onUnload();
-      }}
-    >
-      <span className="filechip__delglyph">✕</span>
-      {/* The editor's universal "unsaved" dot, in the space under the ✕ that was empty anyway —
-          so a modified chip announces itself, and the bar neither grows nor reflows when it does.
-          The slot is always there, just invisible (`app.css`), which is what keeps the ✕ from
-          hopping as files are edited. */}
-      <span className="filechip__moddot" aria-hidden="true" />
-    </button>
-  );
-}
-
 /** One file chip plus its hover card. The card is a fixed-position portal (see {@link HoverCard})
  * positioned from the chip's own bounding rect on hover, since `.filebar`'s horizontal scroll
  * clips a plain absolutely-positioned dropdown. */
@@ -260,7 +231,7 @@ function FileChip({
   isIncomplete,
   isPending,
   onSelect,
-  onUnload,
+  onClose,
 }: {
   f: LoadedFile;
   identity: ExperimentIdentity;
@@ -268,7 +239,8 @@ function FileChip({
   plateFile: PlateFileResult | undefined;
   password: string;
   isActive: boolean;
-  /** See {@link Props.modifiedIds} — the "unsaved" dot under the ✕. */
+  /** See {@link Props.modifiedIds} — the "unsaved" dot under the ✕, and the second click it
+   * costs to close this file. */
   isModified: boolean;
   /** See {@link Props.inProgressIds} — the run is still being written to. */
   isRunning: boolean;
@@ -277,7 +249,7 @@ function FileChip({
   /** See {@link Props.pendingIds} — the experiment has not been started. */
   isPending: boolean;
   onSelect: (id: string) => void;
-  onUnload: (id: string) => void;
+  onClose: (id: string) => void;
 }) {
   const mainRef = useRef<HTMLButtonElement>(null);
   const [cardPos, setCardPos] = useState<{ top: number; left: number } | null>(null);
@@ -352,7 +324,18 @@ function FileChip({
           />,
           document.body,
         )}
-      <UnloadButton name={identity.name} onUnload={() => onUnload(f.name)} />
+      <CloseFileButton
+        name={identity.name}
+        modified={isModified}
+        onClose={() => onClose(f.name)}
+        className="filechip__del"
+      >
+        {/* The editor's universal "unsaved" dot, in the space under the ✕ that was empty anyway —
+            so a modified chip announces itself, and the bar neither grows nor reflows when it
+            does. The slot is always there, just invisible (`app.css`), which is what keeps the ✕
+            from hopping as files are edited. */}
+        <span className="filechip__moddot" aria-hidden="true" />
+      </CloseFileButton>
     </div>
   );
 }
@@ -363,7 +346,7 @@ export function FileBar({
   plateFiles,
   activeName,
   onSelect,
-  onUnload,
+  onClose,
   modifiedIds,
   inProgressIds,
   incompleteIds,
@@ -399,7 +382,7 @@ export function FileBar({
           isIncomplete={incompleteIds.has(f.name)}
           isPending={pendingIds.has(f.name)}
           onSelect={onSelect}
-          onUnload={onUnload}
+          onClose={onClose}
         />
       ))}
     </div>

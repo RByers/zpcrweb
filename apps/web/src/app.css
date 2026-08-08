@@ -672,9 +672,9 @@
   color: var(--ink-muted);
   margin-top: 4px;
 }
-/* A column, so the ✕ can carry the modified dot beneath it (see `FileBar`'s DeleteButton). The
-   dot's row is reserved on every chip whether or not it shows one, which is what lets a file
-   become modified without the ✕ moving. */
+/* A column, so the ✕ can carry the modified dot beneath it (see `CloseFileButton`, whose optional
+   slot the dot goes in). The dot's row is reserved on every chip whether or not it shows one,
+   which is what lets a file become modified without the ✕ moving. */
 .filechip__del {
   display: inline-flex;
   flex-direction: column;
@@ -688,9 +688,10 @@
   color: var(--ink-muted);
   font-size: 11px;
 }
-/* Fixed box, because the ✕ and the bin are not the same size: without it, arming would widen
-   the chip and shove the whole bar along. */
-.filechip__delglyph {
+/* Fixed box, because the ✕ and the waste bin it arms into are not the same size: without it,
+   arming would widen the chip and shove the whole bar along. Shared by both places the close
+   button appears (`CloseFileButton.tsx`). */
+.closefile__glyph {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -709,16 +710,16 @@
 .filechip.is-modified .filechip__moddot {
   background: var(--warn);
 }
-.filechip.is-arming .filechip__moddot {
+.filechip__del.is-armed .filechip__moddot {
   background: transparent;
 }
 .filechip__del:hover {
   background: rgba(255, 90, 90, 0.16);
   color: var(--danger);
 }
-/* Armed: the file has edits that aren't on disk, and this click deletes them (see `FileBar`'s
-   DeleteButton). Solid rather than tinted — the first click changed what the button *does*, so
-   it has to stop looking like the same button it was. */
+/* Armed: the file has edits that aren't on disk, and this click closes it and loses them (see
+   `CloseFileButton.tsx`). Solid rather than tinted — the first click changed what the button
+   *does*, so it has to stop looking like the same button it was. */
 .filechip__del.is-armed,
 .filechip__del.is-armed:hover {
   background: var(--danger);
@@ -727,9 +728,9 @@
 
 /* ---- FilesTableView ------------------------------------------------------ */
 /* Fills `<main>` in place of whatever view was showing (see `App.tsx`'s `store.view === "files"`).
-   Up to two panes stacked, each scrolling on its own: the catalog table, and — only when a folder
-   has been granted — the folders on disk. With no folders the first pane is the whole view, which
-   is the plain scrolling table this used to be.
+   Up to two panes stacked, each scrolling on its own: the open files, and — only when a folder has
+   been granted — the folders on disk. With no folders the first pane is the whole view, which is
+   the plain scrolling table this used to be.
 
    Its own container for the folder panes' side-by-side query below: `app__main` is a container too,
    but the question here is how much room *this view* has, and it is the thing that will grow a
@@ -819,10 +820,6 @@
 .filesview__link:hover {
   color: var(--neon-cyan);
 }
-.filesview__checkcol {
-  width: 30px;
-  text-align: center;
-}
 .filesview__delcol {
   width: 30px;
   text-align: center;
@@ -848,8 +845,9 @@
   font-size: 11px;
   padding-top: 10px;
 }
-/* Same two-stage ✕ → waste bin as the file bar's delete used to be (see `FilesTableView.tsx`'s
-   `DeleteButton`) — now the only place a file is actually removed from IndexedDB. */
+/* The row's close button — the same control as the chip's, and the same component
+   (`CloseFileButton.tsx`): one click for a file that is a copy of something on disk, and a
+   ✕ → waste bin second click for one carrying edits that are nowhere else. */
 .ftbl__del {
   display: inline-flex;
   align-items: center;
@@ -874,8 +872,8 @@
 /* ---- FolderSection -------------------------------------------------------- */
 /* The granted folders, stacked in the Files view's lower pane. Each is a header plus two panes of
    its own: the directory tree, and the files of whichever directory is picked — side by side when
-   there is room, stacked when there isn't. A row here is a file on *disk*, which the catalog
-   table's rows are not; see `FolderSection.tsx`.
+   there is room, stacked when there isn't. A row here is a file on *disk*, which the table's
+   rows above are not; see `FolderSection.tsx`.
 
    Tree indentation is an inline `padding-left` per depth rather than nested padding, so a deep
    row's hover and its selected background still span the full width of the pane. */

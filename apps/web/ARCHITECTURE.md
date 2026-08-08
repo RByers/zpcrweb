@@ -1,18 +1,18 @@
 # Web app architecture
 
 The web app (`@zpcrweb/web`) is a browser UI over [`@zpcrweb/core`](../../packages/core). It
-holds a catalog of files — `.zpcr`, `.pcrd`, a Biomeme run export (`.bmrun`, see "A third format:
-Biomeme" below), a standalone plate file (`.pltd` or zpcrweb's own `.plt.csv`, see "Standalone
-plate entries and attach" below), a thermal protocol (`.prcl.txt`) or an instrument run report
-(`.alf`, see "A run report on its own" below) — **loads** some of them,
-**selects exactly one** of those, and explores it through up to seven views: Overview, Protocol,
-Curves, Plates, Reference, Calibration and Raw (a standalone plate file only gets Overview, Plates
-and Raw; a standalone protocol file only Overview, Protocol and Raw; a run report only Overview and
-Raw; a Biomeme run only Overview, Protocol, Curves, Plates and Raw — see below). Two further tabs are about no file at all: **Files**,
-the catalog, and **Instrument**, a live cycler over USB.
+holds a set of **open files** — `.zpcr`, `.pcrd`, a Biomeme run export (`.bmrun`, see "A third
+format: Biomeme" below), a standalone plate file (`.pltd` or zpcrweb's own `.plt.csv`, see
+"Standalone plate entries and attach" below), a thermal protocol (`.prcl.txt`) or an instrument run
+report (`.alf`, see "A run report on its own" below) — **selects exactly one** of them, and explores
+it through up to seven views: Overview, Protocol, Curves, Plates, Reference, Calibration and Raw (a
+standalone plate file only gets Overview, Plates and Raw; a standalone protocol file only Overview,
+Protocol and Raw; a run report only Overview and Raw; a Biomeme run only Overview, Protocol, Curves,
+Plates and Raw — see below). Two further tabs are about no file at all: **Files**, the open files
+and the folders on disk, and **Instrument**, a live cycler over USB.
 
-Those three sets — the catalog, the loaded files, the one selection — are the app's spine; see
-"Files, loaded files, and the one selection" below before changing anything that touches them.
+Open files and the one selection are the app's spine; see "Open files and the one selection" below
+before changing anything that touches them.
 
 ## Format independence
 
@@ -502,23 +502,29 @@ alongside `"zpcr"`/`"pcrd"`:
   standalone `.prcl.txt`, which *is* the file — replacing its contents from another file is just
   opening that other file, the same reason `StandalonePlateView` has no attach control.
 
-## Files, loaded files, and the one selection
+## Open files and the one selection
 
-Three sets, nested, and every part of the UI belongs to exactly one of them. Getting this right is
-what lets the app hold thousands of files without becoming slow, so it is stated here as an
-invariant rather than left to be inferred from the store.
+**Open or gone: there is no third state.** A file the app is holding has its bytes in memory, is
+decoded, has a chip on the file bar and a row in the Files table, and has a record in IndexedDB.
+Closing it takes all of that away at once — `ZpcrStore.closeFile` drops the bytes *and* deletes the
+records. The app is a set of open documents, not a library with a loaded subset.
 
 | Set | What it is | Where it shows | Where it lives |
 | --- | ---------- | -------------- | -------------- |
-| **files** (the catalog) | every file this browser holds | the **Files** tab (`FilesTableView`) | `ZpcrStore.files` — `FileEntry[]`, metadata only |
-| **loaded files** | those whose bytes are in memory and decoded | the **file bar** (`FileBar`), one chip each | `ZpcrStore.loaded` — `LoadedFile[]`, with `bytes` |
-| **the selection** | exactly one loaded file, or none | the cyan chip; every tab of the **view bar** | `ZpcrStore.activeName` / `active` |
+| **open files** | every file the app is holding | the **Files** tab (`FilesTableView`), one row each; the **file bar** (`FileBar`), one chip each | `ZpcrStore.files` (`FileEntry[]`, metadata) and `ZpcrStore.loaded` (`LoadedFile[]`, with content) |
+| **the selection** | exactly one open file, or none | the cyan chip; every tab of the **view bar** | `ZpcrStore.activeName` / `active` |
 
-There is a fourth set, outside all three: the files sitting in a **granted folder** on disk that
-the app has *not* opened. They appear in the Files view's lower pane and nowhere else, they have
-no catalog record, and the app knows nothing about them beyond a name, a size and an mtime read
-from the directory listing. Ticking one moves it into the catalog and the loaded set at once. See
-"Disk-backed files and folders" below.
+`files` and `loaded` are two views of the same set, and come apart only while a file's bytes are on
+their way in, or when they can't be got at all — a disk-backed file whose folder is waiting on its
+permission back is a row with no content behind it yet, and reads itself in as soon as the app can
+reach it (`retryUnread`, called when a folder is granted, and by `setActive`).
+
+Outside the set entirely are the files sitting in a **granted folder** on disk that the app has not
+opened. They appear in the Files view's lower pane and nowhere else, they have no record anywhere,
+and the app knows nothing about them beyond a name, a size and an mtime read from the directory
+listing. Ticking one opens it. That pane is the only way in for a folder file, which is why the
+table above it has no checkbox column: the table lists what is open, and its ✕ is how something
+stops being. See "Disk-backed files and folders" below.
 
 The two bars are named after those sets and are referred to by those names throughout the code:
 the **view bar** is the tab strip (`components/ViewBar.tsx`), the **file bar** is the row of chips
@@ -526,48 +532,48 @@ under it (`components/FileBar.tsx`).
 
 ### The invariants
 
-1. **A file is decoded only as part of being loaded.** Unzipping, decrypting and parsing happen in
-   exactly two places — `addFiles` (the bytes are already in hand) and `setLoaded(id, true)` (which
-   reads them from IndexedDB) — and the derived `runs`/`plateFiles`/`protocolFiles` maps are built
-   from the loaded set alone. Nothing else may open an archive. In particular **listing files must
-   never decode one**: a catalog of a thousand runs would otherwise cost a thousand unzips to draw
-   a table.
-2. **Everything the catalog shows comes from a cached summary.** At the one moment a file *is*
-   decoded, `lib/fileSummary.ts` reduces it to a `FileSummary` — name, run date, protocol name,
-   plate name, targets, samples, read count, run state, encryption — and `db.ts`'s `updateFile`
-   caches it on the file's catalog record. That is what the Files table renders, loaded or not. It is refreshed
-   on every load and whenever the decode changes (a password landing, a plate attached, a name
-   typed), and written synchronously when a file is *released*, since after that there is nothing
-   left to derive it from. A file that has never been loaded has no summary and renders as dashes —
-   the honest answer, not a guess.
+1. **A file is decoded exactly once, as it is opened.** Unzipping, decrypting and parsing happen in
+   two places — `addFiles`/`addDiskFiles`/`addRunArchive` (the bytes are already in hand) and
+   `loadOne` (which reads them from IndexedDB or off the disk) — and the derived
+   `runs`/`plateFiles`/`protocolFiles` maps are built from the loaded set alone. Nothing else may
+   open an archive.
+2. **Everything shown about a file is derived live from the decoded file.** There is no cached
+   per-file summary: every row of the Files table reads its cells out of `runs`/`plateFiles`/
+   `experiments` (`FilesTableView`'s `rows`), which are the same values every other view is drawing
+   from. That is affordable precisely because the set is what is *open* rather than everything the
+   browser has ever seen, and it removes a whole class of staleness — a rename or an attached plate
+   changes the row as it happens, rather than when a summary write lands.
 3. **The view bar is tied to the selection, exactly.** Every tab but Files is a lens on the one
    selected file, and `App.tsx`'s `enabledViewsFor` decides which of them that file can answer.
    Three situations produce the same empty answer, because they are the same fact — no tab has a
    file to be a lens on: nothing selected, the selected file's bytes still arriving, or a run that
    hasn't decoded (locked behind the password prompt, or failed). The strip still renders; it is
-   simply all disabled but **Files**, a lens on the catalog, and **Instrument**, a lens on a
-   machine — the two tabs that were never about the selection. So are the wordmark (About) and the
-   load button, which are not lenses on a file at all — with nothing selected, those are the ways
-   out.
-4. **The selection is always a loaded file, or nothing.** Selecting a released file loads it
-   (`setActive` → `setLoaded(id, true)`); releasing the selected one moves the selection to another
-   loaded file or clears it. There is no third state where the app is pointed at bytes it doesn't
-   have. "Nothing selected" is a real, reachable state — every file released, or a `#file=` naming
-   a file this browser doesn't have — and the app renders it as itself rather than substituting
-   some other file.
-5. **Loading is persisted, so a session reopens as it was left.** `FileSettings.loaded` (formerly
-   `visible`, when every file was loaded and the flag only decided whether it got a chip) rides in
-   the same per-file settings record as `modified`. On startup the whole catalog is read as
-   metadata and only the previously-loaded files have their bytes fetched.
+   simply all disabled but **Files** and **Instrument**, a lens on a machine — the two tabs that
+   were never about the selection. So are the wordmark (About) and the load button, which are not
+   lenses on a file at all — with nothing selected, those are the ways out.
+4. **The selection is an open file, or nothing.** Closing the selected file moves the selection to
+   another open file or clears it. "Nothing selected" is a real, reachable state — every file
+   closed, or a `#file=` naming a file this browser doesn't have — and the app renders it as itself
+   rather than substituting some other file.
+5. **A session reopens holding exactly what it was left holding.** The catalog is read as metadata
+   on startup and then every file in it is read in, selected file first. A file that can't be read
+   keeps its row rather than being dropped: a folder whose permission has lapsed is the ordinary
+   case, and deleting the user's own bookkeeping over a dialog they haven't answered yet would be
+   the app losing their work for them.
 
-### What the two bars do
+### Closing a file
 
-- A chip's **✕ releases** the file: bytes out of memory, chip off the bar, file untouched in
-  storage and still listed in the catalog. No confirmation, because nothing is at risk.
-- The Files table's **checkbox is `loaded`** — the other direction of the same act — and its **✕
-  deletes**, arming first (red waste bin, click again). That is the only delete in the app.
-- Clicking a **row** selects the file, loading it if needed, and lands on its own first enabled
-  tab; the Protocol/Plate/Reads cells land on that view instead.
+One control, two places, one component (`components/CloseFileButton.tsx`): the chip's ✕ on the file
+bar and the row's ✕ in the Files table. For a file that is a copy of something on disk, one click —
+nothing is at risk. For one carrying edits that exist nowhere else (`modifiedIds`) the first click
+**arms** (a red waste bin) and the second does it; moving the pointer away disarms. See "Closing an
+edited file" below.
+
+The two used to disagree — the chip released without asking, the table always asked twice — which
+meant the same file answered "is this safe?" differently depending on where you clicked.
+
+Clicking a **row** anywhere else selects the file and lands on its own first enabled tab; the
+Protocol/Plate/Reads cells land on that view instead.
 
 ### Instrument is not a file view
 
@@ -588,8 +594,8 @@ Instrument view" below.
 
 ## State & persistence
 
-`state/useZpcrStore.ts` is the single store hook. It holds the catalog (`FileEntry[]`), the loaded
-files (`LoadedFile[]`, bytes in memory), the active file id, a per-file settings map, the derived
+`state/useZpcrStore.ts` is the single store hook. It holds the open files (`FileEntry[]`, metadata)
+and their content (`LoadedFile[]`, bytes in memory), the active file id, a per-file settings map, the derived
 `runs`/`plateFiles` maps over the loaded set (see "The `.pcrd` password gate" above and "Standalone
 plate entries and attach"), and the globally-selected view (`view`/`setView`, plain `useState` —
 not persisted, and not part of the per-file settings map, so switching files never changes which
@@ -600,17 +606,14 @@ view is showing). `state/db.ts` is a minimal IndexedDB wrapper with **two** obje
   entry (U+0000). Files survive reloads and are re-parsed (`parseZpcrArchive`/`parsePcrd`/
   `parsePltd`/`parsePlateCsv`, by the catalog's `kind`) when loaded. **Read one file at a time**
   (`getContent`, a range read over that file's keys), never in bulk: this store is the expensive
-  one, and only the loaded set ever touches it.
+  one, and only opening a file touches it.
 - `catalog` — everything else the app knows about a file, one small record each
   (`StoredFile`), read whole on startup by `getAllFiles()`:
   - **identity** — `{ name, size, addedAt, lastModified, kind }`. The **name is the key**, in both
     stores — see "A file is its name" below. `size` is reported only; nothing is keyed on it.
-  - **`summary?`** — the cached decode described under "Files, loaded files, and the one selection"
-    above, and what the Files table draws. Absent until the file has been loaded once.
-  - **`modified` / `loaded`** — not display state: whether this file's *content* has been edited
-    since it was loaded and not since downloaded (see "Deleting an edited file" below), and whether
-    its bytes are in memory. Both are kept for every file, and written straight through rather than
-    debounced.
+  - **`modified`** — not display state: whether this file's *content* has been edited since it was
+    opened and not since downloaded (see "Closing an edited file" below). Written straight through
+    rather than debounced.
   - **`view?`** — display state (`StoredView`): `{ enabledChannels[], enabledWells[],
     enabledRefCols[], baseline, curveView, drawBaseline, scale, … }`, so each file remembers its
     enabled wells/channels/reference columns. `baseline` (Reference view's factory-relative
@@ -618,16 +621,15 @@ view is showing). `state/db.ts` is a minimal IndexedDB wrapper with **two** obje
     stored, since it's always the auto-detected linear fit) are independent settings — see "Two
     baseline concepts" under Reference view. Writes are debounced by 300 ms.
 
-**Content is the only thing worth a store of its own.** `getAllFiles()` lists the whole catalog
-in one `getAll()`, and IndexedDB has no way to fetch part of a record — a store holding the bytes
-too would clone every archive in the database on that call. Everything that *isn't* bytes is one
-record per file, so a release is one write and identity can't disagree with itself.
+**Content is the only thing worth a store of its own.** `getAllFiles()` reads the whole catalog in
+one `getAll()` on startup, and IndexedDB has no way to fetch part of a record — a store holding the
+bytes too would clone every archive in the database on that call. Everything that *isn't* bytes is
+one record per file, so identity can't disagree with itself.
 
-**`view` is kept only while `loaded` is true.** Releasing a file drops it (`updateFile(name, { view:
-undefined })`), and re-loading the file starts from defaults. Everything that changes a reported
-number lives in the run's own archive and survives (see "Analysis state lives in the file" below);
-which wells you had hidden is a property of *looking at* the run, and lasts as long as you are.
-This also keeps the largest field off the records in the one query that has to stay cheap.
+**Closing a file deletes both records.** `view` therefore lasts exactly as long as the file is open,
+which is the right lifetime for it: everything that changes a reported number lives in the run's own
+archive and travels with the file (see "Analysis state lives in the file" below), while which wells
+you had hidden is a property of *looking at* the run.
 
 **A write costs what changed, not what the file is.** `putFile` takes the set of entries the caller
 actually touched (`fileContent.ts`'s `changedEntries`) and leaves the rest of the records alone, so
@@ -685,14 +687,14 @@ one whose file has just been renamed out from under it (the derived name can mov
 whatever the user had added to the file it was reading from.
 
 Every write here is a read-modify-write — a catalog write merges into what is stored, and a content
-write reads back the entry keys it should delete — and several fire at once on one file: releasing
-it writes the flags, the summary and the dropped view from three places in the same tick. `db.ts`'s
-`serializeWrites` chains them per file so a later write can't read a stale "before" record and undo
-an earlier one. Deletes are on the same chain, or a delete racing a put would leave the row it just
-removed resurrected by the put's merge.
+write reads back the entry keys it should delete — and several fire at once on one file: an edit
+writes the modified flag and the view from two places in the same tick. `db.ts`'s `serializeWrites`
+chains them per file so a later write can't read a stale "before" record and undo an earlier one.
+Deletes are on the same chain, or a delete racing a put would leave the row it just removed
+resurrected by the put's merge.
 
-Deleting a file removes its whole `content` range and its `catalog` record, and drops it from both
-the catalog and memory — exposed as the Files table's two-click delete.
+Closing a file removes its whole `content` range and its `catalog` record, and drops it from both
+lists in memory — see "Open files and the one selection" above.
 
 ### A file is its name
 
@@ -843,22 +845,26 @@ tabs is stated on each end rather than left to be discovered:
   had something to report — that report lives in the rail (`InstrumentRail`'s `startNote`) and
   would go with the view.
 
-### Deleting an edited file
+### Closing an edited file
 
-A loaded file is normally disposable: it came off the user's disk and is still there, so the file
-chip's ✕ deletes on the click. Once its content has been edited it isn't — the edits live in the
-archive bytes in IndexedDB (thresholds, the experiment name, an attached plate) and the copy on
-disk is stale until the user downloads again. So the chip changes in two ways:
+An open file is normally disposable: it came off the user's disk and is still there, so its ✕ closes
+on the click. Once its content has been edited it isn't — the edits live in the archive bytes in
+IndexedDB (thresholds, the experiment name, an attached plate) and the copy on disk is stale until
+the user downloads again. So the chip changes in two ways:
 
 - an amber dot under the ✕, in space the button had spare, saying "this has changes that aren't on
   disk". The dot's row is reserved on every chip whether or not it shows one, so becoming modified
   never reflows the bar;
-- the ✕ arms rather than deletes: it turns into a waste bin on solid red, and the *next* click is
-  the one that removes the file. Moving the pointer off the chip or pressing Escape disarms it —
-  it is a warning, not a modal, and a red button must not be left sitting in the bar waiting for a
-  stray click.
+- the ✕ arms rather than closes: it turns into a waste bin on solid red, and the *next* click is
+  the one that closes the file. Moving the pointer off it disarms — it is a warning, not a modal,
+  and a red button must not be left sitting in the bar waiting for a stray click.
 
-`ZpcrStore.modifiedIds` is the set the file bar reads. It is set by `updateSettings` whenever the
+A **disk-backed** file is never in this state: its edits are written back to the file on disk, so
+there is no second copy to go stale (`updateSettings` skips the flag for one), and closing it only
+means the app stops holding it. What it *does* do first is flush anything the write throttle still
+owes that file, so closing it a second after a threshold drag doesn't lose the drag.
+
+`ZpcrStore.modifiedIds` is the set the file bar and the Files table read. It is set by `updateSettings` whenever the
 patch touches an **analysis** key — precisely what a download writes into the file, so display
 state (which channels are shown, log vs. linear) never counts — and by `attachPlate`, which
 rewrites the archive outright. It is cleared by `markDownloaded`, called from the Overview view's
@@ -949,7 +955,7 @@ instrument is still writing.
 
 ### The Files view is two panes
 
-The catalog table and the granted folders answer different questions — what this browser is
+The open-files table and the granted folders answer different questions — what this browser is
 holding, and what is on the disk — and are different lengths, so they are two panes that scroll
 independently rather than one long column. The folders pane is sized to its content and capped at
 55% of the view, so two folders don't cost half the window and thirty don't push the table out of
@@ -973,9 +979,9 @@ buttons) and a `<summary>` would swallow all of them into "toggle".
 A folder handed to the app may be an entire lab archive, so there is no recursive scan anywhere.
 `listDirectory` reads **one** directory level and caches it, and the tree calls it as nodes are
 opened. It also de-duplicates listings in flight, because selecting a directory and expanding it are
-now one click and both want the same read. What opens by itself is derived from the catalog, not from the disk: the ancestors of the
-disk-backed files that are already loaded, so the work in progress is in front of the user and every
-other branch stays shut and unread. A directory row therefore shows no child count — counting means
+now one click and both want the same read. What opens by itself is derived from the open files, not from the disk: the ancestors of the
+disk-backed ones, so the work in progress is in front of the user and every other branch stays shut
+and unread. A directory row therefore shows no child count — counting means
 descending, which is the thing being avoided.
 
 The cost is that a file newly written into a folder does not announce itself. The tree re-reads when
@@ -984,7 +990,7 @@ by themselves, because those are watched one by one.
 
 ### Watching is per file, and has to re-arm
 
-`watchDiskFile` puts one `FileSystemObserver` on each loaded disk-backed file. There is no directory
+`watchDiskFile` puts one `FileSystemObserver` on each open disk-backed file. There is no directory
 observation at all — recursive or otherwise — because that would mean caring about a subtree the app
 has deliberately not read.
 
@@ -1024,8 +1030,11 @@ Three things this had to be careful about, each of which was a bug first:
   `persistFile`.** For a disk-backed file it is skipped entirely, and `updateSettings` marks the
   disk throttle instead — otherwise a copy of the run would accumulate in IndexedDB and be read in
   preference to the disk on the next load.
-- **Deleting a file must not write it.** `forget` calls the throttle's `forget`, never `flush`:
-  dropping a file from the app is not an edit to it. Nothing here ever deletes anything on disk.
+- **Closing a file must write what it already owed, and nothing more.** `closeFile` flushes the disk
+  throttle first — the edit was made, and it is only the throttle that hasn't got to it — and then
+  `forget` drops the entry so a *later* write can't fire against a file the app has stopped holding.
+  Nothing here ever deletes anything on disk: closing a disk-backed file is the app forgetting about
+  it, and the file stays exactly where it is.
 
 ### A run in progress is the exception
 

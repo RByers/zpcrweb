@@ -1,19 +1,21 @@
 /**
- * Thin IndexedDB wrapper — no dependencies. Two stores:
+ * Thin IndexedDB wrapper — no dependencies. Three stores:
  *
- * - `files` — the bytes, and nothing else. A record holds either a file's raw bytes or, for a run
+ * - `content` — the bytes, and nothing else. A record holds either a file's raw bytes or, for a run
  *   still being written to, its archive entries individually — see {@link StoredContent} and
  *   `fileContent.ts`, which owns that choice. **Records are read one file at a time**
- *   ({@link getContent}), never all at once: the content of a file only enters memory when that
- *   file is loaded (see `useZpcrStore`'s loaded set, and `apps/web/ARCHITECTURE.md`'s "Files,
- *   loaded files, and the one selection").
- * - `catalog` — one small record per file ({@link StoredFile}): its identity, a cached
- *   {@link FileSummary} of what the *content* turned out to say, the two per-file flags that must
- *   outlive a reload ({@link StoredFile.modified} and {@link StoredFile.loaded}), and — for a
- *   loaded file only — its {@link StoredView} display state.
+ *   ({@link getContent}), never all at once, so a session opens by reading the catalog and then the
+ *   files it names, rather than everything the browser has ever held.
+ * - `catalog` — one small record per file ({@link StoredFile}): its identity, the
+ *   {@link StoredFile.modified} flag, and its {@link StoredView} display state.
  * - `folders` — the directories the user has granted access to ({@link StoredFolder}). A handle is
  *   structured-cloneable, so keeping one here is how folder access survives a reload; see
  *   `state/diskFolders.ts`.
+ *
+ * **Everything here is an open file.** Closing a file in the app deletes its records outright
+ * ({@link deleteFile}) — there is no third state between "open" and "gone", and so nothing here
+ * describes a file the app isn't currently holding. See `apps/web/ARCHITECTURE.md`, "Open files and
+ * the one selection".
  *
  * **A file whose bytes live on disk has no `content` records.** {@link FileIdentity.source} says a
  * file is backed by a real file inside one of those folders, and then this module holds only its
@@ -23,11 +25,10 @@
  * "Disk-backed files and folders".
  *
  * **Why content is a separate store.** {@link getAllFiles} reads the whole catalog in one
- * `getAll()`, which is what lets the Files table list thousands of files — names, dates, protocol
- * and plate names, read counts — without decoding, or even reading, a single archive. IndexedDB has
- * no way to fetch part of a record, so a store holding both would structured-clone every archive in
- * the database on that call. That is the one split worth keeping, and the reason everything *else*
- * about a file lives together in `catalog`.
+ * `getAll()` — every file's name, size, kind and display state — and that read happens on startup,
+ * before a single archive is touched. IndexedDB has no way to fetch part of a record, so a store
+ * holding both would structured-clone every archive in the database on that call. That is the one
+ * split worth keeping, and the reason everything *else* about a file lives together in `catalog`.
  *
  * **Analysis state is deliberately absent.** Thresholds, the auto-threshold multiplier and
  * calibration normalization all change the numbers the app reports, so they belong to the run and
@@ -42,7 +43,7 @@
 
 const DB_NAME = "zpcrweb";
 /** Bumping this **erases the database**. See {@link openDb}. */
-const DB_VERSION = 6;
+const DB_VERSION = 7;
 const CONTENT = "content";
 const CATALOG = "catalog";
 const FOLDERS = "folders";
@@ -175,56 +176,9 @@ export interface StoredContent {
 }
 
 /**
- * What a file's *content* turned out to say, cached from the last time the file was loaded.
- *
- * Every field here could be recomputed by decoding the file — and that is exactly the point of
- * caching it. Listing a thousand files in the Files table must not mean unzipping a thousand
- * archives, so the app decodes a file **only** when it is loaded (see
- * `apps/web/ARCHITECTURE.md`), and writes this summary at that moment. Everything the table and
- * its hover card show comes from here.
- *
- * Absent on a file that has never been loaded. Such a row renders with dashes, which is the honest
- * answer: nothing has read its content yet.
- */
-export interface FileSummary {
-  /** The experiment's resolved name (`lib/experiment.ts`'s `experimentIdentity`). */
-  name: string;
-  /** Whether {@link name} was given rather than derived from the file name. */
-  named: boolean;
-  /** Run start as epoch ms, or null for a file that records none. Stored as a number rather than
-   * a `Date` because structured clone round-trips it either way and a number sorts directly. */
-  dateMs: number | null;
-  /** The thermal protocol's own name, or null when the file carries no protocol. */
-  protocol: string | null;
-  /** The plate's display name (`lib/plateNames.ts`), or null when there is no plate. */
-  plate: string | null;
-  /** The plate's targets, with the dye each is first loaded as (for coloring — see
-   * `lib/fluorColors.ts`), or null for a target no well assigns a fluor to. A record written
-   * before this field replaced the optical channel simply colors its chips neutrally until the
-   * file is summarized again; nothing reads the old key. */
-  targets: { name: string; fluor: string | null }[];
-  /** The plate's sample names. */
-  samples: string[];
-  /** Plate-read count for a run; null for a file that isn't one. */
-  reads: number | null;
-  /** Loaded wells, for a standalone plate file; null otherwise. */
-  wells: number | null;
-  /**
-   * Where the run stands: never started (`pending`), still being written to (`running`), over but
-   * short of its protocol (`incomplete`), over (`complete`), or not a run at all (`none`). The
-   * same three distinctions the file bar's chips draw — see `useZpcrStore`'s `pendingIds`,
-   * `inProgressIds` and `incompleteIds`, which are what a *loaded* file's chip reads.
-   */
-  state: "none" | "pending" | "running" | "incomplete" | "complete";
-  /** Mirrors `lib/encryptionStatus.ts`: nothing encrypted, encrypted and opened with the password
-   * in force at load time, or encrypted and never opened. */
-  encryption: "none" | "decrypted" | "locked";
-}
-
-/**
  * A file's **display** state: which channels/wells/fluorophores are shown, log vs. linear, which
- * protocol step, whether to draw baselines. A per-person view onto a run, and the one part of a
- * {@link StoredFile} that is not kept for every file — see {@link StoredFile.view}.
+ * protocol step, whether to draw baselines. A per-person view onto a run — see
+ * {@link StoredFile.view}.
  *
  * Sets are stored as arrays. Structured clone would round-trip a `Set` directly, but the persisted
  * shape is worth keeping plain: it is what a person reads in the browser's storage inspector, and
@@ -283,38 +237,25 @@ export interface StoredView {
 }
 
 /**
- * One record per file, holding everything the app can say about it **without reading its bytes**.
- * This is what the whole catalog is listed from ({@link getAllFiles}) while the archives stay on
- * disk, so it must stay small: {@link view} is the largest thing on it, and it is kept only for the
- * handful of files that are loaded.
+ * One record per open file, holding everything the app can say about it **without reading its
+ * bytes**. This is what a session is restored from ({@link getAllFiles}) before any archive is
+ * read, so it must stay small: {@link view} is the largest thing on it.
  */
 export interface StoredFile extends FileIdentity {
-  /** See {@link FileSummary} — absent until the file has been loaded at least once. */
-  summary?: FileSummary;
   /**
    * Whether this file's *content* has been edited since it was loaded (or since it was last
    * downloaded) — a threshold moved, the run renamed. Not display state, and it has to outlive a
    * reload: the edits themselves are already durable (in the archive's `zpcrweb.json`, in
    * IndexedDB), so what is at risk is the copy on the user's disk, which is stale until they
-   * download again. See `useZpcrStore`'s `modifiedIds` and the file chip's two-stage delete.
+   * download again. See `useZpcrStore`'s `modifiedIds` and the file chip's two-stage close.
    */
   modified: boolean;
   /**
-   * Whether this file is **loaded** — its bytes in memory, decoded, and so a chip on the file bar
-   * and a candidate for the tab strip. An unloaded file stays in IndexedDB and in the full files
-   * table; only its bytes leave memory. This is what the app restores on the next session, so a
-   * browser holding a thousand archives reopens holding the handful that were in use.
-   */
-  loaded: boolean;
-  /**
-   * This file's display state — **present only while {@link loaded} is true**.
-   *
-   * Releasing a file drops it, and re-loading the file starts from defaults again. That is the
-   * deliberate bargain of the two sets: everything that changes a reported number lives in the
-   * archive and survives (see the module comment), while which wells you had hidden is a property
-   * of looking at the run, not of the run, and lasts as long as you are looking at it. Keeping it
-   * for every file the browser has ever seen would also put the largest field on this record into
-   * the one query that has to stay cheap.
+   * This file's display state — absent until the file's first display edit, since defaults need no
+   * record. Closing the file deletes it along with everything else about the file, which is what
+   * makes this the one part of a run's state that does *not* survive: everything that changes a
+   * reported number lives in the archive instead (see the module comment), while which wells you
+   * had hidden is a property of looking at the run rather than of the run.
    */
   view?: StoredView;
 }
@@ -376,8 +317,8 @@ const writes = new Map<string, Promise<unknown>>();
  * Run a write after any already in flight for the same file.
  *
  * Every write here is a read-modify-write — a catalog write merges into what is already stored —
- * and the app fires several at once on one file: releasing it writes the flags, the summary and
- * the dropped view from three places in the same tick. Without this, two of them could read the
+ * and the app fires several at once on one file: an edit writes the modified flag and the view from
+ * two places in the same tick. Without this, two of them could read the
  * same "before" record and the later write would silently undo the earlier one. Deletes and
  * renames join the same chain, or a delete racing a put would leave the row it just removed
  * resurrected by the put's merge. Per file, so unrelated files still write in parallel.
@@ -398,13 +339,13 @@ function serializeWrites<T>(name: string, run: () => Promise<T>): Promise<T> {
 
 /**
  * Write a file's content **and** its identity, so the two can never disagree about a file's name,
- * size or kind. Everything else on the catalog record — the summary, the flags, the view — belongs
- * to whoever last wrote it ({@link updateFile}) and is carried over untouched; a file being seen
- * for the first time starts unmodified and loaded, which is what adding a file means.
+ * size or kind. Everything else on the catalog record — the modified flag, the view — belongs to
+ * whoever last wrote it ({@link updateFile}) and is carried over untouched; a file being seen for
+ * the first time starts unmodified, which is what opening a file means.
  *
  * Carrying the rest over is what lets a run in progress be re-put every cycle without losing the
- * display settings, the summary or the modified flag it accumulated — the record is the file's,
- * not this snapshot's. A *different* file arriving under a used name is a replacement rather than
+ * display settings or the modified flag it accumulated — the record is the file's, not this
+ * snapshot's. A *different* file arriving under a used name is a replacement rather than
  * another snapshot, and the store resets those fields explicitly (see `useZpcrStore`'s `install`).
  *
  * The content is written **a record per entry**, in one transaction: entries the file no longer has
@@ -440,8 +381,8 @@ export async function putFile(
  * file's catalog row is written by, since its bytes are on the user's disk and there is nothing
  * here to keep in step with them.
  *
- * Same merge as {@link putFile}: the summary, the flags and the view belong to whoever last wrote
- * them, and a file seen for the first time starts unmodified and loaded.
+ * Same merge as {@link putFile}: the modified flag and the view belong to whoever last wrote them,
+ * and a file seen for the first time starts unmodified.
  */
 export async function putIdentity(identity: FileIdentity): Promise<void> {
   await serializeWrites(identity.name, () => writeIdentity(identity));
@@ -454,7 +395,7 @@ async function writeIdentity(identity: FileIdentity): Promise<void> {
     s.get(identity.name),
   );
   await tx(CATALOG, "readwrite", (s) =>
-    s.put({ modified: false, loaded: true, ...existing, ...identity } satisfies StoredFile),
+    s.put({ modified: false, ...existing, ...identity } satisfies StoredFile),
   );
 }
 
@@ -500,9 +441,8 @@ function writeContent(
 }
 
 /**
- * Change part of a file's catalog record, leaving the rest as it stands — how the summary, the two
- * flags and the view are all written. A key set to `undefined` is **removed**, which is how
- * releasing a file drops its {@link StoredFile.view}.
+ * Change part of a file's catalog record, leaving the rest as it stands — how the modified flag and
+ * the view are both written. A key set to `undefined` is **removed**.
  *
  * A no-op for a name with no record, which can only mean the file was deleted mid-flight.
  */
@@ -521,8 +461,8 @@ export async function updateFile(
   });
 }
 
-/** The whole catalog — no archive bytes are read. This is the query the Files table is built on,
- * and the reason a browser holding thousands of files still starts instantly. */
+/** The whole catalog — no archive bytes are read. This is the query a session is restored from:
+ * the app knows what it is holding before it reads any of it. */
 export function getAllFiles(): Promise<StoredFile[]> {
   return tx<StoredFile[]>(CATALOG, "readonly", (s) => s.getAll());
 }
@@ -554,7 +494,8 @@ export async function deleteFile(name: string): Promise<void> {
 /**
  * Drop a file's bytes but keep its catalog row — how a disk-backed run in progress lets go of the
  * buffer it accumulated once the finished run has been written to disk. The file goes on existing;
- * it is simply read from disk from now on.
+ * it is simply read from disk from now on. The one place a catalog row outlives its content, and
+ * only because the bytes are on disk instead.
  */
 export async function deleteContent(name: string): Promise<void> {
   await serializeWrites(name, async () => {
@@ -572,9 +513,9 @@ export async function putFolder(folder: StoredFolder): Promise<void> {
   await tx(FOLDERS, "readwrite", (s) => s.put(folder));
 }
 
-/** Forget a granted folder. The files opened from it keep their catalog rows and go on being
- * listed — they are simply unreadable until the folder is granted again, which is the same state a
- * file whose permission lapsed is in. */
+/** Forget a granted folder. The files opened from it keep their catalog rows and stay open — they
+ * are simply unreadable until the folder is granted again, which is the same state a file whose
+ * permission lapsed is in. */
 export async function deleteFolder(label: string): Promise<void> {
   await tx(FOLDERS, "readwrite", (s) => s.delete(label));
 }

@@ -169,15 +169,18 @@ export function App() {
   /**
    * The granted folders and their lazily-listed trees.
    *
-   * The sources it is handed are the *loaded* disk-backed files, which is what decides the branches
+   * The sources it is handed are the open disk-backed files, which is what decides the branches
    * that open by themselves the first time a folder is shown — so the app never searches the disk
-   * to work out where to look, it reads that off the catalog it already has. See `useDiskTree`.
+   * to work out where to look, it reads that off the list of files it already has. Off `files`
+   * rather than `loaded`, so a file whose folder is still waiting on its permission back is one
+   * whose branch opens too: it is exactly the file the user is about to grant access for. And
+   * granting is what reads those files in (`retryUnread`). See `useDiskTree`.
    */
-  const loadedDiskSources = useMemo(
-    () => store.loaded.flatMap((f) => (f.source ? [f.source] : [])),
-    [store.loaded],
+  const openDiskSources = useMemo(
+    () => store.files.flatMap((f) => (f.source ? [f.source] : [])),
+    [store.files],
   );
-  const diskTree = useDiskTree(loadedDiskSources, store.view === "files");
+  const diskTree = useDiskTree(openDiskSources, store.view === "files", store.retryUnread);
   /** Grant a folder and go and look at it: its tree lives in the Files view, so landing anywhere
    * else would make picking a folder look like it did nothing. */
   const addFolder = useCallback(async () => {
@@ -750,7 +753,7 @@ export function App() {
         incompleteIds={store.incompleteIds}
         pendingIds={store.pendingIds}
         onSelect={selectFile}
-        onUnload={(id) => void store.setLoaded(id, false)}
+        onClose={(id) => void store.closeFile(id)}
         experiments={store.experiments}
       />
 
@@ -780,11 +783,12 @@ export function App() {
           <FilesTableView
             files={store.files}
             activeName={store.activeName}
-            loadedIds={store.loadedIds}
             modifiedIds={store.modifiedIds}
+            runs={store.runs}
+            plateFiles={store.plateFiles}
+            experiments={store.experiments}
             onSelectFile={selectFromTable}
-            onSetLoaded={(id, on) => void store.setLoaded(id, on)}
-            onDelete={store.remove}
+            onCloseFile={store.closeFile}
             onClose={leaveFiles}
             tree={diskTree}
             onAddDiskFiles={(sources) => void store.addDiskFiles(sources)}

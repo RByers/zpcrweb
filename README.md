@@ -168,9 +168,11 @@ view each several ways:
   ΔRFU baselining, Linear ↔ Log scale, and a hover/tap tooltip showing mean/min/max/std.
 - **Raw files** — a hex/ASCII (and text) viewer over every file in the archive.
 
-Files persist in **IndexedDB** across reloads, along with which of them were loaded and — for those
-— their view settings; files can be deleted from storage from the file bar. Everything that changes
-a reported number is written into the run's own file instead, so it travels with it. Non-trivial logic lives in `@zpcrweb/core` —
+The files you have open persist in **IndexedDB** across reloads, along with their view settings, so
+a session reopens as you left it. Closing a file — the ✕ on its chip, or on its row in the Files tab
+— is what removes it from the browser again; a file with edits that aren't on disk yet asks a second
+time first. Everything that changes a reported number is written into the run's own file instead, so
+it travels with it. Non-trivial logic lives in `@zpcrweb/core` —
 see the [web architecture notes](./apps/web/ARCHITECTURE.md).
 
 ### Working in a folder on your disk
@@ -217,7 +219,7 @@ view is expected to work fine regardless.
 
 - `#file=<name>&view=<overview|protocol|curves|plates|reference|calibration|raw|instrument|files|about>`
   selects the active file and view. Every view the app can show is nameable here: `files` is the
-  full files table, `instrument` the USB panel, and `about` the credits page behind the logo —
+  open files and the folders on disk, `instrument` the USB panel, and `about` the credits page —
   the last of these has no tab, and none of the three needs a file.
 - `#load=<url>` fetches a file and loads it — the only key that can put a file the browser doesn't
   already have into the app. It's consumed on load and replaced by the `#file=` the loaded file
@@ -353,16 +355,15 @@ RT hold, whose protocol carries no `PLATEREAD` and which therefore writes no `.P
 it opens on Overview with only Curves, Reference and Calibration greyed out, is not mistaken for a
 run that stopped short, and neither view says anything about readings that don't exist —
 
-and what happens when a file with unsaved edits is deleted — an edited file (a rename is enough)
-wears a dot and its ✕ arms into a waste bin that takes a second click, Escape disarms it, neither
-state widens the chip, the flag survives a reload, and downloading the file puts it back to
-deleting on one click — and that the view bar is the *same eight file views* for every file, a tab
+and what happens when a file with unsaved edits is closed — an edited file (a rename is enough)
+wears a dot and its ✕ arms into a waste bin that takes a second click, moving away disarms it,
+neither state widens the chip, the flag survives a reload, and downloading the file puts it back to
+closing on one click — and that the view bar is the *same eight file views* for every file, a tab
 the file can't answer being disabled rather than dropped (`ViewBar`'s `enabled` prop), including a
 run still behind the password prompt, which greys out every file view rather than dropping the
 strip — a claim about two files' headers matching that no single-file check can make — and the
-three sets the app rests on: releasing a file leaves its Files-table row intact, still described
-from the summary cached in IndexedDB when it was last loaded, and a reload brings back the loaded
-set and nothing else — plus the file
+model the app rests on: closing a file takes it out of IndexedDB then and there, so a reload comes
+back holding exactly what was open and nothing else — plus the file
 chip's icon, whose shape is what the file *is* (core's `fileCategory`, so the two plate encodings
 draw alike) while its colour stays the encryption status, two claims a screenshot can only show
 one at a time.

@@ -49,7 +49,6 @@ import {
   updateFile,
   type DiskSource,
   type FileIdentity,
-  type FileSummary,
   type StoredFile,
   type StoredView,
 } from "./db";
@@ -90,7 +89,6 @@ import {
   restampExperimentDate,
   type ExperimentIdentity,
 } from "../lib/experiment";
-import { summarizeFile } from "../lib/fileSummary";
 import { usePltdPassword } from "./pltdPassword";
 import { onHashChange, readHash, writeHash } from "./urlHash";
 
@@ -282,39 +280,24 @@ export interface FileSettings extends AnalysisSettings {
   /** See {@link AnalysisSource}. */
   cqSource: AnalysisSource;
   /**
-   * Whether this file's content has been edited since it was loaded — a threshold moved, the run
+   * Whether this file's content has been edited since it was opened — a threshold moved, the run
    * renamed, a plate attached — and not yet downloaded. The odd one out in this interface: not a
    * view setting at all, and no view reads it. It is kept here because call sites want one flat
-   * per-file object; on the record it is a field of its own (`StoredFile.modified`), kept for
-   * every file rather than only loaded ones, since the stale copy is the one on the user's disk
-   * whether or not this browser still holds the bytes. Surfaced to the UI as
-   * {@link ZpcrStore.modifiedIds}, which is what makes the file chip's delete ask twice.
+   * per-file object; on the record it is a field of its own (`StoredFile.modified`), since the
+   * stale copy is the one on the user's disk. Surfaced to the UI as
+   * {@link ZpcrStore.modifiedIds}, which is what makes closing the file ask twice.
    */
   modified: boolean;
-  /**
-   * Whether this file is **loaded**: its bytes in memory, decoded, a chip on the file bar and a
-   * candidate for the tab strip. Unchecking it in the full files table (see `FilesTableView.tsx`)
-   * releases the bytes without touching the file itself — it stays in IndexedDB and in that
-   * table, described by its cached summary (`lib/fileSummary.ts`). Selecting a file anywhere (the
-   * table, a `#file=` link) loads it, since the one selected file is by definition one the app is
-   * showing.
-   *
-   * Persisted so a session reopens holding what it was working on rather than every archive the
-   * browser has ever seen — the whole point of separating the two sets. It is also what decides
-   * whether the rest of this object is persisted at all: a released file keeps no display state
-   * (see `db.ts`'s `StoredFile.view`), so loading it again starts from {@link defaultSettings}.
-   */
-  loaded: boolean;
 }
 
 /**
- * One file in the app's catalog — **every** file, loaded or not. Metadata only: the identity
- * IndexedDB records under its name, plus the cached {@link FileSummary} of what its content said
- * the last time it was loaded (null for one that never has been).
+ * One open file, as its catalog record describes it — metadata only, no bytes.
  *
- * This is what the Files table lists, and it is deliberately not a {@link LoadedFile}: a browser
- * holding a thousand archives must be able to describe all of them without any of their bytes
- * being read. See `apps/web/ARCHITECTURE.md`, "Files, loaded files, and the one selection".
+ * Every open file has one of these, and (once its bytes are in) a {@link LoadedFile} beside it. The
+ * two lists come apart only while a file's bytes are on their way in, or when they can't be got at
+ * all: a disk-backed file whose folder is waiting on its permission back is an entry with no loaded
+ * file, listed and selectable, and it reads itself in as soon as the app can reach it. See
+ * `apps/web/ARCHITECTURE.md`, "Open files and the one selection".
  */
 export interface FileEntry {
   /** The file's name — its identity here and its key in IndexedDB (`db.ts`'s `FileIdentity`). */
@@ -323,7 +306,6 @@ export interface FileEntry {
   addedAt: number;
   lastModified: number;
   kind: FileKind;
-  summary: FileSummary | null;
   /** Where this file's bytes live, when they live on the user's disk rather than in IndexedDB —
    * see `db.ts`'s {@link DiskSource}. */
   source?: DiskSource;
@@ -432,7 +414,7 @@ function isRunInProgress(file: LoadedFile): boolean {
  *
  * Free for a run held open (one more entry in an object). An unzip and a re-zip for a finished one,
  * which is what editing a finished archive costs anyway — and skipped entirely when there is
- * nothing to write, which is the case for every file that is merely being loaded or released.
+ * nothing to write, which is the case for every file that is merely being read in.
  */
 function contentToStore(file: LoadedFile, analysis: AnalysisSettings | undefined): FileContent {
   if (file.kind !== "zpcr" || !analysis) return file.content;
@@ -627,11 +609,8 @@ function defaultSettings(): FileSettings {
     // "file": a Biomeme user opened the file to see the instrument's own call, not this app's.
     baselineSource: "file",
     cqSource: "file",
-    // A freshly loaded file is by definition the copy on disk.
+    // A freshly opened file is by definition the copy on disk.
     modified: false,
-    // A file arrives by being loaded — dropping one, or opening it from the table — so this is
-    // true from the outset; it only ever goes false by someone releasing the file.
-    loaded: true,
     ...defaultAnalysisSettings(),
   };
 }
@@ -639,8 +618,8 @@ function defaultSettings(): FileSettings {
 /**
  * The display half of a file's settings, as its record's {@link StoredView} — sets flattened to
  * arrays, and the analysis fields pointedly not written (they live in the file; see
- * {@link FileSettings}). {@link FileSettings.modified} and {@link FileSettings.loaded} aren't here
- * either: they are fields of the record itself, kept for every file rather than only loaded ones.
+ * {@link FileSettings}). {@link FileSettings.modified} isn't here either: it is a field of the
+ * record itself.
  */
 function viewOf(s: FileSettings): StoredView {
   return {
@@ -673,17 +652,16 @@ function viewOf(s: FileSettings): StoredView {
 }
 
 /**
- * A file's settings as its record holds them: the two flags, plus the display state if the file
- * was loaded when the session ended. A released file has no {@link StoredFile.view} by
- * construction (see the field), so it comes back on defaults — the deliberate other half of not
- * keeping view state for every file the browser has ever seen.
+ * A file's settings as its record holds them: the modified flag, plus whatever display state the
+ * file had when the session ended. A file that was never looked at closely enough to change one has
+ * no {@link StoredFile.view}, and comes back on defaults.
  *
  * Analysis fields are *not* read from the record: they come from the file's own `zpcrweb.json`,
  * and are merged in by the store's seeding effect.
  */
 function fromStored(e: StoredFile): FileSettings {
   const v = e.view;
-  if (!v) return { ...defaultSettings(), modified: e.modified, loaded: e.loaded };
+  if (!v) return { ...defaultSettings(), modified: e.modified };
   return {
     enabledChannels: new Set(v.enabledChannels),
     enabledWells: new Set(v.enabledWells),
@@ -713,7 +691,6 @@ function fromStored(e: StoredFile): FileSettings {
     // needs reconciling here.
     leds: new Set(v.leds),
     modified: e.modified,
-    loaded: e.loaded,
     ...defaultAnalysisSettings(),
   };
 }
@@ -837,37 +814,27 @@ export interface AddFilesOptions {
 
 export interface ZpcrStore {
   /**
-   * The catalog: **every** file the browser holds, metadata only (see {@link FileEntry}). The
-   * Files table's rows, and the set a file is deleted from.
+   * Every open file, metadata only (see {@link FileEntry}) — the Files table's rows, and the set a
+   * file is closed out of.
    */
   files: FileEntry[];
   /**
-   * The **loaded** set: the files whose bytes are in memory and decoded — the file bar's chips,
-   * and the only files the rest of the app can show. A subset of {@link files}, oldest first by
-   * `addedAt`, so the chips keep their places across a reload however the loads were ordered.
+   * The same files with their bytes in memory and decoded — the file bar's chips, and the only
+   * files the rest of the app can show. Oldest first by `addedAt`, so the chips keep their places
+   * across a reload however the reads were ordered. Shorter than {@link files} only while bytes are
+   * on their way in, or for a file the app currently can't read (see {@link FileEntry}).
    */
   loaded: LoadedFile[];
-  /** Ids of {@link loaded}, for a membership test that doesn't scan the array. */
-  loadedIds: Set<string>;
   /**
-   * Ids currently being read out of IndexedDB by {@link setLoaded} — a file that has been asked
-   * for but whose bytes haven't arrived. {@link activeName} may name one, which is what lets a click
-   * in the Files table select a file immediately instead of waiting on a disk read.
+   * Ids whose bytes are currently being read — a file the app is holding but can't draw yet.
+   * {@link activeName} may name one, which is what lets a click select a file immediately instead
+   * of waiting on a disk read.
    */
   loadingIds: Set<string>;
   /**
-   * Load or release a file. Loading reads its bytes from IndexedDB, decodes it, gives it a chip
-   * and (once decoded) refreshes its cached summary; releasing drops the bytes from memory,
-   * leaving the file in storage and in the Files table exactly as it was.
-   *
-   * Releasing the selected file moves the selection to another loaded file, or clears it — the
-   * one selection always names a loaded file or nothing at all.
-   */
-  setLoaded: (fileName: string, loaded: boolean) => Promise<void>;
-  /**
    * The single selection: the one file every tab in the strip is a lens on, or `null` when
-   * nothing is selected (everything released, or a `#file=` naming a file this browser doesn't
-   * have). Never names an unloaded file.
+   * nothing is selected (everything closed, or a `#file=` naming a file this browser doesn't
+   * have).
    */
   activeName: string | null;
   active: LoadedFile | null;
@@ -894,10 +861,10 @@ export interface ZpcrStore {
    * protocol Overview renders, the counterpart of {@link activePlateFile}. */
   activeProtocolFile: string | null;
   /**
-   * Ids of the files whose content has been edited since they were loaded and not since
+   * Ids of the files whose content has been edited since they were opened and not since
    * downloaded — thresholds, the experiment name, an attached plate (see
-   * {@link FileSettings.modified}). The file bar reads it to decide whether deleting a chip
-   * throws work away, and so has to be confirmed.
+   * {@link FileSettings.modified}). The file bar and the Files table read it to decide whether
+   * closing a file throws work away, and so has to be confirmed.
    */
   modifiedIds: Set<string>;
   /**
@@ -1020,9 +987,9 @@ export interface ZpcrStore {
   ) => Promise<string | null>;
   /**
    * Open files out of a granted folder — {@link addFiles} for files the app can read directly,
-   * and the only way a **disk-backed** file gets into the catalog.
+   * and the only way a **disk-backed** file gets opened.
    *
-   * A file added this way keeps no copy in IndexedDB: it is read from disk when loaded and written
+   * A file added this way keeps no copy in IndexedDB: it is read from disk when opened and written
    * back there when edited (see `state/diskFolders.ts`). Its name is its folder-rooted path,
    * `runs/2026-07/a.zpcr`, so two same-named files in different folders are different files, which
    * they weren't when everything was uploaded by base name.
@@ -1040,6 +1007,12 @@ export interface ZpcrStore {
    * is currently on disk rather than being silently discarded by it.
    */
   refreshDiskFile: (id: string) => Promise<void>;
+  /**
+   * Read in any open file whose bytes the app doesn't have — what a folder granted its permission
+   * back means for the files inside it. Called by the Files view when a grant lands; ordinary
+   * selection retries too, so nothing depends on this having been called.
+   */
+  retryUnread: () => void;
   /**
    * Whether this file can be renamed. False for a disk-backed file: its name is its path on the
    * user's disk, and the File System Access API cannot rename — see {@link renameFile}.
@@ -1082,7 +1055,19 @@ export interface ZpcrStore {
    */
   addUrl: (url: string) => Promise<void>;
   setActive: (id: string) => void;
-  remove: (id: string) => Promise<void>;
+  /**
+   * Close a file: its bytes leave memory and its records leave IndexedDB, in one act. A
+   * disk-backed file's bytes are the file on the user's disk and are left exactly where they are —
+   * closing one is forgetting about it, never deleting it — but anything the app still owed that
+   * file is written out first, so an edit made a second ago isn't lost to the throttle.
+   *
+   * The only way a file leaves the app, which is why the controls that call it (the chip's ✕, the
+   * Files table's ✕ — one component, `CloseFileButton.tsx`) ask twice for a file carrying edits
+   * that exist nowhere else ({@link modifiedIds}).
+   *
+   * Closing the selected file moves the selection to another open file, or clears it.
+   */
+  closeFile: (id: string) => Promise<void>;
   /**
    * Patch the active file's settings. Display keys land in IndexedDB, analysis keys
    * ({@link ANALYSIS_KEYS}) in the file's own `zpcrweb.json` — one flat call either way; see
@@ -1099,7 +1084,7 @@ export interface ZpcrStore {
 }
 
 export function useZpcrStore(): ZpcrStore {
-  /** The catalog — every file, metadata only. Ordered by `addedAt`, oldest first. */
+  /** Every open file, metadata only. Ordered by `addedAt`, oldest first. */
   const [entries, setEntries] = useState<FileEntry[]>([]);
   /** The loaded set — bytes in memory. A subset of {@link entries}, in load order (the file
    * bar's order). */
@@ -1139,21 +1124,8 @@ export function useZpcrStore(): ZpcrStore {
   const analysisRef = useRef(analysisMap);
   analysisRef.current = analysisMap;
   /**
-   * Everything {@link summarizeFile} needs besides the file itself, kept current for the one
-   * caller that can't wait for the debounced effect below: releasing a file has to cache what it
-   * said *before* its bytes go, since after that there is nothing left to derive it from.
-   */
-  const summaryInputs = useRef<{
-    runs: Map<string, RunResult>;
-    plateFiles: Map<string, PlateFileResult>;
-    password: string;
-    names: Record<string, string | undefined>;
-  }>({ runs: new Map(), plateFiles: new Map(), password: "", names: {} });
-
-  /**
-   * Keep the catalog in step with a change to a loaded file — its bytes (so its `size`) or its
-   * identity (a rename). The two lists describe the same files and must agree about them; the
-   * cached summary is refreshed separately, by the effect that watches the decoded run.
+   * Keep the catalog row in step with a change to a loaded file — its bytes (so its `size`) or its
+   * identity (a rename). The two lists describe the same files and must agree about them.
    */
   const patchEntry = useCallback((id: string, patch: Partial<FileEntry>) => {
     setEntries((prev) => {
@@ -1260,12 +1232,14 @@ export function useZpcrStore(): ZpcrStore {
   useEffect(() => protocolThrottle.current!.attach(), []);
 
   /**
-   * Read one file's bytes out of IndexedDB and put it in the loaded set — the *only* place bytes
-   * enter memory, and so the only place a file is ever decoded (the `runs`/`plateFiles`/
-   * `protocolFiles` maps below parse the loaded set and nothing else).
+   * Read one open file's bytes — out of IndexedDB, or off the user's disk — and put it in the
+   * loaded set. The *only* place bytes enter memory, and so the only place a file is ever decoded
+   * (the `runs`/`plateFiles`/`protocolFiles` maps below parse the loaded set and nothing else).
    *
-   * A no-op for a file already loaded or already on its way. Returns the `LoadedFile`, or null if
-   * the file has since been deleted.
+   * A no-op for a file already loaded. Returns the `LoadedFile`, or null for a file with neither a
+   * stored copy nor a source to read from. **Throws** if the read or decode fails — a disk-backed
+   * file whose folder is waiting on its permission back is the ordinary case — and the caller
+   * decides what that means; the entry stays, so the next attempt can succeed.
    */
   const loadOne = useCallback(async (entry: FileEntry): Promise<LoadedFile | null> => {
     if (loadedRef.current.some((f) => f.name === entry.name)) return null;
@@ -1319,8 +1293,10 @@ export function useZpcrStore(): ZpcrStore {
     }
   }, [patchEntry, startDiskWatch]);
 
-  // Hydrate from IndexedDB on mount: the whole catalog (metadata only — no archive is read, let
-  // alone unzipped), then the bytes of just those files that were loaded when the session ended.
+  // Hydrate from IndexedDB on mount: the whole catalog first (metadata only — no archive is read,
+  // let alone unzipped), so the app knows what it is holding, and then the bytes of each of those
+  // files. Everything in the catalog is a file the session was left with open; a file the user
+  // closed took its records with it (see `closeFile`).
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -1334,35 +1310,35 @@ export function useZpcrStore(): ZpcrStore {
           addedAt: e.addedAt,
           kind: e.kind,
           lastModified: e.lastModified,
-          summary: e.summary ?? null,
           ...(e.source ? { source: e.source } : {}),
         }));
         catalog.sort((a, b) => a.addedAt - b.addedAt);
         const map: Record<string, FileSettings> = {};
         for (const e of stored) map[e.name] = fromStored(e);
         setEntries(catalog);
-        const wantsLoading = catalog.filter((e) => map[e.name]!.loaded);
-        // A `#file=` from the URL picks the selection; without one, the most recently added
-        // loaded file. A link naming a file this browser doesn't have selects **nothing** rather
-        // than silently substituting another — the app then shows the file bar with no tab
-        // available, which is the truthful answer to "that file isn't here".
+        // A `#file=` from the URL picks the selection; without one, the most recently added file.
+        // A link naming a file this browser doesn't have selects **nothing** rather than silently
+        // substituting another — the app then shows the file bar with no tab available, which is
+        // the truthful answer to "that file isn't here".
         const wanted = readHash().file;
         const target = wanted
           ? catalog.find((f) => f.name === wanted) ?? null
-          : wantsLoading.at(-1) ?? null;
-        // A link may name a file that was released; selecting it loads it, so the flag has to
-        // agree before the record is written back.
-        if (target && !map[target.name]!.loaded) {
-          map[target.name] = { ...map[target.name]!, loaded: true };
-          void updateFile(target.name, { loaded: true, view: viewOf(map[target.name]!) });
-        }
+          : catalog.at(-1) ?? null;
         setSettingsMap(map);
-        // The selected file loads first, so the app has something to draw before the rest arrive.
-        for (const e of target ? [target, ...wantsLoading.filter((f) => f.name !== target.name)] : wantsLoading) {
-          if (cancelled) return;
-          await loadOne(e);
-        }
         if (!cancelled) setActiveName(target?.name ?? null);
+        // The selected file is read first, so the app has something to draw before the rest arrive.
+        // A file that can't be read is *kept* — a folder whose permission has lapsed is the usual
+        // reason, and dropping the row would delete the user's own bookkeeping over a dialog they
+        // haven't answered yet. It stays listed, and reads itself in when it next can (`setActive`,
+        // `retryUnread`).
+        for (const e of target ? [target, ...catalog.filter((f) => f.name !== target.name)] : catalog) {
+          if (cancelled) return;
+          try {
+            await loadOne(e);
+          } catch (err) {
+            setError(`${e.name}: ${err instanceof Error ? err.message : String(err)}`);
+          }
+        }
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e));
       } finally {
@@ -1396,16 +1372,16 @@ export function useZpcrStore(): ZpcrStore {
       if (h.view) setView(h.view);
       if (h.load) setPendingLoad(h.load);
       if (h.file) {
-        // Against the whole catalog, not just the loaded set: a link may name a file that has
-        // been released, and following it should bring that file back rather than do nothing.
+        // Against the catalog, not the loaded set: the file may be one the app hasn't managed to
+        // read yet, and following the link is a fresh attempt at it rather than nothing at all.
         const match = entries.find((f) => f.name === h.file);
         if (match) void selectRef.current(match.name);
       }
     });
   }, [entries]);
 
-  /** Drop everything keyed by a file id except the catalog itself — the cleanup {@link remove}
-   * and the same-name replacement in {@link addFiles} both need. */
+  /** Drop everything the app holds under a file id, storage included — the whole of
+   * {@link closeFile}, and what the same-name replacement in {@link addFiles} needs. */
   const forget = useCallback(async (id: string) => {
     await deleteFile(id);
     setEntries((prev) => prev.filter((e) => e.name !== id));
@@ -1421,8 +1397,9 @@ export function useZpcrStore(): ZpcrStore {
     // from its own bytes if it's ever loaded again.
     persister.current!.forget(id);
     protocolThrottle.current!.forget(id);
-    // Deliberately `forget`, not `flush`: forgetting a disk-backed file must not write it out one
-    // last time. The file on disk is the user's, and dropping it from the app is not an edit to it.
+    // `forget`, not `flush` — the flush, when one is owed, has already happened in `closeFile`.
+    // Here the file is going either way, so a pending write must not fire against a file the app
+    // has stopped holding.
     diskThrottle.current!.forget(id);
     unwatchDiskFile(id);
     seeded.current.delete(id);
@@ -1445,7 +1422,7 @@ export function useZpcrStore(): ZpcrStore {
       if (current.modified === value) return prev;
       const next = { ...current, modified: value };
       window.clearTimeout(saveTimers.current[id]);
-      void updateFile(id, { modified: value, ...(next.loaded ? { view: viewOf(next) } : {}) });
+      void updateFile(id, { modified: value, view: viewOf(next) });
       return { ...prev, [id]: next };
     });
   }, []);
@@ -1456,64 +1433,24 @@ export function useZpcrStore(): ZpcrStore {
   );
 
   /**
-   * Record whether a file is loaded (see {@link FileSettings.loaded}). Written straight through
-   * like {@link setModifiedFlag}, for the same reason: it's a discrete, deliberate act (a chip's
-   * ✕, the table's checkbox, opening a file), not a value worth debouncing.
+   * Read in an open file whose bytes the app doesn't have yet, ignoring the ordinary reason it
+   * might not have them: a folder still waiting on its permission back. Called when the app gets a
+   * fresh chance at the disk — a folder granted, a file selected — rather than on a timer, since
+   * nothing else changes the answer.
    */
-  const setLoadedFlag = useCallback((id: string, value: boolean) => {
-    setSettingsMap((prev) => {
-      const current = prev[id] ?? defaultSettings();
-      if (current.loaded === value) return prev;
-      const next = { ...current, loaded: value };
-      window.clearTimeout(saveTimers.current[id]);
-      // Releasing a file drops its display state (see `StoredFile.view`); loading one writes the
-      // state it is being loaded with, so the record always says what the file bar is showing.
-      void updateFile(id, { loaded: value, view: value ? viewOf(next) : undefined });
-      return { ...prev, [id]: next };
-    });
-  }, []);
-
-  /** See {@link ZpcrStore.setLoaded}. */
-  const setLoaded = useCallback(
-    async (id: string, value: boolean) => {
-      setLoadedFlag(id, value);
-      if (value) {
-        const entry = entriesRef.current.find((e) => e.name === id);
-        if (entry) await loadOne(entry);
-        return;
-      }
-      // Releasing: get anything still owed to disk written first, since dropping the bytes is
-      // exactly what makes them unrecoverable from memory. That includes the cached summary —
-      // written here rather than left to the debounced effect below, because a file released
-      // moments after it loaded would otherwise leave a row with nothing to say, and no way to
-      // find out short of reading the archive again.
-      await persister.current!.flush(id);
-      await protocolThrottle.current!.flush(id);
-      await diskThrottle.current!.flush(id);
-      // Nothing left in memory to watch against, and re-loading the file starts a fresh watch.
-      unwatchDiskFile(id);
-      const going = loadedRef.current.find((f) => f.name === id);
-      if (going) {
-        const { runs: r, plateFiles: pf, password: pw, names } = summaryInputs.current;
-        const summary = summarizeFile(going, r.get(id), pf.get(id), pw, names[id]);
-        patchEntry(id, { summary });
-        void updateFile(id, { summary });
-      }
-      loadedRef.current = loadedRef.current.filter((f) => f.name !== id);
-      setLoadedFiles(loadedRef.current);
-      // The selection must always name a loaded file, or nothing. Falling back to the most
-      // recently loaded one keeps releasing a file you weren't looking at from moving the view,
-      // and releasing the one you were from leaving the app pointed at bytes that are gone.
-      setActiveName((cur) => (cur === id ? loadedRef.current.at(-1)?.name ?? null : cur));
-      // The analysis/seeding state stays: it was read from the file, and re-reading it on the
-      // next load would be the same answer. Only the bytes go.
-    },
-    [loadOne, setLoadedFlag, patchEntry],
-  );
+  const retryUnread = useCallback(() => {
+    for (const entry of entriesRef.current) {
+      if (loadedRef.current.some((f) => f.name === entry.name)) continue;
+      void loadOne(entry).catch(() => {
+        // Still unreadable. It keeps its row and will be tried again; saying so twice would only
+        // replace the error the first attempt already reported.
+      });
+    }
+  }, [loadOne]);
 
   /**
    * Put a validated file into the catalog *and* the loaded set: write the record, land it in both
-   * sets. The tail every way of adding a file shares — a drop, a `#load=`, and a snapshot of a run
+   * lists. The tail every way of adding a file shares — a drop, a `#load=`, and a snapshot of a run
    * in progress ({@link addRunArchive}) — so they differ in how the content is *obtained* and in
    * one deliberate flag, below.
    *
@@ -1528,9 +1465,9 @@ export function useZpcrStore(): ZpcrStore {
    * snapshot disagree about:
    *
    * - `replacing: false` — another snapshot of a file we are already following. Everything the
-   *   record accumulated belongs to the file, not to this snapshot, so the cached summary, the
-   *   display settings, the analysis state and the modified flag all stay. This is what stops a
-   *   live run resetting its own settings once per plate read.
+   *   record accumulated belongs to the file, not to this snapshot, so the display settings, the
+   *   analysis state and the modified flag all stay. This is what stops a live run resetting its
+   *   own settings once per plate read.
    * - `replacing: true` — the user dropped a different file over a name in use. It is a new file
    *   that happens to share a name, so everything the old one accumulated goes with it.
    */
@@ -1559,7 +1496,7 @@ export function useZpcrStore(): ZpcrStore {
           return rest;
         });
         setSettingsMap((prev) => ({ ...prev, [file.name]: defaultSettings() }));
-        await updateFile(file.name, { summary: undefined, view: undefined, modified: false });
+        await updateFile(file.name, { view: undefined, modified: false });
       }
       const entry: FileEntry = {
         name: file.name,
@@ -1567,9 +1504,6 @@ export function useZpcrStore(): ZpcrStore {
         addedAt: file.addedAt,
         kind: file.kind,
         lastModified: file.lastModified,
-        // A snapshot keeps what the file's content last said; only a replacement has nothing to
-        // say yet. Refreshed either way by the summary effect once the new content parses.
-        summary: options.replacing ? null : prior?.summary ?? null,
         ...(file.source ? { source: file.source } : {}),
       };
       // Normally nothing to layer in — a file arriving from disk hasn't been seeded yet, and its
@@ -1589,14 +1523,13 @@ export function useZpcrStore(): ZpcrStore {
         loadedRef.current = [...prev.filter((f) => f.name !== file.name), file];
         return loadedRef.current;
       });
-      setLoadedFlag(file.name, true);
       if (options.modified) setModifiedFlag(file.name, true);
       // Every route to a loaded disk-backed file passes through here or through `loadOne`, and
       // both have to start the watch — a file opened from the tree arrives by this one.
       if (file.source) startDiskWatch(file.name, file.source);
       return file.name;
     },
-    [setModifiedFlag, setLoadedFlag, startDiskWatch],
+    [setModifiedFlag, startDiskWatch],
   );
 
   /**
@@ -1630,7 +1563,7 @@ export function useZpcrStore(): ZpcrStore {
           const { kind, content } = decodeFile(file.name, new Uint8Array(buf));
           // Dropping a file replaces whatever held its name, and counts as a *different* file:
           // the copy on disk is authoritative, and whatever the old one accumulated here — its
-          // cached summary, its display settings, its modified flag — described something else.
+          // display settings, its modified flag — described something else.
           await install(
             {
               name: file.name,
@@ -1789,8 +1722,8 @@ export function useZpcrStore(): ZpcrStore {
     [patchEntry],
   );
 
-  /** See {@link ZpcrStore.canRename}. Asked of the catalog, not the loaded set, so the Files table
-   * can answer for a released file too. */
+  /** See {@link ZpcrStore.canRename}. Asked of the catalog, not the loaded set, so it answers for a
+   * file whose bytes haven't arrived too. */
   const canRename = useCallback(
     (id: string) => !entriesRef.current.find((e) => e.name === id)?.source,
     [],
@@ -1839,10 +1772,17 @@ export function useZpcrStore(): ZpcrStore {
     void addUrl(pendingLoad);
   }, [loading, pendingLoad, addUrl]);
 
-  const remove = useCallback(
+  /** See {@link ZpcrStore.closeFile}. */
+  const closeFile = useCallback(
     async (id: string) => {
-      // `forget` takes the file out of both sets and out of storage; all that's left is the
-      // selection, which may have been pointing at it.
+      // Anything the app still owes the file on the user's disk goes out first: the edit was made,
+      // it is only the throttle that hasn't got to it, and closing the file must not be what
+      // decides whether it was kept. The IndexedDB writes are pointedly *not* flushed — those
+      // records are about to be deleted, so writing them would be work to undo a line later.
+      await diskThrottle.current!.flush(id);
+      // `forget` takes the file out of both lists and out of storage; all that's left is the
+      // selection, which may have been pointing at it. Falling back to the most recently opened
+      // file keeps closing a file you weren't looking at from moving the view.
       await forget(id);
       setActiveName((cur) => (cur === id ? loadedRef.current.at(-1)?.name ?? null : cur));
     },
@@ -1852,21 +1792,28 @@ export function useZpcrStore(): ZpcrStore {
   // Switching files flushes anything pending: the window of unsaved analysis edits then only
   // ever covers the file you're actually looking at.
   //
-  // Also **loads** the file (see `FileSettings.loaded`): the one selection is the file every tab
-  // in the strip is a lens on, so it is by definition one whose bytes the app is holding. This is
-  // the single place every path to "make this the active file" goes through — a chip click, the
-  // Files table's row click, a `#file=` link — so selecting a released file simply brings it
-  // back. The id is set at once and the bytes arrive after (`loadingIds`), so a click in a table
-  // of a thousand files responds immediately rather than after a disk read.
+  // The one selection is the file every tab in the strip is a lens on, so it has to be a file
+  // whose bytes the app is holding — which every open file is, except one the app hasn't managed
+  // to read yet. Selecting that one is also a fresh attempt at it, since a click on a file the
+  // user can see is the most likely moment for its folder to have been granted. The id is set at
+  // once and the bytes arrive after (`loadingIds`), so the click responds immediately rather than
+  // after a disk read.
   const setActive = useCallback(
     (id: string) => {
       void persister.current!.flushAll();
       void protocolThrottle.current!.flushAll();
       void diskThrottle.current!.flushAll();
       setActiveName(id);
-      void setLoaded(id, true);
+      if (!loadedRef.current.some((f) => f.name === id)) {
+        const entry = entriesRef.current.find((e) => e.name === id);
+        if (entry) {
+          void loadOne(entry).catch((e) =>
+            setError(`${id}: ${e instanceof Error ? e.message : String(e)}`),
+          );
+        }
+      }
     },
-    [setLoaded],
+    [loadOne],
   );
   selectRef.current = setActive;
 
@@ -2030,8 +1977,8 @@ export function useZpcrStore(): ZpcrStore {
   /**
    * Rename a file — the one edit that *moves* a file's records instead of rewriting them, since
    * the name is the key. Everything keyed by the old name moves with it here in memory; the
-   * catalog record travels intact inside `db.ts`'s own re-key, so the file keeps its cached
-   * summary, its display settings and its modified flag across the rename.
+   * catalog record travels intact inside `db.ts`'s own re-key, so the file keeps its display
+   * settings and its modified flag across the rename.
    *
    * **Not available for a disk-backed file** ({@link ZpcrStore.canRename}). A disk-backed file's
    * name *is* its path on the user's disk, so renaming it would have to rename the real file — and
@@ -2053,8 +2000,8 @@ export function useZpcrStore(): ZpcrStore {
       await persister.current!.flush(from);
       await protocolThrottle.current!.flush(from);
       // Renaming onto a name already in use replaces that file, the same way dropping one over it
-      // would. Asked of the whole catalog, not just the loaded set: a released file holding the
-      // name is just as much an occupant of it.
+      // would. Asked of the catalog, not the loaded set: a file the app hasn't managed to read is
+      // just as much an occupant of its name.
       for (const old of entriesRef.current.filter((f) => f.name === to)) await forget(old.name);
       // The analysis state is read under the *old* name — it moves to `to` below, but the record
       // being written is this file's, and dropping it here is what used to lose the name of an
@@ -2308,13 +2255,10 @@ export function useZpcrStore(): ZpcrStore {
     return ids;
   }, [settingsMap]);
 
-  /** See {@link ZpcrStore.loadedIds} — the loaded set as a set. */
-  const loadedIds = useMemo(() => new Set(loadedFiles.map((f) => f.name)), [loadedFiles]);
-
   /**
    * The loaded set as the file bar shows it: oldest first, by when the file was added. Ordering by
    * `addedAt` rather than by when it happened to be read in is what keeps the chips in the same
-   * places across a reload — hydration loads the selected file first so the app has something to
+   * places across a reload — hydration reads the selected file first so the app has something to
    * draw, and that must not shuffle the bar.
    */
   const loadedInOrder = useMemo(
@@ -2384,43 +2328,6 @@ export function useZpcrStore(): ZpcrStore {
     return ids;
   }, [loadedFiles, runs]);
 
-  /**
-   * Cache what each loaded file's content says, for the Files table to describe it by once it is
-   * released (see `lib/fileSummary.ts` and `db.ts`'s `FileSummary`).
-   *
-   * Runs off the *loaded* set only, which is what makes the invariant hold: a summary exists
-   * precisely because the file was decoded, and a file is decoded precisely because it was
-   * loaded. Rewritten whenever the decode changes — a password landing, a plate attached, a name
-   * typed — so a row never describes a file as it was two edits ago, and debounced because the
-   * name field changes on every keystroke while the record is worth writing once.
-   */
-  summaryInputs.current = {
-    runs,
-    plateFiles,
-    password,
-    names: Object.fromEntries(
-      Object.entries(analysisMap).map(([id, a]) => [id, a.experimentName]),
-    ),
-  };
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      for (const f of loadedFiles) {
-        const summary = summarizeFile(
-          f,
-          runs.get(f.name),
-          plateFiles.get(f.name),
-          password,
-          analysisMap[f.name]?.experimentName,
-        );
-        const current = entriesRef.current.find((e) => e.name === f.name);
-        if (current && JSON.stringify(current.summary) === JSON.stringify(summary)) continue;
-        patchEntry(f.name, { summary });
-        void updateFile(f.name, { summary });
-      }
-    }, 400);
-    return () => window.clearTimeout(timer);
-  }, [loadedFiles, runs, plateFiles, password, analysisMap, patchEntry]);
-
   const exportBytes = useCallback(
     (id: string): Uint8Array | null => {
       const file = loadedFiles.find((f) => f.name === id);
@@ -2444,9 +2351,7 @@ export function useZpcrStore(): ZpcrStore {
   return {
     files: entries,
     loaded: loadedInOrder,
-    loadedIds,
     loadingIds,
-    setLoaded,
     activeName,
     active,
     runs,
@@ -2481,7 +2386,8 @@ export function useZpcrStore(): ZpcrStore {
     canRename,
     addUrl,
     setActive,
-    remove,
+    closeFile,
+    retryUnread,
     updateSettings,
     exportBytes,
   };
