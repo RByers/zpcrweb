@@ -157,6 +157,16 @@ the text, where whoever maintains the component will find it, and let the format
 the authority. That is the same split the docs themselves use — rule in the main text, derivation
 in an appendix.
 
+## Raw views show everything
+
+**A raw view shows absolutely everything the file contains, in exactly the detail the file holds
+it in. Every other view is prettified and simplified to be useful.** Applies to every format and
+every decoded raw renderer, without exception: don't drop a field for being empty, don't drop one
+for being uninterpretable, and if core doesn't parse a field yet, add it to core rather than
+leaving a hole in the view. Adding to a file's contents — naming fields, joining a row to what
+explains it, deriving what the file implies but never states — is always fine; subtracting is not.
+`apps/web/ARCHITECTURE.md` ("Raw views") has the reasoning and the worked example.
+
 ## Secrets
 
 Local-only secrets (the CFX file decryption password) live in `secrets.json`, which is gitignored

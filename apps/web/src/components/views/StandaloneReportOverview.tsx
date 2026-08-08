@@ -1,22 +1,20 @@
 import type { AlfReport } from "@zpcrweb/core";
 import { OverviewPanel, type OverviewPanelProps, type InfoRow } from "./OverviewPanel";
-import { DecodedAlf } from "../raw/DecodedAlf";
 import type { LoadedFile } from "../../state/useZpcrStore";
 
 /**
  * The Overview tab for a standalone `.alf` run report.
  *
- * A report is the whole file rather than a summary of one, so this puts the decoded report right
- * here, in {@link OverviewPanel}'s `children` slot: the identity card leads with the four things
- * someone opening a report wants first — what the run was called, when it ran, how long it took,
- * and whether it finished cleanly — and {@link DecodedAlf} follows with the rest of the header, the
- * error flags and the executed-step log, the same copy an in-archive report gets in the Raw view.
+ * An Overview is a *prettified* view — it answers "how did this run go" in as few lines as it can,
+ * and the raw view is where nothing is left out (see `ARCHITECTURE.md`, "Raw views"). So this is
+ * the identity card and nothing else: what the run was called, when it ran, how long it took, the
+ * outcome it reports, the instrument, and one line counting what the log holds.
  *
- * What is deliberately *not* here is the protocol the report carries. That is the Protocol tab's
- * (`ProtocolView`), where it reads as its annotated listing, with the step log plotted beneath it
- * as a thermal profile against the clock. The plot and the table are not two renderings of one
- * thing in the way two protocol listings would be: the plot is the shape of the run, the table is
- * what each logged line actually says.
+ * The report *whole* — every header field, the protocol it carries, all 8 error fields, every line
+ * of the step log with all nine of its fields — is the Raw tab's Decoded mode (`StandaloneRawView`
+ * → `DecodedAlfFile`), and the protocol also reads as an annotated listing with the thermal profile
+ * beneath it on the Protocol tab. Embedding the full decode here as well, which this view used to
+ * do, made Overview a scroll through the same content one tab over.
  *
  * This is what a thermal-only run leaves behind. The instrument writes no run folder for a
  * protocol with no plate read, so the app collects the report instead of a run file
@@ -51,11 +49,19 @@ export function StandaloneReportOverview({
     // clean one's, so this says what the file says and claims nothing beyond it.
     rows.push({ label: "Outcome", value: errors.clean ? "No errors reported" : errors.text.trim() });
     if (header.cyclerName) rows.push({ label: "Instrument", value: header.cyclerName });
+    // The shape of what ran, counted off the log rather than off the protocol — none of the three
+    // is a field in the file (`alf.md` §7.2, §7.5). The log itself is the Raw tab's.
+    const stages = new Set(report.steps.map((s) => s.stage)).size;
+    rows.push({
+      label: "Executed",
+      value:
+        `${report.steps.length} ${report.steps.length === 1 ? "step" : "steps"}` +
+        (stages > 1 ? ` · ${stages} stages` : "") +
+        (report.plateReadCount > 0
+          ? ` · ${report.plateReadCount} plate read${report.plateReadCount === 1 ? "" : "s"}`
+          : ""),
+    });
   }
 
-  return (
-    <OverviewPanel file={file} rows={rows} {...tools}>
-      {report && <DecodedAlf report={report} />}
-    </OverviewPanel>
-  );
+  return <OverviewPanel file={file} rows={rows} {...tools} />;
 }

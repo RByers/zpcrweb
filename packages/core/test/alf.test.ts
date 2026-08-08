@@ -77,6 +77,9 @@ describe("parseAlf — the documented example (alf.md §3)", () => {
   it("decodes each step line's fields (§7)", () => {
     expect(report.steps).toHaveLength(10);
     expect(report.steps[0]).toMatchObject({
+      // Field 1 is the constant -1 and means nothing (§7), but it is a field the file has, so it
+      // is carried verbatim for the app's raw view rather than dropped.
+      cycleField: "-1",
       repeat: 1,
       stepNumber: 1,
       rampTimeField: 0,
@@ -242,6 +245,14 @@ describe("parseAlf — the committed samples", () => {
     expect(alf.header.blockSerial).toBe(zpcr.metadata.raw["AlphaSerialNumber"]);
     expect(alf.errors.clean).toBe(true);
     expect(alf.completionPhrase).toBe("Protocol completed.");
+  });
+
+  it("carries field 1 verbatim, and it is -1 everywhere (§7)", () => {
+    for (const bytes of [readSampleBytes(), readMultistepBytes(), readGradientBytes()]) {
+      const alf = parseZpcr(bytes).runReports()[0]!.alf;
+      const seen = new Set([...alf.steps, alf.sentinel!].map((s) => s.cycleField));
+      expect([...seen]).toEqual(["-1"]);
+    }
   });
 
   it("logs exactly as many plate reads as the archive holds (§7.5)", () => {

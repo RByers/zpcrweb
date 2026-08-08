@@ -8,11 +8,12 @@
  * carries is **timing**: each step line's timestamp is the wall-clock moment that step began
  * (`alf.md` §7.4), which is the only per-step timing record the instrument produces.
  *
- * Two fields are deliberately not interpreted here, because the format doc says they can't yet
- * be: the fourth step column, labelled a ramp time and not behaving like one (`alf.md` §8), is
- * carried through as {@link AlfStep.rampTimeField} with no meaning attached, and the error
- * line's failure encodings (`alf.md` §6) are unobserved, so flags are tested for the literal
- * `True` and the raw code list is left as text.
+ * Three fields are carried through **uninterpreted**, because the format doc says they can't yet
+ * be read: the fourth step column, labelled a ramp time and not behaving like one (`alf.md` §8),
+ * as {@link AlfStep.rampTimeField}; the first, a constant `-1`, as {@link AlfStep.cycleField};
+ * and the error line's code list (`alf.md` §6), whose failure encodings are unobserved, as text —
+ * so flags there are tested for the literal `True`. Every field of every line is decoded into
+ * *something*, meaning or no meaning, because the app's raw view shows a file whole.
  *
  * The protocol line is the same grammar every other carrier holds, so it is normalized to the
  * `;` delimiter {@link parseRunDefinition} reads and handed on rather than re-parsed here
@@ -112,6 +113,12 @@ export type AlfSetpoint =
 export interface AlfStep {
   /** 0-based position among the step lines, sentinel included. */
   index: number;
+  /**
+   * Field 1, verbatim — `-1` in all 6,205 step lines of the corpus, so it carries nothing
+   * (`alf.md` §7). Kept because a raw view shows every field a file has, including the ones with
+   * no meaning; nothing in this library reads it.
+   */
+  cycleField: string;
   /** Field 2 — the 1-based pass through the loop block executing now; resets at a stage boundary. */
   repeat: number;
   /** Field 3 — the protocol's 1-based step index, numbered as `protocol.md` §4 defines it. */
@@ -376,6 +383,7 @@ export function parseAlf(data: Uint8Array | ArrayBuffer | string): AlfReport {
     const setpoint = parseSetpoint(g(4));
     const step: AlfStep = {
       index,
+      cycleField: g(0),
       repeat,
       stepNumber,
       rampTimeField: num(g(3)),

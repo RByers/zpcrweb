@@ -217,8 +217,8 @@ async function noPlateReadRunChecks(chrome, origin) {
  * Three things have to hold. It has to be *admitted* at all, which is a file-kind question and the
  * one this used to fail on. Only Overview, Protocol and Raw may be enabled — a report has no
  * curves and no plate, and every other tab rendering an empty frame is the failure this app greys
- * tabs out to avoid. And the report's two halves have to land on the two tabs that claim them:
- * identity and errors on Overview, what ran and what it cost on Protocol.
+ * tabs out to avoid. And the report has to land on the three tabs at their three altitudes:
+ * Overview summarises it, Protocol draws what ran and what it cost, Raw holds the file whole.
  */
 async function reportFileChecks(chrome, origin) {
   console.log("\na standalone .alf run report");
@@ -261,12 +261,13 @@ async function reportFileChecks(chrome, origin) {
     overview.slice(0, 220),
   );
   check(
-    // Not "no TEMP anywhere": the log's Directive column names each executed step, which is the
-    // point of it. What must be absent is the protocol *listing* — a setup directive like `HOTLID`
-    // is never a logged step (`alf.md` §7.1), so it can only come from a second rendering.
-    "…and the report's header, error detail and step log with it, but not the protocol it carries",
-    overview.includes("User aborted") &&
-      overview.includes("Execution log") &&
+    // An Overview is the prettified view: it counts what the log holds and stops there. The log
+    // itself, the header's every field and the protocol are the Raw tab's Decoded mode, which is
+    // the view whose rule is "everything the file has".
+    "…and counts what ran, without becoming a second copy of the file",
+    overview.includes("Executed") &&
+      !overview.includes("Execution log") &&
+      !overview.includes("Lid pressure") &&
       !overview.includes("HOTLID"),
     overview.slice(0, 400),
   );
@@ -293,16 +294,45 @@ async function reportFileChecks(chrome, origin) {
     protocol.text.slice(0, 300),
   );
   check(
-    "…and the step log as the thermal profile, which is what replaced the execution table",
+    "…and the step log as the thermal profile — the shape of the run, not its every line",
     protocol.text.includes("Thermal profile as run") && protocol.chart,
     JSON.stringify(protocol.chart),
   );
 
+  // Raw is where the file is shown whole. A standalone report gets the same Decoded mode an
+  // in-archive one does, and opens on it — its own text being a `*`-delimited wall of numbers is
+  // exactly why a Text-only raw view would be the app's weakest reading of a file it owns.
   await clickTab(cdp, "Raw");
+  await waitFor(() => cdp.eval(`!!document.querySelector('.raw__decoded .decoded__alf')`), {
+    what: "the standalone report's decoded execution log",
+  });
+  const decoded = await cdp
+    .eval(
+      `JSON.stringify({
+         mode: document.querySelector('.raw__modes .segmented__item.is-active')?.textContent.trim(),
+         text: (document.querySelector('.raw__decoded')?.textContent ?? "").replace(/\\s+/g, " "),
+         rows: document.querySelectorAll('.raw__decoded .decoded__alf tbody tr').length,
+       })`,
+    )
+    .then(JSON.parse);
+  check(
+    "a standalone report's Raw tab opens on Decoded, holding the whole file",
+    decoded.mode === "Decoded" &&
+      decoded.text.includes("Lid pressure") &&
+      decoded.text.includes("HOTLID") &&
+      decoded.text.includes("User aborted") &&
+      decoded.rows === 2,
+    `${decoded.mode}, ${decoded.rows} log rows`,
+  );
+
+  await cdp.eval(
+    `[...document.querySelectorAll('.raw__modes .segmented__item')]
+       .find(b => b.textContent.trim() === 'Text').click()`,
+  );
   const raw = await cdp.eval(
     `(document.querySelector(".raw__dump")?.textContent ?? "").slice(0, 120)`,
   );
-  check("Raw shows the report's own bytes", raw.includes("AGBLK1*admin*"), raw);
+  check("…and its Text mode still shows the report's own bytes", raw.includes("AGBLK1*admin*"), raw);
   cdp.close();
 }
 
@@ -2006,10 +2036,12 @@ async function alfViewChecks(chrome, origin) {
          heading: [...document.querySelectorAll('.raw__decoded .decoded__h')]
            .find(h => /^Execution log/.test(h.textContent.trim()))?.textContent.trim(),
          rows: document.querySelectorAll('.raw__decoded .decoded__alf tbody tr').length,
+         cols: [...document.querySelectorAll('.raw__decoded .decoded__alf thead th')]
+           .map(th => th.textContent.trim()),
          reads: [...document.querySelectorAll('.raw__decoded .decoded__alf tbody tr')]
-           .filter(r => /Plate read/.test(r.children[4]?.textContent ?? '')).length,
+           .filter(r => /Plate read/.test(r.children[6]?.textContent ?? '')).length,
          took: [...document.querySelectorAll('.raw__decoded .decoded__alf tbody tr')]
-           .filter(r => /^\\d+:\\d\\d/.test((r.children[7]?.textContent ?? '').trim())).length,
+           .filter(r => /^\\d+:\\d\\d/.test((r.children[9]?.textContent ?? '').trim())).length,
          end: document.querySelector('.raw__decoded .decoded__alfend')?.textContent.trim(),
        })`,
     )
@@ -2022,9 +2054,23 @@ async function alfViewChecks(chrome, origin) {
     `${shown.heading} / ${plateReads} files`,
   );
   check(
-    "what the decoded view is: the run's identity and its error flags",
-    shown.text.includes("Base unit") && shown.text.includes("User aborted"),
-    shown.text.slice(0, 200),
+    // The raw view's rule: everything the file holds. All four line roles are here, the protocol
+    // (line 2) included, and an empty header field shows as ∅ rather than going missing.
+    "the decoded view holds the whole file: header, protocol, errors and log",
+    shown.text.includes("Base serial") &&
+      shown.text.includes("Lid pressure") &&
+      shown.text.includes("∅") &&
+      shown.text.includes("HOTLID") &&
+      shown.text.includes("User aborted") &&
+      shown.text.includes("Execution log"),
+    shown.text.slice(0, 300),
+  );
+  check(
+    "…and every field of a step line has a column, the uninterpretable one included (alf.md §8)",
+    ["Cycle", "Rep", "Step", "Field 4", "Setpoint", "Hold", "Began", "Paused"].every((c) =>
+      shown.cols.includes(c),
+    ),
+    JSON.stringify(shown.cols),
   );
   check(
     "the execution log is a table, one row per logged step plus the end-of-run line",
@@ -2040,11 +2086,6 @@ async function alfViewChecks(chrome, origin) {
     "…and whose last row is the sentinel's completion phrase (alf.md §7.3)",
     /completed/i.test(shown.end ?? ""),
     shown.end,
-  );
-  check(
-    "the protocol itself is not restated here — that's the Protocol tab's",
-    !shown.text.includes("HOTLID"),
-    shown.text.slice(0, 200),
   );
   cdp.close();
 }

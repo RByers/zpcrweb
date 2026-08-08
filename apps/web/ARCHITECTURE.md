@@ -1249,23 +1249,33 @@ supplies one.
   there the lid and volume are directives the annotated listing already explains, so showing
   them twice would be two views of one line.
 - **`.alf`** → `DecodedAlfFile` (`components/raw/DecodedAlf.tsx`) — the instrument's own run
-  report ([`alf.md`](../../alf.md)): run identity, the error summary's flags, and the **execution
-  log**, one row per logged step under a heading counting the steps, stages and plate reads it
-  holds (none of the three is a field — a stage boundary is where the repeat counter went
-  backwards, §7.2, and a read's index is its position among the `Plate Read` lines, §7.5). Eight columns: stage, repeat, step number, the directive that step number names
-  (joined from line 2 of the same file, §5), setpoint, nominal hold, the clock time it began, the
-  wall time it **Took** (= the next line's timestamp minus this one's, §7.4 — the only measurable
-  ramp cost) and its read index. A rule marks each stage boundary; the sentinel becomes the
-  end-of-run row (§7.3).
+  report ([`alf.md`](../../alf.md)), rendered whole per the everything-the-file-holds rule under
+  "Raw views" below: one block per line role the format has (§2).
 
-  The fourth step column is deliberately absent: `alf.md` §8 rules out both readings of it, and a
-  column of numbers with no meaning invites the reading the measurements exclude. Text mode is one
-  click away for anyone who wants the literal fields.
+  - **Run header** — all 15 fields of line 1 in the file's own order (§4), including the two that
+    are empty in every sample seen. Field 1 is the run name for a PC-started run and the selected
+    protocol's *path* for one started at the touchscreen, so both it and its basename are listed.
+  - **Protocol as executed** — line 2 through the shared `ProtocolDecoded` listing. Post-expansion,
+    with the scan mask the run really used (§5), which is what makes it a different document from
+    an archive's authored `.prcl` rather than a second copy of one.
+  - **Errors** — the summary string, then all 8 fields of line 3 (§6), the code list included
+    whatever it says: only the empty `0:` has ever been observed, so its grammar is unknown and it
+    stays text.
+  - **Execution log** — one row per logged step, all nine of its fields, under a heading counting
+    the steps, stages and plate reads it holds (none of the three is a field — a stage boundary is
+    where the repeat counter went backwards, §7.2, and a read's index is its position among the
+    `Plate Read` lines, §7.5). Twelve columns: the derived stage, then field 1 (`Cycle`, the
+    constant `-1`), repeat, step number, `Field 4` (labelled `RAMPTIME`, doesn't measure one, §8 —
+    hence the heading that claims nothing), the directive that step number names (joined from line
+    2, §5), setpoint, nominal hold, the full timestamp, the derived **Took** (= the next line's
+    timestamp minus this one's, §7.4 — the only measurable ramp cost), the paused pair (fields 8
+    and 9, meaningless apart), and the read index. A rule marks each stage boundary; the sentinel
+    becomes the end-of-run row (§7.3).
 
-  The protocol the report carries is *not* here — that is the Protocol tab's, as the annotated
-  listing, and two listings of one protocol could only agree or be a bug. The Protocol tab also
-  plots this log as the thermal profile, which is not the same duplication: the plot is the shape
-  of the run, the table is what each line says.
+  The Protocol tab plots this same log as a thermal profile. That is not duplication of the kind
+  two protocol listings would be: the plot is the shape of the run, prettified to be read at a
+  glance; the table is what each line literally says.
+
 - **other `.xml`** (e.g. `runlog.xml`) → the shared collapsible `XmlTreeFromString`
   (`lib/xmlTree.tsx` — see "Raw views" below).
 
@@ -1383,6 +1393,24 @@ about which run this is.
 
 ## Raw views
 
+**The rule, everywhere: a raw view shows absolutely everything the file contains, at exactly the
+detail the file holds it in. Every other view is allowed to prettify and simplify in order to be
+useful.** That is the division of labour the app is built on. Overview answers "how did this run
+go", Curves answers "what did well A1 do", Protocol answers "what was going to happen" — each of
+them chooses, summarises, and leaves things out, and each is better for it. Raw is where that
+choosing stops. Someone opens it precisely because a prettified view left out the thing they need,
+so a field skipped there has nowhere left to appear, and the app becomes less capable than a text
+editor on the same bytes.
+
+In practice this means: no field is dropped for being empty (it is shown as `∅` — that the file
+carries it and left it blank is itself a fact), and none is dropped for being uninterpretable. A
+column nobody can explain gets a neutral heading and its literal contents, never a guess and never
+silence — `.alf`'s fourth step column and its constant `-1` first column are both shown for exactly
+this reason. Decoding into named fields, joining a step to the directive that numbers it, and
+deriving what the file implies but never states (a step's duration) all *add* to the file; they may
+never subtract from it. Where a decode needs a field core doesn't parse yet, core grows the field —
+that is why `AlfStep.cycleField` exists.
+
 A `.zpcr` is a real multi-file archive; a `.pcrd` is a single XML document with no inner
 files. Rather than make `.pcrd` pretend to have files matching `.zpcr`'s names, the two
 formats get separate raw-browsing components that share one XML rendering primitive.
@@ -1456,10 +1484,17 @@ what `exportBytes` writes into a downloaded copy, modulo the write-time `updated
 ### `StandaloneRawView` (one file, no archive)
 
 The third raw view, and the smallest: a viewer with no file list beside it, for a top-level entry
-that *is* a single file — a standalone `.pltd`/`.plt.csv`, and a Biomeme `.bmrun`. Same toolbar
-and Text/Hex modes as `RawFilesView`, with the text tab named for what it holds ("XML" for a
-`.pltd`'s decrypted payload, "JSON" for a Biomeme run, "Text" otherwise), and the same
-`looksLikeXml` sniffing deciding between the XML tree and the flat dump.
+that *is* a single file — a standalone `.pltd`/`.plt.csv`, a `.alf` run report, and a Biomeme
+`.bmrun`. Same toolbar and Text/Hex modes as `RawFilesView`, with the text tab named for what it
+holds ("XML" for a `.pltd`'s decrypted payload, "JSON" for a Biomeme run, "Text" otherwise), and
+the same `looksLikeXml` sniffing deciding between the XML tree and the flat dump.
+
+A `.alf` additionally gets **Decoded**, and opens on it, exactly as it does inside an archive: same
+`DecodedAlfFile`, same everything-the-file-holds rendering. A report's own text is a `*`-delimited
+wall of numbers, so a raw view without the decode beside it would make the app *less* useful for a
+file it owns outright than for the same file zipped inside a run. The other standalone kinds have
+no decoder to offer here — a plate's is the Plates tab's, a protocol's the Protocol tab's — so for
+them the toggle stays two buttons wide.
 
 ### `PcrdRawView` (`.pcrd`)
 
