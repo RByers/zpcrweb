@@ -1157,6 +1157,139 @@ async function cqFilterChecks(chrome, origin) {
   cdp.close();
 }
 
+/**
+ * Dragging a Cq ring on the chart to set that one curve's threshold (`CurveChart`'s `onCqDrag`).
+ *
+ * Every part of this is invisible to a screenshot and to the core suite: that the ring is grabbable
+ * at all, that the gesture opens and scrolls to the right row in the rail rather than editing a
+ * number nobody can see, and — the actual arithmetic — that the threshold the drag sets is the one
+ * whose line passes through where the pointer let go, which is what makes the ring appear to follow
+ * the mouse. It has to be driven with real `Input.dispatchMouseEvent`s: the drag is a
+ * mousedown-on-the-plot/mousemove-on-the-window pair, and a synthesized event skips the
+ * capture-phase interception that keeps uPlot from starting a zoom selection instead.
+ */
+async function cqDragChecks(chrome, origin) {
+  console.log("\ncurves chart (dragging a Cq marker)");
+  const cdp = await openPage(chrome.base, origin);
+  await sleep(600);
+  await loadFile(cdp, ZPCR);
+  await waitFor(() => cdp.eval(`!!document.querySelector(".chanbar")`), { what: "curves rail" });
+  // Every plotted curve's ring, not just the first: the rings arrive with the chart's own render,
+  // and grabbing one mid-render would measure a position that is about to move.
+  await waitFor(
+    () => cdp.eval(`document.querySelectorAll(".u-over svg circle").length >= 5`),
+    { what: "Cq rings" },
+  );
+  await sleep(300);
+
+  /** Every Cq ring's center, in viewport coordinates — what a mouse event is addressed with. */
+  const rings = () =>
+    cdp.eval(`[...document.querySelectorAll(".u-over svg circle")].map((c) => {
+      const r = c.getBoundingClientRect();
+      return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+    })`);
+  const mouse = (type, x, y) =>
+    cdp.send("Input.dispatchMouseEvent", {
+      type,
+      x,
+      y,
+      button: "left",
+      buttons: type === "mouseReleased" ? 0 : 1,
+      clickCount: 1,
+    });
+
+  const before = await rings();
+  check("the chart draws Cq rings", before.length > 0, `${before.length} rings`);
+  // The middle ring by height, so the drag has curve above it and below it either way.
+  const target = [...before].sort((a, b) => a.y - b.y)[Math.floor(before.length / 2)];
+
+  await cdp.send("Input.dispatchMouseEvent", {
+    type: "mouseMoved",
+    x: target.x,
+    y: target.y,
+    buttons: 0,
+  });
+  await sleep(150);
+  const cursor = await cdp.eval(`document.querySelector(".u-over").style.cursor`);
+  check("hovering a ring offers a drag cursor", cursor === "ns-resize", cursor || "(none)");
+  const openBefore = await cdp.eval(
+    `[...document.querySelectorAll("details")].some((d) => d.open &&
+       /Threshold/.test(d.querySelector("summary")?.textContent ?? ""))`,
+  );
+  check("the Threshold section starts closed", openBefore === false);
+
+  const DY = 60;
+  await mouse("mousePressed", target.x, target.y);
+  for (let dy = 10; dy <= DY; dy += 10) {
+    await mouse("mouseMoved", target.x, target.y - dy);
+    await sleep(90);
+  }
+  await sleep(300);
+
+  const revealed = await cdp.eval(`(() => {
+    const row = document.querySelector(".analysis__threshold-row--curve.is-revealed");
+    if (!row) return null;
+    const rail = row.closest(".curves__rail").getBoundingClientRect();
+    const r = row.getBoundingClientRect();
+    return {
+      well: row.querySelector(".analysis__threshold-well")?.textContent.trim() ?? "",
+      klass: row.querySelector("input")?.className ?? "",
+      open: !!row.closest("details")?.open,
+      inView: r.top >= rail.top - 1 && r.bottom <= rail.bottom + 1,
+    };
+  })()`);
+  check("the drag opens the Threshold section", revealed?.open === true, JSON.stringify(revealed));
+  check("…on the dragged well's own row", !!revealed?.well, revealed?.well ?? "no row");
+  check("…scrolled into view in the rail", revealed?.inView === true);
+  check(
+    "…showing the value as an override, not an auto threshold",
+    /is-override/.test(revealed?.klass ?? ""),
+    revealed?.klass,
+  );
+
+  // A higher threshold is crossed *later*, so the ring rides up to the pointer's row and to the
+  // right along its own curve. The row is the assertion — that is the threshold the drag set.
+  const during = await rings();
+  const landed = during.filter((r) => Math.abs(r.y - (target.y - DY)) < 4);
+  check(
+    "the ring follows the pointer",
+    landed.length === 1 && landed[0].x > target.x,
+    `ring at ${JSON.stringify(landed[0])}, grabbed at ${JSON.stringify(target)}`,
+  );
+
+  await mouse("mouseReleased", target.x, target.y - DY);
+  await sleep(300);
+  check(
+    "releasing ends the drag",
+    (await cdp.eval(`document.body.classList.contains("is-cqdrag")`)) === false,
+  );
+  check(
+    "…and clears the row's drag marker",
+    (await cdp.eval(`!!document.querySelector(".analysis__threshold-row--curve.is-revealed")`)) ===
+      false,
+  );
+  // The override outlives the gesture — it is a threshold the run now carries, undone with the
+  // row's own reset button like any other.
+  check(
+    "the threshold it set stays set",
+    (await cdp.eval(`document.querySelectorAll(".analysis__thresholds input.is-override").length`)) >
+      0,
+  );
+
+  // Channel space has no per-curve threshold to set and no rings to grab (see `channelAnalysis`).
+  await cdp.eval(
+    `(() => { const b = [...document.querySelectorAll("button")]
+        .find((b) => b.textContent.trim() === "Channel"); b && b.click(); })()`,
+  );
+  await sleep(400);
+  check(
+    "channel mode has no Cq rings to drag",
+    (await cdp.eval(`document.querySelectorAll(".u-over svg circle").length`)) === 0,
+  );
+
+  cdp.close();
+}
+
 /** Compare two well labels the way the table does: row letter, then column *number*. */
 function byWell(a, b) {
   return a[0].localeCompare(b[0]) || Number(a.slice(1)) - Number(b.slice(1));
@@ -4003,6 +4136,7 @@ async function main() {
     await tablePickChecks(chrome, origin);
     await persistedThresholdChecks(chrome, origin, pw);
     await cqFilterChecks(chrome, origin);
+    await cqDragChecks(chrome, origin);
     await wellHeaderChecks(chrome, origin);
     await referenceChecks(chrome, origin);
     await calibrationChecks(chrome, origin);

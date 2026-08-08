@@ -1895,6 +1895,44 @@ is: a per-target curve needs channel→dye color separation (`calibration.md`).
   threshold on the raw channel curve, so a hover highlights the fluor's channel (or the curve's
   well) and draws neither.
 
+  **The chart edits back: a Cq ring is a drag handle for its own curve's threshold.** `buildChart`
+  returns the rings it draws (`CqMarker`, carrying the index of the curve each belongs to);
+  `CurveChart` hit-tests them against the pointer (`hitTestCqMarker`, a 9px grab radius around a
+  4.5px ring, skipping curves the rail has dimmed) and, on a grab, turns each vertical mouse move
+  into a threshold with `thresholdAtPixel` — `posToVal(y) − plotDelta`, the exact inverse of the
+  projection the dotted threshold line is drawn with, so the ring rides *to* the pointer while
+  sliding along its curve to the new crossing. `CurvesView`'s `dragCq` writes it to
+  `curveThresholdOverrides` like any typed value, so a drag and the row's own input are the same
+  edit, and `threshold.md` §5.3's precedence needs no special case for either.
+
+  Three details make the gesture work:
+
+  - **The drag opens the row it is editing** (`beginCqDrag`): the Threshold `<details>` is forced
+    open, `ThresholdSection`'s `revealCurve` prop expands that fluorophore and scrolls the curve's
+    row into view (`block: "nearest"` — the pointer is mid-drag, and a rail that jumps reads as the
+    app losing its place), and the row is marked (`.is-revealed`) for the duration. The same
+    `hoverThreshold` state a rail hover sets is set too, so the threshold line and the curve's
+    baseline-region diagnostic are drawn while the drag lasts. A threshold set invisibly would be
+    indistinguishable from the chart misbehaving.
+  - **`mousedown` is taken in the capture phase on the chart host**, an *ancestor* of uPlot's own
+    `.u-over` listener, so grabbing a ring can `stopPropagation` and suppress uPlot's drag-to-zoom.
+    Two listeners on `.u-over` itself would fire in registration order — uPlot's first — whatever
+    phase we asked for.
+  - **The drag outlives the plot it started on.** Setting a threshold re-runs the run's analysis and
+    rebuilds the whole uPlot instance, so the listeners live on the component (bound once) and on
+    the window, and every move re-reads `plotRef`/`metaRef`/`cqMarkersRef` and re-resolves the
+    curve by well label + fluorophore rather than trusting an index captured at grab time. Moves
+    are coalesced to one threshold per animation frame, since they arrive faster than an analysis
+    is worth re-running.
+
+  Only dye space has rings to grab — channel curves carry no Cq (`channelAnalysis`) and have no
+  per-curve threshold to set — so the handles are simply absent there rather than present and inert.
+  One gap, since the per-curve list is the plate's *loaded* wells: a curve plotted only because
+  "Unloaded" is on has no row to reveal, so dragging its ring sets a real override with the chart as
+  the only feedback.
+  Driven by `cqDragChecks` in `tools/uitest.mjs`, which is the only place any of this can be
+  checked: a screenshot can't show that a ring is grabbable, and the core suite has no DOM.
+
   The section sits in the Curves rail in **every** view mode, Channel included, and lists **every**
   fluorophore with a matched calibration curve (`thresholdGroups.filter(g => g.curve)`) — not just
   the ones currently toggled on in the Targets/Fluorophores chip list above, and not gated by which

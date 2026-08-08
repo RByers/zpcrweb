@@ -4,9 +4,12 @@ import type { Baseline, CurveView, Scale } from "../../state/useZpcrStore";
 import {
   applyHighlight,
   buildChart,
+  hitTestCqMarker,
   setThresholdLine,
+  thresholdAtPixel,
   type AuxAxis,
   type BuildChartConfig,
+  type CqMarker,
   type FactoryCurve,
   type HighlightMatch,
   type PlotCurve,
@@ -55,6 +58,29 @@ interface Props {
   /** Also mark each highlighted curve's own baseline region and σ (hovering a single curve's row
    * in the rail's Threshold section) — see {@link ThresholdLineState.regions}. */
   thresholdRegions?: boolean;
+  /** Grabbing a Cq ring; the caller reveals that curve's row in the rail's Threshold section. */
+  onCqDragStart?: (target: CqDragTarget) => void;
+  /**
+   * Dragging a Cq ring up or down: `threshold` is where the pointer now sits, in the
+   * baseline-corrected RFU the curve's threshold is expressed in. Supplying this is what makes the
+   * rings draggable at all — without it they stay decorative, which is what the Reference view
+   * wants.
+   */
+  onCqDrag?: (target: CqDragTarget, threshold: number) => void;
+  /** The drag is over — released, or ended with Escape (which stops the drag where it is; the
+   * threshold it set is an override like any other, undone with the row's own reset button). */
+  onCqDragEnd?: () => void;
+}
+
+/** Which curve a dragged Cq ring belongs to — enough to key a per-curve threshold override
+ * (`curveKey(row, col, fluor)`) and to name the well in the rail. */
+export interface CqDragTarget {
+  row: number;
+  col: number;
+  /** A per-curve threshold belongs to a well/fluorophore pair, so a curve with no fluorophore —
+   * channel space — is never draggable. */
+  fluor: string;
+  wellLabel: string;
 }
 
 export function CurveChart({
@@ -72,10 +98,14 @@ export function CurveChart({
   highlight = null,
   thresholdLine = null,
   thresholdRegions = false,
+  onCqDragStart,
+  onCqDrag,
+  onCqDragEnd,
 }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const plotRef = useRef<uPlot | null>(null);
   const metaRef = useRef<SeriesMeta[]>([]);
+  const cqMarkersRef = useRef<CqMarker[]>([]);
   const thresholdLineStateRef = useRef<ThresholdLineState | null>(null);
   const [tip, setTip] = useState<TooltipData | null>(null);
   // Kept current on every render (not just inside an effect) so the build effect below can
@@ -87,6 +117,14 @@ export function CurveChart({
   thresholdLineRef.current = thresholdLine;
   const thresholdRegionsRef = useRef(thresholdRegions);
   thresholdRegionsRef.current = thresholdRegions;
+  // Same reason as the highlight refs above, and one more: a Cq drag outlives the uPlot instance
+  // it started on. Every move sets a threshold, which re-runs the analysis and rebuilds the whole
+  // chart, so the drag has to read the *current* plot, meta and markers on each move rather than
+  // closing over the ones it began with.
+  const curvesRef = useRef(curves);
+  curvesRef.current = curves;
+  const cqHandlersRef = useRef({ onCqDragStart, onCqDrag, onCqDragEnd });
+  cqHandlersRef.current = { onCqDragStart, onCqDrag, onCqDragEnd };
 
   // (Re)build the plot whenever the data or options change.
   useEffect(() => {
@@ -96,7 +134,7 @@ export function CurveChart({
     const width = Math.max(320, Math.floor(rect.width));
     const height = Math.max(240, Math.floor(rect.height));
 
-    const { data, options, meta, thresholdLineState } = buildChart({
+    const { data, options, meta, thresholdLineState, cqMarkers } = buildChart({
       wellCurves: curves,
       darkCurves,
       factoryCurves,
@@ -116,6 +154,7 @@ export function CurveChart({
     plotRef.current?.destroy();
     plotRef.current = new uPlot(options, data, host);
     metaRef.current = meta;
+    cqMarkersRef.current = cqMarkers;
     thresholdLineStateRef.current = thresholdLineState;
     applyHighlight(plotRef.current, meta, highlightRef.current);
     setThresholdLine(
@@ -157,6 +196,129 @@ export function CurveChart({
       );
     }
   }, [thresholdLine, thresholdRegions]);
+
+  /**
+   * Cq rings as drag handles: grab one and move the pointer up or down to set that one curve's
+   * threshold, which moves the ring along its curve to the new crossing.
+   *
+   * Bound once, for the lifetime of the component rather than of a uPlot instance, since setting a
+   * threshold rebuilds the plot (see `cqHandlersRef`) and a listener on the old instance would be
+   * torn down mid-drag.
+   *
+   * `mousedown` is taken in the **capture** phase on the host, an ancestor of uPlot's own `.u-over`
+   * listener, so grabbing a ring can `stopPropagation` and suppress uPlot's drag-to-zoom for that
+   * gesture. On the `.u-over` element itself the two listeners would fire in registration order —
+   * uPlot's first — whatever phase we asked for.
+   */
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host) return;
+
+    /** The grabbed ring's curve, resolved afresh on every move: the rebuilds a drag causes can
+     * reorder `curves` (a filter changing under it), so an index captured at grab time can't be
+     * trusted, but a well/fluorophore pair identifies the curve for as long as it is plotted. */
+    let dragging: CqDragTarget | null = null;
+    let pendingTop: number | null = null;
+    let frame = 0;
+
+    const plotPos = (e: MouseEvent): { left: number; top: number } | null => {
+      const u = plotRef.current;
+      if (!u) return null;
+      const rect = u.over.getBoundingClientRect();
+      return { left: e.clientX - rect.left, top: e.clientY - rect.top };
+    };
+
+    /** The ring under the pointer, and the curve it belongs to — `null` unless that curve can
+     * actually carry a per-curve threshold (dye space; see {@link CqDragTarget.fluor}). */
+    const grabbable = (e: MouseEvent): CqDragTarget | null => {
+      const u = plotRef.current;
+      const pos = u && plotPos(e);
+      if (!u || !pos) return null;
+      const hit = hitTestCqMarker(u, cqMarkersRef.current, pos.left, pos.top);
+      const curve = hit && curvesRef.current[hit.curveIndex];
+      if (!curve?.fluor) return null;
+      return {
+        row: curve.row,
+        col: curve.col,
+        fluor: curve.fluor,
+        wellLabel: curve.wellLabel,
+      };
+    };
+
+    const apply = () => {
+      frame = 0;
+      const u = plotRef.current;
+      const target = dragging;
+      if (!u || !target || pendingTop == null) return;
+      const meta = metaRef.current;
+      const idx = meta.findIndex(
+        (m) => m.kind === "well" && m.label === target.wellLabel && m.fluor === target.fluor,
+      );
+      if (idx === -1) return;
+      const value = thresholdAtPixel(u, meta, idx, cqMarkersRef.current, pendingTop);
+      if (value != null) cqHandlersRef.current.onCqDrag?.(target, value);
+    };
+
+    const onMove = (e: MouseEvent) => {
+      const pos = plotPos(e);
+      if (!pos) return;
+      pendingTop = pos.top;
+      // One threshold per frame: a move sets an override, which re-runs the run's analysis and
+      // rebuilds the chart, and mouse moves arrive faster than that is worth doing.
+      if (!frame) frame = requestAnimationFrame(apply);
+    };
+
+    const onUp = () => stop();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") stop();
+    };
+
+    const stop = () => {
+      if (!dragging) return;
+      dragging = null;
+      pendingTop = null;
+      if (frame) cancelAnimationFrame(frame);
+      frame = 0;
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      window.removeEventListener("keydown", onKey);
+      document.body.classList.remove("is-cqdrag");
+      cqHandlersRef.current.onCqDragEnd?.();
+    };
+
+    const onDown = (e: MouseEvent) => {
+      if (e.button !== 0 || !cqHandlersRef.current.onCqDrag) return;
+      const target = grabbable(e);
+      if (!target) return;
+      // Both: `stopPropagation` keeps uPlot from starting a zoom selection, `preventDefault` keeps
+      // the browser from starting a text selection that would follow the pointer across the page.
+      e.stopPropagation();
+      e.preventDefault();
+      dragging = target;
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
+      window.addEventListener("keydown", onKey);
+      document.body.classList.add("is-cqdrag");
+      cqHandlersRef.current.onCqDragStart?.(target);
+    };
+
+    // Hover affordance: the ring is the only thing on the plot that can be grabbed, so it is the
+    // only place the cursor changes. Left to uPlot's own cursor everywhere else.
+    const onHoverMove = (e: MouseEvent) => {
+      const u = plotRef.current;
+      if (!u || dragging) return;
+      const cursor = cqHandlersRef.current.onCqDrag && grabbable(e) ? "ns-resize" : "";
+      if (u.over.style.cursor !== cursor) u.over.style.cursor = cursor;
+    };
+
+    host.addEventListener("mousedown", onDown, true);
+    host.addEventListener("mousemove", onHoverMove);
+    return () => {
+      host.removeEventListener("mousedown", onDown, true);
+      host.removeEventListener("mousemove", onHoverMove);
+      stop();
+    };
+  }, []);
 
   // Keep the plot sized to its container.
   useEffect(() => {

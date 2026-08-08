@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { DEFAULT_THRESHOLD_MULTIPLIER } from "../../state/useZpcrStore";
 import { ResetIcon } from "../ResetIcon";
 
@@ -49,6 +49,13 @@ interface Props {
   /** Hovering one curve's row: isolate that curve and mark its threshold *and* its baseline
    * region/noise — the diagnostic only makes sense one curve at a time. */
   onHoverCurve: (group: ThresholdGroupRow, curve: ThresholdCurveRow) => void;
+  /**
+   * One curve to show: expand its fluorophore, scroll its row into view and mark it. Set while its
+   * Cq marker is being dragged on the chart (see `CurvesView`'s `beginCqDrag`) — the drag is
+   * editing this row's value, so the row it is editing has to be on screen. `null` the rest of the
+   * time. The expansion is left behind afterwards, like any the user opened themselves.
+   */
+  revealCurve?: { fluor: string; key: string } | null;
 }
 
 /**
@@ -72,6 +79,7 @@ export function ThresholdSection({
   onCurveOverride,
   onHoverGroup,
   onHoverCurve,
+  revealCurve = null,
 }: Props) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const toggle = (fluor: string) => {
@@ -79,6 +87,24 @@ export function ThresholdSection({
     next.has(fluor) ? next.delete(fluor) : next.add(fluor);
     setExpanded(next);
   };
+
+  // Revealing a curve is two steps that can't happen in one pass: expanding its fluorophore is a
+  // state change, and its row only exists to be scrolled to once that render has landed. Hence two
+  // effects, the second re-running on `expanded`.
+  const revealFluor = revealCurve?.fluor;
+  const revealKey = revealCurve?.key;
+  const revealRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (revealFluor == null) return;
+    setExpanded((prev) => (prev.has(revealFluor) ? prev : new Set(prev).add(revealFluor)));
+  }, [revealFluor]);
+  useEffect(() => {
+    if (revealKey == null) return;
+    // `nearest`: scroll the rail (and only as far as it takes) rather than yanking the row to the
+    // middle of it — the pointer is mid-drag over the chart, and a rail that jumps under a drag
+    // reads as the app losing its place.
+    revealRef.current?.scrollIntoView({ block: "nearest" });
+  }, [revealKey, expanded]);
 
   return (
     <>
@@ -172,10 +198,15 @@ export function ThresholdSection({
                 g.curves.map((c) => {
                   const curveAuto = c.override === undefined;
                   const curveShown = curveAuto ? Math.round(c.threshold) : c.override;
+                  const isRevealed = c.key === revealKey;
                   return (
                     <div
                       key={c.key}
-                      className="analysis__threshold-row analysis__threshold-row--curve mono"
+                      ref={isRevealed ? revealRef : undefined}
+                      className={
+                        "analysis__threshold-row analysis__threshold-row--curve mono" +
+                        (isRevealed ? " is-revealed" : "")
+                      }
                       onMouseEnter={() => onHoverCurve(g, c)}
                       onMouseLeave={() => onHoverGroup(null)}
                     >

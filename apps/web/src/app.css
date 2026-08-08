@@ -3437,6 +3437,22 @@
   font-size: 10px;
   padding: 2px 5px;
 }
+/* The row a Cq marker is currently being dragged against (see `ThresholdSection`'s `revealCurve`).
+   Same treatment as hovering the row, since it is the same relationship — this row and that curve —
+   just driven from the chart instead of from the rail, plus an edge marker so it stays findable
+   once the pointer is somewhere else entirely. */
+.analysis__threshold-row--curve.is-revealed {
+  background: var(--raised);
+  box-shadow: inset 2px 0 0 var(--neon-cyan);
+}
+/* A Cq drag runs over the whole document (the pointer leaves the plot freely), so the resize
+   cursor has to be set there too, not just on the marker it started from. */
+body.is-cqdrag,
+body.is-cqdrag * {
+  cursor: ns-resize !important;
+  user-select: none;
+}
+
 .analysis__threshold-well {
   flex: none;
   color: var(--ink-2);

@@ -34,7 +34,7 @@ import { FluorBar, type FluorChip } from "../curves/FluorBar";
 import { SampleBar } from "../curves/SampleBar";
 import { useHoverCard, type HoverCardData, type HoverCardRow } from "../curves/HoverCard";
 import { WellMatrix } from "../curves/WellMatrix";
-import { CurveChart } from "../curves/CurveChart";
+import { CurveChart, type CqDragTarget } from "../curves/CurveChart";
 import { CurveTable } from "../curves/CurveTable";
 import { CqRange } from "../curves/CqRange";
 import {
@@ -926,6 +926,41 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
     setHoverThreshold(calibrationOn ? { fluor: g.fluor, curveKey: c.key, regions: true } : null);
   };
 
+  /**
+   * Dragging a Cq ring on the chart (see `CurveChart`'s `onCqDrag`) is the same edit as typing in
+   * that curve's Threshold row, so it *opens that row* rather than editing invisibly: the rail's
+   * Threshold section is forced open, the curve's fluorophore group expanded, the row scrolled into
+   * view and marked — and the row's own field then tracks the drag, since it renders whatever
+   * override is current. The chart shows the same edit from the other side: the hover state below
+   * draws the dotted threshold line and the curve's baseline-region diagnostic for as long as the
+   * drag lasts.
+   */
+  const thresholdDetailsRef = useRef<HTMLDetailsElement>(null);
+  const [revealThresholdCurve, setRevealThresholdCurve] = useState<{
+    fluor: string;
+    key: string;
+  } | null>(null);
+
+  const beginCqDrag = (t: CqDragTarget) => {
+    const key = curveKey(t.row, t.col, t.fluor);
+    // Imperative rather than a controlled `open` prop: the section is a plain <details> the user
+    // opens and closes themselves, and forcing it open is a one-off nudge, not ownership of its
+    // state — closing it after the drag would throw away a deliberate open.
+    if (thresholdDetailsRef.current) thresholdDetailsRef.current.open = true;
+    setRevealThresholdCurve({ fluor: t.fluor, key });
+    setHoverHighlight({ kind: "curve", label: t.wellLabel, fluor: t.fluor });
+    setHoverThreshold({ fluor: t.fluor, curveKey: key, regions: true });
+  };
+
+  const dragCq = (t: CqDragTarget, threshold: number) =>
+    setCurveThresholdOverride(curveKey(t.row, t.col, t.fluor), String(threshold));
+
+  const endCqDrag = () => {
+    setRevealThresholdCurve(null);
+    setHoverHighlight(null);
+    setHoverThreshold(null);
+  };
+
   /** The RFU the hovered Threshold row currently stands at, read fresh out of `thresholdRows` so
    * an edit to that row's own input (or to the auto-threshold multiplier feeding it) moves the
    * chart's dotted line with it. `null` when nothing is hovered, or when the hovered row has no
@@ -1341,7 +1376,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
             which made the multiplier below silently move the channel chart's Cq markers with no
             visible cause. */}
         {calibrationAvailable && (
-          <details className="rail__section rail__details">
+          <details className="rail__section rail__details" ref={thresholdDetailsRef}>
             <summary className="rail__title">
               <span>
                 <span className="rail__chevron" aria-hidden="true">
@@ -1352,6 +1387,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
             </summary>
             <ThresholdSection
               groups={thresholdRows}
+              revealCurve={revealThresholdCurve}
               multiplier={settings.thresholdMultiplier}
               onMultiplierChange={(v) => onChange({ thresholdMultiplier: v })}
               onGroupOverride={setThresholdOverride}
@@ -1425,6 +1461,11 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
               settings.curveView === "relative" ? hoverThresholdValue : null
             }
             thresholdRegions={settings.curveView === "relative" && !!hoverThreshold?.regions}
+            onCqDragStart={beginCqDrag}
+            // Channel space has no per-curve threshold to set — and no Cq rings either (see
+            // `channelAnalysis`) — so the handles are simply absent there.
+            onCqDrag={calibrationOn ? dragCq : undefined}
+            onCqDragEnd={endCqDrag}
           />
         </section>
       )}

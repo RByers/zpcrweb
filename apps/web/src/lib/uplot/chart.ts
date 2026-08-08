@@ -454,6 +454,89 @@ const SETPOINT_DASH = [2, 4];
 /** uPlot scale key for the right-hand auxiliary axis (temperatures or LED currents). */
 const AUX_SCALE = "aux";
 
+/**
+ * One Cq ring: where a curve's corrected values reach its threshold, already projected into the
+ * chart's own plotted space (`y = correctedValues(cq) + plotDelta(cq)`).
+ *
+ * Returned from {@link buildChart} as well as drawn, because the ring is a **handle**: dragging it
+ * up or down sets that one curve's threshold (see {@link hitTestCqMarker} and
+ * {@link thresholdAtPixel}, and `CurveChart`'s `onCqDrag`).
+ */
+export interface CqMarker {
+  /** Cq — the marker's x, in cycles. */
+  x: number;
+  /** The marker's y in plotted space, not in the corrected space Cq is measured in. */
+  y: number;
+  color: string;
+  /** Index into `u.series` (i.e. {@link curveIndex} + 1), for reading the series' alpha. */
+  seriesIdx: number;
+  /** Index into `BuildChartConfig.wellCurves`/`meta` of the curve this marks. */
+  curveIndex: number;
+}
+
+/** How close (px) the pointer must come to a Cq ring to grab it. Larger than the ring's 4.5px
+ * radius: the ring is a thin outline, and a handle you have to hit exactly isn't a handle. */
+const CQ_GRAB_RADIUS = 9;
+
+/**
+ * The Cq ring nearest the pointer within {@link CQ_GRAB_RADIUS}, or `null`. Dimmed curves (the
+ * rail is isolating something else) are skipped — their rings are barely visible, and grabbing
+ * one you can't see would silently re-threshold a curve you weren't looking at.
+ *
+ * Positions are relative to the plot area, i.e. what `u.valToPos` returns and what an event's
+ * coordinates become once `u.over`'s bounding rect is subtracted.
+ */
+export function hitTestCqMarker(
+  u: uPlot,
+  markers: CqMarker[],
+  left: number,
+  top: number,
+): CqMarker | null {
+  let best: CqMarker | null = null;
+  let bestDist = CQ_GRAB_RADIUS;
+  for (const m of markers) {
+    if ((u.series[m.seriesIdx]?.alpha ?? 1) < 1) continue;
+    const dx = u.valToPos(m.x, "x") - left;
+    const dy = u.valToPos(m.y, "y") - top;
+    const dist = Math.hypot(dx, dy);
+    if (dist <= bestDist) {
+      best = m;
+      bestDist = dist;
+    }
+  }
+  return best;
+}
+
+/**
+ * The inverse of the projection the threshold line is drawn with: given a pixel row, the threshold
+ * (in the baseline-corrected space `threshold.md` §5–§6 works in) whose line would sit there for
+ * curve `curveIndex`. This is what turns a vertical drag of a Cq ring into a threshold value.
+ *
+ * `plotDelta` is read at the ring's own cycle where there is a ring, since in the "Absolute" view
+ * the offset between corrected space and plotted space *is* the fitted baseline and therefore
+ * varies along the curve. That makes the mapping exact in "Relative" (where the delta is constant)
+ * and locally linear in "Absolute", where each mouse move re-reads it at the ring's new position.
+ * A curve whose threshold has been dragged clear of its curve has no ring left to read; the delta
+ * at the first cycle is the honest fallback.
+ */
+export function thresholdAtPixel(
+  u: uPlot,
+  meta: SeriesMeta[],
+  curveIndex: number,
+  markers: CqMarker[],
+  top: number,
+): number | null {
+  const m = meta[curveIndex];
+  if (!m || m.kind !== "well") return null;
+  const marker = markers.find((k) => k.curveIndex === curveIndex);
+  const delta =
+    (marker && m.plotDelta ? interpolateAt(m.cycles, m.plotDelta, marker.x) : null) ??
+    m.plotDelta?.[0] ??
+    0;
+  const value = u.posToVal(top, "y");
+  return Number.isFinite(value) ? value - delta : null;
+}
+
 /** Mutable holder for the rail-driven threshold-hover line (see {@link setThresholdLine}) — a
  * plain object rather than a plugin option so its value can be updated on every hover without
  * tearing down and rebuilding the whole uPlot instance. */
@@ -487,6 +570,8 @@ export function buildChart(cfg: BuildChartConfig): {
   options: uPlot.Options;
   meta: SeriesMeta[];
   thresholdLineState: ThresholdLineState;
+  /** The Cq rings, so the caller can hit-test them as drag handles — see {@link CqMarker}. */
+  cqMarkers: CqMarker[];
 } {
   const { wellCurves, darkCurves, factoryCurves, aux, baseline, curveView, scale } = cfg;
   const xTick = cfg.xAxis?.tickLabel;
@@ -705,7 +790,7 @@ export function buildChart(cfg: BuildChartConfig): {
   // instrument's reported Cq is not derived from its reported threshold crossing its own
   // `baselineData` (`biomeme.md` §3), so the ring landed on the threshold line instead of the
   // curve. Interpolating `correctedValues` is exact for `computeCq` and honest for a file's Cq.
-  const cqMarkers: { x: number; y: number; color: string; seriesIdx: number }[] = [];
+  const cqMarkers: CqMarker[] = [];
   wellCurves.forEach((curve, i) => {
     const { cq, correctedValues } = curve.analysis ?? {};
     if (cq == null || correctedValues == null) return;
@@ -717,6 +802,7 @@ export function buildChart(cfg: BuildChartConfig): {
       y: value + delta,
       color: curveColor(curve),
       seriesIdx: i + 1,
+      curveIndex: i,
     });
   });
 
@@ -858,7 +944,7 @@ export function buildChart(cfg: BuildChartConfig): {
     ],
   };
 
-  return { data: rows as uPlot.AlignedData, options, meta, thresholdLineState };
+  return { data: rows as uPlot.AlignedData, options, meta, thresholdLineState, cqMarkers };
 }
 
 /**
@@ -919,7 +1005,7 @@ const REGION_MARK_COLOR = "#fde047";
 function overlayPlugin(
   meta: SeriesMeta[],
   bands: BandData[],
-  cqMarkers: { x: number; y: number; color: string; seriesIdx: number }[],
+  cqMarkers: CqMarker[],
   baselineTicks: { x: number; y: number; color: string; seriesIdx: number }[],
   thresholdLineState: ThresholdLineState,
   /** How to present a right-axis value in the hovercard (see {@link AuxAxis}). */

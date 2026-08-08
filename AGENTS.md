@@ -192,6 +192,8 @@ every view you touched in one run. Controlling what it costs:
 It takes ~100s and needs Chrome, so it is deliberately **not** part of `npm test`. Run it when you
 touch `state/urlHash.ts`, `state/useHeaderFit.ts`, `state/pltdPassword.ts`,
 `components/curves/ChipBar.tsx`, `components/curves/CurveTable.tsx`, `components/curves/CqRange.tsx`,
+`components/curves/CurveChart.tsx` or `components/curves/ThresholdSection.tsx` (or `lib/uplot/chart.ts`'s
+Cq markers — the rings are drag handles for a curve's threshold),
 `components/instrument/InstrumentRun.tsx`, `state/useRunStaging.ts`, `state/useRunNaming.ts`,
 `components/instrument/InstrumentRail.tsx`, `state/fileContent.ts` (or `state/db.ts`'s
 `StoredFile`, or `useZpcrStore.ts`'s `addRunArchive`), `state/useCfxDevice.ts`'s `cancelRun`/`setRunPaused`

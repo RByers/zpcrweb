@@ -304,6 +304,15 @@ only to report a Cq but to show what it was derived from and let it be corrected
 - **Hovering explains rather than merely highlights.** A fluorophore row isolates its curves and
   draws a dotted line at its threshold; a single curve's row additionally traces the exact cycle span
   its baseline was fitted over, with σ labelled at the end.
+- **A curve's Cq marker on the chart is a handle for its own threshold.** Grab the ring and drag it
+  up or down and the curve's per-curve override follows the pointer: the threshold is read back out
+  of the pixel row through the same projection the dotted line is drawn with, so the ring stays under
+  the mouse while sliding along its curve to the new crossing — later for a higher threshold, earlier
+  for a lower one. The gesture is the same edit as typing in the row, so it *opens the row*: the
+  Threshold section unfolds, the curve's fluorophore expands, and its line is scrolled into view and
+  marked while the drag lasts, with its field counting along. Editing a threshold where its
+  consequence is visible is the point — the crossing is the thing being judged, and the number is
+  downstream of it.
 - **A curve whose whole corrected trace sits above its threshold is flagged** (⚠), because §6 gives
   it no Cq and that is otherwise indistinguishable from a flat well.
 - **A row with no Cq is greyed, never hidden**, so a well's disqualification stays visible; with no
