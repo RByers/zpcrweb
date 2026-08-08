@@ -86,6 +86,9 @@ export interface UsbDeviceLike {
   claimInterface(interfaceNumber: number): Promise<void>;
   releaseInterface(interfaceNumber: number): Promise<void>;
   transferIn(endpointNumber: number, length: number): Promise<UsbInTransferResultLike>;
+  /** Clear a halted endpoint. Optional: a browser `USBDevice` always has it, but the structural
+   * typing here also covers devices that may not, and the read pump treats it as best-effort. */
+  clearHalt?(direction: "in" | "out", endpointNumber: number): Promise<void>;
   transferOut(endpointNumber: number, data: BytesLike): Promise<unknown>;
 }
 

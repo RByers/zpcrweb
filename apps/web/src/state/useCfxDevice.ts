@@ -74,7 +74,24 @@ const POLL_MS = 1500;
  * console usable for watching anything else — see {@link useCfxDevice.setHidePolls}. */
 const POLL_COMMANDS = /^(STATUS\?|RTSTATUS\?|ERRORLIST A)/;
 
-export type ConnectionState = "unsupported" | "disconnected" | "connecting" | "connected";
+export type ConnectionState =
+  | "unsupported"
+  | "disconnected"
+  | "connecting"
+  | "connected"
+  | "reconnecting";
+
+/**
+ * Backoff between reconnect attempts after the connection dropped on its own, in ms; the last
+ * value repeats for as long as it takes.
+ *
+ * It repeats rather than giving up because the case this exists for is a *run in progress*: the
+ * instrument goes on cycling whatever the host does, so the only thing a dropped pipe costs is our
+ * view of it, and a run is hours long. Retrying forever is cheap and quiet — while the device is
+ * unplugged `getDevices()` simply returns nothing, so an attempt is one resolved promise and no
+ * error — and the `connect` event below short-circuits the wait the moment it comes back anyway.
+ */
+const RECONNECT_DELAYS_MS = [500, 1000, 2000, 4000, 8000];
 
 /** One decoded message, pre-formatted for display — one kind of line in the debug console. */
 export interface TrafficLine {
@@ -126,7 +143,12 @@ export interface ActionResult {
 
 /** WebUSB is Chromium-only and needs a secure context; `navigator.usb` is simply absent
  * otherwise, which is what the view checks to explain itself rather than offering a dead button. */
-function usbApi(): { requestDevice(o: unknown): Promise<UsbDeviceLike>; getDevices(): Promise<UsbDeviceLike[]> } | null {
+function usbApi(): {
+  requestDevice(o: unknown): Promise<UsbDeviceLike>;
+  getDevices(): Promise<UsbDeviceLike[]>;
+  addEventListener(type: string, fn: () => void): void;
+  removeEventListener(type: string, fn: () => void): void;
+} | null {
   const nav = navigator as unknown as { usb?: ReturnType<typeof usbApi> };
   return nav.usb ?? null;
 }
@@ -154,6 +176,17 @@ function ackUsbWarning(): void {
 
 export function useCfxDevice() {
   const deviceRef = useRef<CfxDevice | null>(null);
+  /** True while the user wants to be connected — set by {@link connect}, cleared by
+   * {@link disconnect} and by a connect that failed. This is the whole difference between "the
+   * pipe died, get it back" and "the user pressed Disconnect", both of which reach `onClose`. */
+  const wantConnected = useRef(false);
+  const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** How many attempts the current outage has cost, indexing {@link RECONNECT_DELAYS_MS}. */
+  const reconnectAttempt = useRef(0);
+  /** Assigned in an effect below, once `reconnectNow` exists. The indirection breaks a genuine
+   * cycle: opening a device installs an `onClose` that must schedule a reconnect, and a reconnect
+   * opens a device. */
+  const scheduleReconnect = useRef<() => void>(() => {});
   const trafficId = useRef(0);
   // The session's complete record, as binary items (core's `UsbTrafficRecorder`, `usb-traffic.md`)
   // rather than console lines: it is unbounded in time, so it is stored in the form that costs
@@ -306,12 +339,20 @@ export function useCfxDevice() {
   // Deliberately does not touch `traffic`: the console is the one place a disconnect's cause is
   // visible after the fact (what was in flight, what the last messages before the failure were),
   // so wiping it on the same event that most needs debugging would defeat the point.
-  const teardown = useCallback(() => {
+  /** Drop any pending reconnect and reset the backoff, so the next outage starts at the short
+   * delay again rather than wherever the last one left off. */
+  const cancelReconnect = useCallback(() => {
+    if (reconnectTimer.current !== null) clearTimeout(reconnectTimer.current);
+    reconnectTimer.current = null;
+    reconnectAttempt.current = 0;
+  }, []);
+
+  const teardown = useCallback((next: ConnectionState = "disconnected") => {
     deviceRef.current = null;
     // No request is outstanding across a disconnect, so the next reply must not be classified by
     // whatever the last session happened to have sent.
     lastOutWasPoll.current = false;
-    setConnection("disconnected");
+    setConnection(next);
     setInfo(null);
     setStatus(null);
     setRtStatus(null);
@@ -319,6 +360,119 @@ export function useCfxDevice() {
     setDirectories({});
     setBusy(null);
   }, []);
+
+  /**
+   * Open a device handle and bring the session up on it. Shared by the Connect button and the
+   * reconnect loop, so a recovered connection is the same connection in every respect — same
+   * traffic recorder, same poll, same identity refresh — rather than a second path that drifts
+   * from this one.
+   */
+  const openDevice = useCallback(
+    async (chosen: UsbDeviceLike) => {
+      // Set when this handle is abandoned below, before it is closed. Closing fires `onClose`, and
+      // without this the cleanup of a *failed* attempt would report the session as disconnected —
+      // racing, and usually winning against, the "reconnecting" the caller sets straight after.
+      let abandoned = false;
+      const device = new CfxDevice(chosen, {
+        onTraffic,
+        onTransferError,
+        onClose: (err) => {
+          if (abandoned) return;
+          if (err) {
+            // The library already logs the retries and the final failure; this adds the one
+            // thing it can't know — what the UI is about to do about it — so the console shows
+            // cause and effect together rather than an isolated stack trace.
+            console.error("[useCfxDevice] device closed unexpectedly:", err);
+            setError(err.message);
+          }
+          // An error close while the user still wants a connection is the reconnect case. An
+          // ordinary one is `disconnect()`, which has already cleared the flag.
+          if (err && wantConnected.current) {
+            teardown("reconnecting");
+            scheduleReconnect.current();
+          } else {
+            teardown();
+          }
+        },
+      });
+      await device.open();
+      deviceRef.current = device;
+      try {
+        setConnection("connected");
+        setInfo(await device.deviceInfo());
+        setStatus(await device.status());
+        try {
+          setRtStatus(await device.rtStatus());
+        } catch {
+          /* the poll will catch up */
+        }
+      } catch (e) {
+        // A handle that opened but failed partway through identification is no good to anyone.
+        // Closing it here — rather than leaving it to whoever called — is what keeps a failed
+        // reconnect attempt from stranding a claimed interface the next attempt then can't take.
+        abandoned = true;
+        deviceRef.current = null;
+        await device.close().catch(() => undefined);
+        throw e;
+      }
+    },
+    [onTraffic, onTransferError, teardown],
+  );
+
+  /**
+   * One reconnect attempt, scheduled by {@link scheduleReconnect} after the pipe died on its own.
+   *
+   * It never calls `requestDevice()`: a picker needs a user gesture and would throw here. What
+   * makes an automatic reconnect possible at all is that permission persists — a device the user
+   * has already granted comes back from `getDevices()` with no prompt and no gesture.
+   */
+  const reconnectNow = useCallback(async () => {
+    reconnectTimer.current = null;
+    if (!wantConnected.current || deviceRef.current) return;
+    const api = usbApi();
+    if (!api) return;
+    try {
+      const known = await api.getDevices();
+      const chosen = known.find((d) => d.vendorId === CFX_USB_FILTER.vendorId);
+      if (!chosen) {
+        // Still unplugged, or not yet re-enumerated. Not an error — wait and look again.
+        scheduleReconnect.current();
+        return;
+      }
+      await openDevice(chosen);
+      reconnectAttempt.current = 0;
+      setError(null);
+      console.info("[useCfxDevice] reconnected");
+    } catch (e) {
+      // Expected while the instrument is still coming back — say so quietly and try again.
+      console.warn("[useCfxDevice] reconnect attempt failed:", e);
+      teardown("reconnecting");
+      scheduleReconnect.current();
+    }
+  }, [openDevice, teardown]);
+
+  useEffect(() => {
+    scheduleReconnect.current = () => {
+      if (!wantConnected.current || reconnectTimer.current !== null) return;
+      const i = Math.min(reconnectAttempt.current, RECONNECT_DELAYS_MS.length - 1);
+      reconnectAttempt.current++;
+      reconnectTimer.current = setTimeout(() => void reconnectNow(), RECONNECT_DELAYS_MS[i]);
+    };
+  }, [reconnectNow]);
+
+  // A replug fires `connect` on `navigator.usb`, which is worth listening for on its own: it turns
+  // "wait out the rest of the backoff" into "reconnect the moment the cable is back".
+  useEffect(() => {
+    const api = usbApi();
+    if (!api) return;
+    const onUsbConnect = () => {
+      if (!wantConnected.current || deviceRef.current) return;
+      cancelReconnect();
+      void reconnectNow();
+    };
+    api.addEventListener("connect", onUsbConnect);
+    return () => api.removeEventListener("connect", onUsbConnect);
+  }, [reconnectNow, cancelReconnect]);
 
   const connect = useCallback(async () => {
     const api = usbApi();
@@ -332,6 +486,8 @@ export function useCfxDevice() {
       ackUsbWarning();
     }
     setError(null);
+    cancelReconnect();
+    wantConnected.current = true;
     setConnection("connecting");
     try {
       // A device the user has already granted comes back from getDevices() without a second
@@ -340,30 +496,7 @@ export function useCfxDevice() {
       const chosen =
         known.find((d) => d.vendorId === CFX_USB_FILTER.vendorId) ??
         (await api.requestDevice({ filters: [CFX_USB_FILTER] }));
-      const device = new CfxDevice(chosen, {
-        onTraffic,
-        onTransferError,
-        onClose: (err) => {
-          if (err) {
-            // The library already logs the retries and the final failure; this adds the one
-            // thing it can't know — that the UI is about to drop the connection because of it —
-            // so the console shows cause and effect together rather than an isolated stack trace.
-            console.error("[useCfxDevice] device closed unexpectedly, tearing down:", err);
-            setError(err.message);
-          }
-          teardown();
-        },
-      });
-      await device.open();
-      deviceRef.current = device;
-      setConnection("connected");
-      setInfo(await device.deviceInfo());
-      setStatus(await device.status());
-      try {
-        setRtStatus(await device.rtStatus());
-      } catch {
-        /* the poll will catch up */
-      }
+      await openDevice(chosen);
     } catch (e) {
       // requestDevice() rejects when the user dismisses the picker — not an error worth shouting.
       const msg = e instanceof Error ? e.message : String(e);
@@ -371,17 +504,26 @@ export function useCfxDevice() {
         console.error("[useCfxDevice] connect() failed:", e);
         setError(msg);
       }
+      wantConnected.current = false;
       deviceRef.current = null;
       setConnection("disconnected");
     }
-  }, [onTraffic, onTransferError, teardown]);
+  }, [openDevice, cancelReconnect]);
 
   const disconnect = useCallback(async () => {
+    // Clear the intent first: the `close()` below fires `onClose`, and this is what tells that
+    // handler the drop was asked for rather than something to undo.
+    wantConnected.current = false;
+    cancelReconnect();
     const d = deviceRef.current;
-    if (!d) return;
+    // No device but a live intent is the reconnecting state — Disconnect must still end it.
+    if (!d) {
+      teardown();
+      return;
+    }
     await d.close();
     teardown();
-  }, [teardown]);
+  }, [teardown, cancelReconnect]);
 
   // Status poll. Skipped while another operation holds the command channel — a `GETFILE` of a
   // plate read would otherwise queue several polls behind it and replay them all at once.
@@ -415,9 +557,14 @@ export function useCfxDevice() {
     };
   }, [connection, polling, busy]);
 
-  // Close the interface on unmount so a view switch doesn't leave it claimed.
+  // Close the interface on unmount so a view switch doesn't leave it claimed. The intent flag goes
+  // with it: a pending reconnect firing after unmount would re-claim the interface nobody is
+  // watching any more.
   useEffect(() => {
     return () => {
+      wantConnected.current = false;
+      if (reconnectTimer.current !== null) clearTimeout(reconnectTimer.current);
+      reconnectTimer.current = null;
       void deviceRef.current?.close();
       deviceRef.current = null;
     };

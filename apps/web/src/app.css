@@ -3899,6 +3899,23 @@ body.is-cqdrag * {
   background: var(--good);
   box-shadow: 0 0 8px var(--good);
 }
+/* Reconnecting: the link is down but the session is not over, so it pulses rather than sitting
+   at the dead grey of a deliberate disconnect. */
+.instrument__dot.is-warn {
+  background: var(--warn);
+  box-shadow: 0 0 8px var(--warn);
+  animation: instrument-dot-pulse 1.2s ease-in-out infinite;
+}
+@keyframes instrument-dot-pulse {
+  50% {
+    opacity: 0.3;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .instrument__dot.is-warn {
+    animation: none;
+  }
+}
 
 /* Status/identity rows */
 .devstat {

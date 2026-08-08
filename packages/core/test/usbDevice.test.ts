@@ -37,6 +37,8 @@ class MockInstrument implements UsbDeviceLike {
   transferInFailures: Error[] = [];
   /** Errors `transferOut` throws instead of resolving, one per call, oldest first. */
   transferOutFailures: Error[] = [];
+  /** Every `clearHalt` the pump asked for, as `direction:endpoint`. */
+  halts: string[] = [];
 
   constructor(
     private readonly replies: (cmd: string) => { payload: Uint8Array; passThrough?: boolean; channel?: number } | null,
@@ -55,6 +57,9 @@ class MockInstrument implements UsbDeviceLike {
     this.claimed.push(n);
   }
   async releaseInterface() {}
+  async clearHalt(direction: "in" | "out", endpointNumber: number) {
+    this.halts.push(`${direction}:${endpointNumber}`);
+  }
 
   /** Push a frame toward the host, waking a blocked `transferIn` if one is parked. */
   push(payload: Uint8Array, { channel = 1, passThrough = false } = {}): void {
@@ -366,6 +371,81 @@ describe("CfxDevice", () => {
     expect(transferErrors).toHaveLength(4);
     expect(transferErrors.map((e) => e.attempt)).toEqual([1, 2, 3, 4]);
     expect(transferErrors.map((e) => e.fatal)).toEqual([false, false, false, true]);
+    errSpy.mockRestore();
+  });
+
+  it("clears a halted endpoint before retrying a transient failure", async () => {
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const mock = new MockInstrument((cmd) =>
+      cmd === "STATUS?" ? { payload: text(STATUS_IDLE) } : null,
+    );
+    mock.transferInFailures = [new Error("A transfer error has occurred")];
+    const dev = new CfxDevice(mock);
+    await dev.open();
+    await dev.status();
+    // Without this the endpoint stays halted and every remaining retry fails identically.
+    expect(mock.halts).toEqual(["in:6"]);
+    await dev.close();
+    errSpy.mockRestore();
+  });
+
+  it("treats a cancelled transfer as fatal immediately, without burning the retries", async () => {
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const mock = new MockInstrument(() => null);
+    // `Cancelled` means the handle is gone, not that the endpoint glitched: retrying re-reads a
+    // pipe that no longer exists, so the pump must hand off to the caller's reconnect at once.
+    mock.transferInFailures = Array.from({ length: 10 }, () => new Error("Cancelled"));
+    const transferErrors: CfxTransferErrorEvent[] = [];
+    const closed = new Promise<Error | null>((resolve) => {
+      void new CfxDevice(mock, {
+        onClose: resolve,
+        onTransferError: (e) => transferErrors.push(e),
+      })
+        .open()
+        .then(() => undefined);
+    });
+    expect(await closed).toBeInstanceOf(Error);
+    // One attempt, not four: the pump gave up on the first one rather than spending the retry
+    // budget re-reading a pipe that no longer exists.
+    expect(transferErrors).toHaveLength(1);
+    expect(transferErrors[0]).toMatchObject({ attempt: 1, fatal: true });
+    // Nothing was retried, so nothing was cleared.
+    expect(mock.halts).toEqual([]);
+    errSpy.mockRestore();
+  });
+
+  it("treats a disconnected device as fatal immediately", async () => {
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const mock = new MockInstrument(() => null);
+    const err = new Error("The device was disconnected.");
+    err.name = "NotFoundError";
+    mock.transferInFailures = [err, err, err, err, err];
+    const transferErrors: CfxTransferErrorEvent[] = [];
+    const closed = new Promise<Error | null>((resolve) => {
+      void new CfxDevice(mock, {
+        onClose: resolve,
+        onTransferError: (e) => transferErrors.push(e),
+      })
+        .open()
+        .then(() => undefined);
+    });
+    expect(await closed).toBeInstanceOf(Error);
+    expect(transferErrors.map((e) => e.fatal)).toEqual([true]);
+    errSpy.mockRestore();
+  });
+
+  it("fails a command immediately once the read pump has given up", async () => {
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const mock = new MockInstrument(() => null);
+    mock.transferInFailures = [new Error("Cancelled")];
+    let resolveClosed!: () => void;
+    const closed = new Promise<void>((r) => (resolveClosed = r));
+    const dev = new CfxDevice(mock, { onClose: () => resolveClosed() });
+    await dev.open();
+    await closed;
+    // The pump is gone; the reply to this can never arrive, so it must not sit in the queue
+    // waiting out a timeout.
+    await expect(dev.status()).rejects.toThrow(/closed/);
     errSpy.mockRestore();
   });
 

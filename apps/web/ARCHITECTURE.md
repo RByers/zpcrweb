@@ -2638,6 +2638,18 @@ knows about the protocol comes from `@zpcrweb/core`'s `CfxDevice` (see the root
 `navigator.usb`, a poll timer, the traffic recording and its bounded display window, and the React
 state the components render.
 
+**A dropped connection is retried, because the run isn't dropped with it.** The library reports the
+pipe dying and stops there; deciding what to do about it is this hook's, since re-obtaining a
+device handle is the browser-specific part. A close carrying an error, with `connect` not having
+been undone by `disconnect`, puts the session in `reconnecting` and retries `getDevices()` on a
+backoff — for as long as it takes, since the instrument goes on cycling either way and a run is
+hours long, and since an attempt while the cable is out costs one resolved promise returning
+nothing. A replug fires `navigator.usb`'s `connect` event, which short-circuits the wait. The
+picker (`requestDevice()`) is never used here: it needs a user gesture, and the only reason it
+isn't needed is that WebUSB permission persists across the outage. The rail shows the state with a
+pulsing amber dot and says what is and isn't affected, and its button still ends the session —
+which is what stops a retry loop the user no longer wants.
+
 **Its tab stands apart, and is always enabled** — a group of its own at the end of the strip, in
 the magenta the view itself uses, never greyed out (see "Instrument is not a file view" above for
 the argument; `enabledViewsFor` no longer answers for it). It renders with nothing selected, and

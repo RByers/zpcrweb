@@ -99,6 +99,34 @@ const READ_ERROR_RETRY_LIMIT = 4;
 /** Pause between retries, so a still-settling endpoint isn't hammered immediately. */
 const READ_ERROR_RETRY_DELAY_MS = 200;
 
+/**
+ * Whether a `transferIn` rejection is worth retrying on the *same* device handle.
+ *
+ * The retry loop above was built for one specific failure — a stalled or babbling endpoint, which
+ * Chrome reports as `NetworkError: A transfer error has occurred` and which really is readable
+ * again on the next call. Not every rejection is that shape, and the difference decides whether
+ * retrying can possibly work:
+ *
+ * - **`Cancelled`** — the platform tore down the transfer parked on the endpoint. Any holder
+ *   closing, resetting or releasing the device does it, as does an OS suspend or a re-enumeration
+ *   Chrome hasn't yet reflected in `opened`. The handle, not the endpoint, is what's broken, so a
+ *   retry re-issues a read on a pipe that no longer exists.
+ * - **`NotFoundError` / "device was disconnected"** — the device is gone outright.
+ * - **`InvalidStateError` / "must be opened first"** — the handle is closed underneath us.
+ *
+ * For all three the recovery is a *new connection*, which is the caller's business, not this
+ * loop's: reporting them as fatal immediately hands off to whoever reconnects (in the web app,
+ * `useCfxDevice`'s reconnect loop) instead of spending {@link READ_ERROR_RETRY_LIMIT} ×
+ * {@link READ_ERROR_RETRY_DELAY_MS} failing the same way four more times first. Anything
+ * unrecognized keeps the benefit of the doubt and is retried, since the retry is bounded anyway.
+ */
+function isUnrecoverableTransferError(err: Error): boolean {
+  const text = `${err.name} ${err.message}`;
+  return /cancell?ed|NotFoundError|device was disconnected|InvalidStateError|must be opened/i.test(
+    text,
+  );
+}
+
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -379,14 +407,19 @@ export class CfxDevice {
         if (this.closing) break readLoop;
         const err = e instanceof Error ? e : new Error(String(e));
         consecutiveErrors++;
-        // `usb.opened` flips to false the moment Chrome notices a real unplug; a transient
-        // stall on an otherwise-live device leaves it true, which is what distinguishes "try
-        // again" from "the device is gone" here.
-        const fatal = consecutiveErrors >= READ_ERROR_RETRY_LIMIT || !this.usb.opened;
+        // Three ways this ends the pump. `usb.opened` flips to false the moment Chrome notices a
+        // real unplug; `isUnrecoverableTransferError` catches the failures that survive on a
+        // still-`opened` handle but can only be fixed by reconnecting; and past that, a *run* of
+        // otherwise-retryable failures. Anything else is a transient stall on a live device, which
+        // is what the retry exists for.
+        const unrecoverable = isUnrecoverableTransferError(err);
+        const fatal =
+          unrecoverable || consecutiveErrors >= READ_ERROR_RETRY_LIMIT || !this.usb.opened;
         console.error(
           `[CfxDevice] transferIn failed (attempt ${consecutiveErrors}/${READ_ERROR_RETRY_LIMIT}` +
             `, endpoint ${CFX_ENDPOINT_IN}, opened=${this.usb.opened}, ` +
-            `${this.queue.length} command(s) pending)${fatal ? " — giving up" : " — retrying"}:`,
+            `${this.queue.length} command(s) pending)` +
+            `${fatal ? (unrecoverable ? " — unrecoverable, giving up" : " — giving up") : " — retrying"}:`,
           err,
         );
         this.opts.onTransferError?.({
@@ -399,6 +432,16 @@ export class CfxDevice {
         if (fatal) {
           error = err;
           break readLoop;
+        }
+        // A halted endpoint stays halted until it is explicitly cleared: without this every
+        // remaining retry fails identically and the connection dies anyway, which is the shape a
+        // burst of four failures 200 ms apart has. Optional on `UsbDeviceLike` because node-usb's
+        // WebUSB device is the one that may not have it; a failure here is not itself fatal, since
+        // the retry is worth attempting either way.
+        try {
+          await this.usb.clearHalt?.("in", CFX_ENDPOINT_IN);
+        } catch (clearErr) {
+          console.warn("[CfxDevice] clearHalt failed before retry:", clearErr);
         }
         await delay(READ_ERROR_RETRY_DELAY_MS);
         continue readLoop;
@@ -477,7 +520,10 @@ export class CfxDevice {
     payload: Uint8Array,
     timeoutMs?: number,
   ): Promise<CfxMessage> {
-    if (this.closed) throw new Error("device is closed");
+    // `pump === null` covers the case `closed` doesn't: the read pump gave up on its own, so the
+    // reply to this command is never coming. Without it the command would sit in the queue until
+    // its timeout — a minute, for a `GETFILE` — when the answer is already knowable.
+    if (this.closed || this.pump === null) throw new Error("device is closed");
     const header = { ...REQUEST_HEADER, channel: CHANNEL_ASCII };
     const frame = encodeFrame(header, payload);
     let pending!: Pending;

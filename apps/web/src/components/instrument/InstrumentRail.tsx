@@ -277,12 +277,36 @@ export function InstrumentRail({
           <div className="instrument__connect">
             <button
               className="btn"
-              onClick={connected ? instrument.disconnect : instrument.connect}
+              // Reconnecting is a connection the user still has, so the button still ends it —
+              // that is what stops an automatic retry loop the user no longer wants.
+              onClick={
+                connected || connection === "reconnecting"
+                  ? instrument.disconnect
+                  : instrument.connect
+              }
               disabled={connection === "connecting"}
             >
-              {connected ? "Disconnect" : connection === "connecting" ? "Connecting…" : "Connect over USB"}
+              {connected || connection === "reconnecting"
+                ? "Disconnect"
+                : connection === "connecting"
+                  ? "Connecting…"
+                  : "Connect over USB"}
             </button>
-            <span className={"instrument__dot" + (connected ? " is-on" : "")} aria-hidden="true" />
+            <span
+              className={
+                "instrument__dot" +
+                (connected ? " is-on" : connection === "reconnecting" ? " is-warn" : "")
+              }
+              aria-hidden="true"
+            />
+          </div>
+        )}
+        {connection === "reconnecting" && (
+          // The instrument goes on running with or without us, so this says what is and isn't
+          // affected — otherwise a dropped cable mid-run reads as a lost run.
+          <div className="rail__note mono">
+            Connection lost — retrying. A run in progress is unaffected; the instrument keeps
+            going, and this reconnects on its own when the link is back.
           </div>
         )}
         {instrument.error && <div className="rail__note mono">{instrument.error}</div>}

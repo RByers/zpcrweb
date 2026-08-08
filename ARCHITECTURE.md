@@ -299,11 +299,25 @@ their definitions:
   to a request by arrival order alone. Worse, `LISTALLFILES` replays whatever the preceding
   `GETFILESLEN` buffered and ignores its own path argument, so listing is an atomic pair;
   `CfxDevice.sequence` is what holds the channel across it.
-- **A single `transferIn` failure isn't treated as a disconnect.** Chrome throws "A transfer error
+- **A `transferIn` failure is classified, not uniformly retried.** Chrome throws "A transfer error
   has occurred" for a stalled/babbling endpoint as well as a genuine unplug, and the former is
-  usually readable again on the next call. The pump retries a bounded number of times (giving up
-  immediately if `usb.opened` has already gone false) before failing pending commands and calling
-  `onClose` — see the constants and logging at the top of `readLoop` in `device.ts`.
+  usually readable again on the next call — so the pump clears the halted endpoint and retries a
+  bounded number of times. What it does *not* retry is a failure that says the handle itself is
+  gone: `Cancelled` (the platform tore down the parked transfer — any holder closing or resetting
+  the device does it, as does an OS suspend or a re-enumeration `usb.opened` hasn't caught up
+  with), `NotFoundError`, and "must be opened first". Those are fatal on the first occurrence,
+  because the only recovery is a new connection and retrying just delays it. Either way, failing
+  pending commands and calling `onClose` is how the pump ends — see `isUnrecoverableTransferError`
+  and the constants at the top of `readLoop` in `device.ts`.
+- **Reconnecting is the web app's job, not the library's.** `CfxDevice` reports the drop and stops;
+  `useCfxDevice` decides what to do about it, since obtaining a device handle is the part that is
+  browser-specific. On an error close with the user still wanting a connection it retries
+  `navigator.usb.getDevices()` on a backoff, indefinitely, and also reconnects immediately on the
+  `connect` event a replug fires. It never calls `requestDevice()` there — a picker needs a user
+  gesture — which works only because WebUSB permission persists, so an already-granted device comes
+  back with no prompt. The case this is for is a run in progress: the instrument keeps cycling
+  regardless, so a dropped pipe costs only the host's view of it, and `useRunWatch` re-establishes
+  its listing baseline on the way back.
 
 **A run without a `PLATEREAD` is a different shape of run, not a degenerate one.** The instrument
 builds no `CurrentRun` folder for an incubation or an RT hold — measured, the folder is unchanged
