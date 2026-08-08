@@ -42,6 +42,7 @@ export function OverviewView({
   onAttachProtocol,
   onCreateProtocol,
   onCloneExperiment,
+  onGoToInstrument,
   autoFocusName,
   onAutoFocusHandled,
   ...tools
@@ -81,6 +82,9 @@ export function OverviewView({
   /** Copy this run's protocol and plate into a fresh pending experiment. Replaces the generic
    * file-clone button for a run — see {@link OverviewPanelProps.onClone} for the difference. */
   onCloneExperiment: () => void;
+  /** Go to the Instrument tab — what {@link ReadyToRun} links to once this experiment has
+   * everything it needs. */
+  onGoToInstrument: () => void;
   /** Put the cursor in the experiment-name field as soon as this panel appears — how a
    * just-created or just-cloned experiment arrives, since naming it is the next thing to do. */
   autoFocusName?: boolean;
@@ -91,6 +95,7 @@ export function OverviewView({
   "onRenameFile" | "onDownload" | "autoEditName" | "onAutoEditHandled"
 >) {
   const m = zpcr.metadata;
+  const hasProtocol = !!zpcr.protocolText;
   const protocolName = zpcr.protocol()?.name || null;
   const lastTemp = zpcr.reads.at(-1)?.blockTempC;
 
@@ -196,7 +201,7 @@ export function OverviewView({
       }
       banner={
         pending ? (
-          <PendingBanner named={identity.named} />
+          <PendingBanner named={identity.named} hasProtocol={hasProtocol} />
         ) : progress.inProgress ? (
           <RunningBanner plateReads={progress.plateReads} />
         ) : completeness.incomplete ? (
@@ -220,7 +225,7 @@ export function OverviewView({
           in without a map, rather than assembling a run.) */}
       {pending && (
         <ExperimentParts
-          hasProtocol={!!zpcr.protocolText}
+          hasProtocol={hasProtocol}
           hasPlate={!!plate}
           plateSources={plateSources}
           protocolSources={protocolSources}
@@ -229,6 +234,10 @@ export function OverviewView({
           onCreateProtocol={onCreateProtocol}
         />
       )}
+      {/* Below the parts, because it is what having supplied them means: the two things assembled
+          just above are exactly the two this waits on. A plate is deliberately not one of them —
+          it is optional, and a run without one is a run. */}
+      {pending && identity.named && hasProtocol && <ReadyToRun onGoToInstrument={onGoToInstrument} />}
       {/* A missing plate is worth saying whatever state the experiment is in — before the run, it's
           a thing to fix; after it, it's why there are no target or sample names on the curves. */}
       {!pending && !plate && (
@@ -343,17 +352,47 @@ function ExperimentParts({
  * on Start: that file existed for minutes and nobody ever chose to make one, whereas this is a
  * thing you deliberately create and then fill in.
  */
-function PendingBanner({ named }: { named: boolean }) {
+function PendingBanner({ named, hasProtocol }: { named: boolean; hasProtocol: boolean }) {
   return (
     <div className="overview__pending">
       <span className="overview__pendingmark" aria-hidden="true" />
       <span>
         <strong>This experiment hasn't been run yet.</strong>{" "}
-        {named
-          ? "Give it a protocol and (optionally) a plate below, then start it from the Instrument tab."
-          : "Name it above — that name identifies the run and its file — then give it a protocol below."}
+        {!named
+          ? "Name it above — that name identifies the run and its file — then give it a protocol below."
+          : !hasProtocol
+            ? "Give it a protocol and (optionally) a plate below."
+            : // Nothing is missing, so the banner stops asking for things: where to go next is
+              // {@link ReadyToRun}'s line, and saying it twice would make the page nag.
+              "It has everything it needs."}
       </span>
     </div>
+  );
+}
+
+/**
+ * A pending experiment with nothing left to supply: it has a name and a protocol, so the next
+ * thing that happens to it happens on the Instrument tab.
+ *
+ * The one state on this page whose next step is *somewhere else*, which is why it is a box with a
+ * way there in it rather than another line of prose. It waits for both halves deliberately —
+ * offered any earlier it would be pointing at a Start button that is disabled for a reason stated
+ * here, which is the round trip it exists to save.
+ */
+function ReadyToRun({ onGoToInstrument }: { onGoToInstrument: () => void }) {
+  return (
+    <section className="overview__block">
+      <div className="overview__ready">
+        <span className="overview__readymark" aria-hidden="true" />
+        <span>
+          <strong>Ready to run</strong> in the{" "}
+          <button type="button" className="overview__readylink" onClick={onGoToInstrument}>
+            Instrument tab
+          </button>
+          , with the instrument connected.
+        </span>
+      </div>
+    </section>
   );
 }
 

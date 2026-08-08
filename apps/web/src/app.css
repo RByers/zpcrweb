@@ -964,6 +964,46 @@
   background: var(--neon-magenta);
 }
 
+/* A pending experiment with nothing left to supply (see `OverviewView`'s ReadyToRun). The same
+   shape as the banners above and the same magenta as the pending one — it is the end of that
+   state, not a different subject — but filled a shade stronger, since unlike them it is a thing to
+   act on rather than a thing to know. */
+.overview__ready {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 14px;
+  border: 1px solid var(--neon-magenta);
+  border-radius: var(--radius-sm);
+  background: var(--neon-magenta-dim);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.overview__readymark {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  margin-top: 6px;
+  border-radius: 50%;
+  background: var(--neon-magenta);
+}
+/* A button that reads as a link: it navigates rather than acting, so it should look like the way
+   there and not like a second Start. */
+.overview__readylink {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  font: inherit;
+  color: var(--neon-magenta);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.overview__readylink:hover {
+  background: transparent;
+  color: var(--neon-cyan);
+}
+
 /* The two halves a pending experiment is assembled from, side by side — one column each, stacking
    on a narrow viewport like every other pair in the app. */
 .overview__parts {

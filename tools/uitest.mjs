@@ -2268,6 +2268,7 @@ async function instrumentRunChecks(chrome, origin) {
     return {
       info,
       pendingBanner: !!document.querySelector(".overview__pending"),
+      ready: !!document.querySelector(".overview__ready"),
       nameValue: name?.value ?? null,
       nameRequired: !!name?.required,
       nameMissing: !!name?.classList.contains("is-missing"),
@@ -2370,6 +2371,35 @@ async function instrumentRunChecks(chrome, origin) {
     named.name === "Cloned RVP" && !named.stillRequired,
     JSON.stringify(named),
   );
+
+  // Name plus protocol is everything a run needs, so the page stops asking for parts and says
+  // where to go instead — the one state on Overview whose next step is on another tab. A clone
+  // carries the protocol across, so naming it is the last thing missing: the box is absent above
+  // (checked on `cloned`, before the name was typed) and present here.
+  const ready = await cdp.eval(`(() => {
+    const box = document.querySelector(".overview__ready");
+    return {
+      shown: !!box,
+      text: box?.textContent.trim() ?? null,
+      link: box?.querySelector(".overview__readylink")?.textContent.trim() ?? null,
+    };
+  })()`);
+  check(
+    "a named pending experiment with a protocol says it is ready to run",
+    !cloned.ready && ready.shown && /Ready to run/.test(ready.text ?? "") && ready.link === "Instrument tab",
+    JSON.stringify({ beforeNaming: cloned.ready, ...ready }),
+  );
+  // And the tab name in it is the way there, not just a word: this is the hand-off Overview owes
+  // the Instrument tab, and the Instrument tab hands back at the click on Start.
+  await cdp.eval(`document.querySelector(".overview__readylink").click()`);
+  await tabBecomes(cdp, "Instrument");
+  check(
+    "…and its 'Instrument tab' goes to the Instrument tab",
+    await cdp.eval(`!!document.querySelector(".instrument__rail")`),
+    "no instrument rail after clicking the ready box's link",
+  );
+  await cdp.eval(`window.location.hash = "view=overview", undefined`);
+  await tabBecomes(cdp, "Overview");
 
   // The name is only really *given* if it outlives the session — it lives in the file's own
   // `zpcrweb.json`, not in this browser. This is the pending-experiment case specifically, and it

@@ -82,6 +82,7 @@ export function InstrumentView({
   instrument,
   runWatch,
   onStartExperiment,
+  onStarted,
   onCloneExperiment,
 }: {
   onOpenRun: (name: string, archive: ZpcrArchive) => Promise<void> | void;
@@ -106,6 +107,15 @@ export function InstrumentView({
    * state.
    */
   onStartExperiment: (plan: RunPlan, fileName: string) => Promise<void> | void;
+  /**
+   * The run has been sent: leave this view for the started experiment's Overview.
+   *
+   * Starting is the one thing this tab is *for*, and once it is done the interesting object is the
+   * file rather than the machine — the Overview is where the "still going" banner and the results
+   * arriving into it are. The rail decides *when* (after the send, and not at all when the deposit
+   * had a problem to report); this is only the going.
+   */
+  onStarted: () => void;
   /** Copy this run's protocol and plate into a fresh pending experiment — the way to run one
    * again, offered here because "this already has results" is where that need is discovered. The
    * file is named explicitly: it is this view's target, not necessarily the app's selection. */
@@ -167,6 +177,7 @@ export function InstrumentView({
         plan={plan}
         runWatch={runWatch}
         onStart={onStartExperiment}
+        onStarted={onStarted}
       />
       <div className="instrument__content">
         <InstrumentRun

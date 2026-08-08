@@ -771,6 +771,22 @@ are the app's reading of the run rather than the run's own record, and they are 
 exists to let someone try. If that distinction ever needs revisiting, this is the paragraph to argue
 with.
 
+#### Assembling one, and the hand-off to the instrument
+
+Assembly is an Overview job and starting is an Instrument job, so the round trip between the two
+tabs is stated on each end rather than left to be discovered:
+
+- Overview's pending banner says what is still missing, in the order it is supplied: a name first,
+  then a protocol. Once both are there it stops asking, and a **"Ready to run"** box appears under
+  the "Experiment parts" cards (`OverviewView`'s `ReadyToRun`) whose "Instrument tab" is a link to
+  that tab. A plate is deliberately not one of its conditions — it is optional, and an experiment
+  without one still runs (it just labels nothing).
+- The Instrument tab hands back the other way: the click on Start switches to the started
+  experiment's Overview, which is where the "still going" banner and the arriving results are. The
+  switch happens after the run has been *sent*, not on the click, and not at all when the deposit
+  had something to report — that report lives in the rail (`InstrumentRail`'s `startNote`) and
+  would go with the view.
+
 ### Deleting an edited file
 
 A loaded file is normally disposable: it came off the user's disk and is still there, so the file
