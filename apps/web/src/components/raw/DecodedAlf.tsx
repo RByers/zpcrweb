@@ -1,28 +1,81 @@
 import { useMemo } from "react";
-import { parseAlf, type AlfReport } from "@zpcrweb/core";
+import {
+  formatDuration,
+  parseAlf,
+  parseRunDefinition,
+  type AlfReport,
+  type AlfStep,
+} from "@zpcrweb/core";
 import { Pair } from "./Pair";
 
 /**
- * The decoded `.alf` run report (`alf.md`) — who ran what, on which block, and whether anything
- * went wrong. The file's own text is a `*`-delimited wall of numbers, and the Raw view's Text mode
- * already shows it; what this adds is the header and error line pulled apart into named fields,
- * with the flags whose meaning is a sentence rather than a word.
+ * The decoded `.alf` run report (`alf.md`) — who ran what, on which block, whether anything went
+ * wrong, and one row per line of the executed-step log. The file's own text is a `*`-delimited
+ * wall of numbers, and the Raw view's Text mode already shows it; what this adds is those lines
+ * pulled apart into named fields, with the three things reading them by eye can't give you:
  *
- * **What ran, and what it cost, is not here.** The report's protocol and its per-step execution log
- * were both rendered in this component once — a directive listing and a nine-column table of
- * timestamps. Both now live on the Protocol tab (`components/views/ProtocolView.tsx`): the protocol
- * as its annotated listing, and the step log as the thermal profile plotted against wall-clock time
- * (`ThermalProfileChart`, `alf.md` §7.6). The plot is the same derivation the table was — a step's
- * duration is the next step's start minus its own (§7.4), which is the only place a ramp cost is
- * measurable — but it shows a 46 s hold overrunning its nominal 30 at a glance, where the table
- * asked the reader to subtract. The literal fields are still one Text-mode click away.
+ * - **Wall-clock durations.** The report states no duration anywhere — a step's timestamp is
+ *   when it *began* (`alf.md` §7.4), so how long it took is the next line's timestamp minus its
+ *   own. Core computes that (`AlfStep.elapsedSeconds`); the "Took" column beside the nominal
+ *   hold is where a ramp cost becomes visible.
+ * - **Which step this was.** Field 3 is a bare step number; the protocol that numbers it is on
+ *   line 2 of the same file, so the directive is joined back onto each row here.
+ * - **Stage and read index.** Neither is a field: a stage boundary is "the repeat count went
+ *   backwards" (§7.2), and a read's position among the archive's `.Plateread` files is its
+ *   position among the `Plate Read` lines (§7.5).
+ *
+ * The fourth step column is deliberately absent. CFX Manager calls it `RAMPTIME`, it does not
+ * behave like one, and nothing is known about when it captures (`alf.md` §8) — a column of
+ * numbers with no meaning would invite exactly the reading the doc's measurements rule out. It
+ * is still one Text-mode click away, which is the right place for a field nobody can interpret.
+ *
+ * The report's *protocol* is not here: it has its own tab (`components/views/ProtocolView.tsx`),
+ * where the same step log is also plotted as a thermal profile against wall-clock time
+ * (`ThermalProfileChart`, `alf.md` §7.6). That plot is this table's derivation drawn rather than
+ * tabulated — it shows a 46 s hold overrunning its nominal 30 at a glance; the table is where the
+ * literal per-line contents are.
  */
 export function DecodedAlfFile({ text }: { text: string }) {
   const report = useMemo(() => parseAlf(text), [text]);
   return <DecodedAlf report={report} />;
 }
 
+/** `hh:mm:ss` / `m:ss` for a count of seconds. */
+function duration(seconds: number | null | undefined): string {
+  return seconds == null ? "—" : formatDuration(seconds);
+}
+
+/** The clock part of a step's `MM/DD/YYYY HH:MM:SS`, which is all that changes down the log. */
+function clock(step: AlfStep): string {
+  const m = /\d{2}:\d{2}:\d{2}$/.exec(step.timestampText);
+  return m ? m[0] : step.timestampText || "—";
+}
+
+function setpointText(step: AlfStep): string {
+  switch (step.setpoint.kind) {
+    case "temperature":
+      return `${step.setpoint.tempC} °C`;
+    case "gradient":
+      return `${step.setpoint.lowC}–${step.setpoint.highC} °C`;
+    case "plateRead":
+      return "Plate read";
+    default:
+      return step.setpointText;
+  }
+}
+
 export function DecodedAlf({ report }: { report: AlfReport }) {
+  // The protocol on line 2 is what numbers field 3, so the directive for a step comes from the
+  // same file rather than from the archive's other copy of the protocol (`alf.md` §5: when the
+  // two disagree, this one is the instrument's word).
+  const directiveOf = useMemo(() => {
+    const byStep = new Map<number, string>();
+    for (const d of parseRunDefinition(report.runDefinition).directives) {
+      if (d.stepNumber !== undefined) byStep.set(d.stepNumber, d.text);
+    }
+    return byStep;
+  }, [report.runDefinition]);
+
   const h = report.header;
   const e = report.errors;
   const stages = new Set(report.steps.map((s) => s.stage)).size;
@@ -41,19 +94,9 @@ export function DecodedAlf({ report }: { report: AlfReport }) {
           <Pair k="Elapsed" v={h.totalElapsed || "—"} />
           <Pair k="Lid" v={h.lidTemperatureC != null ? `${h.lidTemperatureC} °C` : "—"} />
           <Pair k="Volume" v={h.sampleVolumeUl != null ? `${h.sampleVolumeUl} µL` : "—"} />
-          {/* The shape of the run, counted off the step log rather than off the protocol: what the
-              instrument executed, loops and all. A stage boundary is not a field either — it is
-              "the repeat count went backwards" (alf.md §7.2). */}
-          <Pair
-            k="Executed"
-            v={
-              `${report.steps.length} ${report.steps.length === 1 ? "step" : "steps"}` +
-              (stages > 1 ? ` · ${stages} stages` : "") +
-              (report.plateReadCount > 0
-                ? ` · ${report.plateReadCount} plate read${report.plateReadCount === 1 ? "" : "s"}`
-                : "")
-            }
-          />
+          {/* What the instrument executed — steps, stages, plate reads — is the log's own heading
+              below, counted off the log rather than off the protocol. Stating it here as well
+              would be the same three numbers twice. */}
           <Pair k="Finished" v={report.completionPhrase ?? "— (no sentinel line)"} />
         </dl>
         {/* alf.md §4: the header states no zone, so the times are the instrument's own clock. */}
@@ -76,13 +119,69 @@ export function DecodedAlf({ report }: { report: AlfReport }) {
           <Flag k="Critical" on={e.criticalError} />
           <Pair k="Emulation" v={e.emulationUsed ? e.emulationMode || "yes" : "no"} />
         </dl>
-        {/* alf.md §6: every sample is clean, so only the shape of the flags is certain. */}
+        {/* Why these flags matter, and how far to trust them (`alf.md` §6): a run that lost power
+            or was aborted has later cycles that may not mean what they seem. But every sample the
+            format was decoded from was clean, so the failure encodings have never been seen set —
+            core reads a flag as raised only for the literal `True`. That is provenance for whoever
+            maintains this, not something to tell the reader in the app. */}
+      </section>
+
+      <section className="decoded__block">
+        <h3 className="decoded__h">
+          Execution log — {report.steps.length} {report.steps.length === 1 ? "step" : "steps"}
+          {report.plateReadCount > 0
+            ? `, ${report.plateReadCount} plate read${report.plateReadCount === 1 ? "" : "s"}`
+            : ""}
+          {stages > 1 ? `, ${stages} stages` : ""}
+        </h3>
+        {/* alf.md §7.4 for the timestamp meaning, §7.1 for GOTO never being logged. */}
         <p className="decoded__hint">
-          Worth checking before trusting the curves: a run that lost power or was aborted has
-          later cycles that may not mean what they seem. Every sample the format was decoded from
-          was clean, so the failure encodings have never been seen set — a flag is read as raised
-          only for the literal <code>True</code>.
+          One line per step <em>execution</em>. A timestamp is when the step began, so "took" is
+          the next step's start minus this one's — the only place a ramp cost is measurable.{" "}
+          <code>GOTO</code> is never logged, which is why the step numbers jump.
         </p>
+        <div className="decoded__gridwrap">
+          <table className="decoded__tbl decoded__alf mono">
+            <thead>
+              <tr>
+                <th>Stage</th>
+                <th>Rep</th>
+                <th>Step</th>
+                <th>Directive</th>
+                <th>Setpoint</th>
+                <th>Hold</th>
+                <th>Began</th>
+                <th>Took</th>
+                <th>Read</th>
+              </tr>
+            </thead>
+            <tbody>
+              {report.steps.map((s, i) => {
+                const newStage = i > 0 && s.stage !== report.steps[i - 1]!.stage;
+                return (
+                  <tr key={s.index} className={newStage ? "decoded__alfstage" : ""}>
+                    <td>{s.stage}</td>
+                    <td>{s.repeat}</td>
+                    <td>{s.stepNumber}</td>
+                    <td className="decoded__fname">{directiveOf.get(s.stepNumber) ?? "—"}</td>
+                    <td>{setpointText(s)}</td>
+                    <td>{s.setpoint.kind === "plateRead" ? "—" : duration(s.holdSeconds)}</td>
+                    <td>{clock(s)}</td>
+                    <td>{duration(s.elapsedSeconds)}</td>
+                    <td>{s.readIndex ?? ""}</td>
+                  </tr>
+                );
+              })}
+              {report.sentinel && (
+                <tr className="decoded__alfend">
+                  <td colSpan={6}>{report.completionPhrase ?? "End of run"}</td>
+                  <td>{clock(report.sentinel)}</td>
+                  <td colSpan={2} />
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </section>
 
       {report.problems.length > 0 && (

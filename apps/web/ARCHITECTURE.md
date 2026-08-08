@@ -319,7 +319,7 @@ It enables **three** tabs, `["overview","protocol","raw"]`:
 - **Overview** (`StandaloneReportOverview`) — who ran what, and how it went. The shared
   `OverviewPanel` gets four extra rows (the run's name, when it ran, how long it took, the outcome
   it reports) and `DecodedAlf` in its `children` slot — the same decode an in-archive report gets in
-  the Raw view, unchanged.
+  the Raw view, unchanged, execution-log table included.
 - **Protocol** (`ProtocolView`, the same component a run and a `.prcl.txt` use) — what actually ran,
   and what it cost. A report carries a protocol of its own: line 2 is the run definition
   post-expansion, with the scan mask the run really used (`alf.md` §5), so the view takes it with
@@ -1245,18 +1245,23 @@ supplies one.
   there the lid and volume are directives the annotated listing already explains, so showing
   them twice would be two views of one line.
 - **`.alf`** → `DecodedAlfFile` (`components/raw/DecodedAlf.tsx`) — the instrument's own run
-  report ([`alf.md`](../../alf.md)): run identity and the error summary's flags, plus one
-  `Executed` line counting the steps, stages and plate reads the log holds (none of the three is
-  a field — a stage boundary is where the repeat counter went backwards, §7.2, and a read's index
-  is its position among the `Plate Read` lines, §7.5).
+  report ([`alf.md`](../../alf.md)): run identity, the error summary's flags, and the **execution
+  log**, one row per logged step under a heading counting the steps, stages and plate reads it
+  holds (none of the three is a field — a stage boundary is where the repeat counter went
+  backwards, §7.2, and a read's index is its position among the `Plate Read` lines, §7.5). Eight columns: stage, repeat, step number, the directive that step number names
+  (joined from line 2 of the same file, §5), setpoint, nominal hold, the clock time it began, the
+  wall time it **Took** (= the next line's timestamp minus this one's, §7.4 — the only measurable
+  ramp cost) and its read index. A rule marks each stage boundary; the sentinel becomes the
+  end-of-run row (§7.3).
 
-  It used to also render the protocol the report carries and a nine-column table of every step
-  execution. Both moved to the Protocol tab — the protocol as the annotated listing, the step log
-  as the thermal profile — because they are the same data plotted rather than tabulated, and the
-  derivation the table existed for (**Took** = the next step's start minus this one's, §7.4, the
-  only measurable ramp cost) is what the profile's slopes *are*. Text mode is one click away for
-  anyone who wants the literal fields, including the fourth step column `alf.md` §8 rules out both
-  readings of.
+  The fourth step column is deliberately absent: `alf.md` §8 rules out both readings of it, and a
+  column of numbers with no meaning invites the reading the measurements exclude. Text mode is one
+  click away for anyone who wants the literal fields.
+
+  The protocol the report carries is *not* here — that is the Protocol tab's, as the annotated
+  listing, and two listings of one protocol could only agree or be a bug. The Protocol tab also
+  plots this log as the thermal profile, which is not the same duplication: the plot is the shape
+  of the run, the table is what each line says.
 - **other `.xml`** (e.g. `runlog.xml`) → the shared collapsible `XmlTreeFromString`
   (`lib/xmlTree.tsx` — see "Raw views" below).
 

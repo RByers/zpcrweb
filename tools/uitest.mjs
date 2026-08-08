@@ -261,11 +261,13 @@ async function reportFileChecks(chrome, origin) {
     overview.slice(0, 220),
   );
   check(
-    "…and the report's header and error detail with it, but not the protocol it carries",
+    // Not "no TEMP anywhere": the log's Directive column names each executed step, which is the
+    // point of it. What must be absent is the protocol *listing* — a setup directive like `HOTLID`
+    // is never a logged step (`alf.md` §7.1), so it can only come from a second rendering.
+    "…and the report's header, error detail and step log with it, but not the protocol it carries",
     overview.includes("User aborted") &&
-      overview.includes("Executed") &&
-      !overview.includes("TEMP 37.0,30") &&
-      !overview.includes("Execution log"),
+      overview.includes("Execution log") &&
+      !overview.includes("HOTLID"),
     overview.slice(0, 400),
   );
 
@@ -1956,17 +1958,19 @@ async function xmlViewChecks(chrome, origin, pw) {
  * The `.alf` run report's decoded view inside an archive (`alf.md`,
  * `components/raw/DecodedAlf.tsx`).
  *
- * What this view is, now, is the run's *identity and outcome* — the header fields and error flags
- * pulled apart and named. What it deliberately is not any more is a second rendering of the
- * protocol or a nine-column table of step timestamps: both are the Protocol tab's, as the annotated
- * listing and the thermal profile, and having them here as well meant one file read twice into two
- * shapes that could only agree or be a bug.
+ * What this view is: the run's *identity and outcome* — the header fields and error flags pulled
+ * apart and named — followed by the executed-step log, one row per line of it. What it deliberately
+ * is not is a second rendering of the protocol: that is the Protocol tab's, as the annotated
+ * listing, and having it here as well meant one protocol read twice into two shapes that could only
+ * agree or be a bug. The step log is not a duplicate of the same kind — the Protocol tab plots it
+ * as a thermal profile, while this is where the literal per-line contents are.
  *
- * The derived numbers that table carried are still asserted, because losing them silently is the
- * failure worth catching: `Executed` states the step and plate-read counts, and the read count has
- * to match the archive's own `.Plateread` entries (§7.5 — the one claim that spans two file types
- * at once). The per-step durations behind it are core's (`packages/core/test/alf.test.ts`), and the
- * plot that now shows them is `thermalProfileChecks` below.
+ * The derived numbers are asserted, because losing them silently is the failure worth catching:
+ * the log's heading counts the steps and plate reads it holds, and its `Plate read` rows have to
+ * be 1:1 with the archive's own `.Plateread` entries (§7.5 — the one claim that spans two file
+ * types at once). The per-step
+ * durations in the table's "Took" column are core's (`packages/core/test/alf.test.ts`), and the
+ * plot of them is `thermalProfileChecks` below.
  */
 async function alfViewChecks(chrome, origin) {
   console.log("\n.alf run report");
@@ -1999,19 +2003,23 @@ async function alfViewChecks(chrome, origin) {
       `JSON.stringify({
          mode: document.querySelector('.raw__modes .segmented__item.is-active')?.textContent.trim(),
          text: (document.querySelector('.raw__decoded')?.textContent ?? "").replace(/\\s+/g, " "),
-         executed: [...document.querySelectorAll('.raw__decoded .decoded__pair')]
-           .find(p => p.querySelector('dt')?.textContent.trim() === 'Executed')
-           ?.querySelector('dd')?.textContent.trim(),
-         table: !!document.querySelector('.raw__decoded .decoded__tbl'),
+         heading: [...document.querySelectorAll('.raw__decoded .decoded__h')]
+           .find(h => /^Execution log/.test(h.textContent.trim()))?.textContent.trim(),
+         rows: document.querySelectorAll('.raw__decoded .decoded__alf tbody tr').length,
+         reads: [...document.querySelectorAll('.raw__decoded .decoded__alf tbody tr')]
+           .filter(r => /Plate read/.test(r.children[4]?.textContent ?? '')).length,
+         took: [...document.querySelectorAll('.raw__decoded .decoded__alf tbody tr')]
+           .filter(r => /^\\d+:\\d\\d/.test((r.children[7]?.textContent ?? '').trim())).length,
+         end: document.querySelector('.raw__decoded .decoded__alfend')?.textContent.trim(),
        })`,
     )
     .then(JSON.parse);
 
   check("a .alf opens on its decoded run report, not a hex dump", shown.mode === "Decoded", shown.mode);
   check(
-    "the report's plate-read count is 1:1 with the archive's .Plateread files (alf.md §7.5)",
-    !!shown.executed && shown.executed.includes(`${plateReads} plate reads`),
-    `${shown.executed} / ${plateReads} files`,
+    "the log's heading counts what it holds — steps, plate reads and stages",
+    !!shown.heading && shown.heading.includes(`${plateReads} plate reads`),
+    `${shown.heading} / ${plateReads} files`,
   );
   check(
     "what the decoded view is: the run's identity and its error flags",
@@ -2019,9 +2027,24 @@ async function alfViewChecks(chrome, origin) {
     shown.text.slice(0, 200),
   );
   check(
-    "the protocol and the step table are not restated here — both are the Protocol tab's",
-    !shown.table && !shown.text.includes("Execution log") && !shown.text.includes("HOTLID"),
-    `table ${shown.table}`,
+    "the execution log is a table, one row per logged step plus the end-of-run line",
+    shown.text.includes("Execution log") && shown.rows > plateReads && shown.took > 0,
+    `${shown.rows} rows, ${shown.took} with a duration`,
+  );
+  check(
+    "…whose Plate read rows are 1:1 with the archive's .Plateread files (alf.md §7.5)",
+    shown.reads === plateReads,
+    `${shown.reads} rows / ${plateReads} files`,
+  );
+  check(
+    "…and whose last row is the sentinel's completion phrase (alf.md §7.3)",
+    /completed/i.test(shown.end ?? ""),
+    shown.end,
+  );
+  check(
+    "the protocol itself is not restated here — that's the Protocol tab's",
+    !shown.text.includes("HOTLID"),
+    shown.text.slice(0, 200),
   );
   cdp.close();
 }
