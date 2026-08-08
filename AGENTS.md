@@ -36,7 +36,8 @@ The operator does manual testing and pushes upstream to deploy live when good, n
 - Typecheck too, before committing — `npm run typecheck` covers only core, so a change under
   `apps/web` needs `npm run typecheck -w @zpcrweb/web` as well. `npm test` passes happily on
   code that doesn't compile, which is how a type error reached `main` in the first place.
-- Then land it with `git merge --ff-only <branch>`, then delete the worktree and branch.
+- Then exit the worktree and land it on main with `git merge --ff-only <branch>`, then delete
+  the worktree and branch.
 - After landing, report the size of what was just merged as lines added and removed, split five
   ways — core, core tests, UI, UI tests, docs — so the operator can see at a glance how much
   production code moved versus test code versus prose. Run it over the commits that landed
