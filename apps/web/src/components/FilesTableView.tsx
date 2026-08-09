@@ -3,8 +3,9 @@
  * with room to say much more about each. It is the "Files" tab of the view bar — the one tab that
  * is not a lens on the selected file — and fills `<main>` while it's open.
  *
- * The view is **two independently scrolling panes**: this table on top, and — only once a folder on
- * disk has been granted — `FolderSection`'s folder trees underneath. They answer different
+ * The view is **two independently scrolling panes**: this table on top, and `FolderSection`'s
+ * folders underneath — the ones the user has granted on disk, plus the app's own bundled
+ * `samples`, which is why the lower pane is always there. They answer different
  * questions, "what is the app holding" and "what is on the disk", and are different lengths, so
  * scrolling one to the bottom must not push the other off screen. With no folders there is only the
  * table. Opening a file that isn't open yet is the folder pane's job, not this one's.
@@ -66,12 +67,14 @@ interface Props {
   onCloseFile: (id: string) => void | Promise<void>;
   /** Leave the Files view. */
   onClose: () => void;
-  /** The granted folders and their lazily-listed trees — see `FolderSection.tsx`. Rendered above
+  /** The folders and their lazily-listed trees — see `FolderSection.tsx`. Rendered below
    * the table because they are a different question: the table is what the app is holding, the
-   * trees are what is on the disk. */
+   * trees are what is on the disk (and, last, what came with the app). */
   tree: DiskTree;
   /** Resolves once the files are open — `FolderSection.tsx`'s double-click waits on it. */
   onAddDiskFiles: (sources: DiskSource[], goToFile?: boolean) => void | Promise<void>;
+  /** The same, for a bundled sample — see `lib/samples.ts`. */
+  onAddSampleFiles: (names: string[], goToFile?: boolean) => void | Promise<void>;
 }
 
 /** The extension a kind is actually decoded as — independent of what the source file was named.
@@ -385,6 +388,7 @@ export function FilesTableView({
   onClose,
   tree,
   onAddDiskFiles,
+  onAddSampleFiles,
 }: Props) {
   const [sortKey, setSortKey] = useState<SortKey>("date");
   const [dir, setDir] = useState<1 | -1>(-1);
@@ -493,7 +497,9 @@ export function FilesTableView({
         </table>
         {files.length === 0 && <div className="filesview__empty mono">No files open.</div>}
       </div>
-      {tree.supported && tree.folders.length > 0 && (
+      {/* Not gated on `tree.supported`: the bundled `samples` folder is in this list on every
+          browser, including those with no File System Access API to grant a folder with. */}
+      {tree.folders.length > 0 && (
         <div className="filesview__pane filesview__pane--folders">
           <FolderSection
             tree={tree}
@@ -501,6 +507,7 @@ export function FilesTableView({
             activeName={activeName}
             onCloseFile={onCloseFile}
             onAddDiskFiles={onAddDiskFiles}
+            onAddSampleFiles={onAddSampleFiles}
             onOpenFile={(id) => onSelectFile(id, "overview")}
           />
         </div>

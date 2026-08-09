@@ -18,6 +18,14 @@
  * re-reads when the Files view is opened, when a node is expanded, and when the folder's ↻ is
  * pressed. Files that are *loaded* do refresh by themselves — those are watched individually
  * (`diskFolders.ts`), which is a per-file cost the app can afford and a per-tree one it cannot.
+ *
+ * **The last folder is not on the disk.** `samples` is the app's own, bundled at build time
+ * (`lib/samples.ts`), and it is here rather than in a section of its own so that one component
+ * draws every folder and the two cannot drift apart. It differs in exactly three ways, each of
+ * them a consequence of being built in: it is always last, it cannot be removed, and its listing
+ * comes from the manifest instead of a directory read — which also means it is present on browsers
+ * with no File System Access API at all, where {@link DiskTree.supported} is false and there is
+ * nothing else in the pane.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -34,12 +42,32 @@ import {
   type DiskEntry,
 } from "./diskFolders";
 import type { DiskSource } from "./db";
+import { SAMPLE_FILES_LIST, SAMPLES_LABEL } from "../lib/samples";
 
-/** One granted folder as the Files view needs it. */
+/** One folder as the Files view needs it — a granted one on disk, or the bundled `samples`. */
 export interface FolderView {
   label: string;
   permission: PermissionState;
+  /** The app's own bundled folder rather than one on the user's disk: no permission to ask for,
+   * nothing to re-read, and no way to remove it. Exactly one folder has this, and it is last. */
+  builtin: boolean;
 }
+
+/** The bundled samples as a directory listing, so the same pane draws them as a disk folder's.
+ * There are no subdirectories: `samples/` is flat, and the plugin reads one level. */
+const sampleEntries = (): DiskEntry[] =>
+  SAMPLE_FILES_LIST.map((s) => ({
+    name: s.name,
+    kind: "file" as const,
+    size: s.size,
+    lastModified: s.lastModified,
+  }));
+
+const samplesFolder: FolderView = {
+  label: SAMPLES_LABEL,
+  permission: "granted",
+  builtin: true,
+};
 
 /** What is known about one directory node, keyed by {@link nodeKey}. */
 export interface DiskNode {
@@ -117,6 +145,13 @@ export function useDiskTree(
 
   const load = useCallback(async (label: string, path: readonly string[]) => {
     const key = nodeKey(label, path);
+    // The bundled folder is already in memory and is flat, so there is nothing to read and no
+    // pending state to show: its root is the manifest, and any deeper path doesn't exist.
+    if (label === SAMPLES_LABEL) {
+      const entries = path.length === 0 ? sampleEntries() : [];
+      setNodes((prev) => new Map(prev).set(key, { entries, pending: false, error: null }));
+      return;
+    }
     setNodes((prev) => {
       const next = new Map(prev);
       next.set(key, { entries: prev.get(key)?.entries ?? null, pending: true, error: null });
@@ -139,13 +174,20 @@ export function useDiskTree(
   );
 
   const readFolders = useCallback(async () => {
-    if (!supported) return;
-    const stored = await listFolders();
-    setFolders(
-      await Promise.all(
-        stored.map(async (f) => ({ label: f.label, permission: await folderPermission(f.label) })),
-      ),
-    );
+    // `samples` is last always — after however many folders the user has granted, so the app's
+    // own files never sit above theirs — and is the whole list on a browser that can't do disk
+    // folders at all.
+    const stored = supported ? await listFolders() : [];
+    setFolders([
+      ...(await Promise.all(
+        stored.map(async (f) => ({
+          label: f.label,
+          permission: await folderPermission(f.label),
+          builtin: false,
+        })),
+      )),
+      samplesFolder,
+    ]);
   }, [supported]);
 
   useEffect(() => {
@@ -173,7 +215,6 @@ export function useDiskTree(
   // A folder seen for the first time opens the branches holding the files already in use, and
   // nothing else. Derived from the catalog, so no directory is read to work out where to look.
   useEffect(() => {
-    if (!supported) return;
     const known = new Set(folders.map((f) => f.label));
     const toOpen: string[] = [];
     /** Where each folder's file pane should start out. */
@@ -209,7 +250,7 @@ export function useDiskTree(
       const [label, ...path] = JSON.parse(key) as string[];
       void load(label!, path);
     }
-  }, [folders, loadedSources, supported, load]);
+  }, [folders, loadedSources, load]);
 
   const select = useCallback(
     (label: string, path: readonly string[]) => {
@@ -289,6 +330,9 @@ export function useDiskTree(
 
   const remove = useCallback(
     async (label: string) => {
+      // The bundled folder is part of the app; the UI offers no ✕ for it, and this is the
+      // backstop that keeps that true if some other caller ever asks.
+      if (label === SAMPLES_LABEL) return;
       await removeFolder(label);
       for (const k of [...expanded.current]) {
         if (k === `folder:${label}` || k.startsWith(`file:["${label}"`)) expanded.current.delete(k);

@@ -955,6 +955,11 @@
   overflow: auto;
   min-height: 0;
 }
+/* The bundled `samples` folder is flat, so it has no tree pane and the line that separates the
+   two would be a stray rule under its header. */
+.folders__files:first-child {
+  border-top: 0;
+}
 @container (min-width: 700px) {
   .folders__body {
     flex-direction: row;

@@ -19,6 +19,7 @@ import { cloneFileName, splitFileName } from "./lib/cloneName";
 import { isPendingExperiment } from "./lib/experiment";
 import { plateSources, protocolSources } from "./lib/attachSources";
 import { plateCsvFileName } from "./lib/plateNames";
+import { sampleUrl } from "./lib/samples";
 import { downloadBytes } from "./lib/download";
 import { useHeaderFit } from "./state/useHeaderFit";
 import { DropZone } from "./components/DropZone";
@@ -140,11 +141,11 @@ function runViews(zpcr: Zpcr): readonly ViewId[] {
 }
 
 /**
- * The run offered on the welcome screen, served from `public/examples/` (a symlink to the
- * repo's `samples/`, so there's one copy of the file). Relative to the page, so it works on a
- * dev server, on a subpath deploy, and offline-cached alike.
+ * The run offered on the welcome screen — one of the bundled samples, served at the same path the
+ * `samples` folder in the Files view opens its files from, so there is one copy of the file and
+ * one way of reaching it (`lib/samples.ts`).
  */
-const EXAMPLE_FILE = "examples/20260726_S183-S185_RVP.zpcr";
+const EXAMPLE_FILE = sampleUrl("20260726_S183-S185_RVP.zpcr");
 
 /** The wordmark, doubling as the link to the About page. Split so a narrow header can drop the
  * "//web" tail (see `.app__logo-rest` in `app.css` and `useHeaderFit`) and keep "zpcr" — the
@@ -684,8 +685,12 @@ export function App() {
   }
 
   // A granted folder counts as having something, even before a file is opened out of it: the
-  // Files view is where its tree lives, and the welcome screen has nowhere to show one.
-  if (store.files.length === 0 && diskTree.folders.length === 0 && store.view !== "instrument") {
+  // Files view is where its tree lives, and the welcome screen has nowhere to show one. The
+  // app's own bundled `samples` folder pointedly does not count — it is in that list on every
+  // browser, and treating it as "something in this browser" would mean the welcome screen never
+  // appeared again. What it offers is on the welcome screen already, as the example link.
+  const userFolders = diskTree.folders.filter((f) => !f.builtin).length;
+  if (store.files.length === 0 && userFolders === 0 && store.view !== "instrument") {
     // Nothing in the browser at all, so About *is* the welcome screen — it carries the drop
     // target. There's no previous view to go back to, hence no `onBack`, and no view bar: with an
     // empty catalog even the Files tab has nothing to list.
@@ -825,6 +830,14 @@ export function App() {
                 if (goToFile && name) store.setView("overview");
               })
             }
+            // A sample is fetched rather than read off disk, and lands as an ordinary copy — but
+            // the gesture is the same one, so it ends the same way: selected, and on Overview if
+            // the user asked to go there.
+            onAddSampleFiles={async (names, goToFile) => {
+              let last: string | null = null;
+              for (const name of names) last = await store.addUrl(sampleUrl(name));
+              if (goToFile && last) store.setView("overview");
+            }}
           />
         ) : view === "about" ? (
           <AboutView

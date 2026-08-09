@@ -40,6 +40,7 @@ import {
   type StoredFolder,
 } from "./db";
 import { cloneFileName } from "../lib/cloneName";
+import { SAMPLES_LABEL } from "../lib/samples";
 
 export { diskFileName, type DiskSource } from "./db";
 
@@ -108,9 +109,10 @@ export async function addFolder(): Promise<StoredFolder | null> {
       return refreshed;
     }
   }
-  const label = folders.has(handle.name)
-    ? cloneFileName(handle.name, (candidate) => folders.has(candidate))
-    : handle.name;
+  // `samples` is taken: the app's own bundled folder sits at the bottom of the same list under
+  // that label (`lib/samples.ts`), and two sections sharing one label would share a tree.
+  const taken = (candidate: string) => folders.has(candidate) || candidate === SAMPLES_LABEL;
+  const label = taken(handle.name) ? cloneFileName(handle.name, taken) : handle.name;
   const folder: StoredFolder = { label, handle, addedAt: Date.now() };
   folders.set(label, folder);
   await putFolder(folder);

@@ -4329,8 +4329,8 @@ async function explodedStorageChecks(chrome, origin) {
  * here, in the test; no code ships for it.
  *
  * **The fixture never crosses the wire.** The tree is built inside the page by `fetch`ing the
- * example run the welcome screen already serves (`public/examples/`, a symlink to `samples/`), so a
- * 400 kB archive costs nothing in the transcript.
+ * example run the app already serves at `/examples/` (a bundled sample — see `lib/samples.ts`), so
+ * a 400 kB archive costs nothing in the transcript.
  *
  * What this is really guarding, in order of how quietly it would break:
  *
@@ -4343,8 +4343,135 @@ async function explodedStorageChecks(chrome, origin) {
  *   reason `rearmWatch` exists.
  * - **No echo loop.** The app's own write must not read itself back forever.
  */
+/**
+ * The bundled `samples` folder — the app's own folder, last in the same pane the granted ones are
+ * in. Run before {@link folderChecks} grants anything, because half of what is being asserted is
+ * that it is there with no folder on disk at all.
+ *
+ * What is checked is what makes it *built in*: it lists itself from the build rather than from a
+ * directory read, it cannot be re-read or removed, and opening a file out of it gives the app an
+ * ordinary copy under the file's own name (no folder-rooted path, unlike a disk-backed file).
+ */
+async function sampleFolderChecks(chrome, origin) {
+  console.log("\nbundled samples folder");
+  const cdp = await openPage(chrome.base, origin);
+  await emptyReload(cdp, origin);
+  // A file first, because an empty browser gets the welcome screen instead of the view bar — the
+  // bundled folder deliberately doesn't count as "something in this browser" (see `App.tsx`).
+  await loadFile(cdp, ZPCR);
+  await waitFor(() => chipPresent(cdp, "FirstQualification"), { what: "the .zpcr chip" });
+  await clickTab(cdp, "Files");
+  await waitFor(() => cdp.eval(`!!document.querySelector(".folders__folder--builtin")`), {
+    what: "the samples folder",
+  });
+
+  const BUILTIN = ".folders__folder--builtin";
+  const shape = await cdp
+    .eval(
+      `(() => { const all = [...document.querySelectorAll(".folders__folder")];
+         const b = document.querySelector("${BUILTIN}");
+         return JSON.stringify({
+           sections: all.length,
+           last: all.at(-1) === b,
+           label: b.querySelector(".folders__title")?.textContent.trim(),
+           buttons: [...b.querySelectorAll(".folders__actions .btn")].map((x) => x.textContent.trim()),
+           trees: b.querySelectorAll(".folders__tree").length,
+           files: [...b.querySelectorAll(".folders__name")].map((x) => x.textContent.trim()),
+         }); })()`,
+    )
+    .then(JSON.parse);
+  check(
+    "The app's own samples folder is there with no folder granted, and is the last one",
+    shape.sections === 1 && shape.last && shape.label === "samples",
+    JSON.stringify({ sections: shape.sections, last: shape.last, label: shape.label }),
+  );
+  check(
+    "…with nothing to re-read and no way to remove it",
+    shape.buttons.length === 0,
+    JSON.stringify(shape.buttons),
+  );
+  check(
+    "…and no tree pane, being one flat directory",
+    shape.trees === 0,
+    JSON.stringify(shape.trees),
+  );
+  // The listing is generated from `samples/` at build time, so this asserts the *rule* — every
+  // openable file, nothing else — rather than a count that would have to be edited whenever a
+  // sample is added.
+  check(
+    "It lists the sample files, the run the welcome screen offers among them",
+    shape.files.length > 5 && shape.files.includes(EXAMPLE),
+    JSON.stringify(shape.files),
+  );
+  check(
+    "…and leaves out what the app has no decoder for, exactly as a folder on disk does",
+    !shape.files.some((f) => /\.(xml|zip|md)$/i.test(f)),
+    JSON.stringify(shape.files.filter((f) => /\.(xml|zip|md)$/i.test(f))),
+  );
+
+  // ── Opening one ────────────────────────────────────────────────────────────────────────────
+  const sampleRow = (name) =>
+    `[...document.querySelectorAll("${BUILTIN} .folders__name")].find((b) => b.textContent.trim() === ${JSON.stringify(name)})`;
+  const loaded = (name) =>
+    cdp.eval(
+      `(() => { const b = ${sampleRow(name)};
+         return !!b?.closest(".folders__file")?.querySelector(".folders__check")?.checked; })()`,
+    );
+  await cdp.eval(`(${sampleRow(EXAMPLE)}?.click(), undefined)`);
+  await waitFor(() => loaded(EXAMPLE), { timeout: 15000, what: "the sample to open" });
+  const catalog = await cdp
+    .eval(
+      `JSON.stringify([...document.querySelectorAll(".filesview__filename")].map((c) => c.title))`,
+    )
+    .then(JSON.parse);
+  check(
+    "Clicking a sample opens it, and stays in Files",
+    (await activeTab(cdp)) === "Files" && (await loaded(EXAMPLE)),
+    await activeTab(cdp),
+  );
+  check(
+    "…as an ordinary copy under the file's own name, not a folder-rooted path",
+    catalog.includes(EXAMPLE) && !catalog.some((n) => n.startsWith("samples/")),
+    JSON.stringify(catalog),
+  );
+  // Unticking closes it again — the same gesture the disk rows have, and the reason the row is a
+  // checkbox at all.
+  await cdp.eval(`(${sampleRow(EXAMPLE)}?.click(), undefined)`);
+  await waitFor(async () => !(await loaded(EXAMPLE)), { what: "the sample to close" });
+  const afterClose = await cdp
+    .eval(
+      `JSON.stringify([...document.querySelectorAll(".filesview__filename")].map((c) => c.title))`,
+    )
+    .then(JSON.parse);
+  check(
+    "…and clicking it again closes it, leaving the rest of the catalog alone",
+    !afterClose.includes(EXAMPLE) && afterClose.length === catalog.length - 1,
+    JSON.stringify(afterClose),
+  );
+
+  // Double-click is the "open it and go look at it" half of the same pair.
+  await cdp.eval(
+    `(() => { const b = ${sampleRow(EXAMPLE)}; if (!b) return;
+       for (const [type, detail] of [["click", 1], ["click", 2], ["dblclick", 2]])
+         b.dispatchEvent(new MouseEvent(type, { bubbles: true, detail }));
+     })()`,
+  );
+  const landed = await tabBecomes(cdp, "Overview", 15000);
+  check(
+    "Double-clicking a sample opens it and lands on its Overview",
+    landed === "Overview",
+    JSON.stringify(landed),
+  );
+
+  cdp.close();
+}
+
 async function folderChecks(chrome, origin) {
   console.log("\ndisk folders");
+  // Every query here means the *disk* folder: the bundled `samples` section is a sibling of it in
+  // the same pane (see sampleFolderChecks), and an unscoped `.folders__name` would collect its
+  // rows too.
+  const DISK = ".folders__folder:not(.folders__folder--builtin)";
   const cdp = await openPage(chrome.base, origin);
   await emptyReload(cdp, origin);
 
@@ -4413,7 +4540,7 @@ async function folderChecks(chrome, origin) {
     (await cdp.eval(`!!document.querySelector(".dropzone__folderbtn")`)) === true,
   );
   await addFolder();
-  await waitFor(() => cdp.eval(`!!document.querySelector(".folders__folder")`), {
+  await waitFor(() => cdp.eval(`!!document.querySelector("${DISK}")`), {
     what: "the folder section",
   });
 
@@ -4421,10 +4548,10 @@ async function folderChecks(chrome, origin) {
     cdp
       .eval(
         `JSON.stringify({
-           dirs: [...document.querySelectorAll(".folders__dir")].map((b) => b.textContent.trim()),
-           files: [...document.querySelectorAll(".folders__name")].map((b) => b.textContent.trim()),
-           crumbs: [...document.querySelectorAll(".folders__crumb")].map((b) => b.textContent.trim()),
-           selected: [...document.querySelectorAll(".folders__dirrow.is-selected .folders__dir")]
+           dirs: [...document.querySelectorAll("${DISK} .folders__dir")].map((b) => b.textContent.trim()),
+           files: [...document.querySelectorAll("${DISK} .folders__name")].map((b) => b.textContent.trim()),
+           crumbs: [...document.querySelectorAll("${DISK} .folders__crumb")].map((b) => b.textContent.trim()),
+           selected: [...document.querySelectorAll("${DISK} .folders__dirrow.is-selected .folders__dir")]
              .map((b) => b.textContent.trim()),
            reads: window.__reads,
          })`,
@@ -4436,8 +4563,8 @@ async function folderChecks(chrome, origin) {
   const paneLayout = () =>
     cdp
       .eval(
-        `(() => { const t = document.querySelector(".folders__tree")?.getBoundingClientRect();
-           const f = document.querySelector(".folders__files")?.getBoundingClientRect();
+        `(() => { const t = document.querySelector("${DISK} .folders__tree")?.getBoundingClientRect();
+           const f = document.querySelector("${DISK} .folders__files")?.getBoundingClientRect();
            if (!t || !f) return "none";
            return f.left >= t.right - 1 ? "side-by-side" : "stacked"; })()`,
       );
@@ -4486,7 +4613,7 @@ async function folderChecks(chrome, origin) {
 
   // ── Expanding reads exactly one level ──────────────────────────────────────────────────────
   await cdp.eval(
-    `[...document.querySelectorAll(".folders__dir")].find((b) => /2026/.test(b.textContent))?.click()`,
+    `[...document.querySelectorAll("${DISK} .folders__dir")].find((b) => /2026/.test(b.textContent))?.click()`,
   );
   await waitFor(async () => (await rows()).files.includes("nested.zpcr"), {
     what: "the expanded directory",
@@ -4510,7 +4637,7 @@ async function folderChecks(chrome, origin) {
 
   // The breadcrumb is the way back up, and going up must not re-read anything.
   await cdp.eval(
-    `[...document.querySelectorAll(".folders__crumb")].find((b) => b.textContent.trim() === "runs")?.click()`,
+    `[...document.querySelectorAll("${DISK} .folders__crumb")].find((b) => b.textContent.trim() === "runs")?.click()`,
   );
   await waitFor(async () => (await rows()).files.includes("top.zpcr"), { what: "the root's files" });
   const backUp = await rows();
@@ -4526,7 +4653,7 @@ async function folderChecks(chrome, origin) {
   );
   // …and back down again, so the rest of the checks are looking at the nested file.
   await cdp.eval(
-    `[...document.querySelectorAll(".folders__dir")].find((b) => /2026/.test(b.textContent))?.click()`,
+    `[...document.querySelectorAll("${DISK} .folders__dir")].find((b) => /2026/.test(b.textContent))?.click()`,
   );
   await waitFor(async () => (await rows()).files.includes("nested.zpcr"), {
     what: "the nested directory again",
@@ -4535,7 +4662,7 @@ async function folderChecks(chrome, origin) {
   // ── Opening a file off disk ────────────────────────────────────────────────────────────────
   const tickFile = (name) =>
     cdp.eval(
-      `(() => { const row = [...document.querySelectorAll(".folders__file")]
+      `(() => { const row = [...document.querySelectorAll("${DISK} .folders__file")]
            .find((r) => r.querySelector(".folders__name")?.textContent.trim() === ${JSON.stringify(name)});
          row?.querySelector(".folders__check")?.click(); return !!row; })()`,
     );
@@ -4607,7 +4734,7 @@ async function folderChecks(chrome, origin) {
   // the row's checkbox, acts at once, and must not throw you out of the Files view the way the
   // catalog table's rows do; the double-click is what leaves, for Overview.
   const nameBtn = (name) =>
-    `[...document.querySelectorAll(".folders__name")].find((b) => b.textContent.trim() === ${JSON.stringify(name)})`;
+    `[...document.querySelectorAll("${DISK} .folders__name")].find((b) => b.textContent.trim() === ${JSON.stringify(name)})`;
   const rowSelected = (name) =>
     cdp.eval(
       `(() => { const b = ${nameBtn(name)};
@@ -4786,7 +4913,7 @@ async function folderChecks(chrome, origin) {
     { awaitPromise: true },
   );
   await clickTab(cdp, "Files");
-  await waitFor(() => cdp.eval(`!!document.querySelector(".folders__folder")`), {
+  await waitFor(() => cdp.eval(`!!document.querySelector("${DISK}")`), {
     what: "the folder after a reload",
   });
   await waitFor(async () => (await rows()).files.includes("nested.zpcr"), {
@@ -4809,7 +4936,7 @@ async function folderChecks(chrome, origin) {
   // The gesture has to work on a file that is only on disk too, which means reading it before
   // there is anything to open. `top.zpcr` has been sitting in the root untouched all along.
   await cdp.eval(
-    `[...document.querySelectorAll(".folders__crumb")].find((b) => b.textContent.trim() === "runs")?.click()`,
+    `[...document.querySelectorAll("${DISK} .folders__crumb")].find((b) => b.textContent.trim() === "runs")?.click()`,
   );
   await waitFor(async () => (await rows()).files.includes("top.zpcr"), { what: "the root's files" });
   await doubleClick("top.zpcr");
@@ -4817,7 +4944,7 @@ async function folderChecks(chrome, origin) {
   // Which file that is, asked back in the tree: the row it was opened from is now both loaded and
   // the selection, which no other row is.
   await clickTab(cdp, "Files");
-  await waitFor(() => cdp.eval(`!!document.querySelector(".folders__folder")`), {
+  await waitFor(() => cdp.eval(`!!document.querySelector("${DISK}")`), {
     what: "the folder section again",
   });
   const openedRow = await cdp.eval(
@@ -4881,6 +5008,7 @@ async function main() {
     await protocolEditorChecks(chrome, origin);
     await cloneChecks(chrome, origin);
     await openFilesChecks(chrome, origin);
+    await sampleFolderChecks(chrome, origin);
     await folderChecks(chrome, origin);
   } finally {
     chrome.stop();

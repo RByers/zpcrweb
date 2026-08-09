@@ -210,6 +210,8 @@ Cq markers — the rings are drag handles for a curve's threshold),
 `state/diskFolders.ts`, `state/useDiskTree.ts`, `components/FolderSection.tsx` or
 `components/DropZone.tsx` (the disk-backed folder route — and note the picker itself cannot be
 driven from CDP, so `folderChecks` substitutes an OPFS directory for it),
+`lib/samples.ts`, `apps/web/vite.config.ts`'s samples plugin or `App.tsx`'s welcome-screen test
+(the bundled `samples` folder — `sampleFolderChecks`),
 `state/useCfxDevice.ts`'s `cancelRun`/`setRunPaused`
 (or core's `usb/device.ts` `cancelRun`), `lib/protocolSource.ts`,
 `lib/experiment.ts` (or core's `experiment.ts`), `components/ViewSelector.tsx` or `App.tsx`'s

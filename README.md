@@ -199,6 +199,19 @@ rather than rewriting the whole archive after every cycle.
 This needs the File System Access API, so it's Chromium-only today; the option simply isn't shown
 where it's unavailable.
 
+### Sample files
+
+Below your own folders, the Files tab always ends with a **samples** folder: the example files that
+ship with the app, the same ones in this repo's `samples/` directory. Tick one to open it and it
+behaves like any other file you loaded — you get a copy, so anything you change stays in your
+browser and the example itself is untouched. It can't be removed, and it's there on every browser,
+including those that can't grant a folder on disk at all.
+
+Nothing enumerates that list in source: `vite.config.ts` reads `samples/` at build time and serves
+what it finds, so adding a file to that directory (or deleting one) and rebuilding is all it takes.
+Only formats the app can actually open are offered, by the same name filter a folder on your disk is
+listed through — the `.xml` decodings and `.zip` exports beside them are not.
+
 ```sh
 npm run dev -w @zpcrweb/web      # start the dev server (http://localhost:5173)
 npm run build -w @zpcrweb/web    # production build
@@ -219,12 +232,12 @@ view is expected to work fine regardless.
 
 - `#file=<name>&view=<overview|protocol|curves|plates|reference|calibration|raw|instrument|files|about>`
   selects the active file and view. Every view the app can show is nameable here: `files` is the
-  open files and the folders on disk, `instrument` the USB panel, and `about` the credits page —
+  open files and the folders (on disk, plus the bundled samples), `instrument` the USB panel, and `about` the credits page —
   the last of these has no tab, and none of the three needs a file.
 - `#load=<url>` fetches a file and loads it — the only key that can put a file the browser doesn't
   already have into the app. It's consumed on load and replaced by the `#file=` the loaded file
-  produces, so it never survives in the address bar. `apps/web/public/examples/` (a symlink to
-  `samples/`) is what the welcome screen's "Load an example file" button loads, via this key.
+  produces, so it never survives in the address bar. The welcome screen's "Load an example file"
+  button is a link to one of these, pointing at a bundled sample (see "Sample files" below).
 - `#cfxPassword=<value>` seeds the decryption password so encrypted files decrypt instead of
   sitting behind the prompt. URL-escape it — the password can contain characters like `#`.
 

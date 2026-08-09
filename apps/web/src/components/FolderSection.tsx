@@ -1,6 +1,7 @@
 /**
- * The granted folders, in the lower half of the Files view: one stacked section each, and inside
- * each a **directory tree beside the files of the directory you have picked**.
+ * The folders in the lower half of the Files view: one stacked section each, and inside each a
+ * **directory tree beside the files of the directory you have picked**. The user's granted
+ * folders first, and the app's own bundled `samples` last.
  *
  * This is the *disk*, not the app: it lists what is in the folder, whether or not the app has ever
  * opened it. **A file's checkbox is whether it is open** — ticking one reads it off disk and opens
@@ -39,6 +40,15 @@
  * The consequence, worth knowing while reading this: a file written into the folder by something
  * else won't appear on its own. The ↻ re-reads. (Files that are *loaded* do refresh by themselves;
  * those are watched one by one.)
+ *
+ * **`samples` is the same section, three things fewer.** The app ships a folder of example files
+ * (`lib/samples.ts`), and it is drawn here rather than in a panel of its own so there is one
+ * folder UI to learn and one to maintain. Being built in rather than on disk, it has no ↻ (its
+ * listing is fixed at build time), no ✕ (it is part of the app), and no tree pane (it is flat).
+ * Everything else — the checkbox that opens a file, the click/double-click pair, the selected
+ * row — is the same code doing the same thing. The one difference a user can feel is what opening
+ * one gives them: a *copy*, like a dropped file, since there is no writing back to a file inside
+ * the app's own bundle.
  */
 import { useRef } from "react";
 import { fileKindDescription } from "@zpcrweb/core";
@@ -64,6 +74,9 @@ interface Props {
    * wait for its own first click before going to the file. `goToFile` also lands on the file's
    * Overview — used where the app is doing the opening rather than a gesture. */
   onAddDiskFiles: (sources: DiskSource[], goToFile?: boolean) => void | Promise<void>;
+  /** The same thing for a bundled sample, which is fetched rather than read off disk and lands as
+   * an ordinary copy under its own name — see `lib/samples.ts`. */
+  onAddSampleFiles: (names: string[], goToFile?: boolean) => void | Promise<void>;
   /** Select it *and* go look at it, on Overview — a double click. */
   onOpenFile: (id: string) => void;
 }
@@ -80,6 +93,7 @@ export function FolderSection({
   activeName,
   onCloseFile,
   onAddDiskFiles,
+  onAddSampleFiles,
   onOpenFile,
 }: Props) {
   return (
@@ -88,7 +102,10 @@ export function FolderSection({
         const isOpen = !tree.collapsed.has(folder.label);
         const selected = tree.selected.get(folder.label) ?? [];
         return (
-          <section className="folders__folder" key={folder.label}>
+          <section
+            className={"folders__folder" + (folder.builtin ? " folders__folder--builtin" : "")}
+            key={folder.label}
+          >
             {/* Not a <details>/<summary>: the header carries three separate actions — collapse the
                 section, select the folder's own root, and the buttons on the right — and a
                 <summary> would swallow all of them into "toggle". */}
@@ -107,7 +124,11 @@ export function FolderSection({
                 className={
                   "folders__title mono" + (isOpen && selected.length === 0 ? " is-selected" : "")
                 }
-                title={`Show the files directly in ${folder.label}`}
+                title={
+                  folder.builtin
+                    ? "Example files that come with the app"
+                    : `Show the files directly in ${folder.label}`
+                }
                 onClick={() => tree.select(folder.label, [])}
               >
                 <span className="folders__icon">
@@ -116,7 +137,9 @@ export function FolderSection({
                 {folder.label}
               </button>
               <span className="folders__actions">
-                {folder.permission !== "granted" && (
+                {/* Nothing to re-read and nothing to give up: the bundled folder's listing is
+                    fixed when the app is built, and it is part of the app. */}
+                {!folder.builtin && folder.permission !== "granted" && (
                   /* The grant does not survive a reload unless the browser has been told to keep
                      it, so this is the ordinary state on a fresh session rather than an error.
                      A button because re-asking needs a user gesture. */
@@ -127,43 +150,53 @@ export function FolderSection({
                     Grant access
                   </button>
                 )}
-                <button
-                  className="btn btn--sm"
-                  title="Read this folder again"
-                  onClick={() => tree.refresh(folder.label)}
-                >
-                  ↻
-                </button>
-                <button
-                  className="btn btn--sm"
-                  title="Stop using this folder. Nothing on disk is deleted."
-                  onClick={() => void tree.remove(folder.label)}
-                >
-                  ✕
-                </button>
+                {!folder.builtin && (
+                  <>
+                    <button
+                      className="btn btn--sm"
+                      title="Read this folder again"
+                      onClick={() => tree.refresh(folder.label)}
+                    >
+                      ↻
+                    </button>
+                    <button
+                      className="btn btn--sm"
+                      title="Stop using this folder. Nothing on disk is deleted."
+                      onClick={() => void tree.remove(folder.label)}
+                    >
+                      ✕
+                    </button>
+                  </>
+                )}
               </span>
             </div>
             {isOpen &&
               (folder.permission === "granted" ? (
                 <div className="folders__body">
-                  <div className="folders__tree">
-                    <DirectoryLevel
-                      tree={tree}
-                      label={folder.label}
-                      path={[]}
-                      depth={0}
-                      selected={selected}
-                    />
-                  </div>
+                  {/* No tree for the bundled folder: it is one flat directory, and a pane whose
+                      only content would be "no subfolders" is a pane worth not drawing. */}
+                  {!folder.builtin && (
+                    <div className="folders__tree">
+                      <DirectoryLevel
+                        tree={tree}
+                        label={folder.label}
+                        path={[]}
+                        depth={0}
+                        selected={selected}
+                      />
+                    </div>
+                  )}
                   <div className="folders__files">
                     <FilePane
                       tree={tree}
                       label={folder.label}
                       path={selected}
+                      builtin={folder.builtin}
                       entries={entries}
                       activeName={activeName}
                       onCloseFile={onCloseFile}
                       onAddDiskFiles={onAddDiskFiles}
+                      onAddSampleFiles={onAddSampleFiles}
                       onOpenFile={onOpenFile}
                     />
                   </div>
@@ -280,36 +313,46 @@ function FilePane({
   tree,
   label,
   path,
+  builtin,
   entries,
   activeName,
   onCloseFile,
   onAddDiskFiles,
+  onAddSampleFiles,
   onOpenFile,
 }: {
   tree: DiskTree;
   label: string;
   path: readonly string[];
+  builtin: boolean;
 } & Omit<Props, "tree">) {
   const node = tree.nodes.get(nodeKey(label, path));
   const files = node?.entries?.filter((e) => e.kind === "file") ?? [];
   return (
     <>
-      <div className="folders__crumbs mono">
-        {/* Every ancestor is a way back up, which is the only navigation the file pane needs. */}
-        <button className="folders__crumb" onClick={() => tree.select(label, [])}>
-          {label}
-        </button>
-        {path.map((part, i) => (
-          <span key={i}>
-            <span className="folders__crumbsep" aria-hidden="true">
-              /
+      {/* The bundled folder has nowhere to navigate to, so its one crumb would only ever be its
+          own name — which the header above already is. */}
+      {!builtin && (
+        <div className="folders__crumbs mono">
+          {/* Every ancestor is a way back up, which is the only navigation the file pane needs. */}
+          <button className="folders__crumb" onClick={() => tree.select(label, [])}>
+            {label}
+          </button>
+          {path.map((part, i) => (
+            <span key={i}>
+              <span className="folders__crumbsep" aria-hidden="true">
+                /
+              </span>
+              <button
+                className="folders__crumb"
+                onClick={() => tree.select(label, path.slice(0, i + 1))}
+              >
+                {part}
+              </button>
             </span>
-            <button className="folders__crumb" onClick={() => tree.select(label, path.slice(0, i + 1))}>
-              {part}
-            </button>
-          </span>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
       {node?.error ? (
         <div className="folders__note folders__note--error mono">{node.error}</div>
       ) : !node?.entries ? (
@@ -324,10 +367,12 @@ function FilePane({
               label={label}
               path={path}
               entry={entry}
+              builtin={builtin}
               entries={entries}
               activeName={activeName}
               onCloseFile={onCloseFile}
               onAddDiskFiles={onAddDiskFiles}
+              onAddSampleFiles={onAddSampleFiles}
               onOpenFile={onOpenFile}
             />
           ))}
@@ -341,18 +386,24 @@ function FileRow({
   label,
   path,
   entry,
+  builtin,
   entries,
   activeName,
   onCloseFile,
   onAddDiskFiles,
+  onAddSampleFiles,
   onOpenFile,
 }: {
   label: string;
   path: readonly string[];
   entry: DiskEntry;
+  builtin: boolean;
 } & Omit<Props, "tree">) {
   const source: DiskSource = { folder: label, path: [...path, entry.name] };
-  const name = diskFileName(source);
+  // A disk file is known by its folder-rooted path, because that path *is* the file. A sample is
+  // known by its plain name: opening one copies it into the app, exactly as dropping a file does,
+  // so what the app holds afterwards has no folder above it.
+  const name = builtin ? entry.name : diskFileName(source);
   const open = entries.find((e) => e.name === name);
   // What the click of this gesture did: which way it left the file, and when that has finished.
   // A `dblclick` arrives after its own two clicks have been handled and after `open` was last
@@ -365,7 +416,12 @@ function FileRow({
   const toggleLoaded = () => {
     gesture.current = open
       ? { open: false, settled: Promise.resolve(onCloseFile(name)) }
-      : { open: true, settled: Promise.resolve(onAddDiskFiles([source])) };
+      : {
+          open: true,
+          settled: Promise.resolve(
+            builtin ? onAddSampleFiles([entry.name]) : onAddDiskFiles([source]),
+          ),
+        };
   };
 
   return (
@@ -379,7 +435,13 @@ function FileRow({
           type="checkbox"
           className="folders__check"
           checked={!!open}
-          title={open ? "Close this file. Nothing on disk is deleted." : "Open this file"}
+          title={
+            open
+              ? builtin
+                ? "Close this file. The example itself stays here."
+                : "Close this file. Nothing on disk is deleted."
+              : "Open this file"
+          }
           aria-label={open ? `Close ${entry.name}` : `Open ${entry.name}`}
           onChange={toggleLoaded}
         />
@@ -391,7 +453,9 @@ function FileRow({
           title={
             open
               ? `${name} — click to close it`
-              : `${name} — click to open it off disk, double-click to go to it`
+              : builtin
+                ? `${name} — click to open a copy of this example, double-click to go to it`
+                : `${name} — click to open it off disk, double-click to go to it`
           }
           // `detail` is the click count, so the toggle runs once per gesture rather than again as
           // the second half of a double-click.

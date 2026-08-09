@@ -9,7 +9,8 @@ it through up to seven views: Overview, Protocol, Curves, Plates, Reference, Cal
 standalone plate file only gets Overview, Plates and Raw; a standalone protocol file only Overview,
 Protocol and Raw; a run report only Overview and Raw; a Biomeme run only Overview, Protocol, Curves,
 Plates and Raw — see below). Two further tabs are about no file at all: **Files**, the open files
-and the folders on disk, and **Instrument**, a live cycler over USB.
+and the folders — the ones granted on disk, plus the app's own bundled `samples` — and
+**Instrument**, a live cycler over USB.
 
 Open files and the one selection are the app's spine; see "Open files and the one selection" below
 before changing anything that touches them.
@@ -191,9 +192,9 @@ an `<a href="#load=…">`, not a button, so the browser's own affordances ("Copy
 middle-click, the status-bar target) work on it. Navigating to it is the whole mechanism; `App`'s
 `loadExample` handler covers only the case where the hash already *is* that value (a repeat click
 after a failed fetch), which fires no `hashchange`, and calls `addUrl` directly. So the link and
-an external deep link are one code path and the resulting URL is shareable. The example is
-`apps/web/public/examples/`, a symlink to the repo's `samples/` — Vite dereferences it into
-`dist/` at build time, so the file is served for real without a second copy in git.
+an external deep link are one code path and the resulting URL is shareable. The example is one of
+the bundled samples, at the same `/examples/<name>` path the samples folder opens its files from
+(see "The bundled samples folder" below) — one copy of the file, one way of reaching it.
 
 ### Same name replaces
 
@@ -970,11 +971,11 @@ instrument is still writing.
 
 ### The Files view is two panes
 
-The open-files table and the granted folders answer different questions — what this browser is
+The open-files table and the folders answer different questions — what this browser is
 holding, and what is on the disk — and are different lengths, so they are two panes that scroll
 independently rather than one long column. The folders pane is sized to its content and capped at
 55% of the view, so two folders don't cost half the window and thirty don't push the table out of
-it. With no folder granted there is only the table, exactly as before.
+it. With no folder granted the pane holds just the bundled `samples` section (below).
 
 Inside the folders pane each folder is a stacked section, and each section is itself split: the
 **directory tree** on one side, the **files of the directory you picked** on the other. Side by side
@@ -1006,6 +1007,43 @@ The folder's header stands in for the tree row its own root doesn't have — cli
 the files at the top level — which is why it is a plain header with buttons rather than a
 `<summary>`: it carries three separate actions (collapse, select the root, and the refresh/remove
 buttons) and a `<summary>` would swallow all of them into "toggle".
+
+### The bundled samples folder
+
+The last section in that pane is not on the disk at all: `samples`, the example files the app ships
+with. It is drawn by `FolderSection` alongside the granted ones rather than in a panel of its own,
+because it is the same thing — a list of files the app isn't holding yet, each with a checkbox that
+opens it — and a second component would drift from the first the moment either changed.
+
+Being built in rather than granted, it differs in exactly four ways, and each is a consequence of
+that one fact:
+
+- **It is always last**, after however many folders the user has granted, so the app's own files
+  never sit above theirs. `useDiskTree` appends it to `folders` after `listFolders()`.
+- **It cannot be removed or re-read** — no ✕, no ↻, no permission to ask back for. Its listing is
+  fixed when the app is built.
+- **It has no tree pane**, being one flat directory.
+- **Opening a file gives a copy.** A disk-backed file *is* the file on disk and is written back to;
+  there is nothing to write back to inside the app's own bundle, so a sample goes through `addUrl`
+  — the same fetch → `addFiles` path `#load=` uses — and lands as an ordinary file under its own
+  name, with no folder-rooted path (see "A disk-backed file's name is a path"). Edits stay in the
+  browser; the sample is what it always was.
+
+It is also present on browsers with no File System Access API, where `DiskTree.supported` is false
+and there is nothing else in the pane — which is why the pane is gated on `folders.length`, not on
+`supported`. The one place this is deliberately *not* counted as "the browser is holding something"
+is `App.tsx`'s welcome-screen test: `samples` is in that list on every browser, so counting it would
+mean the welcome screen never appeared again.
+
+**Nothing about the list is written in source.** `vite.config.ts`'s `zpcrweb-samples` plugin reads
+the repo's `samples/` directory at build time and produces both halves from that one read: a
+`virtual:samples` module naming the files (with size and mtime, so a row reads like a disk row) and
+the bytes themselves, emitted verbatim to `dist/examples/` in a build and served from the same paths
+by a middleware in dev. `lib/samples.ts` is the app's view of it. Adding a file to `samples/` and
+rebuilding is the whole procedure; the filter for *which* files is core's `matchesSupportedExtension`
+— the same list the picker and the disk lister use — so a format the app can't open is left out here
+exactly as it would be in a folder on disk. This replaced a `public/examples/` directory holding one
+symlink per offered file, which could only ever list what someone had remembered to link.
 
 ### Nothing is walked up front
 

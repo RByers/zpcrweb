@@ -12,6 +12,7 @@ import {
   isAlfName,
   markExperimentBegun,
   matchesSupportedExtension,
+  SUPPORTED_EXTENSIONS,
   parseAlf,
   parseBiomeme,
   parsePcrd,
@@ -1050,10 +1051,12 @@ export interface ZpcrStore {
   pendingIds: Set<string>;
   /**
    * Fetch a file over HTTP and load it as if it had been dropped — the `#load=<url>` hash key's
-   * implementation, and how the welcome screen's example button works. The name comes from the
-   * URL's last path segment (see {@link fileNameFromUrl}).
+   * implementation, how the welcome screen's example button works, and how a file is opened out of
+   * the bundled `samples` folder (`lib/samples.ts`). The name comes from the URL's last path
+   * segment (see {@link fileNameFromUrl}); the loaded file's name comes back, or `null` if the
+   * fetch or the decode failed (the error is reported through {@link error} either way).
    */
-  addUrl: (url: string) => Promise<void>;
+  addUrl: (url: string) => Promise<string | null>;
   setActive: (id: string) => void;
   /**
    * Close a file: its bytes leave memory and its records leave IndexedDB, in one act. A
@@ -1748,16 +1751,18 @@ export function useZpcrStore(): ZpcrStore {
     async (url: string) => {
       const name = fileNameFromUrl(url);
       try {
-        // Only the extension is checked here; `addFiles` below does the real (content-based)
-        // validation once it has the bytes.
-        if (!/\.(zpcr|pcrd|pltd|csv|bmrun)$/i.test(name)) {
-          throw new Error("not a .zpcr, .pcrd, .pltd, .csv or .bmrun file");
+        // Only the name is checked here, against the one list of openable extensions the picker
+        // and the disk lister use; `addFiles` below does the real (content-based) validation once
+        // it has the bytes.
+        if (!matchesSupportedExtension(name)) {
+          throw new Error(`not one of ${SUPPORTED_EXTENSIONS.join(", ")}`);
         }
         const res = await fetch(url, { credentials: "omit" });
         if (!res.ok) throw new Error(`fetch failed (HTTP ${res.status})`);
-        await addFiles([new File([await res.arrayBuffer()], name)]);
+        return await addFiles([new File([await res.arrayBuffer()], name)]);
       } catch (e) {
         setError(`${url}: ${e instanceof Error ? e.message : String(e)}`);
+        return null;
       }
     },
     [addFiles],
