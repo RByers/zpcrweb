@@ -2420,9 +2420,11 @@ neighbours' channels.
 - **Default selection = what the analysis uses.** A run ships a `.Dcal` for every dye Bio-Rad
   sells on both tube types (28 files in the committed samples), which is unreadable all at once.
   `lib/calibrationCurves.ts` marks each file `inUse` on exactly the terms
-  `matchFluorCalibrations` matches on (this plate's fluorophores, this plate's tube type, both
-  compared case-insensitively), and those are what's shown; everything else is one chip-click
-  away. `inUse` decides the default selection and **nothing else** — in particular it doesn't
+  `matchFluorCalibrations` matches on (this plate's fluorophores, the tube type(s) its wells sit
+  in, both compared case-insensitively), and those are what's shown; everything else is one
+  chip-click away. A plate that mixes plastics (`pltcsv.md` §3.1) marks *both* groups in use,
+  because such a run really does read both halves of the set — one calibration matrix per vessel
+  (`calibration.md` §3.1). `inUse` decides the default selection and **nothing else** — in particular it doesn't
   affect how a line is drawn. A `.Dcal` set characterizes the instrument's optics, not the run:
   across the committed samples the four `.zpcr` files carry bit-identical calibration values from
   2019 to 2026 (same instrument, alpha `SG16130`), and the two `.pcrd` files agree with them to

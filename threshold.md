@@ -169,6 +169,12 @@ near-identical curves, one cohort being a single well.
 
 **The median** is what keeps one unusual well from moving the group.
 
+**One group spans both vessels** on a plate loaded with a mix of plastics (`pltcsv.md` §3.1) —
+the fluorophore is the group, whatever the well sits in. The white and clear halves of such a
+plate genuinely differ in gain, but baseline noise is an instrument floor rather than a fraction
+of the signal, so the pooled median barely moves: measured at ≤0.52 cycles of Cq, worst case
+(`calibration.md` Appendix A).
+
 **The multiplier is a default, not a reproduction.** The evidence says the *form* of the rule is
 wrong rather than the constant: on one plate, three dyes read in the same cycles, with baseline noise
 within 40% of each other, used thresholds spanning 35× (§A.3, §B.3). No noise-relative rule can

@@ -2,6 +2,7 @@ import { PasswordPrompt } from "../PasswordPrompt";
 import { OverviewPanel, type InfoRow, type OverviewPanelProps } from "./OverviewPanel";
 import { OverviewPlateSection } from "./OverviewPlateSection";
 import { usePltdPassword } from "../../state/pltdPassword";
+import { plateVesselLabel } from "../../lib/plateNames";
 import type { LoadedFile, PlateFileResult } from "../../state/useZpcrStore";
 
 /**
@@ -29,7 +30,7 @@ export function StandalonePlateOverviewView({
   const rows: InfoRow[] = plate
     ? [
         { label: "Plate", value: `${plate.rows}×${plate.columns}` },
-        { label: "Vessel", value: plate.plateName || "—" },
+        { label: "Vessel", value: plateVesselLabel(plate) || "—" },
         ...(result.container
           ? [{ label: "Encrypted", value: result.container.encrypted ? "Yes" : "No" }]
           : []),

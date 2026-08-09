@@ -35,7 +35,7 @@ parses.
 
 | Line | Meaning |
 |---|---|
-| `# vessel: <name> <rows>x<columns>` | The only header line that matters. `<name>` is `PlateDefinition.plateName` — the consumable type (`BR Clear`, `BR White`), not the plate's own name (see §4) — spelled `vessel` so it can't be mistaken for that. `<rows>x<columns>` is the plate's extent; absent, the extent is inferred from the well labels seen in the table. |
+| `# vessel: <name> <rows>x<columns>` | The only header line that matters. `<name>` is `PlateDefinition.plateName` — the consumable type (`BR Clear`, `BR White`), not the plate's own name (see §4) — spelled `vessel` so it can't be mistaken for that. Either half may be left out: `<rows>x<columns>` is the plate's extent, and absent it the extent is inferred from the well labels seen in the table; the `<name>` is absent exactly when the plate states its vessel per well instead (§3.1). |
 | `# plateType: <value>` | Display-only passenger from a `.pltd` (CFX's template category). Omitted when empty. |
 | `# scanMode: <value>` | Display-only passenger from a `.pltd`. Omitted when empty. |
 | `# standardUnits: <value>` | Display-only passenger from a `.pltd`. Omitted when empty. |
@@ -49,6 +49,7 @@ parses.
 | `Sample` | yes | Sample name. Blank = none. |
 | `Replicate` | no | Written only when some well on the plate uses it (most don't — a column of empty cells says nothing); read whenever present, in any column position. |
 | `Quantity` | no | Same rule as `Replicate`. |
+| `Vessel` | no | This well's consumable type, for a plate loaded with a mix of plastics — see §3.1. Same rule as `Replicate`: written only when some well uses it. |
 | one column per fluorophore | no | See §4. |
 
 Row order is presentation only: `parsePlateCsv` places each row by its own well label and derives
@@ -58,6 +59,48 @@ C1, … A2, B2`), the order a plate is actually filled down. A well carrying not
 `isBlankWell`) is left out of the table entirely — on a typical plate that's most of the wells —
 and a well missing from the table parses back to exactly that; the header's `rows`/`columns` (or
 the well labels seen) keep the plate's extent regardless.
+
+### 3.1 `Vessel` — a plate that mixes plastics
+
+**This is the one thing the format describes that no CFX format can.** A `.pltd`/`.pcrd` carries
+the vessel once, on the root element ([`pltd.md`](./pltd.md) §2), so a CFX plate is single-vessel
+by construction — while the block itself is perfectly happy holding white strip tubes beside clear
+ones, and the two plastics have separate pure-dye calibrations
+([`calibration.md`](./calibration.md) §3.1).
+
+A `Vessel` column gives each well its own value, in the same vocabulary as the header line
+(`BR Clear`, `BR White`, `MJ White`; matched case-insensitively, like every vessel comparison).
+A blank cell means the well says nothing.
+
+**The two forms are strictly either-or.** A file that names a vessel on the header line *and*
+carries a `Vessel` column is **rejected** — not resolved in some precedence order:
+
+```
+Plate CSV: the vessel is stated twice — "# vessel: BR White 8x12" names one and a "Vessel"
+column gives one per well. Use one or the other: drop the column, or reduce the header line to
+the plate's extent alone ("# vessel: 8x12").
+```
+
+The two would drift apart the first time someone edited one and not the other, and no reading of
+which the author meant is better than the other. So a per-well plate writes the extent alone on
+the header line and leaves `PlateDefinition.plateName` empty:
+
+```csv
+# zpcrweb plate definition
+# vessel: 8x12
+Well,SampleType,Sample,Vessel,FAM,Tex 615
+A1,unknown,S183,BR White,ATP,+
+A2,unknown,S184,BR Clear,ATP,+
+```
+
+An empty `plateName` therefore means "ask the wells", never "unknown". Note that a well carrying
+*only* a vessel is not a blank well (§3) — the plastic is in the block whether or not anything was
+pipetted into it — so its row is written out and survives the round-trip.
+
+> **Future:** the vocabulary is open-ended here, as it is in a `.pltd` — anything containing
+> "white" resolves to the `BR White` calibration and everything else to `BR Clear`
+> (`resolveTubeType`). A third genuinely-distinct plastic would need calibration data that no
+> archive currently ships.
 
 ## 4. Fluor columns
 

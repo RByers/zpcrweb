@@ -90,6 +90,18 @@ export interface WellDefinition {
   replicate?: number;
   /** Standard concentration (`sampleQuantity`), when a finite number (NaN is treated as unset). */
   quantity?: number;
+  /**
+   * Vessel type for *this well*, when the plate states one per well — the same vocabulary as
+   * {@link PlateDefinition.plateName} (`BR Clear`, `BR White`, `MJ White`), and the join key
+   * into the matching `.Dcal` calibration.
+   *
+   * Undefined on every plate CFX itself can write: `.pltd`/`.pcrd` carry the vessel once, on the
+   * root element, so a CFX plate is single-vessel by construction. Only zpcrweb's own `.plt.csv`
+   * can state it per well (a `Vessel` column — see `plateCsv.ts`), for a block loaded with a mix
+   * of plastics, which the instrument is perfectly happy to run and CFX's format simply cannot
+   * describe. Undefined means "use the plate's own {@link PlateDefinition.plateName}".
+   */
+  vessel?: string;
 }
 
 /** A dye layer of the plate: one fluorophore across all wells. */
@@ -122,6 +134,10 @@ export interface PlateDefinition {
    * case-insensitively) and so selects which calibration data applies. See `pltd.md` §2.
    * For a user-facing plate/setup name, see {@link identityKey} instead — despite the
    * confusingly similar name, `plateName` is never that.
+   *
+   * **Empty when the plate states its vessel per well instead** ({@link WellDefinition.vessel}),
+   * which only a `.plt.csv` can do. The two are strictly either-or, so an empty value here means
+   * "ask the wells", not "unknown".
    */
   plateName: string;
   /**

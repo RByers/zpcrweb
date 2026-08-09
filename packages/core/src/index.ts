@@ -221,6 +221,8 @@ export {
 } from "./threshold.js";
 export {
   resolveTubeType,
+  wellTubeType,
+  plateTubeTypes,
   matchFluorCalibrations,
   computeFluorCurves,
   dyeSpaceFluorCurves,
@@ -337,6 +339,7 @@ export type { BaselineRegion, BaselineMode, LinearBaselineFit } from "./baseline
 export type { AutoThresholdOptions, ThresholdOptions } from "./threshold.js";
 export type {
   TubeType,
+  DyeSolver,
   FluorCalibration,
   FluorCorrections,
   FluorCurve,

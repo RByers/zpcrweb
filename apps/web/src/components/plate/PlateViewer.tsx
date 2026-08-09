@@ -9,7 +9,7 @@ import {
 import { fluorColor } from "../../lib/fluorColors";
 import { FluorChannelChip } from "./FluorChannelChip";
 import { ROW_LABELS, SAMPLE_TYPE_META } from "../../lib/sampleType";
-import { plateDisplayName } from "../../lib/plateNames";
+import { plateDisplayName, plateVesselLabel } from "../../lib/plateNames";
 import { useHoverCard, type HoverCardData, type HoverCardRow } from "../curves/HoverCard";
 import { Pair } from "../raw/Pair";
 
@@ -94,7 +94,9 @@ export function PlateViewer({
         {!compact && (
           <dl className="decoded__dl mono">
             {kind && <Pair k="Type" v={fileKindDescription(kind)} />}
-            <Pair k="Vessel" v={plate.plateName || "—"} />
+            {/* A mixed-vessel plate has no plate-level name — the wells each carry their own,
+                so list what's actually in the block rather than showing a dash. */}
+            <Pair k="Vessel" v={plateVesselLabel(plate) || "—"} />
             <Pair k="Scan mode" v={plate.scanMode || "—"} />
             <Pair k="Plate type" v={plate.plateType || "—"} />
             <Pair k="Std units" v={plate.standardUnits || "—"} />
@@ -173,6 +175,9 @@ function wellCard(well: WellDefinition, fluorOrder: PlateFluor[]): HoverCardData
     well.sample ? `Sample: ${well.sample}` : null,
     well.replicate !== undefined ? `Rep ${well.replicate}` : null,
     well.quantity !== undefined ? `Qty ${well.quantity}` : null,
+    // Only on a plate that states the vessel per well — otherwise the whole plate's plastic is
+    // already named above the grid, and repeating it in all 96 cards says nothing.
+    well.vessel ?? null,
   ]
     .filter(Boolean)
     .join(" · ");

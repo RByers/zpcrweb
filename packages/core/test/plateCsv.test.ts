@@ -421,3 +421,71 @@ describe("Zpcr.channelForDye — giving an outside plate CSV its channels", () =
     expect(mapped.fluors.some((f) => f.channel !== undefined)).toBe(true);
   });
 });
+
+describe("plate CSV — per-well vessel", () => {
+  /** A plate whose two loaded columns sit in different plastic — the case no CFX format can
+   * express, since a `.pltd` carries one vessel on the root element. */
+  function mixedPlate(): PlateDefinition {
+    const plate = syntheticPlate();
+    return {
+      ...plate,
+      plateName: "",
+      wells: plate.wells.map((w) =>
+        w.loaded ? { ...w, vessel: w.col === 0 ? "BR White" : "BR Clear" } : w,
+      ),
+    };
+  }
+
+  it("round-trips a per-well vessel through the Vessel column", () => {
+    const csv = plateToCsv(mixedPlate());
+    const back = parsePlateCsv(csv, { channelForFluor: SYNTHETIC_CHANNELS });
+    expect(back.wells.find((w) => w.label === "A1")?.vessel).toBe("BR White");
+    expect(back.wells.find((w) => w.label === "A2")?.vessel).toBe("BR Clear");
+    // Untouched wells say nothing rather than inheriting a value they were never given.
+    expect(back.wells.find((w) => w.label === "A3")?.vessel).toBeUndefined();
+    expect(back.wells).toEqual(mixedPlate().wells);
+  });
+
+  it("writes the extent alone on the vessel line, and no plate-level name", () => {
+    const csv = plateToCsv(mixedPlate());
+    expect(csv).toContain("# vessel: 8x12\r\n");
+    expect(csv).toContain(",Vessel,");
+    const plate = parsePlateCsv(csv);
+    expect(plate.plateName).toBe("");
+    expect([plate.rows, plate.columns]).toEqual([8, 12]);
+  });
+
+  it("omits the Vessel column entirely when no well carries one", () => {
+    const csv = plateToCsv(syntheticPlate());
+    expect(csv).not.toContain("Vessel");
+    expect(csv).toContain("# vessel: BR White 8x12\r\n");
+  });
+
+  it("keeps a vessel stated on an otherwise-blank well", () => {
+    const plate = syntheticPlate();
+    const wells = plate.wells.map((w) => (w.label === "H12" ? { ...w, vessel: "BR Clear" } : w));
+    const back = parsePlateCsv(plateToCsv({ ...plate, plateName: "", wells }));
+    expect(back.wells.find((w) => w.label === "H12")?.vessel).toBe("BR Clear");
+  });
+
+  it("rejects a file that states the vessel both ways", () => {
+    const csv = [
+      "# vessel: BR White 8x12",
+      "Well,SampleType,Sample,Vessel,FAM",
+      "A1,unknown,,BR Clear,GeneA",
+    ].join("\r\n");
+    expect(() => parsePlateCsv(csv)).toThrow(/stated twice/);
+  });
+
+  it("accepts a Vessel column alongside an extent-only vessel line", () => {
+    const csv = [
+      "# vessel: 8x12",
+      "Well,SampleType,Sample,Vessel,FAM",
+      "A1,unknown,,BR Clear,GeneA",
+    ].join("\r\n");
+    const plate = parsePlateCsv(csv);
+    expect(plate.plateName).toBe("");
+    expect([plate.rows, plate.columns]).toEqual([8, 12]);
+    expect(plate.wells.find((w) => w.label === "A1")?.vessel).toBe("BR Clear");
+  });
+});

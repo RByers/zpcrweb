@@ -513,7 +513,11 @@ type"), which is what picks the tube type the dye response curve is built for, a
 name invited reading it as the plate's own name when the file name is that. It also sits next
 to a real `plateType` header, CFX's unrelated template category. The plate's extent rides on
 the same line — `# vessel: BR Clear 8x12` — since it's one more fact about the physical plate;
-absent, it's inferred from the well labels. Header values are read up to the first comma, since
+absent, it's inferred from the well labels. A `Vessel` **column** says it per well instead, for a
+block loaded with a mix of plastics — the one thing this format describes that no CFX format can,
+since a `.pltd` carries the vessel once on its root element. The two are strictly either-or and a
+file stating both is rejected, so an empty `plateName` means "ask the wells" (pltcsv.md §3.1;
+the analysis builds one calibration matrix per vessel present, calibration.md §3.1). Header values are read up to the first comma, since
 a spreadsheet round-trip pads comment lines with trailing commas. It's
 deliberately not a CFX format (no `meta`/`fluorId` fidelity), so it isn't a decoder doc in the
 table above.

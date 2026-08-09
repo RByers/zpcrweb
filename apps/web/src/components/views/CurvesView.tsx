@@ -29,6 +29,7 @@ import {
   useRunAnalysis,
 } from "../../lib/runAnalysis";
 import { downloadText } from "../../lib/download";
+import { vesselLabel } from "../../lib/plateNames";
 import { ChannelBar } from "../curves/ChannelBar";
 import { FluorBar, type FluorChip } from "../curves/FluorBar";
 import { SampleBar } from "../curves/SampleBar";
@@ -90,7 +91,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
     allCurves,
     darkCurves,
     available,
-    tube,
+    tubes,
     fluorCals,
     calibrationAvailable,
     wellFluorTargets,
@@ -230,6 +231,10 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
   const resetFluors = () => onChange({ disabledFluors: new Set<string>() });
 
   const calibrationOn = settings.calibration ?? calibrationAvailable;
+  /** Names the plastic the calibration warnings below are talking about — both of them, on a
+   * plate that mixes vessels, since each has its own calibration and either can be the one
+   * missing. */
+  const vessels = vesselLabel(tubes);
   const fluorViewMode: FluorViewMode = settings.fluorViewMode;
   /** Table mode replaces the chart with the run's Cq/ΔRFU table (the former Analysis view). It is
    * dye-space-only for the same reason the "Target" mode is: a per-target Cq needs color
@@ -1049,7 +1054,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
                     exists (see FileSettings) — it just isn't a user-facing choice. */}
                 {calibrationOn && !dyeSpace && !calibrationAvailable && (
                   <div className="rail__note mono">
-                    No .Dcal calibration matches this plate's fluorophores for {tube}. Check
+                    No .Dcal calibration matches this plate's fluorophores for {vessels}. Check
                     the Calibration files under Raw files.
                   </div>
                 )}
@@ -1058,7 +1063,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
                   calibrationAvailable &&
                   fluorCals.some((f) => !f.curve) && (
                     <div className="rail__note mono">
-                      No {tube} calibration for:{" "}
+                      No {vessels} calibration for:{" "}
                       {fluorCals
                         .filter((f) => !f.curve)
                         .map((f) => f.fluor)

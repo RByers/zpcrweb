@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { resolveTubeType, stepTemperature, type Zpcr } from "@zpcrweb/core";
+import { plateTubeTypes, stepTemperature, type TubeType, type Zpcr } from "@zpcrweb/core";
 import type { CalView, FileSettings, Scale } from "../../state/useZpcrStore";
 import { usePltdPassword } from "../../state/pltdPassword";
 import { channelLabel } from "../../lib/channelColors";
+import { vesselLabel } from "../../lib/plateNames";
 import {
   calChannels,
   calPlateTypes,
@@ -70,14 +71,17 @@ export function CalibrationView({ zpcr, settings, onChange }: Props) {
     () => zpcr.plates(pltdPassword || undefined)[0]?.pltd.plate,
     [zpcr, pltdPassword],
   );
-  const tube = resolveTubeType(plate?.plateName);
+  // Every vessel the plate's wells sit in — one for any plate CFX can write, two for a
+  // `.plt.csv` that mixes plastics, in which case the run really does read both halves of the
+  // archive's calibration set and both are marked in use below.
+  const tubes = useMemo(() => plateTubeTypes(plate), [plate]);
   const files = useMemo(
-    () => calibrationFiles(calibrations, tube, plate?.fluors.map((f) => f.fluor) ?? []),
-    [calibrations, tube, plate],
+    () => calibrationFiles(calibrations, tubes, plate?.fluors.map((f) => f.fluor) ?? []),
+    [calibrations, tubes, plate],
   );
   const plateTypes = useMemo(() => calPlateTypes(files), [files]);
   const available = useMemo(() => calChannels(files), [files]);
-  const defaultKeys = useMemo(() => defaultCalKeys(files, tube), [files, tube]);
+  const defaultKeys = useMemo(() => defaultCalKeys(files, tubes), [files, tubes]);
   /** True while the default is a fallback rather than a real match — see `defaultCalKeys`. */
   const usingFallback = files.length > 0 && !files.some((f) => f.inUse);
 
@@ -265,7 +269,9 @@ export function CalibrationView({ zpcr, settings, onChange }: Props) {
                 <div key={plateType} className="calgroup">
                   <div className="calgroup__title mono">
                     {plateType}
-                    {plateType === tube && <span className="calgroup__tag">plate</span>}
+                    {tubes.includes(plateType as TubeType) && (
+                      <span className="calgroup__tag">plate</span>
+                    )}
                   </div>
                   <FluorBar
                     items={chipsFor(plateType)}
@@ -278,8 +284,8 @@ export function CalibrationView({ zpcr, settings, onChange }: Props) {
               ))}
               {usingFallback && (
                 <div className="rail__note mono">
-                  No plate data, so no calibration is in use — showing every {tube} calibration
-                  instead.
+                  No plate data, so no calibration is in use — showing every{" "}
+                  {vesselLabel(tubes)} calibration instead.
                 </div>
               )}
             </>

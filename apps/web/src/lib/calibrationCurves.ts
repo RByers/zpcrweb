@@ -64,14 +64,16 @@ function norm(s: string): string {
  * below them rather than cutting across it alphabetically.
  *
  * `plateFluors` is the plate's fluorophore list (empty when there's no plate, e.g. before a
- * password unlocks one) and `tube` the tube type it resolves to; together they decide `inUse`.
+ * password unlocks one) and `tubes` the vessel types its wells sit in — normally one, two for a
+ * plate that mixes plastics, which the analysis then reads a calibration set for *each* of;
+ * together they decide `inUse`.
  */
 export function calibrationFiles(
   entries: DcalEntry[],
-  tube: TubeType,
+  tubes: readonly TubeType[],
   plateFluors: string[],
 ): CalibrationFile[] {
-  const wantedTube = norm(tube);
+  const wantedTubes = new Set(tubes.map(norm));
   const wantedDyes = new Set(plateFluors.map(norm));
   return entries
     .map(({ dcal }) => {
@@ -84,7 +86,7 @@ export function calibrationFiles(
         primaryChannel: dcal.primaryChannel,
         channels: curve.channels,
         readings: readings.channels,
-        inUse: norm(dcal.plate) === wantedTube && wantedDyes.has(norm(dcal.dye)),
+        inUse: wantedTubes.has(norm(dcal.plate)) && wantedDyes.has(norm(dcal.dye)),
       };
     })
     .sort(
@@ -100,9 +102,10 @@ export function calibrationFiles(
  * or still behind a password) nothing is "in use", so fall back to every file for the resolved
  * tube type — an unfiltered 28-line plot would be unreadable, and a blank one uninformative.
  */
-export function defaultCalKeys(files: CalibrationFile[], tube: TubeType): Set<string> {
+export function defaultCalKeys(files: CalibrationFile[], tubes: readonly TubeType[]): Set<string> {
   const inUse = files.filter((f) => f.inUse);
-  const chosen = inUse.length > 0 ? inUse : files.filter((f) => norm(f.plateType) === norm(tube));
+  const wanted = new Set(tubes.map(norm));
+  const chosen = inUse.length > 0 ? inUse : files.filter((f) => wanted.has(norm(f.plateType)));
   return new Set(chosen.map((f) => f.key));
 }
 

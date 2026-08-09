@@ -102,6 +102,11 @@ Three traps worth knowing:
   internal collection metadata and is **not** what this attribute holds; the white/clear
   distinction is carried by the string above and nothing else.
 
+**A CFX plate is therefore single-vessel by construction** — one attribute, one plastic for the
+whole block — even though the block itself will happily hold white strip tubes beside clear ones.
+zpcrweb's own [`.plt.csv`](./pltcsv.md) §3.1 can say it per well (`WellDefinition.vessel`) for
+exactly that case; nothing here can, and no decoder in this repo invents one.
+
 One cross-format note: the `.pcrd` document embeds this same schema but spells the root element
 `<plateSetup2>` (capital S) where a `.pltd` uses `<platesetup2>`. The attribute is `plateName` in
 both. Match the element name case-insensitively if one code path handles both.

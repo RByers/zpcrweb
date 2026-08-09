@@ -63,6 +63,32 @@ export function resolveTubeType(plateName: string | undefined): TubeType {
   return plateName?.trim().toLowerCase().includes("white") ? "BR White" : "BR Clear";
 }
 
+/**
+ * The tube type one well sits in: its own {@link WellDefinition.vessel} when the plate states one
+ * per well, else the plate's {@link PlateDefinition.plateName}. Only a `.plt.csv` can state it
+ * per well — see that field — so for every CFX-authored plate this is the plate's own answer for
+ * every well, exactly as before.
+ */
+export function wellTubeType(plate: PlateDefinition | undefined, row: number, col: number): TubeType {
+  const well = plate?.wells.find((w) => w.row === row && w.col === col);
+  return resolveTubeType(well?.vessel ?? plate?.plateName);
+}
+
+/**
+ * Every tube type present on a plate, plate order, deduplicated — one entry for a normal
+ * single-vessel plate, two for a mixed one. Drives how many calibration matrices a run needs
+ * ({@link computeRunAnalysis}).
+ */
+export function plateTubeTypes(plate: PlateDefinition | undefined): TubeType[] {
+  if (!plate) return [resolveTubeType(undefined)];
+  const seen: TubeType[] = [];
+  for (const w of plate.wells) {
+    const tube = resolveTubeType(w.vessel ?? plate.plateName);
+    if (!seen.includes(tube)) seen.push(tube);
+  }
+  return seen.length ? seen : [resolveTubeType(plate.plateName)];
+}
+
 /** One fluorophore present on the plate, with its calibration curve if a matching `.Dcal` was found. */
 export interface FluorCalibration {
   fluor: string;
@@ -155,11 +181,23 @@ export interface FluorCurve {
   fileAnalysis?: FileAnalysis;
 }
 
+/** The calibration a single well is solved against — one vessel's matrix, plus each of its
+ * columns' primary channel (aligned with `matrix.dyes`, and used only for the returned curves'
+ * coloring, never fed into the solve). */
+export interface DyeSolver {
+  matrix: CalibrationMatrix;
+  dyeChannels: (number | undefined)[];
+}
+
 /**
  * Run color separation for every well and cycle: build the raw per-channel vector (restricted
- * to `channels`, in that order), apply `calibration.md` §4's corrections, and solve against
- * `matrix`. `dyeChannels` gives each matrix column's primary channel, aligned with
- * `matrix.dyes`, purely for the returned curves' coloring.
+ * to `channels`, in that order), apply `calibration.md` §4's corrections, and solve against the
+ * {@link DyeSolver} `solverFor` returns for that well.
+ *
+ * `solverFor` is per well rather than per run because a plate may mix vessel types, and white
+ * and clear plastic have separate pure-dye calibrations (`calibration.md` §3.1). Returning
+ * `undefined` skips the well entirely — that vessel has no usable calibration — which is the
+ * same treatment an uncalibrated dye already gets.
  *
  * `corrections` carries the per-cycle reference/dark levels and per-well gain factors. Omitting
  * it skips §4 entirely, which is only right for a run that genuinely has none of that data —
@@ -172,9 +210,8 @@ export interface FluorCurve {
  */
 export function computeFluorCurves(
   wellCurves: WellCurve[],
-  matrix: CalibrationMatrix,
+  solverFor: (row: number, col: number) => DyeSolver | undefined,
   channels: number[],
-  dyeChannels: (number | undefined)[],
   corrections: FluorCorrections = {},
 ): FluorCurve[] {
   const byWell = new Map<string, Map<number, WellCurve>>();
@@ -189,6 +226,12 @@ export function computeFluorCurves(
   for (const byChannel of byWell.values()) {
     const first = [...byChannel.values()][0];
     if (!first) continue;
+    // Per well, because the plate may mix vessels and each plastic has its own calibration
+    // (`WellDefinition.vessel`). On the single-vessel plates every CFX format can express, every
+    // well gets the same solver and this is the one matrix it always was.
+    const solver = solverFor(first.row, first.col);
+    if (!solver) continue;
+    const { matrix, dyeChannels } = solver;
     const cycles = first.cycles;
     const perDye: number[][] = matrix.dyes.map(() => new Array<number>(cycles.length).fill(0));
     // Per well, not per cycle: the gain factors are a fixed property of the plate position.
@@ -518,7 +561,13 @@ export interface RunAnalysis {
   darkCurves: DarkCurve[];
   /** Optical channels this run actually scanned. */
   available: number[];
+  /** The plate's own vessel — its {@link PlateDefinition.plateName}. On a mixed-vessel plate
+   * (`.plt.csv` only) that name is empty and this is the default the wells that state nothing
+   * fall back to; {@link tubes} is what such a run is actually analysed against. */
   tube: TubeType;
+  /** Every vessel type the plate's wells sit in — one entry for any plate CFX can write, two
+   * for a mixed one. One calibration matrix is built per entry. */
+  tubes: TubeType[];
   fluorCals: FluorCalibration[];
   calibratedFluors: FluorCalibration[];
   calibrationAvailable: boolean;
@@ -612,8 +661,24 @@ export function computeRunAnalysis(
   const plate = plateEntry?.pltd.plate;
   const calibrations = zpcr.calibrations();
   const tube = resolveTubeType(plate?.plateName);
+  // One entry for every plate CFX can write; two only for a `.plt.csv` that mixes plastics.
+  const tubes = plateTubeTypes(plate);
+  // Per-vessel calibration: the same dye has a different pure-dye response in white than in
+  // clear, so each vessel present gets its own matched fluor list and its own matrix below.
+  const calsByTube = new Map<TubeType, FluorCalibration[]>(
+    tubes.map((t) => [t, plate ? matchFluorCalibrations(plate.fluors, calibrations, t) : []]),
+  );
 
-  const fluorCals = plate ? matchFluorCalibrations(plate.fluors, calibrations, tube) : [];
+  // The run-level fluor list the UI groups and labels by. A dye is one dye whichever plastic it
+  // sits in, so this is merged across vessels rather than duplicated per vessel: the plate's own
+  // vessel answers first, and any other present vessel supplies a curve for a dye that one
+  // doesn't cover.
+  const fluorCals: FluorCalibration[] = (calsByTube.get(tube) ?? calsByTube.get(tubes[0]!) ?? []).map(
+    (f) => ({
+      ...f,
+      curve: f.curve ?? tubes.map((t) => calsByTube.get(t)?.find((o) => o.fluor === f.fluor)?.curve).find(Boolean),
+    }),
+  );
   // A dye-space source has no `.Dcal` calibration to match — its fluors are trustworthy by
   // construction, not by having found one (see `RunAnalysis.dyeSpace`).
   const calibratedFluors = dyeSpace ? fluorCals : fluorCals.filter((f) => f.curve);
@@ -671,17 +736,36 @@ export function computeRunAnalysis(
 
   // A dye-space source has no channel mixing to solve for at all (see `RunAnalysis.dyeSpace`) —
   // `allFluorCurves` below reads its curves straight off `allCurves` instead.
-  const matrix =
-    dyeSpace || calibratedFluors.length === 0
-      ? null
-      : // `channels` is passed in rather than slicing rows afterwards so the matrix's column
+  // One solver per vessel present — normally exactly one. Each is built over the dyes *that*
+  // vessel has calibration for, so a dye covered in clear but not white still quantifies in the
+  // clear wells instead of costing the whole run its matrix.
+  const solverByTube = new Map<TubeType, DyeSolver>();
+  if (!dyeSpace) {
+    for (const t of tubes) {
+      const cals = (calsByTube.get(t) ?? []).filter((f) => f.curve);
+      if (cals.length === 0) continue;
+      solverByTube.set(t, {
+        // `channels` is passed in rather than slicing rows afterwards so the matrix's column
         // norms — the RFU scale factor of calibration.md §5 — are computed over the rows the
         // solve uses.
-        buildCalibrationMatrix(
-          calibratedFluors.map((f) => f.curve!),
-          stepTemperatureC,
-          { normalization: settings.calibrationNormalization ?? "global", channels: available },
-        );
+        matrix: buildCalibrationMatrix(cals.map((f) => f.curve!), stepTemperatureC, {
+          normalization: settings.calibrationNormalization ?? "global",
+          channels: available,
+        }),
+        dyeChannels: cals.map((f) => f.channel),
+      });
+    }
+  }
+  // Well → vessel, resolved once: `wellTubeType` scans the plate's wells, and doing that per well
+  // inside the separation loop would be quadratic for no gain.
+  const tubeByWell = new Map<string, TubeType>();
+  if (plate) {
+    for (const w of plate.wells) {
+      tubeByWell.set(wellKey(w.row, w.col), resolveTubeType(w.vessel ?? plate.plateName));
+    }
+  }
+  const solverFor = (row: number, col: number): DyeSolver | undefined =>
+    solverByTube.get(tubeByWell.get(wellKey(row, col)) ?? tube);
 
   // The §4 corrections applied to every raw reading before the solve. The levels are read per
   // scan, so this is a `[channelIndex][cycle]` table aligned with `available`.
@@ -703,14 +787,8 @@ export function computeRunAnalysis(
         allCurves,
         (ch) => new Map(plate?.fluors.map((f) => [f.channel, f.fluor]) ?? []).get(ch),
       )
-    : matrix
-      ? computeFluorCurves(
-          allCurves,
-          matrix,
-          available,
-          calibratedFluors.map((f) => f.channel),
-          corrections,
-        )
+    : solverByTube.size > 0
+      ? computeFluorCurves(allCurves, solverFor, available, corrections)
       : [];
 
   // ---- The Cq table ------------------------------------------------------------------------
@@ -784,6 +862,7 @@ export function computeRunAnalysis(
     darkCurves,
     available,
     tube,
+    tubes,
     fluorCals,
     calibratedFluors,
     calibrationAvailable,

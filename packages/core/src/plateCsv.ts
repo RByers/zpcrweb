@@ -28,9 +28,18 @@
  * `SampleType` holds a normalized {@link SampleType} name; a raw CFX `wellSampleType` code is
  * accepted there too and normalized on read (see {@link SAMPLE_TYPE_TO_RAW}).
  *
- * `Replicate` and `Quantity` are omitted entirely when no well on the plate carries one — which
- * is most plates — rather than written as a column of empty cells. They're read whenever
- * present, in any column position.
+ * `Replicate`, `Quantity` and `Vessel` are omitted entirely when no well on the plate carries
+ * one — which is most plates — rather than written as a column of empty cells. They're read
+ * whenever present, in any column position.
+ *
+ * `Vessel` is how this format says something no CFX format can: **a block loaded with a mix of
+ * plastics**, white tubes beside clear ones, which the instrument runs perfectly happily. A
+ * `.pltd`/`.pcrd` carries the vessel once on the root element, so a CFX plate is single-vessel
+ * by construction. Stating it per well is therefore strictly an alternative to stating it on the
+ * header line, never an addition: a file that does both is **rejected** by
+ * {@link parsePlateCsv} rather than resolved in some order, since the two would drift apart and
+ * no reading of the author's intent is better than the other. A per-well plate's header line
+ * carries the extent alone (`# vessel: 8x12`) and its {@link PlateDefinition.plateName} is empty.
  *
  * Only `vessel` is always written, as `# vessel: <name> <rows>x<columns>`: the extent rides
  * along on that line, and falls back to the extent implied by the well labels when absent.
@@ -150,7 +159,7 @@ const PRESENT_NO_TARGET = "+";
 /** Columns every file carries, and which {@link parsePlateCsv} insists on. */
 const REQUIRED_COLUMNS = ["Well", "SampleType", "Sample"];
 /** Columns written only when some well fills one in, and read whenever present. */
-const OPTIONAL_COLUMNS = ["Replicate", "Quantity"];
+const OPTIONAL_COLUMNS = ["Replicate", "Quantity", "Vessel"];
 /** Everything that isn't a fluor column. */
 const FIXED_COLUMNS = [...REQUIRED_COLUMNS, ...OPTIONAL_COLUMNS];
 
@@ -165,7 +174,10 @@ export function isBlankWell(w: WellDefinition): boolean {
     w.sampleType === "empty" &&
     !w.sample &&
     w.replicate === undefined &&
-    w.quantity === undefined
+    w.quantity === undefined &&
+    // A vessel is something to say even about an empty well — the plastic is in the block whether
+    // or not anything was pipetted into it — and dropping the row would lose it on round-trip.
+    !w.vessel
   );
 }
 
@@ -179,7 +191,13 @@ export function plateToCsv(plate: PlateDefinition): string {
   // which is what the field means in a `.pltd` too — CFX just gave it a misleading attribute
   // name. The plate's extent rides on the same line (`BR Clear 8x12`) — it's one fact about
   // the physical plate, and two more header lines to say `8` and `12` was noise.
-  out += `# vessel: ${plate.plateName} ${plate.rows}x${plate.columns}\r\n`;
+  //
+  // A mixed-vessel plate says it per well in the `Vessel` column below instead, and this line
+  // then carries the extent alone (`8x12`). Never both: see `parsePlateCsv`, which rejects a
+  // file stating the vessel twice rather than picking a winner.
+  const perWellVessel = plate.wells.some((w) => w.vessel);
+  const extent = `${plate.rows}x${plate.columns}`;
+  out += `# vessel: ${perWellVessel ? extent : `${plate.plateName} ${extent}`}\r\n`;
   // Optional, and omitted when empty: nothing computes with these three, they're just carried
   // through from a `.pltd` for display. `plateType` is CFX's template category
   // (`OtherStdTemplate` in every file inspected) and is unrelated to the vessel above.
@@ -196,6 +214,9 @@ export function plateToCsv(plate: PlateDefinition): string {
     .sort((a, b) => a.col - b.col || a.row - b.row);
   const hasReplicate = written.some((w) => w.replicate !== undefined);
   const hasQuantity = written.some((w) => w.quantity !== undefined);
+  // Same rule as those two — the column exists only if some well fills it in. `perWellVessel` is
+  // computed over every well, not just the written ones, so a plate whose only per-well vessel
+  // sits on an otherwise-blank well can't lose it silently: that well stops being blank.
   // Fluor columns in ascending channel order (unknown channel last, keeping its relative order) —
   // the same `byChannel` ordering `parsePltd` gives each well's fluors and every fluor list in the
   // app. `plate.fluors` is whatever order the source declared them in, so each well's cells read
@@ -205,6 +226,7 @@ export function plateToCsv(plate: PlateDefinition): string {
     ...REQUIRED_COLUMNS,
     ...(hasReplicate ? ["Replicate"] : []),
     ...(hasQuantity ? ["Quantity"] : []),
+    ...(perWellVessel ? ["Vessel"] : []),
     ...fluorColumns.map((f) => f.fluor),
   ]);
   for (const w of written) {
@@ -217,6 +239,7 @@ export function plateToCsv(plate: PlateDefinition): string {
       w.sample ?? "",
       ...(hasReplicate ? [w.replicate !== undefined ? String(w.replicate) : ""] : []),
       ...(hasQuantity ? [w.quantity !== undefined ? String(w.quantity) : ""] : []),
+      ...(perWellVessel ? [w.vessel ?? ""] : []),
       ...fluorColumns.map((pf) => {
         const f = byFluor.get(pf.fluor);
         if (!f) return "";
@@ -277,8 +300,13 @@ export function parsePlateCsv(text: string, options: ParsePlateCsvOptions = {}):
     i++;
   }
   // The vessel line ends with the plate's extent (`BR Clear 8x12`); what precedes it is the
-  // vessel name. Absent, the whole value is the name and the well labels give the extent.
-  const vessel = /^(.*?)\s+(\d+)\s*x\s*(\d+)$/i.exec(meta.vessel ?? "");
+  // vessel name. Either half may be left out: `BR Clear` alone lets the well labels give the
+  // extent, and a bare `8x12` is what a per-well-vessel plate writes, the name then living in
+  // the `Vessel` column instead.
+  const vesselLine = (meta.vessel ?? "").trim();
+  const extentOnly = /^(\d+)\s*x\s*(\d+)$/i.exec(vesselLine);
+  const named = extentOnly ? null : /^(.*?)\s+(\d+)\s*x\s*(\d+)$/i.exec(vesselLine);
+  const plateVessel = extentOnly ? "" : named ? named[1]!.trim() : vesselLine;
 
   const rows = parseCsvTable(lines.slice(i).join("\n")).filter(
     (r) => !(r.length === 1 && r[0] === ""),
@@ -290,8 +318,21 @@ export function parsePlateCsv(text: string, options: ParsePlateCsvOptions = {}):
     if (idx[c] === -1) throw new Error(`Plate CSV: missing "${c}" column`);
   }
 
-  const declaredRows = vessel ? Number(vessel[2]) : NaN;
-  const declaredCols = vessel ? Number(vessel[3]) : NaN;
+  // A plate says its vessel once: on the header line, or per well in the `Vessel` column. A file
+  // doing both is rejected rather than resolved — the two would disagree sooner or later, and
+  // guessing which the author meant is exactly the confusion the either-or rule exists to stop.
+  if (idx.Vessel !== -1 && plateVessel) {
+    throw new Error(
+      `Plate CSV: the vessel is stated twice — "# vessel: ${vesselLine}" names one and a ` +
+        `"Vessel" column gives one per well. Use one or the other: drop the column, or reduce the ` +
+        `header line to the plate's extent alone` +
+        (named ? ` ("# vessel: ${named[2]}x${named[3]}")` : "") +
+        `.`,
+    );
+  }
+
+  const declaredRows = extentOnly ? Number(extentOnly[1]) : named ? Number(named[2]) : NaN;
+  const declaredCols = extentOnly ? Number(extentOnly[2]) : named ? Number(named[3]) : NaN;
   const dataRows = rows.slice(1);
   // A table with no rows at all is only meaningful if the extent is declared — every well is
   // then simply empty (an all-empty plate writes no rows).
@@ -382,6 +423,10 @@ export function parsePlateCsv(text: string, options: ParsePlateCsvOptions = {}):
     };
     const replicate = optional(idx.Replicate!);
     const quantity = optional(idx.Quantity!);
+    // Blank cell = this well says nothing, so the plate's own vessel applies (see
+    // `WellDefinition.vessel`). No normalization of the value: it's matched case-insensitively
+    // downstream, exactly as `plateName` is.
+    const vessel = (idx.Vessel === -1 ? "" : (r[idx.Vessel!] ?? "").trim()) || undefined;
 
     wells[wellIndex] = {
       index: wellIndex,
@@ -395,6 +440,7 @@ export function parsePlateCsv(text: string, options: ParsePlateCsvOptions = {}):
       sample,
       replicate,
       quantity,
+      vessel,
     };
   });
 
@@ -407,7 +453,7 @@ export function parsePlateCsv(text: string, options: ParsePlateCsvOptions = {}):
   }
 
   return {
-    plateName: vessel ? vessel[1]!.trim() : (meta.vessel ?? ""),
+    plateName: plateVessel,
     identityKey: sourceName ? identityFromName(sourceName) : undefined,
     rows: rowsCount,
     columns,

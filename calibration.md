@@ -129,6 +129,42 @@ underdetermined and the pseudo-inverse returns the minimum-norm solution. Column
 there. A plate with more fluorophores than scanned channels is not a well-posed unmixing problem
 to begin with.
 
+### 3.1 One matrix per vessel
+
+*This library's own — the rule is stated here; the measurement behind the threshold half of it is
+Appendix A.*
+
+White and clear plastic have separate pure-dye calibrations, so the matrix above is built **per
+vessel type**, and each well is solved against the one for the plastic *it* sits in.
+
+For every plate CFX can write this changes nothing: a `.pltd`/`.pcrd` states the vessel once, on
+the root element, so every well gets the same matrix and there is exactly one. Only zpcrweb's own
+`.plt.csv` can state a vessel per well ([`pltcsv.md`](./pltcsv.md) §3.1), for a block loaded with
+a mix of plastics — which the instrument runs happily and no CFX format can describe. Such a run
+builds two matrices and picks between them per well.
+
+Implemented by `runAnalysis.ts`: `plateTubeTypes()` lists the vessels present, one `DyeSolver`
+(matrix + column channels) is built per vessel, and `computeFluorCurves()` takes a
+`solverFor(row, col)` rather than a single matrix. Each vessel's matrix covers the dyes *that*
+vessel has calibration for, so a dye covered in clear but not white still quantifies in the clear
+wells instead of costing the whole run its matrix.
+
+**Thresholds are deliberately left alone** — one per fluorophore, spanning both vessels, exactly
+as [`threshold.md`](./threshold.md) §5.2 describes. The reasoning that says they should be split
+does not survive contact with the data:
+
+- Baseline subtraction removes a curve's offset, not its gain, and the same dye's `columnNorm`
+  really does differ between vessels by a **per-dye 0.85×–4.05×** (Appendix A, measured across
+  all 14 dyes the sample archive calibrates). So a mixed plate's group *is* a bimodal population.
+- But the automatic threshold is `20 × median(baseline noise)`, and baseline noise turns out to
+  be an **instrument floor of ~2 RFU** — flat across every dye, every amplitude and both vessels
+  — not a fraction of the signal. So pooling barely moves the median, and the threshold with it.
+
+Measured end to end: pooling a clear run and a white run into shared per-fluor threshold groups
+moved every Cq by **≤0.52 cycles, median under 0.1**, and cost no curve its Cq (Appendix A).
+Splitting the groups would have meant a new persisted key in `zpcrweb.json`, a migration, and a
+second threshold line on the chart, to buy that.
+
 ## 4. Preprocessing the raw channel readings
 
 Before a raw reading is fed into the solve, two corrections are applied to each channel value.
@@ -637,3 +673,83 @@ call is wasted work.
   Gram matrix (`Mᵀ·M`), which is mathematically equivalent to an SVD-based pseudo-inverse for
   these purposes but is a simpler implementation suited to the small (≤6×6) matrices this
   library handles — not a general-purpose numerical linear algebra routine.
+
+## Appendix A. Mixed vessels — what a shared threshold actually costs
+
+The measurement behind §3.1's decision to build a matrix per vessel but leave thresholds pooled.
+All numbers from the committed samples, at 60 °C, `normalization: global`.
+
+### A.1 The per-dye vessel gain
+
+`columnNorm` — the RFU a dye produces at unit concentration, and the factor §5.1 multiplies the
+solved concentration by — for all 14 dyes `20260720_FirstQualification.zpcr` calibrates, in both
+vessels:
+
+| Dye | BR Clear | BR White | White/Clear |
+|---|---|---|---|
+| HEX | 3725 | 15073 | 4.05 |
+| FAM / SYBR | 3951 | 15628 | 3.96 |
+| Cal Orange 560 | 2611 | 9860 | 3.78 |
+| Cal Gold 540 | 1978 | 7437 | 3.76 |
+| Cy5 | 2577 | 9048 | 3.51 |
+| Tex 615 / Texas Red | 4751 | 15804 | 3.33 |
+| VIC | 5993 | 18908 | 3.16 |
+| ROX | 6883 | 21009 | 3.05 |
+| Cal Red 610 | 11955 | 20721 | 1.73 |
+| Cy5-5 | 5557 | 8033 | 1.45 |
+| Quasar 670 | 4226 | 4154 | 0.98 |
+| Quasar 705 | 4602 | 3933 | 0.85 |
+
+The ratio is **per dye, not a constant**: 0.85× to 4.05×. Quasar 670 in white and in clear is the
+same response to within 2%; FAM differs fourfold.
+
+### A.2 Why that does *not* propagate to the threshold
+
+Two facts, both measured, cancel most of A.1's apparent problem.
+
+**The reported RFU is nearly invariant to which vessel's matrix you use.** §5.1's reconstruction is
+`solved × columnScale × columnNorm`; solving against a column that is ¼ the size returns ~4× the
+concentration, and `columnNorm` then multiplies by ~¼. Measured on the same 24 physical wells,
+white matrix vs clear matrix: FAM's median ΔRFU moves 4177 → 3872, **8%, not 4×**. Picking the
+wrong vessel perturbs the *cross-channel unmixing* — which is what §3.1's per-well matrix is for —
+not the overall scale.
+
+**Baseline noise is an instrument floor, not a fraction of the signal.** Median `baselineNoise()`
+per dye, across three runs and both vessels, spans only **1.87–2.94 RFU** — while median ΔRFU
+spans −4 to 5609. A dye at SNR 2533 and one at SNR −2 have the same ~2 RFU noise. So
+§5.2's `20 × median(noise)` lands at 37–58 RFU everywhere:
+
+| Run | Vessel | FAM | Tex 615 | Cy5 | VIC | ROX |
+|---|---|---|---|---|---|---|
+| `20260720_FirstQualification` | BR Clear | 41.1 | 39.6 | 37.5 | — | — |
+| `20260726_S183-S185_RVP` | BR Clear | 37.9 | 44.9 | 45.3 | — | — |
+| `20260807-YouSeq_RT_-_S56` | BR White | 58.0 | — | 54.8 | 40.1 | 49.3 |
+
+### A.3 The combined-plate experiment
+
+`20260720_FirstQualification` (clear) and `20260807-YouSeq_RT_-_S56` (white) pooled into shared
+per-fluorophore threshold groups, against each run analysed on its own. **B** solves each well
+with its own vessel's matrix (what §3.1 ships); **C** declares the whole plate clear.
+
+Pooled thresholds: FAM 41.1 / 58.0 → 56.7; Cy5 37.5 / 54.8 → 53.0. Median ΔCq:
+
+| | FAM | Cy5 | VIC | ROX | Tex 615 |
+|---|---|---|---|---|---|
+| **B**, FirstQualification wells | +0.49 | +0.52 | — | — | 0.00 |
+| **B**, YouSeq wells | −0.10 | −0.05 | 0.00 | 0.00 | — |
+| **C**, FirstQualification wells | +0.45 | +0.52 | — | — | 0.00 |
+| **C**, YouSeq wells | −0.00 | −0.04 | +0.03 | 0.00 | — |
+
+**Worst case 0.52 cycles; no curve gained or lost a Cq.** The FirstQualification wells are the
+worst case by construction — 1–3 loaded wells per dye against YouSeq's ~11, so the pooled median
+is effectively YouSeq's alone — and the shift is exactly `log2(56.7/41.1) = 0.46`.
+
+That is the whole cost of one threshold per fluorophore on a mixed plate, and it buys keeping
+`zpcrweb.json`'s override keys, §5.2's measured "one threshold per fluorophore" rule, and a single
+threshold line on the chart.
+
+> **Future:** A.1's gain is a *known* per-dye scalar, so a threshold could be defined in one
+> reference vessel's RFU and converted per well, making a mixed plate's Cq comparable across
+> plastics by construction. Deliberately not implemented: A.3 measures the thing it would fix at
+> under 0.52 cycles, and it would cost a second threshold line on the chart and a persisted-format
+> change. Worth revisiting only if a real mixed plate shows a discrepancy this doesn't explain.
