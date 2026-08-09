@@ -42,7 +42,7 @@ The reason is not tidiness. `.zpcr` and `.pcrd` are two containers around *the s
 run*, so anything the app reports off one must match what it reports off the other; a number
 that changes with the container is an artifact, not a measurement. This binds the analysis
 pipeline especially hard — see the header comment in `@zpcrweb/core`'s `runAnalysis.ts`, and the `wellFactors`
-note in [`calibration.md`](../../calibration.md) §4.1 for the one correction dropped to keep it
+note in [`calibration.md`](../../docs/calibration.md) §4.1 for the one correction dropped to keep it
 true. Verified: a `.zpcr`/`.pcrd` pair of one run agrees to ~4e-5 cycles in Cq, the residual
 being only that a `.pcrd` stores well readings as text rounded to two decimals where a `.zpcr`
 stores binary float32.
@@ -428,7 +428,7 @@ happened — there is no honest way to edit one.
 The plate-side counterpart of the protocol editor, and deliberately the same shape as it:
 `PlateEditor` wraps the ordinary `PlateViewer` grid, adds an Edit pencil that becomes a worded
 Done, edits through core's plate primitives rather than text (`plateEdit.ts`,
-[`pltcsv.md`](../../pltcsv.md) §5), and saves as it goes (`ZpcrStore.setPlateText`, the same
+[`pltcsv.md`](../../docs/pltcsv.md) §5), and saves as it goes (`ZpcrStore.setPlateText`, the same
 write-behind throttle a protocol edit uses). Undo/redo work the same way too, over a stack of
 plates compared by their serialization — the store hands back a *re-parsed* plate, never the
 object the editor emitted, so identity comparison would restart the history on every edit.
@@ -1277,10 +1277,10 @@ supplies one.
 
   Beneath the step table, when the run carries a `.alf` report (`zpcr.runReports()`), the
   **thermal profile as run** — `ThermalProfileChart` over core's `alfThermalProfile`
-  ([`alf.md`](../../alf.md) §7.6). The pairing is the point: the table states what was asked
+  ([`alf.md`](../../docs/alf.md) §7.6). The pairing is the point: the table states what was asked
   for, the plot states what it cost, and a 30 s hold that occupied 46 s is only visible in the
   second. It's the one section here that isn't format-independent — a `.pcrd` carries no report
-  ([`alf.md`](../../alf.md) §1), so the section simply doesn't render for one.
+  ([`alf.md`](../../docs/alf.md) §1), so the section simply doesn't render for one.
 
   A **third uPlot builder** (`lib/uplot/thermalChart.ts`) for the same reason `calChart.ts` is a
   second one: it shares neither axis with either of the others — the only plot in the app whose x
@@ -1395,7 +1395,7 @@ supplies one.
   number and, in the right-hand column, the library's plain-English reading of it ("Return to
   step 2 (TEMP 95.0,10) — 45 passes in total"). It renders `parseRunDefinition()`'s directives
   and **parses nothing itself**: the verbs, the step numbering `GOTO` counts in, and the
-  `PLATEREAD` scan mask are all core's, per [`protocol.md`](../../protocol.md). Takes plain
+  `PLATEREAD` scan mask are all core's, per [`protocol.md`](../../docs/protocol.md). Takes plain
   `text`, so `ProtocolView` and the Instrument view's protocol panel reuse it unchanged — the
   latter with `annotated={false}`, which drops the reading column and leaves the program itself
   (plus the scan mask's channels and sweep mode, on a sub-line — a packed operand no text says).
@@ -1411,7 +1411,7 @@ supplies one.
   there the lid and volume are directives the annotated listing already explains, so showing
   them twice would be two views of one line.
 - **`.alf`** → `DecodedAlfFile` (`components/raw/DecodedAlf.tsx`) — the instrument's own run
-  report ([`alf.md`](../../alf.md)), rendered whole per the everything-the-file-holds rule under
+  report ([`alf.md`](../../docs/alf.md)), rendered whole per the everything-the-file-holds rule under
   "Raw views" below: one block per line role the format has (§2).
 
   - **Run header** — all 15 fields of line 1 in the file's own order (§4), including the two that
@@ -1802,7 +1802,7 @@ and, on top of those, the run's **Cq table**.
 `@zpcrweb/core`'s `parseBiomeme` decodes a Biomeme handheld instrument's `.bmrun` run export into
 the same `Zpcr` shape `parseZpcr`/`parsePcrd` produce (see the root
 [`ARCHITECTURE.md`](../../ARCHITECTURE.md#a-third-non-cfx-input-biomeme) and
-[`biomeme.md`](../../biomeme.md)), so `useZpcrStore` routes it through the exact same
+[`biomeme.md`](../../docs/biomeme.md)), so `useZpcrStore` routes it through the exact same
 `RunResult`/`useRunAnalysis` pipeline every other run uses — `.bmrun` names the format, so
 `fileKind()` (`state/useZpcrStore.ts`) routes on the extension like every other format bar `.txt`,
 and from there on almost nothing in the app
@@ -2134,7 +2134,7 @@ only pieces the two views share.
   `matchFluorCalibrations()`
   matches the plate's fluorophores to this run's `.Dcal` data, builds one calibration matrix per step
   (restricted to the scanned channels, so its RFU scale factors are measured over the right
-  rows), and solves every well/cycle — see [`calibration.md`](../../calibration.md). `CurvesView`
+  rows), and solves every well/cycle — see [`calibration.md`](../../docs/calibration.md). `CurvesView`
   assembles the §4 corrections that go in first: the per-scan reference level from the reference
   row: the per-scan reference level from the reference row, and nothing else.
 
@@ -2837,7 +2837,7 @@ instrument — identity, live status, its filesystem, and the decoded protocol t
 service of starting an experiment and following the run that comes out of it. Everything it
 knows about the protocol comes from `@zpcrweb/core`'s `CfxDevice` (see the root
 [`ARCHITECTURE.md`](../../ARCHITECTURE.md#talking-to-an-instrument-not-a-file-srcusb) and
-[`usb.md`](../../usb.md)), per the standing rule that logic lives in the library — the app side is
+[`usb.md`](../../docs/usb.md)), per the standing rule that logic lives in the library — the app side is
 `state/useCfxDevice.ts`, which owns only what a browser session adds: obtaining the instrument through
 `navigator.usb`, a poll timer, the traffic recording and its bounded display window, and the React
 state the components render.

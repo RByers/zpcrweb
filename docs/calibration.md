@@ -8,8 +8,8 @@ given the 6 raw channel readings for a well and the pure-dye calibration data fo
 the plate, estimate how much each dye actually contributed.
 
 > **Status:** implements the algorithm below in full (§§2–5), including preprocessing (§4) —
-> [`packages/core/src/calibration.ts`](./packages/core/src/calibration.ts) (linear algebra in
-> [`linalg.ts`](./packages/core/src/linalg.ts)), tested against the calibration data in the
+> [`packages/core/src/calibration.ts`](../packages/core/src/calibration.ts) (linear algebra in
+> [`linalg.ts`](../packages/core/src/linalg.ts)), tested against the calibration data in the
 > committed sample archives — and, as of 2026-07-28, **cross-validated end-to-end against CFX
 > Manager's own per-cycle output** on `20260726_S183-S185_RVP.pcrd`: 17 of 24 curves agree to
 > 4–9 × 10⁻³ RFU up to the baseline both sides remove, the other 7 to ~2 × 10⁻⁴ relative. That
@@ -20,7 +20,7 @@ the plate, estimate how much each dye actually contributed.
 > The web app's **Calibration** view plots the §2 response curves this is all built on (block
 > temperature on x, RFU on y, one line per dye × channel), marked at the block temperature the
 > run's own analysis samples them at — see
-> [`apps/web/ARCHITECTURE.md`](./apps/web/ARCHITECTURE.md#calibration-view).
+> [`apps/web/ARCHITECTURE.md`](../apps/web/ARCHITECTURE.md#calibration-view).
 
 ---
 
@@ -464,7 +464,7 @@ run. That makes three uses, all diagnostic:
 
 The web app already plots the dark curves as a Curves-view overlay; that is the right home for
 all three, and no analysis stage consumes them. Surfacing 1–3 as actual checks is
-[`TODO.md`](./TODO.md) work; only the removal of the subtraction stage has landed.
+[`TODO.md`](../TODO.md) work; only the removal of the subtraction stage has landed.
 
 > The `.Dcal` `empty` blocks are **not** a second background candidate. They are consumed by §2
 > as the per-temperature baseline each matrix column is differenced against

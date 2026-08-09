@@ -57,7 +57,7 @@ The operator does manual testing and pushes upstream to deploy live when good, n
 
   "UI tests" is the browser harness in `tools/` (`uitest.mjs`, `uishot.mjs`, `harness.mjs`), since
   that is where the web app's tests actually live. "docs" is every `*.md` wherever it sits — the
-  format docs at the root, the `ARCHITECTURE.md` files inside `apps/` and `packages/`, this file —
+  format docs in `docs/`, the `ARCHITECTURE.md` files inside `apps/` and `packages/`, this file —
   which is why its rule comes last and overrides the directory rules above it. Everything else —
   config, other `tools/` scripts — falls into "other"; keep that row, it is the honest remainder.
   Report the five categories even when a row is zero, so a commit that touched no tests says so

@@ -7,7 +7,7 @@ sample type, replicate number and — for standards — a quantity.
 
 > **Status:** fully decoded. Every `.pltd` in the sample set (32 distinct files, 2019–2023,
 > both container variants) decrypts, decompresses and parses; the decoded XML is byte-exact
-> against a reference `unzip`. See [`packages/core/src/pltd.ts`](./packages/core/src/pltd.ts).
+> against a reference `unzip`. See [`packages/core/src/pltd.ts`](../packages/core/src/pltd.ts).
 
 The library entry point is `parsePltd(bytes)` → `Pltd`, and `zpcr.plates()` decodes every
 `.pltd` entry in an archive. A `.pltd` is also a file in its own right — CFX Manager saves plate

@@ -8,8 +8,8 @@ encryption layer once; the format docs cover only their payload.
 > **Status:** fully decoded. Every sample in both formats (32 `.pltd` files, 2019–2023, both
 > container variants, plus the `.pcrd` sample) decrypts, decompresses and parses byte-exact
 > against a reference `unzip`. Implemented by
-> [`packages/core/src/zipcrypto.ts`](./packages/core/src/zipcrypto.ts) +
-> [`inflate.ts`](./packages/core/src/inflate.ts).
+> [`packages/core/src/zipcrypto.ts`](../packages/core/src/zipcrypto.ts) +
+> [`inflate.ts`](../packages/core/src/inflate.ts).
 
 ---
 
@@ -35,7 +35,7 @@ entry is **compressed and ZipCrypto-encrypted**. Two variants appear in the wild
 
 The uncompressed inner file is small but highly repetitive (compression ratios up to ~54× for
 `.pltd`), so **Deflate64** (method 9) is common — a standard DEFLATE inflater cannot read those;
-the library ships its own inflater ([`inflate.ts`](./packages/core/src/inflate.ts)) covering
+the library ships its own inflater ([`inflate.ts`](../packages/core/src/inflate.ts)) covering
 both methods.
 
 `.pcrd` has only been observed as variant B, but it's the same writer library that emits
@@ -70,4 +70,4 @@ immediately before the call is the password). Enter that value into the app once
 redistribute it.
 
 Once supplied: decrypt the entry, drop the 12-byte header, then inflate (method 8 or 9). See
-[`zipcrypto.ts`](./packages/core/src/zipcrypto.ts).
+[`zipcrypto.ts`](../packages/core/src/zipcrypto.ts).

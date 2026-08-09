@@ -297,7 +297,7 @@ neither may be derived from the other.
 Because the automatic threshold is a default rather than a reproduction (§5.2), the app's job is not
 only to report a Cq but to show what it was derived from and let it be corrected. The Curves rail's
 **Threshold** section is that surface (`apps/web/src/components/curves/ThresholdSection.tsx`; see
-[`apps/web/ARCHITECTURE.md`](./apps/web/ARCHITECTURE.md) for the implementation):
+[`apps/web/ARCHITECTURE.md`](../apps/web/ARCHITECTURE.md) for the implementation):
 
 - **The multiplier is a slider** (1–100, default 20), not a buried constant, with the thresholds
   below it updating live as it moves — the one number with no measurement behind it is also the one

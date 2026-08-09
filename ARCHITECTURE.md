@@ -1,16 +1,16 @@
 # Architecture
 
 Key design points for the zpcrweb project. For the `.Plateread` binary format itself, see
-[`plateread.md`](./plateread.md); for the `.pcrd` XML format, see [`pcrd.md`](./pcrd.md).
+[`plateread.md`](./docs/plateread.md); for the `.pcrd` XML format, see [`pcrd.md`](./docs/pcrd.md).
 
 ## Format documentation
 
 Every reverse-engineered Bio-Rad file format (or sub-format, like the shared ICFF container)
-gets its own top-level `*.md` doc — [`plateread.md`](./plateread.md), [`dcal.md`](./dcal.md),
-[`pltd.md`](./pltd.md), [`pcrd.md`](./pcrd.md), [`icff.md`](./icff.md). The one non-format
-exception is [`calibration.md`](./calibration.md), which documents the channel→dye
+gets its own `*.md` doc under [`docs/`](./docs) — [`plateread.md`](./docs/plateread.md), [`dcal.md`](./docs/dcal.md),
+[`pltd.md`](./docs/pltd.md), [`pcrd.md`](./docs/pcrd.md), [`icff.md`](./docs/icff.md). The one non-format
+exception is [`calibration.md`](./docs/calibration.md), which documents the channel→dye
 color-separation algorithm built on top of `.Dcal` rather than a byte layout, and
-[`zpcrweb-json.md`](./zpcrweb-json.md) and [`usb-traffic.md`](./usb-traffic.md), which document
+[`zpcrweb-json.md`](./docs/zpcrweb-json.md) and [`usb-traffic.md`](./docs/usb-traffic.md), which document
 the two entries we *write* into a `.zpcr` rather than ones we decode. Each doc is
 self-contained and ends with a pointer to the `packages/core/src` module that implements it, so
 the doc is always the entry point for understanding *and* changing a decoder. See
@@ -182,7 +182,7 @@ than let that difference leak into every consumer, `parsePcrd` decodes straight 
   the `HOTLID`/`VOLUME` directives, no step list).
 - **`ProtocolDocument.program`** — the `runDefinition` text decoded into typed directives, each
   with its operands, its 1-based step number and a one-line description of what it does
-  (`runDefinition.ts`, `parseRunDefinition`; the language is [`protocol.md`](./protocol.md)).
+  (`runDefinition.ts`, `parseRunDefinition`; the language is [`protocol.md`](./docs/protocol.md)).
   Always present, whatever the source, so a consumer never parses the `;`-delimited text itself
   — which is what keeps the web app's protocol views free of format knowledge. The XML step list
   gets the same treatment from `describeProtocolStep()`, and `parseScanMask()` decodes the
@@ -191,7 +191,7 @@ than let that difference leak into every consumer, `parsePcrd` decodes straight 
   by `formatDuration` (`duration.ts`) — `45:00`, not `2700 s` — which is also what the web app's
   thermal-profile tooltip, its time axis and its `.alf` step table call, so one length of time has
   one spelling wherever it appears.
-- **`ProtocolBuilder`** (`protocolBuilder.ts`, [`protocol.md`](./protocol.md) §10) — the same
+- **`ProtocolBuilder`** (`protocolBuilder.ts`, [`protocol.md`](./docs/protocol.md) §10) — the same
   language in the other direction: a protocol as a header plus typed steps, immutable, and the
   library's only writer of directive text. It exists so an editor can be built without one
   existing anywhere near the grammar — `END`'s position, the step numbering and a `GOTO`'s
@@ -272,7 +272,7 @@ motivating case for the file/computed toggle rather than a bug to close the gap 
 ## Talking to an instrument, not a file (`src/usb/`)
 
 Every other subsystem here decodes bytes someone already saved. `src/usb/` is the exception: it
-drives a **live CFX96 over USB**, implementing the protocol in [`usb.md`](./usb.md) — enumeration,
+drives a **live CFX96 over USB**, implementing the protocol in [`usb.md`](./docs/usb.md) — enumeration,
 the 5-byte application frame, the ASCII command channel, and file retrieval. Entry point
 `CfxDevice`. It gets its own directory rather than a flat module because it is a five-file
 subsystem with an internal seam (framing → commands → device), and because "this one talks to
@@ -391,7 +391,7 @@ already carries one, because a plate's entry name is not fixed and the folder's 
 app deposited there.
 
 One entry in such an archive did not come off the instrument: `usb-traffic.bin`, the log of the
-conversation that produced the run (`usbTraffic.ts`, [`usb-traffic.md`](./usb-traffic.md)). It is
+conversation that produced the run (`usbTraffic.ts`, [`usb-traffic.md`](./docs/usb-traffic.md)). It is
 stored as binary records rather than the text it renders to — an hour of the status poll is 237 KB
 of records against 1.3 MB of text, and ~1 KB against ~41 KB once the ZIP has deflated either — which
 is what makes keeping a session's whole wire log with the run cost single-digit KB. The app records
@@ -405,7 +405,7 @@ arrive rather than from stored records, stops a payload in the same place.
 The same module answers a question the files never state outright. **A cancelled run is not marked
 as cancelled anywhere**: it writes the same `ended` marker as a completed one, and its `.alf` run
 report's user-aborted flag stays `False` with the sentinel still reading `Protocol completed.`
-(measured — [`usb.md`](./usb.md) §7.8, [`alf.md`](./alf.md) §6). The one live signal, `STATUS?`'s
+(measured — [`usb.md`](./docs/usb.md) §7.8, [`alf.md`](./docs/alf.md) §6). The one live signal, `STATUS?`'s
 cancelled bit, never reaches a file.
 
 What is left is arithmetic: a run that stopped short holds **fewer `Read*.Plateread` files than
@@ -488,10 +488,10 @@ gets wrong: the derived fields (`loaded`, `dyeCount`, `targets`, `samples`) are 
 the wells, a well is loaded iff it carries a dye (the `.plt.csv` rule, so an edit can't survive on
 screen but not through a save), and the vessel stays stated **once** — giving one well its own
 pushes the plate's down onto the others, and wells that all agree hoist back up
-([`pltcsv.md`](./pltcsv.md) §3.1).
+([`pltcsv.md`](./docs/pltcsv.md) §3.1).
 
 `plateClipboard.ts` is the same idea for a block of wells: tab-separated text
-(`formatPlateBlock`/`parsePlateBlock`, [`pltcsv.md`](./pltcsv.md) §5.1), the same columns spelled
+(`formatPlateBlock`/`parsePlateBlock`, [`pltcsv.md`](./docs/pltcsv.md) §5.1), the same columns spelled
 the same way as the CSV's, which is what a spreadsheet puts on the system clipboard — so a column
 of sample names copied out of Excel pastes onto a column of wells.
 
@@ -563,7 +563,7 @@ inverse `runFileBaseName` composes the filename a named run should be saved unde
 `writeZpcrwebSettings` adds them to the archive as a `zpcrweb.json` entry;
 `parseZpcrwebSettings` reads them back through the already-decompressed `Zpcr.archive`, total and
 field-by-field so a hand-edited or newer document degrades instead of failing. Full schema and
-rationale in [`zpcrweb-json.md`](./zpcrweb-json.md); the app-side scheduling (why writes are
+rationale in [`zpcrweb-json.md`](./docs/zpcrweb-json.md); the app-side scheduling (why writes are
 rate-limited, and what a `.pcrd` does instead) in `apps/web/ARCHITECTURE.md`.
 
 ## Decoding pipeline
@@ -584,7 +584,7 @@ raw bytes ─▶ fflate.unzipSync ─▶ { name: Uint8Array }
 - **`icff.ts`** — parses the trailing **ICFF index** shared by `.Plateread` and `.Dcal`: a
   footer points at a list of field-name slots, each mapping to an offset/length in the file.
   Every other field lookup in those two formats goes through it, so no offsets are hardcoded.
-  See [`icff.md`](./icff.md).
+  See [`icff.md`](./docs/icff.md).
 - **`plateread.ts`** — `DataView`-based decoder for the 22037-byte `.Plateread` layout, driven
   by the ICFF index: mixed-endian (big-endian scalars, little-endian WELLDATA / DARKDATA float
   arrays). Scalars are guarded (returned only when they validate).
@@ -592,24 +592,24 @@ raw bytes ─▶ fflate.unzipSync ─▶ { name: Uint8Array }
   dye's fluorescence response across all 6 channels at 4 block temperatures, plus a matching
   empty-plate baseline, also on top of the ICFF index. Also exports `dyeChannelLookup`, the
   one place dye→channel matching (`PRIMARYCHANNEL`, case- and whitespace-insensitive) is
-  implemented — see the plate CSV format above. See [`dcal.md`](./dcal.md).
+  implemented — see the plate CSV format above. See [`dcal.md`](./docs/dcal.md).
 - **`alf.ts`** — decodes the `.alf` run report (`zpcr.runReports()`): the instrument's own
   execution log, one record per *executed* step. Derives what the file only implies — a step's
   wall-clock duration (the next line's timestamp minus its own, since the timestamp is the
   step's *start*), the stage boundaries (where the repeat counter goes backwards) and each
   plate read's index among the archive's `.Plateread` files. Deliberately leaves the fourth
-  step column uninterpreted; see [`alf.md`](./alf.md) §8. Line 2 is a run definition, so it is
+  step column uninterpreted; see [`alf.md`](./docs/alf.md) §8. Line 2 is a run definition, so it is
   re-delimited and handed to `runDefinition.ts` rather than parsed here. On top of those
   durations, `alfThermalProfile()` assembles the run's **thermal profile** — block temperature
   against wall-clock time, each step split into the ramp that got there (`took − hold`) and the
-  hold at it, with plate reads as numbered points; see [`alf.md`](./alf.md) §7.6. That is the
+  hold at it, with plate reads as numbered points; see [`alf.md`](./docs/alf.md) §7.6. That is the
   only measurement of ramp cost the instrument produces, and the app plots it under a run's
   Protocol tab.
 - **`calibration.ts`** — channel→dye color separation built on top of `.Dcal` data: per-dye
   response curves, a channel×dye calibration matrix, and a solve via `linalg.ts`'s
   pseudo-inverse. The matrix's normalization mode is a conditioning choice only — the solve
   undoes it and reports per-dye RFU, so the mode never changes the scale. See
-  [`calibration.md`](./calibration.md).
+  [`calibration.md`](./docs/calibration.md).
 - **`linalg.ts`** — the small dense-matrix routines `calibration.ts` needs, chiefly a
   pseudo-inverse via Jacobi eigen-decomposition of the Gram matrix. Both its convergence test
   and its singular-value floor are **relative**, which is what makes the color-separation
@@ -622,7 +622,7 @@ raw bytes ─▶ fflate.unzipSync ─▶ { name: Uint8Array }
   plateau and nothing else). `endPointRfu()` — the mean of the last five corrected cycles — lives
   here too. Every constant in the module is measured against the instrument's exported results;
   this replaced two onset detectors, a whiteness start-trim, a validation gate and a smoothing
-  stage, all of them inferred. See [`threshold.md`](./threshold.md) §A.7 and §3.
+  stage, all of them inferred. See [`threshold.md`](./docs/threshold.md) §A.7 and §3.
 - **`threshold.ts`** — the threshold and Cq stages (§5–§6). `baselineNoise()` is the median
   absolute second difference of the corrected curve over the baseline region, scaled to σ: unlike a
   standard deviation or an RMS successive difference it survives being computed over a region the
@@ -637,7 +637,7 @@ raw bytes ─▶ fflate.unzipSync ─▶ { name: Uint8Array }
   a Cq off one produced a Cq of 1.32 for a flat well. There are no quality
   gates at all: the reference applies none, and letting one veto a Cq is what kept this library's
   Cq population from ever matching. See
-  [`threshold.md`](./threshold.md) §5–§6, and `packages/core/test/cfxExport.test.ts`, which asserts
+  [`threshold.md`](./docs/threshold.md) §5–§6, and `packages/core/test/cfxExport.test.ts`, which asserts
   the Cq stage against CFX's own numbers to 1e-9 cycles. `median()` and `stdDev()` live here too:
   they had their own `stats.ts` while `baseline.ts` also needed them, and it does not any more.
 - **`analysis.ts`** — the transforms that sit on top of those two: `baselineCorrectCurve()` (one
@@ -667,7 +667,7 @@ raw bytes ─▶ fflate.unzipSync ─▶ { name: Uint8Array }
 - **`pltd.ts`** — decodes `.pltd` plate-definition entries into a typed `PlateDefinition`
   (`zpcr.plates()`): each `.pltd` is a single-entry ZIP whose payload is ZipCrypto-encrypted
   and DEFLATE/DEFLATE64-compressed, wrapping a `<platesetup2>` XML plate map. See
-  [`pltd.md`](./pltd.md). `fflate` covers neither ZipCrypto nor DEFLATE64, so those are
+  [`pltd.md`](./docs/pltd.md). `fflate` covers neither ZipCrypto nor DEFLATE64, so those are
   handled in-house by **`zipcrypto.ts`** (traditional PKWARE decrypt) and **`inflate.ts`**
   (a small DEFLATE/DEFLATE64 inflater) — no new runtime dependency.
 - **`zipsingle.ts`** — the single-entry-ZIP container parse (central-directory driven, both
@@ -716,7 +716,7 @@ the low-level contract. This is `.zpcr`-only — a `.pcrd`'s `archive` is empty 
 Wells are addressed as `(channel, row, col)`:
 
 - `channel` 0–5, scan order. The channel→dye mapping itself lives in `.Dcal` calibration
-  files (`PRIMARYCHANNEL`), not `.Plateread` — see [`dcal.md`](./dcal.md).
+  files (`PRIMARYCHANNEL`), not `.Plateread` — see [`dcal.md`](./docs/dcal.md).
 - `row` 0–7 = plate rows A–H; `row` 8 = the reference row.
 - `col` 0–11 = plate columns 1–12.
 - Flat WELLDATA index: `channel * 108 + row * 12 + col`.

@@ -10,7 +10,7 @@ visualizer for everything** inside a `.zpcr` archive.
 `samples/20260726_S183-S185_RVP-export.zip` holds CFX's own exported results for
 `samples/20260726_S183-S185_RVP.pcrd` — per-cycle corrected RFU, per-well Cq and end-point RFU.
 Measuring against it turned most of the analysis chain from a guess into a fact.
-**[`threshold.md`](./threshold.md) §A is the write-up.**
+**[`threshold.md`](./docs/threshold.md) §A is the write-up.**
 
 **Landed** (2026-07-28): the measured crossing rule (linear two-point interpolation on the cycle
 index, longest-following-increasing-run selection, `T ∉ [min, max]` as the only no-Cq gate), the

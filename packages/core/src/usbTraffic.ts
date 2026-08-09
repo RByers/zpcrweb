@@ -11,18 +11,18 @@
  *
  * So the log is *stored* as records — the bytes as framed, plus the few facts about each message
  * that can't be recovered later — and *rendered* to text on demand, by whoever displays or
- * downloads it ({@link formatUsbTrafficLog}). Nothing is lost: §4 of
- * [`usb-traffic.md`](../../../usb-traffic.md) shows the round trip is exact, line for line.
+ * downloads it ({@link formatUsbTrafficLog}). Nothing is lost: §4 of `usb-traffic.md` shows the
+ * round trip is exact, line for line.
  *
  * **What can't be recovered, and so is stored.** Three things about a message are not in its
- * bytes: whether it was solicited (§2 of [`usb.md`](../../../usb.md) — an unsolicited channel-1
- * message and a reply look identical), whether the reader classified it as poll chatter (a reply
+ * bytes: whether it was solicited (§2 of `usb.md` — an unsolicited channel-1 message and a reply
+ * look identical), whether the reader classified it as poll chatter (a reply
  * carries no copy of its request, so this is decided on arrival), and whether the device offered a
  * text decode at all (a `passThrough` reply is left as bytes even when every one of them is
  * printable). Each is one bit. Everything else — the direction arrow, the byte count, the text —
  * is derived at format time.
  *
- * The format itself is documented in [`usb-traffic.md`](../../../usb-traffic.md); this file is its
+ * The format itself is documented in `usb-traffic.md`; this file is its
  * only reader and writer. {@link UsbTrafficRecorder} appends, {@link parseUsbTrafficLog} reads
  * back, {@link formatUsbTrafficLog} renders.
  */

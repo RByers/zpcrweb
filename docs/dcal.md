@@ -7,7 +7,7 @@ temperature, so a consumer can baseline one against the other. `.Dcal` is also t
 in-archive source of which optical channel a dye is primarily read on (`PRIMARYCHANNEL`).
 
 > **Status:** fully decoded. Not encrypted, not compressed — `file` reports plain `data`.
-> Implemented by [`packages/core/src/dcal.ts`](./packages/core/src/dcal.ts), entry point
+> Implemented by [`packages/core/src/dcal.ts`](../packages/core/src/dcal.ts), entry point
 > `parseDcal(bytes)`; `zpcr.calibrations()` decodes every `.Dcal` entry in a `.zpcr` archive.
 
 Every `.zpcr` run archive carries **28 `.Dcal` files** — 14 dyes × 2 plate types (`BR Clear`,
