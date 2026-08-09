@@ -4976,12 +4976,19 @@ async function folderChecks(chrome, origin) {
   // A grant can't be revoked from CDP, and an OPFS handle is permanently granted, so the lapse is
   // reproduced where it is felt: every handle method rejects with `NotAllowedError`, which is
   // exactly what Chrome does to a real folder whose permission has gone. Installed before the
-  // document so the app's own hydration read is the one that hits it.
+  // document so the app's own hydration read is the one that hits it, and switchable at
+  // `window.__denyFs` so the checks below can play the user answering the browser's dialog.
   await cdp.send("Page.addScriptToEvaluateOnNewDocument", {
     source: `(() => {
-      const deny = () => Promise.reject(new DOMException("denied", "NotAllowedError"));
-      FileSystemDirectoryHandle.prototype.getFileHandle = deny;
-      FileSystemDirectoryHandle.prototype.getDirectoryHandle = deny;
+      window.__denyFs = true;
+      for (const method of ["getFileHandle", "getDirectoryHandle"]) {
+        const real = FileSystemDirectoryHandle.prototype[method];
+        FileSystemDirectoryHandle.prototype[method] = function (...a) {
+          return window.__denyFs
+            ? Promise.reject(new DOMException("denied", "NotAllowedError"))
+            : real.apply(this, a);
+        };
+      }
     })()`,
   });
   await cdp.send("Page.navigate", { url: "about:blank" });
@@ -5023,6 +5030,22 @@ async function folderChecks(chrome, origin) {
     JSON.stringify(retried),
   );
 
+  // Now the user says yes. Permission is granted per *folder*, so one answer covers everything in
+  // it: clicking the one file has to bring back its neighbours too, rather than leaving them
+  // badged as unreadable when they demonstrably aren't. Both open files live in `runs`.
+  await cdp.eval(`window.__denyFs = false`);
+  await cdp.eval(`document.querySelector(".filesview__row").click()`);
+  await waitFor(async () => (await lapsed()).badges === 0, {
+    timeout: 10000,
+    what: "the badges to clear",
+  });
+  const granted = await lapsed();
+  const chipsBack = await cdp.eval(`document.querySelectorAll(".filechip").length`);
+  check(
+    "Granting the folder back reads in every open file in it, not just the one clicked",
+    granted.rows === 2 && granted.badges === 0 && chipsBack === 2,
+    JSON.stringify({ ...granted, chips: chipsBack }),
+  );
   cdp.close();
 }
 

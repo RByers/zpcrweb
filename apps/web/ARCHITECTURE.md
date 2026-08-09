@@ -535,10 +535,16 @@ their way in, or when they can't be got at all — a disk-backed file whose fold
 permission back is a row with no content behind it yet, and reads itself in as soon as the app can
 reach it (`retryUnread`, called when a folder is granted, and by `setActive`). Such a row says so
 where its type icon goes, with a red badge (`ZpcrStore.unreadableIds`), and **clicking it is what
-asks for the permission back** — `setActive` is the one read path with a user gesture behind it, so
-it is the one that may call `requestPermission` (`diskFolders.ts`'s `ensureDiskAccess`). That click
-also stays in the Files view rather than going to the file's Overview, since until the browser's
-question is answered there is nothing to show there.
+asks for the permission back** — a click is the user gesture `requestPermission` requires, and the
+row is the thing in front of the person who wants the file.
+
+That ask is the **folder's**, not the file's: `App.tsx`'s `selectFromTable` routes it to
+`useDiskTree`'s `grant`, the Grant access button's own implementation, because permission is
+granted per folder and one dialog answers for everything inside it. So granting re-reads the
+folder's listings, re-arms its watches, and reads back in *every* open file in it — a click on one
+file recovers its neighbours too, rather than leaving them badged as unreadable when they
+demonstrably are not. The click also stays in the Files view rather than going to the file's
+Overview, since until the browser's question is answered there is nothing to show there.
 
 A lapsed permission is therefore **not** an error the app reports. It used to be, and the banner it
 raised sat over the folder's own **Grant access** button quoting the platform at the reader

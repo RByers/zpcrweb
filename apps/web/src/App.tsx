@@ -601,11 +601,23 @@ export function App() {
    * there is nothing to show. So it selects and stays, leaving the row and its badge in front of
    * the user; a second click, once the folder is granted, goes and looks at the file like any
    * other. Same reasoning as the folder tree below, where a click ticks a file open and stays put.
+   *
+   * The ask goes through the **folder's** own grant (`diskTree.grant`, the Grant access button's
+   * one implementation) rather than through anything file-shaped, because permission is granted
+   * per folder and never per file: one dialog answers for everything in there. So granting re-reads
+   * the folder's listings, re-arms its watches, and reads back in *every* open file inside it
+   * (`retryUnread`) — the alternative, recovering only the file that happened to be clicked, would
+   * leave its neighbours wearing an error badge that no longer describes anything true, and make
+   * the user click through a dialog-less prompt once per file to find that out.
    */
   const selectFromTable = (id: string, view?: ViewId) => {
     const f = store.loaded.find((x) => x.name === id);
     store.setActive(id);
-    if (!f && store.unreadableIds.has(id)) return;
+    if (!f && store.unreadableIds.has(id)) {
+      const source = store.files.find((e) => e.name === id)?.source;
+      if (source) void diskTree.grant(source.folder);
+      return;
+    }
     store.setView(
       view ?? (f ? enabledViewsFor(f.kind, store.runs.get(id)?.zpcr)[0] ?? "overview" : "overview"),
     );

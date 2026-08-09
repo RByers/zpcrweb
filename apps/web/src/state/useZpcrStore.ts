@@ -54,7 +54,6 @@ import {
   type StoredView,
 } from "./db";
 import {
-  ensureDiskAccess,
   isPermissionError,
   readDiskFile,
   unwatchDiskFile,
@@ -1355,17 +1354,20 @@ export function useZpcrStore(): ZpcrStore {
   }, [clearReadFailure, patchEntry, startDiskWatch]);
 
   /**
-   * Read a file in *because the user asked for it* — a click on its row or its chip.
+   * Read a file in *because the user asked for it* — a click on its row or its chip. A fresh
+   * attempt, whatever went wrong last time; a fresh failure leaves the file marked unreadable and
+   * its row clickable again.
    *
-   * The one path that may ask the browser for a lapsed folder's permission back, since that is the
-   * one path with a user gesture behind it to ask with (`diskFolders.ts`'s `ensureDiskAccess`). A
-   * refusal isn't reported separately: the read is attempted either way and fails the same way it
-   * would have, leaving the file marked unreadable and its row clickable again.
+   * Asking the browser for a lapsed folder's permission back is deliberately **not** here. That is
+   * one act on a *folder*, not on a file — it re-reads its listings, re-arms its watches and reads
+   * back in every open file inside it — and it already has exactly one implementation, the Grant
+   * access button's (`useDiskTree`'s `grant`). A click on an unreadable file routes there too
+   * (`App.tsx`'s `selectFromTable`), which is what stops one file's click being answered with one
+   * file's worth of recovery.
    */
   const openEntry = useCallback(
     async (entry: FileEntry) => {
       try {
-        if (entry.source) await ensureDiskAccess(entry.source);
         await loadOne(entry);
       } catch (e) {
         noteReadFailure(entry.name, e);
@@ -1878,10 +1880,10 @@ export function useZpcrStore(): ZpcrStore {
   //
   // The one selection is the file every tab in the strip is a lens on, so it has to be a file
   // whose bytes the app is holding — which every open file is, except one the app hasn't managed
-  // to read yet. Selecting that one is also a fresh attempt at it, and the attempt that may *ask*
-  // for a lapsed folder's permission back ({@link openEntry}), since the click is the user gesture
-  // the browser requires to ask with. The id is set at once and the bytes arrive after
-  // (`loadingIds`), so the click responds immediately rather than after a disk read.
+  // to read yet. Selecting that one is also a fresh attempt at it ({@link openEntry}), since a
+  // click on a file the user can see is the most likely moment for its folder to have been
+  // granted. The id is set at once and the bytes arrive after (`loadingIds`), so the click
+  // responds immediately rather than after a disk read.
   const setActive = useCallback(
     (id: string) => {
       void persister.current!.flushAll();
