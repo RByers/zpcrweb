@@ -40,7 +40,6 @@ import {
   type StoredFolder,
 } from "./db";
 import { cloneFileName } from "../lib/cloneName";
-import { SAMPLES_LABEL } from "../lib/samples";
 
 export { diskFileName, type DiskSource } from "./db";
 
@@ -89,8 +88,14 @@ export async function listFolders(): Promise<StoredFolder[]> {
  * The label is the directory's own name, made unique with the same `(2)`/`(3)` counter the Clone
  * button uses, because two folders called `runs` in different places are a perfectly ordinary
  * thing to pick and the label is the first component of every file name beneath it.
+ *
+ * `reserved` is every *other* name already showing at the top level of the Files view — the open
+ * files that sit above the folders — so a folder never takes a name something else in that list
+ * already answers to. The app's own bundled folder is deliberately **not** reserved: it yields the
+ * name instead (see `useDiskTree`), because relabelling a granted folder would rename every file
+ * already open out of it, and relabelling the bundled one costs nothing.
  */
-export async function addFolder(): Promise<StoredFolder | null> {
+export async function addFolder(reserved: readonly string[] = []): Promise<StoredFolder | null> {
   await hydrate();
   let handle: FileSystemDirectoryHandle;
   try {
@@ -109,9 +114,8 @@ export async function addFolder(): Promise<StoredFolder | null> {
       return refreshed;
     }
   }
-  // `samples` is taken: the app's own bundled folder sits at the bottom of the same list under
-  // that label (`lib/samples.ts`), and two sections sharing one label would share a tree.
-  const taken = (candidate: string) => folders.has(candidate) || candidate === SAMPLES_LABEL;
+  const takenNames = new Set(reserved);
+  const taken = (candidate: string) => folders.has(candidate) || takenNames.has(candidate);
   const label = taken(handle.name) ? cloneFileName(handle.name, taken) : handle.name;
   const folder: StoredFolder = { label, handle, addedAt: Date.now() };
   folders.set(label, folder);

@@ -218,7 +218,10 @@ export function App() {
   /** Grant a folder and go and look at it: its tree lives in the Files view, so landing anywhere
    * else would make picking a folder look like it did nothing. */
   const addFolder = useCallback(async () => {
-    await diskTree.add();
+    // The open files' names, so the folder can't land under one of them: everything in the Files
+    // view is addressed by name, and a folder's label is the first component of every file name
+    // beneath it.
+    await diskTree.add(store.files.map((f) => f.name));
     store.setView("files");
   }, [diskTree, store]);
   /**

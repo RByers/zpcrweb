@@ -5049,6 +5049,115 @@ async function folderChecks(chrome, origin) {
   cdp.close();
 }
 
+/**
+ * A granted folder that is itself called `samples` — the one name the app already uses, for its own
+ * bundled folder.
+ *
+ * Two sections sharing a label share everything a label identifies: the tree keys its nodes by it,
+ * so the disk folder was listed from the bundled manifest instead of from the disk, and its ✕
+ * matched the "this is the app's own folder, refuse" guard and silently did nothing. So what is
+ * asserted here is that the two are told apart: the folder on disk keeps the name, the bundled one
+ * becomes `samples (2)`, each lists its own files, and the ✕ removes the one it is on.
+ */
+async function folderNameCollisionChecks(chrome, origin) {
+  console.log("\na folder named like the app's own");
+  const DISK = ".folders__folder:not(.folders__folder--builtin)";
+  const BUILTIN = ".folders__folder--builtin";
+  const cdp = await openPage(chrome.base, origin);
+  await emptyReload(cdp, origin);
+
+  // An OPFS directory called `samples`, standing in for the picker exactly as `folderChecks` does.
+  await cdp.eval(
+    `(async () => {
+       const root = await navigator.storage.getDirectory();
+       for await (const [n] of root.entries()) await root.removeEntry(n, { recursive: true });
+       const dir = await root.getDirectoryHandle("samples", { create: true });
+       const bytes = new Uint8Array(await (await fetch("/examples/${EXAMPLE}")).arrayBuffer());
+       const h = await dir.getFileHandle("mine.zpcr", { create: true });
+       const w = await h.createWritable();
+       await w.write(bytes);
+       await w.close();
+       window.showDirectoryPicker = async () => dir;
+       return true;
+     })()`,
+    { awaitPromise: true },
+  );
+  await cdp.eval(
+    `(() => { const b = document.querySelector(".dropzone__folderbtn")
+         ?? [...document.querySelectorAll(".dlmenu__item")].find((x) => /Add folder/.test(x.textContent));
+       b?.click(); })()`,
+  );
+  await waitFor(() => cdp.eval(`!!document.querySelector("${DISK}")`), {
+    what: "the folder section",
+  });
+
+  const sections = () =>
+    cdp
+      .eval(
+        `JSON.stringify([...document.querySelectorAll(".folders__folder")].map((s) => ({
+           label: s.querySelector(".folders__title")?.textContent.trim(),
+           builtin: s.classList.contains("folders__folder--builtin"),
+           files: [...s.querySelectorAll(".folders__name")].map((b) => b.textContent.trim()),
+         })))`,
+      )
+      .then(JSON.parse);
+  await waitFor(async () => (await sections()).some((s) => s.files.includes("mine.zpcr")), {
+    what: "the granted folder's own listing",
+  });
+  const both = await sections();
+  const disk = both.find((s) => !s.builtin);
+  const builtin = both.find((s) => s.builtin);
+  check(
+    "A folder granted under the app's own name keeps it, and the bundled one steps aside",
+    disk?.label === "samples" && builtin?.label === "samples (2)",
+    JSON.stringify(both.map((s) => ({ label: s.label, builtin: s.builtin }))),
+  );
+  check(
+    "…and each lists its own files rather than sharing one listing",
+    disk?.files.length === 1 &&
+      disk.files[0] === "mine.zpcr" &&
+      builtin?.files.includes(EXAMPLE) &&
+      !builtin.files.includes("mine.zpcr"),
+    JSON.stringify({ disk: disk?.files, builtin: builtin?.files.length }),
+  );
+
+  // Open the folder's own file before removing it, so the app is still holding something
+  // afterwards: with nothing open and no folder granted it goes back to the welcome screen, and
+  // the pane being asserted about wouldn't be on screen at all.
+  await cdp.eval(
+    `(() => { const row = [...document.querySelectorAll("${DISK} .folders__file")]
+         .find((r) => r.querySelector(".folders__name")?.textContent.trim() === "mine.zpcr");
+       row?.querySelector(".folders__check")?.click(); })()`,
+  );
+  await waitFor(() => cdp.eval(`!!document.querySelector(".filechip")`), {
+    what: "the disk-backed file's chip",
+  });
+
+  // The bug as the user met it: the ✕ was there and did nothing.
+  await cdp.eval(
+    `[...document.querySelectorAll("${DISK} .folders__actions .btn")]
+       .find((b) => b.textContent.trim() === "✕")?.click()`,
+  );
+  await waitFor(async () => !(await cdp.eval(`!!document.querySelector("${DISK}")`)), {
+    what: "the folder to be removed",
+  });
+  await waitFor(async () => (await sections()).some((s) => s.label === "samples"), {
+    what: "the bundled folder to take the name back",
+  });
+  const after = await sections();
+  check(
+    "…and its ✕ removes it, giving the bundled folder its name back",
+    after.length === 1 && after[0].builtin && after[0].label === "samples",
+    JSON.stringify(after.map((s) => s.label)),
+  );
+  check(
+    "…while the bundled folder still has no ✕ of its own",
+    (await cdp.eval(`document.querySelectorAll("${BUILTIN} .folders__actions .btn").length`)) === 0,
+  );
+
+  cdp.close();
+}
+
 async function main() {
   const pw = cfxPassword();
   if (!pw) {
@@ -5098,6 +5207,7 @@ async function main() {
     await openFilesChecks(chrome, origin);
     await sampleFolderChecks(chrome, origin);
     await folderChecks(chrome, origin);
+    await folderNameCollisionChecks(chrome, origin);
   } finally {
     chrome.stop();
     dev.stop();

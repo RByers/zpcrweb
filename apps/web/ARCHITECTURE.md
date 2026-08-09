@@ -763,7 +763,9 @@ the file's path inside it (`db.ts`'s `DiskSource` and `diskFileName`). Nothing a
 changes: it is still one unique string, still the key in both stores, still what `#file=` addresses.
 It just isn't a bare filename any more, which is what makes two runs called `plate.plt.csv` in
 different directories two different files. The folder label is made unique with the same `(2)`
-counter, so the whole name is too. Two consequences worth knowing:
+counter — against the other granted folders *and* against the names already in the open-files table
+above them, since everything in the Files view is addressed by name — so the whole name is too. Two
+consequences worth knowing:
 
 - What the run is **called** comes from the last path component, not the whole name
   (`lib/experiment.ts`'s `baseName`) — `runs/2026-07/a.zpcr` is the run *a*.
@@ -1039,7 +1041,7 @@ with. It is drawn by `FolderSection` alongside the granted ones rather than in a
 because it is the same thing — a list of files the app isn't holding yet, each with a checkbox that
 opens it — and a second component would drift from the first the moment either changed.
 
-Being built in rather than granted, it differs in exactly four ways, and each is a consequence of
+Being built in rather than granted, it differs in exactly five ways, and each is a consequence of
 that one fact:
 
 - **It is always last**, after however many folders the user has granted, so the app's own files
@@ -1047,6 +1049,15 @@ that one fact:
 - **It cannot be removed or re-read** — no ✕, no ↻, no permission to ask back for. Its listing is
   fixed when the app is built.
 - **It has no tree pane**, being one flat directory.
+- **It yields its name.** Every section in the pane has a distinct label, because a label is an
+  identity: the tree keys its nodes by it, and the file names beneath a granted folder begin with
+  it. When a granted folder is itself called `samples` — an entirely ordinary thing to pick — the
+  bundled one becomes `samples (2)`, using the same `(N)` counter as `lib/cloneName.ts`, and the
+  folder on disk keeps the name. That way round because renaming a granted folder would rename
+  every file already open out of it, while the bundled folder's files are copies under their own
+  bare names and have nothing to rename. `useDiskTree`'s `bundledLabel` computes it on every folder
+  read, and its `builtinLabel` ref — not a comparison against the literal `samples` — is what tells
+  the app's folder from a granted one when the ✕ is pressed or a directory is listed.
 - **Opening a file gives a copy.** A disk-backed file *is* the file on disk and is written back to;
   there is nothing to write back to inside the app's own bundle, so a sample goes through `addUrl`
   — the same fetch → `addFiles` path `#load=` uses — and lands as an ordinary file under its own

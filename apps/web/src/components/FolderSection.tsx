@@ -41,10 +41,13 @@
  * else won't appear on its own. The ↻ re-reads. (Files that are *loaded* do refresh by themselves;
  * those are watched one by one.)
  *
- * **`samples` is the same section, three things fewer.** The app ships a folder of example files
- * (`lib/samples.ts`), and it is drawn here rather than in a panel of its own so there is one
- * folder UI to learn and one to maintain. Being built in rather than on disk, it has no ↻ (its
- * listing is fixed at build time), no ✕ (it is part of the app), and no tree pane (it is flat).
+ * **The bundled samples are the same section, three things fewer.** The app ships a folder of
+ * example files (`lib/samples.ts`), and it is drawn here rather than in a panel of its own so there
+ * is one folder UI to learn and one to maintain. Being built in rather than on disk, it has no ↻
+ * (its listing is fixed at build time), no ✕ (it is part of the app), and no tree pane (it is
+ * flat). It is normally called `samples`, but a granted folder of that name outranks it and it
+ * becomes `samples (2)` — `useDiskTree` owns that, and `folder.builtin` rather than the label is
+ * what this component branches on.
  * Everything else — the checkbox that opens a file, the click/double-click pair, the selected
  * row — is the same code doing the same thing. The one difference a user can feel is what opening
  * one gives them: a *copy*, like a dropped file, since there is no writing back to a file inside

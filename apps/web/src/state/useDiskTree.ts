@@ -21,9 +21,10 @@
  *
  * **The last folder is not on the disk.** `samples` is the app's own, bundled at build time
  * (`lib/samples.ts`), and it is here rather than in a section of its own so that one component
- * draws every folder and the two cannot drift apart. It differs in exactly three ways, each of
- * them a consequence of being built in: it is always last, it cannot be removed, and its listing
- * comes from the manifest instead of a directory read — which also means it is present on browsers
+ * draws every folder and the two cannot drift apart. It differs in exactly four ways, each of
+ * them a consequence of being built in: it is always last, it cannot be removed, it gives up its
+ * name to a granted folder that wants it ({@link bundledLabel}), and its listing comes from the
+ * manifest instead of a directory read — which also means it is present on browsers
  * with no File System Access API at all, where {@link DiskTree.supported} is false and there is
  * nothing else in the pane.
  */
@@ -43,6 +44,7 @@ import {
 } from "./diskFolders";
 import type { DiskSource } from "./db";
 import { SAMPLE_FILES_LIST, SAMPLES_LABEL } from "../lib/samples";
+import { cloneFileName } from "../lib/cloneName";
 
 /** One folder as the Files view needs it — a granted one on disk, or the bundled `samples`. */
 export interface FolderView {
@@ -63,11 +65,24 @@ const sampleEntries = (): DiskEntry[] =>
     lastModified: s.lastModified,
   }));
 
-const samplesFolder: FolderView = {
-  label: SAMPLES_LABEL,
-  permission: "granted",
-  builtin: true,
-};
+/**
+ * What to call the bundled folder, given the folders granted on disk.
+ *
+ * `samples` normally, and `samples (2)` when a granted folder has already taken that name — the
+ * bundled folder is the one that yields, because a label is the first component of every file name
+ * beneath it: renaming a granted folder would rename every file already open out of it, while the
+ * bundled folder's files are copies under their own bare names and so have nothing to rename.
+ *
+ * Labels have to be unique for the ordinary reason that a name is an identity here — the tree keys
+ * its nodes by label ({@link nodeKey}), so two sections sharing one would share a listing, and the
+ * ✕ on one would be asking about the other.
+ */
+function bundledLabel(granted: readonly string[]): string {
+  const taken = new Set(granted);
+  return taken.has(SAMPLES_LABEL)
+    ? cloneFileName(SAMPLES_LABEL, (candidate) => taken.has(candidate))
+    : SAMPLES_LABEL;
+}
 
 /** What is known about one directory node, keyed by {@link nodeKey}. */
 export interface DiskNode {
@@ -103,8 +118,14 @@ export interface DiskTree {
   toggleFolder: (label: string) => void;
   /** Re-read everything currently open in this folder. */
   refresh: (label: string) => void;
-  /** Ask for a folder and add it. Must be called from a user gesture. */
-  add: () => Promise<void>;
+  /**
+   * Ask for a folder and add it. Must be called from a user gesture.
+   *
+   * `reserved` is the names already showing at the top of the Files view — the open files — so a
+   * picked folder never lands under a name that list already uses. The new folder gets a `(2)`
+   * rather than the collision.
+   */
+  add: (reserved?: readonly string[]) => Promise<void>;
   /** Ask for a lapsed folder's permission back. Must be called from a user gesture. */
   grant: (label: string) => Promise<void>;
   remove: (label: string) => Promise<void>;
@@ -142,12 +163,21 @@ export function useDiskTree(
    * working on would never open at all on a reload.
    */
   const expanded = useRef(new Set<string>());
+  /**
+   * What the bundled folder is currently called — {@link bundledLabel} of the granted folders.
+   *
+   * A ref because it is what tells "the app's own folder" from "a folder on disk" everywhere below,
+   * and those callbacks are handed a label alone. Asking `label === SAMPLES_LABEL` instead is the
+   * bug this replaced: a folder granted under the name `samples` answered to that test, so it was
+   * listed from the bundled manifest and its ✕ silently did nothing.
+   */
+  const builtinLabel = useRef(SAMPLES_LABEL);
 
   const load = useCallback(async (label: string, path: readonly string[]) => {
     const key = nodeKey(label, path);
     // The bundled folder is already in memory and is flat, so there is nothing to read and no
     // pending state to show: its root is the manifest, and any deeper path doesn't exist.
-    if (label === SAMPLES_LABEL) {
+    if (label === builtinLabel.current) {
       const entries = path.length === 0 ? sampleEntries() : [];
       setNodes((prev) => new Map(prev).set(key, { entries, pending: false, error: null }));
       return;
@@ -178,6 +208,9 @@ export function useDiskTree(
     // own files never sit above theirs — and is the whole list on a browser that can't do disk
     // folders at all.
     const stored = supported ? await listFolders() : [];
+    // Before the folders go out, so anything that reacts to them already agrees with `load` and
+    // `remove` about which label is the app's own.
+    builtinLabel.current = bundledLabel(stored.map((f) => f.label));
     setFolders([
       ...(await Promise.all(
         stored.map(async (f) => ({
@@ -186,7 +219,7 @@ export function useDiskTree(
           builtin: false,
         })),
       )),
-      samplesFolder,
+      { label: builtinLabel.current, permission: "granted", builtin: true },
     ]);
   }, [supported]);
 
@@ -298,10 +331,10 @@ export function useDiskTree(
     [liveNodes, load, readFolders],
   );
 
-  const add = useCallback(async () => {
+  const add = useCallback(async (reserved?: readonly string[]) => {
     try {
       setError(null);
-      const folder = await pickFolder();
+      const folder = await pickFolder(reserved);
       if (folder) await readFolders();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -331,8 +364,9 @@ export function useDiskTree(
   const remove = useCallback(
     async (label: string) => {
       // The bundled folder is part of the app; the UI offers no ✕ for it, and this is the
-      // backstop that keeps that true if some other caller ever asks.
-      if (label === SAMPLES_LABEL) return;
+      // backstop that keeps that true if some other caller ever asks. By its *current* label,
+      // which is not always `samples` — a granted folder may have that name.
+      if (label === builtinLabel.current) return;
       await removeFolder(label);
       for (const k of [...expanded.current]) {
         if (k === `folder:${label}` || k.startsWith(`file:["${label}"`)) expanded.current.delete(k);
