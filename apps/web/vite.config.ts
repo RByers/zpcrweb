@@ -1,5 +1,5 @@
-import { readdirSync, readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
@@ -34,6 +34,7 @@ interface SampleEntry {
  * opens, so they are left out exactly as they would be in a folder on disk.
  */
 function readSamples(): SampleEntry[] {
+  if (!existsSync(samplesDir)) return []; // A checkout with no `samples/` — the folder is empty.
   return readdirSync(samplesDir, { withFileTypes: true })
     .filter((e) => e.isFile() && !e.name.startsWith(".") && matchesSupportedExtension(e.name))
     .map((e) => {
@@ -51,7 +52,8 @@ function readSamples(): SampleEntry[] {
  * serve. In a build each sample is emitted verbatim (no content hash) — the name in the URL is
  * the name the user sees in the samples folder and the name the file gets when they open it. In
  * dev the same paths are served straight off disk by a middleware, so there is one mechanism in
- * both modes and nothing to keep in sync.
+ * both modes and nothing to keep in sync — and the directory is watched, so adding or removing a
+ * sample reloads the running app instead of waiting for a restart.
  *
  * This replaced a `public/examples/` directory holding a symlink per offered file, which could
  * only ever list what someone had remembered to link.
@@ -67,6 +69,25 @@ function samples(): Plugin {
       return `export const SAMPLE_FILES = ${JSON.stringify(readSamples())};\n`;
     },
     configureServer(server) {
+      // Adding a sample to `samples/` should show up in the running app the way editing a source
+      // file does. Two things stand in the way: the directory sits outside the Vite root, so the
+      // watcher does not cover it, and the listing is a virtual module Vite caches after its one
+      // `load`. So watch the directory explicitly, and on a change that the listing would show,
+      // drop the cached module and reload. (The bytes need no help — the middleware below reads
+      // them off disk per request.)
+      server.watcher.add(samplesDir);
+      let listing = JSON.stringify(readSamples());
+      const refresh = (path: string) => {
+        if (dirname(path) !== samplesDir) return;
+        const next = JSON.stringify(readSamples());
+        if (next === listing) return;
+        listing = next;
+        const mod = server.moduleGraph.getModuleById(`\0${VIRTUAL_ID}`);
+        if (mod) server.moduleGraph.invalidateModule(mod);
+        server.ws.send({ type: "full-reload" });
+      };
+      for (const event of ["add", "unlink", "change"] as const) server.watcher.on(event, refresh);
+
       server.middlewares.use((req, res, next) => {
         const url = new URL(req.url ?? "/", "http://localhost");
         const prefix = `/${SAMPLES_ROUTE}/`;
