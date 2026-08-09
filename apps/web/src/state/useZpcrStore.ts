@@ -91,6 +91,7 @@ import {
   restampExperimentDate,
   type ExperimentIdentity,
 } from "../lib/experiment";
+import { sampleNameFromUrl } from "../lib/samples";
 import { usePltdPassword } from "./pltdPassword";
 import { onHashChange, readHash, writeHash } from "./urlHash";
 
@@ -1830,7 +1831,9 @@ export function useZpcrStore(): ZpcrStore {
    */
   const addUrl = useCallback(
     async (url: string) => {
-      const name = fileNameFromUrl(url);
+      // A bundled sample is filed under its folder like any other folder's file, however it was
+      // asked for — including through `#load=`, which is how the welcome screen opens one.
+      const name = sampleNameFromUrl(url) ?? fileNameFromUrl(url);
       try {
         // Only the name is checked here, against the one list of openable extensions the picker
         // and the disk lister use; `addFiles` below does the real (content-based) validation once

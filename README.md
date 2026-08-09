@@ -204,10 +204,12 @@ where it's unavailable.
 Below your own folders, the Files tab always ends with a **samples** folder: the example files that
 ship with the app, the same ones in this repo's `samples/` directory. Tick one to open it and it
 behaves like any other file you loaded — you get a copy, so anything you change stays in your
-browser and the example itself is untouched. It can't be removed, and it's there on every browser,
-including those that can't grant a folder on disk at all. If you open a folder of your own that is
-also called `samples`, yours keeps the name and this one shows up as `samples (2)` — every folder in
-the list has a name of its own, since that name is what the files inside it are filed under.
+browser and the example itself is untouched. It's filed under `samples/<name>`, the same way a file
+out of a folder on your disk is named for its folder, so opening a sample can never displace a file
+of the same name you loaded yourself. It can't be removed, and it's there on every browser,
+including those that can't grant a folder on disk at all. The name `samples` is reserved for it: a
+folder of your own picked under that name comes in as `samples (2)`, since every folder in the list
+needs a name of its own.
 
 Nothing enumerates that list in source: `vite.config.ts` reads `samples/` at build time and serves
 what it finds, so adding a file to that directory (or deleting one) and rebuilding is all it takes.

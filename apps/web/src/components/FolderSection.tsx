@@ -45,13 +45,12 @@
  * example files (`lib/samples.ts`), and it is drawn here rather than in a panel of its own so there
  * is one folder UI to learn and one to maintain. Being built in rather than on disk, it has no ↻
  * (its listing is fixed at build time), no ✕ (it is part of the app), and no tree pane (it is
- * flat). It is normally called `samples`, but a granted folder of that name outranks it and it
- * becomes `samples (2)` — `useDiskTree` owns that, and `folder.builtin` rather than the label is
- * what this component branches on.
- * Everything else — the checkbox that opens a file, the click/double-click pair, the selected
- * row — is the same code doing the same thing. The one difference a user can feel is what opening
- * one gives them: a *copy*, like a dropped file, since there is no writing back to a file inside
- * the app's own bundle.
+ * flat). It always keeps the name `samples`; a granted folder picked under that name gets the
+ * `(2)` instead, so no two sections in the pane ever share a label. Everything else — the checkbox
+ * that opens a file, the click/double-click pair, the selected row, the `samples/`-rooted name the
+ * file is filed under — is the same code doing the same thing. The one difference a user can feel
+ * is what opening one gives them: a *copy*, like a dropped file, since there is no writing back to
+ * a file inside the app's own bundle.
  */
 import { useRef } from "react";
 import { fileKindDescription } from "@zpcrweb/core";
@@ -64,6 +63,7 @@ import type { FileEntry } from "../state/useZpcrStore";
 import { formatCompactDateTime } from "../lib/experiment";
 import { FileKindIcon } from "./FileIcons";
 import { FolderIcon } from "./ViewIcons";
+import { sampleFileName } from "../lib/samples";
 
 interface Props {
   tree: DiskTree;
@@ -78,7 +78,8 @@ interface Props {
    * Overview — used where the app is doing the opening rather than a gesture. */
   onAddDiskFiles: (sources: DiskSource[], goToFile?: boolean) => void | Promise<void>;
   /** The same thing for a bundled sample, which is fetched rather than read off disk and lands as
-   * an ordinary copy under its own name — see `lib/samples.ts`. */
+   * an ordinary copy — under `samples/<name>`, like any other folder's file. See `lib/samples.ts`.
+   * Called with the plain file names; the prefix is the store's business. */
   onAddSampleFiles: (names: string[], goToFile?: boolean) => void | Promise<void>;
   /** Select it *and* go look at it, on Overview — a double click. */
   onOpenFile: (id: string) => void;
@@ -403,10 +404,11 @@ function FileRow({
   builtin: boolean;
 } & Omit<Props, "tree">) {
   const source: DiskSource = { folder: label, path: [...path, entry.name] };
-  // A disk file is known by its folder-rooted path, because that path *is* the file. A sample is
-  // known by its plain name: opening one copies it into the app, exactly as dropping a file does,
-  // so what the app holds afterwards has no folder above it.
-  const name = builtin ? entry.name : diskFileName(source);
+  // Either way the file is known by its folder-rooted path. For a disk file that path *is* the
+  // file; for a sample it is only where the copy came from, but everything in the app is keyed by
+  // name, and a sample under its bare name would replace a file of that name someone had dropped
+  // in themselves (`lib/samples.ts`).
+  const name = builtin ? sampleFileName(entry.name) : diskFileName(source);
   const open = entries.find((e) => e.name === name);
   // What the click of this gesture did: which way it left the file, and when that has finished.
   // A `dblclick` arrives after its own two clicks have been handled and after `open` was last

@@ -758,8 +758,10 @@ a `replacing` flag:
 A rename is the one edit that *moves* a file's records rather than rewriting them; `renameFile`
 writes the content under the new name and deletes the old, carrying the settings across.
 
-**A disk-backed file's name is a path.** `runs/2026-07/a.zpcr` — the granted folder's label, then
-the file's path inside it (`db.ts`'s `DiskSource` and `diskFileName`). Nothing about identity
+**A folder's file is named for its folder.** `runs/2026-07/a.zpcr` — the granted folder's label,
+then the file's path inside it (`db.ts`'s `DiskSource` and `diskFileName`); a bundled sample is
+`samples/run.zpcr` by the same rule, though it is a copy rather than the file itself
+(`lib/samples.ts`). Nothing about identity
 changes: it is still one unique string, still the key in both stores, still what `#file=` addresses.
 It just isn't a bare filename any more, which is what makes two runs called `plate.plt.csv` in
 different directories two different files. The folder label is made unique with the same `(2)`
@@ -1049,20 +1051,22 @@ that one fact:
 - **It cannot be removed or re-read** — no ✕, no ↻, no permission to ask back for. Its listing is
   fixed when the app is built.
 - **It has no tree pane**, being one flat directory.
-- **It yields its name.** Every section in the pane has a distinct label, because a label is an
-  identity: the tree keys its nodes by it, and the file names beneath a granted folder begin with
-  it. When a granted folder is itself called `samples` — an entirely ordinary thing to pick — the
-  bundled one becomes `samples (2)`, using the same `(N)` counter as `lib/cloneName.ts`, and the
-  folder on disk keeps the name. That way round because renaming a granted folder would rename
-  every file already open out of it, while the bundled folder's files are copies under their own
-  bare names and have nothing to rename. `useDiskTree`'s `bundledLabel` computes it on every folder
-  read, and its `builtinLabel` ref — not a comparison against the literal `samples` — is what tells
-  the app's folder from a granted one when the ✕ is pressed or a directory is listed.
+- **It keeps its name.** Every section in the pane has a distinct label, because a label is an
+  identity: the tree keys its nodes by it, and the file names inside it begin with it. `samples` is
+  the app's, always — a folder the user grants under that name gets `samples (2)` instead, from the
+  same `(N)` counter as `lib/cloneName.ts` (`addFolder`'s `reserved`). Because no granted folder can
+  hold the label, `useDiskTree` can go on telling the app's folder from a disk one by comparing
+  against it, which is what the ✕ and the directory lister both do.
 - **Opening a file gives a copy.** A disk-backed file *is* the file on disk and is written back to;
   there is nothing to write back to inside the app's own bundle, so a sample goes through `addUrl`
-  — the same fetch → `addFiles` path `#load=` uses — and lands as an ordinary file under its own
-  name, with no folder-rooted path (see "A disk-backed file's name is a path"). Edits stay in the
-  browser; the sample is what it always was.
+  — the same fetch → `addFiles` path `#load=` uses — and lands as an ordinary file in the browser's
+  storage. Edits stay there; the sample is what it always was. Its **name** is folder-rooted all the
+  same — `samples/run.zpcr` (`lib/samples.ts`'s `sampleFileName`, see "A folder's file is named for
+  its folder") — because the app keys everything by name, and a bare `run.zpcr` would mean opening a
+  sample silently replaced a file of that name the user had dropped in themselves. `addUrl` applies
+  the prefix by recognizing the URL as a sample's (`sampleNameFromUrl`) rather than by being told,
+  so the welcome screen's example — which is one of these, opened through `#load=` — lands under
+  the same name as the folder row, and that row shows as ticked while it is open.
 
 It is also present on browsers with no File System Access API, where `DiskTree.supported` is false
 and there is nothing else in the pane — which is why the pane is gated on `folders.length`, not on

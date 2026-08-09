@@ -679,21 +679,36 @@ async function loadChecks(chrome, origin) {
   );
   await waitFor(() => cdp.eval(`/file=/.test(window.location.hash)`), { what: "example loaded" });
   const exampleHash = await cdp.eval("window.location.hash");
+  // The example is one of the bundled samples, so it is filed under the samples folder however it
+  // was asked for — including through this link, which is a plain `#load=<url>` (`sampleNameFromUrl`).
   check(
-    "example link loads the served sample",
-    /file=20260726_S183-S185_RVP\.zpcr/.test(exampleHash),
+    "example link loads the served sample, filed under the samples folder",
+    /file=samples(%2F|\/)20260726_S183-S185_RVP\.zpcr/.test(exampleHash),
     exampleHash,
   );
   check("the load= instruction is consumed, not left in the hash", !/load=/.test(exampleHash));
 
-  // 2. Same name, different bytes (a 4-byte-longer copy — ids hash name+size, so this is a new
-  //    id) must replace the chip rather than add an indistinguishable second one.
+  // 2. A dropped file whose name matches a *sample*'s bare name is a different file, and both
+  //    stay: the sample is `samples/<name>`, which is the point of the prefix.
+  await loadFile(cdp, DUPE);
+  await sleep(800);
+  const withDupe = await cdp
+    .eval(`JSON.stringify([...document.querySelectorAll(".filechip")].map((c) => c.title || c.textContent.trim()))`)
+    .then(JSON.parse);
+  check(
+    "a dropped file doesn't displace a sample that shares its bare name",
+    withDupe.length === 2,
+    JSON.stringify(withDupe),
+  );
+
+  // 3. …and same-name replacement itself still holds: dropping it again replaces it rather than
+  //    adding an indistinguishable second chip.
   await loadFile(cdp, DUPE);
   await sleep(800);
   const chips = await cdp.eval(`document.querySelectorAll(".filechip").length`);
-  check("re-loading a name replaces the file instead of duplicating it", chips === 1, `${chips} chips`);
+  check("re-loading a name replaces the file instead of duplicating it", chips === 2, `${chips} chips`);
 
-  // 3. A cold deep link does the fetch on its own, with nothing in IndexedDB to fall back on.
+  // 4. A cold deep link does the fetch on its own, with nothing in IndexedDB to fall back on.
   await emptyReload(cdp, `${origin}#load=examples/20260726_S183-S185_RVP.zpcr&view=plates`);
   await waitFor(() => cdp.eval(`document.querySelectorAll(".filechip").length === 1`), {
     what: "deep-linked file",
@@ -701,14 +716,14 @@ async function loadChecks(chrome, origin) {
   const cold = await tabBecomes(cdp, "Plates");
   check("cold #load= link fetches the file and honors view=", cold === "Plates", `tab "${cold}"`);
 
-  // 4. A bad URL surfaces an error rather than hanging on the welcome screen.
+  // 5. A bad URL surfaces an error rather than hanging on the welcome screen.
   await emptyReload(cdp, `${origin}#load=examples/nope.zpcr`);
   await sleep(1200);
   const errored = await cdp.eval(`!!document.querySelector(".app__error")`);
   const stillWelcome = await cdp.eval(`!!document.querySelector(".app--empty")`);
   check("a #load= that 404s reports an error and keeps the welcome screen", errored && stillWelcome);
 
-  // 5. …and the banner can be got rid of. It floats over the bottom-right corner of the page, so
+  // 6. …and the banner can be got rid of. It floats over the bottom-right corner of the page, so
   // an error with no ✕ covers whatever is under it — including, for a folder whose permission has
   // lapsed, the "Grant access" button that would fix it — for the rest of the session.
   await cdp.eval(`document.querySelector(".app__errordismiss").click()`);
@@ -4360,7 +4375,8 @@ async function explodedStorageChecks(chrome, origin) {
  *
  * What is checked is what makes it *built in*: it lists itself from the build rather than from a
  * directory read, it cannot be re-read or removed, and opening a file out of it gives the app an
- * ordinary copy under the file's own name (no folder-rooted path, unlike a disk-backed file).
+ * ordinary copy — editable and closable, unlike the bundled file itself — filed under
+ * `samples/<name>`, so it can never displace a file of that name the user loaded themselves.
  */
 async function sampleFolderChecks(chrome, origin) {
   console.log("\nbundled samples folder");
@@ -4440,8 +4456,8 @@ async function sampleFolderChecks(chrome, origin) {
     await activeTab(cdp),
   );
   check(
-    "…as an ordinary copy under the file's own name, not a folder-rooted path",
-    catalog.includes(EXAMPLE) && !catalog.some((n) => n.startsWith("samples/")),
+    "…as a copy named for the folder it came out of, like any other folder's file",
+    catalog.includes(`samples/${EXAMPLE}`) && !catalog.includes(EXAMPLE),
     JSON.stringify(catalog),
   );
   // Unticking closes it again — the same gesture the disk rows have, and the reason the row is a
@@ -4455,7 +4471,7 @@ async function sampleFolderChecks(chrome, origin) {
     .then(JSON.parse);
   check(
     "…and clicking it again closes it, leaving the rest of the catalog alone",
-    !afterClose.includes(EXAMPLE) && afterClose.length === catalog.length - 1,
+    !afterClose.includes(`samples/${EXAMPLE}`) && afterClose.length === catalog.length - 1,
     JSON.stringify(afterClose),
   );
 
@@ -4922,6 +4938,11 @@ async function folderChecks(chrome, origin) {
        return true; })()`,
     { awaitPromise: true },
   );
+  // Wait for hydration before reaching for a tab: until the catalog is back the app can still be
+  // rendering the welcome screen, and a click that lands then goes nowhere.
+  await waitFor(() => cdp.eval(`!!document.querySelector(".filechip")`), {
+    what: "the app to come back holding its file",
+  });
   await clickTab(cdp, "Files");
   await waitFor(() => cdp.eval(`!!document.querySelector("${DISK}")`), {
     what: "the folder after a reload",
@@ -5040,6 +5061,12 @@ async function folderChecks(chrome, origin) {
     what: "the badges to clear",
   });
   const granted = await lapsed();
+  // The rows lose their badge as each file is read; the chips are a render behind that, so they
+  // are waited for rather than sampled the instant the badges clear.
+  await waitFor(() => cdp.eval(`document.querySelectorAll(".filechip").length === 2`), {
+    timeout: 10000,
+    what: "both files back on the file bar",
+  }).catch(() => {});
   const chipsBack = await cdp.eval(`document.querySelectorAll(".filechip").length`);
   check(
     "Granting the folder back reads in every open file in it, not just the one clicked",
@@ -5055,9 +5082,10 @@ async function folderChecks(chrome, origin) {
  *
  * Two sections sharing a label share everything a label identifies: the tree keys its nodes by it,
  * so the disk folder was listed from the bundled manifest instead of from the disk, and its ✕
- * matched the "this is the app's own folder, refuse" guard and silently did nothing. So what is
- * asserted here is that the two are told apart: the folder on disk keeps the name, the bundled one
- * becomes `samples (2)`, each lists its own files, and the ✕ removes the one it is on.
+ * matched the "this is the app's own folder, refuse" guard and silently did nothing. What is
+ * asserted here is that the collision cannot happen: the bundled folder keeps `samples`, the
+ * granted one comes in as `samples (2)`, each lists its own files, and the ✕ removes the one it
+ * is on.
  */
 async function folderNameCollisionChecks(chrome, origin) {
   console.log("\na folder named like the app's own");
@@ -5108,8 +5136,8 @@ async function folderNameCollisionChecks(chrome, origin) {
   const disk = both.find((s) => !s.builtin);
   const builtin = both.find((s) => s.builtin);
   check(
-    "A folder granted under the app's own name keeps it, and the bundled one steps aside",
-    disk?.label === "samples" && builtin?.label === "samples (2)",
+    "A folder granted under the app's own name comes in as samples (2), which keeps samples the app's",
+    disk?.label === "samples (2)" && builtin?.label === "samples",
     JSON.stringify(both.map((s) => ({ label: s.label, builtin: s.builtin }))),
   );
   check(
@@ -5141,12 +5169,9 @@ async function folderNameCollisionChecks(chrome, origin) {
   await waitFor(async () => !(await cdp.eval(`!!document.querySelector("${DISK}")`)), {
     what: "the folder to be removed",
   });
-  await waitFor(async () => (await sections()).some((s) => s.label === "samples"), {
-    what: "the bundled folder to take the name back",
-  });
   const after = await sections();
   check(
-    "…and its ✕ removes it, giving the bundled folder its name back",
+    "…and its ✕ removes it, leaving the app's own folder alone",
     after.length === 1 && after[0].builtin && after[0].label === "samples",
     JSON.stringify(after.map((s) => s.label)),
   );

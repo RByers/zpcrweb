@@ -12,6 +12,12 @@
  * and with the samples folder's own row ticked while it is open. They are read-only in the sense
  * that matters — an edit is never written back to the bundled copy — which is the one way they
  * differ from a granted folder on disk.
+ *
+ * **A sample is still named for its folder** — `samples/run.zpcr`, exactly as a file out of a
+ * granted folder is named for its own ({@link sampleFileName}). The copy is not the bundled file
+ * the way a disk-backed file *is* the file on disk, but the app keys everything by name, and a
+ * bare `run.zpcr` would mean opening a sample silently replaced a file of that name someone had
+ * dropped in themselves.
  */
 import { SAMPLE_FILES } from "virtual:samples";
 
@@ -24,9 +30,16 @@ export interface SampleFile {
   lastModified: number;
 }
 
-/** The folder's name in the Files view, and nothing else: a sample opens under its own file name,
- * not a folder-rooted path, because the app holds a copy rather than the file itself. */
+/** The folder's name in the Files view, and the first component of every sample's file name. Kept
+ * for the app's own folder whatever the user grants: a granted folder of the same name gets the
+ * `(2)` instead (`state/diskFolders.ts`). */
 export const SAMPLES_LABEL = "samples";
+
+/** What the app calls its copy of a bundled sample — the folder's name and the file's, joined the
+ * same way a disk-backed file's name is (`state/db.ts`'s `diskFileName`). */
+export function sampleFileName(name: string): string {
+  return `${SAMPLES_LABEL}/${name}`;
+}
 
 /** Every bundled sample, sorted by name. Empty is a legitimate state (a checkout with no
  * `samples/`), and the folder simply says it has nothing in it. */
@@ -39,4 +52,22 @@ export const SAMPLE_FILES_LIST: readonly SampleFile[] = SAMPLE_FILES;
  */
 export function sampleUrl(name: string): string {
   return `examples/${encodeURIComponent(name)}`;
+}
+
+/**
+ * The name to file a URL's bytes under when the URL is one of {@link sampleUrl}'s — `samples/x`
+ * rather than the bare `x` a URL would otherwise give, so a sample lands under the same name
+ * however it was asked for. `null` for every other URL.
+ *
+ * The welcome screen's example run needs this: it is a bundled sample, but it is opened through
+ * `#load=<url>` so that the in-app affordance and an external deep link are one code path. Without
+ * this the same file would be `run.zpcr` from the welcome screen and `samples/run.zpcr` from the
+ * folder — two copies of one run, and the folder's row unticked while it was open.
+ *
+ * Matched against the manifest rather than by pattern, so only bytes that really are the app's own
+ * get the app's own folder name.
+ */
+export function sampleNameFromUrl(url: string): string | null {
+  const match = SAMPLE_FILES_LIST.find((s) => sampleUrl(s.name) === url);
+  return match ? sampleFileName(match.name) : null;
 }
