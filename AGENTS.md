@@ -235,6 +235,28 @@ core's `runSeed.ts` or `App.tsx`'s `runViews`, `state/useRunWatch.ts`,
 `modifiedIds`/`markDownloaded`/`setProtocolText`, its settings seeding or `fileKind`, or
 view selection.
 
+### Don't write a fixed `sleep` into a check
+
+**Wait for the state you are about to assert on, not for a number of milliseconds.** A `sleep` long
+enough to be safe on a loaded machine is dead time on every run, and one short enough to be quick
+is a flake — the suite has been both. `harness.mjs` has the vocabulary:
+
+- `waitFor(fn)` — a condition became true. Throws on timeout, naming what it waited for.
+- `waitValue(read, pred)` — poll until the value satisfies `pred`, then **return it**. Wait for the
+  value to *change* and let the `check` assert what it changed to; a `pred` that restates the
+  assertion makes the check tautological. Returns the stale value on timeout rather than throwing,
+  so the failure surfaces as the check it belongs to.
+- `waitStable(read)` — the value stopped changing. For state the app writes more than once per
+  action, such as the routing hash.
+- `clickTab` / `clickButton` / `clickUntil` — click a control that may not have rendered yet.
+  `element?.click()` on a control React hasn't drawn is a silent no-op, and the caller then times
+  out on a view it never actually asked for.
+
+A fixed `sleep` is right for exactly two things, and both should say so in a comment: a **negative**
+assertion (nothing happened — there is no state change to wait for), and outwaiting a **rate limit**
+whose interval is a constant in the app (`DISK_WRITE_INTERVAL_MS`). Reaching for one anywhere else
+means the observable hasn't been found yet.
+
 Both tools share `tools/harness.mjs` (the CDP client and dev-server/Chrome plumbing); **add new
 checks there rather than starting a third script.** Note that rail hover ("peek") needs a real
 `Input.dispatchMouseEvent` — React derives `onMouseEnter`/`onMouseLeave` from an over/out pair

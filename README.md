@@ -291,7 +291,7 @@ npm run typecheck -w @zpcrweb/web   # typecheck the web app
 npm run dev -w @zpcrweb/web     # web dev server → http://localhost:5173
                                 # hot-reloads packages/core edits too (aliased to src, no tsup watch)
 npm run build -w @zpcrweb/web   # web production build (typechecks first)
-npm run test:ui                 # browser assertions (needs Chrome, ~35s; not part of npm test)
+npm run test:ui                 # browser assertions (needs Chrome, ~100s; not part of npm test)
 ```
 
 Local-only secrets (the CFX file decryption password) live in `secrets.json`, which is gitignored

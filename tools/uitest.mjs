@@ -26,6 +26,8 @@ import {
   startChrome,
   startDevServer,
   waitFor,
+  waitStable,
+  waitValue,
 } from "./harness.mjs";
 
 const ZPCR = join(REPO, "samples/20260720_FirstQualification.zpcr");
@@ -465,10 +467,54 @@ async function tabBecomes(cdp, label, timeout = 8000) {
 /** Click a `.viewbar` tab by its visible label — the Files/Instrument tabs (their own
  * `.segmented--*` groups, `ViewBar.tsx`) as well as the main strip's. Scoped to `.viewbar`
  * rather than every `[role="tab"]` in the page, since a file chip is one too. */
-const clickTab = (cdp, label) =>
-  cdp.eval(`(() => { const t = [...document.querySelectorAll('.viewbar [role="tab"]')]
-      .find((b) => b.textContent.trim() === ${JSON.stringify(label)});
-      t?.click(); })()`);
+/**
+ * Click a plain `<button>` found by its exact label, waiting for it to exist first.
+ *
+ * The idiom this replaces — `[...querySelectorAll("button")].find(...); b && b.click()` — is a
+ * silent no-op when the button hasn't rendered yet, and the caller then waits out its own
+ * timeout on a control it never actually pressed. Failing here instead names the button.
+ */
+const clickButton = async (cdp, label) => {
+  const sel = `[...document.querySelectorAll("button")]
+      .find((b) => b.textContent.trim() === ${JSON.stringify(label)})`;
+  await waitFor(() => cdp.eval(`!!(${sel})`), { what: `the ${label} button` });
+  await cdp.eval(`(() => { (${sel}).click(); })()`);
+};
+
+/**
+ * Click a labelled button until `settled()` holds, re-clicking between polls.
+ *
+ * For controls whose state the app also writes itself: the Curves view mode is seeded from the
+ * file's stored settings in an effect that runs after hydration, so a click that lands in the
+ * window before it gets overwritten and the mode silently snaps back. One click plus a wait then
+ * times out on a view that was asked for and then taken away. Re-clicking rides that out without
+ * hiding a real failure — if the view never appears, this still throws.
+ */
+const clickUntil = async (cdp, label, settled, what) => {
+  const deadline = Date.now() + 15000;
+  for (;;) {
+    await clickButton(cdp, label);
+    if (await waitValue(settled, (v) => !!v, { timeout: 1500 })) return;
+    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
+  }
+};
+
+const clickTab = async (cdp, label) => {
+  const sel = `[...document.querySelectorAll('.viewbar [role="tab"]')]
+      .find((b) => b.textContent.trim() === ${JSON.stringify(label)})`;
+  // `document.readyState === "complete"` is true well before React has drawn the view bar, so a
+  // bare `t?.click()` here was a silent no-op whenever this ran early — the caller then waited
+  // out its own timeout on a view that had never been asked for. Wait for the tab to exist.
+  await waitFor(() => cdp.eval(`!!(${sel})`), { what: `the ${label} tab` });
+  await cdp.eval(`(() => { (${sel}).click(); })()`);
+  // Then let the click land. Not asserted: a few callers click a tab precisely to show that it
+  // is disabled and does *not* take the selection.
+  await waitValue(
+    () => cdp.eval(`(${sel})?.getAttribute("aria-selected") === "true"`),
+    (v) => v === true,
+    { timeout: 2000 },
+  );
+};
 
 /**
  * The Calibration view's default selection. A run ships a `.Dcal` for every dye Bio-Rad sells on
@@ -480,12 +526,10 @@ const clickTab = (cdp, label) =>
 async function calibrationChecks(chrome, origin) {
   console.log("\ncalibration view");
   const cdp = await openPage(chrome.base, origin);
-  await sleep(600);
   await loadFile(cdp, ZPCR);
   await waitFor(() => cdp.eval(`!!document.querySelector(".chanbar")`), { what: "curves rail" });
   await cdp.eval(`window.location.hash = "view=calibration", undefined`);
   await waitFor(() => cdp.eval(`!!document.querySelector(".calgroup")`), { what: "calibration rail" });
-  await sleep(400);
 
   /** Every calibration chip, with the plate-type group it sits in. */
   const chips = () =>
@@ -498,6 +542,12 @@ async function calibrationChecks(chrome, origin) {
       }));
     })`);
 
+  // Both plate-type groups have to be on screen before the chips are counted — the `waitFor`
+  // above only gates on the first one existing.
+  await waitValue(
+    () => cdp.eval(`document.querySelectorAll(".calgroup").length`),
+    (n) => n >= 2,
+  );
   const initial = await chips();
   const on = initial.filter((c) => c.on);
   check(
@@ -518,8 +568,10 @@ async function calibrationChecks(chrome, origin) {
       .find((x) => x.querySelector(".calgroup__title").textContent.includes("BR White"));
       [...g.querySelectorAll(".chanchip")].find((b) =>
         b.querySelector(".chanchip__ch").textContent === "FAM").click(); })()`);
-  await sleep(300);
-  const afterOn = (await chips()).filter((c) => c.on);
+  // Wait for the selection to *change*, then assert what it changed to.
+  const afterOn = (
+    await waitValue(chips, (cs) => cs.filter((c) => c.on).length !== on.length)
+  ).filter((c) => c.on);
   check(
     "clicking an unused calibration's chip adds it",
     afterOn.length === 4 && afterOn.some((c) => c.dye === "FAM" && c.group === "BR White"),
@@ -540,11 +592,9 @@ async function calibrationChecks(chrome, origin) {
 
   const relativeCurves = await curveCount();
   await clickToggle("Absolute");
-  await sleep(300);
-  const absoluteCurves = await curveCount();
+  const absoluteCurves = await waitValue(curveCount, (n) => n !== relativeCurves);
   await clickToggle("Relative");
-  await sleep(300);
-  const backToRelative = await curveCount();
+  const backToRelative = await waitValue(curveCount, (n) => n !== absoluteCurves);
   check(
     "absolute mode plots both raw reads, relative mode just their difference",
     relativeCurves > 0 &&
@@ -560,9 +610,10 @@ async function routingChecks(chrome, origin, pw) {
   console.log("\nhash routing");
   const cdp = await openPage(chrome.base, `${origin}#cfxPassword=${encodeURIComponent(pw)}`);
   await loadFile(cdp, ZPCR);
-  await sleep(600);
 
-  const h1 = await cdp.eval("window.location.hash");
+  // The hash is written after the file lands, so wait for it to carry anything at all before
+  // asking what it carries.
+  const h1 = await waitValue(() => cdp.eval("window.location.hash"), (h) => /file=/.test(h));
   check("hash carries file+view once a file is active", /file=/.test(h1) && /view=/.test(h1), h1);
   check(
     "file param round-trips the real name",
@@ -570,12 +621,12 @@ async function routingChecks(chrome, origin, pw) {
   );
 
   // Clicking a tab must write the hash — this is what makes any view linkable.
-  await cdp.eval(
-    `(() => { const b = [...document.querySelectorAll('[role="tab"]')]
-        .find(x => x.textContent.trim() === "Plates"); b && b.click(); })()`,
-  );
-  await sleep(400);
-  check("clicking a tab writes view= to the hash", /view=plates/.test(await cdp.eval("window.location.hash")));
+  await clickTab(cdp, "Plates");
+  // Stable, not merely changed: the app can write the hash more than once settling into a view,
+  // and `back()` below has to leave from the entry it finishes on rather than an intermediate
+  // one — which is exactly how "back() restores the previous view" failed intermittently.
+  const clicked = await waitStable(() => cdp.eval("window.location.hash"));
+  check("clicking a tab writes view= to the hash", /view=plates/.test(clicked), clicked);
 
   // pushState (not replaceState) on user-driven changes is what makes these two work.
   await cdp.eval("window.history.back()");
@@ -612,8 +663,7 @@ async function routingChecks(chrome, origin, pw) {
 
   await cdp.send("Page.navigate", { url: `${origin}#view=notaview` });
   await waitFor(() => cdp.eval("document.readyState==='complete'"), { what: "reload" });
-  await sleep(800);
-  const junk = await activeTab(cdp);
+  const junk = await waitValue(() => activeTab(cdp), (t) => t !== "none");
   check("invalid view value falls back to a real tab", junk !== "none", `tab "${junk}"`);
 
   cdp.close();
@@ -627,7 +677,14 @@ async function routingChecks(chrome, origin, pw) {
 async function loadChecks(chrome, origin) {
   console.log("\nload from URL");
   const cdp = await openPage(chrome.base, origin);
-  await sleep(600);
+  // `document.readyState === "complete"` is true before React has rendered anything, so the
+  // welcome screen's buttons have to be waited for rather than assumed. A fixed sleep here used
+  // to fail the whole run, intermittently, as `undefined is not a function` on the click below.
+  const welcomeBtn = (re) =>
+    cdp.eval(
+      `!![...document.querySelectorAll("button")].find((b) => ${re}.test(b.textContent))`,
+    );
+  await waitFor(() => welcomeBtn("/Connect an instrument/i"), { what: "the welcome screen" });
 
   // 0. The other thing the welcome screen offers: an instrument, with nothing loaded and nothing
   //    created. The Instrument tab is not a lens on a file (see `ViewBar`), so it is reachable
@@ -660,7 +717,10 @@ async function loadChecks(chrome, origin) {
   // Back to the welcome screen for the example-link checks below — the view is sticky, and this
   // browser is still empty.
   await emptyReload(cdp, origin);
-  await sleep(400);
+  await waitFor(
+    () => cdp.eval(`!![...document.querySelectorAll("a")].find(x => /load an example/i.test(x.textContent || ""))`),
+    { what: "the welcome screen's example link" },
+  );
 
   // 1. The welcome screen offers the example as a real link (so "Copy link address" works),
   //    and clicking it loads it.
@@ -691,10 +751,11 @@ async function loadChecks(chrome, origin) {
   // 2. A dropped file whose name matches a *sample*'s bare name is a different file, and both
   //    stay: the sample is `samples/<name>`, which is the point of the prefix.
   await loadFile(cdp, DUPE);
-  await sleep(800);
-  const withDupe = await cdp
-    .eval(`JSON.stringify([...document.querySelectorAll(".filechip")].map((c) => c.title || c.textContent.trim()))`)
-    .then(JSON.parse);
+  const chipTitles = () =>
+    cdp
+      .eval(`JSON.stringify([...document.querySelectorAll(".filechip")].map((c) => c.title || c.textContent.trim()))`)
+      .then(JSON.parse);
+  const withDupe = await waitValue(chipTitles, (t) => t.length !== 1);
   check(
     "a dropped file doesn't displace a sample that shares its bare name",
     withDupe.length === 2,
@@ -703,6 +764,9 @@ async function loadChecks(chrome, origin) {
 
   // 3. …and same-name replacement itself still holds: dropping it again replaces it rather than
   //    adding an indistinguishable second chip.
+  // A *negative* assertion — that no third chip appears — so this one has to be elapsed time
+  // rather than a wait on a condition. `loadFile`'s own wait is satisfied the moment it starts,
+  // the view tabs being already on screen from the load above.
   await loadFile(cdp, DUPE);
   await sleep(800);
   const chips = await cdp.eval(`document.querySelectorAll(".filechip").length`);
@@ -718,7 +782,9 @@ async function loadChecks(chrome, origin) {
 
   // 5. A bad URL surfaces an error rather than hanging on the welcome screen.
   await emptyReload(cdp, `${origin}#load=examples/nope.zpcr`);
-  await sleep(1200);
+  await waitFor(() => cdp.eval(`!!document.querySelector(".app__error")`), {
+    what: "the 404's error banner",
+  });
   const errored = await cdp.eval(`!!document.querySelector(".app__error")`);
   const stillWelcome = await cdp.eval(`!!document.querySelector(".app--empty")`);
   check("a #load= that 404s reports an error and keeps the welcome screen", errored && stillWelcome);
@@ -727,10 +793,9 @@ async function loadChecks(chrome, origin) {
   // an error with no ✕ covers whatever is under it — including, for a folder whose permission has
   // lapsed, the "Grant access" button that would fix it — for the rest of the session.
   await cdp.eval(`document.querySelector(".app__errordismiss").click()`);
-  await sleep(200);
   check(
     "…and the error banner's ✕ dismisses it",
-    !(await cdp.eval(`!!document.querySelector(".app__error")`)),
+    !(await waitValue(() => cdp.eval(`!!document.querySelector(".app__error")`), (v) => !v)),
   );
 
   cdp.close();
@@ -757,7 +822,11 @@ async function headerFitChecks(chrome, origin) {
     mobile: false,
   });
   await loadFile(cdp, ZPCR);
-  await sleep(500);
+  // The header's `data-fit` is written by a ResizeObserver callback, so it lands a frame or two
+  // after the header itself mounts.
+  await waitFor(() => cdp.eval(`!!document.querySelector(".app__header")?.dataset.fit`), {
+    what: "the header's measured fit",
+  });
 
   // `.app__header` itself is a plain (non-scrolling) flex row — an overflowing child paints past
   // the box rather than growing `scrollWidth` there. `.app__views` (the tab strip) is the one
@@ -782,8 +851,10 @@ async function headerFitChecks(chrome, origin) {
     deviceScaleFactor: 1,
     mobile: false,
   });
-  await sleep(500);
-  const wide = await cdp.eval(`document.querySelector(".app__header").dataset.fit`);
+  const wide = await waitValue(
+    () => cdp.eval(`document.querySelector(".app__header").dataset.fit`),
+    (f) => f !== narrow.fit,
+  );
   check("widening the window restores the full header", wide === "0", `data-fit=${wide}`);
 
   cdp.close();
@@ -798,7 +869,6 @@ async function headerFitChecks(chrome, origin) {
 async function rightAxisChecks(chrome, origin) {
   console.log("\nright axis (temperatures vs LED currents)");
   const cdp = await openPage(chrome.base, origin);
-  await sleep(600);
   await loadFile(cdp, ZPCR);
   await waitFor(() => cdp.eval(`!!document.querySelector(".chanbar")`), { what: "curves rail" });
 
@@ -817,8 +887,7 @@ async function rightAxisChecks(chrome, origin) {
         })); })()`);
 
   check("LED currents get their own rail section", (await clickAll("LED current")) === "ok");
-  await sleep(300);
-  const leds = (await chips("LED current")) ?? [];
+  const leds = (await waitValue(() => chips("LED current"), (c) => c?.some((x) => x.on))) ?? [];
   check(
     "every channel's LED drive current is plotted, previewed in DAC counts",
     leds.length === 6 && leds.every((c) => c.on) && /^\d+ DAC$/.test(leds[0].value),
@@ -827,8 +896,7 @@ async function rightAxisChecks(chrome, origin) {
 
   // Enabling temperatures must take the axis over, not share it.
   check("temperatures get their own rail section", (await clickAll("Temperature")) === "ok");
-  await sleep(300);
-  const temps = (await chips("Temperature")) ?? [];
+  const temps = (await waitValue(() => chips("Temperature"), (c) => c?.some((x) => x.on))) ?? [];
   const ledsAfter = (await chips("LED current")) ?? [];
   check(
     "enabling temperatures clears the LED currents — one right axis, one unit",
@@ -838,7 +906,7 @@ async function rightAxisChecks(chrome, origin) {
 
   // And back the other way, so neither direction is the special case.
   await clickAll("LED current");
-  await sleep(300);
+  await waitValue(() => chips("LED current"), (c) => c?.every((x) => x.on));
   const tempsAfter = (await chips("Temperature")) ?? [];
   const ledsBack = (await chips("LED current")) ?? [];
   check(
@@ -860,7 +928,6 @@ async function rightAxisChecks(chrome, origin) {
 async function persistedThresholdChecks(chrome, origin, pw) {
   console.log("\npersisted .pcrd threshold");
   const cdp = await openPage(chrome.base, origin, `/#cfxPassword=${encodeURIComponent(pw)}`);
-  await sleep(600);
   await loadFile(cdp, RVP_PCRD);
   await waitFor(() => cdp.eval(`!!document.querySelector(".chanbar")`), { what: "curves rail" });
   // The file's own settings are seeded in an effect that runs after the first render, so the rail
@@ -914,6 +981,10 @@ async function persistedThresholdChecks(chrome, origin, pw) {
     { what: "the RVP .pcrd to close" },
   );
   await cdp.eval(`(() => { document.querySelector(".filesview__close")?.click(); })()`);
+  // Deliberately elapsed time, not a wait on a condition: this is the IndexedDB cleanup the
+  // comment above is about, and there is nothing left on screen whose change would signal that
+  // the delete transaction has committed. Skipping it leaves the RVP run behind for every later
+  // check to re-hydrate and re-analyse.
   await sleep(300);
   cdp.close();
 }
@@ -928,15 +999,20 @@ async function persistedThresholdChecks(chrome, origin, pw) {
 async function tableSortChecks(chrome, origin) {
   console.log("\ncurves table mode (sortable headers)");
   const cdp = await openPage(chrome.base, origin);
-  await sleep(600);
   await loadFile(cdp, ZPCR);
   await waitFor(() => cdp.eval(`!!document.querySelector(".chanbar")`), { what: "curves rail" });
-  const toTable = await cdp.eval(
-    `(() => { const b = [...document.querySelectorAll("button")]
-        .find((b) => b.textContent.trim() === "Table"); if (!b) return "missing"; b.click(); return "ok"; })()`,
+  check(
+    "the Curves rail offers Table mode",
+    (await cdp.eval(
+      `!![...document.querySelectorAll("button")].find((b) => b.textContent.trim() === "Table")`,
+    )) === true,
   );
-  check("the Curves rail offers Table mode", toTable === "ok");
-  await waitFor(() => cdp.eval(`!!document.querySelector(".atbl")`), { what: "the analysis table" });
+  await clickUntil(
+    cdp,
+    "Table",
+    () => cdp.eval(`!!document.querySelector(".atbl")`),
+    "the analysis table",
+  );
 
   /** The rendered rows' cells for one column, by header label. */
   const column = (label) =>
@@ -960,8 +1036,10 @@ async function tableSortChecks(chrome, origin) {
   check("table mode renders the run's rows", (wellsBefore?.length ?? 0) > 1, `${wellsBefore?.length} rows`);
 
   check("clicking a header sorts by that column", (await clickHead("Well")) === "ok");
-  await sleep(200);
-  const wellAsc = await column("Well");
+  const wellAsc = await waitValue(
+    () => column("Well"),
+    (c) => JSON.stringify(c) !== JSON.stringify(wellsBefore),
+  );
   check(
     "the sorted column is the only one marked",
     JSON.stringify(await sortedHeads()) === '["Well"]',
@@ -974,8 +1052,10 @@ async function tableSortChecks(chrome, origin) {
   );
 
   await clickHead("Well");
-  await sleep(200);
-  const wellDesc = await column("Well");
+  const wellDesc = await waitValue(
+    () => column("Well"),
+    (c) => JSON.stringify(c) !== JSON.stringify(wellAsc),
+  );
   check(
     "clicking the same header again reverses it",
     JSON.stringify(wellDesc) === JSON.stringify([...wellAsc].reverse()),
@@ -983,7 +1063,7 @@ async function tableSortChecks(chrome, origin) {
   );
 
   await clickHead("Cq");
-  await sleep(200);
+  await waitValue(sortedHeads, (h) => JSON.stringify(h) === '["Cq"]');
   const cqAsc = await column("Cq");
   const quantified = cqAsc.filter((v) => v !== "—");
   check(
@@ -1001,8 +1081,10 @@ async function tableSortChecks(chrome, origin) {
   // Reversing Cq must not float the unquantified wells to the top: they carry no number to be
   // the largest, so they stay parked at the bottom in both directions.
   await clickHead("Cq");
-  await sleep(200);
-  const cqDesc = await column("Cq");
+  const cqDesc = await waitValue(
+    () => column("Cq"),
+    (c) => JSON.stringify(c) !== JSON.stringify(cqAsc),
+  );
   check(
     "reversing Cq reverses the quantified wells",
     JSON.stringify(cqDesc.filter((v) => v !== "—")) === JSON.stringify([...quantified].reverse()),
@@ -1039,7 +1121,7 @@ async function tableSortChecks(chrome, origin) {
   // *not* ΔRFU: on a still-climbing well the two differ by hundreds of RFU, so a column that
   // silently mirrored the other one would look entirely reasonable on screen.
   await clickHead("End RFU");
-  await sleep(200);
+  await waitValue(sortedHeads, (h) => JSON.stringify(h) === '["End RFU"]');
   const endAsc = await column("End RFU");
   const num = (v) => Number(String(v).replace(/[^-\d.]/g, ""));
   check(
@@ -1066,17 +1148,16 @@ async function tableSortChecks(chrome, origin) {
 async function tablePickChecks(chrome, origin) {
   console.log("\ncurves table mode (well/sample/target pickers)");
   const cdp = await openPage(chrome.base, origin);
-  await sleep(600);
   await loadFile(cdp, ZPCR);
   await waitFor(() => cdp.eval(`!!document.querySelector(".chanbar")`), { what: "curves rail" });
 
-  const toTable = async () => {
-    await cdp.eval(
-      `(() => { [...document.querySelectorAll(".segmented__item")]
-          .find((b) => b.textContent.trim() === "Table")?.click(); })()`,
+  const toTable = () =>
+    clickUntil(
+      cdp,
+      "Table",
+      () => cdp.eval(`!!document.querySelector(".atbl")`),
+      "the analysis table",
     );
-    await waitFor(() => cdp.eval(`!!document.querySelector(".atbl")`), { what: "the analysis table" });
-  };
   /** The first row's three picker buttons, in column order: Well, Sample, Target. */
   const pickers = () =>
     cdp.eval(`[...document.querySelector(".atbl tbody tr").querySelectorAll(".atbl__pick")]
@@ -1085,7 +1166,8 @@ async function tablePickChecks(chrome, origin) {
     await cdp.eval(
       `(() => { document.querySelector(".atbl tbody tr").querySelectorAll(".atbl__pick")[${i}].click(); })()`,
     );
-    await sleep(400);
+    // The pick leaves table mode for a chart; that swap is the observable.
+    await waitFor(() => cdp.eval(`!document.querySelector(".atbl")`), { what: "the picked chart" });
   };
   /** Active view mode, plus each rail bar's chips marked `*` when enabled. */
   const state = () =>
@@ -1112,13 +1194,17 @@ async function tablePickChecks(chrome, origin) {
     })()`);
   /** The Wells reset button, to undo an isolate — the rail's bars follow the enabled wells, so a
    * one-well selection would otherwise mask what the target/sample picks did. */
+  const onWells = () => cdp.eval(`document.querySelectorAll(".wm-cell.is-on").length`);
   const resetWells = async () => {
+    // Not every `.wm-cell` is selectable, so "all of them are on" is the wrong finish line —
+    // what the callers depend on is that the isolate has been undone, i.e. the count moved.
+    const isolated = await onWells();
     await cdp.eval(
       `(() => { [...document.querySelectorAll(".rail__section")]
           .find((s) => (s.querySelector(".rail__title")?.textContent || "").includes("Wells"))
           ?.querySelector(".rail__icon-btn").click(); })()`,
     );
-    await sleep(400);
+    await waitValue(onWells, (n) => n !== isolated);
   };
 
   await toTable();
@@ -1210,14 +1296,14 @@ async function tablePickChecks(chrome, origin) {
 async function cqFilterChecks(chrome, origin) {
   console.log("\ncurves rail (Cq range filter)");
   const cdp = await openPage(chrome.base, origin);
-  await sleep(600);
   await loadFile(cdp, ZPCR);
   await waitFor(() => cdp.eval(`!!document.querySelector(".chanbar")`), { what: "curves rail" });
-  await cdp.eval(
-    `(() => { const b = [...document.querySelectorAll("button")]
-        .find((b) => b.textContent.trim() === "Table"); b && b.click(); })()`,
+  await clickUntil(
+    cdp,
+    "Table",
+    () => cdp.eval(`!!document.querySelector(".atbl")`),
+    "the analysis table",
   );
-  await waitFor(() => cdp.eval(`!!document.querySelector(".atbl")`), { what: "the analysis table" });
 
   /** The Cq column as rendered — numbers as strings, "—" for a well that never crossed. */
   const cqs = () =>
@@ -1267,12 +1353,13 @@ async function cqFilterChecks(chrome, origin) {
   check("moving the upper handle off the top stop hides the no-Cq rows", !bounded.includes("—"));
 
   // Handles can't cross: pushing the lower one past the upper clamps it to the upper.
+  const beforeClamp = await readout();
   await drag("lo", top);
-  await sleep(200);
+  const clamped = await waitValue(readout, (r) => r !== beforeClamp);
   check(
     "the lower handle clamps at the upper instead of crossing it",
-    (await readout()) === `${lastCycle - 10}–${lastCycle - 10}`,
-    await readout(),
+    clamped === `${lastCycle - 10}–${lastCycle - 10}`,
+    clamped,
   );
 
   check("the reset link restores the full range", (await reset()) === "ok");
@@ -1282,8 +1369,7 @@ async function cqFilterChecks(chrome, origin) {
   // The top stop's other half: the lower handle parked there leaves only the no-Cq rows, which
   // is the "what never amplified?" question no other control in the rail can ask.
   await drag("lo", top);
-  await sleep(200);
-  const only = await cqs();
+  const only = await waitValue(cqs, (c) => c.length !== all.length);
   check(
     "the lower handle on the top stop leaves only the no-Cq rows",
     only.length === noCq && only.every((v) => v === "—"),
@@ -1294,10 +1380,7 @@ async function cqFilterChecks(chrome, origin) {
   await reset();
   // Channel space has no Cq table of its own (see `CurvesView`'s `channelAnalysis`), so the
   // control is absent there rather than present and inert.
-  await cdp.eval(
-    `(() => { const b = [...document.querySelectorAll("button")]
-        .find((b) => b.textContent.trim() === "Channel"); b && b.click(); })()`,
-  );
+  await clickButton(cdp, "Channel");
   await sleep(300);
   check(
     "channel mode has no Cq filter",
@@ -1321,7 +1404,6 @@ async function cqFilterChecks(chrome, origin) {
 async function cqDragChecks(chrome, origin) {
   console.log("\ncurves chart (dragging a Cq marker)");
   const cdp = await openPage(chrome.base, origin);
-  await sleep(600);
   await loadFile(cdp, ZPCR);
   await waitFor(() => cdp.eval(`!!document.querySelector(".chanbar")`), { what: "curves rail" });
   // Every plotted curve's ring, not just the first: the rings arrive with the chart's own render,
@@ -1330,7 +1412,6 @@ async function cqDragChecks(chrome, origin) {
     () => cdp.eval(`document.querySelectorAll(".u-over svg circle").length >= 5`),
     { what: "Cq rings" },
   );
-  await sleep(300);
 
   /** Every Cq ring's center, in viewport coordinates — what a mouse event is addressed with. */
   const rings = () =>
@@ -1359,8 +1440,10 @@ async function cqDragChecks(chrome, origin) {
     y: target.y,
     buttons: 0,
   });
-  await sleep(150);
-  const cursor = await cdp.eval(`document.querySelector(".u-over").style.cursor`);
+  const cursor = await waitValue(
+    () => cdp.eval(`document.querySelector(".u-over").style.cursor`),
+    (c) => c === "ns-resize",
+  );
   check("hovering a ring offers a drag cursor", cursor === "ns-resize", cursor || "(none)");
   const openBefore = await cdp.eval(
     `[...document.querySelectorAll("details")].some((d) => d.open &&
@@ -1374,7 +1457,10 @@ async function cqDragChecks(chrome, origin) {
     await mouse("mouseMoved", target.x, target.y - dy);
     await sleep(90);
   }
-  await sleep(300);
+  await waitFor(
+    () => cdp.eval(`!!document.querySelector(".analysis__threshold-row--curve.is-revealed")`),
+    { what: "the dragged curve's threshold row" },
+  );
 
   const revealed = await cdp.eval(`(() => {
     const row = document.querySelector(".analysis__threshold-row--curve.is-revealed");
@@ -1425,10 +1511,12 @@ async function cqDragChecks(chrome, origin) {
   );
 
   await mouse("mouseReleased", target.x, target.y - DY);
-  await sleep(300);
   check(
     "releasing ends the drag",
-    (await cdp.eval(`document.body.classList.contains("is-cqdrag")`)) === false,
+    (await waitValue(
+      () => cdp.eval(`document.body.classList.contains("is-cqdrag")`),
+      (v) => v === false,
+    )) === false,
   );
   // The other half of that: a drag must not leave the plot permanently deaf to the mouse.
   await cdp.send("Input.dispatchMouseEvent", {
@@ -1437,7 +1525,11 @@ async function cqDragChecks(chrome, origin) {
     y: target.y,
     buttons: 0,
   });
-  await sleep(300);
+  // uPlot re-arms its cursor on the next frame after the move; the tooltip is the last part to
+  // come back, so it is what says the plot is live again.
+  await waitFor(() => cdp.eval(`!!document.querySelector(".chart__tip")`), {
+    what: "the chart's cursor to revive",
+  });
   const revived = await cdp.eval(`({
     overEvents: getComputedStyle(document.querySelector(".u-over")).pointerEvents,
     points: [...document.querySelectorAll(".u-cursor-pt")]
@@ -1463,11 +1555,11 @@ async function cqDragChecks(chrome, origin) {
   );
 
   // Channel space has no per-curve threshold to set and no rings to grab (see `channelAnalysis`).
-  await cdp.eval(
-    `(() => { const b = [...document.querySelectorAll("button")]
-        .find((b) => b.textContent.trim() === "Channel"); b && b.click(); })()`,
+  await clickButton(cdp, "Channel");
+  await waitValue(
+    () => cdp.eval(`document.querySelectorAll(".u-over svg circle").length`),
+    (n) => n === 0,
   );
-  await sleep(400);
   check(
     "channel mode has no Cq rings to drag",
     (await cdp.eval(`document.querySelectorAll(".u-over svg circle").length`)) === 0,
@@ -1497,7 +1589,6 @@ function noCqLast(cqs) {
 async function referenceChecks(chrome, origin) {
   console.log("\nreference view rail (shared chips + dark overlay)");
   const cdp = await openPage(chrome.base, origin);
-  await sleep(600);
   await loadFile(cdp, ZPCR);
   await cdp.eval(`window.location.hash = "view=reference", undefined`);
   await tabBecomes(cdp, "Reference");
@@ -1548,8 +1639,7 @@ async function referenceChecks(chrome, origin) {
 
   // Double-click solos, the same gesture every other bar uses.
   await cdp.eval(`(${refChip(1)}.dispatchEvent(new MouseEvent("dblclick", { bubbles: true })), undefined)`);
-  await sleep(250);
-  const soloCols = await refOn();
+  const soloCols = await waitValue(refOn, (n) => n !== allCols);
   const soloCurves = await curveCount();
   check(
     "double-clicking a reference column isolates it",
@@ -1559,11 +1649,9 @@ async function referenceChecks(chrome, origin) {
 
   // Hovering one of the columns just turned off shows it again — but only while hovered.
   await hover(refChip(3));
-  await sleep(250);
-  const peeked = await curveCount();
+  const peeked = await waitValue(curveCount, (n) => n !== soloCurves);
   await hover(null);
-  await sleep(250);
-  const unpeeked = await curveCount();
+  const unpeeked = await waitValue(curveCount, (n) => n !== peeked);
   check(
     "hovering a disabled reference column peeks at it, and only while hovered",
     peeked > soloCurves && unpeeked === soloCurves,
@@ -1581,9 +1669,9 @@ async function referenceChecks(chrome, origin) {
         .find((s) => s.textContent.trim() === ${JSON.stringify(label)});
         if (!b) return "missing"; b.click(); return "ok"; })()`);
 
+  const beforeDark = await stat();
   check("the Reference rail offers a dark overlay switch", (await clickSwitch("Show dark")) === "ok");
-  await sleep(300);
-  const withDark = await stat();
+  const withDark = await waitValue(stat, (v) => v !== beforeDark);
   check(
     "Show dark overlays the run's DARKDATA channels in the Raw baseline",
     /\+ \d+ dark/.test(withDark),
@@ -1594,11 +1682,9 @@ async function referenceChecks(chrome, origin) {
   // Drift % baselines, so hiding the line must not empty them (that would silently break both
   // modes). Turning it back on has to restore the line, not just the count.
   check("the Reference rail offers a factory overlay switch", (await clickSwitch("Show factory")) === "ok");
-  await sleep(300);
-  const factoryOff = await stat();
+  const factoryOff = await waitValue(stat, (v) => v !== withDark);
   await clickSwitch("Show factory");
-  await sleep(300);
-  const factoryOn = await stat();
+  const factoryOn = await waitValue(stat, (v) => v !== factoryOff);
   check(
     "Show factory hides and restores the factory line",
     /factory hidden/.test(factoryOff) && /\d+ factory/.test(factoryOn),
@@ -1611,11 +1697,9 @@ async function referenceChecks(chrome, origin) {
   // mode draws one line per (channel, column), column mode one line per channel. (uPlot paints
   // its axis label onto the canvas, so the axis itself can't be read from the DOM.)
   await cdp.eval(`(document.querySelectorAll(".reference .rail__icon-btn")[1].click(), undefined)`);
-  await sleep(300);
-  const cycleAll = await curveCount();
+  const cycleAll = await waitValue(curveCount, (n) => n !== soloCurves);
   check("the Reference rail offers the Column x axis", (await clickBaseline("Column")) === "ok");
-  await sleep(400);
-  const colStat = await stat();
+  const colStat = await waitValue(stat, (v) => /reference columns/.test(v));
   const colCount = await curveCount();
   check(
     "Column mode collapses each column's curve into one line per channel",
@@ -1625,21 +1709,19 @@ async function referenceChecks(chrome, origin) {
   // ΔRFU still works in column mode — which it would not if hiding the factory line had
   // emptied the array the baseline reads.
   await clickBaseline("ΔRFU");
-  await sleep(400);
-  const colDelta = await stat();
+  const colDelta = await waitValue(stat, (v) => v !== colStat);
   check(
     "column mode still baselines against the factory values",
     /ΔRFU from factory/.test(colDelta),
     colDelta.trim(),
   );
   await clickBaseline("Raw");
-  await sleep(300);
+  await waitValue(stat, (v) => v !== colDelta);
   check("the Reference rail returns to the Cycle x axis", (await clickBaseline("Cycle")) === "ok");
-  await sleep(400);
+  const cycleStat = await waitValue(stat, (v) => !/reference columns/.test(v));
 
   check("the Reference rail offers the ΔRFU baseline", (await clickBaseline("ΔRFU")) === "ok");
-  await sleep(300);
-  const deltaStat = await stat();
+  const deltaStat = await waitValue(stat, (v) => v !== cycleStat);
   const note = await cdp.eval(
     `document.querySelector(".reference .rail__note")?.textContent ?? ""`,
   );
@@ -1659,16 +1741,14 @@ async function referenceChecks(chrome, origin) {
         return svg ? svg.firstElementChild.children.length : -1; })()`);
   const noBands = await bandCount();
   check("the Reference rail offers a min/max band switch", (await clickSwitch("Min/max band")) === "ok");
-  await sleep(400);
-  const deltaBands = await bandCount();
+  const deltaBands = await waitValue(bandCount, (n) => n !== noBands);
   check(
     "min/max bands draw under the factory-relative baseline too",
     noBands === 0 && deltaBands > 0,
     `${noBands} → ${deltaBands} band paths`,
   );
   await clickBaseline("Column");
-  await sleep(400);
-  const colBands = await bandCount();
+  const colBands = await waitValue(bandCount, (n) => n !== deltaBands);
   const colNote = await cdp.eval(
     `[...document.querySelectorAll(".reference .rail__note")].map((n) => n.textContent).join(" ")`,
   );
@@ -1690,7 +1770,6 @@ async function referenceChecks(chrome, origin) {
 async function wellHeaderChecks(chrome, origin) {
   console.log("\ncurves rail (well row/column headers)");
   const cdp = await openPage(chrome.base, origin);
-  await sleep(600);
   await loadFile(cdp, ZPCR);
   await waitFor(() => cdp.eval(`!!document.querySelector(".wm-cell")`), { what: "the well grid" });
 
@@ -1834,8 +1913,10 @@ async function passwordChecks(chrome, origin, pw) {
 
   // Hash form: consumed, then stripped so a copied URL can't leak the secret.
   const a = await openPage(chrome.base, `${origin}#cfxPassword=${encodeURIComponent(pw)}`);
-  await sleep(500);
-  const urlA = await a.eval("window.location.href");
+  const urlA = await waitValue(
+    () => a.eval("window.location.href"),
+    (u) => !/cfxPassword/i.test(u),
+  );
   check("hash password stripped from the URL", !/cfxPassword/i.test(urlA), urlA.replace(origin, "/"));
   check(
     "password persisted to localStorage",
@@ -1851,8 +1932,10 @@ async function passwordChecks(chrome, origin, pw) {
 
   // Legacy query form still works, is stripped too, and doesn't eat unrelated params.
   const b = await openPage(chrome.base, `${origin}?cfxPassword=${encodeURIComponent(pw)}&keep=1`);
-  await sleep(500);
-  const urlB = await b.eval("window.location.href");
+  const urlB = await waitValue(
+    () => b.eval("window.location.href"),
+    (u) => !/cfxPassword/i.test(u),
+  );
   check(
     "legacy ?cfxPassword still accepted",
     (await b.eval(`localStorage.getItem("zpcr:pltdPassword")`)) === pw,
@@ -1862,8 +1945,7 @@ async function passwordChecks(chrome, origin, pw) {
 
   // And it must never reappear in the routing hash written after hydration.
   await loadFile(b, ZPCR);
-  await sleep(800);
-  const hashB = await b.eval("window.location.hash");
+  const hashB = await waitValue(() => b.eval("window.location.hash"), (h) => /file=/.test(h));
   check("routing hash carries no password", /file=/.test(hashB) && !/cfxPassword/i.test(hashB), hashB);
   b.close();
 }
@@ -2215,13 +2297,11 @@ const chipPresent = (cdp, text) =>
 async function instrumentRunChecks(chrome, origin) {
   console.log("\ninstrument runs and experiments");
   const cdp = await openPage(chrome.base, origin);
-  await sleep(600);
   // Earlier checks leave their own files in IndexedDB, so start from a known empty bar rather
   // than from whatever the suite happened to load last — the selection rules below are about
   // *which* chips are on, and a stray one makes every count meaningless.
   await emptyReload(cdp, origin);
   await loadFile(cdp, ZPCR);
-  await sleep(800);
   await cdp.eval(
     `window.location.hash = "file=20260720_FirstQualification.zpcr&view=protocol", undefined`,
   );
@@ -2274,7 +2354,9 @@ async function instrumentRunChecks(chrome, origin) {
 
   await cdp.eval(`window.location.hash = "view=instrument", undefined`);
   await waitFor(() => cdp.eval(`!!document.querySelector(".devrun")`), { what: "the run panel" });
-  await sleep(300);
+  await waitFor(() => cdp.eval(`!!document.querySelector(".devrun__part")`), {
+    what: "the run panel's halves",
+  });
 
   /** The experiment as the Instrument panel renders it: each half, and what the bar shows. */
   const shown = () =>
@@ -2392,8 +2474,7 @@ async function instrumentRunChecks(chrome, origin) {
   writeFileSync(PRCL_TXT, PRCL_TXT_BODY);
   await loadFile(cdp, PRCL_TXT);
   await waitFor(() => chipPresent(cdp, "Gradient"), { what: "the .prcl.txt chip" });
-  await sleep(400);
-  const loadedTab = await activeTab(cdp);
+  const loadedTab = await waitValue(() => activeTab(cdp), (t) => t !== "none");
 
   // …and the rule the whole view now rests on: with a `.prcl.txt` selected there is no experiment,
   // so the panel shows *nothing* rather than the run that happens to have been there before. A run
@@ -2404,7 +2485,9 @@ async function instrumentRunChecks(chrome, origin) {
   await waitFor(() => cdp.eval(`!!document.querySelector(".instrument__rail")`), {
     what: "the instrument rail",
   });
-  await sleep(300);
+  await waitFor(() => cdp.eval(`!!document.querySelector(".instrument__panelhead, .instrument__empty")`), {
+    what: "the instrument panel",
+  });
   const afterProtocol = await cdp.eval(`(() => ({
     named: document.querySelector(".instrument__panelhead .devrun__hint")?.textContent.trim() ?? null,
     parts: document.querySelectorAll(".devrun__part").length,
@@ -2573,7 +2656,6 @@ async function instrumentRunChecks(chrome, origin) {
     `(() => { [...document.querySelectorAll(".filechip__main")]
         .find((b) => /FirstQualification/.test(b.textContent)).click(); })()`,
   );
-  await sleep(300);
   await cdp.eval(`window.location.hash = "view=overview", undefined`);
   await waitFor(() => cdp.eval(`!!document.querySelector(".overview__clonebtn")`), {
     what: "the Overview clone button",
@@ -2584,7 +2666,9 @@ async function instrumentRunChecks(chrome, origin) {
     () => cdp.eval(`document.querySelectorAll(".filebar .filechip").length > ${chipsBeforeClone}`),
     { what: "the cloned experiment's chip" },
   );
-  await sleep(500);
+  await waitFor(() => cdp.eval(`!!document.querySelector(".overview__infotable")`), {
+    what: "the clone's Overview table",
+  });
 
   const cloned = await cdp.eval(`(() => {
     const dl = document.querySelector(".overview__infotable");
@@ -2677,8 +2761,11 @@ async function instrumentRunChecks(chrome, origin) {
   // are one action here and nowhere else: leaving `20260804.zpcr` on disk while the run is called
   // something else would have the bar, the download and the instrument's own deposit disagree
   // about which run this is.
+  // Naming renames the file, so the info table's Filename row moving is the signal that the
+  // rename has been through the store — `protoFilename` reads that row whatever the file is.
+  const beforeNaming = await protoFilename();
   await setExperimentName(cdp, "Cloned RVP");
-  await sleep(600);
+  await waitValue(protoFilename, (f) => f !== beforeNaming);
   const named = await cdp.eval(`(() => {
     const dl = document.querySelector(".overview__infotable");
     const dts = [...dl.querySelectorAll("dt")];
@@ -2764,7 +2851,9 @@ async function instrumentRunChecks(chrome, origin) {
   // separate file first. A run that has happened gets the read-only listing instead.
   await cdp.eval(`window.location.hash = "view=protocol", undefined`);
   await tabBecomes(cdp, "Protocol");
-  await sleep(400);
+  await waitFor(() => cdp.eval(`!!document.querySelector(".overview__blockhead, .decoded__protoline, .protoedit")`), {
+    what: "the Protocol tab's body",
+  });
   // Asserting the editor is *usable*, not merely present: the Edit button renders either way, and
   // the bug this pins had it rendering disabled with "Not editable: Unrecognized directive
   // "[ProtocolRunDefinition version 06.00]"" — the archive entry had been written in the `.prcl.txt`
@@ -2821,7 +2910,9 @@ async function instrumentRunChecks(chrome, origin) {
   await cdp.eval(
     `document.querySelector(".overview__blocktools .dlmenu > summary").click(), undefined`,
   );
-  await sleep(200);
+  await waitFor(() => cdp.eval(`!!document.querySelector(".overview__blocktools .dlmenu__item")`), {
+    what: "the download menu's items",
+  });
   const offered = await cdp
     .eval(
       `JSON.stringify([...document.querySelectorAll(".overview__blocktools .dlmenu__item")]
@@ -2852,7 +2943,9 @@ async function instrumentRunChecks(chrome, origin) {
   // sample names), so that is a warning rather than a blocker.
   await cdp.eval(`window.location.hash = "view=instrument", undefined`);
   await waitFor(() => cdp.eval(`!!document.querySelector(".devrun")`), { what: "the run panel" });
-  await sleep(400);
+  await waitFor(() => cdp.eval(`!!document.querySelector(".instrument__paneltitle")`), {
+    what: "the run panel's title",
+  });
   const pendingPanel = await cdp.eval(`(() => ({
     title: document.querySelector(".instrument__paneltitle")?.textContent.trim() || "",
     named: document.querySelector(".instrument__panelhead .devrun__hint")?.textContent.trim() || "",
@@ -2887,7 +2980,9 @@ async function instrumentRunChecks(chrome, origin) {
   await waitFor(() => cdp.eval(`!!document.querySelector(".overview__pending")`), {
     what: "the new experiment's pending banner",
   });
-  await sleep(400);
+  await waitFor(() => cdp.eval(`!!document.querySelector(".overview__infotable")`), {
+    what: "the new experiment's Overview table",
+  });
   const fresh = await cdp.eval(`(() => {
     const dl = document.querySelector(".overview__infotable");
     const dts = [...dl.querySelectorAll("dt")];
@@ -2929,7 +3024,9 @@ async function instrumentRunChecks(chrome, origin) {
   // `zpcrweb.json` is what identifies it now (`zpcr.ts`).
   await clickTab(cdp, "Raw");
   await tabBecomes(cdp, "Raw");
-  await sleep(400);
+  await waitFor(() => cdp.eval(`!!document.querySelector(".raw__item")`), {
+    what: "the Raw tab's entry list",
+  });
   const entries = await cdp
     .eval(
       `JSON.stringify([...document.querySelectorAll(".raw__item")].map((i) => i.textContent.trim()))`,
@@ -2944,7 +3041,9 @@ async function instrumentRunChecks(chrome, origin) {
   // …and its Protocol tab says where a protocol comes from rather than showing a default one.
   await clickTab(cdp, "Protocol");
   await tabBecomes(cdp, "Protocol");
-  await sleep(400);
+  await waitFor(() => cdp.eval(`!!document.querySelector(".decoded__na, .decoded__protoline")`), {
+    what: "the Protocol tab's verdict",
+  });
   const emptyProto = await cdp.eval(
     `JSON.stringify({
        note: document.querySelector(".decoded__na")?.textContent.trim() ?? null,
@@ -2961,7 +3060,9 @@ async function instrumentRunChecks(chrome, origin) {
   // it used to be a "New protocol…" item inside the attach menu that demanded a file name first.
   await clickTab(cdp, "Overview");
   await tabBecomes(cdp, "Overview");
-  await sleep(300);
+  await waitFor(() => cdp.eval(`!!document.querySelector(".overview__part button")`), {
+    what: "the Overview parts",
+  });
   const clickedNew = await cdp.eval(
     `(() => { const b = [...document.querySelectorAll(".overview__part button")]
         .find((x) => /^new protocol$/i.test(x.textContent.trim()));
@@ -2969,7 +3070,9 @@ async function instrumentRunChecks(chrome, origin) {
   );
   check("Overview offers a 'new protocol' button beside 'attach protocol'", clickedNew === true);
   await tabBecomes(cdp, "Protocol");
-  await sleep(600);
+  await waitFor(() => cdp.eval(`!!document.querySelector(".decoded__prototext")`), {
+    what: "the created protocol's text",
+  });
   const created = await cdp
     .eval(
       `JSON.stringify({
@@ -3170,15 +3273,16 @@ async function experimentNameChecks(chrome, origin) {
     JSON.stringify(gate),
   );
   await cdp.eval(`document.querySelector(".overview__nameeditbtn").click()`);
-  await sleep(250);
   check(
     "…and the button is what opens the field",
-    (await cdp.eval(`!!document.querySelector(".overview__name")`)) === true,
+    (await waitValue(
+      () => cdp.eval(`!!document.querySelector(".overview__name")`),
+      (v) => v === true,
+    )) === true,
   );
   await cdp.eval(`document.querySelector(".overview__name").blur()`);
-  await sleep(250);
 
-  const first = await headline();
+  const first = await waitValue(headline, (h) => h.name !== null);
   check(
     "an unnamed run is named from its filename, without the date/serial prefix",
     first.name === "S183-S185 RVP" && first.chip === "S183-S185 RVP",
@@ -3447,7 +3551,12 @@ async function openFilesChecks(chrome, origin) {
 
   // And a reload proves it: nothing came back, because there was nothing left to come back.
   await cdp.eval(`window.location.reload()`);
-  await sleep(1200);
+  await waitFor(() => cdp.eval("document.readyState==='complete'"), { what: "reload" });
+  // Nothing was left open, so the app comes back on the welcome screen. Waiting for that is what
+  // says hydration has finished — without it the "no chips" below is just an early read.
+  await waitFor(() => cdp.eval(`!!document.querySelector(".app--empty")`), {
+    what: "the welcome screen after the reload",
+  });
   check(
     "…so a reload comes back with nothing, rather than re-listing what was closed",
     (await chips()) === 0 && (await stored()).length === 0,
@@ -3458,9 +3567,11 @@ async function openFilesChecks(chrome, origin) {
   // and drawn, without being re-opened by hand.
   await loadFile(cdp, join(REPO, "samples", EXAMPLE));
   await waitFor(() => chipPresent(cdp, "S183"), { what: "the .zpcr chip again" });
+  // The catalog write is asynchronous, and reloading before it lands is what this check would
+  // otherwise blame on the app. There is nothing on screen for it, so it stays elapsed time.
   await sleep(700);
   await cdp.eval(`window.location.reload()`);
-  await sleep(1500);
+  await waitFor(() => cdp.eval("document.readyState==='complete'"), { what: "reload" });
   await waitFor(async () => (await chips()) === 1, { what: "the open file after a reload" });
   const reopened = await strip();
   check(
@@ -3484,7 +3595,9 @@ async function openFilesChecks(chrome, origin) {
   await clickTab(cdp, "Files");
   await waitFor(() => cdp.eval(`!!document.querySelector(".ftbl__del")`), { what: "the row's ✕" });
   await cdp.eval(`(() => { document.querySelector(".ftbl__del").click(); })()`);
-  await sleep(300);
+  await waitFor(() => cdp.eval(`!document.querySelector(".ftbl__del")`), {
+    what: "storage to be left empty",
+  });
   cdp.close();
 }
 
@@ -3555,9 +3668,13 @@ async function closeConfirmChecks(chrome, origin) {
 
   // …and it is really gone from storage, not merely off the bar.
   await cdp.eval(`window.location.reload()`);
-  await sleep(1200);
-  await clickTab(cdp, "Files");
-  await sleep(400);
+  await waitFor(() => cdp.eval("document.readyState==='complete'"), { what: "reload" });
+  // With the last file closed the app comes back on the welcome screen, which has no view bar and
+  // so no Files tab to open. This used to ask for one anyway and pass on the table it never
+  // opened being empty; the empty state itself is the stronger claim, and the one being made.
+  await waitFor(() => cdp.eval(`!!document.querySelector(".app--empty")`), {
+    what: "the welcome screen after the reload",
+  });
   check("…and does not come back after a reload", (await tableRows()) === 0);
 
   // Now edit one: a rename is the cheapest thing that changes what a download would contain.
@@ -4515,8 +4632,10 @@ async function explodedStorageChecks(chrome, origin) {
   await waitFor(() => cdp.eval(`!!document.querySelector(".overview__pending")`), {
     what: "the new experiment's pending banner",
   });
-  await sleep(400);
-  const pending = (await records()).filter((r) => r.entries !== null && r.entries < 5);
+  const pending = await waitValue(
+    async () => (await records()).filter((r) => r.entries !== null && r.entries < 5),
+    (rs) => rs.length > 0,
+  );
   check(
     "a pending experiment is stored exploded too — it hasn't started, so nothing is packed",
     pending.length === 1 && !pending[0].whole && pending[0].entries >= 1,
@@ -4961,10 +5080,9 @@ async function folderChecks(chrome, origin) {
     deviceScaleFactor: 1,
     mobile: false,
   });
-  await sleep(400);
-  const narrow = await paneLayout();
+  const narrow = await waitValue(paneLayout, (l) => l !== wide);
   await cdp.send("Emulation.clearDeviceMetricsOverride");
-  await sleep(400);
+  await waitValue(paneLayout, (l) => l !== narrow);
   check(
     "The tree sits beside the files when the view is wide, and above them when it isn't",
     wide === "side-by-side" && narrow === "stacked",
@@ -5238,7 +5356,16 @@ async function folderChecks(chrome, origin) {
   // Now the shape that kills an un-re-armed watch. Rename again so there is something to undo.
   await setExperimentName(cdp, "Second Rename");
   await waitFor(async () => (await shownName()) === "Second Rename", { what: "the second rename" });
-  await sleep(3500); // let the throttled disk write land, so the refresh is unambiguous
+  // Deliberately elapsed time. The app's own write has to reach the disk before the external one
+  // below, or the refresh that follows is ambiguous about which write it noticed, and that write
+  // is rate-limited to `DISK_WRITE_INTERVAL_MS` (3 s) — so one interval plus slack.
+  //
+  // Polling the file's mtime instead looks like the obvious improvement and is not: an open
+  // `FileSystemWritableFileStream` holds an exclusive lock, so a reader that arrives mid-write
+  // queues behind it, and polling every 100 ms across the app's own write window stalled the
+  // page long enough to trip the 30 s CDP watchdog. The 500 ms this might save is not worth
+  // racing the writer for.
+  await sleep(3500);
   await externalWrite(["runs", "2026"], "nested.zpcr", true);
   let rearmed = "";
   try {

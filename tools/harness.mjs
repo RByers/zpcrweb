@@ -54,13 +54,69 @@ function killGroup(proc) {
 /** A random high port. Never 5173 — the user may have a dev server there. */
 const randomPort = () => 20000 + Math.floor(Math.random() * 20000);
 
-/** Poll `fn` until it returns truthy or `timeout` elapses. */
-export async function waitFor(fn, { timeout = 20000, interval = 150, what = "condition" } = {}) {
+/**
+ * Poll `fn` until it returns truthy or `timeout` elapses.
+ *
+ * The 50 ms interval is a compromise, not a floor: every wait overshoots by half an interval on
+ * average, across ~200 call sites, so the cost of a lazy value is real. Below ~40 ms the CDP
+ * round-trips start competing with the rendering they are waiting on.
+ */
+export async function waitFor(fn, { timeout = 20000, interval = 50, what = "condition" } = {}) {
   const deadline = Date.now() + timeout;
   for (;;) {
     if (await fn()) return true;
     if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
     await sleep(interval);
+  }
+}
+
+/**
+ * Poll `read()` until its value satisfies `pred`, then return it — the replacement for a fixed
+ * `sleep` in front of a `check`.
+ *
+ * Two things distinguish it from {@link waitFor}, and both matter for keeping the checks honest:
+ *
+ * - **It returns the value rather than a boolean**, so the caller goes on asserting what it
+ *   actually saw. The idiom is to wait for the state to *change* and then assert *what it
+ *   changed to* — `pred` is "different from before", the `check` is "and it is now this". A
+ *   `pred` that restates the assertion would make the check tautological; one that waits for
+ *   change does not.
+ * - **It returns on timeout instead of throwing**, handing back the stale value. A regression
+ *   then fails as the check it belongs to, naming the value it got, rather than as a bare
+ *   timeout thrown from inside the harness.
+ */
+export async function waitValue(read, pred, { timeout = 8000, interval = 50 } = {}) {
+  const deadline = Date.now() + timeout;
+  for (;;) {
+    const value = await read();
+    if (pred(value)) return value;
+    if (Date.now() > deadline) return value;
+    await sleep(interval);
+  }
+}
+
+/**
+ * Poll `read()` until it returns the same value `quiet` ms running, and return it.
+ *
+ * For state the app writes more than once per user action. `waitValue(…, changed)` returns on the
+ * *first* write, which is right for reading a rendered value but wrong when the next step depends
+ * on the app having finished — notably the routing hash, where acting on the first write can put
+ * `history.back()` on an entry that is about to be superseded.
+ */
+export async function waitStable(read, { quiet = 250, timeout = 5000, interval = 50 } = {}) {
+  const deadline = Date.now() + timeout;
+  let last = await read();
+  let since = Date.now();
+  for (;;) {
+    await sleep(interval);
+    const now = await read();
+    if (JSON.stringify(now) !== JSON.stringify(last)) {
+      last = now;
+      since = Date.now();
+    } else if (Date.now() - since >= quiet) {
+      return last;
+    }
+    if (Date.now() > deadline) return last;
   }
 }
 
@@ -135,6 +191,9 @@ export class Cdp {
   }
 
   close() {
+    if (this.targetId) {
+      fetch(`${this.chromeBase}/json/close/${this.targetId}`).catch(() => {});
+    }
     try {
       this.ws.close();
     } catch {
@@ -155,7 +214,7 @@ export class Cdp {
  *
  * Importing the source here instead would close the gap at its root, but Node's type stripping
  * can't resolve the `.js` specifiers core's source uses to import itself. So: build first, every
- * run. `tsup` is about a second against the ~35s the suite already takes.
+ * run. `tsup` is about a second against the ~100s the suite already takes.
  */
 export async function buildCore() {
   const proc = spawn("npm", ["run", "build", "-w", "@zpcrweb/core"], {
@@ -243,6 +302,8 @@ export async function openPage(chromeBase, url, { domains = ["Page", "Runtime", 
   const res = await fetch(`${chromeBase}/json/new?${encodeURIComponent(url)}`, { method: "PUT" });
   const target = await res.json();
   const cdp = await Cdp.connect(target.webSocketDebuggerUrl);
+  cdp.targetId = target.id;
+  cdp.chromeBase = chromeBase;
   for (const d of domains) await cdp.send(`${d}.enable`);
   await waitFor(() => cdp.eval("document.readyState === 'complete'"), { what: "page load" });
   return cdp;
