@@ -72,9 +72,10 @@ export function readMultistepArchive(): ZpcrArchive {
 
 /**
  * The committed **mixed-vessel** plate: three columns of a commercial 4-dye respiratory panel in
- * white strip tubes beside one column of the operator's own controls in clear ones. The one
- * committed plate a CFX format could not express (`pltcsv.md` §3.1), and so the sample that keeps
- * per-well vessel support honest.
+ * white strip tubes beside one column of the operator's own RVP multiplex in clear ones. The one
+ * committed plate a CFX format could not express (`pltcsv.md` §3.1) — and it carries two
+ * channel-2 dyes in different wells besides (`calibration.md` §3.2), so it keeps both rules
+ * honest.
  */
 export const MIXED_VESSEL_PLATE_PATH = resolve(
   here,

@@ -1,35 +1,35 @@
 # zpcrweb plate definition
 # vessel: 8x12
-Well,SampleType,Sample,Vessel,FAM,VIC,ROX,Cy5
-A4,ntc,,BR White,C.pneum,Mp.pneum,L.pneum,RNaseP (Endo Ctrl)
-B4,ntc,,BR White,HPIV1,HPIV3,HPIV2,HPIV4
-C4,ntc,,BR White,HRV,HCoVOC43,HCoVHKU1,HCoVNL63
-D4,ntc,,BR White,HBoV,HCoV229E,Haem.Flu,HMPV
-E4,ntc,,BR White,FluA,FluB,Covid19 N+RdRP,RSV
-F4,ntc,,BR White,Adeno,M.catar,P.aerug,EVD68
-G4,ntc,,BR White,K.pneum,S.pyoge,S.aureus,C.albic
-H4,ntc,,BR White,S.pneum,B.pertu,A.bauma,B.parap
-A7,positiveControl,YRP PC,BR White,C.pneum,Mp.pneum,L.pneum,RNaseP (Endo Ctrl)
-B7,positiveControl,YRP PC,BR White,HPIV1,HPIV3,HPIV2,HPIV4
-C7,positiveControl,YRP PC,BR White,HRV,HCoVOC43,HCoVHKU1,HCoVNL63
-D7,positiveControl,YRP PC,BR White,HBoV,HCoV229E,Haem.Flu,HMPV
-E7,positiveControl,YRP PC,BR White,FluA,FluB,Covid19 N+RdRP,RSV
-F7,positiveControl,YRP PC,BR White,Adeno,M.catar,P.aerug,EVD68
-G7,positiveControl,YRP PC,BR White,K.pneum,S.pyoge,S.aureus,C.albic
-H7,positiveControl,YRP PC,BR White,S.pneum,B.pertu,A.bauma,B.parap
-A9,unknown,YRPmix1,BR White,C.pneum,Mp.pneum,L.pneum,RNaseP (Endo Ctrl)
-B9,unknown,YRPmix1,BR White,HPIV1,HPIV3,HPIV2,HPIV4
-C9,unknown,YRPmix1,BR White,HRV,HCoVOC43,HCoVHKU1,HCoVNL63
-D9,unknown,YRPmix1,BR White,HBoV,HCoV229E,Haem.Flu,HMPV
-E9,unknown,YRPmix1,BR White,FluA,FluB,Covid19 N+RdRP,RSV
-F9,unknown,YRPmix1,BR White,Adeno,M.catar,P.aerug,EVD68
-G9,unknown,YRPmix1,BR White,K.pneum,S.pyoge,S.aureus,C.albic
-H9,unknown,YRPmix1,BR White,S.pneum,B.pertu,A.bauma,B.parap
-A11,unknown,S183,BR Clear,,,,ENT rc
-B11,unknown,S184,BR Clear,,,,ENT rc
-C11,unknown,S185,BR Clear,,,,ENT rc
-D11,ntc,,BR Clear,,,,ENT rc
-E11,positiveControl,S183,BR Clear,B2M,,,
-F11,positiveControl,S184,BR Clear,B2M,,,
-G11,positiveControl,S185,BR Clear,B2M,,,
-H11,ntc,,BR Clear,B2M,,,
+Well,SampleType,Sample,Vessel,FAM,VIC,ROX,Tex 615,Cy5
+A4,ntc,,BR White,C.pneum,Mp.pneum,L.pneum,,RNaseP (Endo Ctrl)
+B4,ntc,,BR White,HPIV1,HPIV3,HPIV2,,HPIV4
+C4,ntc,,BR White,HRV,HCoVOC43,HCoVHKU1,,HCoVNL63
+D4,ntc,,BR White,HBoV,HCoV229E,Haem.Flu,,HMPV
+E4,ntc,,BR White,FluA,FluB,Covid19 N+RdRP,,RSV
+F4,ntc,,BR White,Adeno,M.catar,P.aerug,,EVD68
+G4,ntc,,BR White,K.pneum,S.pyoge,S.aureus,,C.albic
+H4,ntc,,BR White,S.pneum,B.pertu,A.bauma,,B.parap
+A7,positiveControl,YRP PC,BR White,C.pneum,Mp.pneum,L.pneum,,RNaseP (Endo Ctrl)
+B7,positiveControl,YRP PC,BR White,HPIV1,HPIV3,HPIV2,,HPIV4
+C7,positiveControl,YRP PC,BR White,HRV,HCoVOC43,HCoVHKU1,,HCoVNL63
+D7,positiveControl,YRP PC,BR White,HBoV,HCoV229E,Haem.Flu,,HMPV
+E7,positiveControl,YRP PC,BR White,FluA,FluB,Covid19 N+RdRP,,RSV
+F7,positiveControl,YRP PC,BR White,Adeno,M.catar,P.aerug,,EVD68
+G7,positiveControl,YRP PC,BR White,K.pneum,S.pyoge,S.aureus,,C.albic
+H7,positiveControl,YRP PC,BR White,S.pneum,B.pertu,A.bauma,,B.parap
+A9,unknown,YRPmix1,BR White,C.pneum,Mp.pneum,L.pneum,,RNaseP (Endo Ctrl)
+B9,unknown,YRPmix1,BR White,HPIV1,HPIV3,HPIV2,,HPIV4
+C9,unknown,YRPmix1,BR White,HRV,HCoVOC43,HCoVHKU1,,HCoVNL63
+D9,unknown,YRPmix1,BR White,HBoV,HCoV229E,Haem.Flu,,HMPV
+E9,unknown,YRPmix1,BR White,FluA,FluB,Covid19 N+RdRP,,RSV
+F9,unknown,YRPmix1,BR White,Adeno,M.catar,P.aerug,,EVD68
+G9,unknown,YRPmix1,BR White,K.pneum,S.pyoge,S.aureus,,C.albic
+H9,unknown,YRPmix1,BR White,S.pneum,B.pertu,A.bauma,,B.parap
+A11,unknown,S183+S184+S185,BR Clear,HRV Ma,,,HMPV Ma,RSV Ma
+B11,unknown,S183+S184+S185,BR Clear,PIV1 Ri,,,PIV2 Ri,PIV3 Ri
+C11,unknown,S183+S184+S185,BR Clear,ADV Ri,,,,HBoV Ri
+D11,unknown,S183+S184+S185,BR Clear,INFA Ri,,,,INFB Ri
+E11,unknown,S183+S184+S185,BR Clear,SC2-N2 CDC,,,OC43 Ha,229E Ha
+F11,unknown,S183+S184+S185,BR Clear,,,,,HKU1 Ha
+G11,unknown,S183+S184+S185,BR Clear,,,,HMPV Bo,
+H11,unknown,S183+S184+S185,BR Clear,NL63 Bo,,,,

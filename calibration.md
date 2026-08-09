@@ -165,6 +165,44 @@ moved every Cq by **≤0.52 cycles, median under 0.1**, and cost no curve its Cq
 Splitting the groups would have meant a new persisted key in `zpcrweb.json`, a migration, and a
 second threshold line on the chart, to buy that.
 
+### 3.2 One dye per channel, per well
+
+*This library's own. Measured — Appendix B.*
+
+A plate may carry two dyes that are read on the **same optical channel** — a commercial panel's
+ROX beside an operator's own Tex 615, both channel 2 — as long as no single well holds both. The
+instrument runs that plate; the question is what matrix each well is solved against.
+
+**Two same-channel dyes must never share a matrix.** Their response vectors are essentially
+parallel — ROX, Tex 615 and Cal Red 610 are pairwise 0.999+ collinear across all six channels
+(Appendix B.1) — so no linear unmixing can say how much of a channel-2 reading was which. A
+matrix holding two of them is ill-conditioned (condition number 408, against 2–3 for the same
+matrix with either one alone), and the pseudo-inverse answers with large, oppositely-signed
+concentrations for the pair. Built from the plate's whole dye list, that poisons **every** well on
+the plate, including wells whose own dyes are perfectly separable.
+
+So the dye set is resolved per well, by `wellDyeSet()` in `runAnalysis.ts`:
+
+```
+dyes(well) = the dyes the well carries
+           + each remaining plate dye whose primary channel is not already taken
+```
+
+- **The well's own dyes always win their channel.** They are what is physically in the tube.
+- **Free channels are filled in** from the rest of the plate's dyes, so a well can still be
+  *displayed* against a dye it doesn't carry (the app's "Unloaded" toggle) — just never against
+  one that would collide with a dye it does.
+- **A contested channel, in a well carrying neither rival**, goes to whichever dye more of the
+  plate's loaded wells use, then plate fluor order. Only the display of empty wells depends on it.
+
+The channel compared is `Dcal.primaryChannel`, the dye's own calibration, not whatever channel the
+plate recorded — a `.plt.csv` states no channels at all.
+
+> A plate with one dye per channel — every plate CFX can write, since a CFX dye layer *is* a
+> channel position — has nothing to resolve: every well's set is the plate's whole dye list, and
+> results are identical to building one matrix for the run. This rule only ever fires on a plate
+> that mixes two assays.
+
 ## 4. Preprocessing the raw channel readings
 
 Before a raw reading is fed into the solve, two corrections are applied to each channel value.
@@ -753,3 +791,67 @@ threshold line on the chart.
 > plastics by construction. Deliberately not implemented: A.3 measures the thing it would fix at
 > under 0.52 cycles, and it would cost a second threshold line on the chart and a persisted-format
 > change. Worth revisiting only if a real mixed plate shows a discrepancy this doesn't explain.
+
+
+## Appendix B. Same-channel dyes — why they cannot share a matrix
+
+The measurement behind §3.2. All numbers from `20260720_FirstQualification.zpcr`'s `.Dcal` set,
+BR Clear at 60 °C.
+
+### B.1 The channel-2 dyes are collinear, not merely similar
+
+Four of the dyes Bio-Rad calibrates are read on channel 2. Their raw per-channel response:
+
+| Dye | ch0 | ch1 | ch2 | ch3 | ch4 | ch5 |
+|---|---|---|---|---|---|---|
+| ROX | 82 | 78 | **6881** | 86 | 6 | 0 |
+| Tex 615 | 94 | 43 | **4744** | 252 | 8 | 0 |
+| Cal Red 610 | 68 | 52 | **11940** | 593 | 5 | 0 |
+| FAM | 3946 | 179 | 10 | 0 | 6 | 0 |
+| Cy5 | 73 | 22 | 105 | 2553 | 323 | 0 |
+
+They differ substantially in *brightness* — 4744 to 11940 on their own channel — but hardly at all
+in *direction*, which is the only thing a linear solve can use. Cosine similarity of the response
+vectors:
+
+| Pair | cos |
+|---|---|
+| Cal Red 610 vs Tex 615 | **0.99988** |
+| Cal Red 610 vs ROX | **0.99927** |
+| ROX vs Tex 615 | **0.99915** |
+| Cy5 vs Tex 615 | 0.09410 |
+| FAM vs Tex 615 | 0.02272 |
+
+A dye pair at cos ≈ 1 is inseparable by any number of channels: the two columns point the same
+way, so infinitely many concentration pairs explain the same reading equally well.
+
+**Tex 615 and Texas Red are the same calibration** — byte-identical `.Dcal` blocks under two
+names, in both vessels. They are aliases, not rivals, and a plate naming both means one dye.
+
+### B.2 What that does to the solve
+
+Condition number of the calibration matrix (global normalization, 6 channels):
+
+| Dye set | cond |
+|---|---|
+| {FAM, ROX, Cy5} | 2.7 |
+| {FAM, Tex 615, Cy5} | 1.9 |
+| {FAM, ROX, Tex 615, Cy5} | **407.7** |
+
+And end to end, on a real plate carrying the YouSeq panel (ROX) in white tubes beside the
+operator's RVP multiplex (Tex 615) in clear ones — one matrix over the whole plate's dye list,
+against §3.2's per-well sets:
+
+| Dye | one matrix | per-well sets |
+|---|---|---|
+| FAM | 59.9 | 55.5 |
+| VIC | 68.0 | 40.1 |
+| ROX | **8119.5** | 49.3 |
+| Tex 615 | **6881.6** | 45.4 |
+| Cy5 | 333.6 | 52.6 |
+
+With one matrix, ROX's threshold is 165× its normal value, Tex 615 gets no Cq at all, and ΔRFU
+swings to −5384 on wells that should read flat — the pair trading enormous opposite
+concentrations. With per-well sets every threshold is back in the ordinary tens of RFU, and the
+panel's own dyes land within a fraction of a percent of what that panel's run produces alone
+(ROX 49.3 and VIC 40.1 are identical to it).

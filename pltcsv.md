@@ -97,11 +97,13 @@ An empty `plateName` therefore means "ask the wells", never "unknown".
 
 `samples/mixed-vessel-YouSeq-RVP.plt.csv` is the committed example: three columns of a commercial
 4-dye respiratory panel in white strip tubes (its NTC, positive-control and patient-pool strips)
-beside one column of the operator's own enterovirus/B2M controls in clear ones. Note that both
-halves are read in the **same four channels** — the clear column uses the panel's FAM and Cy5
-rather than that assay's own Tex 615 multiplex, because Tex 615 and the panel's ROX are both
-channel-2 dyes and one channel-2 reading cannot separate two of them. That constraint is about
-optics, not about vessels, but it is what a real mixed plate has to be designed around. Note that a well carrying
+beside one column of the operator's own RVP multiplex in clear ones.
+
+It also carries **two dyes on one optical channel** — the panel's ROX and the operator's Tex 615
+are both channel 2 — in different wells, which is legal and which no CFX plate can express either
+(a CFX dye layer *is* a channel position). No well holds both, because nothing could unmix that;
+the analysis resolves each well's dye set separately, so the panel's wells are solved against ROX
+and the operator's against Tex 615. See [`calibration.md`](./calibration.md) §3.2. Note that a well carrying
 *only* a vessel is not a blank well (§3) — the plastic is in the block whether or not anything was
 pipetted into it — so its row is written out and survives the round-trip.
 

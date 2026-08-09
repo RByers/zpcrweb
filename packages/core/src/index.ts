@@ -223,6 +223,7 @@ export {
   resolveTubeType,
   wellTubeType,
   plateTubeTypes,
+  wellDyeSet,
   matchFluorCalibrations,
   computeFluorCurves,
   dyeSpaceFluorCurves,

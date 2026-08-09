@@ -96,6 +96,16 @@ export interface FluorCalibration {
    * Undefined when the plate doesn't know it (see `PlateFluor.channel`); the solve is unaffected,
    * since it works off the `.Dcal` response curves and never this field. */
   channel?: number;
+  /**
+   * The channel the dye's **own calibration** says it is read on (`Dcal.primaryChannel`) — the
+   * optical fact, as opposed to {@link channel}, which is whatever the plate happened to record
+   * and may be unset on a `.plt.csv`. Present whenever {@link curve} is.
+   *
+   * This is what {@link wellDyeSet} detects same-channel dyes with. Two dyes sharing it cannot be
+   * told apart by any linear unmixing — on the committed samples ROX, Tex 615 and Cal Red 610 are
+   * all channel 2, with response vectors 0.999+ collinear — so they must never share a matrix.
+   */
+  primaryChannel?: number;
   curve?: DyeResponseCurve;
 }
 
@@ -128,6 +138,7 @@ export function matchFluorCalibrations(
     seen.set(f.fluor, {
       fluor: f.fluor,
       channel: f.channel,
+      primaryChannel: dcal?.primaryChannel,
       curve: dcal ? buildDyeResponseCurve(dcal) : undefined,
     });
   }
@@ -187,6 +198,57 @@ export interface FluorCurve {
 export interface DyeSolver {
   matrix: CalibrationMatrix;
   dyeChannels: (number | undefined)[];
+}
+
+/**
+ * The dyes one well is solved for: **the ones it carries, plus every other plate dye whose
+ * optical channel is still free.**
+ *
+ * A plate may legitimately carry two dyes read on the same channel — a commercial panel's ROX
+ * beside an operator's own Tex 615 — in *different* wells. No single well can hold both, because
+ * one channel-2 reading cannot say how much of it was ROX and how much Tex 615: the two response
+ * vectors are 0.999+ collinear (`calibration.md` §3.2), so a matrix holding both is
+ * ill-conditioned and the solve returns enormous, oppositely-signed concentrations for the pair.
+ * Building the matrix from the plate's whole dye list therefore poisons *every* well on such a
+ * plate, including the wells whose own dyes are perfectly separable.
+ *
+ * Taking the well's own dyes first and then filling the free channels keeps two properties that
+ * matter:
+ *
+ * - **A plate with one dye per channel is completely unaffected** — nothing collides, so every
+ *   well's set is the plate's whole list, exactly as before. This is every plate CFX can write.
+ * - The well can still be *displayed* against dyes it doesn't carry (the app's "Unloaded"
+ *   toggle), because the free channels are filled in rather than left out — just never with a
+ *   dye that would collide with one the well actually holds.
+ *
+ * `rank` breaks ties for a contested channel among dyes the well doesn't carry: higher wins.
+ * A dye with no {@link FluorCalibration.primaryChannel} can't be checked for collision and is
+ * always included, which is the old behaviour and only reachable for a dye with no calibration —
+ * which has no column in the matrix anyway.
+ */
+export function wellDyeSet(
+  own: ReadonlySet<string>,
+  cals: readonly FluorCalibration[],
+  rank: (fluor: string) => number = () => 0,
+): FluorCalibration[] {
+  const chosen: FluorCalibration[] = [];
+  const taken = new Set<number>();
+  const claim = (f: FluorCalibration) => {
+    chosen.push(f);
+    if (f.primaryChannel !== undefined) taken.add(f.primaryChannel);
+  };
+  // The well's own dyes always win their channel — they are what is physically in the tube.
+  for (const f of cals) if (own.has(f.fluor)) claim(f);
+  // Then the rest, best-ranked first, each taking a channel only if it is still free. Sorted on a
+  // copy: `cals` is the caller's array and shared across every well.
+  const rest = cals.filter((f) => !own.has(f.fluor)).sort((a, b) => rank(b.fluor) - rank(a.fluor));
+  for (const f of rest) {
+    if (f.primaryChannel !== undefined && taken.has(f.primaryChannel)) continue;
+    claim(f);
+  }
+  // Back into the caller's order, so a well's curves and the matrix's columns come out in the
+  // plate's fluor order rather than in rank order.
+  return cals.filter((f) => chosen.includes(f));
 }
 
 /**
@@ -736,26 +798,11 @@ export function computeRunAnalysis(
 
   // A dye-space source has no channel mixing to solve for at all (see `RunAnalysis.dyeSpace`) —
   // `allFluorCurves` below reads its curves straight off `allCurves` instead.
-  // One solver per vessel present — normally exactly one. Each is built over the dyes *that*
-  // vessel has calibration for, so a dye covered in clear but not white still quantifies in the
-  // clear wells instead of costing the whole run its matrix.
-  const solverByTube = new Map<TubeType, DyeSolver>();
-  if (!dyeSpace) {
-    for (const t of tubes) {
-      const cals = (calsByTube.get(t) ?? []).filter((f) => f.curve);
-      if (cals.length === 0) continue;
-      solverByTube.set(t, {
-        // `channels` is passed in rather than slicing rows afterwards so the matrix's column
-        // norms — the RFU scale factor of calibration.md §5 — are computed over the rows the
-        // solve uses.
-        matrix: buildCalibrationMatrix(cals.map((f) => f.curve!), stepTemperatureC, {
-          normalization: settings.calibrationNormalization ?? "global",
-          channels: available,
-        }),
-        dyeChannels: cals.map((f) => f.channel),
-      });
-    }
-  }
+  // The calibrated dyes available to each vessel — a dye covered in clear but not white still
+  // quantifies in the clear wells rather than costing the whole run its matrix.
+  const calibratedByTube = new Map<TubeType, FluorCalibration[]>(
+    tubes.map((t) => [t, (calsByTube.get(t) ?? []).filter((f) => f.curve)]),
+  );
   // Well → vessel, resolved once: `wellTubeType` scans the plate's wells, and doing that per well
   // inside the separation loop would be quadratic for no gain.
   const tubeByWell = new Map<string, TubeType>();
@@ -764,8 +811,44 @@ export function computeRunAnalysis(
       tubeByWell.set(wellKey(w.row, w.col), resolveTubeType(w.vessel ?? plate.plateName));
     }
   }
-  const solverFor = (row: number, col: number): DyeSolver | undefined =>
-    solverByTube.get(tubeByWell.get(wellKey(row, col)) ?? tube);
+  // How many loaded wells carry each dye — the tie-break `wellDyeSet` uses when two dyes contest
+  // a channel in a well that carries neither, so the plate's dominant assay is the one an
+  // otherwise-empty well is displayed against. Ties fall back to plate fluor order.
+  const dyeUse = new Map<string, number>();
+  for (const dyes of loadedFluors.values()) {
+    for (const d of dyes) dyeUse.set(d, (dyeUse.get(d) ?? 0) + 1);
+  }
+  const rank = (fluor: string) => dyeUse.get(fluor) ?? 0;
+
+  // One solver per (vessel, dye set). Normally that is exactly one for the whole plate: nothing
+  // collides on a single-assay plate, so every well resolves to the same set and this cache holds
+  // one entry. A plate mixing two assays that share a channel gets one per distinct set.
+  const solverCache = new Map<string, DyeSolver | undefined>();
+  const solverFor = (row: number, col: number): DyeSolver | undefined => {
+    if (dyeSpace) return undefined;
+    const key = wellKey(row, col);
+    const t = tubeByWell.get(key) ?? tube;
+    const cals = calibratedByTube.get(t) ?? [];
+    const dyes = wellDyeSet(wellFluors.get(key) ?? new Set(), cals, rank);
+    const cacheKey = `${t}|${dyes.map((f) => f.fluor).join(" ")}`;
+    const hit = solverCache.get(cacheKey);
+    if (hit !== undefined || solverCache.has(cacheKey)) return hit;
+    const solver: DyeSolver | undefined =
+      dyes.length === 0
+        ? undefined
+        : {
+            // `channels` is passed in rather than slicing rows afterwards so the matrix's column
+            // norms — the RFU scale factor of calibration.md §5 — are computed over the rows the
+            // solve uses.
+            matrix: buildCalibrationMatrix(dyes.map((f) => f.curve!), stepTemperatureC, {
+              normalization: settings.calibrationNormalization ?? "global",
+              channels: available,
+            }),
+            dyeChannels: dyes.map((f) => f.channel),
+          };
+    solverCache.set(cacheKey, solver);
+    return solver;
+  };
 
   // The §4 corrections applied to every raw reading before the solve. The levels are read per
   // scan, so this is a `[channelIndex][cycle]` table aligned with `available`.
@@ -787,9 +870,9 @@ export function computeRunAnalysis(
         allCurves,
         (ch) => new Map(plate?.fluors.map((f) => [f.channel, f.fluor]) ?? []).get(ch),
       )
-    : solverByTube.size > 0
-      ? computeFluorCurves(allCurves, solverFor, available, corrections)
-      : [];
+    : // `solverFor` decides per well whether there is anything to solve; a run with no usable
+      // calibration at all simply yields no solver for any well, and so no curves.
+      computeFluorCurves(allCurves, solverFor, available, corrections);
 
   // ---- The Cq table ------------------------------------------------------------------------
   // Over every well/dye pair on the plate, never a filtered subset. Pairs the plate doesn't load

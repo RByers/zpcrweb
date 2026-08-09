@@ -22,6 +22,8 @@ import {
   parseZpcrArchive,
   plateToCsv,
   plateTubeTypes,
+  wellDyeSet,
+  type FluorCalibration,
   type PlateDefinition,
 } from "../src/index.js";
 import { readMixedVesselPlateText, readSampleArchive } from "./sample.js";
@@ -136,22 +138,151 @@ describe("the committed mixed-vessel sample plate", () => {
     expect(plateToCsv(plate)).toBe(text);
   });
 
-  it("keeps one dye per optical channel, so the unmixing stays well-posed", () => {
-    // Both halves of the plate are read in the same four channels, and two dyes sharing one
-    // channel cannot be separated by a single reading in it — the panel's ROX and the operator's
-    // own Tex 615 are both channel 2, which is exactly why the clear column here is the
-    // FAM/Cy5 control column rather than that plate's Tex 615 multiplex.
-    expect(plate.fluors.map((f) => f.fluor)).toEqual(["FAM", "VIC", "ROX", "Cy5"]);
+  it("carries two dyes on one optical channel, in different wells", () => {
+    // The point of the sample: the panel's ROX and the operator's own Tex 615 are both channel 2.
+    // No well holds both — nothing could unmix that — but the plate holds both, which is legal
+    // and which CFX has no way to write down.
+    expect(plate.fluors.map((f) => f.fluor)).toEqual(["FAM", "VIC", "ROX", "Tex 615", "Cy5"]);
+    const dyesIn = (vessel: string) =>
+      new Set(plate.wells.filter((w) => w.vessel === vessel).flatMap((w) => w.fluors.map((f) => f.fluor)));
+    expect(dyesIn("BR White")).toContain("ROX");
+    expect(dyesIn("BR White")).not.toContain("Tex 615");
+    expect(dyesIn("BR Clear")).toContain("Tex 615");
+    expect(dyesIn("BR Clear")).not.toContain("ROX");
+    for (const w of plate.wells) {
+      const dyes = w.fluors.map((f) => f.fluor);
+      expect(dyes.includes("ROX") && dyes.includes("Tex 615")).toBe(false);
+    }
   });
 
   it("has both vessels sharing a dye, which is what makes it worth having", () => {
     // A plate whose vessels used disjoint dye sets would never exercise a threshold group that
-    // spans both (`calibration.md` Appendix A) — FAM and Cy5 have to appear in each.
+    // spans both (`calibration.md` Appendix A) — FAM and Cy5 appear in each.
     const dyesIn = (vessel: string) =>
       new Set(plate.wells.filter((w) => w.vessel === vessel).flatMap((w) => w.fluors.map((f) => f.fluor)));
     const white = dyesIn("BR White");
-    const clear = dyesIn("BR Clear");
-    expect([...clear].every((d) => white.has(d))).toBe(true);
-    expect([...clear].sort()).toEqual(["Cy5", "FAM"]);
+    for (const shared of ["FAM", "Cy5"]) {
+      expect(white).toContain(shared);
+      expect(dyesIn("BR Clear")).toContain(shared);
+    }
+  });
+
+  it("analyses without the channel collision poisoning the plate", () => {
+    // The regression this sample exists for. Built with one matrix over the plate's whole dye
+    // list, ROX and Tex 615 sit in the same matrix as 0.999+ collinear columns and the solve
+    // blows up — ROX's threshold went to 8119 RFU against its usual 49, and Tex 615 got no Cq at
+    // all. Per-well dye sets keep every threshold in the ordinary tens of RFU.
+    const archive = readSampleArchive();
+    const run = computeRunAnalysis(
+      parseZpcrArchive(
+        attachPlate(archive, {
+          name: "mixed.plt.csv",
+          bytes: new TextEncoder().encode(plateToCsv(plate)),
+        }),
+      ),
+      {},
+      STEP,
+    );
+    const thresholds = new Map<string, number>();
+    for (const c of run.allFluorCurves) {
+      const e = run.cqTable.get(curveKey(c.row, c.col, c.dye));
+      if (e?.threshold != null) thresholds.set(c.dye, e.threshold);
+    }
+    expect(thresholds.size).toBeGreaterThan(0);
+    for (const [dye, t] of thresholds) {
+      expect(t, `${dye} threshold`).toBeGreaterThan(0);
+      expect(t, `${dye} threshold`).toBeLessThan(500);
+    }
+  });
+
+  it("never puts two same-channel dyes in one well's matrix", () => {
+    const archive = readSampleArchive();
+    const run = computeRunAnalysis(
+      parseZpcrArchive(
+        attachPlate(archive, {
+          name: "mixed.plt.csv",
+          bytes: new TextEncoder().encode(plateToCsv(plate)),
+        }),
+      ),
+      {},
+      STEP,
+    );
+    const byWell = new Map<string, string[]>();
+    for (const c of run.allFluorCurves) {
+      byWell.set(c.wellLabel, [...(byWell.get(c.wellLabel) ?? []), c.dye]);
+    }
+    expect(byWell.size).toBeGreaterThan(0);
+    for (const [well, dyes] of byWell) {
+      expect(dyes.includes("ROX") && dyes.includes("Tex 615"), `well ${well}`).toBe(false);
+      // Each well still gets a full set — the free channels are filled in, so the "Unloaded"
+      // display has something to draw for every channel the run scanned.
+      expect(dyes.length, `well ${well}`).toBe(4);
+    }
+    // A well that carries the dye is always solved for it, never for its rival.
+    const dyesAt = (label: string) => byWell.get(label) ?? [];
+    expect(dyesAt("A4")).toContain("ROX");
+    expect(dyesAt("A11")).toContain("Tex 615");
+  });
+});
+
+describe("wellDyeSet", () => {
+  /** A calibration stub — only the fields the rule reads. */
+  const cal = (fluor: string, primaryChannel: number | undefined) =>
+    ({ fluor, channel: primaryChannel, primaryChannel }) as FluorCalibration;
+
+  /** FAM ch0, VIC ch1, ROX ch2, Tex 615 ch2, Cy5 ch3 — the committed sample's shape. */
+  const CALS = [cal("FAM", 0), cal("VIC", 1), cal("ROX", 2), cal("Tex 615", 2), cal("Cy5", 3)];
+  const names = (out: FluorCalibration[]) => out.map((f) => f.fluor);
+
+  it("gives a plate with one dye per channel every dye, in every well", () => {
+    // The no-collision case — every plate CFX can write. Nothing is dropped, so results are
+    // identical to building one matrix for the whole plate.
+    const cals = [cal("FAM", 0), cal("HEX", 1), cal("Cy5", 3)];
+    expect(names(wellDyeSet(new Set(["FAM"]), cals))).toEqual(["FAM", "HEX", "Cy5"]);
+    expect(names(wellDyeSet(new Set(), cals))).toEqual(["FAM", "HEX", "Cy5"]);
+  });
+
+  it("keeps the dye the well actually carries when two contest a channel", () => {
+    expect(names(wellDyeSet(new Set(["FAM", "ROX", "Cy5"]), CALS))).toEqual([
+      "FAM", "VIC", "ROX", "Cy5",
+    ]);
+    expect(names(wellDyeSet(new Set(["FAM", "Tex 615", "Cy5"]), CALS))).toEqual([
+      "FAM", "VIC", "Tex 615", "Cy5",
+    ]);
+  });
+
+  it("fills the free channels, so a well can still be shown against dyes it lacks", () => {
+    // The well carries only FAM; VIC and Cy5 are free channels and come along, which is what
+    // the app's "Unloaded" toggle draws. Only the contested channel is resolved to one dye.
+    const out = names(wellDyeSet(new Set(["FAM"]), CALS));
+    expect(out).toContain("VIC");
+    expect(out).toContain("Cy5");
+    expect(out.filter((d) => d === "ROX" || d === "Tex 615")).toHaveLength(1);
+  });
+
+  it("never returns two dyes on the same channel", () => {
+    for (const own of [[], ["FAM"], ["ROX"], ["Tex 615"], ["FAM", "Tex 615", "Cy5"]]) {
+      const out = wellDyeSet(new Set(own), CALS);
+      const channels = out.map((f) => f.primaryChannel);
+      expect(new Set(channels).size).toBe(channels.length);
+    }
+  });
+
+  it("breaks a tie by rank, for a well that carries neither rival", () => {
+    const rank = (f: string) => (f === "Tex 615" ? 10 : 0);
+    expect(names(wellDyeSet(new Set(["FAM"]), CALS, rank))).toContain("Tex 615");
+    expect(names(wellDyeSet(new Set(["FAM"]), CALS, (f) => (f === "ROX" ? 10 : 0)))).toContain("ROX");
+  });
+
+  it("returns the caller's order, not rank order", () => {
+    // The matrix's columns and a well's curves come out in plate fluor order whatever the
+    // tie-break decided.
+    const out = names(wellDyeSet(new Set(), CALS, (f) => (f === "Tex 615" ? 10 : 0)));
+    expect(out).toEqual(["FAM", "VIC", "Tex 615", "Cy5"]);
+  });
+
+  it("includes a dye whose channel is unknown rather than guessing", () => {
+    const cals = [cal("FAM", 0), cal("Mystery", undefined)];
+    expect(names(wellDyeSet(new Set(["FAM"]), cals))).toEqual(["FAM", "Mystery"]);
   });
 });
