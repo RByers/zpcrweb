@@ -539,11 +539,14 @@ asks for the permission back** — a click is the user gesture `requestPermissio
 row is the thing in front of the person who wants the file.
 
 That ask is the **folder's**, not the file's: `App.tsx`'s `selectFromTable` routes it to
-`useDiskTree`'s `grant`, the Grant access button's own implementation, because permission is
-granted per folder and one dialog answers for everything inside it. So granting re-reads the
-folder's listings, re-arms its watches, and reads back in *every* open file in it — a click on one
-file recovers its neighbours too, rather than leaving them badged as unreadable when they
-demonstrably are not. The click also stays in the Files view rather than going to the file's
+`useDiskTree`'s `grant`, the Grant access button's own implementation, because permission is not
+granted per file. It is not really granted per folder either — one handle is asked, but Chrome's
+restore-permission prompt answers for the **origin**, handing back every directory the site was
+granted before. So a grant re-reads *everything*: all cached listings dropped, every node on screen
+re-listed, every watch re-armed, and every open file the app couldn't get at read back in
+(`retryUnread`). One click recovers the whole session, rather than leaving other folders showing a
+Grant access button and other files wearing a read-error badge that stopped being true the moment
+the dialog was answered. The click also stays in the Files view rather than going to the file's
 Overview, since until the browser's question is answered there is nothing to show there.
 
 A lapsed permission is therefore **not** an error the app reports. It used to be, and the banner it

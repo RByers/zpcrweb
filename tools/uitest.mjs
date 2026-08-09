@@ -4990,6 +4990,40 @@ async function folderChecks(chrome, origin) {
   );
 
   // ── When the grant expires underneath the app ──────────────────────────────────────────────
+  // First, a *second* granted folder with a file open in it. The recovery checked below is
+  // origin-wide rather than folder-wide — the browser hands back every directory the site was
+  // granted, not the one handle asked about — and with only one folder there would be nothing to
+  // tell the two apart.
+  await cdp.eval(
+    `(async () => {
+       const root = await navigator.storage.getDirectory();
+       const archive = await root.getDirectoryHandle("archive", { create: true });
+       const bytes = new Uint8Array(await (await fetch("/examples/${EXAMPLE}")).arrayBuffer());
+       const h = await archive.getFileHandle("archived.zpcr", { create: true });
+       const w = await h.createWritable();
+       await w.write(bytes);
+       await w.close();
+       window.showDirectoryPicker = async () => archive;
+       return true;
+     })()`,
+    { awaitPromise: true },
+  );
+  await addFolder();
+  await waitFor(() => cdp.eval(`document.querySelectorAll("${DISK}").length === 2`), {
+    what: "the second folder",
+  });
+  await waitFor(() => cdp.eval(`!!(${nameBtn("archived.zpcr")})`), {
+    what: "the second folder's listing",
+  });
+  // A single click, not a double: one tick opens the file and stays in Files, where the rows
+  // being counted are. A double-click would navigate to Overview once its read settled, which is
+  // a race against the tab click that would follow it.
+  await cdp.eval(`${nameBtn("archived.zpcr")}?.click()`);
+  await waitFor(() => cdp.eval(`document.querySelectorAll(".filesview__row").length === 3`), {
+    timeout: 10000,
+    what: "the second folder's file to open",
+  });
+
   // A folder grant does not survive a reload unless the browser has been told to keep it, so this
   // is the *ordinary* state of a disk-backed file the morning after — and the state the app used
   // to report as a red box of the platform's own wording, sitting over the Grant access button.
@@ -5034,7 +5068,7 @@ async function folderChecks(chrome, origin) {
   const lapsedState = await lapsed();
   check(
     "A file whose folder permission has expired stays listed, with a read-error badge",
-    lapsedState.rows === 2 && lapsedState.badges === 2,
+    lapsedState.rows === 3 && lapsedState.badges === 3,
     JSON.stringify(lapsedState),
   );
   check("…and says so on the row rather than in an error banner", lapsedState.banner === false);
@@ -5047,13 +5081,14 @@ async function folderChecks(chrome, origin) {
   const retried = await lapsed();
   check(
     "…and clicking it retries rather than dropping it",
-    retried.rows === 2 && retried.badges === 2 && retried.banner === false,
+    retried.rows === 3 && retried.badges === 3 && retried.banner === false,
     JSON.stringify(retried),
   );
 
-  // Now the user says yes. Permission is granted per *folder*, so one answer covers everything in
-  // it: clicking the one file has to bring back its neighbours too, rather than leaving them
-  // badged as unreadable when they demonstrably aren't. Both open files live in `runs`.
+  // Now the user says yes. The browser grants for the origin, not for the handle asked about, so
+  // one answer covers every folder: clicking one file in `runs` has to bring back its neighbour
+  // there *and* the file open in `archive`, rather than leaving them badged as unreadable when
+  // they demonstrably aren't.
   await cdp.eval(`window.__denyFs = false`);
   await cdp.eval(`document.querySelector(".filesview__row").click()`);
   await waitFor(async () => (await lapsed()).badges === 0, {
@@ -5069,8 +5104,8 @@ async function folderChecks(chrome, origin) {
   }).catch(() => {});
   const chipsBack = await cdp.eval(`document.querySelectorAll(".filechip").length`);
   check(
-    "Granting the folder back reads in every open file in it, not just the one clicked",
-    granted.rows === 2 && granted.badges === 0 && chipsBack === 2,
+    "Granting access back reads in every open file, in every folder — not just the one clicked",
+    granted.rows === 3 && granted.badges === 0 && chipsBack === 3,
     JSON.stringify({ ...granted, chips: chipsBack }),
   );
   cdp.close();

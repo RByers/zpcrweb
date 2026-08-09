@@ -119,7 +119,9 @@ export interface DiskTree {
    * rather than the collision.
    */
   add: (reserved?: readonly string[]) => Promise<void>;
-  /** Ask for a lapsed folder's permission back. Must be called from a user gesture. */
+  /** Ask for a lapsed folder's permission back, and re-read every folder once it is answered —
+   * the browser grants for the origin, not for the one handle asked. Must be called from a user
+   * gesture. */
   grant: (label: string) => Promise<void>;
   remove: (label: string) => Promise<void>;
   error: string | null;
@@ -134,10 +136,10 @@ export function useDiskTree(
    * moment: cached listings are dropped and watches that had nothing to attach to try again. */
   active: boolean,
   /**
-   * Called when a folder's permission is granted back. The files the app has open inside that
-   * folder have been unreadable until this moment — a granted folder is exactly when they can be
-   * read in — so this is what makes them come back without the user having to click each one
-   * (`ZpcrStore.retryUnread`).
+   * Called when a folder's permission is granted back — which, since the browser grants for the
+   * origin rather than for the one handle asked, means every folder is readable again. The files
+   * the app has open in any of them have been unreadable until this moment, so this is what makes
+   * them come back without the user having to click each one (`ZpcrStore.retryUnread`).
    */
   onGranted?: () => void,
 ): DiskTree {
@@ -323,17 +325,29 @@ export function useDiskTree(
     }
   }, [readFolders]);
 
+  /**
+   * Ask for a lapsed folder's permission back — and then re-read **everything**, not just that
+   * folder.
+   *
+   * One handle is asked, but the browser answers for the origin: Chrome's restore-permission
+   * prompt hands back access to every directory the site was granted before, so by the time this
+   * resolves the *other* folders are readable again too. Refreshing only the one whose button was
+   * clicked would leave the rest showing cached "needs permission" state that had stopped being
+   * true — and their open files wearing a read-error badge until something else happened to touch
+   * them. So every listing is dropped, every node on screen is re-read, and `onGranted`
+   * (`ZpcrStore.retryUnread`) reads back in every open file the app is holding but couldn't get at.
+   */
   const grant = useCallback(
     async (label: string) => {
       try {
         setError(null);
         await requestFolderPermission(label);
-        invalidateListings(label);
+        invalidateListings();
         retryFailedWatches();
         await readFolders();
         for (const key of liveNodes()) {
           const [keyLabel, ...path] = JSON.parse(key) as string[];
-          if (keyLabel === label) void load(keyLabel, path);
+          void load(keyLabel!, path);
         }
         onGranted?.();
       } catch (e) {
