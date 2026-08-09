@@ -224,6 +224,35 @@ export function toSampleType(raw: string): SampleType {
 }
 
 /**
+ * Normalized type → the `wellSampleType` code a `.pltd` would carry — the inverse of
+ * {@link toSampleType}, for anything that has to write a type back out (`plateCsv.ts`'s
+ * SampleType cell, `plateEdit.ts`'s {@link WellDefinition.sampleTypeRaw} bookkeeping).
+ *
+ * `other` is deliberately absent: it isn't a code, it's "we didn't recognize the code", so a
+ * well of that type keeps its preserved {@link WellDefinition.sampleTypeRaw} instead. Inventing
+ * a `wcOther` here would both fabricate a code CFX never emits and lose the real one on every
+ * round-trip.
+ */
+export const SAMPLE_TYPE_TO_RAW: Record<Exclude<SampleType, "other">, string> = {
+  unknown: "wcSample",
+  standard: "wcStandard",
+  ntc: "wcNTC",
+  nrt: "wcNRT",
+  positiveControl: "wcPositiveControl",
+  negativeControl: "wcNegativeControl",
+  empty: "wcEmpty",
+  passiveRef: "wcPassiveRef",
+  custom: "wcCustom",
+};
+
+/** Every normalized sample type, in the order a chooser should offer them — the recognized
+ * codes first, `other` (the unrecognized-code bucket) last. */
+export const SAMPLE_TYPES: SampleType[] = [
+  ...(Object.keys(SAMPLE_TYPE_TO_RAW) as Exclude<SampleType, "other">[]),
+  "other",
+];
+
+/**
  * Order fluors by optical channel, with unknown-channel ones last (in their existing relative
  * order). Every surface that lists a plate's fluors wants the same ordering, so it lives here
  * once instead of being duplicated — exported for `plateCsv.ts`, which orders its fluor columns

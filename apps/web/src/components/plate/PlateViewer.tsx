@@ -1,4 +1,4 @@
-import type { CSSProperties, ReactNode } from "react";
+import type { CSSProperties, MouseEvent, ReactNode } from "react";
 import {
   fileKindDescription,
   type FileKind,
@@ -22,17 +22,42 @@ import { Pair } from "../raw/Pair";
  * `plateSetup2` subtree — same component either way, only the source of the
  * {@link PlateDefinition} differs.
  *
- * There is no click-through detail panel: a well's remaining fields (replicate, quantity, the
- * fluor→channel→target mapping) are already in the cell's hover card ({@link wellCard} — the same
- * card the Curves view's well grid shows, minus the Cq column), and the panel it used to open cost
- * a 320px column that a narrow container had to stack below the grid.
+ * There is no click-through detail panel *while reading*: a well's remaining fields (replicate,
+ * quantity, the fluor→channel→target mapping) are already in the cell's hover card
+ * ({@link wellCard} — the same card the Curves view's well grid shows, minus the Cq column), and
+ * the panel it used to open cost a 320px column that a narrow container had to stack below the
+ * grid. Editing is the one state where a panel earns that column back, and {@link PlateEditor}
+ * supplies it — this component stays the single plate grid either way, taking the selection as a
+ * prop rather than being forked into a read copy and an edit copy.
  */
+/**
+ * The grid's editing behaviour, supplied by {@link PlateEditor} while its edit mode is on and
+ * absent the rest of the time — which is exactly what "the grid is selectable now" means.
+ *
+ * Spreadsheet conventions throughout: a plain click selects one well, Cmd/Ctrl-click adds to the
+ * selection, Shift-click extends a rectangle from the anchor, dragging sweeps one out, and the row
+ * letters / column numbers / corner select a whole row, column or plate. The modifiers arrive as
+ * the raw mouse event because deciding what they mean is one rule that belongs in one place
+ * (`usePlateSelection.ts`), not something each caller re-derives.
+ */
+export interface PlateGridSelection {
+  /** Well indices currently selected. */
+  selected: ReadonlySet<number>;
+  onWellDown: (well: WellDefinition, e: MouseEvent) => void;
+  /** Fires only mid-drag; the hook ignores it otherwise. */
+  onWellEnter: (well: WellDefinition, e: MouseEvent) => void;
+  onRowHead: (row: number, e: MouseEvent) => void;
+  onColumnHead: (col: number, e: MouseEvent) => void;
+  onAllHead: (e: MouseEvent) => void;
+}
+
 export function PlateViewer({
   plate,
   kind,
   sourceHint,
   toolbar,
   compact,
+  selection,
 }: {
   plate: PlateDefinition;
   /** The standalone file's own kind (`pltd` or `csv`) — only passed by
@@ -56,6 +81,8 @@ export function PlateViewer({
    * well F7?".
    */
   compact?: boolean;
+  /** Present iff the plate is being edited — see {@link PlateGridSelection}. */
+  selection?: PlateGridSelection;
 }) {
   // Gated on `loaded` exactly as the cells are (see `WellCell`), so the legend lists the colors
   // actually on screen. Without the gate an unloaded well's configured sample type — often just
@@ -82,7 +109,13 @@ export function PlateViewer({
   const { show, hide, node } = useHoverCard((well: WellDefinition) => wellCard(well, fluorOrder));
 
   return (
-    <div className={"plateviewer" + (compact ? " plateviewer--compact" : "")}>
+    <div
+      className={
+        "plateviewer" +
+        (compact ? " plateviewer--compact" : "") +
+        (selection ? " plateviewer--selectable" : "")
+      }
+    >
       <section className="decoded__block">
         <div className="plateviewer__head">
           <h3 className="decoded__h">
@@ -118,9 +151,22 @@ export function PlateViewer({
           >
             <thead>
               <tr>
-                <th />
+                {/* The corner selects the whole plate while editing (a spreadsheet's own
+                    convention, and Cmd-A's equivalent for the mouse); it is blank otherwise. */}
+                <th
+                  className={selection ? "plate__head plate__head--all" : undefined}
+                  onMouseDown={selection ? (e) => selection.onAllHead(e) : undefined}
+                  title={selection ? "Select every well" : undefined}
+                />
                 {Array.from({ length: plate.columns }, (_, c) => (
-                  <th key={c}>{c + 1}</th>
+                  <th
+                    key={c}
+                    className={selection ? "plate__head" : undefined}
+                    onMouseDown={selection ? (e) => selection.onColumnHead(c, e) : undefined}
+                    title={selection ? `Select column ${c + 1}` : undefined}
+                  >
+                    {c + 1}
+                  </th>
                 ))}
               </tr>
             </thead>
@@ -129,8 +175,15 @@ export function PlateViewer({
                 <tr key={label}>
                   {/* A single-row plate (e.g. a Biomeme run's synthesized strip of tube
                       positions — `biomeme.ts`) has no row to distinguish, so the header cell is
-                      left blank rather than showing the redundant, always-"A" row letter. */}
-                  <th>{plate.rows === 1 ? "" : label}</th>
+                      left blank rather than showing the redundant, always-"A" row letter. It is
+                      still the row's select-all target while editing. */}
+                  <th
+                    className={selection ? "plate__head" : undefined}
+                    onMouseDown={selection ? (e) => selection.onRowHead(row, e) : undefined}
+                    title={selection ? `Select row ${label}` : undefined}
+                  >
+                    {plate.rows === 1 ? "" : label}
+                  </th>
                   {Array.from({ length: plate.columns }, (_, col) => (
                     <WellCell
                       key={col}
@@ -138,6 +191,7 @@ export function PlateViewer({
                       fluorOrder={fluorOrder}
                       show={show}
                       hide={hide}
+                      selection={selection}
                     />
                   ))}
                 </tr>
@@ -209,20 +263,30 @@ function WellCell({
   fluorOrder,
   show,
   hide,
+  selection,
 }: {
   well: WellDefinition;
   fluorOrder: PlateFluor[];
   show: (well: WellDefinition, el: HTMLElement) => void;
   hide: () => void;
+  selection?: PlateGridSelection;
 }) {
   const meta = SAMPLE_TYPE_META[well.sampleType];
 
   return (
     <td
-      className={"plate__well" + (well.loaded ? "" : " is-empty")}
+      className={
+        "plate__well" +
+        (well.loaded ? "" : " is-empty") +
+        (selection?.selected.has(well.index) ? " is-selected" : "")
+      }
       style={well.loaded ? { background: meta.color + "22", borderColor: meta.color + "55" } : undefined}
-      onMouseEnter={(e) => show(well, e.currentTarget)}
+      onMouseEnter={(e) => {
+        show(well, e.currentTarget);
+        selection?.onWellEnter(well, e);
+      }}
       onMouseLeave={hide}
+      onMouseDown={selection ? (e) => selection.onWellDown(well, e) : undefined}
     >
       {well.loaded && (
         <>

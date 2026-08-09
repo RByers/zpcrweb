@@ -47,8 +47,19 @@ export {
   COLUMNS,
   ROWS,
 } from "./plateread.js";
-export { parsePltd, parsePlatesetup2, isPltdName } from "./pltd.js";
+export { parsePltd, parsePlatesetup2, isPltdName, SAMPLE_TYPES, SAMPLE_TYPE_TO_RAW } from "./pltd.js";
 export { plateToCsv, parsePlateCsv, isPlateCsvName, isBlankWell } from "./plateCsv.js";
+export {
+  editWells,
+  applyWellPatches,
+  setPlateFluors,
+  normalizePlate,
+  wellPatch,
+  clearPatch,
+} from "./plateEdit.js";
+export type { WellPatch } from "./plateEdit.js";
+export { formatPlateBlock, parsePlateBlock } from "./plateClipboard.js";
+export type { PlateBlock } from "./plateClipboard.js";
 export { attachPlate, attachProtocol } from "./attachPlate.js";
 export { buildExperimentArchive } from "./experimentArchive.js";
 export type { ExperimentArchiveParts } from "./experimentArchive.js";

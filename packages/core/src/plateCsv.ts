@@ -54,28 +54,8 @@
  * commas — still parses.
  */
 
-import { byChannel, toSampleType } from "./pltd.js";
+import { byChannel, toSampleType, SAMPLE_TYPES, SAMPLE_TYPE_TO_RAW } from "./pltd.js";
 import type { PlateDefinition, PlateFluor, SampleType, WellDefinition, WellFluor } from "./pltd.js";
-
-/**
- * Normalized type → the `wellSampleType` code a `.pltd` would carry. `other` is deliberately
- * absent: it isn't a code, it's "we didn't recognize the code", so a well of that type writes
- * its preserved {@link WellDefinition.sampleTypeRaw} into the SampleType cell instead (and
- * {@link parsePlateCsv} normalizes it back). Inventing a `wcOther` here, as an earlier version
- * did, both fabricated a code CFX never emits and lost the real one on every round-trip.
- */
-const SAMPLE_TYPE_TO_RAW: Record<Exclude<SampleType, "other">, string> = {
-  unknown: "wcSample",
-  standard: "wcStandard",
-  ntc: "wcNTC",
-  nrt: "wcNRT",
-  positiveControl: "wcPositiveControl",
-  negativeControl: "wcNegativeControl",
-  empty: "wcEmpty",
-  passiveRef: "wcPassiveRef",
-  custom: "wcCustom",
-};
-const SAMPLE_TYPES = [...Object.keys(SAMPLE_TYPE_TO_RAW), "other"] as SampleType[];
 
 function indexToRowLetters(n: number): string {
   let s = "";

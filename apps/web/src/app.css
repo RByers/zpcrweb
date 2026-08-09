@@ -2686,6 +2686,152 @@
   margin-bottom: 4px;
 }
 
+/* ---- Plate editor -------------------------------------------------------
+ * The grid plus, while editing, a details panel for the selected wells (`PlateEditor`). A flex
+ * row rather than a grid for the same reason `.plateview` is one: the second column exists only
+ * in edit mode, and a fixed track would leave a gap the rest of the time.
+ *
+ * The panel is `sticky` inside `.plateview__main`, which is the element that scrolls: a 96-well
+ * grid is taller than the viewport, and a panel that scrolled away would leave the fields out of
+ * reach exactly when a selection at the bottom of the plate needs them. */
+.plateedit {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  min-width: 0;
+}
+.plateedit__grid {
+  flex: 1;
+  min-width: 0;
+}
+.plateedit__panel {
+  flex: 0 0 clamp(240px, 26cqi, 300px);
+  position: sticky;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--raised);
+  font-size: 12px;
+}
+.plateedit__panelhead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.plateedit__panelhead .decoded__h {
+  margin-bottom: 0;
+}
+.plateedit__field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.plateedit__label {
+  color: var(--ink-muted);
+  font-size: 11px;
+}
+.plateedit__input {
+  width: 100%;
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--plane);
+  color: var(--ink);
+  font-size: 12px;
+}
+.plateedit__input:focus {
+  outline: none;
+  border-color: var(--neon-cyan);
+}
+.plateedit__section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.plateedit__sectionhead {
+  color: var(--ink-muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+/* Dye name (with its in-the-well checkbox) then that dye's target, on one line: the pair is one
+   fact — what this well measures in this channel — and stacking them doubled the panel's height
+   for a five-dye plate. */
+.plateedit__fluorrow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.plateedit__fluorname {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.plateedit__addrow {
+  display: flex;
+  gap: 6px;
+}
+.plateedit__chipx {
+  padding: 0 2px;
+  border: 0;
+  background: transparent;
+  color: var(--ink-muted);
+  font-size: 10px;
+  line-height: 1;
+  cursor: pointer;
+}
+.plateedit__chipx:hover {
+  color: var(--danger);
+  background: transparent;
+}
+
+/* Editing turns the grid into a selection surface: headers become click targets, and a selected
+   well is outlined rather than filled, so the sample-type tint underneath still reads. */
+.plateviewer--selectable .plate__grid th.plate__head {
+  cursor: pointer;
+  user-select: none;
+}
+.plateviewer--selectable .plate__grid th.plate__head:hover {
+  color: var(--ink);
+  background: var(--raised-2);
+}
+.plateviewer--selectable .plate__well {
+  cursor: cell;
+  user-select: none;
+}
+.plateviewer--selectable .plate__grid td.plate__well.is-selected {
+  outline-color: var(--neon-cyan);
+  /* Above its neighbours, so the outline of a selected block isn't clipped by the next cell's
+     own border on the shared edge. */
+  position: relative;
+  z-index: 1;
+}
+
+@container appmain (inline-size < 760px) {
+  /* Too narrow for two columns: the panel goes under the grid and stops sticking (there is
+     nothing beside it to stay level with). */
+  .plateedit {
+    flex-direction: column;
+  }
+  .plateedit__panel {
+    position: static;
+    flex: 1 1 auto;
+    align-self: stretch;
+  }
+}
+
 /* ---- Decoded view ------------------------------------------------------- */
 .raw__decoded {
   flex: 1;

@@ -153,7 +153,47 @@ positional guess would produce a wrong answer that looks plausible rather than a
 > matched verbatim against the calibration like any other. Earlier versions parsed that as a
 > channel; nothing writes or reads it that way now.
 
-## 5. What's deliberately not in the file
+## 5. Editing a plate, and the clipboard block
+
+This is the one plate encoding zpcrweb can **write**, so it is also the only one it can edit: the
+app's plate editor works on a `PlateDefinition` and saves through `plateToCsv`. A `.pltd` has no
+writer, and gets no editor rather than one that couldn't save.
+
+The edit operations themselves are `packages/core/src/plateEdit.ts` — pure
+`PlateDefinition → PlateDefinition` functions, so the UI owns the interaction and the library owns
+what a plate may look like afterwards. What that costs the format is nothing; what it protects is
+the three things a hand edit gets wrong, each of which would otherwise produce a file that reads
+back as something else than what was on screen:
+
+| Invariant | Why the format cares |
+|---|---|
+| `loaded`, `dyeCount`, `targets`, `samples` are recomputed from the wells | `parsePlateCsv` derives all four on read (§1, §3), so an edit that sets a target without updating the list writes a plate that disagrees with itself. |
+| A well is loaded iff it carries a fluor | That *is* the read rule (§4). Any other rule survives on screen and not through a save. |
+| The vessel stays stated once | §3.1 rejects a file that states it twice, so giving one well its own vessel pushes the plate's down onto the others, and wells that all agree hoist back up. |
+
+`WellPatch` is the unit of an edit, and **every field is optional, with absent meaning "leave this
+alone"** — which is what lets one edit set the sample across a column without disturbing the
+targets in it.
+
+### 5.1 The clipboard block
+
+Copying wells between plates, or to and from a spreadsheet, uses **tab-separated** text
+(`packages/core/src/plateClipboard.ts`, `formatPlateBlock`/`parsePlateBlock`) rather than this CSV:
+TSV is what a spreadsheet puts on the system clipboard and reads back off it. The columns are the
+same fields spelled the same way as §3's — the optional ones written only when some copied well
+carries one, a fluor column per dye holding that well's target, `+` for present-with-no-target — so
+a cell means the same thing in both formats. A blank cell **clears** the field, which is what makes
+copying an empty well over a loaded one empty it.
+
+One well is several tab-separated fields, so a copied block leads with a header row naming them;
+each subsequent line is one plate row, holding `width × wells` cells. On paste, a first row whose
+cells are non-empty, distinct, and include at least one known column name is read as that header —
+which is also how a paste introduces a dye the plate doesn't have yet (`Sample⇥Cy5`). Without a
+header the columns are positional: `Sample`, `SampleType`, then the plate's dyes in order, so the
+commonest paste of all — a bare column of names out of a spreadsheet — sets the samples. A row
+shorter than the columns says nothing about the ones it doesn't reach, rather than clearing them.
+
+## 6. What's deliberately not in the file
 
 - **The plate's identity** (`PlateDefinition.identityKey`, its user-facing name) — the
   file/archive-entry name *is* that identity. `parsePlateCsv`'s `sourceName` option derives it by

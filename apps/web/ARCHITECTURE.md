@@ -423,6 +423,50 @@ happened — there is no honest way to edit one.
 - **A protocol the builder can't represent gets no editor**, with the reason on the disabled
   button. Refusing is the honest answer: the alternative is rewriting bytes we didn't understand.
 
+### Editing a plate (`components/plate/`)
+
+The plate-side counterpart of the protocol editor, and deliberately the same shape as it:
+`PlateEditor` wraps the ordinary `PlateViewer` grid, adds an Edit pencil that becomes a worded
+Done, edits through core's plate primitives rather than text (`plateEdit.ts`,
+[`pltcsv.md`](../../pltcsv.md) §5), and saves as it goes (`ZpcrStore.setPlateText`, the same
+write-behind throttle a protocol edit uses). Undo/redo work the same way too, over a stack of
+plates compared by their serialization — the store hands back a *re-parsed* plate, never the
+object the editor emitted, so identity comparison would restart the history on every edit.
+
+**A `.plt.csv` is editable and a `.pltd` is not**, which is a fact about writers rather than about
+permissions: there is no encrypted-`.pltd` writer (`pltcsv.md`), so an edit to one would have
+nowhere to go. A `.pltd` gets the same grid with no pencil, and the clone button beside it turns
+it into a `.plt.csv` that does edit. The editor is offered for a **standalone** plate file; a
+plate living inside a run is still replaced wholesale through attach (see "Attach" above).
+
+- **One grid, two modes.** `PlateViewer` takes an optional `PlateGridSelection`; having it *is*
+  what edit mode means for the grid. There is no second plate grid to keep in sync, which is the
+  same rule "One Protocol view" states for the protocol listing.
+- **Selection is a spreadsheet's** (`usePlateSelection.ts`, which is the one place the rules are
+  written down): click selects a well and anchors there, Cmd/Ctrl-click adds or removes,
+  Shift-click takes the rectangle from the anchor, dragging sweeps one out, the row letters /
+  column numbers / corner take a whole row, column or plate, arrows and Shift-arrows move and
+  extend, Cmd-A and Escape select everything and nothing. Selection is state about the *grid*, so
+  it survives an edit — which is what makes a run of edits to one group of wells bearable — and
+  dies with edit mode.
+- **One field per fact, across the whole selection** (`PlateEditPanel.tsx`, the right-hand panel
+  that only edit mode has). A field shows the selected wells' shared value or `‹mixed›`, and
+  typing sets that one fact on every selected well: select a column, set the sample, and twelve
+  wells get the sample while their targets stay put. That is `WellPatch`'s absent-means-leave-alone
+  rule surfaced as UI, and it is the whole reason the panel isn't a well-at-a-time form. The dye
+  list sits at the bottom, apart from the per-well fields, because it is the one control there
+  that isn't about the selection.
+- **The clipboard is the system's**, not an in-app one: `copy`/`cut`/`paste` events (so Cmd-C/V
+  need no permission prompt) carrying the tab-separated block of `pltcsv.md` §5.1 — which means
+  wells copy between plates *and* to and from a spreadsheet. A single well pasted onto a
+  selection fills all of it; a block lands with its top-left corner on the selection's. The last
+  copied block is also kept in the component, for a browser that hands us a paste event with no
+  readable text.
+- Those window listeners read their state through a ref rather than through their closures.
+  They are registered once per edit-mode entry while the selection changes on every click, so a
+  copy arriving between a click and the effect that would re-register it would otherwise copy the
+  *previous* block — reproducible, not theoretical.
+
 ## Standalone plate entries and attach
 
 Two more `LoadedFile` kinds, `"pltd"` and `"csv"` (a bare `.csv` upload is treated leniently as

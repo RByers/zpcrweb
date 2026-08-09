@@ -4022,6 +4022,192 @@ async function protocolEditorChecks(chrome, origin) {
   cdp.close();
 }
 
+/**
+ * The Plate view's editor for a `.plt.csv` (`components/plate/PlateEditor.tsx`).
+ *
+ * All of it is interaction, and none of it is visible in a screenshot: which wells a gesture
+ * selects, that an edit lands on every selected well and only on the field that was typed in, that
+ * the clipboard carries a block of wells, and that the result is in the *file* rather than in the
+ * view. The plate model and the clipboard format are core's and are asserted there
+ * (`test/plateEdit.test.ts`, `test/plateClipboard.test.ts`).
+ *
+ * Cells are addressed by grid position rather than by a test hook, and the modifier gestures go
+ * in as real `mousedown` events with the modifier flags set — which is what the selection rules
+ * actually read.
+ */
+async function plateEditorChecks(chrome, origin) {
+  console.log("\nplate editor");
+  const cdp = await openPage(chrome.base, origin);
+  await emptyReload(cdp, origin);
+  await loadFile(cdp, join(REPO, "samples/S183-S185-RVP.plt.csv"));
+  await waitFor(() => chipPresent(cdp, "S183"), { what: "the .plt.csv chip" });
+  await clickTab(cdp, "Plates");
+  await tabBecomes(cdp, "Plates");
+
+  /** One well cell, by row/column — `.plate__grid` has a header row and a header cell per row. */
+  const cellExpr = (row, col) =>
+    `document.querySelectorAll(".plate__grid tbody tr")[${row}].querySelectorAll("td")[${col}]`;
+  /** What a well shows: its sample name and the targets drawn in it. */
+  const wellText = (row, col) =>
+    cdp.eval(`(() => { const td = ${cellExpr(row, col)};
+       return JSON.stringify({
+         sample: (td.querySelector(".plate__wellsample") || {}).textContent ?? "",
+         targets: [...td.querySelectorAll(".plate__target")].map((t) => t.textContent).filter(Boolean),
+         selected: td.classList.contains("is-selected"),
+       }); })()`).then(JSON.parse);
+  const selectedCount = () => cdp.eval(`document.querySelectorAll(".plate__well.is-selected").length`);
+  const panelTitle = () =>
+    cdp.eval(`((document.querySelector(".plateedit__panelhead .decoded__h") || {}).textContent || "").trim()`);
+  const editBtn = () =>
+    cdp.eval(`(() => { const b = [...document.querySelectorAll(".plateview__toolbar button")]
+        .find((x) => /^Done$/.test(x.textContent.trim()) ||
+                     /^Edit this plate$/.test(x.getAttribute("aria-label") ?? ""));
+       return b ? (/^Done$/.test(b.textContent.trim()) ? "Done" : "Edit") : "none"; })()`);
+  const clickEdit = () =>
+    cdp.eval(`(() => { const b = [...document.querySelectorAll(".plateview__toolbar button")]
+        .find((x) => /^Done$/.test(x.textContent.trim()) ||
+                     /^Edit this plate$/.test(x.getAttribute("aria-label") ?? ""));
+       if (b) b.click(); return !!b; })()`);
+  /** A click on a well or a header, with the modifiers a spreadsheet reads. */
+  const clickCell = (row, col, mods = {}) =>
+    cdp.eval(`(() => { ${cellExpr(row, col)}.dispatchEvent(new MouseEvent("mousedown",
+       { bubbles: true, metaKey: ${!!mods.meta}, shiftKey: ${!!mods.shift} })); return true; })()`);
+  const clickColumnHead = (col) =>
+    cdp.eval(`(() => { document.querySelectorAll(".plate__grid thead th")[${col + 1}]
+       .dispatchEvent(new MouseEvent("mousedown", { bubbles: true })); return true; })()`);
+  const clickRowHead = (row) =>
+    cdp.eval(`(() => { document.querySelectorAll(".plate__grid tbody tr")[${row}].querySelector("th")
+       .dispatchEvent(new MouseEvent("mousedown", { bubbles: true })); return true; })()`);
+  /** Type into one of the panel's fields, by its accessible label. */
+  const setPanel = (label, value) =>
+    cdp.eval(`(() => {
+      const el = [...document.querySelectorAll(".plateedit__panel input, .plateedit__panel select")]
+        .find((x) => x.getAttribute("aria-label") === ${JSON.stringify(label)});
+      if (!el) return false;
+      const proto = el.tagName === "SELECT" ? HTMLSelectElement.prototype : HTMLInputElement.prototype;
+      Object.getOwnPropertyDescriptor(proto, "value").set.call(el, ${JSON.stringify(String(value))});
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+      return true; })()`);
+  const key = async (k, { code, vk, mods = 0 } = {}) => {
+    for (const type of ["keyDown", "keyUp"]) {
+      await cdp.send("Input.dispatchKeyEvent", {
+        type, key: k, code: code ?? k, windowsVirtualKeyCode: vk ?? 0, modifiers: mods,
+      });
+    }
+  };
+
+  check("a .plt.csv's Plate tab offers an Edit button", (await editBtn()) === "Edit", await editBtn());
+  check("…and no well is selectable before it is pressed", (await selectedCount()) === 0);
+
+  await clickEdit();
+  await waitFor(async () => (await editBtn()) === "Done", { what: "edit mode" });
+  check("Edit turns into Done and opens the details panel", /No wells selected/.test(await panelTitle()));
+
+  // A4 is a loaded well of this plate (three targets, one sample) — clicking it selects exactly it.
+  await clickCell(0, 3);
+  await waitFor(async () => (await selectedCount()) === 1, { what: "one selected well" });
+  check("clicking a well selects it alone, and the panel says which", /Well A4/.test(await panelTitle()));
+
+  // The column gesture, and the reason the panel edits one field at a time: setting the sample for
+  // a whole column must not disturb the targets already in it.
+  const beforeTargets = (await wellText(0, 3)).targets;
+  await clickColumnHead(3);
+  await waitFor(async () => (await selectedCount()) === 8, { what: "a selected column" });
+  check("clicking a column number selects the whole column", (await panelTitle()).startsWith("8 wells"), await panelTitle());
+
+  await setPanel("Sample name for the selected wells", "Bulk edit");
+  await waitFor(async () => (await wellText(0, 3)).sample === "Bulk edit", { what: "the bulk edit" });
+  const a4 = await wellText(0, 3);
+  const h4 = await wellText(7, 3);
+  check(
+    "editing the sample applies to every selected well and leaves their targets alone",
+    a4.sample === "Bulk edit" && h4.sample === "Bulk edit" &&
+      JSON.stringify(a4.targets) === JSON.stringify(beforeTargets),
+    JSON.stringify({ a4, h4, beforeTargets }),
+  );
+
+  // Cmd-click adds one well to the selection; Shift-click extends a rectangle from the anchor.
+  await clickCell(0, 0, { meta: true });
+  await waitFor(async () => (await selectedCount()) === 9, { what: "the added well" });
+  check("Cmd-click adds a well to the selection", (await selectedCount()) === 9);
+  await clickCell(0, 0);
+  // The anchor a Shift-click extends from is React state, so it has to have landed first — a
+  // shift-click dispatched in the same tick would extend from the *previous* anchor.
+  await waitFor(async () => /Well A1/.test(await panelTitle()), { what: "the new anchor" });
+  await clickCell(2, 2, { shift: true });
+  await waitFor(async () => (await selectedCount()) === 9, { what: "the extended rectangle" });
+  check("Shift-click selects the rectangle from the anchor", (await selectedCount()) === 9);
+
+  // The clipboard carries whole wells: copy A4, paste it onto A1, and A1 becomes A4.
+  await clickCell(0, 3);
+  await waitFor(async () => /Well A4/.test(await panelTitle()), { what: "A4 selected alone" });
+  const copied = await cdp.eval(`(() => {
+    const dt = new DataTransfer();
+    window.dispatchEvent(new ClipboardEvent("copy", { bubbles: true, clipboardData: dt }));
+    return dt.getData("text/plain"); })()`);
+  check("Cmd-C copies the selected wells as a block", /Bulk edit/.test(copied), JSON.stringify(copied));
+  await clickCell(0, 0);
+  await waitFor(async () => /Well A1/.test(await panelTitle()), { what: "A1 selected alone" });
+  await cdp.eval(`(() => {
+    const dt = new DataTransfer();
+    dt.setData("text/plain", ${JSON.stringify(copied)});
+    window.dispatchEvent(new ClipboardEvent("paste", { bubbles: true, clipboardData: dt })); })()`);
+  await waitFor(async () => (await wellText(0, 0)).sample === "Bulk edit", { what: "the pasted well" });
+  const pasted = await wellText(0, 0);
+  check(
+    "Cmd-V pastes a copied well, targets and all",
+    pasted.sample === "Bulk edit" && JSON.stringify(pasted.targets) === JSON.stringify(a4.targets),
+    JSON.stringify({ pasted, a4 }),
+  );
+
+  // Delete empties the selection; Cmd-Z puts it back — the same history the buttons walk.
+  await key("Delete", { code: "Delete", vk: 46 });
+  await waitFor(async () => (await wellText(0, 0)).sample === "", { what: "the cleared well" });
+  check("Delete empties the selected wells", (await wellText(0, 0)).targets.length === 0);
+  await key("z", { code: "KeyZ", vk: 90, mods: 4 });
+  await waitFor(async () => (await wellText(0, 0)).sample === "Bulk edit", { what: "the undo" });
+  check("Cmd-Z undoes it", (await wellText(0, 0)).sample === "Bulk edit");
+
+  // A row header selects its 12 wells, and Cmd-A the whole plate — the two remaining gestures.
+  await clickRowHead(1);
+  await waitFor(async () => (await selectedCount()) === 12, { what: "a selected row" });
+  check("clicking a row letter selects the whole row", (await selectedCount()) === 12);
+  await key("a", { code: "KeyA", vk: 65, mods: 4 });
+  await waitFor(async () => (await selectedCount()) === 96, { what: "the whole plate" });
+  check("Cmd-A selects every well", (await selectedCount()) === 96);
+  await key("Escape", { code: "Escape", vk: 27 });
+  await waitFor(async () => (await selectedCount()) === 0, { what: "the cleared selection" });
+
+  // Leaving the view saves what was edited and drops edit mode — the edits are already in the
+  // file, so the round trip through another tab is also the check that they were written.
+  await clickTab(cdp, "Raw");
+  await tabBecomes(cdp, "Raw");
+  await clickTab(cdp, "Plates");
+  await tabBecomes(cdp, "Plates");
+  check("changing the view leaves edit mode", (await editBtn()) === "Edit", await editBtn());
+
+  await cdp.send("Page.reload", {});
+  await sleep(600);
+  await waitFor(() => chipPresent(cdp, "S183"), { what: "the chip after reload" });
+  await clickTab(cdp, "Plates");
+  await tabBecomes(cdp, "Plates");
+  check(
+    "edits are written to the file as they're made, with no Done required",
+    (await wellText(0, 3)).sample === "Bulk edit",
+    JSON.stringify(await wellText(0, 3)),
+  );
+
+  // A `.pltd` is read-only here: this app has no `.pltd` writer, so there is nowhere to save an
+  // edit to one, and it gets the same grid with no pencil rather than an editor that can't.
+  await loadFile(cdp, join(REPO, "samples/QuickPlate_96 wells_All Channels.pltd"));
+  await waitFor(() => chipPresent(cdp, "QuickPlate"), { what: "the .pltd chip" });
+  await clickTab(cdp, "Plates");
+  await tabBecomes(cdp, "Plates");
+  check("a .pltd gets no editor, having no writer to save through", (await editBtn()) === "none", await editBtn());
+  cdp.close();
+}
+
 
 /**
  * The Overview toolbar's Clone button — a copy of the loaded file under the next free `(N)` name,
@@ -5452,6 +5638,7 @@ async function main() {
     await experimentNameChecks(chrome, origin);
     await closeConfirmChecks(chrome, origin);
     await protocolEditorChecks(chrome, origin);
+    await plateEditorChecks(chrome, origin);
     await cloneChecks(chrome, origin);
     await openFilesChecks(chrome, origin);
     await fileTypeFilterChecks(chrome, origin);

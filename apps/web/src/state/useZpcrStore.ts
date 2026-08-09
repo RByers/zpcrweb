@@ -22,6 +22,7 @@ import {
   parseZpcr,
   parseZpcrArchive,
   parseZpcrwebSettings,
+  plateToCsv,
   runCompleteness,
   runProgressFromNames,
   wellKey,
@@ -102,11 +103,12 @@ export { DEFAULT_THRESHOLD_MULTIPLIER } from "./analysisSettings";
  * them. */
 export type { FileKind };
 /**
- * How often an edited protocol file may be rewritten to IndexedDB — see
- * {@link ZpcrStore.setProtocolText}. Short, because a `.prcl.txt` is a few hundred bytes; the
- * archive rewrite an analysis edit costs is spaced a minute apart instead (`analysisPersist.ts`).
+ * How often an edited protocol or plate file may be rewritten to IndexedDB — see
+ * {@link ZpcrStore.setProtocolText} and {@link ZpcrStore.setPlateText}. Short, because a
+ * `.prcl.txt`/`.plt.csv` is a few hundred bytes to a few kilobytes; the archive rewrite an
+ * analysis edit costs is spaced a minute apart instead (`analysisPersist.ts`).
  */
-const PROTOCOL_WRITE_INTERVAL_MS = 2_000;
+const EDIT_WRITE_INTERVAL_MS = 2_000;
 
 /**
  * How often a disk-backed file may be rewritten to the user's disk.
@@ -971,6 +973,20 @@ export interface ZpcrStore {
    * A no-op for a file that isn't `kind === "prcl"`.
    */
   setProtocolText: (fileName: string, runDefinition: string) => void;
+  /**
+   * Replace a standalone `.plt.csv` plate file's contents with an edited plate — the plate-side
+   * mirror of {@link setProtocolText}, and what the Plate view's editor calls after every change
+   * (`components/plate/PlateEditor.tsx`).
+   *
+   * Takes the {@link PlateDefinition} rather than text: `plateToCsv` is the one place that knows
+   * how a plate is spelled, exactly as `formatRunDefinitionText` is for a protocol. Same
+   * write-behind throttle, same `modified` flag, and the same "Done is not Save" rule — the bytes
+   * are updated on every edit, so leaving the view (or the app) can't lose one.
+   *
+   * A no-op for a file that isn't `kind === "csv"`. A `.pltd` is deliberately not editable: this
+   * app has no `.pltd` writer (`pltcsv.md`), so there is nothing to save an edit into.
+   */
+  setPlateText: (fileName: string, plate: PlateDefinition) => void;
   settings: FileSettings | null;
   /** Selected top-level view (Overview/Curves/…) — global across all loaded files, not
    * per-file, so switching files doesn't reset it. */
@@ -1236,30 +1252,31 @@ export function useZpcrStore(): ZpcrStore {
   }
   useEffect(() => persister.current!.attach(), []);
 
-  // ── Protocol edits ───────────────────────────────────────────────────────────────────────
-  // The same write-behind policy as an analysis edit, on a much shorter window: a `.prcl.txt` is
-  // a few hundred bytes, so the write costs nothing next to the archive rewrite the minute-long
-  // window above exists to space out — and a protocol being typed at is state a person would be
-  // upset to lose. See `writeThrottle.ts`. Shared by two editors, both of which have already
-  // updated `loadedRef.current`/`files` themselves before marking dirty: a standalone `.prcl.txt`
-  // (`setProtocolText`) and a pending experiment's in-place protocol (`setRunProtocolText`) — this
-  // throttle only has to persist whatever bytes it finds under the id at flush time, whichever
-  // editor wrote them.
-  const protocolThrottle = useRef<WriteThrottle>();
-  if (!protocolThrottle.current) {
-    protocolThrottle.current = new WriteThrottle({
-      minIntervalMs: PROTOCOL_WRITE_INTERVAL_MS,
+  // ── Document edits (protocol, plate) ─────────────────────────────────────────────────────
+  // The same write-behind policy as an analysis edit, on a much shorter window: a `.prcl.txt` or
+  // a `.plt.csv` is a few hundred bytes to a few kilobytes, so the write costs nothing next to the
+  // archive rewrite the minute-long window above exists to space out — and a document being typed
+  // at is state a person would be upset to lose. See `writeThrottle.ts`. Shared by the app's
+  // three document editors, all of which have already updated `loadedRef.current`/`files`
+  // themselves before marking dirty: a standalone `.prcl.txt` (`setProtocolText`), a pending
+  // experiment's in-place protocol (`setRunProtocolText`) and a standalone `.plt.csv`
+  // (`setPlateText`) — this throttle only has to persist whatever bytes it finds under the id at
+  // flush time, whichever editor wrote them.
+  const editThrottle = useRef<WriteThrottle>();
+  if (!editThrottle.current) {
+    editThrottle.current = new WriteThrottle({
+      minIntervalMs: EDIT_WRITE_INTERVAL_MS,
       // Read the file at flush time, never at edit time, so the write always lands the latest
       // text even when several edits coalesced into one trailing write.
       write: async (id) => {
         const file = loadedRef.current.find((f) => f.name === id);
-        if (!file || (file.kind !== "prcl" && file.kind !== "zpcr")) return;
+        if (!file || (file.kind !== "prcl" && file.kind !== "zpcr" && file.kind !== "csv")) return;
         await persistFile(file, analysisRef.current[id], undefined, markDiskDirty);
       },
       onError: (e) => setError(e instanceof Error ? e.message : String(e)),
     });
   }
-  useEffect(() => protocolThrottle.current!.attach(), []);
+  useEffect(() => editThrottle.current!.attach(), []);
 
   const clearError = useCallback(() => setError(null), []);
 
@@ -1483,7 +1500,7 @@ export function useZpcrStore(): ZpcrStore {
     // Drop any pending settings write for a file that no longer exists, and let it re-seed
     // from its own bytes if it's ever loaded again.
     persister.current!.forget(id);
-    protocolThrottle.current!.forget(id);
+    editThrottle.current!.forget(id);
     // `forget`, not `flush` — the flush, when one is owed, has already happened in `closeFile`.
     // Here the file is going either way, so a pending write must not fire against a file the app
     // has stopped holding.
@@ -1575,7 +1592,7 @@ export function useZpcrStore(): ZpcrStore {
         // A pending write belongs to content that no longer exists: drop it rather than let it
         // flush onto the file that has just taken its place.
         persister.current!.forget(file.name);
-        protocolThrottle.current!.forget(file.name);
+        editThrottle.current!.forget(file.name);
         seeded.current.delete(file.name);
         window.clearTimeout(saveTimers.current[file.name]);
         setAnalysisMap((prev) => {
@@ -1893,7 +1910,7 @@ export function useZpcrStore(): ZpcrStore {
   const setActive = useCallback(
     (id: string) => {
       void persister.current!.flushAll();
-      void protocolThrottle.current!.flushAll();
+      void editThrottle.current!.flushAll();
       void diskThrottle.current!.flushAll();
       setActiveName(id);
       if (!loadedRef.current.some((f) => f.name === id)) {
@@ -2010,7 +2027,7 @@ export function useZpcrStore(): ZpcrStore {
       setLoadedFiles((prev) => replaceFile(prev, next));
       patchEntry(id, { size: next.size });
       setModifiedFlag(id, true);
-      protocolThrottle.current!.markDirty(id);
+      editThrottle.current!.markDirty(id);
     },
     [setModifiedFlag, patchEntry],
   );
@@ -2022,7 +2039,7 @@ export function useZpcrStore(): ZpcrStore {
       if (!file || file.kind !== "zpcr") return;
       // Flush a pending protocol-text write first: both rewrite the same two entries, and writing
       // from a stale archive would drop whichever edit hadn't landed.
-      await protocolThrottle.current!.flush(id);
+      await editThrottle.current!.flush(id);
       const current = loadedRef.current.find((f) => f.name === id) ?? file;
       const archive = contentFiles(current.content);
       let runDefinition: string;
@@ -2057,7 +2074,23 @@ export function useZpcrStore(): ZpcrStore {
       // The bytes now differ from the copy on disk, which is exactly what the flag is for — an
       // edited protocol deleted before it was downloaded is lost work.
       setModifiedFlag(id, true);
-      protocolThrottle.current!.markDirty(id);
+      editThrottle.current!.markDirty(id);
+    },
+    [setModifiedFlag, patchEntry],
+  );
+
+  /** See {@link ZpcrStore.setPlateText}. */
+  const setPlateText = useCallback(
+    (id: string, plate: PlateDefinition) => {
+      const file = loadedRef.current.find((f) => f.name === id);
+      if (!file || file.kind !== "csv") return;
+      const next = withContent(file, plainContent(new TextEncoder().encode(plateToCsv(plate))));
+      // Same reasoning as `setProtocolText`, line for line — see the comments there.
+      loadedRef.current = replaceFile(loadedRef.current, next);
+      setLoadedFiles((prev) => replaceFile(prev, next));
+      patchEntry(id, { size: next.size });
+      setModifiedFlag(id, true);
+      editThrottle.current!.markDirty(id);
     },
     [setModifiedFlag, patchEntry],
   );
@@ -2086,7 +2119,7 @@ export function useZpcrStore(): ZpcrStore {
       // Flush any pending archive rewrite for the old name first — once the rename lands, the
       // persister's `resolve` can no longer find a file under it and would silently drop the edit.
       await persister.current!.flush(from);
-      await protocolThrottle.current!.flush(from);
+      await editThrottle.current!.flush(from);
       // Renaming onto a name already in use replaces that file, the same way dropping one over it
       // would. Asked of the catalog, not the loaded set: a file the app hasn't managed to read is
       // just as much an occupant of its name.
@@ -2121,7 +2154,7 @@ export function useZpcrStore(): ZpcrStore {
       });
       if (seeded.current.delete(from)) seeded.current.add(to);
       persister.current!.forget(from);
-      protocolThrottle.current!.forget(from);
+      editThrottle.current!.forget(from);
       window.clearTimeout(saveTimers.current[from]);
       delete saveTimers.current[from];
       setActiveName((cur) => (cur === from ? to : cur));
@@ -2136,7 +2169,7 @@ export function useZpcrStore(): ZpcrStore {
       if (!file || file.kind !== "zpcr") return null;
       // Flush any in-flight protocol edit first — the begun marker must land on top of the
       // latest text, not race a still-pending throttled write.
-      await protocolThrottle.current!.flush(id);
+      await editThrottle.current!.flush(id);
       const current = loadedRef.current.find((f) => f.name === id) ?? file;
       // Restamping the date renames the file, and the new name *is* the new key — no second
       // derivation to keep in step with whatever `renameFile` chose.
@@ -2463,6 +2496,7 @@ export function useZpcrStore(): ZpcrStore {
     beginExperiment,
     renameFile,
     setProtocolText,
+    setPlateText,
     settings,
     view,
     setView,

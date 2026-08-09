@@ -928,7 +928,19 @@ export function App() {
               />
             )}
             {view === "plates" && store.activePlateFile && (
-              <StandalonePlateView file={active} result={store.activePlateFile} />
+              <StandalonePlateView
+                key={active.name}
+                file={active}
+                result={store.activePlateFile}
+                // Only a `.plt.csv` can be written back — see the store's `setPlateText`. A
+                // `.pltd` gets the same view with no editor rather than an editor that couldn't
+                // save.
+                onChangePlate={
+                  active.kind === "csv"
+                    ? (plate) => store.setPlateText(active.name, plate)
+                    : undefined
+                }
+              />
             )}
             {view === "raw" && <StandaloneRawView key={active.name} file={active} />}
           </>

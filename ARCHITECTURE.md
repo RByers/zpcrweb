@@ -466,7 +466,7 @@ by its own well label and derives the plate's target/sample lists by walking the
 file re-sorted in a spreadsheet reads back identically. The fixed columns (`Well`, `SampleType`,
 `Sample`, plus `Replicate`/`Quantity` when any well on the plate uses them — most don't, and a
 column of empty cells says nothing) are followed by one column per fluorophore, labelled with
-the dye name plus its channel when known (`FAM Ch1`), whose cells hold only that well's target
+the dye name and nothing else (a channel is never written — see below), whose cells hold only that well's target
 for it (empty = fluor absent, `+` =
 present with no target) — so a plate reads as a target-per-fluor grid in a spreadsheet. Those
 columns are ordered by ascending channel (unknown-channel dyes last, `pltd.ts`'s shared
@@ -477,6 +477,23 @@ The `SampleType` cell holds a normalized type name (`unknown`, `ntc`, …), but 
 `wellSampleType` code is accepted too and normalized on read — which is how an `other` well
 round-trips: since `other` means "a code we didn't recognize" rather than a type, `plateToCsv`
 writes the preserved `sampleTypeRaw` instead of inventing a `wcOther` that no CFX tool emits.
+
+**Editing a plate** is `plateEdit.ts`, the plate's answer to `ProtocolBuilder` above: pure
+functions from one `PlateDefinition` to the next (`editWells`, `applyWellPatches`,
+`setPlateFluors`), so the app's plate editor owns the interaction and the library owns what a
+plate is allowed to look like afterwards. A `WellPatch`'s fields are all optional, and **absent
+means leave alone** — which is what lets one edit set the sample across a column without
+disturbing the targets in it. Three invariants ride along, each of which a naive in-place edit
+gets wrong: the derived fields (`loaded`, `dyeCount`, `targets`, `samples`) are recomputed from
+the wells, a well is loaded iff it carries a dye (the `.plt.csv` rule, so an edit can't survive on
+screen but not through a save), and the vessel stays stated **once** — giving one well its own
+pushes the plate's down onto the others, and wells that all agree hoist back up
+([`pltcsv.md`](./pltcsv.md) §3.1).
+
+`plateClipboard.ts` is the same idea for a block of wells: tab-separated text
+(`formatPlateBlock`/`parsePlateBlock`, [`pltcsv.md`](./pltcsv.md) §5.1), the same columns spelled
+the same way as the CSV's, which is what a spreadsheet puts on the system clipboard — so a column
+of sample names copied out of Excel pastes onto a column of wells.
 
 **The file states no optical channel**, and the format has no syntax for one: a channel belongs
 to the instrument's optics, not to the plate, so a portable document must not assert one. Nothing
