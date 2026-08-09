@@ -1406,8 +1406,9 @@ supplies one.
     the steps, stages and plate reads it holds (none of the three is a field — a stage boundary is
     where the repeat counter went backwards, §7.2, and a read's index is its position among the
     `Plate Read` lines, §7.5). Twelve columns: the derived stage, then field 1 (`Cycle`, the
-    constant `-1`), repeat, step number, `Field 4` (labelled `RAMPTIME`, doesn't measure one, §8 —
-    hence the heading that claims nothing), the directive that step number names (joined from line
+    constant `-1`), repeat, step number, `RAMPTIME` (CFX Manager's own name for field 4 — §10 for
+    where the name comes from, §8 for why it doesn't measure a ramp; the heading names the field,
+    the note under it says what the field isn't), the directive that step number names (joined from line
     2, §5), setpoint, nominal hold, the full timestamp, the derived **Took** (= the next line's
     timestamp minus this one's, §7.4 — the only measurable ramp cost), the paused pair (fields 8
     and 9, meaningless apart), and the read index. A rule marks each stage boundary; the sentinel

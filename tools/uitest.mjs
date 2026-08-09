@@ -2174,7 +2174,7 @@ async function alfViewChecks(chrome, origin) {
   );
   check(
     "…and every field of a step line has a column, the uninterpretable one included (alf.md §8)",
-    ["Cycle", "Rep", "Step", "Field 4", "Setpoint", "Hold", "Began", "Paused"].every((c) =>
+    ["Cycle", "Rep", "Step", "RAMPTIME", "Setpoint", "Hold", "Began", "Paused"].every((c) =>
       shown.cols.includes(c),
     ),
     JSON.stringify(shown.cols),

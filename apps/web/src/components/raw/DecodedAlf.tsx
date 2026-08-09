@@ -21,8 +21,10 @@ import { Pair } from "./Pair";
  *
  * Two fields have no meaning attached, deliberately. The fourth step column is labelled `RAMPTIME`
  * by CFX Manager, does not behave like one, and nothing is known about when it captures (§8); the
- * error line's code list has only ever been seen empty (§6). Both are shown verbatim under neutral
- * headings — a raw view's job is to show them, not to guess.
+ * error line's code list has only ever been seen empty (§6). Both are shown verbatim, the step
+ * column under the instrument's own name for it — `RAMPTIME` says *which field of the file this
+ * is*, which is what someone matching the table against the bytes needs, while the note under the
+ * heading says what it doesn't mean. A raw view's job is to show a field, not to guess it.
  *
  * What the decode adds over the file's own `*`-delimited text is naming and three derivations the
  * file states nowhere:
@@ -156,14 +158,16 @@ export function DecodedAlf({ report }: { report: AlfReport }) {
             : ""}
           {stages > 1 ? `, ${stages} stages` : ""}
         </h3>
-        {/* alf.md §7.4 for the timestamp meaning, §7.1 for GOTO never being logged, §8 for the
-            column headed "Field 4" — labelled a ramp time, doesn't behave like one, so it is
-            carried through under a heading that claims nothing. */}
+        {/* alf.md §7.4 for the timestamp meaning, §7.1 for GOTO never being logged, §8 and §10 for
+            RAMPTIME — CFX Manager's own name for field 4 (its converter emits it as a `RAMPTIME`
+            element), and measurably not a ramp time. The instrument's vocabulary is the honest
+            heading: it says which column of the file this is, and claims nothing about it. */}
         <p className="decoded__hint">
           One line per step <em>execution</em>, with all nine of its fields. A timestamp is when the
           step began, so "took" is the next step's start minus this one's — the only place a ramp
           cost is measurable. <code>GOTO</code> is never logged, which is why the step numbers jump.
-          Field 4 is shown as written: it is labelled a ramp time and does not measure one.
+          The field CFX Manager calls <code>RAMPTIME</code> is shown as written: whatever it
+          records, it is not how long a ramp took.
         </p>
         <div className="decoded__gridwrap">
           <table className="decoded__tbl decoded__alf mono">
@@ -173,7 +177,7 @@ export function DecodedAlf({ report }: { report: AlfReport }) {
                 <th>Cycle</th>
                 <th>Rep</th>
                 <th>Step</th>
-                <th>Field 4</th>
+                <th>RAMPTIME</th>
                 <th>Directive</th>
                 <th>Setpoint</th>
                 <th>Hold</th>
