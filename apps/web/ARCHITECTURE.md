@@ -1323,13 +1323,22 @@ supplies one.
   minus the Cq column, since a plate definition is a setup with no run to quantify. Wells are
   therefore not clickable; the hover outline stays, as a reading aid pairing with the card.
   Cells: each well cell writes the well's `sample` and each loaded fluor's `target` directly
-  into the cell, the target text colored by that fluor's channel (`channelColor`) — trading
+  into the cell, the target text colored by that fluor's dye (`fluorColor`) — trading
   grid density for being able to read sample identity and target at a glance. Every cell is the
-  same fixed set of lines: one for the sample name, then **one per plate fluor**, in the optical-
+  same fixed set of lines: one for the sample name, then **one per optical channel**, in the
   channel order `PlateViewer.fluorOrder` computes (unknown channel last — the same order the
-  fluor chips above the grid use). A well that doesn't carry a given fluor renders that line
-  blank rather than pulling the ones below it up, so a target always sits on its own channel's
-  line and a column of cells can be read down. The line count is published as the
+  fluor chips above the grid use). Two dyes in one emission band, such as the mixed-vessel
+  plate's ROX and Tex 615 on Ch3, share a line instead of each taking one: no well can be read
+  for both, so the second line was blank in every cell and pushed the channels below it down a
+  row. `PlateViewer.fluorLine` keys a line by the dye's **colour**, which needs no channel
+  lookup — the dye palette *is* the channel palette (`lib/fluorColors.ts`), so band-mates already
+  share a hue — and so groups a `.plt.csv` opened with no run beside it (no `.Dcal`, hence no
+  channel stated at all) the way the same plate groups inside its run. A dye the palette doesn't
+  name keys on its own name and keeps its own line. A well that carries nothing on a channel
+  renders that line blank rather than pulling the ones below it up, so a target always sits on
+  its own channel's line and a column of cells can be read down. On the rare hand-authored plate
+  that does load two dyes of one channel into one well, the line names both (` · `-joined)
+  rather than hiding one. The line count is published as the
   `--plate-fluor-rows` custom property on the table and spent by `.plate__grid td.plate__well`'s
   `height` calc, which is also what makes every row of the grid the same height — applied to
   empty cells too, so a row of untouched wells is no shorter than a loaded one. Letting cells

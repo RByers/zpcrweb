@@ -3309,12 +3309,12 @@
      the reserved cell height below is exact rather than an estimate of the font's metrics. */
   --plate-well-line: 12px;
 }
-/* Each cell carries the sample name + per-fluor target text (colored by channel), so the
+/* Each cell carries the sample name + per-channel target text (colored by dye), so the
    columns size to their content rather than to a fixed well-sized box.
 
-   The height is reserved from `--plate-fluor-rows` (set by `PlateViewer` to the busiest well's
-   fluor count): one line for the sample name plus one per fluorophore, plus padding and the
-   2px gap above the target list. Applied to every cell — including empty ones — so all rows
+   The height is reserved from `--plate-fluor-rows` (set by `PlateViewer` to the plate's channel
+   count — dyes sharing a channel share a line): one line for the sample name plus one per
+   channel, plus padding and the 2px gap above the target list. Applied to every cell — including empty ones — so all rows
    come out identical instead of each row sizing to its own tallest well. */
 .plate__grid td.plate__well {
   min-width: 84px;
@@ -3355,8 +3355,8 @@
 .plate__target {
   font-size: 9px;
   line-height: var(--plate-well-line);
-  /* A fluor this well doesn't carry renders as an empty span; it still has to hold its line so
-     the fluors below it stay on their own. */
+  /* A channel this well carries nothing on renders as an empty span; it still has to hold its
+     line so the channels below it stay on their own. */
   min-height: var(--plate-well-line);
   white-space: nowrap;
   overflow: hidden;

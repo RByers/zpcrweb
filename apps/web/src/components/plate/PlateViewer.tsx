@@ -6,7 +6,7 @@ import {
   type PlateFluor,
   type WellDefinition,
 } from "@zpcrweb/core";
-import { fluorColor } from "../../lib/fluorColors";
+import { fluorColor, isKnownFluor } from "../../lib/fluorColors";
 import { FluorChannelChip } from "./FluorChannelChip";
 import { ROW_LABELS, SAMPLE_TYPE_META } from "../../lib/sampleType";
 import { plateDisplayName, plateVesselLabel } from "../../lib/plateNames";
@@ -17,7 +17,8 @@ import { Pair } from "../raw/Pair";
  * The visual plate map for any {@link PlateDefinition}: a `plate.rows`×`plate.columns` grid
  * (8×12 for a CFX block; a single row of as few as 3 positions for a Biomeme run's synthesized
  * plate — `biomeme.ts`) coloured by sample type,
- * each well showing its sample name and per-fluorophore targets (coloured by channel). Used both
+ * each well showing its sample name and one target line per optical channel (coloured by dye —
+ * see {@link fluorLine}). Used both
  * by the "Plates" tab (for a `.zpcr`'s embedded `.pltd` entries) and a `.pcrd`'s already-decrypted
  * `plateSetup2` subtree — same component either way, only the source of the
  * {@link PlateDefinition} differs.
@@ -88,12 +89,8 @@ export function PlateViewer({
   // actually on screen. Without the gate an unloaded well's configured sample type — often just
   // enum filler — added a swatch to the legend that no cell ever showed.
   const typesPresent = [...new Set(plate.wells.map((w) => (w.loaded ? w.sampleType : "empty")))];
-  // The plate's fluors in optical-channel order (unknown channel last), which is both the chip
-  // order and the row order every well cell follows: one line for the sample name, then one per
-  // plate fluor, always at the same offset. A well that doesn't carry a given fluor leaves that
-  // line blank rather than pulling the ones below it up, so a column of cells reads down its
-  // channels — Ch3's target is on the Ch3 line whether or not the well also has Ch1. Reserving
-  // the same lines everywhere is also what makes every row of the grid come out the same height.
+  // The plate's fluors in optical-channel order (unknown channel last) — the chip order, and the
+  // order the cell's lines are grouped from.
   const fluorOrder = [...plate.fluors].sort((a, b) =>
     a.channel === undefined
       ? b.channel === undefined
@@ -103,6 +100,12 @@ export function PlateViewer({
         ? -1
         : a.channel - b.channel,
   );
+  // The row order every well cell follows: one line for the sample name, then one per *channel*
+  // (see {@link fluorLine}), always at the same offset. A well that carries nothing on a given
+  // channel leaves that line blank rather than pulling the ones below it up, so a column of cells
+  // reads down its channels — Ch3's target is on the Ch3 line whether or not the well also has
+  // Ch1. Reserving the same lines everywhere is also what makes every grid row the same height.
+  const lines = [...new Set(fluorOrder.map((f) => fluorLine(f.fluor)))];
 
   // Keyed by the `WellDefinition` itself rather than by label: the grid already has the well in
   // hand at the point it hovers, and a Biomeme strip's positions are labelled by column alone.
@@ -147,7 +150,7 @@ export function PlateViewer({
         <div className="decoded__gridwrap">
           <table
             className="decoded__grid plate__grid mono"
-            style={{ "--plate-fluor-rows": Math.max(1, fluorOrder.length) } as CSSProperties}
+            style={{ "--plate-fluor-rows": Math.max(1, lines.length) } as CSSProperties}
           >
             <thead>
               <tr>
@@ -188,6 +191,7 @@ export function PlateViewer({
                     <WellCell
                       key={col}
                       well={plate.wells[row * plate.columns + col]!}
+                      lines={lines}
                       fluorOrder={fluorOrder}
                       show={show}
                       hide={hide}
@@ -212,6 +216,21 @@ export function PlateViewer({
       {node}
     </div>
   );
+}
+
+/**
+ * Which cell line a dye's target belongs on: **its colour, which is its channel.** The dye
+ * palette *is* the channel palette (`fluorColors.ts`), so two dyes of one emission band — the
+ * mixed-vessel plate's ROX and Tex 615, both Ch3 — already share a hue, and sharing a line falls
+ * out of that with no channel lookup. Going through the colour rather than `PlateFluor.channel`
+ * is also what makes a `.plt.csv` opened with no run beside it group the way the same plate does
+ * inside its run: with no `.Dcal` to resolve dye names against, it states no channel at all.
+ *
+ * A dye the palette doesn't name has no band to share, so it keys on its own name and keeps its
+ * own line — merging the unnamed ones would put two unrelated dyes on one.
+ */
+function fluorLine(fluor: string): string {
+  return isKnownFluor(fluor) ? fluorColor(fluor) : fluor;
 }
 
 /** Hover-card content for one well: what it holds, in the plate's own fluor order. Mirrors the
@@ -253,19 +272,21 @@ function wellCard(well: WellDefinition, fluorOrder: PlateFluor[]): HoverCardData
   return { title: `Well ${well.label}`, subtitle, rows, empty: "Not loaded" };
 }
 
-/** One well: a line for the sample name, then one line per plate fluor in `fluorOrder`, blank
- * where this well doesn't carry that fluor — plus a row of channel-coloured dots, one per fluor
+/** One well: a line for the sample name, then one line per channel in `lines`, blank where this
+ * well carries nothing on that channel — plus a row of channel-coloured dots, one per fluor
  * the well actually carries, which is all the compact variant has room for (the text lines are
  * hidden there). Everything the cell can't show — replicate, quantity, the full fluor→target
  * list — is one hover away in {@link wellCard}, which is why there's no click-through panel. */
 function WellCell({
   well,
+  lines,
   fluorOrder,
   show,
   hide,
   selection,
 }: {
   well: WellDefinition;
+  lines: string[];
   fluorOrder: PlateFluor[];
   show: (well: WellDefinition, el: HTMLElement) => void;
   hide: () => void;
@@ -294,18 +315,21 @@ function WellCell({
               same height in every well, which is the point of the fixed row height. */}
           <span className="plate__wellsample">{well.sample}</span>
           <span className="plate__welltargets">
-            {fluorOrder.map((pf) => {
-              // Blank, not skipped, when this well doesn't carry the fluor: the line belongs to
-              // the plate's fluor, not to the well's Nth one, so targets stay in channel order
-              // down the cell no matter which dyes a given well happens to use.
-              const f = well.fluors.find((wf) => wf.fluor === pf.fluor);
+            {lines.map((line) => {
+              // Blank, not skipped, when this well carries nothing on the channel: the line
+              // belongs to the plate's channel, not to the well's Nth dye, so targets stay in
+              // channel order down the cell no matter which dyes a given well happens to use.
+              // Normally a well has at most one dye per line — an instrument cannot resolve two
+              // dyes from one band — but a hand-authored plate can say otherwise, and the line
+              // names both rather than hiding one.
+              const here = well.fluors.filter((wf) => fluorLine(wf.fluor) === line);
               return (
                 <span
-                  key={pf.fluor}
+                  key={line}
                   className="plate__target"
-                  style={f ? { color: fluorColor(pf.fluor) } : undefined}
+                  style={here[0] ? { color: fluorColor(here[0].fluor) } : undefined}
                 >
-                  {f ? f.target || f.fluor : ""}
+                  {here.map((f) => f.target || f.fluor).join(" · ")}
                 </span>
               );
             })}
