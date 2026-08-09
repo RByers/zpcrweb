@@ -69,3 +69,19 @@ export function readSampleArchive(): ZpcrArchive {
 export function readMultistepArchive(): ZpcrArchive {
   return unzipArchive(readMultistepBytes());
 }
+
+/**
+ * The committed **mixed-vessel** plate: three columns of a commercial 4-dye respiratory panel in
+ * white strip tubes beside one column of the operator's own controls in clear ones. The one
+ * committed plate a CFX format could not express (`pltcsv.md` §3.1), and so the sample that keeps
+ * per-well vessel support honest.
+ */
+export const MIXED_VESSEL_PLATE_PATH = resolve(
+  here,
+  "../../../samples/mixed-vessel-YouSeq-RVP.plt.csv",
+);
+
+/** Text of the mixed-vessel plate sample. */
+export function readMixedVesselPlateText(): string {
+  return readFileSync(MIXED_VESSEL_PLATE_PATH, "utf8");
+}

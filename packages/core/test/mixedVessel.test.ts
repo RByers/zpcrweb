@@ -18,11 +18,13 @@ import {
   attachPlate,
   computeRunAnalysis,
   curveKey,
+  parsePlateCsv,
   parseZpcrArchive,
   plateToCsv,
+  plateTubeTypes,
   type PlateDefinition,
 } from "../src/index.js";
-import { readSampleArchive } from "./sample.js";
+import { readMixedVesselPlateText, readSampleArchive } from "./sample.js";
 
 /** The step the sample's amplification lives on. */
 const STEP = 2;
@@ -112,5 +114,44 @@ describe("mixed-vessel plate", () => {
     const restated = analyze(mixedPlate(basePlate, () => basePlate.plateName));
     expect(untouched.tubes).toEqual(["BR Clear"]);
     expect(restated.allFluorCurves.map((c) => c.mean)).toEqual(untouched.allFluorCurves.map((c) => c.mean));
+  });
+});
+
+describe("the committed mixed-vessel sample plate", () => {
+  const text = readMixedVesselPlateText();
+  const plate = parsePlateCsv(text, { sourceName: "mixed-vessel-YouSeq-RVP.plt.csv" });
+
+  it("is a real mixed-vessel plate, not a single-vessel one with a column", () => {
+    expect([...plateTubeTypes(plate)].sort()).toEqual(["BR Clear", "BR White"]);
+    // The whole point of the file: the plate level says nothing, the wells say it all.
+    expect(plate.plateName).toBe("");
+    expect(text).toContain("# vessel: 8x12\r\n");
+    const byVessel = new Map<string, number>();
+    for (const w of plate.wells) if (w.vessel) byVessel.set(w.vessel, (byVessel.get(w.vessel) ?? 0) + 1);
+    expect(byVessel.get("BR White")).toBe(24);
+    expect(byVessel.get("BR Clear")).toBe(8);
+  });
+
+  it("round-trips byte-for-byte", () => {
+    expect(plateToCsv(plate)).toBe(text);
+  });
+
+  it("keeps one dye per optical channel, so the unmixing stays well-posed", () => {
+    // Both halves of the plate are read in the same four channels, and two dyes sharing one
+    // channel cannot be separated by a single reading in it — the panel's ROX and the operator's
+    // own Tex 615 are both channel 2, which is exactly why the clear column here is the
+    // FAM/Cy5 control column rather than that plate's Tex 615 multiplex.
+    expect(plate.fluors.map((f) => f.fluor)).toEqual(["FAM", "VIC", "ROX", "Cy5"]);
+  });
+
+  it("has both vessels sharing a dye, which is what makes it worth having", () => {
+    // A plate whose vessels used disjoint dye sets would never exercise a threshold group that
+    // spans both (`calibration.md` Appendix A) — FAM and Cy5 have to appear in each.
+    const dyesIn = (vessel: string) =>
+      new Set(plate.wells.filter((w) => w.vessel === vessel).flatMap((w) => w.fluors.map((f) => f.fluor)));
+    const white = dyesIn("BR White");
+    const clear = dyesIn("BR Clear");
+    expect([...clear].every((d) => white.has(d))).toBe(true);
+    expect([...clear].sort()).toEqual(["Cy5", "FAM"]);
   });
 });
