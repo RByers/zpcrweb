@@ -108,11 +108,14 @@ in `.git/rr-cache`; leave it as-is.
 - Renumbering a doc's sections means updating everything that cites them in the same commit:
   `grep -rn '<doc>.md'` finds the references, and bare `§N` mentions in nearby prose too.
 - A directory of standalone, independently-usable pieces (currently `tools/`) gets its own
-  `README.md` indexing what each one is for — one row per file, short enough to scan, pointing
-  into the file's own header comment for detail rather than duplicating it. Add the new entry in
-  the same commit that adds the file, and update the row in the same commit that changes what a
-  file does. The root `README.md` links to it rather than re-listing the contents, the same way
-  it points at `ARCHITECTURE.md` and the format docs instead of inlining them.
+  `README.md` indexing what each one is for — **one line per file**, short enough that the whole
+  table scans in a glance, and no more. How to *use* a piece goes in its own doc beside it
+  (`tools/zpcr.mjs` → `tools/zpcr.md`): synopsis, options, requirements, and the design notes worth
+  knowing before changing it. Anything below that stays in the file's own header comment; don't
+  copy the header into the doc. Add both the row and the doc in the same commit that adds the file,
+  and update them in the same commit that changes what the file does. The root `README.md` links to
+  the index rather than re-listing the contents, the same way it points at `ARCHITECTURE.md` and
+  the format docs instead of inlining them.
 
 ### Writing documentation
 
