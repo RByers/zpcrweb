@@ -4716,87 +4716,98 @@ async function explodedStorageChecks(chrome, origin) {
  * no way back.
  */
 async function fileTypeFilterChecks(chrome, origin) {
-  console.log("\nfiles view type filter");
+  console.log("\nfolder file-type filter");
   const cdp = await openPage(chrome.base, origin);
   await emptyReload(cdp, origin);
-  // Two kinds, so there is something to tell apart: a run archive and a bare plate.
+  // A file first, because an empty browser gets the welcome screen instead of the view bar. The
+  // bundled `samples` folder is the subject: it is a flat directory of a dozen-odd files across
+  // every kind the app opens, and it is there on any browser with no folder granted at all.
   await loadFile(cdp, ZPCR);
   await waitFor(() => chipPresent(cdp, "FirstQualification"), { what: "the .zpcr chip" });
-  await loadFile(cdp, PLTD);
-  await waitFor(() => cdp.eval(`document.querySelectorAll(".filebar .filechip").length === 2`), {
-    what: "both files",
-  });
   await clickTab(cdp, "Files");
 
+  const FILES = ".folders__pane--files";
   const state = () =>
     cdp
       .eval(
         `JSON.stringify({
-           chips: [...document.querySelectorAll(".filesview__filter")].map((b) => ({
+           chips: [...document.querySelectorAll(".kindfilter__chip")].map((b) => ({
              text: b.textContent.trim().replace(/\\s+/g, " "),
              on: b.getAttribute("aria-pressed") === "true",
            })),
-           rows: document.querySelectorAll(".filesview__row").length,
-           footer: document.querySelector(".filesview__totals td")?.textContent.trim().replace(/\\s+/g, " ") ?? "",
+           files: [...document.querySelectorAll("${FILES} .folders__name")].map((b) => b.textContent.trim()),
+           note: document.querySelector("${FILES} .folders__note")?.textContent.trim() ?? "",
          })`,
       )
       .then(JSON.parse);
   await waitFor(async () => (await state()).chips.length > 0, { what: "the type chips" });
 
   const unfiltered = await state();
+  const chipText = unfiltered.chips.map((c) => c.text);
+  // The samples directory is generated from `samples/` at build time, so this asserts the *rule* —
+  // a chip per kind present, counting that kind — rather than numbers that would need editing
+  // whenever a sample is added.
+  const countOf = (ext) => Number(/(\d+)$/.exec(chipText.find((t) => t.startsWith(ext)) ?? "")?.[1]);
   check(
-    "The Files view offers one chip per kind of file open, with how many there are of it",
-    unfiltered.chips.length === 2 &&
-      unfiltered.chips.some((c) => /^pltd\s*1$/.test(c.text)) &&
-      unfiltered.chips.some((c) => /^zpcr\s*1$/.test(c.text)),
-    JSON.stringify(unfiltered.chips),
+    "The folder's file list offers one chip per kind of file in it, with how many there are",
+    chipText.some((t) => t.startsWith("zpcr")) &&
+      chipText.some((t) => t.startsWith("pltd")) &&
+      chipText.some((t) => t.startsWith("alf")) &&
+      countOf("zpcr") === unfiltered.files.filter((f) => f.endsWith(".zpcr")).length,
+    JSON.stringify(chipText),
   );
+  // Every chip's count, added up, is the whole listing — which is both "nothing is filtered yet"
+  // and "every file in the directory got counted as some kind".
+  const totalCounted = chipText.reduce((n, t) => n + Number(/(\d+)$/.exec(t)?.[1] ?? 0), 0);
   check(
-    "…all off to begin with, so the table opens on everything the browser is holding",
-    !unfiltered.chips.some((c) => c.on) && unfiltered.rows === 2 && /2 files open/.test(unfiltered.footer),
-    JSON.stringify({ rows: unfiltered.rows, footer: unfiltered.footer }),
+    "…all off to begin with, so the list opens on the whole directory",
+    !unfiltered.chips.some((c) => c.on) && unfiltered.files.length === totalCounted,
+    JSON.stringify({ files: unfiltered.files.length, counted: totalCounted }),
   );
 
-  const clickChip = (text) =>
+  const clickChip = (ext) =>
     cdp.eval(
-      `(() => { const b = [...document.querySelectorAll(".filesview__filter")]
-           .find((x) => x.textContent.includes(${JSON.stringify(text)}));
+      `(() => { const b = [...document.querySelectorAll(".kindfilter__chip")]
+           .find((x) => x.textContent.trim().startsWith(${JSON.stringify(ext)}));
          b?.click(); return !!b; })()`,
     );
   await clickChip("pltd");
-  await waitFor(async () => (await state()).rows === 1, { what: "the table to filter" });
+  await waitFor(async () => (await state()).files.every((f) => f.endsWith(".pltd")), {
+    what: "the list to narrow to plates",
+  });
   const filtered = await state();
   check(
-    "Turning a chip on shows only that kind, and the footer says so rather than losing the count",
-    filtered.rows === 1 &&
-      filtered.chips.filter((c) => c.on).length === 1 &&
-      /1 of 2 files shown/.test(filtered.footer),
-    JSON.stringify({ rows: filtered.rows, footer: filtered.footer }),
+    "Turning a chip on leaves only that kind of file, which is how a long directory is searched",
+    filtered.files.length === countOf("pltd") &&
+      filtered.files.every((f) => f.endsWith(".pltd")) &&
+      filtered.chips.filter((c) => c.on).length === 1,
+    JSON.stringify(filtered.files),
+  );
+  // A second chip widens rather than replaces: the chips are a set of kinds to show.
+  await clickChip("alf");
+  await waitFor(async () => (await state()).files.some((f) => f.endsWith(".alf")), {
+    what: "the reports to come back too",
+  });
+  const two = await state();
+  check(
+    "…and a second chip adds its kind rather than replacing the first",
+    two.files.length === countOf("pltd") + countOf("alf") &&
+      two.files.every((f) => f.endsWith(".pltd") || f.endsWith(".alf")),
+    JSON.stringify(two.files),
   );
 
-  // The way back is the same chip: nothing on is the unfiltered table, which is why there is no
+  // The way back is the same chips: nothing on is the whole listing, which is why there is no
   // separate "All" control.
   await clickChip("pltd");
-  await waitFor(async () => (await state()).rows === 2, { what: "the filter to come off" });
+  await clickChip("alf");
+  await waitFor(async () => (await state()).files.length === unfiltered.files.length, {
+    what: "the filter to come off",
+  });
   const back = await state();
   check(
-    "…and turning it off again brings the whole catalog back",
-    back.rows === 2 && !back.chips.some((c) => c.on) && /2 files open/.test(back.footer),
-    JSON.stringify({ rows: back.rows, footer: back.footer }),
-  );
-
-  // One kind left means nothing to tell apart, so the bar is not worth the space it costs.
-  await cdp.eval(
-    `[...document.querySelectorAll(".filesview__row")]
-       .find((r) => /pltd/.test(r.querySelector(".filesview__typecol")?.textContent ?? ""))
-       ?.querySelector(".ftbl__del")?.click()`,
-  );
-  await waitFor(async () => (await state()).rows === 1, { what: "the plate file to close" });
-  const oneKind = await state();
-  check(
-    "With only one kind open there are no chips at all",
-    oneKind.chips.length === 0,
-    JSON.stringify(oneKind.chips),
+    "…and turning them all off again brings the whole directory back",
+    back.files.length === unfiltered.files.length && !back.chips.some((c) => c.on),
+    JSON.stringify({ files: back.files.length, on: back.chips.filter((c) => c.on).length }),
   );
   cdp.close();
 }
@@ -4919,18 +4930,43 @@ async function sampleFolderChecks(chrome, origin) {
     JSON.stringify(afterClose),
   );
 
-  // Double-click is the "open it and go look at it" half of the same pair.
+  // Double-click is the "open it and go look at it" half of the same pair — and where it goes is
+  // what that kind of file is *for* (`App.tsx`'s `defaultViewFor`), which for a run is its curves.
   await cdp.eval(
     `(() => { const b = ${sampleRow(EXAMPLE)}; if (!b) return;
        for (const [type, detail] of [["click", 1], ["click", 2], ["dblclick", 2]])
          b.dispatchEvent(new MouseEvent(type, { bubbles: true, detail }));
      })()`,
   );
-  const landed = await tabBecomes(cdp, "Overview", 15000);
+  const landed = await tabBecomes(cdp, "Curves", 15000);
   check(
-    "Double-clicking a sample opens it and lands on its Overview",
-    landed === "Overview",
+    "Double-clicking a sample run opens it and lands on its Curves, the view a run is for",
+    landed === "Curves",
     JSON.stringify(landed),
+  );
+
+  // The same rule for the other two categories the samples folder holds: what a file *is* decides
+  // where opening it lands, so a plate goes to the plate map and a run report to the protocol it
+  // records. Overview is the fallback, not the answer.
+  const doubleClickSample = async (name) => {
+    await clickTab(cdp, "Files");
+    await waitFor(() => cdp.eval(`!!${sampleRow(name)}`), { what: `the ${name} row` });
+    await cdp.eval(
+      `(() => { const b = ${sampleRow(name)}; if (!b) return;
+         for (const [type, detail] of [["click", 1], ["click", 2], ["dblclick", 2]])
+           b.dispatchEvent(new MouseEvent(type, { bubbles: true, detail }));
+       })()`,
+    );
+  };
+  await doubleClickSample("QuickPlate_96 wells_All Channels.pltd");
+  const plateTab = await tabBecomes(cdp, "Plates", 15000);
+  check("…a plate file lands on Plates", plateTab === "Plates", JSON.stringify(plateTab));
+  await doubleClickSample("20260807_231326_CT019138_AGBLK1.alf");
+  const reportTab = await tabBecomes(cdp, "Protocol", 15000);
+  check(
+    "…and an .alf run report lands on Protocol, the protocol it is a record of",
+    reportTab === "Protocol",
+    JSON.stringify(reportTab),
   );
 
   cdp.close();
@@ -5197,7 +5233,7 @@ async function folderChecks(chrome, origin) {
   // must not carry the other two off screen.
   const panes = await cdp
     .eval(
-      `JSON.stringify([".filesview__scroll", ".folders__pane--tree", "${FILES}"].map((sel) => {
+      `JSON.stringify([".filesview__pane--catalog", ".folders__pane--tree", "${FILES}"].map((sel) => {
          const p = document.querySelector(sel);
          return { sel, found: !!p, scrolls: p ? getComputedStyle(p).overflowY : null };
        }))`,
@@ -5208,6 +5244,31 @@ async function folderChecks(chrome, origin) {
     panes.length === 3 &&
       panes.every((p) => p.found && (p.scrolls === "auto" || p.scrolls === "scroll")),
     JSON.stringify(panes),
+  );
+
+  // The folders panel is a fixed share of the view, not a box that grows with what is in it: a
+  // panel that resized as branches were expanded would shove the table above it on every click.
+  // Measured by expanding a branch and asking whether the boundary moved.
+  const panelBox = () =>
+    cdp
+      .eval(
+        `(() => { const f = document.querySelector(".filesview__pane--folders").getBoundingClientRect();
+           const v = document.querySelector(".filesview").getBoundingClientRect();
+           return JSON.stringify({ share: Math.round((f.height / v.height) * 100), top: Math.round(f.top) }); })()`,
+      )
+      .then(JSON.parse);
+  const beforeExpand = await panelBox();
+  await cdp.eval(
+    `[...document.querySelectorAll("${DISK} .folders__twisty")].forEach((b) => b.click())`,
+  );
+  await sleep(400); // negative assertion: nothing should move, so there is no state to wait for
+  const afterExpand = await panelBox();
+  check(
+    "The folders panel keeps a fixed share of the view however much is expanded inside it",
+    beforeExpand.share === 40 &&
+      afterExpand.share === beforeExpand.share &&
+      afterExpand.top === beforeExpand.top,
+    JSON.stringify({ before: beforeExpand, after: afterExpand }),
   );
 
   check(
@@ -5247,7 +5308,7 @@ async function folderChecks(chrome, origin) {
   // ── Click ticks it open or closed, double-click opens ──────────────────────────────────────
   // A folder is browsed by clicking through it deciding what the app should hold, so a click is
   // the row's checkbox, acts at once, and must not throw you out of the Files view the way the
-  // catalog table's rows do; the double-click is what leaves, for Overview.
+  // catalog table's rows do; the double-click is what leaves, for the view that file is for.
   const nameBtn = (name) =>
     `[...document.querySelectorAll("${FILES} .folders__name")].find((b) => b.textContent.trim() === ${JSON.stringify(name)})`;
   const rowSelected = (name) =>
@@ -5304,18 +5365,20 @@ async function folderChecks(chrome, origin) {
 
   const before = await diskFile(["runs", "2026", "nested.zpcr"]);
   // Renaming the experiment rewrites the archive's own settings entry — an ordinary edit, and one
-  // that has to reach the file on disk rather than IndexedDB. It is done on Overview, so go there
-  // the way a user would: double-click the file, which is closed again after the check above.
+  // that has to reach the file on disk rather than IndexedDB. Double-click the file, which is
+  // closed again after the check above: it opens on Curves, the view a run is for.
   await doubleClick("nested.zpcr");
-  const opened2 = await tabBecomes(cdp, "Overview");
+  const opened2 = await tabBecomes(cdp, "Curves", 15000);
   // The click read it off disk and the dblclick followed it there, which means it waited: a file
   // that is still being decoded has nothing to show.
   const chipsAfterDbl = await cdp.eval(`document.querySelectorAll(".filechip").length`);
   check(
-    "…and double-clicking a file that isn't open opens it and lands on its Overview",
-    opened2 === "Overview" && chipsAfterDbl === 1,
+    "…and double-clicking a file that isn't open opens it and lands on its Curves",
+    opened2 === "Curves" && chipsAfterDbl === 1,
     JSON.stringify({ tab: opened2, chips: chipsAfterDbl }),
   );
+  // The rename below is an Overview affordance, so go there the way a user would.
+  await clickTab(cdp, "Overview");
   await waitFor(
     () => cdp.eval(`!!document.querySelector(".overview__name, .overview__nameeditbtn")`),
     { what: "the Overview name control" },
@@ -5475,7 +5538,7 @@ async function folderChecks(chrome, origin) {
   );
   await waitFor(async () => (await rows()).files.includes("top.zpcr"), { what: "the root's files" });
   await doubleClick("top.zpcr");
-  const openedDisk = await tabBecomes(cdp, "Overview", 15000);
+  const openedDisk = await tabBecomes(cdp, "Curves", 15000);
   // Which file that is, asked back in the tree: the row it was opened from is now both loaded and
   // the selection, which no other row is.
   await clickTab(cdp, "Files");
@@ -5488,8 +5551,8 @@ async function folderChecks(chrome, origin) {
          selected: !!r?.classList.contains("is-selected") }); })()`,
   );
   check(
-    "Double-clicking a file that is only on disk reads it and opens it on Overview",
-    openedDisk === "Overview" && JSON.parse(openedRow).loaded && JSON.parse(openedRow).selected,
+    "Double-clicking a file that is only on disk reads it and opens it on its own view",
+    openedDisk === "Curves" && JSON.parse(openedRow).loaded && JSON.parse(openedRow).selected,
     JSON.stringify({ tab: openedDisk, row: openedRow }),
   );
 
@@ -5520,8 +5583,8 @@ async function folderChecks(chrome, origin) {
     what: "the second folder's listing",
   });
   // A single click, not a double: one tick opens the file and stays in Files, where the rows
-  // being counted are. A double-click would navigate to Overview once its read settled, which is
-  // a race against the tab click that would follow it.
+  // being counted are. A double-click would navigate away once its read settled, which is a race
+  // against the tab click that would follow it.
   await cdp.eval(`${nameBtn("archived.zpcr")}?.click()`);
   await waitFor(() => cdp.eval(`document.querySelectorAll(".filesview__row").length === 3`), {
     timeout: 10000,

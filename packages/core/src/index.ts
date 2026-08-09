@@ -167,6 +167,7 @@ export { parseBiomeme } from "./biomeme.js";
 export {
   fileCategory,
   fileKindDescription,
+  fileKindFromName,
   matchesSupportedExtension,
   SUPPORTED_EXTENSIONS,
 } from "./fileKind.js";

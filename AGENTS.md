@@ -215,7 +215,9 @@ driven from CDP, so `folderChecks` substitutes an OPFS directory for it),
 `state/useCfxDevice.ts`'s `cancelRun`/`setRunPaused`
 (or core's `usb/device.ts` `cancelRun`), `lib/protocolSource.ts`,
 `lib/experiment.ts` (or core's `experiment.ts`), `components/ViewSelector.tsx` or `App.tsx`'s
-`enabledViewsFor`/`selectFile`, core's `runDefinition.ts`, `components/raw/DecodedView.tsx`'s
+`enabledViewsFor`/`selectFile`/`defaultViewFor` (where opening a file lands, per kind) or its
+`pendingLanding`, `components/KindFilter.tsx` (or core's `fileKindFromName`),
+core's `runDefinition.ts`, `components/raw/DecodedView.tsx`'s
 `ProtocolDecoded`, `components/views/StandaloneProtocolView.tsx`, `components/FileBar.tsx`,
 `components/FilesTableView.tsx` or `components/CloseFileButton.tsx` (closing a file is what removes
 it from IndexedDB — see `useZpcrStore.ts`'s `closeFile`),

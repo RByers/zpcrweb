@@ -659,8 +659,14 @@ edited file" below.
 The two used to disagree — the chip released without asking, the table always asked twice — which
 meant the same file answered "is this safe?" differently depending on where you clicked.
 
-Clicking a **row** anywhere else selects the file and lands on its own first enabled tab; the
-Protocol/Plate/Reads cells land on that view instead.
+Clicking a **row** anywhere else selects the file and lands on **that kind of file's own view** —
+`App.tsx`'s `defaultViewFor`, keyed on core's `fileCategory`: a run opens on Curves, a plate on
+Plates, a protocol on Protocol, and an `.alf` report on Protocol (the protocol it records, with the
+wall-clock profile of what it cost). That is what each file is *for*, and the same destination a
+double-click in the folder list below goes to, so one gesture-independent rule answers "go look at
+this file" everywhere. Overview is the fallback rather than the answer: the preferred view has to be
+one this file actually supports, so a run still recording — no plate reads, no Curves — lands on its
+first enabled tab instead. The Protocol/Plate/Reads cells override it with their own view.
 
 ### Instrument is not a file view
 
@@ -1048,18 +1054,11 @@ instrument is still writing.
 
 The open-files table and the folders answer different questions — what this browser is
 holding, and what is on the disk — and are different lengths, so they are two panes that scroll
-independently rather than one long column. The folders pane is sized to its content and capped at
-55% of the view, so two folders don't cost half the window and thirty don't push the table out of
-it. With no folder granted the pane holds just the bundled `samples` group (below).
-
-Above the table is a row of **type chips**, one per kind of file open, each carrying how many there
-are of it and toggling the table down to that kind. They are a filter rather than a selection:
-nothing on is the whole catalog, which is the state the view opens in and the state turning the last
-chip off returns to, so there is no "All" control to keep in step. Only kinds actually present get a
-chip, so the bar doubles as a summary of what the browser is holding and disappears when everything
-is one kind. The footer counts what is on screen (`3 of 9 files shown`) rather than what is open, so
-a filtered table never reads as files having gone missing. The chips sit outside
-`.filesview__scroll`, so the control never scrolls away from the table it filters.
+independently rather than one long column. The folders pane takes a **fixed 40%** of the view and
+the table takes the rest: a fixed share rather than one sized to its content, because a panel that
+grew as a branch was expanded and shrank as it was collapsed would move the table above it on every
+click. Nothing in either pane decides where the boundary sits; both scroll inside their own half.
+With no folder granted the pane holds just the bundled `samples` group (below).
 
 The folders pane is itself **two columns**: every folder's **directory tree** in the left one, one
 group per folder under its own heading (name, ↻, ✕), and the **files of whichever directory is
@@ -1076,9 +1075,22 @@ asking to look in it), and, until the user picks for themselves, by whichever fo
 already open. `DiskTree.selected` stays per folder, so a folder that opened itself on the branch
 holding the work in progress keeps that branch marked while another folder is being read.
 
+Over that column sit the **type chips** (`KindFilter.tsx`), one per kind of file the directory
+holds, each carrying how many and narrowing the list to that kind. A filter rather than a selection:
+nothing on is the whole listing, which is the state it opens in and the state turning the last chip
+off returns to, so there is no "All" control to keep in step. They are over the *folder's* list and
+not the catalog table deliberately — the folder list is a directory on disk, possibly a very long
+one, and narrowing it to "just the plates" is how you find the file you came to open; the table
+above is what you already chose, one file at a time. The kinds come from the file **names**
+(`fileKindFromName`, core), because nothing in a listing has been read yet — the loader's content
+sniff is still the authority once a file is actually opened. The filter is held across directory
+changes (hunting for a `.pltd` spans subdirectories) but only ever applies to kinds the current
+directory has, so it can never empty the list with no chip left to turn off.
+
 A **file** row in that pane answers a different question from the table's, so its click means
 something different: a click is the row's checkbox — it opens the file off disk, or closes it
-again — and stays in the Files view, while a **double-click** opens it on Overview. That divergence
+again — and stays in the Files view, while a **double-click** opens it and goes there, on that
+kind's own default view (`defaultViewFor`, above). That divergence
 is deliberate. The table's rows are files already open, so clicking one to go look at it is the
 whole point; the folder pane is something you read *through*, deciding what the app should hold, and
 a click that left the view every time would make a folder of a hundred runs unbrowsable. Closing on

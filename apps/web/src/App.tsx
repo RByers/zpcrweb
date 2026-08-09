@@ -1,11 +1,14 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  fileCategory,
   parseAlf,
   parseRunDefinition,
   plateToCsv,
   ProtocolBuilder,
   runFileBaseName,
   runProgressFromNames,
+  type FileCategory,
+  type FileKind,
   type ZpcrArchive,
   type RunPlan,
   type Zpcr,
@@ -106,6 +109,31 @@ function enabledViewsFor(kind: string, zpcr?: Zpcr | null): readonly ViewId[] {
   // Instrument isn't here: it is not a lens on this file, or on any file (see `ViewBar`). Which
   // experiment it would *start* is asked in the view itself — `instrumentExperiment` below.
   return runViews(zpcr);
+}
+
+/**
+ * Where "go and look at this file" lands, per **category** of file rather than per encoding: a run
+ * opens on its amplification curves, a plate on the plate map, a protocol on the protocol, and a
+ * run report on the protocol it records. That is the thing each file is *for* — the view someone
+ * opening it came to see — and asking `fileCategory` rather than listing seven encodings means a
+ * new encoding of an existing category needs nothing here.
+ *
+ * Overview is the fallback rather than the answer. The preferred view has to be one this
+ * particular file actually supports ({@link enabledViewsFor}) — a run still recording has no
+ * Curves, a pending experiment no Plates — so a file that can't answer its category's question
+ * lands on its first enabled tab instead, which is Overview for everything that has one.
+ */
+const CATEGORY_VIEW: Record<FileCategory, ViewId> = {
+  run: "curves",
+  plate: "plates",
+  protocol: "protocol",
+  report: "protocol",
+};
+
+function defaultViewFor(kind: string, zpcr?: Zpcr | null): ViewId {
+  const enabled = enabledViewsFor(kind, zpcr);
+  const preferred = CATEGORY_VIEW[fileCategory(kind as FileKind)];
+  return (preferred && enabled.includes(preferred) ? preferred : enabled[0]) ?? "overview";
 }
 
 /**
@@ -564,6 +592,30 @@ export function App() {
   };
 
   /**
+   * A file the app has been asked to go and look at, but which is still being read.
+   *
+   * Where a file lands depends on what it turns out to be ({@link defaultViewFor}) — a question
+   * only its decoded self can answer — so "open this and take me there" is two steps: remember the
+   * id, and go when it arrives. Every gesture that opens a file and follows it goes through here:
+   * a double-click in the folder tree, and the load paths that pass `goToFile`.
+   *
+   * A file that never decodes (a `.pltd` behind the password prompt, a read that failed) simply
+   * never fires this, which is the honest outcome: there is nothing to show, and the user is left
+   * where they were rather than on an empty view.
+   */
+  const [pendingLanding, setPendingLanding] = useState<string | null>(null);
+  useEffect(() => {
+    if (!pendingLanding) return;
+    const f = store.loaded.find((x) => x.name === pendingLanding);
+    if (!f) return;
+    setPendingLanding(null);
+    store.setActive(f.name);
+    store.setView(defaultViewFor(f.kind, store.runs.get(f.name)?.zpcr));
+    // `store` is rebuilt every render; the identities that matter are the ones read here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingLanding, store.loaded, store.runs]);
+
+  /**
    * Which tabs the active file supports. Computed once per file rather than per render, and
    * before the early returns below as hook order demands: for a run this asks what the archive
    * actually holds (`runViews`), and answering the calibration half of that decodes the run's
@@ -596,8 +648,11 @@ export function App() {
    * always done. `view`, when given (the Plate cell's own link), overrides that landing spot
    * instead of guessing at it.
    *
-   * A file that isn't loaded yet has no decoded run to ask, so its enabled set isn't known here;
-   * Overview is where such a click lands, and the strip fills in as the bytes arrive.
+   * A file that isn't loaded **yet** has no decoded run to ask, so which views it supports — and
+   * therefore where it should land — isn't knowable at the moment of the click. That is the
+   * ordinary case for a double-click in the folder tree, which opens the file *and* goes to it: the
+   * read is still in flight. So the landing is deferred rather than guessed at ({@link
+   * pendingLanding}), and happens the moment the file turns up decoded.
    *
    * The exception is a file the app currently *can't* read (`store.unreadableIds` — a folder whose
    * permission lapsed): the click is what asks for the access back, and until that is answered
@@ -621,9 +676,9 @@ export function App() {
       if (source) void diskTree.grant(source.folder);
       return;
     }
-    store.setView(
-      view ?? (f ? enabledViewsFor(f.kind, store.runs.get(id)?.zpcr)[0] ?? "overview" : "overview"),
-    );
+    if (view) store.setView(view);
+    else if (f) store.setView(defaultViewFor(f.kind, store.runs.get(id)?.zpcr));
+    else setPendingLanding(id);
   };
 
   /** The Instrument view's "Run complete" banner's "Open run" button: jump straight to that run's
@@ -870,22 +925,23 @@ export function App() {
             onCloseFile={store.closeFile}
             onClose={leaveFiles}
             tree={diskTree}
-            // Reading a file off disk selects it. `goToFile` also goes and looks at it, on
-            // Overview, because that is where every "open this file" lands whatever kind it turns
-            // out to be. The promise comes back so that a double-click in the folder tree can wait
-            // for its own first click to finish opening the file before following it there.
+            // Reading a file off disk selects it. `goToFile` also goes and looks at it, on the view
+            // that kind of file is *for* — curves for a run, the plate map for a plate — since the
+            // file has been decoded by then and can be asked. The promise comes back so that a
+            // double-click in the folder tree can wait for its own first click to finish opening
+            // the file before following it there.
             onAddDiskFiles={(sources, goToFile) =>
               store.addDiskFiles(sources).then((name) => {
-                if (goToFile && name) store.setView("overview");
+                if (goToFile && name) setPendingLanding(name);
               })
             }
             // A sample is fetched rather than read off disk, and lands as an ordinary copy — but
-            // the gesture is the same one, so it ends the same way: selected, and on Overview if
-            // the user asked to go there.
+            // the gesture is the same one, so it ends the same way: selected, and on that file's
+            // own default view if the user asked to go there.
             onAddSampleFiles={async (names, goToFile) => {
               let last: string | null = null;
               for (const name of names) last = await store.addUrl(sampleUrl(name));
-              if (goToFile && last) store.setView("overview");
+              if (goToFile && last) setPendingLanding(last);
             }}
           />
         ) : view === "about" ? (

@@ -42,6 +42,12 @@
  * there is then nothing to go to. That is the honest consequence of an instant checkbox, and the
  * gesture that matters is the other one, on a file you are opening for the first time.
  *
+ * **The type chips narrow the file column** (`KindFilter.tsx`), one per kind of file the directory
+ * holds. This is where a type filter earns its place rather than over the catalog: the column is a
+ * directory on disk, it can be very long, and the job it exists for is finding the file to open out
+ * of it. A directory's kinds are read from the file *names* (`fileKindFromName`) — nothing here has
+ * been opened, and a name is all a listing knows.
+ *
  * **A closed branch has not been read.** The tree lists lazily, one directory level per expansion,
  * because a folder handed to the app may hold a career's worth of runs. What opens by itself is only
  * the branch containing files that are already loaded, and the file pane starts on that directory.
@@ -62,8 +68,8 @@
  * same thing. The one difference a user can feel is what opening one gives them: a *copy*, like a
  * dropped file, since there is no writing back to a file inside the app's own bundle.
  */
-import { useRef } from "react";
-import { fileKindDescription } from "@zpcrweb/core";
+import { useRef, useState } from "react";
+import { fileKindDescription, fileKindFromName, type FileKind } from "@zpcrweb/core";
 import type { DiskSource } from "../state/db";
 import type { DiskTree } from "../state/useDiskTree";
 import { nodeKey } from "../state/useDiskTree";
@@ -72,6 +78,7 @@ import type { DiskEntry } from "../state/diskFolders";
 import type { FileEntry } from "../state/useZpcrStore";
 import { formatCompactDateTime } from "../lib/experiment";
 import { FileKindIcon } from "./FileIcons";
+import { countKinds, KindFilter } from "./KindFilter";
 import { FolderIcon } from "./ViewIcons";
 import { sampleFileName } from "../lib/samples";
 
@@ -91,7 +98,8 @@ interface Props {
    * an ordinary copy — under `samples/<name>`, like any other folder's file. See `lib/samples.ts`.
    * Called with the plain file names; the prefix is the store's business. */
   onAddSampleFiles: (names: string[], goToFile?: boolean) => void | Promise<void>;
-  /** Select it *and* go look at it, on Overview — a double click. */
+  /** Select it *and* go look at it, on whichever view that kind of file is for (`App.tsx`'s
+   * `defaultViewFor`) — a double click. */
   onOpenFile: (id: string) => void;
 }
 
@@ -112,6 +120,16 @@ export function FolderSection({
 }: Props) {
   const shown = tree.folders.find((f) => f.label === tree.activeFolder) ?? null;
   const shownPath = shown ? (tree.selected.get(shown.label) ?? []) : [];
+  /** Which kinds the file column is narrowed to; empty is the whole listing. Held here rather than
+   * in the column itself so it survives walking into another directory — hunting for the one
+   * `.pltd` in a folder is a hunt across its subdirectories, not within one of them. */
+  const [kinds, setKinds] = useState<ReadonlySet<FileKind>>(new Set());
+  const toggleKind = (kind: FileKind) =>
+    setKinds((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(kind)) next.add(kind);
+      return next;
+    });
   return (
     <div className="folders">
       <div className="folders__pane folders__pane--tree">
@@ -228,6 +246,8 @@ export function FolderSection({
             label={shown.label}
             path={shownPath}
             builtin={shown.builtin}
+            kinds={kinds}
+            onToggleKind={toggleKind}
             entries={entries}
             activeName={activeName}
             onCloseFile={onCloseFile}
@@ -343,6 +363,8 @@ function FilePane({
   label,
   path,
   builtin,
+  kinds,
+  onToggleKind,
   entries,
   activeName,
   onCloseFile,
@@ -354,9 +376,29 @@ function FilePane({
   label: string;
   path: readonly string[];
   builtin: boolean;
+  /** The type filter — see {@link FolderSection}. */
+  kinds: ReadonlySet<FileKind>;
+  onToggleKind: (kind: FileKind) => void;
 } & Omit<Props, "tree">) {
   const node = tree.nodes.get(nodeKey(label, path));
   const files = node?.entries?.filter((e) => e.kind === "file") ?? [];
+  // What kinds this directory holds, from the file names — nothing here has been read, and the
+  // name is all a listing knows (`fileKindFromName`). A chip per kind, and only when there is more
+  // than one to tell apart.
+  const counts = countKinds(files, (e) => fileKindFromName(e.name));
+  // The filter as it applies to *this* directory: it is kept while you move between directories,
+  // so a kind absent from the one you are in now must not empty the list with no chip left to
+  // turn off. The choice itself is kept, so walking back into a directory that has them restores
+  // it.
+  const present = new Set(counts.map(([k]) => k));
+  const on = new Set([...kinds].filter((k) => present.has(k)));
+  const visible =
+    on.size === 0
+      ? files
+      : files.filter((e) => {
+          const kind = fileKindFromName(e.name);
+          return kind != null && on.has(kind);
+        });
   return (
     <>
       {/* Which directory this column is showing — its folder's own name included, since the
@@ -380,15 +422,19 @@ function FilePane({
           </span>
         ))}
       </div>
+      {/* Only worth drawing when there is more than one kind here to tell apart. */}
+      {counts.length > 1 && <KindFilter counts={counts} on={on} onToggle={onToggleKind} />}
       {node?.error ? (
         <div className="folders__note folders__note--error mono">{node.error}</div>
       ) : !node?.entries ? (
         <div className="folders__note mono">{node?.pending ? "reading…" : ""}</div>
       ) : files.length === 0 ? (
         <div className="folders__note mono">nothing here the app can open</div>
+      ) : visible.length === 0 ? (
+        <div className="folders__note mono">nothing of that type here</div>
       ) : (
         <ul className="folders__list">
-          {files.map((entry) => (
+          {visible.map((entry) => (
             <FileRow
               key={entry.name}
               label={label}

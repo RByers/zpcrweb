@@ -105,3 +105,29 @@ export function matchesSupportedExtension(name: string): boolean {
   const lower = name.toLowerCase();
   return SUPPORTED_EXTENSIONS.some((ext) => lower.endsWith(ext));
 }
+
+/** Extension → the kind that extension is *decoded as*, longest first so `.plt.csv` is read as the
+ * plate table it is before the bare `.csv` rule can claim it. */
+const KIND_BY_EXTENSION: readonly (readonly [string, FileKind])[] = [
+  [".zpcr", "zpcr"],
+  [".pcrd", "pcrd"],
+  [".bmrun", "biomeme"],
+  [".pltd", "pltd"],
+  [".csv", "csv"],
+  [".txt", "prcl"],
+  [".alf", "alf"],
+];
+
+/**
+ * What a file of this *name* would be decoded as, or null if the name isn't one worth trying.
+ *
+ * **A guess from the name alone, and the only one available before the bytes are read.** The
+ * authority is still the loader's own content sniff — a `.txt` is admitted only once it parses as a
+ * run definition (`prcl.md` §3.1), and a `.csv` only as a plate table — so this answers "what would
+ * this be?", which is exactly the question a directory listing can ask about a file nobody has
+ * opened. A file already open has a real, decoded {@link FileKind}; use that in preference.
+ */
+export function fileKindFromName(name: string): FileKind | null {
+  const lower = name.toLowerCase();
+  return KIND_BY_EXTENSION.find(([ext]) => lower.endsWith(ext))?.[1] ?? null;
+}
