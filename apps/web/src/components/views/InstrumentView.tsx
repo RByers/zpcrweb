@@ -49,6 +49,7 @@ import { useCallback, useMemo } from "react";
 import { planRun, type ZpcrArchive, type RunPlan, type Zpcr } from "@zpcrweb/core";
 import { InstrumentRail } from "../instrument/InstrumentRail";
 import { InstrumentRun } from "../instrument/InstrumentRun";
+import { InstrumentLastRun } from "../instrument/InstrumentLastRun";
 import { InstrumentFiles } from "../instrument/InstrumentFiles";
 import { InstrumentConsole } from "../instrument/InstrumentConsole";
 import type { CfxDeviceHandle } from "../../state/useCfxDevice";
@@ -91,6 +92,7 @@ export interface InstrumentExperiment {
 
 export function InstrumentView({
   onOpenRun,
+  onOpenReport,
   onOpenFinishedRun,
   experiment,
   onNewExperiment,
@@ -101,6 +103,10 @@ export function InstrumentView({
   onCloneExperiment,
 }: {
   onOpenRun: (name: string, archive: ZpcrArchive) => Promise<void> | void;
+  /** Put the instrument's own run report in the file bar — the last-run panel's "Open report".
+   * The same callback the run watcher files a thermal-only run's report through, so a report
+   * collected by hand and one collected automatically become the same kind of file. */
+  onOpenReport: (name: string, bytes: Uint8Array) => Promise<string | null>;
   /** Jump to a finished run's curves — the "Run complete" banner's "Open run" button. Distinct
    * from `onOpenRun`: that one adds a *new* file (an offloaded archive dropped in from outside);
    * this one just switches to a file the watcher already put in the store. */
@@ -208,6 +214,10 @@ export function InstrumentView({
           onNewRun={runWatch.clearFinished}
           onCloneExperiment={onCloneExperiment}
         />
+        {/* Between the experiment and the file browser: it is about this machine rather than about
+            the selection, and it is the answer to "what was it doing before I got here?" — which
+            is a question asked before anyone goes browsing the instrument's storage by hand. */}
+        <InstrumentLastRun instrument={instrument} onOpenReport={onOpenReport} />
         <InstrumentFiles instrument={instrument} onOpenRun={onOpenRun} />
         <InstrumentConsole instrument={instrument} />
       </div>

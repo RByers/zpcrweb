@@ -882,6 +882,11 @@ export class CfxDevice {
    * directory at §7.1 of every start, so what is in there afterwards is this run's and only this
    * run's. When several are somehow present — a start whose housekeeping failed — the last by name
    * is taken, which is the newest, since the firmware names them `<yyyymmdd>_<hhmmss>_…`.
+   *
+   * That newest-by-name rule is also what makes this usable **outside** a run this client started:
+   * the app reads it on connect to say what the instrument last ran, where the §7.1 guarantee does
+   * not apply and the answer is simply the most recent report the instrument is holding (the app's
+   * `useCfxDevice.refreshLastReport`).
    */
   async runReport(): Promise<{ name: string; bytes: Uint8Array } | null> {
     const dir = await this.listFiles(CFX_RUN_REPORT_DIR);

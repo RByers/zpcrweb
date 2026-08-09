@@ -318,9 +318,10 @@ everywhere a run belongs, and every one of those places would find it empty.
 It enables **three** tabs, `["overview","protocol","raw"]`:
 
 - **Overview** (`StandaloneReportOverview`) — who ran what, and how it went. The shared
-  `OverviewPanel` gets four extra rows (the run's name, when it ran, how long it took, the outcome
-  it reports) and `DecodedAlf` in its `children` slot — the same decode an in-archive report gets in
-  the Raw view, unchanged, execution-log table included.
+  `OverviewPanel` gets the six summary rows of `lib/alfSummary.ts` (the run's name, when it ran, how
+  long it took, the outcome it reports, the instrument, and what the log holds) and nothing else:
+  the full decode is one tab over in Raw, and the Instrument view's last-run panel builds its
+  account of a report still on the machine from the same six.
 - **Protocol** (`ProtocolView`, the same component a run and a `.prcl.txt` use) — what actually ran,
   and what it cost. A report carries a protocol of its own: line 2 is the run definition
   post-expansion, with the scan mask the run really used (`alf.md` §5), so the view takes it with
@@ -2942,6 +2943,40 @@ already-claimed interface fails.
 meant leaving the tab released the USB interface — fine while the view was the only thing that
 talked to the instrument, and wrong once a started run has to keep being followed while you sit in
 Curves watching its amplification curves arrive. The connection is a property of the session.
+
+### What the instrument last ran
+
+**The instrument's `.alf` report is read on connect, unasked** — `useCfxDevice.refreshLastReport`,
+once per connection, into `lastReport`; `InstrumentLastRun` is the panel that shows it, between the
+experiment and the file browser.
+
+`\Storage Card\PCRunReport` is the only place that answers "what did this machine last do?" for
+*every* kind of run. `CurrentRun` exists only for a run with a `PLATEREAD` and otherwise still holds
+whatever the last such run left behind (`usb.md` §7.10), so a thermal-only run — or one somebody
+started at the touchscreen with no computer attached — is invisible in it. A report is written for
+all of them (§5.2). The read costs one listing and one `GETFILE` of 386 bytes to ~14 KB, which is
+why it happens on sight rather than behind a button.
+
+It is also the only chance to keep it. The report **survives until a new run's pre-flight deletes
+it** (`CfxDevice.clearRunReports`, §7.1 — CFX Manager's own behaviour, deleting a six-day-old report
+in the reference capture, which this app copies deliberately). So the panel offers "Open report",
+which files it through `App`'s `openReport` — the same callback the run watcher uses for a
+thermal-only run's report, so a report collected by hand and one collected automatically are the
+same kind of file. Starting a run clears `lastReport` in the same breath as the deletion, and the
+watcher re-reads it when a run finishes, so the panel describes the run that just happened rather
+than the one before it. `fetchRunReport` — the watcher's collection path for a thermal-only run — is
+that same read rather than a second one: there is one report directory, so whatever comes out of it
+is by definition the current last report.
+
+The six summary lines are `lib/alfSummary.ts`, shared with a standalone report's Overview
+(`StandaloneReportOverview`) so the same file reads the same way whether it is in the file bar or
+still on the instrument. The panel adds one row those don't need — **who started it**, which is the
+report's empty `user` field for a touchscreen run (`alf.md` §4) and the only way to tell a run this
+browser drove from one someone walked up and started.
+
+What this is *not*: a collection path for a run being watched. The report a watched run produces
+arrives on its own (see "Following a run"), and for a qPCR run it also travels inside the `.zpcr`,
+since the instrument copies it into `CurrentRun` too.
 
 ### Starting a run
 

@@ -288,6 +288,26 @@ export function App() {
   const [startedRun, setStartedRun] = useState<{ experimentName: string; fileName: string } | null>(
     null,
   );
+
+  /**
+   * File one of the instrument's own `.alf` run reports, added exactly as a dropped file would be —
+   * validated, persisted and selected — so it is a file of the user's from the moment it lands
+   * rather than a special case the rest of the app has to know about. Marked modified: like every
+   * file this app makes rather than reads, it exists only in the browser until it is saved.
+   *
+   * Two callers, deliberately the same one: the run watcher, for a thermal-only run whose report is
+   * its entire output, and the Instrument view's last-run panel, where the user asks for the report
+   * the instrument is already holding. A report collected automatically and one collected by hand
+   * should be the same file in every respect.
+   */
+  const openReport = useCallback(
+    async (name: string, bytes: Uint8Array) =>
+      store.addFiles([new File([bytes.slice()], name, { lastModified: Date.now() })], {
+        modified: true,
+      }),
+    [store],
+  );
+
   const runWatch = useRunWatch(
     instrument,
     useCallback(
@@ -306,18 +326,7 @@ export function App() {
       },
       [store],
     ),
-    // A thermal-only run's whole output: the instrument's `.alf` report, added exactly as a
-    // dropped file would be — validated, persisted and selected — so it is a file of the user's
-    // from the moment it lands rather than a special case the rest of the app has to know about.
-    // Marked modified: like every file this app makes rather than reads, it exists only in the
-    // browser until it is saved.
-    useCallback(
-      async (name: string, bytes: Uint8Array) =>
-        store.addFiles([new File([bytes.slice()], name, { lastModified: Date.now() })], {
-          modified: true,
-        }),
-      [store],
-    ),
+    openReport,
     // What the app is holding for a run — the watcher's only record of what it has already
     // downloaded, so that the file the user has and the bytes the watcher believes in are the same
     // thing (see `useRunWatch`'s `heldRun`). A file that isn't loaded reads as nothing held.
@@ -899,6 +908,7 @@ export function App() {
         {view === "instrument" ? (
           <InstrumentView
             onOpenRun={openRun}
+            onOpenReport={openReport}
             onOpenFinishedRun={openFinishedRun}
             experiment={instrumentExperiment}
             // Creating one selects it, which is the second rung — so it lands on screen here with

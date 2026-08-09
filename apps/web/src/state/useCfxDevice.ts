@@ -43,7 +43,9 @@ import {
   CFX_DIRECTORIES,
   CFX_USB_FILTER,
   CfxDevice,
+  parseAlf,
   runProgressFromNames,
+  type AlfReport,
   type CfxCommandName,
   type CfxDeviceInfo,
   type CfxDirectory,
@@ -80,6 +82,21 @@ export type ConnectionState =
   | "connecting"
   | "connected"
   | "reconnecting";
+
+/**
+ * The `.alf` the instrument is currently holding in `\Storage Card\PCRunReport` — the last run it
+ * ran, whoever started it and whatever it produced (see {@link useCfxDevice.lastReport}).
+ *
+ * Kept as bytes as well as a decode: the bytes are what "Open report" hands to the file bar, so
+ * the file the user ends up with is the instrument's, byte for byte, rather than a re-rendering of
+ * our parse of it. `report` is null when those bytes don't decode as a report, which leaves the
+ * panel able to say a report is there without claiming to have read it.
+ */
+export interface LastRunReport {
+  name: string;
+  bytes: Uint8Array;
+  report: AlfReport | null;
+}
 
 /**
  * Backoff between reconnect attempts after the connection dropped on its own, in ms; the last
@@ -237,6 +254,8 @@ export function useCfxDevice() {
   const [runPending, setRunPending] = useState(false);
   /** The last listing of `CurrentRun`, which is what the run watcher works from. */
   const [runFolder, setRunFolder] = useState<CfxDirectory | null>(null);
+  /** The run report the instrument is holding — see {@link LastRunReport} and `refreshLastReport`. */
+  const [lastReport, setLastReport] = useState<LastRunReport | null>(null);
   // The latest status, reachable from a callback without making that callback depend on it —
   // `acknowledgeFinishedRun` must check what the instrument is doing *now*, not what it was doing
   // when the callback was created.
@@ -359,6 +378,10 @@ export function useCfxDevice() {
     setRunPending(false);
     setDirectories({});
     setBusy(null);
+    // Read from the instrument at connect and true only of the instrument that was on the other
+    // end: a different unit — or the same one after someone ran something at its touchscreen —
+    // must not be described by the last one's report.
+    setLastReport(null);
   }, []);
 
   /**
@@ -662,6 +685,11 @@ export function useCfxDevice() {
       // readout stops being relevant, so it shouldn't linger through it.
       setLastAction(null);
       setRunPending(true);
+      // The first thing a start does is empty `PCRunReport` (`usb.md` §7.1), so the report shown
+      // as "the last run" is about to stop existing. Drop it here rather than leaving the panel
+      // describing a file that has been deleted; the run being started writes the next one, and
+      // `refreshLastReport` picks that up when it finishes.
+      setLastReport(null);
       try {
         const result = await withBusy("Starting run", (d) =>
           d.startRun(plan, (what) => setBusy(what)),
@@ -707,19 +735,70 @@ export function useCfxDevice() {
   }, [withBusy]);
 
   /**
-   * Collect the `.alf` report the run that just finished wrote — `CfxDevice.runReport`.
+   * Read whatever `\Storage Card\PCRunReport` is holding into {@link lastReport}.
    *
-   * The whole output of a thermal-only run, which builds no run folder at all (see
-   * `RunPlan.producesRunFile`), so this is what the watcher fetches in place of a `.zpcr`. Returns
-   * null when the directory holds no report, or when the read fails: a report that doesn't arrive
-   * is worth nothing more than a note in the rail, since by then the run itself is over and
-   * nothing about it can be lost by this failing.
+   * **Called automatically once per connection**, which is what makes the Instrument view able to
+   * say what this machine last did the moment it is plugged in. The report is there for *every*
+   * run — a qPCR one and a thermal-only one alike (`usb.md` §5.2) — so unlike `CurrentRun`, which
+   * exists only for runs with a `PLATEREAD`, this one directory answers "what ran here last?"
+   * whatever was run. It survives until something deletes it, and the thing that deletes it is a
+   * new run's pre-flight (`CfxDevice.clearRunReports`, §7.1), so what is sitting there on connect
+   * is the previous run's and nobody has seen it in this app before.
+   *
+   * Cheap enough to do unasked: the file is 386 bytes to ~14 KB (`alf.md` §1), and this is a
+   * listing plus one `GETFILE`.
+   *
+   * Also called after a run finishes, where it picks up the report that run just wrote — so the
+   * panel describes the run that has actually just happened rather than the one before it.
    */
-  const fetchRunReport = useCallback(
-    async () =>
-      (await withBusy("Fetching the run report", (d) => d.runReport())) ?? null,
-    [withBusy],
-  );
+  const refreshLastReport = useCallback(async () => {
+    const got = await withBusy("Reading the last run report", (d) => d.runReport());
+    // `undefined` is a failed read, which `withBusy` has already reported; leave the last answer
+    // standing rather than claiming the instrument has no report. `null` is the instrument
+    // genuinely holding none, which is a real answer and replaces whatever was there.
+    if (got === undefined) return null;
+    if (got === null) {
+      setLastReport(null);
+      return null;
+    }
+    let report: AlfReport | null = null;
+    try {
+      report = parseAlf(got.bytes);
+    } catch (e) {
+      // A report we can't decode is still a report the instrument is holding, and its bytes are
+      // still worth offering — so keep it, undecoded, rather than dropping the fact of it.
+      console.warn("[useCfxDevice] the instrument's run report did not decode:", e);
+    }
+    const held: LastRunReport = { name: got.name, bytes: got.bytes, report };
+    setLastReport(held);
+    return held;
+  }, [withBusy]);
+
+  // Read it once per connection. `refreshLastReport` is stable, so this fires on the transition
+  // into `connected` and not again — a reconnect mid-run runs it afresh, which is right: the
+  // directory may have changed while the pipe was down.
+  useEffect(() => {
+    if (connection !== "connected") return;
+    void refreshLastReport();
+  }, [connection, refreshLastReport]);
+
+  /**
+   * Collect the `.alf` report the run that just finished wrote — the whole output of a thermal-only
+   * run, which builds no run folder at all (see `RunPlan.producesRunFile`), so this is what the
+   * watcher fetches in place of a `.zpcr`.
+   *
+   * The same read as {@link refreshLastReport}, and deliberately *is* it rather than a second call
+   * to `runReport`: there is one report directory, so anything fetched out of it is by definition
+   * the instrument's current last report, and having the two share a read means the last-run panel
+   * is right after this without a duplicate transfer. Returns null when the directory holds no
+   * report, or when the read fails — a report that doesn't arrive is worth nothing more than a note
+   * in the rail, since by then the run itself is over and nothing about it can be lost by this
+   * failing.
+   */
+  const fetchRunReport = useCallback(async () => {
+    const held = await refreshLastReport();
+    return held ? { name: held.name, bytes: held.bytes } : null;
+  }, [refreshLastReport]);
 
   /**
    * Stop the run in progress — `usb.md` §7.8, driven by `CfxDevice.cancelRun`.
@@ -918,6 +997,8 @@ export function useCfxDevice() {
     setRunPaused,
     acknowledgeFinishedRun,
     fetchRunReport,
+    lastReport,
+    refreshLastReport,
     refreshRunFolder,
     runFolder,
     runProgress,

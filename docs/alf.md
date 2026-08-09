@@ -44,7 +44,7 @@ numbering the log uses (its Appendix A is measured from these files);
 
 | Location | Name | Notes |
 |---|---|---|
-| On the instrument, `\Storage Card\PCRunReport\` | `<yyyymmdd>_<hhmmss>_<serial>_<RUN NAME>.alf` | written when the run finishes; survives until deleted, so the directory normally holds the *previous* run's report until something clears it (`usb.md` §5.2) |
+| On the instrument, `\Storage Card\PCRunReport\` | `<yyyymmdd>_<hhmmss>_<serial>_<RUN NAME>.alf` | complete when the run finishes — whether it is written incrementally before then is unmeasured, and nothing reads it mid-run (`usb.md` §5.2). Survives until deleted, so the directory normally holds the *previous* run's report until something clears it |
 | On the instrument, `\Storage Card\CurrentRun\` | same name | a copy, alongside the run's `.Plateread`s and `.Dcal`s |
 | Inside a `.zpcr` | usually the same name; sometimes renamed to the archive's own basename | a `.zpcr` is a plain ZIP of the run directory, so the copy above travels with it. Present in **all 50** archives examined |
 | Inside a `.pcrd` | **absent** | checked across four `.pcrd` samples — the saved-experiment XML carries `RunInfo`/`runlog` but not the report text |

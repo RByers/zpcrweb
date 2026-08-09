@@ -305,6 +305,7 @@ export function useRunWatch(
     fetchDirectoryFiles,
     acknowledgeFinishedRun,
     fetchRunReport,
+    refreshLastReport,
     trafficLogForRun,
   } = instrument;
 
@@ -649,13 +650,19 @@ export function useRunWatch(
       const id = expectReport ? null : await check(true, true);
       if (id) {
         setFinished({ name: finishedName, totalS: totalS ?? 0, fileName: id });
+        // `PCRunReport` now holds the report *this* run wrote, and the Instrument view's last-run
+        // panel has been showing the previous run's until this moment. Last, and awaited, so it
+        // takes the command channel after the run's own files rather than alongside them. The
+        // other branch needs no such call: `collectReport` reads the same directory, which is the
+        // same read (`useCfxDevice`'s `fetchRunReport`).
+        await refreshLastReport();
         return;
       }
       if (!expectReport && !staleAtFinish.current) return; // a failed pass, retried by the next edge
       const reportId = await collectReport(finishedName);
       if (reportId) setFinished({ name: finishedName, totalS: totalS ?? 0, fileName: reportId });
     })();
-  }, [connection, watching, status, acknowledgeFinishedRun, check, collectReport]);
+  }, [connection, watching, status, acknowledgeFinishedRun, check, collectReport, refreshLastReport]);
 
   // --- the baseline listing on connect --------------------------------------------------------
   //

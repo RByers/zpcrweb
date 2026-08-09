@@ -763,6 +763,27 @@ nothing listed it mid-run, so exactly when during the run it materialises is unm
 that wants certainty should clear the directory first and treat the reappearance of any entry as
 the signal.
 
+**Nothing reads it during a run, in either capture.** `usb-run` touches this directory exactly
+twice: once in the pre-flight of §7.1, to delete the previous report, and once after the run has
+ended and been acknowledged, to fetch the new one (§7.6). There is no mid-run poll of it, and no
+partial report was ever observed — which is consistent with the file's own shape, since its header
+carries the run's *end* time and total elapsed (`alf.md` §4, fields 8 and 9) and its last line is an
+end-of-run sentinel. Whether the firmware writes it incrementally, or in one go at the finish, is
+therefore unmeasured; what is established is that a client gains nothing by watching it. Live
+progress is `STATUS?` (§3.2, §7.5), and the report is the record afterwards.
+
+The two are not the same information, either, so this is not a choice between them: the report's
+step lines are one per *executed protocol step*, with the wall-clock time that step began — the only
+per-step timing the instrument ever reports, and something no number of status samples recovers
+exactly. `STATUS?` says what is happening now; the report says what happened, and when.
+
+**The useful time to read it is on connect.** It is the only directory that describes *every* run —
+`CurrentRun` exists only for a run with a `PLATEREAD` (§7.10) and otherwise still holds the last
+such run's files — so a client that wants to say what the instrument last did, whatever was run and
+whoever started it, reads this one. That is what this project's app does (`useCfxDevice`'s
+`refreshLastReport`, one listing and one `GETFILE`), and it is also the only chance to keep the
+report, since §7.1 will delete it at the next start.
+
 The name is `<yyyymmdd>_<hhmmss>_<serial>_<RUN NAME>.alf` — start timestamp, the base-unit serial
 `*IDN?` reports, and the run name from `RemoteRun`'s operand 4 in full (uppercased, unlike the
 8-character truncation `STATUS?` shows). Reading it needs nothing new: `GETFILESLEN` +
@@ -1131,6 +1152,10 @@ plate reads:
    by channel**, not a read-per-command: channel 2 carries unsolicited traffic (§2, §4), so a
    per-command reader eventually returns a channel-2 payload as the answer to a channel-1 query
    and every reply after it is off by one.
+   Worth doing here too, once, before anything else: read `\Storage Card\PCRunReport` (§5.2). One
+   listing plus one small `GETFILE` says what this instrument last ran — including a run with no
+   plate read, and one started at its own touchscreen — and it is the last chance to keep that
+   report, since step 4 deletes it.
 3. Start the polling loop — `STATUS?`/`RTSTATUS?`/`ERRORLIST A` (§3), ~1 Hz — and keep it running
    for everything below. It is both the liveness check and, from §7.5, the run's only real progress
    signal.

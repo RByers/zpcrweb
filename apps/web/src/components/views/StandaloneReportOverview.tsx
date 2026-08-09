@@ -1,5 +1,6 @@
 import type { AlfReport } from "@zpcrweb/core";
 import { OverviewPanel, type OverviewPanelProps, type InfoRow } from "./OverviewPanel";
+import { alfSummaryRows } from "../../lib/alfSummary";
 import type { LoadedFile } from "../../state/useZpcrStore";
 
 /**
@@ -34,34 +35,9 @@ export function StandaloneReportOverview({
   OverviewPanelProps,
   "onRenameFile" | "onDownload" | "onClone" | "autoEditName" | "onAutoEditHandled"
 >) {
-  const rows: InfoRow[] = [];
-  if (report) {
-    const { header, errors } = report;
-    rows.push({ label: "Run", value: header.runName || "—" });
-    rows.push({
-      label: "Ran",
-      value: header.dateBegan
-        ? `${header.dateBegan} ${header.timeBegan}–${header.timeEnd}`.trim()
-        : "—",
-    });
-    rows.push({ label: "Took", value: header.totalElapsed || "—" });
-    // The report's own verdict, not ours. `alf.md` §6: a cancelled run's flags read exactly like a
-    // clean one's, so this says what the file says and claims nothing beyond it.
-    rows.push({ label: "Outcome", value: errors.clean ? "No errors reported" : errors.text.trim() });
-    if (header.cyclerName) rows.push({ label: "Instrument", value: header.cyclerName });
-    // The shape of what ran, counted off the log rather than off the protocol — none of the three
-    // is a field in the file (`alf.md` §7.2, §7.5). The log itself is the Raw tab's.
-    const stages = new Set(report.steps.map((s) => s.stage)).size;
-    rows.push({
-      label: "Executed",
-      value:
-        `${report.steps.length} ${report.steps.length === 1 ? "step" : "steps"}` +
-        (stages > 1 ? ` · ${stages} stages` : "") +
-        (report.plateReadCount > 0
-          ? ` · ${report.plateReadCount} plate read${report.plateReadCount === 1 ? "" : "s"}`
-          : ""),
-    });
-  }
+  // The same six lines the Instrument view's last-run panel shows, from the same helper — see
+  // `lib/alfSummary.ts`.
+  const rows: InfoRow[] = report ? alfSummaryRows(report) : [];
 
   return <OverviewPanel file={file} rows={rows} {...tools} />;
 }
