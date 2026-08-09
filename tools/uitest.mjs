@@ -1240,8 +1240,11 @@ async function tablePickChecks(chrome, origin) {
 
   await resetWells();
   await toTable();
+  // No `resetWells` here, unlike after the Well pick above: a Sample pick does not isolate wells —
+  // that is the very claim "…and leaves the other dimensions alone" makes below. Asking for a reset
+  // that has nothing to undo just waits out `waitValue`'s full timeout for a change that never
+  // comes, which cost this group 8 s per call.
   await clickPicker(1);
-  await resetWells();
   const afterSample = await state();
   check(
     "clicking a Sample isolates it in Target view",
@@ -1258,7 +1261,6 @@ async function tablePickChecks(chrome, origin) {
 
   await toTable();
   await clickPicker(2);
-  await resetWells();
   const afterTarget = await state();
   check(
     "clicking a Target isolates it in Target view",
@@ -3133,7 +3135,9 @@ async function setExperimentName(cdp, value) {
     `(() => { if (!document.querySelector(".overview__name"))
         document.querySelector(".overview__nameeditbtn")?.click(); })()`,
   );
-  await sleep(150);
+  await waitFor(() => cdp.eval(`!!document.querySelector(".overview__name")`), {
+    what: "the name field to open",
+  });
   await cdp.eval(
     // `focus()` first because the commit is on blur, and blurring an element that was never
     // focused fires nothing at all — the field would keep the text and store none of it.
@@ -3143,7 +3147,13 @@ async function setExperimentName(cdp, value) {
        setter.call(el, ${JSON.stringify(value)});
        el.dispatchEvent(new Event("input", { bubbles: true })); })()`,
   );
-  await sleep(200);
+  // The field is controlled, so the typed text is only really *in* the app once React has rendered
+  // it back — blurring before that commits whatever the previous render held.
+  await waitFor(
+    async () =>
+      (await cdp.eval(`document.querySelector(".overview__name")?.value ?? null`)) === value,
+    { what: `the name field to read ${JSON.stringify(value)}` },
+  );
   await cdp.eval(`document.querySelector(".overview__name").blur()`);
 }
 
@@ -3155,7 +3165,9 @@ async function setExperimentName(cdp, value) {
  */
 async function renameFile(cdp, value) {
   await cdp.eval(`document.querySelector(".overview__renamebtn").click()`);
-  await sleep(50);
+  await waitFor(() => cdp.eval(`!!document.querySelector(".overview__filename-input")`), {
+    what: "the Filename field to open",
+  });
   await cdp.eval(
     `(() => { const el = document.querySelector(".overview__filename-input");
        el.focus();
@@ -3163,7 +3175,13 @@ async function renameFile(cdp, value) {
        setter.call(el, ${JSON.stringify(value)});
        el.dispatchEvent(new Event("input", { bubbles: true })); })()`,
   );
-  await sleep(200);
+  // Controlled field, same as {@link setExperimentName}: wait for the render, not for a guess.
+  await waitFor(
+    async () =>
+      (await cdp.eval(`document.querySelector(".overview__filename-input")?.value ?? null`)) ===
+      value,
+    { what: `the Filename field to read ${JSON.stringify(value)}` },
+  );
   await cdp.eval(`document.querySelector(".overview__filename-input").blur()`);
 }
 

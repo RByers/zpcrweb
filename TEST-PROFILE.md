@@ -9,10 +9,10 @@ estimate of what a suite actually costs.
 | suite | command | before | after | tests |
 |---|---|---|---|---|
 | core (vitest) | `npm test` | 6.2 s | **6.2 s** | 540 in 39 files |
-| UI (browser) | `npm run test:ui` | 159.5 s | **94.5 s** | 337 checks in 30 groups |
+| UI (browser) | `npm run test:ui` | 159.5 s | **76 s** | 340 checks in 33 groups |
 | root vitest | `npx vitest run` | 21.1 s | **4.6 s** | 540, not 2104 |
 
-The browser suite is **41% faster** and no longer the flake source it was: 6 consecutive green runs
+The browser suite is **52% faster** and no longer the flake source it was: 6 consecutive green runs
 at the end, against 3 failures in 7 runs when this started.
 
 Core was measured and left alone — 11.3 s of work parallelised into 6.2 s of wall time, with
@@ -45,8 +45,8 @@ asserted, through three new helpers in `harness.mjs`:
 | `waitStable(read)` | the value stopped changing. For state the app writes more than once per action. |
 | `clickUntil(cdp, label, settled)` | re-click a control until it takes. |
 
-Across this and the write-behind change below, the 113 sleeps are down to **31**, and the 54.5 s
-they cost is down to **13.2 s**. What remains is deliberate and each one says why in a comment:
+Across this and the write-behind change below, the 113 sleeps are down to **31** (and to **27**
+with §7), and the 54.5 s they cost is down to **13.2 s**. What remains is deliberate and each one says why in a comment:
 mostly **negative assertions**, where nothing is going to happen and so there is no state change to
 wait for.
 
@@ -152,26 +152,62 @@ the operator's, landing while this was being measured:
 (The other one reported at the time, `closeConfirmChecks`' download button, turned out to be the
 test's own race — see above.)
 
-## Where the remaining 95 s goes
+### 6. Two `resetWells()` calls that had nothing to undo — 16 s
 
-Per-group minimums from the original profile (30 groups, on `8ddad14`). The shape is what
-matters — the three groups at the top were half the suite:
+`tablePickChecks` reset the well selection after each of its three picks. Only the *Well* pick
+isolates wells; a Sample or Target pick leaves them alone — which is exactly what the check
+"…and leaves the other dimensions alone" asserts one line later. So the other two resets clicked a
+control that changed nothing and then sat in `waitValue` for the full 8 s default waiting for a
+count that was never going to move. Both checks passed the whole time, because `waitValue` returns
+the stale value rather than throwing; the cost was invisible in the pass/fail output and showed up
+only as two 8.1 s gaps in a per-check timing run.
 
-| group | checks | s |
-|---|---|---|
-| experiment names | 16 | 29.7 |
-| disk folders | 29 | 15.4 |
-| instrument runs and experiments | 47 | 12.1 |
-| reference view rail (shared chips + dark overlay) | 16 | 6.1 |
-| load from URL | 8 | 6.0 |
-| open files and the selection | 7 | 6.0 |
-| close confirmation | 11 | 5.7 |
-| password handling | 8 | 5.6 |
-| curves table mode (well/sample/target pickers) | 10 | 4.9 |
-| curves chart (dragging a Cq marker) | 14 | 3.9 |
+**A `waitValue` that always times out is a silent 8 s.** It is the one helper whose misuse doesn't
+announce itself, so a wait for something that never changes reads as a passing check. Worth
+suspecting whenever a group's wall time doesn't match the work it appears to do.
 
-What is left is mostly irreducible: page loads, file parses and React renders, plus ~4 s of
-startup (`tsup` build, Vite, Chrome) and the deliberate sleeps above.
+### 7. `setExperimentName` / `renameFile` still slept
+
+Two of the last fixed sleeps outside the deliberate set, at 350 ms and 250 ms a call across
+12 call sites in 6 groups. Both are now waits on the controlled field having rendered the typed
+text back, which is also the more correct thing to wait for: blurring before that render commits
+whatever the *previous* render held.
+
+## Where the remaining 76 s goes
+
+Per-group totals, measured in place (33 groups, all 340 checks green). Only one group is still
+worth looking at:
+
+| group | s |
+|---|---|
+| disk folders | 19.9 |
+| load from URL | 6.7 |
+| password handling | 3.3 |
+| instrument runs and experiments | 2.9 |
+| curves rail (well row/column headers) | 2.8 |
+| XML rendering | 2.5 |
+| open files and the selection | 2.4 |
+| thermal profile | 2.3 |
+| protocol editor | 2.2 |
+| close confirmation | 2.1 |
+| experiment names | 2.0 |
+
+The tail is flat: the remaining 22 groups are all under 2 s. What is left is mostly irreducible —
+page loads, file parses and React renders, plus ~4 s of startup (`tsup` build, Vite, Chrome) and
+the deliberate sleeps above.
+
+**`disk folders` is now a quarter of the suite on its own**, and unlike the rest of the tail it is
+not irreducible: ~10 s of it is one check (re-granting a folder and reading every open file back
+in) and ~5 s is a negative assertion that the app does not re-read its own write. The second is a
+deliberate sleep and has to stay; the first has not been looked at.
+
+> **Historical note.** An earlier version of this table listed `experiment names` at 29.7 s and
+> was read for a long time as "naming a run is expensive". It was not: those were the *original*
+> per-group minimums on `8ddad14`, before §1, and nearly all of that 29.7 s was the tab leak's
+> `deleteDatabase` stall landing on this group's `emptyReload`. Measured in place afterwards the
+> group is **2 s**. A before-table left sitting under an after-heading sent one investigation
+> chasing a cost that had been fixed a year of commits earlier — hence the numbers above are
+> re-measured rather than carried forward.
 
 ### The one big lever not pulled
 
