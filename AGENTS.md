@@ -64,6 +64,11 @@ The operator does manual testing and pushes upstream to deploy live when good, n
   plainly.
 - If the fast-forward fails, the branch has fallen behind — rebase it again. Never reach for
   `--no-ff` or `-m` to get unstuck, and never rebase commits already reachable from `origin/main`.
+- **`main` only ever moves forward.** Never `reset`, `branch -f` or `checkout -B` it: other agents
+  land here concurrently, and a failed fast-forward means your branch is stale, not that `main` is
+  wrong. A `reset` to get unstuck cost two agents their commits on 2026-08-09.
+- To revise work already on `main`, commit the fix on top of current `main`. Re-landing an edited
+  copy of the old commit can't fast-forward, which is what tempts the `reset` above.
 - Don't open PRs, and don't create branches on `origin`. Pushing `main` to `origin` is a deploy
   step the user performs by hand after a round of manual testing — don't push, and never
   force-push.
