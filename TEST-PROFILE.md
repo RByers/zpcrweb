@@ -9,11 +9,11 @@ estimate of what a suite actually costs.
 | suite | command | before | after | tests |
 |---|---|---|---|---|
 | core (vitest) | `npm test` | 6.2 s | **6.2 s** | 540 in 39 files |
-| UI (browser) | `npm run test:ui` | 159.5 s | **99.9 s** | 337 checks in 30 groups |
+| UI (browser) | `npm run test:ui` | 159.5 s | **94.5 s** | 337 checks in 30 groups |
 | root vitest | `npx vitest run` | 21.1 s | **4.6 s** | 540, not 2104 |
 
-The browser suite is **37% faster** and no longer the flake source it was: 8 consecutive green
-runs at the end, against 3 failures in 7 runs when this started.
+The browser suite is **41% faster** and no longer the flake source it was: 6 consecutive green runs
+at the end, against 3 failures in 7 runs when this started.
 
 Core was measured and left alone — 11.3 s of work parallelised into 6.2 s of wall time, with
 only `zpcrwebSettings` (3.1 s) and `pcrd` (3.1 s) above a second, both dominated by real
@@ -45,10 +45,10 @@ asserted, through three new helpers in `harness.mjs`:
 | `waitStable(read)` | the value stopped changing. For state the app writes more than once per action. |
 | `clickUntil(cdp, label, settled)` | re-click a control until it takes. |
 
-83 of the 113 sleeps are gone. The 30 that remain are deliberate and each says why in a comment:
-**negative assertions** (nothing happened — there is no state change to wait for) and **rate
-limits** whose interval is a constant in the app (`DISK_WRITE_INTERVAL_MS` is 3 s, so
-`folderChecks` outwaits it).
+Across this and the write-behind change below, the 113 sleeps are down to **31**, and the 54.5 s
+they cost is down to **13.2 s**. What remains is deliberate and each one says why in a comment:
+mostly **negative assertions**, where nothing is going to happen and so there is no state change to
+wait for.
 
 > One conversion was tried and reverted: polling the file's mtime instead of outwaiting the disk
 > write throttle. An open `FileSystemWritableFileStream` holds an exclusive lock, so a reader
@@ -56,12 +56,43 @@ limits** whose interval is a constant in the app (`DISK_WRITE_INTERVAL_MS` is 3 
 > stalled the page long enough to trip the 30 s CDP watchdog. The 500 ms it might have saved was
 > not worth racing the writer for. The comment in the code says so, so it isn't re-proposed.
 
-### 3. `waitFor`'s poll interval, 150 ms → 50 ms
+### 3. Don't wait out a write-behind interval — hide the page
+
+The app writes to storage behind a rate limiter: 3 s for the write-back to a file on disk, 2 s for
+a protocol edit, and **60 s** for a `.zpcr`'s analysis settings. Six checks want the edit *on
+storage* rather than merely on screen, and were each sleeping through some part of that.
+
+They don't have to, and no test-only hook is needed for it. `WriteThrottle.attach` already flushes
+everything pending on `visibilitychange` → hidden, because a backgrounded tab may never come back.
+`flushWrites(cdp)` drives that same listener from outside — the shortcut the tests want is the
+production path.
+
+Two details worth recording:
+
+- **Chrome removed `Emulation.setPageVisibilityState`**, and `Page.setWebLifecycleState` freezes
+  the page without reliably thawing it — it stayed `hidden`, which throttles every timer
+  afterwards. So the helper overrides `document.visibilityState` for exactly as long as the event
+  takes to dispatch and puts it straight back.
+- **The flush is started, not awaited.** The listener is `void this.flushAll()`, so there is no
+  completion signal. Callers still wait for the write to land — but for something short and
+  bounded rather than for a rate limit.
+
+Worth 5.6 s of sleeping (18.8 s of fixed waits down to 13.2 s), and it removes the suite's
+dependence on *guessing* that a given edit is the first one in its window — the one the limiter
+writes immediately. A second edit inside the window is a pending trailing write, and those checks
+were previously passing only because navigating away fires `pagehide`, which flushes too:
+accidentally correct, and now deliberate.
+
+**One check still waits out the real timer**, and must: `folderChecks`' "An edit in the app is
+written back to the real file on disk". Since `flushWrites` short-circuits the timer everywhere
+else, a suite with no such check would pass with the timer removed entirely.
+
+### 4. `waitFor`'s poll interval, 150 ms → 50 ms
 
 Every wait overshot by 75 ms on average across ~200 call sites. Worth ~8 s — but on its own it
 *broke* the suite, which turned out to be the most useful thing it did (below).
 
-### 4. `npx vitest run` walked into `.claude/worktrees/`
+### 5. `npx vitest run` walked into `.claude/worktrees/`
 
 Those are complete checkouts of this repo, one per branch in flight, each with its own copy of
 every test file. A root-level `npx vitest run` collected 152 files and 2104 tests instead of 39
@@ -69,7 +100,7 @@ and 540, and ran whatever stale code those branches were sitting on. A root `vit
 adds `**/.claude/**` to the default excludes: **21.1 s → 4.6 s**, and it now tests the working
 tree rather than five of them. `npm test` was never affected — it runs `-w @zpcrweb/core`.
 
-## Four real bugs the speedup exposed
+## Six real bugs the speedup exposed
 
 Dropping the fixed sleeps turned three latent races into deterministic failures, which is how
 they got found. All three were in the tests, not the app.
@@ -98,17 +129,30 @@ once settling into a view, so acting on the first write can put `back()` on an e
 about to be superseded — "back() restores the previous view" failed intermittently, both before
 and after this work. `waitStable` fixed it.
 
-## Two flakes that were already there
+**A hash write plus `tabBecomes` is not a navigation.** `tabBecomes` *reports* where the view
+settled rather than insisting on it, so a hash write that lost a race left `closeConfirmChecks` on
+the Files view and the next wait timed out on a button that was never going to appear. This is the
+intermittent "timed out waiting for Overview's download button" reported earlier as a main-side
+flake — it was in the test. It uses `clickTab` now, which presses the tab and confirms it took.
 
-Both were observed on unmodified `main` and are now gone, but neither was fixed here — the
-commits that fixed them were the operator's, landing while this was being measured:
+**A single synthesized mouse move can be dropped.** After a Cq drag, `cqDragChecks` moved the
+pointer once to prove the plot is not left deaf. The drag's teardown finishes a frame or two after
+`is-cqdrag` clears, and a move arriving inside that window lands on a plot whose `pointerEvents` is
+still `none` — dropped, with nothing else arriving to re-arm the cursor. A real pointer emits a
+stream of moves; the check re-dispatches until it takes.
+
+## One flake that was already there
+
+Observed on unmodified `main` and now gone, but not fixed here — the commits that fixed it were
+the operator's, landing while this was being measured:
 
 - `folderChecks`' "Granting the folder back reads in every open file in it" — failed 5 of 9 runs
   on `8ddad14`, fixed by `0497e1c` / `932c9db`.
-- `closeConfirmChecks`' "timed out waiting for Overview's download button" — hit 3 of 7 runs on
-  `ef2cc98`, patched and unpatched alike. Not seen since.
 
-## Where the remaining 100 s goes
+(The other one reported at the time, `closeConfirmChecks`' download button, turned out to be the
+test's own race — see above.)
+
+## Where the remaining 95 s goes
 
 Per-group minimums from the original profile (30 groups, on `8ddad14`). The shape is what
 matters — the three groups at the top were half the suite:
@@ -142,3 +186,12 @@ near 30 s. It was left alone deliberately:
 - Output needs buffering per group or the log becomes unreadable.
 - It is a structural change to how the suite runs, and worth doing on its own rather than
   bundled with a set of measured, individually-reversible fixes.
+
+### Not done: unit tests for the write throttle
+
+`WriteThrottle` takes a `now()` override that is commented "Overridable for tests", and there are
+no tests. `apps/web` has no test runner at all — every unit test in the repo lives in
+`packages/core`. The rate limiter's contract (first edit immediate, later ones coalesced into one
+trailing write, a throwing `write` re-arming) is exactly the sort of thing that belongs in a fast
+unit test rather than in a browser, and today it is only covered incidentally, through the one
+`folderChecks` case above. Standing up a Vitest project for `apps/web` is its own piece of work.

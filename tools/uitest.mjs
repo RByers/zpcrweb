@@ -19,6 +19,7 @@ import {
   activeTab,
   buildCore,
   cfxPassword,
+  flushWrites,
   loadFile,
   openPage,
   setFileInput,
@@ -636,17 +637,29 @@ async function routingChecks(chrome, origin, pw) {
   const fwd = await tabBecomes(cdp, "Plates");
   check("forward() re-applies the view", fwd === "Plates", `tab "${fwd}"`);
 
+  /**
+   * Navigate to `url` and wait until the app is actually up.
+   *
+   * `document.readyState === "complete"` only says the document parsed; the app then hydrates
+   * from IndexedDB, which for a 400 KB archive is parse plus analysis. Starting `tabBecomes`'
+   * own 8 s clock at readyState puts hydration inside it, and on a loaded machine that is how
+   * "cold deep link opens the named view" failed while the app was doing nothing wrong.
+   */
+  const coldLoad = async (url) => {
+    await cdp.send("Page.navigate", { url });
+    await waitFor(() => cdp.eval("document.readyState==='complete'"), { what: "reload" });
+    await waitFor(() => cdp.eval(`!!document.querySelector('.viewbar [role="tab"]')`), {
+      what: `the app to come up on ${url.replace(/^.*#/, "#")}`,
+    });
+  };
+
   // A cold load must honor the hash without flashing the default view first.
-  await cdp.send("Page.navigate", { url: `${origin}#file=20260720_FirstQualification.zpcr&view=reference` });
-  await waitFor(() => cdp.eval("document.readyState==='complete'"), { what: "reload" });
+  await coldLoad(`${origin}#file=20260720_FirstQualification.zpcr&view=reference`);
   const cold = await tabBecomes(cdp, "Reference");
   check("cold deep link opens the named view", cold === "Reference", `tab "${cold}"`);
 
   // The Files table is not a lens on the active file, but it is linkable like any other view.
-  await cdp.send("Page.navigate", {
-    url: `${origin}#file=20260720_FirstQualification.zpcr&view=files`,
-  });
-  await waitFor(() => cdp.eval("document.readyState==='complete'"), { what: "reload" });
+  await coldLoad(`${origin}#file=20260720_FirstQualification.zpcr&view=files`);
   const filesTab = await tabBecomes(cdp, "Files");
   check("cold deep link opens the Files table", filesTab === "Files", `tab "${filesTab}"`);
   check(
@@ -656,13 +669,11 @@ async function routingChecks(chrome, origin, pw) {
   );
 
   // Files live in IndexedDB and can't be fetched from a link, so an unknown name must degrade.
-  await cdp.send("Page.navigate", { url: `${origin}#file=nope.zpcr&view=plates` });
-  await waitFor(() => cdp.eval("document.readyState==='complete'"), { what: "reload" });
+  await coldLoad(`${origin}#file=nope.zpcr&view=plates`);
   const unknown = await tabBecomes(cdp, "Plates");
   check("unknown file falls back but keeps the view", unknown === "Plates", `tab "${unknown}"`);
 
-  await cdp.send("Page.navigate", { url: `${origin}#view=notaview` });
-  await waitFor(() => cdp.eval("document.readyState==='complete'"), { what: "reload" });
+  await coldLoad(`${origin}#view=notaview`);
   const junk = await waitValue(() => activeTab(cdp), (t) => t !== "none");
   check("invalid view value falls back to a real tab", junk !== "none", `tab "${junk}"`);
 
@@ -1519,17 +1530,21 @@ async function cqDragChecks(chrome, origin) {
     )) === false,
   );
   // The other half of that: a drag must not leave the plot permanently deaf to the mouse.
-  await cdp.send("Input.dispatchMouseEvent", {
-    type: "mouseMoved",
-    x: target.x - 40,
-    y: target.y,
-    buttons: 0,
-  });
-  // uPlot re-arms its cursor on the next frame after the move; the tooltip is the last part to
-  // come back, so it is what says the plot is live again.
-  await waitFor(() => cdp.eval(`!!document.querySelector(".chart__tip")`), {
-    what: "the chart's cursor to revive",
-  });
+  //
+  // Re-dispatched until it takes, rather than sent once. A real pointer emits a stream of moves,
+  // and the drag's teardown finishes a frame or two after `is-cqdrag` clears — a single
+  // synthesized move arriving inside that window lands on a plot whose `pointerEvents` is still
+  // `none`, is dropped, and nothing else ever comes to re-arm the cursor.
+  const revive = async () => {
+    await cdp.send("Input.dispatchMouseEvent", {
+      type: "mouseMoved",
+      x: target.x - 40,
+      y: target.y,
+      buttons: 0,
+    });
+    return cdp.eval(`!!document.querySelector(".chart__tip")`);
+  };
+  await waitFor(revive, { timeout: 8000, what: "the chart's cursor to revive" });
   const revived = await cdp.eval(`({
     overEvents: getComputedStyle(document.querySelector(".u-over")).pointerEvents,
     points: [...document.querySelectorAll(".u-cursor-pt")]
@@ -2824,7 +2839,10 @@ async function instrumentRunChecks(chrome, origin) {
   // written under the new name was assembled from the in-memory archive, which deliberately carries
   // no settings entry. So the name went back to being required on the next load, and with it the
   // red field and the "required" badge (`useZpcrStore`'s `contentToStore`).
-  await sleep(700); // the archive rewrite is immediate but asynchronous (`analysisPersist.ts`)
+  await flushWrites(cdp);
+  // Started, not awaited (see `flushWrites`) — this is the write landing, not the rate
+  // limit expiring.
+  await sleep(200);
   await cdp.send("Page.navigate", {
     url: `${origin}#file=${encodeURIComponent(named.file)}&view=overview`,
   });
@@ -3312,9 +3330,13 @@ async function experimentNameChecks(chrome, origin) {
   const named = await headline();
   check("a typed name replaces the derived one everywhere", named.name === "Renamed RVP", JSON.stringify(named));
 
-  // The archive rewrite is rate-limited but writes the first edit immediately
-  // (`analysisPersist.ts`), so a reload is enough — no minute of waiting.
-  await sleep(700);
+  // The archive rewrite is rate-limited (`analysisPersist.ts`, a 60 s window). Rather than bet on
+  // this being the first edit — the one the limiter writes immediately — hide the page, which is
+  // what makes a real backgrounded tab durable, and flush whatever is pending.
+  await flushWrites(cdp);
+  // Started, not awaited (see `flushWrites`) — this is the write landing, not the rate
+  // limit expiring.
+  await sleep(200);
   await cdp.send("Page.navigate", { url: `${origin}#file=${EXAMPLE}&view=overview` });
   await tabBecomes(cdp, "Overview");
   await waitFor(async () => (await headline()).name !== null, { what: "the reloaded headline" });
@@ -3568,8 +3590,11 @@ async function openFilesChecks(chrome, origin) {
   await loadFile(cdp, join(REPO, "samples", EXAMPLE));
   await waitFor(() => chipPresent(cdp, "S183"), { what: "the .zpcr chip again" });
   // The catalog write is asynchronous, and reloading before it lands is what this check would
-  // otherwise blame on the app. There is nothing on screen for it, so it stays elapsed time.
-  await sleep(700);
+  // otherwise blame on the app.
+  await flushWrites(cdp);
+  // Started, not awaited (see `flushWrites`) — this is the write landing, not the rate
+  // limit expiring.
+  await sleep(200);
   await cdp.eval(`window.location.reload()`);
   await waitFor(() => cdp.eval("document.readyState==='complete'"), { what: "reload" });
   await waitFor(async () => (await chips()) === 1, { what: "the open file after a reload" });
@@ -3692,7 +3717,10 @@ async function closeConfirmChecks(chrome, origin) {
   );
 
   // The flag is about the copy on disk, so it has to outlive this browser session.
-  await sleep(700); // the archive rewrite is immediate but asynchronous (`analysisPersist.ts`)
+  await flushWrites(cdp);
+  // Started, not awaited (see `flushWrites`) — this is the write landing, not the rate
+  // limit expiring.
+  await sleep(200);
   await cdp.send("Page.navigate", { url: `${origin}#file=${EXAMPLE}&view=overview` });
   await tabBecomes(cdp, "Overview");
   await waitFor(async () => (await chip())?.modified === true, { what: "the flag after a reload" });
@@ -3731,8 +3759,13 @@ async function closeConfirmChecks(chrome, origin) {
   );
 
   // Download it: the edits are on disk now, so the ✕ stops asking.
-  await cdp.eval(`window.location.hash = "view=overview", undefined`);
-  await tabBecomes(cdp, "Overview");
+  //
+  // `clickTab` rather than a hash write plus `tabBecomes`: the latter *reports* where the view
+  // settled instead of insisting, so a hash write that lost a race left the page on Files and the
+  // wait below then timed out on a button that was never going to appear — the intermittent
+  // "timed out waiting for Overview's download button". `clickTab` presses the tab and confirms
+  // it took.
+  await clickTab(cdp, "Overview");
   // The tab is current before its toolbar is painted, so waiting for the button is the difference
   // between this passing and throwing on a null.
   await waitFor(
@@ -4563,7 +4596,10 @@ async function explodedStorageChecks(chrome, origin) {
   // Editing it must not force it back into a ZIP: renaming the experiment rewrites one JSON entry.
   await setExperimentName(cdp, "Still Running Renamed");
   await waitFor(() => chipPresent(cdp, "Still Running Renamed"), { what: "the renamed chip" });
-  await sleep(700); // the archive rewrite is immediate but asynchronous (`analysisPersist.ts`)
+  await flushWrites(cdp);
+  // Started, not awaited (see `flushWrites`) — this is the write landing, not the rate
+  // limit expiring.
+  await sleep(200);
   // Looked up by file name, which a renamed *experiment* doesn't change — the chip's label does.
   const edited = await recordFor("Still_Running");
   check(
@@ -5285,6 +5321,12 @@ async function folderChecks(chrome, origin) {
     { what: "the Overview name control" },
   );
   await setExperimentName(cdp, "Renamed On Disk");
+  // **The one check that waits out the real timer.** Everywhere else the suite calls
+  // `flushWrites` to hurry a rate-limited write along, which is a shortcut through the same
+  // listener a backgrounded tab uses — and a shortcut that works even if the timer never fires
+  // at all. So exactly one place has to prove the ordinary path: an edit reaches the file on
+  // disk on its own, with the tab never hidden and nothing but `DISK_WRITE_INTERVAL_MS` making
+  // it happen. Don't "optimise" this one; it is the only thing standing behind the others.
   await waitFor(
     async () => (await diskFile(["runs", "2026", "nested.zpcr"])).mtime !== before.mtime,
     { timeout: 15000, what: "the edit to reach the file on disk" },
@@ -5356,16 +5398,16 @@ async function folderChecks(chrome, origin) {
   // Now the shape that kills an un-re-armed watch. Rename again so there is something to undo.
   await setExperimentName(cdp, "Second Rename");
   await waitFor(async () => (await shownName()) === "Second Rename", { what: "the second rename" });
-  // Deliberately elapsed time. The app's own write has to reach the disk before the external one
-  // below, or the refresh that follows is ambiguous about which write it noticed, and that write
-  // is rate-limited to `DISK_WRITE_INTERVAL_MS` (3 s) — so one interval plus slack.
+  // The app's own write has to reach the disk before the external one below, or the refresh that
+  // follows is ambiguous about which write it noticed. That write is rate-limited to
+  // `DISK_WRITE_INTERVAL_MS` (3 s), so this used to outwait the interval blind. Hiding the page
+  // flushes it now instead — the same thing a real backgrounded tab does.
   //
-  // Polling the file's mtime instead looks like the obvious improvement and is not: an open
-  // `FileSystemWritableFileStream` holds an exclusive lock, so a reader that arrives mid-write
-  // queues behind it, and polling every 100 ms across the app's own write window stalled the
-  // page long enough to trip the 30 s CDP watchdog. The 500 ms this might save is not worth
-  // racing the writer for.
-  await sleep(3500);
+  // Polling the file's mtime to see it land looks like the next improvement and is not: an open
+  // `FileSystemWritableFileStream` holds an exclusive lock, so a reader arriving mid-write queues
+  // behind it, and polling across the write window stalled the page into the 30 s CDP watchdog.
+  await flushWrites(cdp);
+  await sleep(400);
   await externalWrite(["runs", "2026"], "nested.zpcr", true);
   let rearmed = "";
   try {

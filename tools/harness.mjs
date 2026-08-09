@@ -96,6 +96,38 @@ export async function waitValue(read, pred, { timeout = 8000, interval = 50 } = 
 }
 
 /**
+ * Make the app flush its pending write-behind, by hiding the page.
+ *
+ * Three of the app's writes are rate-limited rather than immediate — a `.zpcr`'s analysis
+ * settings, a `.prcl.txt`'s protocol text, and the write-back to a file on disk (`writeThrottle.ts`,
+ * `analysisPersist.ts`). A test that wants the edit *on storage* rather than merely on screen
+ * therefore has to wait out an interval it does not control, up to 60 s for the analysis one.
+ *
+ * It doesn't have to. `WriteThrottle.attach` already flushes everything pending on
+ * `visibilitychange` → hidden, because a backgrounded tab may never come back — so the shortcut
+ * the tests need is the production path, driven from outside. No test-only hook exists in the app
+ * and none should: this exercises the same listener a real backgrounded tab does.
+ *
+ * Chrome no longer implements `Emulation.setPageVisibilityState`, and `Page.setWebLifecycleState`
+ * freezes the page without reliably thawing it (it stayed `hidden`, which throttles every timer
+ * afterwards). So the visibility is overridden for exactly as long as the event takes to
+ * dispatch, and put straight back — `document.visibilityState` reads `visible` again on return.
+ *
+ * The flush is started, not awaited: the listener is `void this.flushAll()`, so there is no
+ * completion signal to hook. Callers still need to wait for the write to land — but for
+ * something short and bounded, rather than for a rate limit.
+ */
+export async function flushWrites(cdp) {
+  await cdp.eval(`(() => {
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "hidden" });
+    document.dispatchEvent(new Event("visibilitychange"));
+    delete document.visibilityState;
+    document.dispatchEvent(new Event("visibilitychange"));
+    return document.visibilityState;
+  })()`);
+}
+
+/**
  * Poll `read()` until it returns the same value `quiet` ms running, and return it.
  *
  * For state the app writes more than once per user action. `waitValue(…, changed)` returns on the

@@ -26,6 +26,12 @@
  * Neither can be made a hard guarantee — IndexedDB is asynchronous and a torn-down page won't
  * wait for it. The exposure is bounded to edits made in the last window of a session that ended
  * without the tab ever being hidden.
+ *
+ * The browser test suite leans on the `visibilitychange` flush as well as depending on it: rather
+ * than wait out an interval that can be a minute long, a check hides the page and the pending
+ * write lands (`tools/harness.mjs`'s `flushWrites`). So this listener is load-bearing for the
+ * tests, not only for a real backgrounded tab — removing it would make a dozen checks fail as
+ * timeouts a long way from here.
  */
 
 /** What a throttle needs from its owner. */

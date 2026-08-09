@@ -251,11 +251,20 @@ is a flake — the suite has been both. `harness.mjs` has the vocabulary:
 - `clickTab` / `clickButton` / `clickUntil` — click a control that may not have rendered yet.
   `element?.click()` on a control React hasn't drawn is a silent no-op, and the caller then times
   out on a view it never actually asked for.
+- `flushWrites(cdp)` — **don't wait out a write-behind interval.** The app's writes to storage are
+  rate-limited (`writeThrottle.ts`, `analysisPersist.ts` — up to 60 s), and `WriteThrottle.attach`
+  already flushes everything pending on `visibilitychange` → hidden, because a backgrounded tab
+  may never come back. This hides the page and puts it straight back, so the flush a real
+  backgrounded tab gets is the one the test gets. Add no test-only hook to the app for this; the
+  production listener is the hook.
 
-A fixed `sleep` is right for exactly two things, and both should say so in a comment: a **negative**
-assertion (nothing happened — there is no state change to wait for), and outwaiting a **rate limit**
-whose interval is a constant in the app (`DISK_WRITE_INTERVAL_MS`). Reaching for one anywhere else
-means the observable hasn't been found yet.
+A fixed `sleep` is right for one thing, and it should say so in a comment: a **negative** assertion
+— nothing happened, so there is no state change to wait for. Reaching for one anywhere else means
+either the observable hasn't been found yet, or a `flushWrites` has been missed.
+
+**Exactly one check waits out a real rate limit**, in `folderChecks`: "An edit in the app is written
+back to the real file on disk". Since `flushWrites` short-circuits the timer everywhere else, that
+one has to prove the timer fires at all. Leave it slow.
 
 Both tools share `tools/harness.mjs` (the CDP client and dev-server/Chrome plumbing); **add new
 checks there rather than starting a third script.** Note that rail hover ("peek") needs a real
