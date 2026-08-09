@@ -84,6 +84,23 @@ export function ReportFileIcon() {
   );
 }
 
+/**
+ * A file the app is holding but currently cannot read — an exclamation in a circle, drawn where
+ * the kind icon would be. It replaces the kind icon rather than sitting beside it because the kind
+ * is a guess at that point: it came from the file's name, not from bytes anyone has read.
+ *
+ * Drawn in `currentColor` like the rest, and the Files table sets that to the app's danger red.
+ */
+export function FileErrorIcon() {
+  return (
+    <Svg>
+      <circle cx="8" cy="8" r="6.2" />
+      <path d="M8 4.6v4.2" />
+      <circle cx="8" cy="11.4" r="0.75" fill="currentColor" stroke="none" />
+    </Svg>
+  );
+}
+
 /** The icon for a loaded file, chosen by what the file is rather than how it is encoded. */
 export function FileKindIcon({ kind }: { kind: FileKind }) {
   switch (fileCategory(kind)) {

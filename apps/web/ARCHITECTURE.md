@@ -533,7 +533,25 @@ records. The app is a set of open documents, not a library with a loaded subset.
 `files` and `loaded` are two views of the same set, and come apart only while a file's bytes are on
 their way in, or when they can't be got at all — a disk-backed file whose folder is waiting on its
 permission back is a row with no content behind it yet, and reads itself in as soon as the app can
-reach it (`retryUnread`, called when a folder is granted, and by `setActive`).
+reach it (`retryUnread`, called when a folder is granted, and by `setActive`). Such a row says so
+where its type icon goes, with a red badge (`ZpcrStore.unreadableIds`), and **clicking it is what
+asks for the permission back** — `setActive` is the one read path with a user gesture behind it, so
+it is the one that may call `requestPermission` (`diskFolders.ts`'s `ensureDiskAccess`). That click
+also stays in the Files view rather than going to the file's Overview, since until the browser's
+question is answered there is nothing to show there.
+
+A lapsed permission is therefore **not** an error the app reports. It used to be, and the banner it
+raised sat over the folder's own **Grant access** button quoting the platform at the reader
+("Failed to execute 'getFileHandle' … not allowed by the user agent") — a message about the call
+that failed rather than about anything they could do. Only a read that fails for some *other*
+reason — a file deleted underneath us, bytes that no longer decode — reaches the error banner
+(`useZpcrStore`'s `noteReadFailure`).
+
+The banner itself (`App.tsx`'s `ErrorBanner`) has a ✕. It is fixed over the bottom-right corner of
+whatever is on screen, so a message nobody can clear goes on hiding the controls underneath it for
+the rest of the session — which is how the lapsed-permission error came to be sitting on top of the
+button that fixed it. Dismissing clears `ZpcrStore.error` and does nothing else: nothing is retried,
+nothing is undone.
 
 Outside the set entirely are the files sitting in a **granted folder** on disk that the app has not
 opened. They appear in the Files view's lower pane and nowhere else, they have no record anywhere,

@@ -165,6 +165,32 @@ function Logo({ onClick }: { onClick: () => void }) {
   );
 }
 
+/**
+ * The app's one error banner — whatever `ZpcrStore.error` last said, in the bottom-right corner,
+ * over everything.
+ *
+ * It has a ✕ because it sits *over* the page rather than in it: an error left on screen covers the
+ * controls underneath it, which for a folder whose permission lapsed were the "Grant access" button
+ * that would have fixed the thing it was complaining about. Dismissing is the only thing it does —
+ * nothing is retried, nothing is undone; the message has been read.
+ */
+function ErrorBanner({ message, onDismiss }: { message: string; onDismiss: () => void }) {
+  return (
+    <div className="app__error mono" role="alert">
+      <span>{message}</span>
+      <button
+        type="button"
+        className="app__errordismiss"
+        onClick={onDismiss}
+        title="Dismiss"
+        aria-label="Dismiss this message"
+      >
+        ✕
+      </button>
+    </div>
+  );
+}
+
 export function App() {
   const store = useZpcrStore();
   const { active, activeRun, settings } = store;
@@ -569,10 +595,17 @@ export function App() {
    *
    * A file that isn't loaded yet has no decoded run to ask, so its enabled set isn't known here;
    * Overview is where such a click lands, and the strip fills in as the bytes arrive.
+   *
+   * The exception is a file the app currently *can't* read (`store.unreadableIds` — a folder whose
+   * permission lapsed): the click is what asks for the access back, and until that is answered
+   * there is nothing to show. So it selects and stays, leaving the row and its badge in front of
+   * the user; a second click, once the folder is granted, goes and looks at the file like any
+   * other. Same reasoning as the folder tree below, where a click ticks a file open and stays put.
    */
   const selectFromTable = (id: string, view?: ViewId) => {
     const f = store.loaded.find((x) => x.name === id);
     store.setActive(id);
+    if (!f && store.unreadableIds.has(id)) return;
     store.setView(
       view ?? (f ? enabledViewsFor(f.kind, store.runs.get(id)?.zpcr)[0] ?? "overview" : "overview"),
     );
@@ -720,7 +753,7 @@ export function App() {
             Connect an instrument over USB
           </button>
         </div>
-        {store.error && <div className="app__error mono">{store.error}</div>}
+        {store.error && <ErrorBanner message={store.error} onDismiss={store.clearError} />}
       </div>
     );
   }
@@ -814,6 +847,7 @@ export function App() {
             files={store.files}
             activeName={store.activeName}
             modifiedIds={store.modifiedIds}
+            unreadableIds={store.unreadableIds}
             runs={store.runs}
             plateFiles={store.plateFiles}
             experiments={store.experiments}
@@ -1074,7 +1108,7 @@ export function App() {
         )}
       </main>
 
-      {store.error && <div className="app__error mono">{store.error}</div>}
+      {store.error && <ErrorBanner message={store.error} onDismiss={store.clearError} />}
     </div>
   );
 }

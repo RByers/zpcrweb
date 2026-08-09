@@ -708,6 +708,16 @@ async function loadChecks(chrome, origin) {
   const stillWelcome = await cdp.eval(`!!document.querySelector(".app--empty")`);
   check("a #load= that 404s reports an error and keeps the welcome screen", errored && stillWelcome);
 
+  // 5. …and the banner can be got rid of. It floats over the bottom-right corner of the page, so
+  // an error with no ✕ covers whatever is under it — including, for a folder whose permission has
+  // lapsed, the "Grant access" button that would fix it — for the rest of the session.
+  await cdp.eval(`document.querySelector(".app__errordismiss").click()`);
+  await sleep(200);
+  check(
+    "…and the error banner's ✕ dismisses it",
+    !(await cdp.eval(`!!document.querySelector(".app__error")`)),
+  );
+
   cdp.close();
 }
 
@@ -4956,6 +4966,61 @@ async function folderChecks(chrome, origin) {
     "Double-clicking a file that is only on disk reads it and opens it on Overview",
     openedDisk === "Overview" && JSON.parse(openedRow).loaded && JSON.parse(openedRow).selected,
     JSON.stringify({ tab: openedDisk, row: openedRow }),
+  );
+
+  // ── When the grant expires underneath the app ──────────────────────────────────────────────
+  // A folder grant does not survive a reload unless the browser has been told to keep it, so this
+  // is the *ordinary* state of a disk-backed file the morning after — and the state the app used
+  // to report as a red box of the platform's own wording, sitting over the Grant access button.
+  //
+  // A grant can't be revoked from CDP, and an OPFS handle is permanently granted, so the lapse is
+  // reproduced where it is felt: every handle method rejects with `NotAllowedError`, which is
+  // exactly what Chrome does to a real folder whose permission has gone. Installed before the
+  // document so the app's own hydration read is the one that hits it.
+  await cdp.send("Page.addScriptToEvaluateOnNewDocument", {
+    source: `(() => {
+      const deny = () => Promise.reject(new DOMException("denied", "NotAllowedError"));
+      FileSystemDirectoryHandle.prototype.getFileHandle = deny;
+      FileSystemDirectoryHandle.prototype.getDirectoryHandle = deny;
+    })()`,
+  });
+  await cdp.send("Page.navigate", { url: "about:blank" });
+  await sleep(200);
+  await cdp.send("Page.navigate", { url: origin });
+  await waitFor(() => cdp.eval("document.readyState==='complete'"), { what: "reload" });
+  await clickTab(cdp, "Files");
+  const lapsed = () =>
+    cdp
+      .eval(
+        `(() => JSON.stringify({
+           rows: document.querySelectorAll(".filesview__row").length,
+           badges: document.querySelectorAll(".filesview__kind.is-error").length,
+           banner: !!document.querySelector(".app__error"),
+         }))()`,
+      )
+      .then((v) => JSON.parse(v));
+  await waitFor(async () => (await lapsed()).badges > 0, {
+    timeout: 10000,
+    what: "the unreadable badge",
+  });
+  const lapsedState = await lapsed();
+  check(
+    "A file whose folder permission has expired stays listed, with a read-error badge",
+    lapsedState.rows === 2 && lapsedState.badges === 2,
+    JSON.stringify(lapsedState),
+  );
+  check("…and says so on the row rather than in an error banner", lapsedState.banner === false);
+
+  // Clicking it asks for the permission back — which this page will go on refusing, so what is
+  // being checked is that the refusal leaves the row exactly as it was: still listed, still
+  // badged, still clickable, and still not shouting.
+  await cdp.eval(`document.querySelector(".filesview__row").click()`);
+  await sleep(600);
+  const retried = await lapsed();
+  check(
+    "…and clicking it retries rather than dropping it",
+    retried.rows === 2 && retried.badges === 2 && retried.banner === false,
+    JSON.stringify(retried),
   );
 
   cdp.close();

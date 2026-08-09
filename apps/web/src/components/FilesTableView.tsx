@@ -15,7 +15,9 @@
  * holding decoded, so there is nothing to cache: the numbers are the ones the rest of the app is
  * showing, and a rename or an attached plate updates the row as it happens rather than after a
  * write lands. A row whose file hasn't been read yet — a folder waiting on its permission back —
- * renders dashes, which is the honest answer.
+ * renders dashes, which is the honest answer, and carries a red badge where its type icon goes
+ * (`unreadableIds`). Such a file is still open and still listed: it is the app's *access* to the
+ * disk that expired, not the file, and clicking the row is what asks for the access back.
  *
  * The ✕ at the right of each row **closes** the file: bytes out of memory, records out of
  * IndexedDB, in one act. It is the same control as the chip's, and the same component
@@ -43,7 +45,7 @@ import { formatCompactDateTime, type ExperimentIdentity } from "../lib/experimen
 import { plateDisplayName } from "../lib/plateNames";
 import { fluorColor } from "../lib/fluorColors";
 import { usePltdPassword } from "../state/pltdPassword";
-import { FileKindIcon } from "./FileIcons";
+import { FileErrorIcon, FileKindIcon } from "./FileIcons";
 import { FolderSection } from "./FolderSection";
 import type { DiskTree } from "../state/useDiskTree";
 import type { DiskSource } from "../state/db";
@@ -63,6 +65,10 @@ interface Props {
    * when given, overrides the usual first-enabled-tab landing spot — the Protocol/Plate/Reads cells
    * use it to go straight to that view rather than Overview. */
   onSelectFile: (id: string, view?: ViewId) => void;
+  /** Open files the app currently can't read, id → why (`ZpcrStore.unreadableIds`). Such a row
+   * keeps its place and wears a red badge where its type icon goes; clicking it is what asks for
+   * the folder's permission back. */
+  unreadableIds: ReadonlyMap<string, string>;
   /** Close the file — see `ZpcrStore.closeFile`. */
   onCloseFile: (id: string) => void | Promise<void>;
   /** Leave the Files view. */
@@ -118,6 +124,8 @@ interface Row {
   samples: string[];
   lastModified: number;
   modified: boolean;
+  /** Why this file couldn't be read, or null — see {@link Props.unreadableIds}. */
+  unreadable: string | null;
 }
 
 type SortKey =
@@ -284,8 +292,13 @@ function FilesRow({
       onMouseLeave={() => setCardPos(null)}
     >
       <td className="filesview__typecol">
-        <span className="filesview__kind">
-          <FileKindIcon kind={r.kind} />
+        {/* The badge is the row's whole account of the failure — the cell's title carries the
+            sentence, and the click that follows is what fixes it. */}
+        <span
+          className={"filesview__kind" + (r.unreadable ? " is-error" : "")}
+          title={r.unreadable ?? undefined}
+        >
+          {r.unreadable ? <FileErrorIcon /> : <FileKindIcon kind={r.kind} />}
         </span>
         <span className="mono">{EXTENSION_TEXT[r.kind]}</span>
       </td>
@@ -380,6 +393,7 @@ export function FilesTableView({
   files,
   activeName,
   modifiedIds,
+  unreadableIds,
   runs,
   plateFiles,
   experiments,
@@ -419,9 +433,10 @@ export function FilesTableView({
         samples: plate?.samples ?? [],
         lastModified: f.lastModified,
         modified: modifiedIds.has(f.name),
+        unreadable: unreadableIds.get(f.name) ?? null,
       };
     });
-  }, [files, modifiedIds, runs, plateFiles, experiments, password]);
+  }, [files, modifiedIds, unreadableIds, runs, plateFiles, experiments, password]);
 
   const sorted = useMemo(() => sortRows(rows, sortKey, dir), [rows, sortKey, dir]);
 

@@ -170,6 +170,25 @@
   border-radius: var(--radius-sm);
   color: #ffd9d9;
   z-index: 20;
+  /* The ✕ keeps its own column so a long message wraps beside it rather than under it — the
+     banner floats over the page, so it covers real controls until it is dismissed. */
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.app__errordismiss {
+  flex: none;
+  border: 0;
+  background: none;
+  padding: 0 2px;
+  color: inherit;
+  opacity: 0.7;
+  cursor: pointer;
+  font: inherit;
+  line-height: 1.2;
+}
+.app__errordismiss:hover {
+  opacity: 1;
 }
 
 /* ---- About / welcome ---------------------------------------------------- */
@@ -798,6 +817,11 @@
   color: var(--ink-muted);
   margin-right: 4px;
   vertical-align: middle;
+}
+/* A file the app is holding but can't currently read — its folder's permission has lapsed. The
+   row stays; only the icon changes, and clicking it asks for the access back. */
+.filesview__kind.is-error {
+  color: var(--danger);
 }
 .filesview__filename {
   max-width: 22ch;

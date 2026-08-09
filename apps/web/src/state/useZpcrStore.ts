@@ -54,6 +54,8 @@ import {
   type StoredView,
 } from "./db";
 import {
+  ensureDiskAccess,
+  isPermissionError,
   readDiskFile,
   unwatchDiskFile,
   watchDiskFile,
@@ -116,6 +118,15 @@ const PROTOCOL_WRITE_INTERVAL_MS = 2_000;
  * moment later, and a few seconds of staleness is the most that should cost them.
  */
 const DISK_WRITE_INTERVAL_MS = 3_000;
+
+/**
+ * What the app says about a file whose folder it may no longer read — see
+ * {@link ZpcrStore.unreadableIds}. The browser's own wording for this is about the call that
+ * failed rather than about anything the reader can do, so this replaces it: the file is still
+ * open, it is only the access to it that expired, and clicking the file asks for it back.
+ */
+const PERMISSION_LAPSED =
+  "Access to the folder this file is in has expired — click the file to allow access again.";
 
 /** The two kinds a plate — standalone or attached to a run — can be uploaded as. */
 type PlateFileKind = "pltd" | "csv";
@@ -833,6 +844,17 @@ export interface ZpcrStore {
    */
   loadingIds: Set<string>;
   /**
+   * Open files whose bytes the app has failed to read, id → why, in words meant for the person
+   * reading them. **They are still open**: the row stays in the catalog and in the Files table,
+   * wearing a red badge instead of its type icon, because the file has not gone anywhere — only
+   * the app's access to it has.
+   *
+   * The usual reason by far is a folder grant that didn't survive the reload, which is why nothing
+   * here is reported as an error: selecting such a file asks for the permission back
+   * (`setActive`), so the row *is* the affordance that fixes it.
+   */
+  unreadableIds: ReadonlyMap<string, string>;
+  /**
    * The single selection: the one file every tab in the strip is a lens on, or `null` when
    * nothing is selected (everything closed, or a `#file=` naming a file this browser doesn't
    * have).
@@ -956,6 +978,10 @@ export interface ZpcrStore {
   setView: (v: ViewId) => void;
   loading: boolean;
   error: string | null;
+  /** Dismiss {@link error}. The banner sits over the bottom-right corner of whatever is on screen,
+   * so an error nobody can clear is an error that hides the controls underneath it for the rest of
+   * the session. */
+  clearError: () => void;
   /** Resolves to the id of the file left active — the last one that loaded — or `null` when
    * every candidate was rejected (the reason is in {@link error}). A caller that only drops
    * files can ignore it; one that wants to *go* to what it just added can't, since the store's
@@ -1093,6 +1119,7 @@ export function useZpcrStore(): ZpcrStore {
    * bar's order). */
   const [loadedFiles, setLoadedFiles] = useState<LoadedFile[]>([]);
   const [loadingIds, setLoadingIds] = useState<Set<string>>(() => new Set());
+  const [unreadableIds, setUnreadableIds] = useState<ReadonlyMap<string, string>>(() => new Map());
   const [settingsMap, setSettingsMap] = useState<Record<string, FileSettings>>({});
   const [activeName, setActiveName] = useState<string | null>(null);
   // Seed the view from the URL hash so a shared link opens on the right tab with no flash of
@@ -1234,6 +1261,36 @@ export function useZpcrStore(): ZpcrStore {
   }
   useEffect(() => protocolThrottle.current!.attach(), []);
 
+  const clearError = useCallback(() => setError(null), []);
+
+  /** Forget that a file couldn't be read — it just was, or it is about to be tried again. */
+  const clearReadFailure = useCallback((id: string) => {
+    setUnreadableIds((prev) => {
+      if (!prev.has(id)) return prev;
+      const next = new Map(prev);
+      next.delete(id);
+      return next;
+    });
+  }, []);
+
+  /**
+   * Record that a file's bytes couldn't be read, and decide whether it is worth interrupting over.
+   *
+   * A lapsed folder permission is **not**: it is a question the browser is waiting to be asked, and
+   * the app asks it when the file is clicked ({@link setActive}). Reporting it as an error would put
+   * a banner of the platform's own wording over the very buttons that fix it, so it only marks the
+   * file — the Files table draws such a row with a red badge and the row goes on being a row.
+   *
+   * Anything else — a file deleted out from under us, bytes that no longer decode — is a real
+   * failure the user can't be expected to guess at, and still says so.
+   */
+  const noteReadFailure = useCallback((id: string, e: unknown) => {
+    const lapsed = isPermissionError(e);
+    const message = lapsed ? PERMISSION_LAPSED : e instanceof Error ? e.message : String(e);
+    setUnreadableIds((prev) => new Map(prev).set(id, message));
+    if (!lapsed) setError(`${id}: ${message}`);
+  }, []);
+
   /**
    * Read one open file's bytes — out of IndexedDB, or off the user's disk — and put it in the
    * loaded set. The *only* place bytes enter memory, and so the only place a file is ever decoded
@@ -1246,6 +1303,7 @@ export function useZpcrStore(): ZpcrStore {
    */
   const loadOne = useCallback(async (entry: FileEntry): Promise<LoadedFile | null> => {
     if (loadedRef.current.some((f) => f.name === entry.name)) return null;
+    clearReadFailure(entry.name);
     setLoadingIds((prev) => new Set(prev).add(entry.name));
     try {
       // IndexedDB first even for a disk-backed file: the one thing that puts a disk-backed file's
@@ -1294,7 +1352,27 @@ export function useZpcrStore(): ZpcrStore {
         return next;
       });
     }
-  }, [patchEntry, startDiskWatch]);
+  }, [clearReadFailure, patchEntry, startDiskWatch]);
+
+  /**
+   * Read a file in *because the user asked for it* — a click on its row or its chip.
+   *
+   * The one path that may ask the browser for a lapsed folder's permission back, since that is the
+   * one path with a user gesture behind it to ask with (`diskFolders.ts`'s `ensureDiskAccess`). A
+   * refusal isn't reported separately: the read is attempted either way and fails the same way it
+   * would have, leaving the file marked unreadable and its row clickable again.
+   */
+  const openEntry = useCallback(
+    async (entry: FileEntry) => {
+      try {
+        if (entry.source) await ensureDiskAccess(entry.source);
+        await loadOne(entry);
+      } catch (e) {
+        noteReadFailure(entry.name, e);
+      }
+    },
+    [loadOne, noteReadFailure],
+  );
 
   // Hydrate from IndexedDB on mount: the whole catalog first (metadata only — no archive is read,
   // let alone unzipped), so the app knows what it is holding, and then the bytes of each of those
@@ -1339,7 +1417,7 @@ export function useZpcrStore(): ZpcrStore {
           try {
             await loadOne(e);
           } catch (err) {
-            setError(`${e.name}: ${err instanceof Error ? err.message : String(err)}`);
+            noteReadFailure(e.name, err);
           }
         }
       } catch (e) {
@@ -1351,7 +1429,7 @@ export function useZpcrStore(): ZpcrStore {
     return () => {
       cancelled = true;
     };
-  }, [loadOne]);
+  }, [loadOne, noteReadFailure]);
 
   // ── URL hash sync ────────────────────────────────────────────────────────────────────
   // Both directions are guarded by "is it already that value?" checks (here and in
@@ -1404,13 +1482,14 @@ export function useZpcrStore(): ZpcrStore {
     // Here the file is going either way, so a pending write must not fire against a file the app
     // has stopped holding.
     diskThrottle.current!.forget(id);
+    clearReadFailure(id);
     unwatchDiskFile(id);
     seeded.current.delete(id);
     setAnalysisMap((prev) => {
       const { [id]: _drop, ...rest } = prev;
       return rest;
     });
-  }, []);
+  }, [clearReadFailure]);
 
   /**
    * Flip a file's "edited since loaded" flag (see {@link FileSettings.modified}). Written
@@ -1444,12 +1523,12 @@ export function useZpcrStore(): ZpcrStore {
   const retryUnread = useCallback(() => {
     for (const entry of entriesRef.current) {
       if (loadedRef.current.some((f) => f.name === entry.name)) continue;
-      void loadOne(entry).catch(() => {
-        // Still unreadable. It keeps its row and will be tried again; saying so twice would only
-        // replace the error the first attempt already reported.
+      void loadOne(entry).catch((e) => {
+        // Still unreadable. It keeps its row and its badge, and will be tried again.
+        noteReadFailure(entry.name, e);
       });
     }
-  }, [loadOne]);
+  }, [loadOne, noteReadFailure]);
 
   /**
    * Put a validated file into the catalog *and* the loaded set: write the record, land it in both
@@ -1799,10 +1878,10 @@ export function useZpcrStore(): ZpcrStore {
   //
   // The one selection is the file every tab in the strip is a lens on, so it has to be a file
   // whose bytes the app is holding — which every open file is, except one the app hasn't managed
-  // to read yet. Selecting that one is also a fresh attempt at it, since a click on a file the
-  // user can see is the most likely moment for its folder to have been granted. The id is set at
-  // once and the bytes arrive after (`loadingIds`), so the click responds immediately rather than
-  // after a disk read.
+  // to read yet. Selecting that one is also a fresh attempt at it, and the attempt that may *ask*
+  // for a lapsed folder's permission back ({@link openEntry}), since the click is the user gesture
+  // the browser requires to ask with. The id is set at once and the bytes arrive after
+  // (`loadingIds`), so the click responds immediately rather than after a disk read.
   const setActive = useCallback(
     (id: string) => {
       void persister.current!.flushAll();
@@ -1811,14 +1890,10 @@ export function useZpcrStore(): ZpcrStore {
       setActiveName(id);
       if (!loadedRef.current.some((f) => f.name === id)) {
         const entry = entriesRef.current.find((e) => e.name === id);
-        if (entry) {
-          void loadOne(entry).catch((e) =>
-            setError(`${id}: ${e instanceof Error ? e.message : String(e)}`),
-          );
-        }
+        if (entry) void openEntry(entry);
       }
     },
-    [loadOne],
+    [openEntry],
   );
   selectRef.current = setActive;
 
@@ -2357,6 +2432,7 @@ export function useZpcrStore(): ZpcrStore {
     files: entries,
     loaded: loadedInOrder,
     loadingIds,
+    unreadableIds,
     activeName,
     active,
     runs,
@@ -2384,6 +2460,7 @@ export function useZpcrStore(): ZpcrStore {
     setView,
     loading,
     error,
+    clearError,
     addFiles,
     addRunArchive,
     addDiskFiles,

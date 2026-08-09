@@ -158,6 +158,40 @@ export async function requestFolderPermission(label: string): Promise<Permission
   return (await folder.handle.requestPermission?.({ mode: "readwrite" })) ?? "granted";
 }
 
+/**
+ * Whether a failed read failed *because the app may not read that folder right now* — a grant that
+ * didn't survive the reload, or one the user has since revoked — rather than because something is
+ * wrong with the file.
+ *
+ * The distinction is what the app shows for it: a lapsed permission is a question waiting to be
+ * asked, so the file keeps its row and a click asks it; anything else is a real failure worth
+ * saying out loud. Every handle method throws `NotAllowedError` for this — the message Chrome puts
+ * in it ("The request is not allowed by the user agent or the platform in the current context") is
+ * about as far from an actionable sentence as it gets, which is the other reason not to show it.
+ * `SecurityError` is the same answer from a context that may not ask at all.
+ */
+export function isPermissionError(e: unknown): boolean {
+  return e instanceof DOMException && (e.name === "NotAllowedError" || e.name === "SecurityError");
+}
+
+/**
+ * Make sure the folder a file lives in is readable, asking the user for it back if it isn't.
+ * Resolves to whether the app may now read it.
+ *
+ * **Must be called from a user gesture** — that is `requestPermission`'s own rule, and the reason
+ * this is called from a click on the file rather than from the read that discovered the lapse.
+ */
+export async function ensureDiskAccess(source: DiskSource): Promise<boolean> {
+  if ((await folderPermission(source.folder)) === "granted") return true;
+  try {
+    return (await requestFolderPermission(source.folder)) === "granted";
+  } catch {
+    // No user activation left to ask with, or the folder is gone. The file keeps its row either
+    // way and the next click is another chance.
+    return false;
+  }
+}
+
 // ── Listing, one level at a time ─────────────────────────────────────────────────────────
 
 /** One row in a directory listing. A directory carries no child count: counting would mean
