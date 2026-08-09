@@ -1303,7 +1303,6 @@ export function useZpcrStore(): ZpcrStore {
    */
   const loadOne = useCallback(async (entry: FileEntry): Promise<LoadedFile | null> => {
     if (loadedRef.current.some((f) => f.name === entry.name)) return null;
-    clearReadFailure(entry.name);
     setLoadingIds((prev) => new Set(prev).add(entry.name));
     try {
       // IndexedDB first even for a disk-backed file: the one thing that puts a disk-backed file's
@@ -1344,6 +1343,10 @@ export function useZpcrStore(): ZpcrStore {
       if (file.source) startDiskWatch(file.name, file.source);
       loadedRef.current = [...loadedRef.current.filter((f) => f.name !== file.name), file];
       setLoadedFiles(loadedRef.current);
+      // Only now: the badge says *the last attempt failed*, so it belongs on the row until one
+      // succeeds. Clearing it when the attempt started would take it off a row that is about to
+      // get it straight back, which reads as a flicker rather than as an answer.
+      clearReadFailure(entry.name);
       return file;
     } finally {
       setLoadingIds((prev) => {

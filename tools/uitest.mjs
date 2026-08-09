@@ -5091,9 +5091,11 @@ async function folderChecks(chrome, origin) {
   // they demonstrably aren't.
   await cdp.eval(`window.__denyFs = false`);
   await cdp.eval(`document.querySelector(".filesview__row").click()`);
-  await waitFor(async () => (await lapsed()).badges === 0, {
-    timeout: 10000,
-    what: "the badges to clear",
+  // The chips are the signal that the reads actually finished — a badge clears the moment its
+  // file lands in the loaded set, and the file bar is drawn from that same set.
+  await waitFor(() => cdp.eval(`document.querySelectorAll(".filechip").length === 3`), {
+    timeout: 20000,
+    what: "every file to be read back in",
   });
   const granted = await lapsed();
   // The rows lose their badge as each file is read; the chips are a render behind that, so they
