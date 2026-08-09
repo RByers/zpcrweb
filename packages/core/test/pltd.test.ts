@@ -1,15 +1,8 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { dirname, resolve, basename } from "node:path";
+import { basename } from "node:path";
 import { describe, it, expect } from "vitest";
 import { parsePlatesetup2, parsePltd, parseZpcr, isPltdName } from "../src/index.js";
 import { readMultistepBytes, readStandalonePltdBytes, STANDALONE_PLTD_PATH } from "./sample.js";
 import { readCfxPassword } from "./secrets.js";
-
-const here = dirname(fileURLToPath(import.meta.url));
-function sampleText(name: string): string {
-  return readFileSync(resolve(here, "../../../samples", name), "utf-8");
-}
 
 const PW = readCfxPassword();
 
@@ -93,12 +86,13 @@ describe("pltd — standalone file (not inside a .zpcr)", () => {
   });
 });
 
-// The decoded plate structure is exercised against the plaintext XML extracted from each
-// sample (committed in samples/ and test/fixtures/) — no decryption, no secret needed. Only
-// the pipeline test below (decrypt → inflate) needs the real password.
-describe("pltd — decoded plate structure (plaintext samples, no secret needed)", () => {
+// The decoded plate structure is exercised against real samples, which means decrypting them
+// first: the plaintext XML is no longer committed beside them, so these need the password. What
+// `parsePlatesetup2` does with the shapes a real sample doesn't have is covered by the synthetic
+// fixtures below, which need no secret.
+describe.skipIf(!PW)("pltd — decoded plate structure (real samples, requires secrets.json)", () => {
   it("decodes the method-8 plate (Qualification_Plate_96.pltd)", () => {
-    const plate = parsePlatesetup2(sampleText("Qualification_Plate_96.pltd.xml"));
+    const plate = parseZpcr(readMultistepBytes()).plates(PW)[0]!.pltd.plate!;
     expect(plate.plateName).toBe("BR White");
     expect(plate.rows).toBe(8);
     expect(plate.columns).toBe(12);
@@ -113,7 +107,7 @@ describe("pltd — decoded plate structure (plaintext samples, no secret needed)
   });
 
   it("decodes the method-9 (DEFLATE64) multi-dye sample (QuickPlate_96 wells_All Channels.pltd)", () => {
-    const plate = parsePlatesetup2(sampleText("QuickPlate_96 wells_All Channels.pltd.xml"));
+    const plate = parsePltd(readStandalonePltdBytes(), { password: PW }).plate!;
     expect(plate.plateName).toBe("BR Clear");
     expect(plate.scanMode).toBe("AllChannelsScan");
     expect(plate.dyeCount).toBe(5);
@@ -179,14 +173,20 @@ describe("pltd — wellSampleType normalization", () => {
   });
 });
 
+// Decrypt → inflate has to yield a *whole* document, not a prefix: a truncated inflate still
+// parses into a plausible-looking plate (the wells come first), so the tail is what catches it.
 describe.skipIf(!PW)("pltd — decryption pipeline (requires secrets.json)", () => {
-  it("decrypts the method-8 entry to the same plaintext committed in samples/", () => {
+  it("decrypts the method-8 entry to a complete platesetup2 document", () => {
     const pltd = parseZpcr(readMultistepBytes()).plates(PW)[0]!.pltd;
-    expect(pltd.xml).toBe(sampleText("Qualification_Plate_96.pltd.xml"));
+    expect(pltd.error).toBeUndefined();
+    expect(pltd.xml).toMatch(/^<\?xml /);
+    expect(pltd.xml!.trimEnd()).toMatch(/<\/platesetup2>$/);
   });
 
-  it("decrypts the method-9 (DEFLATE64) entry to the same plaintext committed sample", () => {
+  it("decrypts the method-9 (DEFLATE64) entry to a complete platesetup2 document", () => {
     const pltd = parsePltd(readStandalonePltdBytes(), { password: PW });
-    expect(pltd.xml).toBe(sampleText("QuickPlate_96 wells_All Channels.pltd.xml"));
+    expect(pltd.error).toBeUndefined();
+    expect(pltd.xml).toMatch(/^<\?xml /);
+    expect(pltd.xml!.trimEnd()).toMatch(/<\/platesetup2>$/);
   });
 });

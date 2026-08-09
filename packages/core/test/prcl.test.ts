@@ -1,6 +1,3 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { dirname, resolve } from "node:path";
 import { describe, it, expect } from "vitest";
 import {
   formatRunDefinitionText,
@@ -15,10 +12,6 @@ import { readMultistepBytes } from "./sample.js";
 import { readCfxPassword } from "./secrets.js";
 import { TEST_PASSWORD, buildEncryptedZip } from "./zipCrypto.js";
 
-const here = dirname(fileURLToPath(import.meta.url));
-function sampleText(name: string): string {
-  return readFileSync(resolve(here, "../../../samples", name), "utf-8");
-}
 const PW = readCfxPassword();
 
 // The `protocol2` example from prcl.md §2 — a hold/cycle protocol with a plate read, matching
@@ -149,21 +142,23 @@ describe("parsePrcl — synthetic ZIP round trip (no real password needed)", () 
   });
 });
 
-// The decoded protocol structure is exercised against the plaintext XML extracted from a real
-// sample (committed as samples/Short Qualification_Plate_96.prcl.xml) — no decryption, no
-// secret needed. Only the pipeline test below (decrypt → inflate) needs the real password.
-describe("parseProtocol2 — real sample (plaintext, no secret needed)", () => {
-  const doc = parseProtocol2(sampleText("Short Qualification_Plate_96.prcl.xml"));
+// The decoded protocol structure is exercised against a real sample, which means decrypting it
+// first: the plaintext XML is no longer committed beside it, so this needs the password. The
+// synthetic `protocol2` fixtures above cover `parseProtocol2` itself without a secret.
+describe.skipIf(!PW)("parseProtocol2 — real sample (requires secrets.json)", () => {
+  // Lazily, since a skipped describe still evaluates its body — with no password there is no
+  // protocol to take apart.
+  const doc = () => parseZpcr(readMultistepBytes()).protocols(PW)[0]!.prcl.protocol!;
 
   it("parses root attributes and identity", () => {
-    expect(doc.name).toBe("Short Qualification_Plate_96.prcl");
-    expect(doc.lidTemperatureC).toBe(105);
-    expect(doc.volumeUl).toBe(20);
-    expect(doc.runDefinition).toContain("PLATEREAD #h3F");
+    expect(doc().name).toBe("Short Qualification_Plate_96.prcl");
+    expect(doc().lidTemperatureC).toBe(105);
+    expect(doc().volumeUl).toBe(20);
+    expect(doc().runDefinition).toContain("PLATEREAD #h3F");
   });
 
   it("parses the ordered step list, including a melt step with an explicit end temp", () => {
-    const steps = doc.steps!;
+    const steps = doc().steps!;
     expect(steps).toHaveLength(5);
     expect(steps[2]).toMatchObject({ kind: "temperature", tempC: 57.5, plateRead: true });
     expect(steps[3]).toEqual({ kind: "goto", stepNumber: 3, targetStep: 1, repeats: 1 });
@@ -176,10 +171,14 @@ describe("parseProtocol2 — real sample (plaintext, no secret needed)", () => {
   });
 });
 
+// As in pltd.test.ts: the tail is what proves inflate produced the whole document rather than a
+// prefix that still parses.
 describe.skipIf(!PW)("prcl — decryption pipeline (requires secrets.json)", () => {
-  it("decrypts the real .prcl entry to the same plaintext committed in samples/", () => {
+  it("decrypts the real .prcl entry to a complete protocol2 document", () => {
     const prcl = parseZpcr(readMultistepBytes()).protocols(PW)[0]!.prcl;
-    expect(prcl.xml).toBe(sampleText("Short Qualification_Plate_96.prcl.xml"));
+    expect(prcl.error).toBeUndefined();
+    expect(prcl.xml).toMatch(/^<\?xml /);
+    expect(prcl.xml!.trimEnd()).toMatch(/<\/protocol2>$/);
   });
 });
 

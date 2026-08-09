@@ -35,9 +35,10 @@ Still open:
       settle `calibration.md` §8's per-dye scale factor, measured against two scalars of uncertain
       definition from that run (one read off a chart) and contradicted by the RVP full-curve
       comparison.
-- [ ] **Ask for an export of `20260726_S183-S185_RVP-drift-correction.pcrd`.** Same experiment,
-      `pDriftCorrection="True"`, nothing else changed — a controlled A/B that would answer what
-      drift correction actually does (`calibration.md` §6) per well and per cycle.
+- [ ] **Ask for `20260726_S183-S185_RVP.pcrd` re-saved with `pDriftCorrection="True"`, and an
+      export of it.** Same experiment, nothing else changed — a controlled A/B that would answer
+      what drift correction actually does (`calibration.md` §6) per well and per cycle. The
+      re-saved file was once in hand but never exported, so it is the export that matters.
 - [ ] **Pin the exact baseline window rule** (`threshold.md` §A.7). The bracket is implemented and
       the model is settled, but the best-matching ordinary least-squares fit still misses CFX's
       recovered line by 0.02–0.5 RFU, and eight smoothing/edge variants plus a zero-slope variant

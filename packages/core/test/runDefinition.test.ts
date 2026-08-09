@@ -14,7 +14,8 @@ const CYCLING =
   "METHOD CALC;HOTLID 105,30;VOLUME 20;TEMP 95.0,60;TEMP 95.0,10;TEMP 60.0,30;" +
   "PLATEREAD #h3F;GOTO 2,44;END;";
 
-/** `samples/Short Qualification_Plate_96.prcl.xml`'s protocol: a cycling loop then a melt. */
+/** The `Short Qualification_Plate_96.prcl` inside `samples/20190516_122922_CT019138_SHORT_QUALIF.zpcr`:
+ * a cycling loop then a melt. */
 const CYCLING_AND_MELT =
   "METHOD CALC;HOTLID 105,30;VOLUME 20;TEMP 98.0,10;TEMP 98.0,5;TEMP 57.5,10;" +
   "PLATEREAD #h3F;GOTO 2,1;TEMP 56.5,31;TEMP 56.5,5;INC 5.0;RATE 5.0;PLATEREAD #h3F;" +

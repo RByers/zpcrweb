@@ -379,10 +379,11 @@ would mean shipping untested code and a UI control for it.
 
 - **`ReferenceNormalized` / `ReferenceLinearBaseLineNormalized`** — normalising against a passive
   reference dye before baselining. Needs a plate that designates one; none does.
-- **`pDriftCorrection`** — see [`calibration.md`](./calibration.md) §6. A controlled A/B pair exists
-  (`20260726_S183-S185_RVP-drift-correction.pcrd` differs in this flag alone), but only the `False`
-  side has an export, so what the option does is unmeasured. **An export of the drift-corrected run
-  would settle it outright**, per well and per cycle.
+- **`pDriftCorrection`** — see [`calibration.md`](./calibration.md) §6. A controlled A/B pair was
+  seen once: `20260726_S183-S185_RVP.pcrd` re-saved with this flag alone changed. Only the `False`
+  side has an export, and only it is still kept in `samples/`, so what the option does is
+  unmeasured. **A drift-corrected re-save with an export would settle it outright**, per well and
+  per cycle.
 - **`BeginCyclesSkip` / `EndCyclesSkip`**, and `pCRBaseLineMethod`'s genuine sub-window — §9. A run
   using either would settle its reading.
 - **The threshold-free (`NoThreshold`) Cq**, which takes Cq from the curve's shape and so needs no
@@ -624,9 +625,10 @@ disagree, all Tex 615 — B4 and G4, where the reference reports a Cq against a 
 sits inside those wells' own jitter (§A.4) and this library reports none, and E4, which the two
 baseline differently.
 
-A second file, `20260726_S183-S185_RVP-drift-correction.pcrd`, is the same experiment re-saved with
-`pDriftCorrection="True"` and nothing else changed — an A/B pair for the drift-correction question in
-[`calibration.md`](./calibration.md) §6, once a matching export exists for it.
+A second file was seen for this experiment, re-saved with `pDriftCorrection="True"` and nothing else
+changed — an A/B pair for the drift-correction question in [`calibration.md`](./calibration.md) §6.
+It is no longer kept in `samples/`: with no export to compare it against, there was nothing to
+measure it with, so the pair is worth re-obtaining together with that export.
 
 ---
 
