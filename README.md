@@ -171,7 +171,9 @@ view each several ways:
 The files you have open persist in **IndexedDB** across reloads, along with their view settings, so
 a session reopens as you left it. Closing a file — the ✕ on its chip, or on its row in the Files tab
 — is what removes it from the browser again; a file with edits that aren't on disk yet asks a second
-time first. Everything that changes a reported number is written into the run's own file instead, so
+time first. When more than one kind of file is open, the chips above the table narrow it to a type —
+runs, plates, protocols — and turning them all off gives the whole list back.
+Everything that changes a reported number is written into the run's own file instead, so
 it travels with it. Non-trivial logic lives in `@zpcrweb/core` —
 see the [web architecture notes](./apps/web/ARCHITECTURE.md).
 
@@ -185,10 +187,11 @@ another program and the app picks it up and refreshes on its own. Nothing in the
 deleted by the app: removing a file from the app, or the folder itself, only forgets it.
 
 The **Files** tab splits in two, scrolling independently: what this browser is holding on top, your
-folders underneath. Each folder shows its directory tree next to the files of whichever directory
-you've picked — one above the other if the window is narrow — and reads one directory at a time as
-you open it, so pointing the app at a folder holding years of runs costs nothing until you go
-looking. Newly-added files show up when you reopen the tab or press the folder's ↻.
+folders underneath. The folders half is two columns — every folder's directory tree on the left,
+each under its own heading with its ↻ and ✕, and the files of whichever directory you've picked on
+the right (one above the other if the window is narrow). It reads one directory at a time as you
+open it, so pointing the app at a folder holding years of runs costs nothing until you go looking.
+Newly-added files show up when you reopen the tab or press the folder's ↻.
 
 Two limits worth knowing. Browsers don't tell a web page where a folder actually is, only what it's
 called, so files are named by their path *within* the folder (`runs/2026-07/a.zpcr`) rather than by

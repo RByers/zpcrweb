@@ -4369,7 +4369,99 @@ async function explodedStorageChecks(chrome, origin) {
  * - **No echo loop.** The app's own write must not read itself back forever.
  */
 /**
- * The bundled `samples` folder — the app's own folder, last in the same pane the granted ones are
+ * The Files view's type chips: one per kind of file the browser is holding, filtering the table to
+ * that kind. What is checked is that they are a *filter* — nothing on is the whole catalog, and the
+ * count in the footer says which of the two it is — rather than a selection that hides files with
+ * no way back.
+ */
+async function fileTypeFilterChecks(chrome, origin) {
+  console.log("\nfiles view type filter");
+  const cdp = await openPage(chrome.base, origin);
+  await emptyReload(cdp, origin);
+  // Two kinds, so there is something to tell apart: a run archive and a bare plate.
+  await loadFile(cdp, ZPCR);
+  await waitFor(() => chipPresent(cdp, "FirstQualification"), { what: "the .zpcr chip" });
+  await loadFile(cdp, PLTD);
+  await waitFor(() => cdp.eval(`document.querySelectorAll(".filebar .filechip").length === 2`), {
+    what: "both files",
+  });
+  await clickTab(cdp, "Files");
+
+  const state = () =>
+    cdp
+      .eval(
+        `JSON.stringify({
+           chips: [...document.querySelectorAll(".filesview__filter")].map((b) => ({
+             text: b.textContent.trim().replace(/\\s+/g, " "),
+             on: b.getAttribute("aria-pressed") === "true",
+           })),
+           rows: document.querySelectorAll(".filesview__row").length,
+           footer: document.querySelector(".filesview__totals td")?.textContent.trim().replace(/\\s+/g, " ") ?? "",
+         })`,
+      )
+      .then(JSON.parse);
+  await waitFor(async () => (await state()).chips.length > 0, { what: "the type chips" });
+
+  const unfiltered = await state();
+  check(
+    "The Files view offers one chip per kind of file open, with how many there are of it",
+    unfiltered.chips.length === 2 &&
+      unfiltered.chips.some((c) => /^pltd\s*1$/.test(c.text)) &&
+      unfiltered.chips.some((c) => /^zpcr\s*1$/.test(c.text)),
+    JSON.stringify(unfiltered.chips),
+  );
+  check(
+    "…all off to begin with, so the table opens on everything the browser is holding",
+    !unfiltered.chips.some((c) => c.on) && unfiltered.rows === 2 && /2 files open/.test(unfiltered.footer),
+    JSON.stringify({ rows: unfiltered.rows, footer: unfiltered.footer }),
+  );
+
+  const clickChip = (text) =>
+    cdp.eval(
+      `(() => { const b = [...document.querySelectorAll(".filesview__filter")]
+           .find((x) => x.textContent.includes(${JSON.stringify(text)}));
+         b?.click(); return !!b; })()`,
+    );
+  await clickChip("pltd");
+  await waitFor(async () => (await state()).rows === 1, { what: "the table to filter" });
+  const filtered = await state();
+  check(
+    "Turning a chip on shows only that kind, and the footer says so rather than losing the count",
+    filtered.rows === 1 &&
+      filtered.chips.filter((c) => c.on).length === 1 &&
+      /1 of 2 files shown/.test(filtered.footer),
+    JSON.stringify({ rows: filtered.rows, footer: filtered.footer }),
+  );
+
+  // The way back is the same chip: nothing on is the unfiltered table, which is why there is no
+  // separate "All" control.
+  await clickChip("pltd");
+  await waitFor(async () => (await state()).rows === 2, { what: "the filter to come off" });
+  const back = await state();
+  check(
+    "…and turning it off again brings the whole catalog back",
+    back.rows === 2 && !back.chips.some((c) => c.on) && /2 files open/.test(back.footer),
+    JSON.stringify({ rows: back.rows, footer: back.footer }),
+  );
+
+  // One kind left means nothing to tell apart, so the bar is not worth the space it costs.
+  await cdp.eval(
+    `[...document.querySelectorAll(".filesview__row")]
+       .find((r) => /pltd/.test(r.querySelector(".filesview__typecol")?.textContent ?? ""))
+       ?.querySelector(".ftbl__del")?.click()`,
+  );
+  await waitFor(async () => (await state()).rows === 1, { what: "the plate file to close" });
+  const oneKind = await state();
+  check(
+    "With only one kind open there are no chips at all",
+    oneKind.chips.length === 0,
+    JSON.stringify(oneKind.chips),
+  );
+  cdp.close();
+}
+
+/**
+ * The bundled `samples` folder — the app's own folder, last in the same column the granted ones are
  * in. Run before {@link folderChecks} grants anything, because half of what is being asserted is
  * that it is there with no folder on disk at all.
  *
@@ -4392,6 +4484,9 @@ async function sampleFolderChecks(chrome, origin) {
   });
 
   const BUILTIN = ".folders__folder--builtin";
+  // The file column belongs to the whole tree rather than to one folder's group, so what it is
+  // showing is asked of it directly — here, the only folder there is.
+  const FILES = ".folders__pane--files";
   const shape = await cdp
     .eval(
       `(() => { const all = [...document.querySelectorAll(".folders__folder")];
@@ -4400,9 +4495,10 @@ async function sampleFolderChecks(chrome, origin) {
            sections: all.length,
            last: all.at(-1) === b,
            label: b.querySelector(".folders__title")?.textContent.trim(),
+           showing: b.querySelector(".folders__title.is-selected") !== null,
            buttons: [...b.querySelectorAll(".folders__actions .btn")].map((x) => x.textContent.trim()),
            trees: b.querySelectorAll(".folders__tree").length,
-           files: [...b.querySelectorAll(".folders__name")].map((x) => x.textContent.trim()),
+           files: [...document.querySelectorAll("${FILES} .folders__name")].map((x) => x.textContent.trim()),
          }); })()`,
     )
     .then(JSON.parse);
@@ -4411,13 +4507,20 @@ async function sampleFolderChecks(chrome, origin) {
     shape.sections === 1 && shape.last && shape.label === "samples",
     JSON.stringify({ sections: shape.sections, last: shape.last, label: shape.label }),
   );
+  // Nothing else is granted, so the one folder there is is the one the file column starts on —
+  // otherwise the column would open empty on a browser whose only folder is the app's own.
+  check(
+    "…and is what the file column is showing, being the only folder there is",
+    shape.showing && shape.files.length > 0,
+    JSON.stringify({ showing: shape.showing, files: shape.files.length }),
+  );
   check(
     "…with nothing to re-read and no way to remove it",
     shape.buttons.length === 0,
     JSON.stringify(shape.buttons),
   );
   check(
-    "…and no tree pane, being one flat directory",
+    "…and no tree under its heading, being one flat directory",
     shape.trees === 0,
     JSON.stringify(shape.trees),
   );
@@ -4437,7 +4540,7 @@ async function sampleFolderChecks(chrome, origin) {
 
   // ── Opening one ────────────────────────────────────────────────────────────────────────────
   const sampleRow = (name) =>
-    `[...document.querySelectorAll("${BUILTIN} .folders__name")].find((b) => b.textContent.trim() === ${JSON.stringify(name)})`;
+    `[...document.querySelectorAll("${FILES} .folders__name")].find((b) => b.textContent.trim() === ${JSON.stringify(name)})`;
   const loaded = (name) =>
     cdp.eval(
       `(() => { const b = ${sampleRow(name)};
@@ -4494,10 +4597,11 @@ async function sampleFolderChecks(chrome, origin) {
 
 async function folderChecks(chrome, origin) {
   console.log("\ndisk folders");
-  // Every query here means the *disk* folder: the bundled `samples` section is a sibling of it in
-  // the same pane (see sampleFolderChecks), and an unscoped `.folders__name` would collect its
-  // rows too.
+  // Tree queries mean the *disk* folder's group: the bundled `samples` group is a sibling of it in
+  // the same column (see sampleFolderChecks). File queries go to the one file column, which shows
+  // whichever folder is picked — the disk one, throughout this check.
   const DISK = ".folders__folder:not(.folders__folder--builtin)";
+  const FILES = ".folders__pane--files";
   const cdp = await openPage(chrome.base, origin);
   await emptyReload(cdp, origin);
 
@@ -4575,8 +4679,8 @@ async function folderChecks(chrome, origin) {
       .eval(
         `JSON.stringify({
            dirs: [...document.querySelectorAll("${DISK} .folders__dir")].map((b) => b.textContent.trim()),
-           files: [...document.querySelectorAll("${DISK} .folders__name")].map((b) => b.textContent.trim()),
-           crumbs: [...document.querySelectorAll("${DISK} .folders__crumb")].map((b) => b.textContent.trim()),
+           files: [...document.querySelectorAll("${FILES} .folders__name")].map((b) => b.textContent.trim()),
+           crumbs: [...document.querySelectorAll("${FILES} .folders__crumb")].map((b) => b.textContent.trim()),
            selected: [...document.querySelectorAll("${DISK} .folders__dirrow.is-selected .folders__dir")]
              .map((b) => b.textContent.trim()),
            reads: window.__reads,
@@ -4584,13 +4688,13 @@ async function folderChecks(chrome, origin) {
       )
       .then(JSON.parse);
 
-  /** Where the tree pane sits relative to the file pane — side by side, or stacked. Read from the
-   * boxes themselves rather than from a class, so the container query is what is actually tested. */
+  /** Where the tree column sits relative to the file column — side by side, or stacked. Read from
+   * the boxes themselves rather than from a class, so the container query is what is tested. */
   const paneLayout = () =>
     cdp
       .eval(
-        `(() => { const t = document.querySelector("${DISK} .folders__tree")?.getBoundingClientRect();
-           const f = document.querySelector("${DISK} .folders__files")?.getBoundingClientRect();
+        `(() => { const t = document.querySelector(".folders__pane--tree")?.getBoundingClientRect();
+           const f = document.querySelector("${FILES}")?.getBoundingClientRect();
            if (!t || !f) return "none";
            return f.left >= t.right - 1 ? "side-by-side" : "stacked"; })()`,
       );
@@ -4614,10 +4718,54 @@ async function folderChecks(chrome, origin) {
   // The tree lists directories and the file pane lists files; neither may show the other's rows,
   // which is the whole basis of the split.
   check(
-    "…with directories and files in their own panes rather than one interleaved list",
+    "…with directories and files in their own columns rather than one interleaved list",
     !first.dirs.includes("top.zpcr") && !first.files.includes("2026"),
     JSON.stringify({ dirs: first.dirs, files: first.files }),
   );
+
+  // ── One file column, whichever folder is picked ────────────────────────────────────────────
+  // The granted folder and the bundled `samples` are two groups in one tree column with one file
+  // column between them, so exactly one folder can be the one being read — and the folder just
+  // picked is it, rather than whatever the list happened to start on.
+  const showing = () =>
+    cdp
+      .eval(
+        `JSON.stringify({
+           marked: [...document.querySelectorAll(".folders__title.is-selected")]
+             .map((b) => b.textContent.trim()),
+           crumb: document.querySelector(".folders__pane--files .folders__crumb")?.textContent.trim() ?? "",
+           columns: document.querySelectorAll(".folders__pane--files").length,
+         })`,
+      )
+      .then(JSON.parse);
+  const afterAdd = await showing();
+  check(
+    "There is one file column for every folder, showing the folder just added",
+    afterAdd.columns === 1 && afterAdd.crumb === "runs" && afterAdd.marked.join() === "runs",
+    JSON.stringify(afterAdd),
+  );
+  // Clicking the other folder's heading moves the one column to it — and moves the mark with it,
+  // so the app never claims to be showing two folders at once.
+  await cdp.eval(
+    `[...document.querySelectorAll(".folders__title")].find((b) => b.textContent.trim() === "samples")?.click()`,
+  );
+  await waitFor(async () => (await showing()).crumb === "samples", {
+    what: "the file column to move to samples",
+  });
+  const onSamples = await showing();
+  check(
+    "…and clicking another folder's heading moves that column, and the mark, to it",
+    onSamples.marked.join() === "samples" &&
+      (await rows()).files.some((f) => f.endsWith(".zpcr")) &&
+      !(await rows()).files.includes("top.zpcr"),
+    JSON.stringify(onSamples),
+  );
+  await cdp.eval(
+    `[...document.querySelectorAll(".folders__title")].find((b) => b.textContent.trim() === "runs")?.click()`,
+  );
+  await waitFor(async () => (await rows()).files.includes("top.zpcr"), {
+    what: "the file column to come back to the disk folder",
+  });
 
   // ── The two panes are side by side when there is room, stacked when there isn't ────────────
   const wide = await paneLayout();
@@ -4663,7 +4811,7 @@ async function folderChecks(chrome, origin) {
 
   // The breadcrumb is the way back up, and going up must not re-read anything.
   await cdp.eval(
-    `[...document.querySelectorAll("${DISK} .folders__crumb")].find((b) => b.textContent.trim() === "runs")?.click()`,
+    `[...document.querySelectorAll("${FILES} .folders__crumb")].find((b) => b.textContent.trim() === "runs")?.click()`,
   );
   await waitFor(async () => (await rows()).files.includes("top.zpcr"), { what: "the root's files" });
   const backUp = await rows();
@@ -4688,7 +4836,7 @@ async function folderChecks(chrome, origin) {
   // ── Opening a file off disk ────────────────────────────────────────────────────────────────
   const tickFile = (name) =>
     cdp.eval(
-      `(() => { const row = [...document.querySelectorAll("${DISK} .folders__file")]
+      `(() => { const row = [...document.querySelectorAll("${FILES} .folders__file")]
            .find((r) => r.querySelector(".folders__name")?.textContent.trim() === ${JSON.stringify(name)});
          row?.querySelector(".folders__check")?.click(); return !!row; })()`,
     );
@@ -4704,20 +4852,21 @@ async function folderChecks(chrome, origin) {
        })`,
     )
     .then(JSON.parse);
+  // Three scrolling regions, not one page: the catalog above, and the tree and file columns of the
+  // folders pane below. Each has its own scrollbar, so reaching the bottom of any one of them
+  // must not carry the other two off screen.
   const panes = await cdp
     .eval(
-      `JSON.stringify([...document.querySelectorAll(".filesview__pane")].map((p) => ({
-         cls: p.className.replace("filesview__pane ", ""),
-         scrolls: getComputedStyle(p).overflowY,
-       })))`,
+      `JSON.stringify([".filesview__scroll", ".folders__pane--tree", "${FILES}"].map((sel) => {
+         const p = document.querySelector(sel);
+         return { sel, found: !!p, scrolls: p ? getComputedStyle(p).overflowY : null };
+       }))`,
     )
     .then(JSON.parse);
   check(
-    "The catalog and the folders are two panes that scroll independently",
-    panes.length === 2 &&
-      panes.every((p) => p.scrolls === "auto" || p.scrolls === "scroll") &&
-      panes[0].cls.includes("catalog") &&
-      panes[1].cls.includes("folders"),
+    "The catalog, the folder trees and the folder's files each scroll on their own",
+    panes.length === 3 &&
+      panes.every((p) => p.found && (p.scrolls === "auto" || p.scrolls === "scroll")),
     JSON.stringify(panes),
   );
 
@@ -4760,7 +4909,7 @@ async function folderChecks(chrome, origin) {
   // the row's checkbox, acts at once, and must not throw you out of the Files view the way the
   // catalog table's rows do; the double-click is what leaves, for Overview.
   const nameBtn = (name) =>
-    `[...document.querySelectorAll("${DISK} .folders__name")].find((b) => b.textContent.trim() === ${JSON.stringify(name)})`;
+    `[...document.querySelectorAll("${FILES} .folders__name")].find((b) => b.textContent.trim() === ${JSON.stringify(name)})`;
   const rowSelected = (name) =>
     cdp.eval(
       `(() => { const b = ${nameBtn(name)};
@@ -4967,7 +5116,7 @@ async function folderChecks(chrome, origin) {
   // The gesture has to work on a file that is only on disk too, which means reading it before
   // there is anything to open. `top.zpcr` has been sitting in the root untouched all along.
   await cdp.eval(
-    `[...document.querySelectorAll("${DISK} .folders__crumb")].find((b) => b.textContent.trim() === "runs")?.click()`,
+    `[...document.querySelectorAll("${FILES} .folders__crumb")].find((b) => b.textContent.trim() === "runs")?.click()`,
   );
   await waitFor(async () => (await rows()).files.includes("top.zpcr"), { what: "the root's files" });
   await doubleClick("top.zpcr");
@@ -5061,10 +5210,17 @@ async function folderChecks(chrome, origin) {
          }))()`,
       )
       .then((v) => JSON.parse(v));
-  await waitFor(async () => (await lapsed()).badges > 0, {
-    timeout: 10000,
-    what: "the unreadable badge",
-  });
+  try {
+    await waitFor(async () => (await lapsed()).badges > 0, {
+      timeout: 10000,
+      what: "the unreadable badge",
+    });
+  } catch (e) {
+    console.log("DEBUG lapsed:", JSON.stringify(await lapsed()));
+    console.log("DEBUG body:", await cdp.eval(`document.body.innerText.slice(0, 600)`));
+    console.log("DEBUG tab:", await activeTab(cdp));
+    throw e;
+  }
   const lapsedState = await lapsed();
   check(
     "A file whose folder permission has expired stays listed, with a read-error badge",
@@ -5162,13 +5318,28 @@ async function folderNameCollisionChecks(chrome, origin) {
         `JSON.stringify([...document.querySelectorAll(".folders__folder")].map((s) => ({
            label: s.querySelector(".folders__title")?.textContent.trim(),
            builtin: s.classList.contains("folders__folder--builtin"),
-           files: [...s.querySelectorAll(".folders__name")].map((b) => b.textContent.trim()),
          })))`,
       )
       .then(JSON.parse);
-  await waitFor(async () => (await sections()).some((s) => s.files.includes("mine.zpcr")), {
-    what: "the granted folder's own listing",
-  });
+  /** The one file column, and which folder it says it is showing — how "each lists its own files"
+   * is asked now that the two groups share a column rather than each carrying a list. */
+  const column = () =>
+    cdp
+      .eval(
+        `JSON.stringify({
+           crumb: document.querySelector(".folders__pane--files .folders__crumb")?.textContent.trim() ?? "",
+           files: [...document.querySelectorAll(".folders__pane--files .folders__name")]
+             .map((b) => b.textContent.trim()),
+         })`,
+      )
+      .then(JSON.parse);
+  /** Click a group's heading, by the label it is currently wearing. */
+  const showFolder = (label) =>
+    cdp.eval(
+      `[...document.querySelectorAll(".folders__title")]
+         .find((b) => b.textContent.trim() === ${JSON.stringify(label)})?.click()`,
+    );
+  await waitFor(async () => (await sections()).length === 2, { what: "both folders" });
   const both = await sections();
   const disk = both.find((s) => !s.builtin);
   const builtin = both.find((s) => s.builtin);
@@ -5177,20 +5348,36 @@ async function folderNameCollisionChecks(chrome, origin) {
     disk?.label === "samples (2)" && builtin?.label === "samples",
     JSON.stringify(both.map((s) => ({ label: s.label, builtin: s.builtin }))),
   );
+  // Adding a folder shows it, so the column is already on the one from disk — `samples (2)`, the
+  // granted one, since the app keeps `samples` for its own.
+  await waitFor(async () => (await column()).files.includes("mine.zpcr"), {
+    what: "the granted folder's own listing",
+  });
+  const onDisk = await column();
+  await showFolder("samples");
+  await waitFor(async () => (await column()).crumb === "samples", {
+    what: "the bundled folder's listing",
+  });
+  const onBuiltin = await column();
   check(
-    "…and each lists its own files rather than sharing one listing",
-    disk?.files.length === 1 &&
-      disk.files[0] === "mine.zpcr" &&
-      builtin?.files.includes(EXAMPLE) &&
-      !builtin.files.includes("mine.zpcr"),
-    JSON.stringify({ disk: disk?.files, builtin: builtin?.files.length }),
+    "…and each is listed from its own place rather than the two sharing one listing",
+    onDisk.files.length === 1 &&
+      onDisk.files[0] === "mine.zpcr" &&
+      onBuiltin.files.includes(EXAMPLE) &&
+      !onBuiltin.files.includes("mine.zpcr"),
+    JSON.stringify({ disk: onDisk.files, builtin: onBuiltin.files.length }),
   );
+  // Back to the folder on disk, so its own file is the one opened below.
+  await showFolder("samples (2)");
+  await waitFor(async () => (await column()).files.includes("mine.zpcr"), {
+    what: "the disk folder's listing again",
+  });
 
   // Open the folder's own file before removing it, so the app is still holding something
   // afterwards: with nothing open and no folder granted it goes back to the welcome screen, and
   // the pane being asserted about wouldn't be on screen at all.
   await cdp.eval(
-    `(() => { const row = [...document.querySelectorAll("${DISK} .folders__file")]
+    `(() => { const row = [...document.querySelectorAll(".folders__pane--files .folders__file")]
          .find((r) => r.querySelector(".folders__name")?.textContent.trim() === "mine.zpcr");
        row?.querySelector(".folders__check")?.click(); })()`,
   );
@@ -5267,6 +5454,7 @@ async function main() {
     await protocolEditorChecks(chrome, origin);
     await cloneChecks(chrome, origin);
     await openFilesChecks(chrome, origin);
+    await fileTypeFilterChecks(chrome, origin);
     await sampleFolderChecks(chrome, origin);
     await folderChecks(chrome, origin);
     await folderNameCollisionChecks(chrome, origin);

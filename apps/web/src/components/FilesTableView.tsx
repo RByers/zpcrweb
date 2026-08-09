@@ -10,6 +10,13 @@
  * scrolling one to the bottom must not push the other off screen. With no folders there is only the
  * table. Opening a file that isn't open yet is the folder pane's job, not this one's.
  *
+ * **The type chips above the table filter it** (see {@link KindFilter}) — one chip per kind that is
+ * open, carrying how many files of it there are. Nothing turned on means everything shows: the
+ * chips are a filter rather than a selection, so the view still opens on the whole catalog and
+ * turning the last chip off is what gets it back. Only the kinds actually present get a chip, which
+ * makes the bar a summary of what this browser is holding as much as a control, and keeps it out of
+ * the way entirely when everything is the same kind.
+ *
  * **Every cell is derived from the decoded file**, live, in {@link FilesTableView}'s `rows` — there
  * is no cached per-file summary anywhere any more. Every row here is a file the app is already
  * holding decoded, so there is nothing to cache: the numbers are the ones the rest of the app is
@@ -263,6 +270,49 @@ function RowHoverCard({
   );
 }
 
+/**
+ * The type chips above the table: one per kind that is open, each with how many files of that kind
+ * there are, and each a toggle. With none on, the table is unfiltered — which is the state the view
+ * opens in and the one a user gets back by turning the last chip off, so there is no separate "All"
+ * control to keep in step with the chips beside it.
+ */
+function KindFilter({
+  counts,
+  on,
+  onToggle,
+}: {
+  counts: [FileKind, number][];
+  on: ReadonlySet<FileKind>;
+  onToggle: (kind: FileKind) => void;
+}) {
+  return (
+    <div className="filesview__filters" role="group" aria-label="Filter by file type">
+      {counts.map(([kind, count]) => {
+        const isOn = on.has(kind);
+        return (
+          <button
+            key={kind}
+            type="button"
+            className={"btn btn--sm filesview__filter" + (isOn ? " is-on" : "")}
+            aria-pressed={isOn}
+            title={
+              fileKindDescription(kind) +
+              (isOn ? " — click to stop showing only these" : " — click to show only these")
+            }
+            onClick={() => onToggle(kind)}
+          >
+            <span className="filesview__filtericon">
+              <FileKindIcon kind={kind} />
+            </span>
+            <span className="mono">{EXTENSION_TEXT[kind]}</span>
+            <span className="filesview__filtercount mono">{count}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 /** One row plus its hover card — a component of its own (rather than inline in the table map)
  * because the card needs its own ref/position state, the same reason `FileBar.tsx` splits
  * `FileChip` out of `FileBar`. */
@@ -406,6 +456,8 @@ export function FilesTableView({
 }: Props) {
   const [sortKey, setSortKey] = useState<SortKey>("date");
   const [dir, setDir] = useState<1 | -1>(-1);
+  /** The kinds the table is restricted to. Empty means no restriction — see {@link KindFilter}. */
+  const [kinds, setKinds] = useState<ReadonlySet<FileKind>>(new Set());
   const [password] = usePltdPassword();
 
   // Read straight off the decoded files — see the module comment. Memoized because naming a run's
@@ -438,9 +490,37 @@ export function FilesTableView({
     });
   }, [files, modifiedIds, unreadableIds, runs, plateFiles, experiments, password]);
 
-  const sorted = useMemo(() => sortRows(rows, sortKey, dir), [rows, sortKey, dir]);
+  /** One entry per kind that is open, ordered by extension so the chips read in the same order the
+   * Type column sorts in. */
+  const kindCounts = useMemo<[FileKind, number][]>(() => {
+    const counts = new Map<FileKind, number>();
+    for (const r of rows) counts.set(r.kind, (counts.get(r.kind) ?? 0) + 1);
+    return [...counts].sort((a, b) => EXTENSION_TEXT[a[0]].localeCompare(EXTENSION_TEXT[b[0]]));
+  }, [rows]);
 
-  const totalSize = useMemo(() => files.reduce((sum, f) => sum + f.size, 0), [files]);
+  /** The filter as it applies to what is actually open. Closing the last `.pltd` must not leave a
+   * filter on a kind with no chip left to turn off — that would be an empty table for no visible
+   * reason — but the choice is kept rather than pruned, so re-opening one brings it back. */
+  const activeKinds = useMemo(() => {
+    const present = new Set(kindCounts.map(([k]) => k));
+    return new Set([...kinds].filter((k) => present.has(k)));
+  }, [kinds, kindCounts]);
+
+  const sorted = useMemo(() => sortRows(rows, sortKey, dir), [rows, sortKey, dir]);
+  const shown = useMemo(
+    () => (activeKinds.size === 0 ? sorted : sorted.filter((r) => activeKinds.has(r.kind))),
+    [sorted, activeKinds],
+  );
+
+  /** What the footer weighs: the files on screen, not the ones a filter is hiding. */
+  const shownSize = useMemo(() => shown.reduce((sum, r) => sum + r.size, 0), [shown]);
+
+  const toggleKind = (kind: FileKind) =>
+    setKinds((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(kind)) next.add(kind);
+      return next;
+    });
 
   const toggle = (key: SortKey) => {
     if (key === sortKey) setDir((d) => (d === 1 ? -1 : 1));
@@ -462,55 +542,71 @@ export function FilesTableView({
           bottom must not push the other off screen. The lower pane is absent entirely when no
           folder has been granted, which leaves the catalog exactly the full-height table it was. */}
       <div className="filesview__pane filesview__pane--catalog">
-        <table className="filesview__tbl">
-          <thead>
-            <tr>
-              {COLUMNS.map((c) => {
-                const state = c.key === sortKey ? (dir === 1 ? "asc" : "desc") : null;
-                return (
-                  <th
-                    key={c.key}
-                    className={c.numeric ? "atbl__num" : undefined}
-                    aria-sort={state === "asc" ? "ascending" : state === "desc" ? "descending" : "none"}
-                  >
-                    <button
-                      type="button"
-                      className={"atbl__sort" + (state ? " is-sorted" : "")}
-                      onClick={() => toggle(c.key)}
-                      title={`Sort by ${c.label}`}
+        {/* Only worth drawing once there is more than one kind to tell apart. */}
+        {kindCounts.length > 1 && (
+          <KindFilter counts={kindCounts} on={activeKinds} onToggle={toggleKind} />
+        )}
+        <div className="filesview__scroll">
+          <table className="filesview__tbl">
+            <thead>
+              <tr>
+                {COLUMNS.map((c) => {
+                  const state = c.key === sortKey ? (dir === 1 ? "asc" : "desc") : null;
+                  return (
+                    <th
+                      key={c.key}
+                      className={c.numeric ? "atbl__num" : undefined}
+                      aria-sort={
+                        state === "asc" ? "ascending" : state === "desc" ? "descending" : "none"
+                      }
                     >
-                      {c.label}
-                      <SortArrow state={state} />
-                    </button>
-                  </th>
-                );
-              })}
-              <th className="filesview__delcol" aria-label="Delete" />
-            </tr>
-          </thead>
-          <tbody>
-            {sorted.map((r) => (
-              <FilesRow
-                key={r.id}
-                r={r}
-                isActive={r.id === activeName}
-                onSelectFile={onSelectFile}
-                onCloseFile={onCloseFile}
-              />
-            ))}
-          </tbody>
-          <tfoot>
-            <tr className="filesview__totals">
-              {/* every data column but the last (Reads) */}
-              <td colSpan={COLUMNS.length - 1}>
-                {files.length} file{files.length === 1 ? "" : "s"} open · {formatSize(totalSize)} total
-              </td>
-              {/* the last data column (Reads) + the close column */}
-              <td colSpan={2} />
-            </tr>
-          </tfoot>
-        </table>
-        {files.length === 0 && <div className="filesview__empty mono">No files open.</div>}
+                      <button
+                        type="button"
+                        className={"atbl__sort" + (state ? " is-sorted" : "")}
+                        onClick={() => toggle(c.key)}
+                        title={`Sort by ${c.label}`}
+                      >
+                        {c.label}
+                        <SortArrow state={state} />
+                      </button>
+                    </th>
+                  );
+                })}
+                <th className="filesview__delcol" aria-label="Delete" />
+              </tr>
+            </thead>
+            <tbody>
+              {shown.map((r) => (
+                <FilesRow
+                  key={r.id}
+                  r={r}
+                  isActive={r.id === activeName}
+                  onSelectFile={onSelectFile}
+                  onCloseFile={onCloseFile}
+                />
+              ))}
+            </tbody>
+            <tfoot>
+              <tr className="filesview__totals">
+                {/* every data column but the last (Reads) */}
+                <td colSpan={COLUMNS.length - 1}>
+                  {/* Filtered, the count has to say what it is counting — a table showing 2 of 9
+                      files otherwise reads as seven files having gone missing. */}
+                  {activeKinds.size > 0
+                    ? `${shown.length} of ${files.length} file${files.length === 1 ? "" : "s"} shown`
+                    : `${files.length} file${files.length === 1 ? "" : "s"} open`}{" "}
+                  · {formatSize(shownSize)} total
+                </td>
+                {/* the last data column (Reads) + the close column */}
+                <td colSpan={2} />
+              </tr>
+            </tfoot>
+          </table>
+          {files.length === 0 && <div className="filesview__empty mono">No files open.</div>}
+          {files.length > 0 && shown.length === 0 && (
+            <div className="filesview__empty mono">No open files of that type.</div>
+          )}
+        </div>
       </div>
       {/* Not gated on `tree.supported`: the bundled `samples` folder is in this list on every
           browser, including those with no File System Access API to grant a folder with. */}

@@ -1,7 +1,16 @@
 /**
- * The folders in the lower half of the Files view: one stacked section each, and inside each a
- * **directory tree beside the files of the directory you have picked**. The user's granted
- * folders first, and the app's own bundled `samples` last.
+ * The folders in the lower half of the Files view: **one tree column, one file column**. Every
+ * folder the user has granted is a group in the left column — a heading carrying its name and its
+ * own ↻ and ✕, then its directory tree — with the app's own bundled `samples` last. The right
+ * column shows the files of whichever directory is picked, wherever it was picked from.
+ *
+ * **One file column, not one per folder.** A folder is picked, a directory inside it is picked, and
+ * the right column answers "what is in there" — which is what lets the left column be a single
+ * scrolling list of every folder at once. Five granted folders then cost five headings rather than
+ * five stacked panes with five scrollbars. Which folder the column is showing is
+ * `DiskTree.activeFolder`; which directory inside it is `DiskTree.selected`, still kept per folder
+ * so a folder that opened itself on the branch holding your work (see `useDiskTree.ts`) keeps that
+ * branch marked in the tree while you read another folder.
  *
  * This is the *disk*, not the app: it lists what is in the folder, whether or not the app has ever
  * opened it. **A file's checkbox is whether it is open** — ticking one reads it off disk and opens
@@ -10,11 +19,12 @@
  * file on disk when they change, which is the whole point of granting the folder
  * (`state/diskFolders.ts`).
  *
- * **Two panes, one when it doesn't fit.** Side by side the tree stays put while you look through a
- * directory, which is what makes a folder of a hundred subdirectories navigable at all. Below a
- * container width the same two panes stack — tree above, files below — rather than the app growing
- * a second, differently-behaved narrow layout. There is one interaction model either way: click a
- * directory to see its files, click its chevron to open it in the tree.
+ * **Two columns, one when it doesn't fit.** Side by side the tree stays put while you look through
+ * a directory, which is what makes a folder of a hundred subdirectories navigable at all. Below a
+ * container width the same two columns stack — tree above, files below — rather than the app
+ * growing a second, differently-behaved narrow layout. There is one interaction model either way:
+ * click a directory to see its files, click its chevron to open it in the tree. Each column scrolls
+ * on its own, so a long tree and a long directory don't fight over one scrollbar.
  *
  * **Click opens or closes, double-click goes there** — and the reason a row here behaves
  * differently from a row of the catalog table above it. Browsing a folder means clicking through a
@@ -41,16 +51,16 @@
  * else won't appear on its own. The ↻ re-reads. (Files that are *loaded* do refresh by themselves;
  * those are watched one by one.)
  *
- * **The bundled samples are the same section, three things fewer.** The app ships a folder of
+ * **The bundled samples are the same group, three things fewer.** The app ships a folder of
  * example files (`lib/samples.ts`), and it is drawn here rather than in a panel of its own so there
  * is one folder UI to learn and one to maintain. Being built in rather than on disk, it has no ↻
- * (its listing is fixed at build time), no ✕ (it is part of the app), and no tree pane (it is
- * flat). It always keeps the name `samples`; a granted folder picked under that name gets the
- * `(2)` instead, so no two sections in the pane ever share a label. Everything else — the checkbox
- * that opens a file, the click/double-click pair, the selected row, the `samples/`-rooted name the
- * file is filed under — is the same code doing the same thing. The one difference a user can feel
- * is what opening one gives them: a *copy*, like a dropped file, since there is no writing back to
- * a file inside the app's own bundle.
+ * (its listing is fixed at build time), no ✕ (it is part of the app), and no tree under its heading
+ * (it is flat, so the heading is the whole group). It always keeps the name `samples`; a granted
+ * folder picked under that name gets the `(2)` instead, so no two groups in the pane ever share a
+ * label. Everything else — the checkbox that opens a file, the click/double-click pair, the
+ * selected row, the `samples/`-rooted name the file is filed under — is the same code doing the
+ * same thing. The one difference a user can feel is what opening one gives them: a *copy*, like a
+ * dropped file, since there is no writing back to a file inside the app's own bundle.
  */
 import { useRef } from "react";
 import { fileKindDescription } from "@zpcrweb/core";
@@ -100,128 +110,141 @@ export function FolderSection({
   onAddSampleFiles,
   onOpenFile,
 }: Props) {
+  const shown = tree.folders.find((f) => f.label === tree.activeFolder) ?? null;
+  const shownPath = shown ? (tree.selected.get(shown.label) ?? []) : [];
   return (
-    <>
-      {tree.folders.map((folder) => {
-        const isOpen = !tree.collapsed.has(folder.label);
-        const selected = tree.selected.get(folder.label) ?? [];
-        return (
-          <section
-            className={"folders__folder" + (folder.builtin ? " folders__folder--builtin" : "")}
-            key={folder.label}
-          >
-            {/* Not a <details>/<summary>: the header carries three separate actions — collapse the
-                section, select the folder's own root, and the buttons on the right — and a
-                <summary> would swallow all of them into "toggle". */}
-            <div className="folders__head">
-              <button
-                className="folders__collapse"
-                aria-expanded={isOpen}
-                title={isOpen ? "Collapse this folder" : "Expand this folder"}
-                onClick={() => tree.toggleFolder(folder.label)}
-              >
-                <span className={"rail__chevron" + (isOpen ? " is-open" : "")} aria-hidden="true">
-                  ▸
-                </span>
-              </button>
-              <button
-                className={
-                  "folders__title mono" + (isOpen && selected.length === 0 ? " is-selected" : "")
-                }
-                title={
-                  folder.builtin
-                    ? "Example files that come with the app"
-                    : `Show the files directly in ${folder.label}`
-                }
-                onClick={() => tree.select(folder.label, [])}
-              >
-                <span className="folders__icon">
-                  <FolderIcon />
-                </span>
-                {folder.label}
-              </button>
-              <span className="folders__actions">
-                {/* Nothing to re-read and nothing to give up: the bundled folder's listing is
-                    fixed when the app is built, and it is part of the app. */}
-                {!folder.builtin && folder.permission !== "granted" && (
-                  /* The grant does not survive a reload unless the browser has been told to keep
-                     it, so this is the ordinary state on a fresh session rather than an error.
-                     A button because re-asking needs a user gesture. */
-                  <button
-                    className="btn btn--sm btn--primary"
-                    onClick={() => void tree.grant(folder.label)}
-                  >
-                    Grant access
-                  </button>
-                )}
-                {!folder.builtin && (
-                  <>
+    <div className="folders">
+      <div className="folders__pane folders__pane--tree">
+        {tree.folders.map((folder) => {
+          const isOpen = !tree.collapsed.has(folder.label);
+          const selected = tree.selected.get(folder.label) ?? [];
+          const isShowing = folder.label === tree.activeFolder;
+          return (
+            <section
+              className={"folders__folder" + (folder.builtin ? " folders__folder--builtin" : "")}
+              key={folder.label}
+            >
+              {/* Not a <details>/<summary>: the heading carries three separate actions — collapse
+                  the group, select the folder's own root, and the buttons on the right — and a
+                  <summary> would swallow all of them into "toggle". */}
+              <div className="folders__head">
+                <button
+                  className="folders__collapse"
+                  aria-expanded={isOpen}
+                  title={isOpen ? "Collapse this folder" : "Expand this folder"}
+                  onClick={() => tree.toggleFolder(folder.label)}
+                >
+                  <span className={"rail__chevron" + (isOpen ? " is-open" : "")} aria-hidden="true">
+                    ▸
+                  </span>
+                </button>
+                <button
+                  className={
+                    "folders__title mono" + (isShowing && selected.length === 0 ? " is-selected" : "")
+                  }
+                  title={
+                    folder.builtin
+                      ? "Example files that come with the app"
+                      : `Show the files directly in ${folder.label}`
+                  }
+                  onClick={() => tree.select(folder.label, [])}
+                >
+                  <span className="folders__icon">
+                    <FolderIcon />
+                  </span>
+                  {folder.label}
+                </button>
+                <span className="folders__actions">
+                  {/* Nothing to re-read and nothing to give up: the bundled folder's listing is
+                      fixed when the app is built, and it is part of the app. */}
+                  {!folder.builtin && folder.permission !== "granted" && (
+                    /* The grant does not survive a reload unless the browser has been told to keep
+                       it, so this is the ordinary state on a fresh session rather than an error.
+                       A button because re-asking needs a user gesture. */
                     <button
-                      className="btn btn--sm"
-                      title="Read this folder again"
-                      onClick={() => tree.refresh(folder.label)}
+                      className="btn btn--sm btn--primary"
+                      onClick={() => void tree.grant(folder.label)}
                     >
-                      ↻
+                      Grant access
                     </button>
-                    <button
-                      className="btn btn--sm"
-                      title="Stop using this folder. Nothing on disk is deleted."
-                      onClick={() => void tree.remove(folder.label)}
-                    >
-                      ✕
-                    </button>
-                  </>
-                )}
-              </span>
-            </div>
-            {isOpen &&
-              (folder.permission === "granted" ? (
-                <div className="folders__body">
-                  {/* No tree for the bundled folder: it is one flat directory, and a pane whose
-                      only content would be "no subfolders" is a pane worth not drawing. */}
-                  {!folder.builtin && (
-                    <div className="folders__tree">
-                      <DirectoryLevel
-                        tree={tree}
-                        label={folder.label}
-                        path={[]}
-                        depth={0}
-                        selected={selected}
-                      />
-                    </div>
                   )}
-                  <div className="folders__files">
-                    <FilePane
-                      tree={tree}
-                      label={folder.label}
-                      path={selected}
-                      builtin={folder.builtin}
-                      entries={entries}
-                      activeName={activeName}
-                      onCloseFile={onCloseFile}
-                      onAddDiskFiles={onAddDiskFiles}
-                      onAddSampleFiles={onAddSampleFiles}
-                      onOpenFile={onOpenFile}
-                    />
-                  </div>
-                </div>
-              ) : (
-                <div className="folders__note mono">
-                  This browser needs permission again before it can read this folder.
-                </div>
-              ))}
-          </section>
-        );
-      })}
-      {tree.error && <div className="folders__note folders__note--error mono">{tree.error}</div>}
-    </>
+                  {!folder.builtin && (
+                    <>
+                      <button
+                        className="btn btn--sm"
+                        title="Read this folder again"
+                        onClick={() => tree.refresh(folder.label)}
+                      >
+                        ↻
+                      </button>
+                      <button
+                        className="btn btn--sm"
+                        title="Stop using this folder. Nothing on disk is deleted."
+                        onClick={() => void tree.remove(folder.label)}
+                      >
+                        ✕
+                      </button>
+                    </>
+                  )}
+                </span>
+              </div>
+              {isOpen &&
+                (folder.permission === "granted"
+                  ? /* No tree under the bundled folder: it is one flat directory, and a branch
+                       whose only content would be "no subfolders" is one worth not drawing. */
+                    !folder.builtin && (
+                      <div className="folders__tree">
+                        <DirectoryLevel
+                          tree={tree}
+                          label={folder.label}
+                          path={[]}
+                          depth={0}
+                          selected={isShowing ? selected : null}
+                        />
+                      </div>
+                    )
+                  : (
+                    <div className="folders__note mono">
+                      This browser needs permission again before it can read this folder.
+                    </div>
+                  ))}
+            </section>
+          );
+        })}
+        {tree.error && <div className="folders__note folders__note--error mono">{tree.error}</div>}
+      </div>
+      {/* One file column for every folder: whichever directory is picked on the left, whichever
+          folder it belongs to. */}
+      <div className="folders__pane folders__pane--files">
+        {shown == null ? (
+          <div className="folders__note mono">Pick a folder to see what is in it.</div>
+        ) : shown.permission !== "granted" ? (
+          <div className="folders__note mono">
+            This browser needs permission again before it can read {shown.label}.
+          </div>
+        ) : (
+          <FilePane
+            tree={tree}
+            label={shown.label}
+            path={shownPath}
+            builtin={shown.builtin}
+            entries={entries}
+            activeName={activeName}
+            onCloseFile={onCloseFile}
+            onAddDiskFiles={onAddDiskFiles}
+            onAddSampleFiles={onAddSampleFiles}
+            onOpenFile={onOpenFile}
+          />
+        )}
+      </div>
+    </div>
   );
 }
 
 const indent = (depth: number): number => 8 + depth * 13;
 
-/** The subdirectories of one directory — the tree pane's recursive half. Files are not here; they
- * are the other pane's job. */
+/** The subdirectories of one directory — the tree column's recursive half. Files are not here; they
+ * are the other column's job. */
 function DirectoryLevel({
   tree,
   label,
@@ -233,7 +256,9 @@ function DirectoryLevel({
   label: string;
   path: string[];
   depth: number;
-  selected: readonly string[];
+  /** The directory the file column is showing, or null when that column is showing some *other*
+   * folder — in which case no row in this tree is the one on screen, and none is marked. */
+  selected: readonly string[] | null;
 }) {
   const node = tree.nodes.get(nodeKey(label, path));
   const dirs = node?.entries?.filter((e) => e.kind === "directory") ?? [];
@@ -266,7 +291,7 @@ function DirectoryLevel({
         const childPath = [...path, entry.name];
         const key = nodeKey(label, childPath);
         const isOpen = tree.open.has(key);
-        const isSelected = key === nodeKey(label, selected);
+        const isSelected = selected != null && key === nodeKey(label, selected);
         return (
           <li key={entry.name}>
             <div
@@ -334,29 +359,27 @@ function FilePane({
   const files = node?.entries?.filter((e) => e.kind === "file") ?? [];
   return (
     <>
-      {/* The bundled folder has nowhere to navigate to, so its one crumb would only ever be its
-          own name — which the header above already is. */}
-      {!builtin && (
-        <div className="folders__crumbs mono">
-          {/* Every ancestor is a way back up, which is the only navigation the file pane needs. */}
-          <button className="folders__crumb" onClick={() => tree.select(label, [])}>
-            {label}
-          </button>
-          {path.map((part, i) => (
-            <span key={i}>
-              <span className="folders__crumbsep" aria-hidden="true">
-                /
-              </span>
-              <button
-                className="folders__crumb"
-                onClick={() => tree.select(label, path.slice(0, i + 1))}
-              >
-                {part}
-              </button>
+      {/* Which directory this column is showing — its folder's own name included, since the
+          heading that says it is over in the other column now. Every ancestor is a way back up,
+          which is the only navigation the file column needs. */}
+      <div className="folders__crumbs mono">
+        <button className="folders__crumb" onClick={() => tree.select(label, [])}>
+          {label}
+        </button>
+        {path.map((part, i) => (
+          <span key={i}>
+            <span className="folders__crumbsep" aria-hidden="true">
+              /
             </span>
-          ))}
-        </div>
-      )}
+            <button
+              className="folders__crumb"
+              onClick={() => tree.select(label, path.slice(0, i + 1))}
+            >
+              {part}
+            </button>
+          </span>
+        ))}
+      </div>
       {node?.error ? (
         <div className="folders__note folders__note--error mono">{node.error}</div>
       ) : !node?.entries ? (

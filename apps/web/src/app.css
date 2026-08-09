@@ -768,15 +768,69 @@
 }
 /* The catalog takes whatever the folders don't. Two granted folders should not cost half the
    window, and thirty should not push the table off it — so the lower pane is sized to its content
-   and capped, and scrolls once it hits the cap. */
+   and capped, and scrolls once it hits the cap.
+
+   The type chips sit above the scrolling part rather than inside it, so the control that filters
+   the table never scrolls away from the table it filters. */
 .filesview__pane--catalog {
   flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
+.filesview__scroll {
+  overflow: auto;
+  min-height: 0;
+}
+/* The folders pane doesn't scroll itself: its two columns do, independently (`.folders` below),
+   so scrolling a long tree must not carry the file list off with it. */
 .filesview__pane--folders {
   flex: 0 1 auto;
   max-height: 55%;
+  display: flex;
+  overflow: hidden;
   border-top: 1px solid var(--border-strong);
   padding-top: 8px;
+}
+
+/* One chip per file type the browser is holding — a filter, so nothing on means the whole table
+   (see `FilesTableView.tsx`). */
+.filesview__filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 0 10px;
+}
+.filesview__filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  opacity: 0.6;
+}
+.filesview__filter:hover {
+  opacity: 1;
+}
+/* On means "show only these". Nothing on is the unfiltered table, which is why an off chip is
+   dimmed rather than struck through: its files aren't excluded, they just aren't being singled
+   out. */
+.filesview__filter.is-on {
+  opacity: 1;
+  border-color: var(--neon-cyan);
+  background: color-mix(in srgb, var(--neon-cyan) 14%, transparent);
+  color: var(--neon-cyan);
+}
+.filesview__filtericon {
+  display: inline-flex;
+  color: var(--ink-muted);
+}
+.filesview__filtercount {
+  font-size: 10px;
+  color: var(--ink-muted);
+}
+.filesview__filter.is-on .filesview__filtericon,
+.filesview__filter.is-on .filesview__filtercount {
+  color: inherit;
 }
 .filesview__tbl {
   width: 100%;
@@ -894,24 +948,64 @@
 }
 
 /* ---- FolderSection -------------------------------------------------------- */
-/* The granted folders, stacked in the Files view's lower pane. Each is a header plus two panes of
-   its own: the directory tree, and the files of whichever directory is picked — side by side when
-   there is room, stacked when there isn't. A row here is a file on *disk*, which the table's
-   rows above are not; see `FolderSection.tsx`.
+/* Two columns filling the Files view's lower pane: every granted folder's tree in the left one,
+   one group per folder under its own heading, and the files of whichever directory is picked in
+   the right one. Side by side when there is room, stacked when there isn't. A row here is a file
+   on *disk*, which the table's rows above are not; see `FolderSection.tsx`.
 
    Tree indentation is an inline `padding-left` per depth rather than nested padding, so a deep
-   row's hover and its selected background still span the full width of the pane. */
+   row's hover and its selected background still span the full width of the column. */
+.folders {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+.folders__pane {
+  overflow: auto;
+  min-width: 0;
+  min-height: 0;
+}
+/* Stacked, the trees must not push the files they exist to reach off the bottom of the pane. */
+.folders__pane--tree {
+  max-height: 34cqh;
+}
+.folders__pane--files {
+  padding: 4px 0 6px;
+  border-top: 1px solid var(--border);
+}
+@container (min-width: 700px) {
+  .folders {
+    flex-direction: row;
+    align-items: stretch;
+  }
+  .folders__pane--tree {
+    flex: 0 0 clamp(180px, 28cqi, 340px);
+    max-height: none;
+    border-right: 1px solid var(--border);
+  }
+  .folders__pane--files {
+    flex: 1 1 auto;
+    border-top: 0;
+  }
+}
+
+/* One folder's group in the tree column: its heading, then its tree. The heading sticks to the top
+   of the column while its own tree scrolls under it, so a folder half way down a long list still
+   says which folder you are reading. */
 .folders__folder {
-  margin-bottom: 8px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--panel);
+  margin-bottom: 6px;
 }
 .folders__head {
   display: flex;
   align-items: center;
   gap: 4px;
   padding: 5px 8px;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--panel);
   border-bottom: 1px solid var(--border);
 }
 .folders__collapse,
@@ -959,45 +1053,8 @@
   margin-left: auto;
 }
 
-/* Stacked by default — tree above, files below — and side by side once the view is wide enough to
-   give each a usable column. One layout switch, no second interaction model: it is the same tree
-   and the same file list either way. */
-.folders__body {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
 .folders__tree {
   padding: 4px 0;
-  overflow: auto;
-  /* Stacked, the tree must not push the files it exists to reach off the bottom of the pane. */
-  max-height: 34cqh;
-}
-.folders__files {
-  padding: 4px 0 6px;
-  border-top: 1px solid var(--border);
-  overflow: auto;
-  min-height: 0;
-}
-/* The bundled `samples` folder is flat, so it has no tree pane and the line that separates the
-   two would be a stray rule under its header. */
-.folders__files:first-child {
-  border-top: 0;
-}
-@container (min-width: 700px) {
-  .folders__body {
-    flex-direction: row;
-    align-items: stretch;
-  }
-  .folders__tree {
-    flex: 0 0 clamp(160px, 26cqi, 320px);
-    max-height: none;
-    border-right: 1px solid var(--border);
-  }
-  .folders__files {
-    flex: 1 1 auto;
-    border-top: 0;
-  }
 }
 
 .folders__list {
@@ -1053,11 +1110,11 @@
   background: color-mix(in srgb, var(--neon-cyan) 12%, transparent);
   color: var(--neon-cyan);
 }
-/* The header stands in for a tree row the root doesn't have, so it marks the same state — but in
-   text alone. Every folder starts on its own root, and a stack of five filled pills would read as
-   five active things when it only means "each is showing its top level". The file pane's
-   breadcrumb is the unambiguous answer either way. */
+/* The heading stands in for a tree row that a folder's own root doesn't have, so it marks the same
+   state the same way. Only ever one at a time now that one file column serves every folder, so a
+   filled pill says exactly what it means: this is the folder you are looking into. */
 .folders__title.is-selected {
+  background: color-mix(in srgb, var(--neon-cyan) 12%, transparent);
   color: var(--neon-cyan);
 }
 .folders__dir {

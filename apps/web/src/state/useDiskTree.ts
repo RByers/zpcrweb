@@ -99,11 +99,13 @@ export interface DiskTree {
   open: ReadonlySet<string>;
   toggle: (label: string, path: readonly string[]) => void;
   /**
-   * The directory whose files are showing, per folder — the right-hand pane's subject. Each folder
-   * keeps its own, so switching between two folders doesn't lose your place in either. Absent means
-   * the folder's own root.
+   * The directory whose files are showing, per folder. Each folder keeps its own, so switching
+   * between two folders doesn't lose your place in either. Absent means the folder's own root.
    */
   selected: ReadonlyMap<string, readonly string[]>;
+  /** Which folder the file column is showing — one at a time, since there is one file column for
+   * the whole tree. Null before any folder has been picked, and after the picked one is removed. */
+  activeFolder: string | null;
   /** Show this directory's files. Lists it if it hasn't been read, exactly as expanding does. */
   select: (label: string, path: readonly string[]) => void;
   /** Folders whose body is hidden. Stacked folders would otherwise push each other off the pane. */
@@ -148,6 +150,11 @@ export function useDiskTree(
   const [nodes, setNodes] = useState<Map<string, DiskNode>>(new Map());
   const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
   const [selected, setSelected] = useState<ReadonlyMap<string, readonly string[]>>(new Map());
+  const [activeFolder, setActiveFolder] = useState<string | null>(null);
+  /** Whether the user has picked a folder themselves. Until they have, a folder holding files that
+   * are already open outranks whatever happened to be listed first — the loaded files arrive from
+   * IndexedDB after the folder list does, so the better answer is only knowable later. */
+  const picked = useRef(false);
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
   /**
@@ -236,8 +243,13 @@ export function useDiskTree(
     const toOpen: string[] = [];
     /** Where each folder's file pane should start out. */
     const toSelect = new Map<string, readonly string[]>();
+    /** Which folder the one file column starts on, if the user hasn't picked: a folder already
+     * holding open files beats whatever happens to be first in the list. */
+    let firstSeen: string | null = null;
+    let holdingOpenFiles: string | null = null;
     for (const folder of folders) {
       const mark = `folder:${folder.label}`;
+      firstSeen ??= folder.label;
       if (expanded.current.has(mark)) continue;
       expanded.current.add(mark);
       toOpen.push(nodeKey(folder.label, []));
@@ -255,6 +267,13 @@ export function useDiskTree(
       // …and land the file pane on the directory that file is actually in, so the work in progress
       // is what's showing rather than whatever happens to be at the top of the folder.
       toSelect.set(source.folder, source.path.slice(0, -1));
+      holdingOpenFiles = source.folder;
+    }
+    // Where the file column starts — only until the user picks a folder themselves, after which
+    // this is their choice to keep and a folder list arriving late must not move it.
+    if (!picked.current) {
+      if (holdingOpenFiles) setActiveFolder(holdingOpenFiles);
+      else if (firstSeen) setActiveFolder((prev) => prev ?? firstSeen);
     }
     if (toOpen.length === 0) return;
     setOpen((prev) => new Set([...prev, ...toOpen]));
@@ -271,7 +290,9 @@ export function useDiskTree(
 
   const select = useCallback(
     (label: string, path: readonly string[]) => {
+      picked.current = true;
       setSelected((prev) => new Map(prev).set(label, path));
+      setActiveFolder(label);
       void load(label, path);
     },
     [load],
@@ -319,7 +340,13 @@ export function useDiskTree(
     try {
       setError(null);
       const folder = await pickFolder(reserved);
-      if (folder) await readFolders();
+      if (folder) {
+        // Picking a folder is asking to look in it, so the file column goes there — and counts as
+        // the user's own choice, which nothing later gets to override.
+        picked.current = true;
+        setActiveFolder(folder.label);
+        await readFolders();
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -377,6 +404,13 @@ export function useDiskTree(
         next.delete(label);
         return next;
       });
+      // The file column was showing a folder that no longer exists. Hand the choice back to the
+      // effect above rather than leaving an empty column with no way back into one.
+      setActiveFolder((prev) => {
+        if (prev !== label) return prev;
+        picked.current = false;
+        return null;
+      });
       await readFolders();
     },
     [readFolders],
@@ -389,6 +423,7 @@ export function useDiskTree(
     open,
     toggle,
     selected,
+    activeFolder,
     select,
     collapsed,
     toggleFolder,

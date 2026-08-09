@@ -1006,15 +1006,31 @@ The open-files table and the folders answer different questions — what this br
 holding, and what is on the disk — and are different lengths, so they are two panes that scroll
 independently rather than one long column. The folders pane is sized to its content and capped at
 55% of the view, so two folders don't cost half the window and thirty don't push the table out of
-it. With no folder granted the pane holds just the bundled `samples` section (below).
+it. With no folder granted the pane holds just the bundled `samples` group (below).
 
-Inside the folders pane each folder is a stacked section, and each section is itself split: the
-**directory tree** on one side, the **files of the directory you picked** on the other. Side by side
-once `.filesview` is wide enough (a container query at 700px), stacked — tree above, files below —
-when it isn't. That is a layout switch and nothing more: there is one interaction model at both
-sizes, one set of components, and one piece of shared state (which directory is selected, per
-folder). Clicking a directory's name selects it *and* opens it in the tree; its chevron opens it
-without changing what the file pane shows.
+Above the table is a row of **type chips**, one per kind of file open, each carrying how many there
+are of it and toggling the table down to that kind. They are a filter rather than a selection:
+nothing on is the whole catalog, which is the state the view opens in and the state turning the last
+chip off returns to, so there is no "All" control to keep in step. Only kinds actually present get a
+chip, so the bar doubles as a summary of what the browser is holding and disappears when everything
+is one kind. The footer counts what is on screen (`3 of 9 files shown`) rather than what is open, so
+a filtered table never reads as files having gone missing. The chips sit outside
+`.filesview__scroll`, so the control never scrolls away from the table it filters.
+
+The folders pane is itself **two columns**: every folder's **directory tree** in the left one, one
+group per folder under its own heading (name, ↻, ✕), and the **files of whichever directory is
+picked** in the right one. Side by side once `.filesview` is wide enough (a container query at
+700px), stacked — trees above, files below — when it isn't; that is a layout switch and nothing
+more, with one interaction model at both sizes. Clicking a directory's name selects it *and* opens
+it in the tree; its chevron opens it without changing what the file column shows.
+
+There is **one file column for every folder**, not one per folder, which is what lets the left
+column be a single scrolling list of every folder at once: five granted folders cost five headings
+rather than five stacked panes with five scrollbars. `DiskTree.activeFolder` is the folder that
+column is showing — set by clicking a heading or a directory row, by adding a folder (picking one is
+asking to look in it), and, until the user picks for themselves, by whichever folder holds files
+already open. `DiskTree.selected` stays per folder, so a folder that opened itself on the branch
+holding the work in progress keeps that branch marked while another folder is being read.
 
 A **file** row in that pane answers a different question from the table's, so its click means
 something different: a click is the row's checkbox — it opens the file off disk, or closes it
@@ -1034,14 +1050,15 @@ nothing to go to. That is accepted rather than worked around; the gesture that m
 one, on a file being opened for the first time. `FileRow` keeps the click's outcome in a ref because
 `dblclick` arrives after `open` was last rendered, so the prop is a render behind by then.
 
-The folder's header stands in for the tree row its own root doesn't have — clicking the name shows
-the files at the top level — which is why it is a plain header with buttons rather than a
+The folder's heading stands in for the tree row its own root doesn't have — clicking the name shows
+the files at the top level — which is why it is a plain heading with buttons rather than a
 `<summary>`: it carries three separate actions (collapse, select the root, and the refresh/remove
-buttons) and a `<summary>` would swallow all of them into "toggle".
+buttons) and a `<summary>` would swallow all of them into "toggle". Only one heading is ever marked,
+since only one folder can be the one the file column is showing.
 
 ### The bundled samples folder
 
-The last section in that pane is not on the disk at all: `samples`, the example files the app ships
+The last group in the tree column is not on the disk at all: `samples`, the example files the app ships
 with. It is drawn by `FolderSection` alongside the granted ones rather than in a panel of its own,
 because it is the same thing — a list of files the app isn't holding yet, each with a checkbox that
 opens it — and a second component would drift from the first the moment either changed.
@@ -1053,8 +1070,8 @@ that one fact:
   never sit above theirs. `useDiskTree` appends it to `folders` after `listFolders()`.
 - **It cannot be removed or re-read** — no ✕, no ↻, no permission to ask back for. Its listing is
   fixed when the app is built.
-- **It has no tree pane**, being one flat directory.
-- **It keeps its name.** Every section in the pane has a distinct label, because a label is an
+- **It has no tree under its heading**, being one flat directory — the heading is the whole group.
+- **It keeps its name.** Every group in the tree column has a distinct label, because a label is an
   identity: the tree keys its nodes by it, and the file names inside it begin with it. `samples` is
   the app's, always — a folder the user grants under that name gets `samples (2)` instead, from the
   same `(N)` counter as `lib/cloneName.ts` (`addFolder`'s `reserved`). Because no granted folder can
