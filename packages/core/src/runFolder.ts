@@ -152,13 +152,21 @@ export interface RunFolderNaming {
    * describes *this* run — see {@link zpcrNameFromRunFiles}.
    */
   experimentName?: string;
-  /** The file base name this run's archive already goes by (no extension). */
+  /**
+   * The name this run's archive already goes by, with or without its `.zpcr` extension — and
+   * **with any directory part kept**. A caller may name a file by a path (the app names a file
+   * opened out of a granted folder by its path within that folder), and that path is part of which
+   * file this is: strip it and the run's snapshots land under a bare name, i.e. beside the file
+   * they are snapshots of rather than in it.
+   */
   fileName?: string;
 }
 
-/** Strip a `.zpcr` extension and any path, so a caller may pass either form. */
-function fileBase(name: string): string {
-  return baseName(name.trim()).replace(/\.zpcr$/i, "");
+/** A caller's file name as a `.zpcr` name: its own extension if it has one, else appended. Any
+ * directory part is left exactly as given — see {@link RunFolderNaming.fileName}. */
+function zpcrFileName(name: string): string {
+  const trimmed = name.trim();
+  return /\.zpcr$/i.test(trimmed) ? trimmed : `${trimmed}.zpcr`;
 }
 
 /**
@@ -169,7 +177,9 @@ function fileBase(name: string): string {
  *    was started, which is what the `zpcrweb.json` deposited into the run folder
  *    (`usb/runPlan.ts`) attests: nothing else writes that entry there, and its `experimentName`
  *    matching `naming.experimentName` is what says the staged run and the folder are the same
- *    run rather than a new name typed over a run still finishing.
+ *    run rather than a new name typed over a run still finishing. Returned **verbatim**, directory
+ *    part and all: the name is how the caller identifies the file it is already holding, so any
+ *    part of it this dropped would name a different file.
  * 2. **The deposited name**, `<YYYYMMDD>-<name>` via {@link runFileBaseName} — the same
  *    derivation the Instrument view offers as its default, so a browser reloaded mid-run (which
  *    forgets what was typed) still lands the file under the name the run was started with.
@@ -189,8 +199,8 @@ export function zpcrNameFromRunFiles(
 
   const deposited = depositedName(files);
   if (deposited) {
-    const chosen = fileBase(naming?.fileName ?? "");
-    if (chosen && naming?.experimentName?.trim() === deposited) return `${chosen}.zpcr`;
+    const chosen = naming?.fileName?.trim() ?? "";
+    if (chosen && naming?.experimentName?.trim() === deposited) return zpcrFileName(chosen);
     const derived = runFileBaseName(deposited, runStartDate(runInfo));
     if (derived) return `${derived}.zpcr`;
   }

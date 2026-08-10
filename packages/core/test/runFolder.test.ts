@@ -75,6 +75,24 @@ describe("zpcrFromRunFiles", () => {
       ).toBe("20260802-S183-S185_RVP.zpcr");
     });
 
+    it("keeps the path of a file the caller names by one, and its own extension", () => {
+      // The app names a file opened out of a granted folder by its path within that folder, so a
+      // run started from one has to stay *that* file — its snapshots update it rather than landing
+      // beside it under a bare name.
+      expect(
+        zpcrNameFromRunFiles(started("S183-S185 RVP"), {
+          experimentName: "S183-S185 RVP",
+          fileName: "Lab runs/2026-08/20260802-S183-S185_RVP.zpcr",
+        }),
+      ).toBe("Lab runs/2026-08/20260802-S183-S185_RVP.zpcr");
+      expect(
+        zpcrNameFromRunFiles(started("S183-S185 RVP"), {
+          experimentName: "S183-S185 RVP",
+          fileName: "Lab runs/2026-08/20260802-S183-S185_RVP",
+        }),
+      ).toBe("Lab runs/2026-08/20260802-S183-S185_RVP.zpcr");
+    });
+
     it("derives the name from the deposited one when nothing is staged, or a different run is", () => {
       // The date is the run's own start (`Tue, 21 Jul 2026 05:18:16 GMT`, so the 20th or the 21st
       // depending on where this test runs), not today's — the same run re-pulled tomorrow keeps

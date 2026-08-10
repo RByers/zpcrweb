@@ -1051,6 +1051,23 @@ structured-cloneable, which is what lets a grant outlive a reload — and `FileI
 its bytes are on disk and IndexedDB holds only its catalog row. The exception is a run the
 instrument is still writing.
 
+**A run started from a file in a folder stays that file.** Starting an experiment marks the file it
+was started from `begun` (`beginExperiment`) and the watcher then appends the instrument's plate
+reads to it — to *it*, not to a second file beside it — for the whole run. Two things make that
+work, and both are about the file's name, since a name is a file here:
+
+- A disk-backed file is named by its path within the granted folder (`db.ts`'s `diskFileName`), so
+  the name the run is pinned under (`App.tsx`'s `startedRun`) is a path, and core's
+  `zpcrNameFromRunFiles` hands it back whole rather than reducing it to a bare file name. A
+  stripped path named a file the store didn't have, and every snapshot installed a new one.
+- `addRunArchive` carries the file's `DiskSource` onto each snapshot, which is what keeps
+  `persistFile` treating it as disk-backed: the reads buffer into IndexedDB while the run is going
+  (above), and the finished run is written back to the original file on disk, once.
+
+The file's name therefore doesn't move over a run, which is also why `beginExperiment` doesn't
+restamp its date the way it does for a browser-held experiment — a disk-backed file can't be
+renamed from here at all (`renameFile`).
+
 ### The Files view is two panes
 
 The open-files table and the folders answer different questions — what this browser is

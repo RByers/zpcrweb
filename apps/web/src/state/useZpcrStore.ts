@@ -1582,12 +1582,11 @@ export function useZpcrStore(): ZpcrStore {
       options: { modified: boolean; replacing: boolean; diskInSync?: boolean },
     ): Promise<string> => {
       const prior = entriesRef.current.find((f) => f.name === file.name);
+      const priorLoaded = loadedRef.current.find((f) => f.name === file.name);
       // The version this write replaces, read before the loaded set moves on — what tells the store
       // which entries are already on disk (`persistFile`). A replacement shares nothing meaningful
       // with what it replaces, so it is written whole.
-      const previous = options.replacing
-        ? undefined
-        : loadedRef.current.find((f) => f.name === file.name)?.content;
+      const previous = options.replacing ? undefined : priorLoaded?.content;
       if (options.replacing && prior) {
         // A pending write belongs to content that no longer exists: drop it rather than let it
         // flush onto the file that has just taken its place.
@@ -1630,8 +1629,16 @@ export function useZpcrStore(): ZpcrStore {
       });
       if (options.modified) setModifiedFlag(file.name, true);
       // Every route to a loaded disk-backed file passes through here or through `loadOne`, and
-      // both have to start the watch — a file opened from the tree arrives by this one.
-      if (file.source) startDiskWatch(file.name, file.source);
+      // both have to start the watch — a file opened from the tree arrives by this one. Not for a
+      // file already loaded from the same place, though: a run being followed re-installs itself
+      // once per plate read, and `watchDiskFile` re-arms by disconnecting and rebuilding the
+      // observer, so re-watching there would tear down a live watch forty-five times over.
+      const sameSource =
+        priorLoaded?.source &&
+        file.source &&
+        !options.replacing &&
+        diskFileName(priorLoaded.source) === diskFileName(file.source);
+      if (file.source && !sameSource) startDiskWatch(file.name, file.source);
       return file.name;
     },
     [setModifiedFlag, startDiskWatch],
@@ -1739,6 +1746,12 @@ export function useZpcrStore(): ZpcrStore {
             kind: "zpcr",
             content,
             lastModified: Date.now(),
+            // A snapshot of a run started from a file in a granted folder is still that file. The
+            // source travels with it, so the reads buffer into IndexedDB while the run is going and
+            // the finished run is written back to the very file it was started from (`persistFile`,
+            // and the completion effect below); dropped, the run would quietly become a
+            // browser-only copy and the file on disk would never be updated.
+            ...(previous?.source ? { source: previous.source } : {}),
           },
           { modified: options?.modified === true, replacing: false },
         );
@@ -2172,8 +2185,10 @@ export function useZpcrStore(): ZpcrStore {
       await editThrottle.current!.flush(id);
       const current = loadedRef.current.find((f) => f.name === id) ?? file;
       // Restamping the date renames the file, and the new name *is* the new key — no second
-      // derivation to keep in step with whatever `renameFile` chose.
-      const restamped = restampExperimentDate(current.name, new Date());
+      // derivation to keep in step with whatever `renameFile` chose. Never for a disk-backed file:
+      // its name is its path on the user's disk and it cannot be renamed from here at all
+      // (`renameFile`), so it keeps the name the file has and the run updates that same file.
+      const restamped = current.source ? null : restampExperimentDate(current.name, new Date());
       const targetName = restamped ?? current.name;
       if (restamped) await renameFile(id, restamped);
       // Pending → in progress: both states are held open (`fileContent.ts`), so writing the
