@@ -1,3 +1,4 @@
+import { safeFileBase } from "@zpcrweb/core";
 import type { PlateDefinition } from "@zpcrweb/core";
 
 /**
@@ -23,13 +24,14 @@ export function plateDisplayName(plate: PlateDefinition): string {
 
 /**
  * The `.plt.csv` file name a plate's own identity gives it — what "Clone experiment"
- * (`App.tsx`'s `cloneExperiment`) names the plate half of the archive it builds. Same sanitizing
- * `PlateDownloadButton`'s Clone button applies to its own filename, kept separate rather than
- * shared since that one also has `pltd`/`plateName` fallbacks this caller never has (a plate
- * pulled from an already-decoded `Zpcr` always carries an `identityKey`).
+ * (`App.tsx`'s `cloneExperiment`) names the plate half of the archive it builds. Core's
+ * `safeFileBase` does the character reduction, as everywhere else a name becomes a file name;
+ * only the fallback is local, since `PlateDownloadButton` also has `pltd`/`plateName` ones this
+ * caller never needs (a plate pulled from an already-decoded `Zpcr` always carries an
+ * `identityKey`).
  */
 export function plateCsvFileName(plate: PlateDefinition): string {
-  const base = plateDisplayName(plate).replace(/[\\/:*?"<>|]+/g, "_").trim() || "plate";
+  const base = safeFileBase(plateDisplayName(plate)) || "plate";
   return `${base}.plt.csv`;
 }
 

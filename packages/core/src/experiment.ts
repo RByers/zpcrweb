@@ -24,6 +24,7 @@
  * | the filename (see {@link deriveExperimentName}) | last resort, and usually right |
  */
 
+import { safeFileBase } from "./fileName.js";
 import type { RunMetadata } from "./types.js";
 
 /** Extensions this project loads, longest-first so `.plt.csv` isn't read as `.csv`. */
@@ -82,22 +83,12 @@ export function deriveExperimentName(fileName: string, opts?: { serial?: string 
  * eye; {@link deriveExperimentName} strips a leading date under either separator, so the two
  * functions round-trip.
  *
- * Characters a filesystem or a `RemoteRun` operand would object to are replaced (the same set as
- * `usb/runPlan.ts`); an empty name yields `""`, which callers turn into their own fallback.
+ * The name is reduced to `A-Za-z0-9_-` by {@link safeFileBase} — every consumer's constraints at
+ * once, rather than one consumer's; an empty name yields `""`, which callers turn into their own
+ * fallback.
  */
 export function runFileBaseName(experimentName: string, date: Date = new Date()): string {
-  const name = experimentName
-    .trim()
-    .replace(/\s+/g, "_")
-    .replace(/[^\x20-\x7e]/g, "")
-    .replace(/['",;]+/g, "_")
-    .replace(/[\\/:*?<>|]+/g, "_")
-    // Two adjacent replacements (`RVP "fast"` → `RVP__fast_`) read as a typo rather than as a
-    // name, so runs of underscores collapse. Nothing reads them back individually — a `_` is a
-    // space to `deriveExperimentName` however many there were.
-    .replace(/_{2,}/g, "_")
-    .replace(/^_+|_+$/g, "")
-    .trim();
+  const name = safeFileBase(experimentName);
   if (!name) return "";
   const stamp =
     `${date.getFullYear()}` +

@@ -210,6 +210,7 @@ export {
   resolveExperimentName,
   runFileBaseName,
 } from "./experiment.js";
+export { safeFileBase } from "./fileName.js";
 export { zipCryptoDecrypt } from "./zipcrypto.js";
 export { inflateRaw } from "./inflate.js";
 export {

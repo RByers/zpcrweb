@@ -7,6 +7,7 @@
  * always agrees with whatever marker a chart draws for the same curve.
  */
 
+import { safeFileBase } from "./fileName.js";
 import type { SampleType } from "./pltd.js";
 import { curveKey, formatBaselineFormula, type RunAnalysis } from "./runAnalysis.js";
 
@@ -136,12 +137,8 @@ export function analysisCsv(rows: AnalysisRow[]): string {
   return csv;
 }
 
-function sanitizeFilePart(s: string): string {
-  return s.replace(/[\\/:*?"<>|]+/g, "_").trim();
-}
-
 /** `<run name>_analysis.csv` — the same `dataFile`-derived naming a raw per-cycle export uses. */
 export function analysisCsvFilename(dataFile: string): string {
-  const runName = sanitizeFilePart(dataFile.replace(/\.(zpcr|pcrd)$/i, "")) || "run";
+  const runName = safeFileBase(dataFile.replace(/\.(zpcr|pcrd)$/i, "")) || "run";
   return `${runName}_analysis.csv`;
 }

@@ -560,6 +560,16 @@ reports. The entry carries one thing that isn't a parameter: `experimentName`, w
 sample; the instrument encodes the name into the filename instead), so `experiment.ts` resolves
 stored name → the format's own → a derivation from the filename (`deriveExperimentName`, whose
 inverse `runFileBaseName` composes the filename a named run should be saved under).
+
+Every name that becomes a file name goes through one function on the way, `fileName.ts`'s
+`safeFileBase`: an **allow-list** of `A-Za-z0-9_-`, everything else `_`, accents folded to their
+base letter, runs collapsed, ends trimmed. Allow-list rather than the per-caller deny-lists it
+replaced, because a name written here can end up as a path on two operating systems, an entry
+inside a `.zpcr`, a download filename and a `RemoteRun` operand (`usb.md` §7.3), and only the
+allow-list stays right for the consumer nobody had in mind. `runFileBaseName`, `usb/runPlan.ts`'s
+uploads, the CSV exports and the web app's download/clone buttons all call it; each keeps its own
+fallback for a name that survives as nothing (`run`, `plate`, `protocol`, `zpcrweb`).
+
 `writeZpcrwebSettings` adds them to the archive as a `zpcrweb.json` entry;
 `parseZpcrwebSettings` reads them back through the already-decompressed `Zpcr.archive`, total and
 field-by-field so a hand-edited or newer document degrades instead of failing. Full schema and

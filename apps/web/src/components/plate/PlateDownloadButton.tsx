@@ -1,15 +1,10 @@
 import { useRef } from "react";
 import type { PlateDefinition } from "@zpcrweb/core";
-import { plateToCsv } from "@zpcrweb/core";
+import { plateToCsv, safeFileBase } from "@zpcrweb/core";
 import { downloadBytes, downloadText } from "../../lib/download";
 import { stripPlateExt } from "../../lib/plateNames";
 import { DownloadIcon } from "../DownloadIcon";
 import { CloneIcon } from "../CloneIcon";
-
-/** Sanitize a plate name / entry name into a safe file basename. */
-function sanitize(s: string): string {
-  return s.replace(/[\\/:*?"<>|]+/g, "_").trim() || "plate";
-}
 
 interface Props {
   plate: PlateDefinition | undefined;
@@ -39,7 +34,7 @@ export function PlateDownloadButton({ plate, pltd, onClone }: Props) {
   // only a vessel/plastic type (see PlateDefinition.plateName's doc comment). identityKey and
   // the archive entry name are typically a source file name, hence stripPlateExt.
   const csvBaseName = plate?.identityKey || pltd?.name || plate?.plateName || "plate";
-  const csvName = `${sanitize(stripPlateExt(csvBaseName))}.plt.csv`;
+  const csvName = `${safeFileBase(stripPlateExt(csvBaseName)) || "plate"}.plt.csv`;
 
   const close = () => {
     if (detailsRef.current) detailsRef.current.open = false;

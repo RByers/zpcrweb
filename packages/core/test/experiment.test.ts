@@ -68,6 +68,12 @@ describe("runFileBaseName", () => {
     expect(runFileBaseName('RVP "fast"/v2', aug2)).toBe("20260802-RVP_fast_v2");
     expect(runFileBaseName("   ")).toBe("");
   });
+
+  it("keeps only A-Za-z0-9_- , whatever the name was", () => {
+    expect(runFileBaseName("RVP #2 & 50%", aug2)).toBe("20260802-RVP_2_50");
+    expect(runFileBaseName("Réplica v2.1", aug2)).toBe("20260802-Replica_v2_1");
+    expect(runFileBaseName("日本語", aug2)).toBe("");
+  });
 });
 
 describe("nextFreeRunFileBase", () => {

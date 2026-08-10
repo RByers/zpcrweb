@@ -58,6 +58,7 @@ import {
   SCAN_MASK_CHANNELS,
   type RunDefinitionProgram,
 } from "../runDefinition.js";
+import { safeFileBase } from "../fileName.js";
 import { assertCommandArgument } from "./commands.js";
 
 /** Where a run's files live on the instrument (`usb.md` §5). */
@@ -226,35 +227,28 @@ export interface PlanRunOptions {
  * too. And anything outside printable ASCII would be rejected by {@link assertCommandArgument}
  * later, at a point where the cause is much harder to see — better a slightly duller name here
  * than an unexplained error from the USB layer.
+ *
+ * All three constraints are satisfied by `fileName.ts`'s allow-list, which keeps only
+ * `A-Za-z0-9_-`; this adds the run-name fallback for a name that survives as nothing.
  */
-function safeFileBase(name: string): string {
-  return sanitizeName(name) || "zpcrweb";
-}
-
-/** {@link safeFileBase}'s character rules, without its fallback — empty in, empty out. */
-function sanitizeName(name: string): string {
-  return name
-    .trim()
-    .replace(/[^\x20-\x7e]/g, "")
-    // The four §7.3 operand-syntax characters, then the filename-hostile set.
-    .replace(/['",;]+/g, "_")
-    .replace(/[\\/:*?<>|]+/g, "_")
-    .trim();
+function runNameBase(name: string): string {
+  return safeFileBase(name) || "zpcrweb";
 }
 
 /**
- * A deposited file's name base: the same character sanitizing as {@link safeFileBase} (the path
+ * A deposited file's name base: the same character sanitizing as {@link runNameBase} (the path
  * still has to survive `assertCommandArgument`), minus one trailing extension, and with its own
  * fallback rather than the run name's.
  *
  * The extension goes because these names arrive already carrying one — a plate's `identityKey` is
  * typically `Qualification_Plate_96.pltd`, and a protocol staged from a file keeps its
  * `.prcl.txt` — and `Qualification_Plate_96.pltd.plt.csv` would be a worse name than either.
- * Only a known one is stripped, so a plate called `S183-S185 RVP v2.1` keeps its version.
+ * Only a known one is stripped, so a plate called `S183-S185 RVP v2.1` keeps its version
+ * (as `S183-S185_RVP_v2_1` — the dot is not an allowed name character).
  */
 function uploadBase(name: string | undefined, fallback: string): string {
   const stripped = (name ?? "").replace(/\.(prcl\.txt|plt\.csv|prcl|pltd|zpcr|pcrd|csv|txt)$/i, "");
-  return sanitizeName(stripped) || fallback;
+  return safeFileBase(stripped) || fallback;
 }
 
 /** The 1-based optical channels a plate actually uses, from its fluor layers (0-based there). */
@@ -413,7 +407,7 @@ export function checkRunPlan(
 export function planRun(options: PlanRunOptions): RunPlan {
   const { runDefinition, plate } = options;
   const program = parseRunDefinition(runDefinition);
-  const name = safeFileBase(options.name || "");
+  const name = runNameBase(options.name || "");
   const user = options.user ?? DEFAULT_USER;
   const method = program.method ?? DEFAULT_METHOD;
 
@@ -504,7 +498,7 @@ export function planRun(options: PlanRunOptions): RunPlan {
   //   <sierra mode>  True — the instrument drives its own optics and writes its own plate reads,
   //                  which is what lets the run survive this browser going away
   //   <method>       repeated from METHOD; this is the copy STATUS? reports back
-  const safeUser = safeFileBase(user);
+  const safeUser = runNameBase(user);
   const remoteRun =
     `RemoteRun "${BLOCK}","True","False","${name}","${safeUser}","","True","${method}"`;
   assertCommandArgument("RemoteRun", remoteRun);

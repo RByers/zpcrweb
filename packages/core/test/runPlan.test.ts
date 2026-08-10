@@ -188,7 +188,7 @@ describe("planRun", () => {
 
   it("builds the RemoteRun line with the run's name and method", () => {
     expect(plan().remoteRun).toBe(
-      'RemoteRun "A","True","False","My Run_2","admin","","True","CALC"',
+      'RemoteRun "A","True","False","My_Run_2","admin","","True","CALC"',
     );
   });
 
@@ -212,12 +212,12 @@ describe("planRun", () => {
       plateName: "S183-S185 RVP.pltd",
     }).uploads;
     expect(uploads.map((u) => u.name)).toEqual([
-      "Luna noRT.prcl.txt",
+      "Luna_noRT.prcl.txt",
       "ProtocolName.txt",
-      "S183-S185 RVP.plt.csv",
+      "S183-S185_RVP.plt.csv",
       "zpcrweb.json",
     ]);
-    expect(uploads[0]!.path).toBe("\\Storage Card\\CurrentRun\\Luna noRT.prcl.txt");
+    expect(uploads[0]!.path).toBe("\\Storage Card\\CurrentRun\\Luna_noRT.prcl.txt");
   });
 
   /** The instrument writes this itself for a touchscreen- or CFX Manager-started run but not for
@@ -282,9 +282,9 @@ describe("planRun", () => {
       protocolName: 'RVP "fast";v2/3',
       plateName: "  ",
     }).uploads;
-    // `";` is one run of operand-syntax characters, so it collapses to a single `_`.
+    // ` "` and `";` are each one run of disallowed characters, so each collapses to a single `_`.
     expect(uploads.map((u) => u.name)).toEqual([
-      "RVP _fast_v2_3.prcl.txt",
+      "RVP_fast_v2_3.prcl.txt",
       "ProtocolName.txt",
       "plate.plt.csv",
     ]);
@@ -351,7 +351,7 @@ describe("planRun", () => {
     expect(thermal.uploads).toEqual([]);
     // Still a real run: the commands and the start are untouched by any of this.
     expect(thermal.commands[0]).toBe("PROTOCOL 'PCRUN'");
-    expect(thermal.remoteRun).toContain('"RT incubation"');
+    expect(thermal.remoteRun).toContain('"RT_incubation"');
 
     const qpcr = planRun({
       runDefinition: ALL_CHANNELS,

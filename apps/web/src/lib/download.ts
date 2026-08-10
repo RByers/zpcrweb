@@ -1,4 +1,4 @@
-import { csvRow, wellLabel, type PlateRead, type Zpcr } from "@zpcrweb/core";
+import { csvRow, safeFileBase, wellLabel, type PlateRead, type Zpcr } from "@zpcrweb/core";
 import { channelLabel } from "./channelColors";
 
 export { csvRow };
@@ -124,14 +124,10 @@ export function plateReadToCsv(read: PlateRead): string {
   return out;
 }
 
-function sanitizeFilePart(s: string): string {
-  return s.replace(/[\\/:*?"<>|]+/g, "_").trim();
-}
-
 /** `<run name>_cycle<N>.csv` — the run name is the instrument-recorded data file name
  * (`RunInfo.xml`'s `DataFile` key, `zpcr.metadata.dataFile`), since a `Zpcr` carries no other
  * run-identifying field (see `packages/core/src/types.ts`'s `RunMetadata`). */
 export function plateReadCsvFilename(zpcr: Zpcr, read: PlateRead): string {
-  const runName = sanitizeFilePart(zpcr.metadata.dataFile.replace(/\.(zpcr|pcrd)$/i, "")) || "run";
+  const runName = safeFileBase(zpcr.metadata.dataFile.replace(/\.(zpcr|pcrd)$/i, "")) || "run";
   return `${runName}_cycle${read.cycle}.csv`;
 }

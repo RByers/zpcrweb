@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState } from "react";
+import { safeFileBase } from "@zpcrweb/core";
 import type { DcalEntry, Zpcr } from "@zpcrweb/core";
 import { parseXmlFragment, serializeXmlPretty, XmlTree } from "../../lib/xmlTree";
 import { logEntriesFromElements, summarizeRunLog } from "../../lib/runlog";
@@ -253,7 +254,7 @@ export function PcrdRawView({
   const canDownload = mode === "xml" ? xmlRootsFor(doc, selected).length > 0 : hasDecoded(selected);
 
   const handleDownload = () => {
-    const label = entryLabel(selected, doc).replace(/[^\w.-]+/g, "_");
+    const label = safeFileBase(entryLabel(selected, doc));
     if (mode === "xml") {
       const roots = xmlRootsFor(doc, selected);
       if (roots.length === 0) return;
