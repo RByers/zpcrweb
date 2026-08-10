@@ -1177,6 +1177,7 @@ export function App() {
                 zpcr={zpcr}
                 fileName={active.name}
                 attachPlate={store.attachPlate}
+                setRunPlateText={store.setRunPlateText}
                 plateSources={plateAttachSources}
                 addFiles={store.addFiles}
               />

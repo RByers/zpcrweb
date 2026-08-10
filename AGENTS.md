@@ -232,7 +232,10 @@ it from IndexedDB — see `useZpcrStore.ts`'s `closeFile`),
 `components/FileIcons.tsx` (or core's `fileKind.ts`), `components/views/StandaloneRawView.tsx`,
 `components/protocol/` (the protocol editor) or core's `protocolBuilder.ts`,
 `components/plate/PlateEditor.tsx`, `components/plate/PlateEditPanel.tsx`,
-`components/plate/usePlateSelection.ts`, `components/plate/PlateViewer.tsx`'s selection props,
+`components/plate/usePlateSelection.ts`, `components/plate/PlateViewer.tsx`'s selection props
+or its `gridRef` (the grid takes focus on a click, which is what lets the keyboard reach it),
+`lib/fluorColors.ts`'s `KNOWN_FLUORS` (the dye menu), `components/views/PlatesView.tsx` or
+`state/useZpcrStore.ts`'s `setRunPlateText` (editing a run's own plate),
 `state/useZpcrStore.ts`'s `setPlateText` or core's `plateEdit.ts`/`plateClipboard.ts`,
 `components/raw/DecodedAlf.tsx`, `components/protocol/ThermalProfileChart.tsx`,
 `lib/uplot/thermalChart.ts`, `components/views/ProtocolView.tsx` or core's `alf.ts`,

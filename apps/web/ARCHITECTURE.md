@@ -437,8 +437,16 @@ object the editor emitted, so identity comparison would restart the history on e
 **A `.plt.csv` is editable and a `.pltd` is not**, which is a fact about writers rather than about
 permissions: there is no encrypted-`.pltd` writer (`pltcsv.md`), so an edit to one would have
 nowhere to go. A `.pltd` gets the same grid with no pencil, and the clone button beside it turns
-it into a `.plt.csv` that does edit. The editor is offered for a **standalone** plate file; a
-plate living inside a run is still replaced wholesale through attach (see "Attach" above).
+it into a `.plt.csv` that does edit.
+
+**A run's own plate edits in place too**, in the same editor — `PlatesView` hands it
+`ZpcrStore.setRunPlateText`, which rewrites the archive entry through core's `attachPlate` and
+throttles the write exactly as `setRunProtocolText` does for a run's protocol. What a plate says is
+a setup, and correcting a sample name in it should not mean downloading the plate, editing it
+elsewhere and attaching it back. `PlatesView`'s `editableEntry` holds the conditions: there is an
+archive to write into (a `.pcrd` has none), the entry is a `.plt.csv`, and it is the run's only
+plate — since `attachPlate`'s contract is that a run ends up with one plate entry, running it on an
+archive holding two would drop the other. Anything else keeps the read-only grid.
 
 - **One grid, two modes.** `PlateViewer` takes an optional `PlateGridSelection`; having it *is*
   what edit mode means for the grid. There is no second plate grid to keep in sync, which is the
@@ -449,7 +457,16 @@ plate living inside a run is still replaced wholesale through attach (see "Attac
   column numbers / corner take a whole row, column or plate, arrows and Shift-arrows move and
   extend, Cmd-A and Escape select everything and nothing. Selection is state about the *grid*, so
   it survives an edit — which is what makes a run of edits to one group of wells bearable — and
-  dies with edit mode.
+  dies with edit mode. Only the left button drives any of it, and a `contextmenu` ends a drag:
+  the context menu swallows the `mouseup` that would otherwise end one, which left the sweep armed
+  and painting under a mouse nobody was pressing. Both are workarounds for mouse events not saying
+  when a gesture is over — there is a `TODO` in `usePlateSelection.ts` to move the app onto pointer
+  events, where `pointercancel` says it directly.
+- **The grid takes focus when it is clicked** (`PlateViewer`'s `gridRef`, `tabIndex={-1}` while
+  selectable). The selection handlers `preventDefault` so a drag doesn't select the cells' text,
+  and that suppresses the focus change with it — so the last panel field typed in kept focus, and
+  since the keyboard and clipboard handlers below stand aside for a focused text field, Cmd-C,
+  Cmd-V, Delete and the arrows all silently did nothing from the first name typed onwards.
 - **One field per fact, across the whole selection** (`PlateEditPanel.tsx`, the right-hand panel
   that only edit mode has). A field shows the selected wells' shared value or `‹mixed›`, and
   typing sets that one fact on every selected well: select a column, set the sample, and twelve
@@ -457,6 +474,13 @@ plate living inside a run is still replaced wholesale through attach (see "Attac
   rule surfaced as UI, and it is the whole reason the panel isn't a well-at-a-time form. The dye
   list sits at the bottom, apart from the per-well fields, because it is the one control there
   that isn't about the selection.
+- **The two fields whose value has to match something outside the app are menus, not text boxes.**
+  Vessel offers `BR Clear` and `BR White` — the two plates every sample's calibration set is cut
+  for — plus "unstated", and keeps an unrecognized value as an option of its own for as long as it
+  is selected, so opening someone else's plate and editing another field can't silently rewrite it.
+  Adding a dye offers the dyes `lib/fluorColors.ts` has colours for, with "Other…" opening the free
+  text box behind one extra click. Both lists are open in the file and closed in the UI on purpose:
+  a typo'd vessel matches no `.Dcal`, and a dye typed "fam" is a dye no other plate lines up with.
 - **The clipboard is the system's**, not an in-app one: `copy`/`cut`/`paste` events (so Cmd-C/V
   need no permission prompt) carrying the tab-separated block of `pltcsv.md` §5.1 — which means
   wells copy between plates *and* to and from a spreadsheet. A single well pasted onto a
@@ -2732,6 +2756,11 @@ well dots and per-fluor target text (`PlateViewer`), dye/target chips (`FluorBar
 Cq markers and hover-card rows (`curveColor` in `chart.ts` and `CurvesView`). `channelColors.ts`
 keeps colour only for views whose subject really *is* the channel: raw `.Plateread` tables, the
 reference-calibration panel, the crosstalk chart, per-channel curve rows.
+
+The table is also the **list the plate editor offers when adding a dye** (`KNOWN_FLUORS`), which is
+why its keys are written in each dye's own spelling rather than in lookup form — a picker that
+offered "cal gold 540" would put that spelling into the user's file. Lookup stays case- and
+spacing-insensitive, so a plate that spells a dye otherwise still finds its colour.
 
 The table is the channel palette redistributed dye by dye — each dye takes the hue its channel
 already used — so nothing changed colour on screen; what changed is what the colour *depends on*.

@@ -1,4 +1,4 @@
-import type { CSSProperties, MouseEvent, ReactNode } from "react";
+import { useRef, type CSSProperties, type MouseEvent, type ReactNode } from "react";
 import {
   fileKindDescription,
   type FileKind,
@@ -111,6 +111,19 @@ export function PlateViewer({
   // hand at the point it hovers, and a Biomeme strip's positions are labelled by column alone.
   const { show, hide, node } = useHoverCard((well: WellDefinition) => wellCard(well, fluorOrder));
 
+  /**
+   * The grid takes focus when it is clicked, which is what makes the keyboard reach it.
+   *
+   * A well click cannot move focus on its own: the selection handlers call `preventDefault` to
+   * stop a drag selecting the cells' text, and that suppresses the focus change too — so whatever
+   * the user last typed in (an edit panel field, the add-a-dye box) kept focus for the rest of the
+   * session. The editor's keyboard and clipboard handlers stand aside for a focused field, by
+   * design, so Cmd-C, Cmd-V, Delete and the arrow keys all silently did nothing after the first
+   * time a name was typed. Focusing the grid here is what ends that: the plate is what the user is
+   * pointing at, so the plate is what the keystroke should reach.
+   */
+  const gridRef = useRef<HTMLTableElement>(null);
+
   return (
     <div
       className={
@@ -149,8 +162,14 @@ export function PlateViewer({
       <section className="decoded__block">
         <div className="decoded__gridwrap">
           <table
+            ref={gridRef}
             className="decoded__grid plate__grid mono"
             style={{ "--plate-fluor-rows": Math.max(1, lines.length) } as CSSProperties}
+            // Focusable only while it is the thing being edited, and never in the tab order: it is
+            // a click target that has to be able to hold focus, not a stop on the way through the
+            // page. See `gridRef` above for why the click can't do this by itself.
+            tabIndex={selection ? -1 : undefined}
+            onMouseDown={selection ? () => gridRef.current?.focus({ preventScroll: true }) : undefined}
           >
             <thead>
               <tr>

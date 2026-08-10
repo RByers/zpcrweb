@@ -30,32 +30,38 @@
 import { NEUTRAL_COLOR, channelColor } from "./channelColors";
 
 /**
- * Dye name → color. Grouped by the optical channel the dye is read on in every sample inspected,
- * which is where each hue comes from — the grouping is provenance, not a lookup key; nothing here
- * consults a channel at runtime.
+ * Dye name → color, **spelled the way the dye is written** — because this table is also the list
+ * the plate editor offers when adding a dye ({@link KNOWN_FLUORS}), and a picker that offered
+ * "cal gold 540" would put that spelling into the user's file. Lookup is case- and
+ * spacing-insensitive regardless (see {@link key}), so a plate that spells it otherwise still
+ * finds its color.
+ *
+ * Grouped by the optical channel the dye is read on in every sample inspected, which is where each
+ * hue comes from — the grouping is provenance, not a lookup key; nothing here consults a channel
+ * at runtime.
  */
 const FLUOR_COLORS: Record<string, string> = {
   // Channel 1 — green
-  fam: "#22c55e",
-  sybr: "#22c55e",
+  FAM: "#22c55e",
+  SYBR: "#22c55e",
   // Channel 2 — yellow
-  hex: "#eab308",
-  vic: "#eab308",
-  "cal gold 540": "#eab308",
-  "cal orange 560": "#eab308",
+  HEX: "#eab308",
+  VIC: "#eab308",
+  "Cal Gold 540": "#eab308",
+  "Cal Orange 560": "#eab308",
   // Channel 3 — orange
-  rox: "#f97316",
-  "tex 615": "#f97316",
-  "texas red": "#f97316",
-  "cal red 610": "#f97316",
-  texredx: "#f97316", // Biomeme's spelling of the same emission band
+  ROX: "#f97316",
+  "Tex 615": "#f97316",
+  "Texas Red": "#f97316",
+  "Cal Red 610": "#f97316",
+  TexRedX: "#f97316", // Biomeme's spelling of the same emission band
   // Channel 4 — red
-  cy5: "#ef4444",
-  "quasar 670": "#ef4444",
-  "atto-647n": "#ef4444", // Biomeme
+  Cy5: "#ef4444",
+  "Quasar 670": "#ef4444",
+  "ATTO-647N": "#ef4444", // Biomeme
   // Channel 5 — purple
-  "cy5-5": "#a855f7",
-  "quasar 705": "#a855f7",
+  "Cy5-5": "#a855f7",
+  "Quasar 705": "#a855f7",
   // Channel 6 — blue. The CFX scans it (ScanMask=63) but no sample calibrates a dye for it, so
   // there is nothing to name here yet; #3b82f6 is reserved for whatever turns up.
 };
@@ -66,6 +72,23 @@ function key(fluor: string): string {
   return fluor.trim().toLowerCase().replace(/\s+/g, " ");
 }
 
+/** {@link FLUOR_COLORS} keyed for lookup, built once — the table itself is written in the dyes'
+ * own spelling, which is not what a lookup can match on. */
+const BY_KEY: Record<string, string> = Object.fromEntries(
+  Object.entries(FLUOR_COLORS).map(([name, color]) => [key(name), color]),
+);
+
+/**
+ * Every dye this app has a color for, in the table's channel order (green → purple) — what the
+ * plate editor offers when adding a dye to a plate.
+ *
+ * It is a menu, not a rule: the dye set is open, and the editor keeps a way to type a name that
+ * isn't here. Offering the list first is about spelling as much as convenience — a dye added as
+ * "Cal Gold 540" gets its color and lines up with the same dye in every other plate, where one
+ * typed as "cal-gold-540" is a dye this app has never heard of.
+ */
+export const KNOWN_FLUORS: string[] = Object.keys(FLUOR_COLORS);
+
 /**
  * Color for a dye, or {@link NEUTRAL_COLOR} for one this table doesn't name.
  *
@@ -74,14 +97,14 @@ function key(fluor: string): string {
  * and "this app has no color for that name" is worth zero of the user's attention.
  */
 export function fluorColor(fluor: string | null | undefined): string {
-  return (fluor != null && FLUOR_COLORS[key(fluor)]) || NEUTRAL_COLOR;
+  return (fluor != null && BY_KEY[key(fluor)]) || NEUTRAL_COLOR;
 }
 
 /** Whether {@link fluorColor} has a color of its own for this dye — for the few places that
  * render a known dye and an unnamed one differently (a filled vs. hollow swatch), never to raise
  * an alarm about the latter. */
 export function isKnownFluor(fluor: string | null | undefined): boolean {
-  return fluor != null && FLUOR_COLORS[key(fluor)] !== undefined;
+  return fluor != null && BY_KEY[key(fluor)] !== undefined;
 }
 
 /**

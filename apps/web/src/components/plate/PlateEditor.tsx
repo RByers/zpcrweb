@@ -17,8 +17,10 @@ import { usePlateSelection } from "./usePlateSelection";
 import { RenameIcon } from "../RenameIcon";
 
 /**
- * The Plate view's editor for a `.plt.csv` plate file — the plate-side counterpart of
- * `ProtocolEditor`, and deliberately the same shape as it:
+ * The editor for a plate — a standalone `.plt.csv` file (`StandalonePlateView`) or the plate
+ * inside a run's archive (`PlatesView`), which are the same grid and the same gestures differing
+ * only in where `onChange` puts the result. The plate-side counterpart of `ProtocolEditor`, and
+ * deliberately the same shape as it:
  *
  * - **It never edits text.** Every change goes through core's plate edit primitives
  *   (`plateEdit.ts`), which own what a plate is allowed to look like — a well is loaded iff it
@@ -35,12 +37,15 @@ import { RenameIcon } from "../RenameIcon";
  * **Only a `.plt.csv` is editable**, which is a fact about writers, not about permissions: this
  * app has no `.pltd` writer (`pltcsv.md`), so there would be nowhere to put an edit to one. A
  * `.pltd` still reads, and cloning it produces a `.plt.csv` that does edit — which is what the
- * clone button beside this one is for.
+ * clone button beside this one is for. The rule holds inside a run's archive too; `PlatesView`'s
+ * `editableEntry` is where a run's extra conditions on it live.
  *
  * The clipboard is the system's (`copy`/`cut`/`paste` events, so Cmd-C/V work with no permission
  * prompt and interchange with a spreadsheet — `plateClipboard.ts` is the format). An in-app copy
  * of the last block is kept as well, for the case where a browser hands us a paste event with no
- * readable text.
+ * readable text. Both those handlers, and the keyboard ones beside them, stand aside for a focused
+ * text field — so the grid takes focus when it is clicked, or the last field typed in would keep
+ * swallowing every shortcut (`PlateViewer`'s `gridRef`).
  */
 export function PlateEditor({
   plate,

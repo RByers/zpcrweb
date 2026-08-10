@@ -932,6 +932,20 @@ export interface ZpcrStore {
    */
   setRunProtocolText: (fileName: string, runDefinition: string) => void;
   /**
+   * The plate-side mirror of {@link setRunProtocolText}: replace a `.zpcr` run's own plate entry
+   * with an edited plate, in place, as the Plates tab's editor makes each change.
+   *
+   * `entryName` is the entry being rewritten — its existing name, so an edit keeps the plate under
+   * the name the run already calls it by. It must be a `.plt.csv`: a `.pltd` has no writer in this
+   * app (`pltcsv.md`), which is the same rule {@link setPlateText} follows for a standalone file.
+   *
+   * Goes through core's `attachPlate`, so "swap this run's plate for another" and "edit the one it
+   * has" stay one operation at the archive layer — which also means the run keeps **exactly one**
+   * plate entry afterwards. The caller only offers editing to a run that has exactly one, so no
+   * sibling plate is ever the thing that gets dropped.
+   */
+  setRunPlateText: (fileName: string, entryName: string, plate: PlateDefinition) => void;
+  /**
    * Name (or rename) a run's own protocol — the `ProtocolName.txt` entry, which is what the Protocol
    * tab's headline shows and edits. A standalone `.prcl.txt` has no such entry: its name *is* its
    * file name, so that case goes through {@link renameFile} instead.
@@ -2045,6 +2059,32 @@ export function useZpcrStore(): ZpcrStore {
     [setModifiedFlag, patchEntry],
   );
 
+  /** See {@link ZpcrStore.setRunPlateText}. */
+  const setRunPlateText = useCallback(
+    (id: string, entryName: string, plate: PlateDefinition) => {
+      const file = loadedRef.current.find((f) => f.name === id);
+      if (!file || file.kind !== "zpcr") return;
+      // Same shape as `setRunProtocolText`, and the same reasoning line for line: an edit to an
+      // open archive is one `TextEncoder` call and no ZIP work, so it is cheap enough to run on
+      // every keystroke.
+      const next = withContent(
+        file,
+        archiveContent(
+          attachPlateToArchive(contentFiles(file.content), {
+            name: entryName,
+            bytes: new TextEncoder().encode(plateToCsv(plate)),
+          }),
+        ),
+      );
+      loadedRef.current = replaceFile(loadedRef.current, next);
+      setLoadedFiles((prev) => replaceFile(prev, next));
+      patchEntry(id, { size: next.size });
+      setModifiedFlag(id, true);
+      editThrottle.current!.markDirty(id);
+    },
+    [setModifiedFlag, patchEntry],
+  );
+
   /** See {@link ZpcrStore.setRunProtocolName}. */
   const setRunProtocolName = useCallback(
     async (id: string, name: string) => {
@@ -2507,6 +2547,7 @@ export function useZpcrStore(): ZpcrStore {
     attachProtocol,
     createExperiment,
     setRunProtocolText,
+    setRunPlateText,
     setRunProtocolName,
     beginExperiment,
     renameFile,

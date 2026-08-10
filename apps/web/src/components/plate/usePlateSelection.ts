@@ -43,6 +43,17 @@ export interface PlateSelection extends PlateGridSelection {
   setSelection: (indices: Iterable<number>) => void;
 }
 
+/**
+ * Whether a mousedown is the one gesture this grid answers to — the left button.
+ *
+ * A right-click is the context menu's, and starting a sweep on it armed a drag that no `mouseup`
+ * ever came to disarm. It must also not move the selection out from under the menu the user is
+ * about to read.
+ */
+function primary(e: MouseEvent): boolean {
+  return e.button === 0;
+}
+
 /** Every well index in the rectangle whose opposite corners are the two given wells. */
 function rect(plate: PlateDefinition, a: number, b: number): number[] {
   const [r1, c1] = [Math.floor(a / plate.columns), a % plate.columns];
@@ -82,13 +93,25 @@ export function usePlateSelection(plate: PlateDefinition): PlateSelection {
     setAnchor((prev) => (prev !== null && prev >= wellCount ? null : prev));
   }, [wellCount]);
 
-  // A drag ends wherever the mouse is released, including outside the grid or the window.
+  // A drag ends wherever the mouse is released, including outside the grid or the window — and on
+  // a right-click, which opens the context menu and swallows the `mouseup` that would otherwise
+  // end it. Without the `contextmenu` half, a right-click mid-sweep left the drag armed: the menu
+  // closed and the next mouse move over the grid went on extending a rectangle nobody was holding.
+  //
+  // TODO: move the app's pointer handling off mouse events onto pointer events, everywhere — not
+  // just here. A `pointercancel` is the browser telling us the gesture is over, which covers this
+  // case, touch and pen, and the ones this pair of listeners doesn't know to guess at; enumerating
+  // the ways a mouse drag can die is exactly the job pointer events exist to end.
   useEffect(() => {
     const end = () => {
       drag.current = null;
     };
     window.addEventListener("mouseup", end);
-    return () => window.removeEventListener("mouseup", end);
+    window.addEventListener("contextmenu", end);
+    return () => {
+      window.removeEventListener("mouseup", end);
+      window.removeEventListener("contextmenu", end);
+    };
   }, []);
 
   const setSelection = useCallback((indices: Iterable<number>) => {
@@ -117,6 +140,7 @@ export function usePlateSelection(plate: PlateDefinition): PlateSelection {
 
   const onWellDown = useCallback(
     (well: WellDefinition, e: MouseEvent) => {
+      if (!primary(e)) return;
       // Without this a drag across cells selects the text in them instead of the wells.
       e.preventDefault();
       if (e.shiftKey && anchor !== null) {
@@ -142,6 +166,7 @@ export function usePlateSelection(plate: PlateDefinition): PlateSelection {
 
   const onRowHead = useCallback(
     (row: number, e: MouseEvent) => {
+      if (!primary(e)) return;
       e.preventDefault();
       const anchorRow = anchor === null ? row : Math.floor(anchor / plate.columns);
       const rows =
@@ -156,6 +181,7 @@ export function usePlateSelection(plate: PlateDefinition): PlateSelection {
 
   const onColumnHead = useCallback(
     (col: number, e: MouseEvent) => {
+      if (!primary(e)) return;
       e.preventDefault();
       const anchorCol = anchor === null ? col : anchor % plate.columns;
       const cols = e.shiftKey && anchor !== null ? rangeBetween(anchorCol, col) : [col];
@@ -177,6 +203,7 @@ export function usePlateSelection(plate: PlateDefinition): PlateSelection {
 
   const onAllHead = useCallback(
     (e: MouseEvent) => {
+      if (!primary(e)) return;
       e.preventDefault();
       selectAll();
     },

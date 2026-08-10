@@ -4254,17 +4254,125 @@ async function protocolEditorChecks(chrome, origin) {
 }
 
 /**
+ * The plate editor's page vocabulary, for the two check functions that drive it — a standalone
+ * `.plt.csv` ({@link plateEditorChecks}) and a run's own plate ({@link runPlateEditChecks}).
+ *
+ * It is one editor in both places (`PlateEditor.tsx`), so it gets one set of selectors rather than
+ * a copy per caller that can drift out of step with it.
+ *
+ * Cells are addressed by grid position rather than by a test hook, and the gestures go in as real
+ * `mousedown` events with the modifier and button flags set — which is what the selection rules
+ * actually read.
+ */
+function plateEditorPage(cdp) {
+  /** One well cell, by row/column — `.plate__grid` has a header row and a header cell per row. */
+  const cellExpr = (row, col) =>
+    `document.querySelectorAll(".plate__grid tbody tr")[${row}].querySelectorAll("td")[${col}]`;
+  /** The panel field or menu with this accessible label. */
+  const fieldExpr = (label) =>
+    `[...document.querySelectorAll(".plateedit__panel input, .plateedit__panel select")]
+       .find((x) => x.getAttribute("aria-label") === ${JSON.stringify(label)})`;
+  return {
+    /** What a well shows: its sample name and the targets drawn in it. */
+    wellText: (row, col) =>
+      cdp.eval(`(() => { const td = ${cellExpr(row, col)};
+         return JSON.stringify({
+           sample: (td.querySelector(".plate__wellsample") || {}).textContent ?? "",
+           targets: [...td.querySelectorAll(".plate__target")].map((t) => t.textContent).filter(Boolean),
+           selected: td.classList.contains("is-selected"),
+         }); })()`).then(JSON.parse),
+    selectedCount: () => cdp.eval(`document.querySelectorAll(".plate__well.is-selected").length`),
+    panelTitle: () =>
+      cdp.eval(`((document.querySelector(".plateedit__panelhead .decoded__h") || {}).textContent || "").trim()`),
+    editBtn: () =>
+      cdp.eval(`(() => { const b = [...document.querySelectorAll(".plateview__toolbar button")]
+          .find((x) => /^Done$/.test(x.textContent.trim()) ||
+                       /^Edit this plate$/.test(x.getAttribute("aria-label") ?? ""));
+         return b ? (/^Done$/.test(b.textContent.trim()) ? "Done" : "Edit") : "none"; })()`),
+    clickEdit: () =>
+      cdp.eval(`(() => { const b = [...document.querySelectorAll(".plateview__toolbar button")]
+          .find((x) => /^Done$/.test(x.textContent.trim()) ||
+                       /^Edit this plate$/.test(x.getAttribute("aria-label") ?? ""));
+         if (b) b.click(); return !!b; })()`),
+    /** A click on a well, with the modifiers a spreadsheet reads and the button a mouse has. */
+    clickCell: (row, col, mods = {}) =>
+      cdp.eval(`(() => { ${cellExpr(row, col)}.dispatchEvent(new MouseEvent("mousedown",
+         { bubbles: true, metaKey: ${!!mods.meta}, shiftKey: ${!!mods.shift},
+           button: ${mods.button ?? 0}, buttons: ${mods.button === 2 ? 2 : 1} })); return true; })()`),
+    /**
+     * The mouse arriving over a cell mid-drag — what extends a sweep.
+     *
+     * Both events, because React derives `onMouseEnter` from the delegated `mouseover` while the
+     * cell's own listener wants the `mouseenter`; sending one of the two is a silent no-op
+     * depending on which side is looking, and the sweep then never grows.
+     */
+    enterCell: (row, col) =>
+      cdp.eval(`(() => { const td = ${cellExpr(row, col)};
+         td.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, buttons: 1 }));
+         td.dispatchEvent(new MouseEvent("mouseenter", { bubbles: false, buttons: 1 }));
+         return true; })()`),
+    /** A right-click on the grid, which is what opens the context menu over it. */
+    contextMenu: () =>
+      cdp.eval(`(() => { document.querySelector(".plate__grid")
+         .dispatchEvent(new MouseEvent("contextmenu", { bubbles: true })); return true; })()`),
+    clickColumnHead: (col) =>
+      cdp.eval(`(() => { document.querySelectorAll(".plate__grid thead th")[${col + 1}]
+         .dispatchEvent(new MouseEvent("mousedown", { bubbles: true })); return true; })()`),
+    clickRowHead: (row) =>
+      cdp.eval(`(() => { document.querySelectorAll(".plate__grid tbody tr")[${row}].querySelector("th")
+         .dispatchEvent(new MouseEvent("mousedown", { bubbles: true })); return true; })()`),
+    /** Type into (or choose in) one of the panel's fields, by its accessible label. */
+    setPanel: (label, value) =>
+      cdp.eval(`(() => {
+        const el = ${fieldExpr(label)};
+        if (!el) return false;
+        const proto = el.tagName === "SELECT" ? HTMLSelectElement.prototype : HTMLInputElement.prototype;
+        Object.getOwnPropertyDescriptor(proto, "value").set.call(el, ${JSON.stringify(String(value))});
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+        return true; })()`),
+    /** What a panel `<select>` offers: its tag and the options' text, for the closed-list fields. */
+    panelOptions: (label) =>
+      cdp.eval(`(() => { const el = ${fieldExpr(label)};
+         return JSON.stringify({ tag: el ? el.tagName : "none",
+                                 options: el && el.options ? [...el.options].map((o) => o.text) : [],
+                                 value: el ? el.value : null }); })()`).then(JSON.parse),
+    /** Put the caret in a panel field — the state a user is in after typing a sample name. */
+    focusPanelField: (label) =>
+      cdp.eval(`(() => { const el = ${fieldExpr(label)}; if (!el) return false; el.focus(); return true; })()`),
+    /**
+     * A keystroke, optionally as one of Chrome's own editing `commands`.
+     *
+     * Cmd-C and Cmd-V need the command: a key event alone is just a key event, and it is Chrome's
+     * copy/paste command that produces the `copy`/`paste` event and touches the system clipboard.
+     * Dispatching that command is what makes this the real gesture rather than a `ClipboardEvent`
+     * the test synthesized — a distinction with teeth, since an event the test aims at `window`
+     * arrives whether or not the app could ever have received the real one. It could not: the
+     * editor stands aside for a focused text field, and every one of these keystrokes was being
+     * swallowed by the panel box the user had last typed in.
+     */
+    key: async (k, { code, vk, mods = 0, commands } = {}) => {
+      await cdp.send("Input.dispatchKeyEvent", {
+        type: commands ? "rawKeyDown" : "keyDown",
+        key: k, code: code ?? k, windowsVirtualKeyCode: vk ?? 0, modifiers: mods,
+        ...(commands ? { commands } : {}),
+      });
+      await cdp.send("Input.dispatchKeyEvent", {
+        type: "keyUp", key: k, code: code ?? k, windowsVirtualKeyCode: vk ?? 0, modifiers: mods,
+      });
+    },
+  };
+}
+
+/**
  * The Plate view's editor for a `.plt.csv` (`components/plate/PlateEditor.tsx`).
  *
  * All of it is interaction, and none of it is visible in a screenshot: which wells a gesture
  * selects, that an edit lands on every selected well and only on the field that was typed in, that
  * the clipboard carries a block of wells, and that the result is in the *file* rather than in the
  * view. The plate model and the clipboard format are core's and are asserted there
- * (`test/plateEdit.test.ts`, `test/plateClipboard.test.ts`).
- *
- * Cells are addressed by grid position rather than by a test hook, and the modifier gestures go
- * in as real `mousedown` events with the modifier flags set — which is what the selection rules
- * actually read.
+ * (`test/plateEdit.test.ts`, `test/plateClipboard.test.ts`). Selectors and gestures come from
+ * {@link plateEditorPage}.
  */
 async function plateEditorChecks(chrome, origin) {
   console.log("\nplate editor");
@@ -4275,58 +4383,10 @@ async function plateEditorChecks(chrome, origin) {
   await clickTab(cdp, "Plates");
   await tabBecomes(cdp, "Plates");
 
-  /** One well cell, by row/column — `.plate__grid` has a header row and a header cell per row. */
-  const cellExpr = (row, col) =>
-    `document.querySelectorAll(".plate__grid tbody tr")[${row}].querySelectorAll("td")[${col}]`;
-  /** What a well shows: its sample name and the targets drawn in it. */
-  const wellText = (row, col) =>
-    cdp.eval(`(() => { const td = ${cellExpr(row, col)};
-       return JSON.stringify({
-         sample: (td.querySelector(".plate__wellsample") || {}).textContent ?? "",
-         targets: [...td.querySelectorAll(".plate__target")].map((t) => t.textContent).filter(Boolean),
-         selected: td.classList.contains("is-selected"),
-       }); })()`).then(JSON.parse);
-  const selectedCount = () => cdp.eval(`document.querySelectorAll(".plate__well.is-selected").length`);
-  const panelTitle = () =>
-    cdp.eval(`((document.querySelector(".plateedit__panelhead .decoded__h") || {}).textContent || "").trim()`);
-  const editBtn = () =>
-    cdp.eval(`(() => { const b = [...document.querySelectorAll(".plateview__toolbar button")]
-        .find((x) => /^Done$/.test(x.textContent.trim()) ||
-                     /^Edit this plate$/.test(x.getAttribute("aria-label") ?? ""));
-       return b ? (/^Done$/.test(b.textContent.trim()) ? "Done" : "Edit") : "none"; })()`);
-  const clickEdit = () =>
-    cdp.eval(`(() => { const b = [...document.querySelectorAll(".plateview__toolbar button")]
-        .find((x) => /^Done$/.test(x.textContent.trim()) ||
-                     /^Edit this plate$/.test(x.getAttribute("aria-label") ?? ""));
-       if (b) b.click(); return !!b; })()`);
-  /** A click on a well or a header, with the modifiers a spreadsheet reads. */
-  const clickCell = (row, col, mods = {}) =>
-    cdp.eval(`(() => { ${cellExpr(row, col)}.dispatchEvent(new MouseEvent("mousedown",
-       { bubbles: true, metaKey: ${!!mods.meta}, shiftKey: ${!!mods.shift} })); return true; })()`);
-  const clickColumnHead = (col) =>
-    cdp.eval(`(() => { document.querySelectorAll(".plate__grid thead th")[${col + 1}]
-       .dispatchEvent(new MouseEvent("mousedown", { bubbles: true })); return true; })()`);
-  const clickRowHead = (row) =>
-    cdp.eval(`(() => { document.querySelectorAll(".plate__grid tbody tr")[${row}].querySelector("th")
-       .dispatchEvent(new MouseEvent("mousedown", { bubbles: true })); return true; })()`);
-  /** Type into one of the panel's fields, by its accessible label. */
-  const setPanel = (label, value) =>
-    cdp.eval(`(() => {
-      const el = [...document.querySelectorAll(".plateedit__panel input, .plateedit__panel select")]
-        .find((x) => x.getAttribute("aria-label") === ${JSON.stringify(label)});
-      if (!el) return false;
-      const proto = el.tagName === "SELECT" ? HTMLSelectElement.prototype : HTMLInputElement.prototype;
-      Object.getOwnPropertyDescriptor(proto, "value").set.call(el, ${JSON.stringify(String(value))});
-      el.dispatchEvent(new Event("input", { bubbles: true }));
-      el.dispatchEvent(new Event("change", { bubbles: true }));
-      return true; })()`);
-  const key = async (k, { code, vk, mods = 0 } = {}) => {
-    for (const type of ["keyDown", "keyUp"]) {
-      await cdp.send("Input.dispatchKeyEvent", {
-        type, key: k, code: code ?? k, windowsVirtualKeyCode: vk ?? 0, modifiers: mods,
-      });
-    }
-  };
+  const {
+    wellText, selectedCount, panelTitle, editBtn, clickEdit, clickCell, enterCell, contextMenu,
+    clickColumnHead, clickRowHead, setPanel, panelOptions, focusPanelField, key,
+  } = plateEditorPage(cdp);
 
   check("a .plt.csv's Plate tab offers an Edit button", (await editBtn()) === "Edit", await editBtn());
   check("…and no well is selectable before it is pressed", (await selectedCount()) === 0);
@@ -4358,6 +4418,30 @@ async function plateEditorChecks(chrome, origin) {
     JSON.stringify({ a4, h4, beforeTargets }),
   );
 
+  // The two closed lists in the panel. Both are menus rather than text boxes because what goes in
+  // them has to match something outside the app — a vessel a `.Dcal` names, a dye every other
+  // plate spells the same way — and a typo in either is a value that silently matches nothing.
+  const vessel = await panelOptions("Vessel for the selected wells");
+  check(
+    "Vessel is a menu of the two plates a run is calibrated for",
+    vessel.tag === "SELECT" && JSON.stringify(vessel.options) === JSON.stringify(["unstated", "BR Clear", "BR White"]),
+    JSON.stringify(vessel),
+  );
+  const dyes = await panelOptions("Add a dye to the plate");
+  check(
+    "adding a dye offers the dyes this app has colours for, and a door out to any other name",
+    dyes.tag === "SELECT" && dyes.options.includes("Quasar 705") && dyes.options.includes("Other…") &&
+      !dyes.options.includes("FAM"), // already on this plate, so not offered again
+    JSON.stringify(dyes),
+  );
+  await setPanel("Add a dye to the plate", "Quasar 705");
+  await waitFor(
+    () => cdp.eval(`[...document.querySelectorAll(".plate__fluors--inline .plate__chip")]
+       .some((c) => /Quasar 705/.test(c.textContent))`),
+    { what: "the dye picked from the menu" },
+  );
+  check("…and picking one adds it to the plate, with no second button to press", true);
+
   // Cmd-click adds one well to the selection; Shift-click extends a rectangle from the anchor.
   await clickCell(0, 0, { meta: true });
   await waitFor(async () => (await selectedCount()) === 9, { what: "the added well" });
@@ -4370,24 +4454,53 @@ async function plateEditorChecks(chrome, origin) {
   await waitFor(async () => (await selectedCount()) === 9, { what: "the extended rectangle" });
   check("Shift-click selects the rectangle from the anchor", (await selectedCount()) === 9);
 
-  // The clipboard carries whole wells: copy A4, paste it onto A1, and A1 becomes A4.
-  await clickCell(0, 3);
-  await waitFor(async () => /Well A4/.test(await panelTitle()), { what: "A4 selected alone" });
-  const copied = await cdp.eval(`(() => {
-    const dt = new DataTransfer();
-    window.dispatchEvent(new ClipboardEvent("copy", { bubbles: true, clipboardData: dt }));
-    return dt.getData("text/plain"); })()`);
-  check("Cmd-C copies the selected wells as a block", /Bulk edit/.test(copied), JSON.stringify(copied));
+  // A right-click ends a sweep. The context menu swallows the `mouseup` that would otherwise end
+  // it, so without a `contextmenu` listener the drag stayed armed: the menu closed and the next
+  // move of an unpressed mouse across the grid went on painting a rectangle.
+  await clickCell(0, 0);
+  await enterCell(0, 1);
+  await waitFor(async () => (await selectedCount()) === 2, { what: "a two-well sweep" });
+  await contextMenu();
+  await enterCell(0, 5);
+  // Negative: the selection must *not* grow, so there is no state change to wait for.
+  await sleep(250);
+  const afterMenu = await selectedCount();
+  check("a right-click ends a drag instead of leaving it armed", afterMenu === 2, `selected ${afterMenu}`);
+
+  // …and a right-click on a well doesn't start one, or move the selection out from under the menu
+  // the user is about to read.
   await clickCell(0, 0);
   await waitFor(async () => /Well A1/.test(await panelTitle()), { what: "A1 selected alone" });
-  await cdp.eval(`(() => {
-    const dt = new DataTransfer();
-    dt.setData("text/plain", ${JSON.stringify(copied)});
-    window.dispatchEvent(new ClipboardEvent("paste", { bubbles: true, clipboardData: dt })); })()`);
+  await clickCell(3, 3, { button: 2 });
+  // Negative, as above: the selection must stay where the left-click put it.
+  await sleep(250);
+  const afterRight = await panelTitle();
+  check("a right-click on a well leaves the selection alone", /Well A1/.test(afterRight), afterRight);
+
+  // The clipboard carries whole wells: copy A4, paste it onto A1, and A1 becomes A4.
+  //
+  // Done from the state a user is actually in — having just typed in the panel, which is what the
+  // `setPanel` above leaves focused. The editor's clipboard and keyboard handlers stand aside for
+  // a focused text field, so until the grid started taking focus on a click (`PlateViewer`'s
+  // `gridRef`) every one of these keystrokes was swallowed by whichever box was last typed in, and
+  // Cmd-C, Cmd-V, Delete and the arrows did nothing for the rest of the session.
+  await focusPanelField("Sample name for the selected wells");
+  await clickCell(0, 3);
+  await waitFor(async () => /Well A4/.test(await panelTitle()), { what: "A4 selected alone" });
+  check(
+    "clicking a well takes focus off the panel field, so the keyboard reaches the plate",
+    (await cdp.eval(`document.activeElement.tagName`)) === "TABLE",
+    await cdp.eval(`document.activeElement.tagName + "/" + (document.activeElement.getAttribute("aria-label") ?? "")`),
+  );
+
+  await key("c", { code: "KeyC", vk: 67, mods: 4, commands: ["copy"] });
+  await clickCell(0, 0);
+  await waitFor(async () => /Well A1/.test(await panelTitle()), { what: "A1 selected alone" });
+  await key("v", { code: "KeyV", vk: 86, mods: 4, commands: ["paste"] });
   await waitFor(async () => (await wellText(0, 0)).sample === "Bulk edit", { what: "the pasted well" });
   const pasted = await wellText(0, 0);
   check(
-    "Cmd-V pastes a copied well, targets and all",
+    "Cmd-C and Cmd-V carry a whole well, targets and all",
     pasted.sample === "Bulk edit" && JSON.stringify(pasted.targets) === JSON.stringify(a4.targets),
     JSON.stringify({ pasted, a4 }),
   );
@@ -4435,6 +4548,69 @@ async function plateEditorChecks(chrome, origin) {
   await clickTab(cdp, "Plates");
   await tabBecomes(cdp, "Plates");
   check("a .pltd gets no editor, having no writer to save through", (await editBtn()) === "none", await editBtn());
+  cdp.close();
+}
+
+/**
+ * The same editor on a **run's own plate** — the `.plt.csv` inside a `.zpcr`'s archive, edited in
+ * place from the Plates tab (`views/PlatesView.tsx`, the store's `setRunPlateText`).
+ *
+ * What is worth checking here is not the editing — that is {@link plateEditorChecks}, and it is one
+ * component either way — but where the result *goes*. A run's plate is an archive entry, so an edit
+ * has to survive being re-derived from the run (`Zpcr.plates()` re-parses the archive on every
+ * change) and has to reach IndexedDB, and neither is visible on screen. It also has to leave the
+ * rest of the run alone: the entry is rewritten through core's `attachPlate`, which is the same
+ * call "replace this run's plate" makes, and a run that came back missing its protocol or its
+ * plate reads would look perfectly fine in the grid.
+ */
+async function runPlateEditChecks(chrome, origin) {
+  console.log("\nediting a run's own plate");
+  const cdp = await openPage(chrome.base, origin);
+  await emptyReload(cdp, origin);
+  await loadFile(cdp, join(REPO, "samples/20260720_FirstQualification.zpcr"));
+  await waitFor(() => chipPresent(cdp, "FirstQualification"), { what: "the run's chip" });
+  await clickTab(cdp, "Plates");
+  await tabBecomes(cdp, "Plates");
+
+  const { wellText, panelTitle, editBtn, clickEdit, clickCell, setPanel } = plateEditorPage(cdp);
+
+  check("a run whose plate is a .plt.csv offers an Edit button", (await editBtn()) === "Edit", await editBtn());
+  await clickEdit();
+  await waitFor(async () => (await editBtn()) === "Done", { what: "edit mode on the run's plate" });
+
+  // B3 is a loaded well of this run's plate.
+  await clickCell(1, 2);
+  await waitFor(async () => /Well B3/.test(await panelTitle()), { what: "B3 selected" });
+  await setPanel("Sample name for the selected wells", "Edited in run");
+  await waitFor(async () => (await wellText(1, 2)).sample === "Edited in run", { what: "the run plate edit" });
+  check("editing a run's plate changes the well", (await wellText(1, 2)).sample === "Edited in run");
+
+  // The edit is in the archive, not just in the view: a reload reads the run back out of
+  // IndexedDB, and the rest of the run has to still be there with it.
+  await flushWrites(cdp);
+  await cdp.send("Page.reload", {});
+  await waitFor(() => chipPresent(cdp, "FirstQualification"), { what: "the run's chip after reload" });
+  await clickTab(cdp, "Plates");
+  await tabBecomes(cdp, "Plates");
+  check(
+    "…and the edit is in the run's archive, surviving a reload",
+    (await wellText(1, 2)).sample === "Edited in run",
+    JSON.stringify(await wellText(1, 2)),
+  );
+
+  // Rewriting the plate entry must not have taken anything else out of the archive with it.
+  await clickTab(cdp, "Raw");
+  await tabBecomes(cdp, "Raw");
+  const entries = await cdp.eval(
+    `JSON.stringify([...document.querySelectorAll(".raw__item")].map((b) => b.textContent.trim()))`,
+  ).then(JSON.parse);
+  check(
+    "…and the run still has its protocol and its plate reads",
+    entries.some((e) => /ProtocolRunDefinition/.test(e)) &&
+      entries.filter((e) => /\.Plateread$/.test(e)).length > 0 &&
+      entries.filter((e) => /\.plt\.csv$/.test(e)).length === 1,
+    JSON.stringify(entries.slice(0, 40)),
+  );
   cdp.close();
 }
 
@@ -5958,6 +6134,7 @@ async function main() {
     await closeConfirmChecks(chrome, origin);
     await protocolEditorChecks(chrome, origin);
     await plateEditorChecks(chrome, origin);
+    await runPlateEditChecks(chrome, origin);
     await cloneChecks(chrome, origin);
     await openFilesChecks(chrome, origin);
     await fileTypeFilterChecks(chrome, origin);
