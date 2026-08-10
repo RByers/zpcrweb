@@ -71,6 +71,33 @@ export async function waitFor(fn, { timeout = 20000, interval = 50, what = "cond
 }
 
 /**
+ * Every soft timeout that has fired this run — see {@link noteSoftTimeout}.
+ *
+ * `waitValue` and `waitStable` deliberately do not throw, so a caller can go on to assert what it
+ * actually saw. That is right for the failure message and wrong for the exit code: a wait for
+ * something that never happens is a broken test whether or not the `check` after it notices. Two
+ * such waits sat in this suite for months costing 8 s and 10 s a run, both behind checks that
+ * passed — one waiting for a well count to change when nothing would change it, one waiting for
+ * two file chips when the line above had just proved there were three.
+ *
+ * So the value still comes back, and the timeout is still recorded. `uitest` turns each one into a
+ * failed check at the end of the run.
+ */
+const softTimeouts = [];
+
+/** Record a wait that gave up, and say so on the spot. */
+export function noteSoftTimeout(what, value, ms) {
+  softTimeouts.push({ what, value });
+  console.log(
+    `    ⏱ gave up after ${(ms / 1000).toFixed(1)}s waiting for ${what} ` +
+      `— continuing with ${JSON.stringify(value)}`,
+  );
+}
+
+/** The soft timeouts recorded so far, for the runner to fail on. */
+export const softTimeoutsSeen = () => softTimeouts;
+
+/**
  * Poll `read()` until its value satisfies `pred`, then return it — the replacement for a fixed
  * `sleep` in front of a `check`.
  *
@@ -84,15 +111,47 @@ export async function waitFor(fn, { timeout = 20000, interval = 50, what = "cond
  * - **It returns on timeout instead of throwing**, handing back the stale value. A regression
  *   then fails as the check it belongs to, naming the value it got, rather than as a bare
  *   timeout thrown from inside the harness.
+ *
+ * The timeout is recorded either way ({@link softTimeouts}), so it cannot pass unnoticed. `what`
+ * is what that record says; give it one. There is deliberately no opt-out: a wait that is allowed
+ * to expire quietly is how both of the timeouts above survived, and "this might legitimately not
+ * arrive" is a negative assertion, which is a `sleep` with a comment rather than a wait.
  */
-export async function waitValue(read, pred, { timeout = 8000, interval = 50 } = {}) {
+export async function waitValue(
+  read,
+  pred,
+  { timeout = 8000, interval = 50, what = "a value to change" } = {},
+) {
   const deadline = Date.now() + timeout;
+  const started = Date.now();
   for (;;) {
     const value = await read();
     if (pred(value)) return value;
-    if (Date.now() > deadline) return value;
+    if (Date.now() > deadline) {
+      noteSoftTimeout(what, value, Date.now() - started);
+      return value;
+    }
     await sleep(interval);
   }
+}
+
+/**
+ * Park the page on `about:blank` and wait until it is really there.
+ *
+ * The step before a deliberately *cold* start: navigating straight from one fragment of the app's
+ * URL to another is a same-document navigation, so the app would keep its state and only the hash
+ * listener would fire. Going via `about:blank` forces a real document load.
+ *
+ * The wait is for `location.href`, not a fixed delay — during the navigation `Runtime.evaluate`
+ * can land in either document or fail outright while the context is swapped, so a failed read is
+ * treated as "not there yet" rather than an error.
+ */
+export async function navigateBlank(cdp) {
+  await cdp.send("Page.navigate", { url: "about:blank" });
+  await waitFor(
+    async () => (await cdp.eval("location.href").catch(() => null)) === "about:blank",
+    { what: "the page to go blank" },
+  );
 }
 
 /**
@@ -134,9 +193,16 @@ export async function flushWrites(cdp) {
  * *first* write, which is right for reading a rendered value but wrong when the next step depends
  * on the app having finished — notably the routing hash, where acting on the first write can put
  * `history.back()` on an entry that is about to be superseded.
+ *
+ * Timing out here means the value never stopped moving, which is a real finding rather than a slow
+ * machine — so it is recorded like {@link waitValue}'s.
  */
-export async function waitStable(read, { quiet = 250, timeout = 5000, interval = 50 } = {}) {
+export async function waitStable(
+  read,
+  { quiet = 250, timeout = 5000, interval = 50, what = "a value to settle" } = {},
+) {
   const deadline = Date.now() + timeout;
+  const started = Date.now();
   let last = await read();
   let since = Date.now();
   for (;;) {
@@ -148,7 +214,10 @@ export async function waitStable(read, { quiet = 250, timeout = 5000, interval =
     } else if (Date.now() - since >= quiet) {
       return last;
     }
-    if (Date.now() > deadline) return last;
+    if (Date.now() > deadline) {
+      noteSoftTimeout(what, last, Date.now() - started);
+      return last;
+    }
   }
 }
 

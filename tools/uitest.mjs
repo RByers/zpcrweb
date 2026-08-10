@@ -21,9 +21,12 @@ import {
   cfxPassword,
   flushWrites,
   loadFile,
+  navigateBlank,
+  noteSoftTimeout,
   openPage,
   setFileInput,
   sleep,
+  softTimeoutsSeen,
   startChrome,
   startDevServer,
   waitFor,
@@ -442,11 +445,30 @@ async function emptyReload(cdp, url) {
     `new Promise(r => { const q = indexedDB.deleteDatabase("zpcrweb");
        q.onsuccess = q.onerror = q.onblocked = () => r(true); })`,
   );
-  await cdp.send("Page.navigate", { url: "about:blank" });
-  await sleep(200);
+  await navigateBlank(cdp);
   await cdp.send("Page.navigate", { url });
   await waitFor(() => cdp.eval("document.readyState==='complete'"), { what: "reload" });
 }
+
+/**
+ * Every file name the IndexedDB catalog currently holds.
+ *
+ * The record-level truth behind the file bar, and the observable for the writes that have no
+ * on-screen signal at all: closing a file (its record is deleted) and renaming one (`renameFile`
+ * rehashes the id, so the record is rewritten under a new key). Both used to be `sleep(300)` on
+ * the grounds that nothing visible changes — nothing visible does, but the store is readable.
+ */
+const catalogNames = (cdp) =>
+  cdp
+    .eval(
+      `new Promise((res) => { const q = indexedDB.open("zpcrweb");
+         q.onsuccess = () => { const db = q.result;
+           const g = db.transaction("catalog", "readonly").objectStore("catalog").getAll();
+           g.onsuccess = () => { res(JSON.stringify(g.result.map((r) => r.name ?? ""))); db.close(); }; };
+         q.onerror = () => res("[]"); })`,
+      { awaitPromise: true },
+    )
+    .then(JSON.parse);
 
 const results = [];
 function check(name, ok, detail = "") {
@@ -454,13 +476,20 @@ function check(name, ok, detail = "") {
   console.log(`  ${ok ? "✓" : "✗"} ${name}${detail ? `  → ${detail}` : ""}`);
 }
 
-/** Wait for the active tab to read `label`, returning whatever it actually settled on. */
+/**
+ * Wait for the active tab to read `label`, returning whatever it actually settled on.
+ *
+ * Reporting rather than insisting is deliberate — a few callers assert on where the view *did*
+ * land. But most ignore the return value, and for those a timeout used to be both silent and 8 s
+ * long, so it is recorded as a soft timeout and fails the run at the end.
+ */
 async function tabBecomes(cdp, label, timeout = 8000) {
   let seen = "none";
+  const started = Date.now();
   try {
     await waitFor(async () => (seen = await activeTab(cdp)) === label, { timeout, what: label });
   } catch {
-    /* fall through with whatever we last saw */
+    noteSoftTimeout(`the ${label} tab to become active`, seen, Date.now() - started);
   }
   return seen;
 }
@@ -500,6 +529,13 @@ const clickUntil = async (cdp, label, settled, what) => {
   }
 };
 
+/**
+ * Click a view tab and wait for it to take the selection.
+ *
+ * This used to tolerate the tab never activating, on the grounds that a few callers click one
+ * precisely to show it is disabled. No caller does — they read the tab's `disabled` state instead
+ * — so the tolerance only bought 2 s of silence whenever a click genuinely failed to land.
+ */
 const clickTab = async (cdp, label) => {
   const sel = `[...document.querySelectorAll('.viewbar [role="tab"]')]
       .find((b) => b.textContent.trim() === ${JSON.stringify(label)})`;
@@ -508,12 +544,10 @@ const clickTab = async (cdp, label) => {
   // out its own timeout on a view that had never been asked for. Wait for the tab to exist.
   await waitFor(() => cdp.eval(`!!(${sel})`), { what: `the ${label} tab` });
   await cdp.eval(`(() => { (${sel}).click(); })()`);
-  // Then let the click land. Not asserted: a few callers click a tab precisely to show that it
-  // is disabled and does *not* take the selection.
   await waitValue(
     () => cdp.eval(`(${sel})?.getAttribute("aria-selected") === "true"`),
     (v) => v === true,
-    { timeout: 2000 },
+    { timeout: 2000, what: `the ${label} tab to take the selection` },
   );
 };
 
@@ -651,6 +685,17 @@ async function routingChecks(chrome, origin, pw) {
     await waitFor(() => cdp.eval(`!!document.querySelector('.viewbar [role="tab"]')`), {
       what: `the app to come up on ${url.replace(/^.*#/, "#")}`,
     });
+    // The view bar is drawn before the named file has been hydrated, and a view like Reference
+    // cannot become active until it has. Waiting for the chip too puts the parse *outside*
+    // `tabBecomes`' 8 s clock rather than inside it — which is what made the Reference deep link
+    // fail on a loaded machine while the app was doing nothing wrong. Only for a URL that names a
+    // file the browser actually has: `#file=nope.zpcr` deliberately names one it doesn't.
+    const named = /[#&]file=([^&]+)/.exec(url)?.[1];
+    if (named && !/nope/.test(named)) {
+      await waitFor(() => cdp.eval(`!!document.querySelector(".filechip")`), {
+        what: `the deep-linked file's chip on ${url.replace(/^.*#/, "#")}`,
+      });
+    }
   };
 
   // A cold load must honor the hash without flashing the default view first.
@@ -992,11 +1037,12 @@ async function persistedThresholdChecks(chrome, origin, pw) {
     { what: "the RVP .pcrd to close" },
   );
   await cdp.eval(`(() => { document.querySelector(".filesview__close")?.click(); })()`);
-  // Deliberately elapsed time, not a wait on a condition: this is the IndexedDB cleanup the
-  // comment above is about, and there is nothing left on screen whose change would signal that
-  // the delete transaction has committed. Skipping it leaves the RVP run behind for every later
-  // check to re-hydrate and re-analyse.
-  await sleep(300);
+  // The delete transaction committing is the thing to wait for, and while nothing left on screen
+  // shows it, the catalog itself does — so read that rather than time an interval and hope. (It
+  // used to be a `sleep(300)` on the grounds that there was no observable; the store is one.)
+  await waitFor(async () => !(await catalogNames(cdp)).some((n) => /RVP/.test(n)), {
+    what: "the RVP .pcrd's catalog record to be deleted",
+  });
   cdp.close();
 }
 
@@ -1394,7 +1440,16 @@ async function cqFilterChecks(chrome, origin) {
   // Channel space has no Cq table of its own (see `CurvesView`'s `channelAnalysis`), so the
   // control is absent there rather than present and inert.
   await clickButton(cdp, "Channel");
-  await sleep(300);
+  // The absence of the control is the claim, so what says the app has finished responding to the
+  // click is the mode itself having changed — not an interval long enough to hope it has.
+  await waitFor(
+    () =>
+      cdp.eval(
+        `[...document.querySelectorAll(".segmented__item")]
+           .some((b) => b.textContent.trim() === "Channel" && b.classList.contains("is-active"))`,
+      ),
+    { what: "Channel to be the active space" },
+  );
   check(
     "channel mode has no Cq filter",
     (await cdp.eval(`!!document.querySelector(".cq-range")`)) === false,
@@ -1468,6 +1523,9 @@ async function cqDragChecks(chrome, origin) {
   await mouse("mousePressed", target.x, target.y);
   for (let dy = 10; dy <= DY; dy += 10) {
     await mouse("mouseMoved", target.x, target.y - dy);
+    // Pacing a drag, not waiting for a state: a real pointer emits moves spread over time, and a
+    // burst delivered in one tick is coalesced into a single jump that never exercises the
+    // drag's intermediate frames. There is no condition to wait for between two moves.
     await sleep(90);
   }
   await waitFor(
@@ -1822,6 +1880,10 @@ async function wellHeaderChecks(chrome, origin) {
   const rowHead = (r) => `document.querySelectorAll(".wm-head")[${grid.cols} + ${r}]`;
   // See `referenceChecks`' own `hover`: React needs a real over/out pair, so the peek only fires
   // for an actual `Input.dispatchMouseEvent`.
+  // Hovering a header marks its cells and hovering away unmarks them, so the marked count is the
+  // peek's own signal — waited on here rather than slept through. The checks below still assert
+  // *how many* cells were marked and what happened to the curve count; this only waits for the
+  // peek to have happened at all.
   const hover = async (sel) => {
     let x = 5;
     let y = 5;
@@ -1832,13 +1894,17 @@ async function wellHeaderChecks(chrome, origin) {
       ({ x, y } = box);
     }
     await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y, buttons: 0 });
-    await sleep(250);
+    await waitValue(peeked, (n) => (sel ? n > 0 : n === 0), {
+      what: sel ? "the hovered header's cells to be marked" : "the peek to clear",
+    });
   };
 
   // Isolate one loaded well, so the curves a hovered header adds are unambiguously the peek's.
   await cdp.eval(`(document.querySelectorAll(".wm-cell")[${grid.solo}]
       .dispatchEvent(new MouseEvent("dblclick", { bubbles: true })), undefined)`);
-  await sleep(300);
+  // Isolating means "every other well went off", so the count moving is the signal; the check
+  // below still asserts what it moved *to*.
+  await waitValue(cellsOn, (n) => n === 1, { what: "the double-clicked well to be the only one on" });
   const soloWells = await cellsOn();
   const soloCurves = await curveCount();
   check(
@@ -1875,17 +1941,19 @@ async function wellHeaderChecks(chrome, origin) {
   // Double-click follows the same grain as hover: a header isolates its whole row/column, exactly
   // as a cell isolates one well. The pair of clicks a double-click also fires toggles the group on
   // and straight back off, so the solo is what survives.
-  const dblclick = async (sel) => {
+  // `want` is the count the isolate should leave, so the wait is for the selection to arrive at
+  // it; the check then says what that count *means* (a whole row, a whole column).
+  const dblclick = async (sel, want) => {
     await cdp.eval(`(${sel}.dispatchEvent(new MouseEvent("dblclick", { bubbles: true })), undefined)`);
-    await sleep(300);
+    await waitValue(cellsOn, (n) => n === want, { what: `the isolate to leave ${want} wells on` });
   };
-  await dblclick(rowHead(grid.row));
+  await dblclick(rowHead(grid.row), grid.cols);
   check(
     "double-clicking a row header isolates that row",
     (await cellsOn()) === grid.cols,
     `${await cellsOn()} wells on, expected ${grid.cols}`,
   );
-  await dblclick(colHead(grid.col));
+  await dblclick(colHead(grid.col), grid.rows);
   check(
     "double-clicking a column header isolates that column",
     (await cellsOn()) === grid.rows,
@@ -2634,20 +2702,9 @@ async function instrumentRunChecks(chrome, origin) {
       const i = dts.findIndex((dt) => dt.textContent.trim() === "Filename");
       return i < 0 ? null : dds[i].textContent;
     })()`);
-  const renameProto = async (value) => {
-    await cdp.eval(`document.querySelector(".overview__renamebtn").click()`);
-    await sleep(50);
-    await cdp.eval(
-      `(() => { const el = document.querySelector(".overview__filename-input");
-         el.focus();
-         const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
-         setter.call(el, ${JSON.stringify(value)});
-         el.dispatchEvent(new Event("input", { bubbles: true })); })()`,
-    );
-    await sleep(200);
-    await cdp.eval(`document.querySelector(".overview__filename-input").blur()`);
-  };
-  await renameProto("Gradient-renamed.prcl.txt");
+  // The same control, and so the same helper, as a `.zpcr`'s rename — this used to be a
+  // byte-identical copy of {@link renameFile} carried alongside it, sleeps and all.
+  await renameFile(cdp, "Gradient-renamed.prcl.txt");
   await waitFor(async () => (await protoFilename()) === "Gradient-renamed.prcl.txt", {
     what: "the protocol file's renamed Filename row",
   });
@@ -2656,7 +2713,7 @@ async function instrumentRunChecks(chrome, origin) {
     (await protoFilename()) === "Gradient-renamed.prcl.txt",
     await protoFilename(),
   );
-  await renameProto("Gradient.prcl.txt");
+  await renameFile(cdp, "Gradient.prcl.txt");
   await waitFor(async () => (await protoFilename()) === "Gradient.prcl.txt", {
     what: "the protocol file's name restored",
   });
@@ -2832,7 +2889,11 @@ async function instrumentRunChecks(chrome, origin) {
     await cdp.eval(`!!document.querySelector(".instrument__rail")`),
     "no instrument rail after clicking the ready box's link",
   );
-  await cdp.eval(`window.location.hash = "view=overview", undefined`);
+  // `clickTab`, not a hash write: the app is still settling into the Instrument view it was just
+  // sent to, and writes the hash itself as it does. A hash write landing inside that window is
+  // overwritten and the view snaps back — which is how this intermittently sat on Instrument for
+  // 8 s and carried on regardless. Pressing the tab confirms it took.
+  await clickTab(cdp, "Overview");
   await tabBecomes(cdp, "Overview");
 
   // The name is only really *given* if it outlives the session — it lives in the file's own
@@ -3398,7 +3459,11 @@ async function experimentNameChecks(chrome, origin) {
     renamed.name === "Stored RVP",
     JSON.stringify(renamed),
   );
-  await sleep(300); // the rename's IndexedDB writes are async (`ZpcrStore.renameFile`)
+  // `ZpcrStore.renameFile` writes the catalog asynchronously, and reloading before it lands would
+  // blame the app for the test's own race. The record under the new name is the observable.
+  await waitFor(async () => (await catalogNames(cdp)).includes(renamedName), {
+    what: "the renamed file's catalog record",
+  });
   await cdp.send("Page.navigate", { url: `${origin}#file=${renamedName}&view=overview` });
   await tabBecomes(cdp, "Overview");
   const reloadedRename = await headline();
@@ -3538,8 +3603,7 @@ async function openFilesChecks(chrome, origin) {
   // different fragment of the same URL is a same-document navigation — the hash listener would see
   // a name it doesn't know and leave the selection exactly where it was. The claim is about how the
   // app *starts up* on such a link.
-  await cdp.send("Page.navigate", { url: "about:blank" });
-  await sleep(200);
+  await navigateBlank(cdp);
   await cdp.send("Page.navigate", { url: `${origin}#file=nosuchfile.zpcr&view=overview` });
   await waitFor(() => cdp.eval(`!!document.querySelector(".app__noselection")`), {
     what: "the no-selection state",
@@ -3912,7 +3976,7 @@ async function protocolEditorChecks(chrome, origin) {
   // Nothing is clickable until Edit is pressed — reading a protocol must stay reading it. The rows
   // are the *same* rows either way, so what says "not yet" is that clicking one opens nothing.
   await clickRow("TEMP");
-  await sleep(200);
+  await sleep(200); // negative assertion: no form should open, so there is no state to wait for
   check("…and no row opens a form before Edit is pressed", (await formOpen()) === false);
 
   /** Where each directive's text sits, to the pixel — the geometry Edit must not disturb. */
@@ -3954,7 +4018,6 @@ async function protocolEditorChecks(chrome, origin) {
 
   // The edit is in the *file*, not just the view: reload from IndexedDB and it's still there.
   await cdp.send("Page.reload", {});
-  await sleep(600);
   await waitFor(() => chipPresent(cdp, "Cycling"), { what: "the chip after reload" });
   await clickTab(cdp, "Protocol");
   await tabBecomes(cdp, "Protocol");
@@ -4356,7 +4419,6 @@ async function plateEditorChecks(chrome, origin) {
   check("changing the view leaves edit mode", (await editBtn()) === "Edit", await editBtn());
 
   await cdp.send("Page.reload", {});
-  await sleep(600);
   await waitFor(() => chipPresent(cdp, "S183"), { what: "the chip after reload" });
   await clickTab(cdp, "Plates");
   await tabBecomes(cdp, "Plates");
@@ -4459,7 +4521,11 @@ async function cloneChecks(chrome, origin) {
   // The copy is a real loaded file, not a view-level fiction: it has to still be there after a
   // reload, since nothing but IndexedDB holds it (it was never on disk).
   await cdp.eval(`document.querySelector(".overview__filename-input").blur()`);
-  await sleep(300);
+  // The blur is what commits the name; the catalog record under it is what the reload below will
+  // go looking for, so wait for that rather than for an interval.
+  await waitFor(async () => (await catalogNames(cdp)).includes(`${base} (3)${ext}`), {
+    what: "the clone's catalog record under its new name",
+  });
   await cdp.send("Page.navigate", { url: `${origin}#file=${encodeURIComponent(`${base} (3)${ext}`)}&view=overview` });
   await tabBecomes(cdp, "Overview");
   await waitFor(async () => (await state()).file !== null, { what: "the reloaded clone" });
@@ -5428,6 +5494,11 @@ async function folderChecks(chrome, origin) {
   // Writing the file fires the watch's `modified`, so without echo suppression the app would
   // re-read what it just wrote, re-persist it, and write again — forever. Measured as "the file
   // stops changing", which is the property that actually matters, rather than as a clean console.
+  //
+  // A negative assertion, and the one place a *long* sleep is the point: the loop it rules out
+  // would tick once per `DISK_WRITE_INTERVAL_MS` (3 s), so the wait has to outlast a full window
+  // with margin, and nothing changing is exactly what is being asserted. Don't shorten it below
+  // that interval, and don't convert it — there is no state to wait for.
   await sleep(5000);
   const settled = await diskFile(["runs", "2026", "nested.zpcr"]);
   check(
@@ -5508,8 +5579,7 @@ async function folderChecks(chrome, origin) {
   // ── Across a reload ────────────────────────────────────────────────────────────────────────
   // Not `emptyReload` — the point is that the folder and the file survive the browser's storage
   // being exactly as the app left it.
-  await cdp.send("Page.navigate", { url: "about:blank" });
-  await sleep(200);
+  await navigateBlank(cdp);
   await cdp.send("Page.navigate", { url: origin });
   await waitFor(() => cdp.eval("document.readyState==='complete'"), { what: "reload" });
   // The picker override and the read counter are page state, so they have to go back on.
@@ -5631,8 +5701,7 @@ async function folderChecks(chrome, origin) {
       }
     })()`,
   });
-  await cdp.send("Page.navigate", { url: "about:blank" });
-  await sleep(200);
+  await navigateBlank(cdp);
   await cdp.send("Page.navigate", { url: origin });
   await waitFor(() => cdp.eval("document.readyState==='complete'"), { what: "reload" });
   await clickTab(cdp, "Files");
@@ -5669,6 +5738,8 @@ async function folderChecks(chrome, origin) {
   // being checked is that the refusal leaves the row exactly as it was: still listed, still
   // badged, still clickable, and still not shouting.
   await cdp.eval(`document.querySelector(".filesview__row").click()`);
+  // Negative assertion: the retry is refused, so the row must end up exactly as it started and
+  // there is no state change to wait for.
   await sleep(600);
   const retried = await lapsed();
   check(
@@ -5690,12 +5761,10 @@ async function folderChecks(chrome, origin) {
     what: "every file to be read back in",
   });
   const granted = await lapsed();
-  // The rows lose their badge as each file is read; the chips are a render behind that, so they
-  // are waited for rather than sampled the instant the badges clear.
-  await waitFor(() => cdp.eval(`document.querySelectorAll(".filechip").length === 2`), {
-    timeout: 10000,
-    what: "both files back on the file bar",
-  }).catch(() => {});
+  // The wait above is the one that proves the reads finished; there is nothing further to wait
+  // for. A second wait used to sit here for `length === 2`, left over from a two-file fixture, and
+  // could never come true now that there are three — so it burned its full 10 s timeout every run
+  // and threw the failure away with `.catch(() => {})`. That was a quarter of this group.
   const chipsBack = await cdp.eval(`document.querySelectorAll(".filechip").length`);
   check(
     "Granting access back reads in every open file, in every folder — not just the one clicked",
@@ -5898,6 +5967,13 @@ async function main() {
   } finally {
     chrome.stop();
     dev.stop();
+  }
+
+  // A wait that gave up is a failure even when the check after it passed anyway: it means the
+  // suite is asserting on something it never actually saw arrive, and paying the full timeout
+  // every run for the privilege. Two of these hid here for months (`harness.mjs`'s `softTimeouts`).
+  for (const t of softTimeoutsSeen()) {
+    results.push({ name: `a wait for ${t.what} timed out`, ok: false });
   }
 
   const failed = results.filter((r) => !r.ok);

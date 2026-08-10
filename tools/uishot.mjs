@@ -215,8 +215,18 @@ async function main() {
         );
         continue;
       }
-      // Let charts/tables paint; uPlot draws on rAF.
-      await sleep(500);
+      // Let charts/tables paint before the shutter. A view that draws a uPlot chart has a real
+      // observable — the canvas exists and has been sized — so wait for that rather than for a
+      // fixed interval; views with no chart fall through immediately. The rAF pair after it is
+      // what actually guarantees a painted frame, chart or not.
+      await waitFor(
+        () =>
+          cdp.eval(
+            `(() => { const cs = [...document.querySelectorAll(".uplot canvas")];
+               return cs.length === 0 || cs.every((c) => c.width > 0 && c.height > 0); })()`,
+          ),
+        { timeout: 5000, what: `${caption}'s charts to be sized` },
+      ).catch(() => problems.push(`view "${caption}" had a chart canvas that never got a size`));
       await cdp.eval("new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))", {
         awaitPromise: true,
       });

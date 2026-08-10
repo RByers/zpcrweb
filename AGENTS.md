@@ -258,6 +258,17 @@ is a flake — the suite has been both. `harness.mjs` has the vocabulary:
   so the failure surfaces as the check it belongs to.
 - `waitStable(read)` — the value stopped changing. For state the app writes more than once per
   action, such as the routing hash.
+
+**Every wait that gives up fails the run.** `waitValue` and `waitStable` return rather than throw,
+so the `check` after them can report what it actually saw — but the timeout is also recorded, and
+`uitest` turns each recorded timeout into a failed check at the end. This is not optional and there
+is no quiet mode: a wait for something that never arrives is a broken test *even when the check
+after it passes anyway*, and it costs the full timeout on every run. Two such waits hid in this
+suite for months, at 8 s and 10 s a run, both behind green checks. Give every `waitValue` /
+`waitStable` a `what:` — it is what the failure will be named after.
+
+If a wait might legitimately not arrive, it is a **negative assertion**, not a wait: use a `sleep`
+with a comment saying so (below).
 - `clickTab` / `clickButton` / `clickUntil` — click a control that may not have rendered yet.
   `element?.click()` on a control React hasn't drawn is a silent no-op, and the caller then times
   out on a view it never actually asked for.
@@ -268,9 +279,16 @@ is a flake — the suite has been both. `harness.mjs` has the vocabulary:
   backgrounded tab gets is the one the test gets. Add no test-only hook to the app for this; the
   production listener is the hook.
 
-A fixed `sleep` is right for one thing, and it should say so in a comment: a **negative** assertion
-— nothing happened, so there is no state change to wait for. Reaching for one anywhere else means
-either the observable hasn't been found yet, or a `flushWrites` has been missed.
+A fixed `sleep` is right for two things, and it should say which in a comment:
+
+- a **negative** assertion — nothing happened, so there is no state change to wait for;
+- **pacing an input**, where the gap between two events is the thing being simulated (a drag's
+  intermediate mouse moves, which arrive coalesced into one jump without it).
+
+Reaching for one anywhere else means either the observable hasn't been found yet, or a
+`flushWrites` has been missed. "Nothing on screen changes" is not a third case: IndexedDB is
+readable from a check (`catalogNames`), and a record appearing or being deleted is an observable
+like any other.
 
 **Exactly one check waits out a real rate limit**, in `folderChecks`: "An edit in the app is written
 back to the real file on disk". Since `flushWrites` short-circuits the timer everywhere else, that

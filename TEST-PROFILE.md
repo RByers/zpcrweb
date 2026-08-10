@@ -8,12 +8,12 @@ estimate of what a suite actually costs.
 
 | suite | command | before | after | tests |
 |---|---|---|---|---|
-| core (vitest) | `npm test` | 6.2 s | **6.2 s** | 540 in 39 files |
-| UI (browser) | `npm run test:ui` | 159.5 s | **76 s** | 340 checks in 33 groups |
+| core (vitest) | `npm test` | 6.2 s | **6.2 s** | 581 in 42 files |
+| UI (browser) | `npm run test:ui` | 159.5 s | **55.5 s** | 340 checks in 33 groups |
 | root vitest | `npx vitest run` | 21.1 s | **4.6 s** | 540, not 2104 |
 
-The browser suite is **52% faster** and no longer the flake source it was: 6 consecutive green runs
-at the end, against 3 failures in 7 runs when this started.
+The browser suite is **65% faster** and no longer the flake source it was: 4 consecutive green runs
+at the end within a 0.8 s spread, against 3 failures in 7 runs when this started.
 
 Core was measured and left alone — 11.3 s of work parallelised into 6.2 s of wall time, with
 only `zpcrwebSettings` (3.1 s) and `pcrd` (3.1 s) above a second, both dominated by real
@@ -173,33 +173,81 @@ Two of the last fixed sleeps outside the deliberate set, at 350 ms and 250 ms a 
 text back, which is also the more correct thing to wait for: blurring before that render commits
 whatever the *previous* render held.
 
-## Where the remaining 76 s goes
+### 8. A wait that gives up now fails the run
 
-Per-group totals, measured in place (33 groups, all 340 checks green). Only one group is still
-worth looking at:
+The two findings above (§6, and the 10 s one in §9) were the same bug twice: a wait for something
+that could never happen, behind a check that passed anyway. Neither was visible in the output —
+`waitValue` and `waitStable` return the stale value instead of throwing, precisely so the `check`
+after them can report what it saw, and that made a permanently-expiring wait indistinguishable
+from a fast one.
+
+They still return. But the timeout is now **recorded** (`harness.mjs`'s `softTimeouts`), and
+`uitest` turns each record into a failed check at the end of the run. `tabBecomes`, which caught
+and discarded its own timeout, records one too. There is no opt-out: a wait allowed to expire
+quietly is exactly how both of these survived.
+
+`clickTab` lost its 2 s tolerance in the process. It was there for "callers that click a tab to
+show it is disabled" — no caller does that; they read the tab's `disabled` state instead.
+
+**This immediately found two live flakes**, both of which had been costing 8 s and passing:
+
+- **the Reference cold deep link.** `coldLoad` waited for the view bar, which is drawn before the
+  named file is hydrated — so a 400 KB parse ran inside `tabBecomes`' 8 s clock instead of before
+  it. It waits for the file's chip now. (The doc comment above `coldLoad` had already diagnosed
+  this exact failure; the fix it describes had not been applied.)
+- **`cloneChecks` writing `location.hash` to leave the Instrument view.** The app writes the hash
+  itself while settling into a view, so a write landing in that window is overwritten and the view
+  snaps back — the failure mode `AGENTS.md` describes as "a hash write plus `tabBecomes` is not a
+  navigation". It uses `clickTab` now.
+
+### 9. The sleep audit
+
+31 fixed sleeps down to **12**, and the ones left are all deliberate:
+
+| kept | why |
+|---|---|
+| 5 × `flushWrites` + 200 ms | the flush is started, not awaited, and the app exposes no "pending writes" state to poll. Bounded and short — not a rate limit. |
+| 5 × negative assertions | nothing is going to happen, so there is nothing to wait for. Includes the 5 s echo-suppression check, which must outlast a full 3 s disk-write window. |
+| 1 × drag pacing | the gap *is* the simulation: a burst of mouse moves in one tick coalesces into a jump that never exercises the drag's intermediate frames. |
+
+What went, and what replaced it:
+
+- **"nothing on screen changes, so there is no observable"** was wrong three times over. Closing a
+  file, renaming one and committing a clone all write IndexedDB, which a check can read — a
+  `catalogNames(cdp)` helper now does, replacing three sleeps and two hand-rolled copies of the
+  same query.
+- **Two `Page.reload` + `sleep(600)` pairs** were followed immediately by a `waitFor` on the chip.
+  Pure dead time.
+- **Four `about:blank` navigations** each slept 200 ms; `navigateBlank` waits for `location.href`.
+- **`renameProto`** was a byte-identical copy of `renameFile`, sleeps and all. Deleted.
+- **Hover, double-click and mode-switch sleeps** all had observables sitting next to them — the
+  peeked-cell count, the selected-well count, the active segmented item.
+
+## Where the remaining 55 s goes
+
+Per-group totals, measured in place (33 groups, all 340 checks green):
 
 | group | s |
 |---|---|
-| disk folders | 19.9 |
-| load from URL | 6.7 |
-| password handling | 3.3 |
-| instrument runs and experiments | 2.9 |
-| curves rail (well row/column headers) | 2.8 |
-| XML rendering | 2.5 |
-| open files and the selection | 2.4 |
-| thermal profile | 2.3 |
-| protocol editor | 2.2 |
-| close confirmation | 2.1 |
-| experiment names | 2.0 |
+| disk folders | 9.4 |
+| load from URL | 6.1 |
+| password handling | 3.0 |
+| instrument runs and experiments | 2.2 |
+| XML rendering | 2.1 |
+| open files and the selection | 2.1 |
+| close confirmation | 1.9 |
+| thermal profile | 1.7 |
+| entry storage | 1.6 |
+| curves chart (dragging a Cq marker) | 1.6 |
 
-The tail is flat: the remaining 22 groups are all under 2 s. What is left is mostly irreducible —
-page loads, file parses and React renders, plus ~4 s of startup (`tsup` build, Vite, Chrome) and
+The tail is flat: the remaining 23 groups are all under 1.6 s. What is left is mostly irreducible
+— page loads, file parses and React renders, plus ~4 s of startup (`tsup` build, Vite, Chrome) and
 the deliberate sleeps above.
 
-**`disk folders` is now a quarter of the suite on its own**, and unlike the rest of the tail it is
-not irreducible: ~10 s of it is one check (re-granting a folder and reading every open file back
-in) and ~5 s is a negative assertion that the app does not re-read its own write. The second is a
-deliberate sleep and has to stay; the first has not been looked at.
+`disk folders` is still the largest, but over half of what remains is the 5 s echo-suppression
+sleep, which has to stay. `load from URL` is second and is genuinely doing the work: it is the
+only group that cold-loads the app five times over, each one a full document load plus a 400 KB
+parse.
 
 > **Historical note.** An earlier version of this table listed `experiment names` at 29.7 s and
 > was read for a long time as "naming a run is expensive". It was not: those were the *original*
