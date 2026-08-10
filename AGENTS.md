@@ -258,6 +258,15 @@ is a flake — the suite has been both. `harness.mjs` has the vocabulary:
   so the failure surfaces as the check it belongs to.
 - `waitStable(read)` — the value stopped changing. For state the app writes more than once per
   action, such as the routing hash.
+- `clickTab` / `clickButton` / `clickUntil` — click a control that may not have rendered yet.
+  `element?.click()` on a control React hasn't drawn is a silent no-op, and the caller then times
+  out on a view it never actually asked for.
+- `flushWrites(cdp)` — **don't wait out a write-behind interval.** The app's writes to storage are
+  rate-limited (`writeThrottle.ts`, `analysisPersist.ts` — up to 60 s), and `WriteThrottle.attach`
+  already flushes everything pending on `visibilitychange` → hidden, because a backgrounded tab
+  may never come back. This hides the page and puts it straight back, so the flush a real
+  backgrounded tab gets is the one the test gets. Add no test-only hook to the app for this; the
+  production listener is the hook.
 
 **Every wait that gives up fails the run.** `waitValue` and `waitStable` return rather than throw,
 so the `check` after them can report what it actually saw — but the timeout is also recorded, and
@@ -268,16 +277,7 @@ suite for months, at 8 s and 10 s a run, both behind green checks. Give every `w
 `waitStable` a `what:` — it is what the failure will be named after.
 
 If a wait might legitimately not arrive, it is a **negative assertion**, not a wait: use a `sleep`
-with a comment saying so (below).
-- `clickTab` / `clickButton` / `clickUntil` — click a control that may not have rendered yet.
-  `element?.click()` on a control React hasn't drawn is a silent no-op, and the caller then times
-  out on a view it never actually asked for.
-- `flushWrites(cdp)` — **don't wait out a write-behind interval.** The app's writes to storage are
-  rate-limited (`writeThrottle.ts`, `analysisPersist.ts` — up to 60 s), and `WriteThrottle.attach`
-  already flushes everything pending on `visibilitychange` → hidden, because a backgrounded tab
-  may never come back. This hides the page and puts it straight back, so the flush a real
-  backgrounded tab gets is the one the test gets. Add no test-only hook to the app for this; the
-  production listener is the hook.
+with a comment saying so.
 
 A fixed `sleep` is right for two things, and it should say which in a comment:
 
