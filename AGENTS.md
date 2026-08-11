@@ -230,6 +230,7 @@ core's `runDefinition.ts`, `components/raw/DecodedView.tsx`'s
 `components/FilesTableView.tsx` or `components/CloseFileButton.tsx` (closing a file is what removes
 it from IndexedDB — see `useZpcrStore.ts`'s `closeFile`),
 `components/FileIcons.tsx` (or core's `fileKind.ts`), `components/views/StandaloneRawView.tsx`,
+`components/views/RawFilesView.tsx` (its download button — Hex saves the entry's bytes verbatim),
 `components/protocol/` (the protocol editor) or core's `protocolBuilder.ts`,
 `components/plate/PlateEditor.tsx`, `components/plate/PlateEditPanel.tsx`,
 `components/plate/usePlateSelection.ts`, `components/plate/PlateViewer.tsx`'s selection props

@@ -1666,6 +1666,21 @@ plain dump otherwise. Switching files resets the mode **during render** rather t
 so the new file never paints a frame in the old file's mode (picking `runlog.xml` from a
 `RunInfo.xml` left in Text mode used to flash its XML before snapping to the decoded table).
 
+**The download button saves whatever the current mode is showing**, and the mode decides both the
+bytes and the name (`RawFilesView.handleDownload`):
+
+| Mode | What it writes | Name |
+| --- | --- | --- |
+| Decoded | the rendered table flattened to CSV (`decodedToCsv`), or every well/channel of a `.Plateread` (`plateReadToCsv`) | `<entry base>.csv` |
+| Text | what the text pane holds — the decrypted `.pltd`/`.prcl` XML, the rendered traffic log, the file's own text | the entry's name, or `<base>.xml`/`.txt` where the text isn't the stored form |
+| Hex | the entry's stored bytes, verbatim (`downloadBytes`) | the archive entry's own name |
+
+Hex is the mode that gets a file *out* of a run unchanged: no re-encoding, no extension swap, and
+no truncation to what the paginated dump happens to have drawn. `zpcrweb.json` is the one entry
+whose "stored bytes" are the synthesized live ones (below), which is what the dump on screen shows
+too. `StandaloneRawView` has the same button, always saving the whole file — there is no archive to
+pick an entry out of. The Hex download is asserted end to end by `uitest`'s `rawHexDownloadChecks`.
+
 **`usb-traffic.bin`** — the wire log the Instrument view records for a run it drove itself (see
 "The Instrument view") — groups under **Metadata** and opens in **Text**, the one entry that is
 binary and yet does. Its stored form is records (`usb-traffic.md`); the text is what a reader wants,

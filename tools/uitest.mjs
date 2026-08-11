@@ -2177,6 +2177,114 @@ async function xmlViewChecks(chrome, origin, pw) {
 }
 
 /**
+ * The raw viewer's download button in **Hex** mode: the entry's stored bytes, verbatim, under the
+ * entry's own name (`components/views/RawFilesView.tsx`). The other two modes download something
+ * derived — a CSV of the decoded table, the decrypted/plain text — so this is the only one where
+ * "byte for byte" is the contract, and the only way to see it is to catch the download itself.
+ *
+ * Nothing in the app is instrumented for that: the check listens for the click on the anchor
+ * `downloadBytes` creates, cancels the navigation, and reads the blob back with a *synchronous*
+ * XHR. Synchronous because `downloadBytes` revokes the object URL as soon as `click()` returns,
+ * so anything asynchronous is racing a URL that is already gone; `charset=x-user-defined` is what
+ * makes a text response carry arbitrary bytes intact.
+ */
+async function rawHexDownloadChecks(chrome, origin) {
+  console.log("\nRaw hex download");
+  const cdp = await openPage(chrome.base, origin);
+  await emptyReload(cdp, origin);
+  await loadFile(cdp, ZPCR);
+  await cdp.eval(`window.location.hash = "view=raw", undefined`);
+  await tabBecomes(cdp, "Raw");
+
+  // What the archive actually holds, read here rather than in the browser — an assertion against
+  // the app's own copy of the bytes could only ever agree with itself.
+  const { unzipArchive } = await import("../packages/core/dist/index.js");
+  const files = unzipArchive(new Uint8Array(readFileSync(ZPCR)));
+  // A `.Dcal`: binary, so Hex is its default mode, and big enough that a truncated download shows.
+  const entry = Object.keys(files).find((n) => /\.Dcal$/i.test(n));
+  const want = files[entry];
+  /** FNV-1a over the bytes — a short value that still changes if any byte does. */
+  const fnv = (bytes) => {
+    let h = 0x811c9dc5;
+    for (const b of bytes) h = Math.imul(h ^ b, 0x01000193) >>> 0;
+    return h;
+  };
+
+  await cdp.eval(`(() => {
+    window.__dl = null;
+    document.addEventListener('click', (e) => {
+      const a = e.target.closest?.('a[download]');
+      if (!a) return;
+      e.preventDefault();
+      const x = new XMLHttpRequest();
+      x.open('GET', a.href, false);
+      x.overrideMimeType('text/plain; charset=x-user-defined');
+      x.send();
+      let h = 0x811c9dc5;
+      for (let i = 0; i < x.responseText.length; i++) {
+        h = Math.imul(h ^ (x.responseText.charCodeAt(i) & 0xff), 0x01000193) >>> 0;
+      }
+      window.__dl = { name: a.download, size: x.responseText.length, hash: h };
+    }, true);
+    return undefined;
+  })()`);
+
+  await waitFor(
+    () =>
+      cdp.eval(
+        `!!([...document.querySelectorAll('.raw__item')]
+           .find(b => b.textContent.trim() === ${JSON.stringify(entry)}))`,
+      ),
+    { what: `${entry} in the file list` },
+  );
+  await cdp.eval(
+    `[...document.querySelectorAll('.raw__item')]
+       .find(b => b.textContent.trim() === ${JSON.stringify(entry)}).click()`,
+  );
+  // Anchor on the toolbar naming this entry before touching the mode buttons: until it does, a
+  // click on Hex would be switching the *previous* file's viewer.
+  await waitFor(
+    () =>
+      cdp.eval(
+        `document.querySelector('.raw__fname')?.textContent.trim() === ${JSON.stringify(entry)}`,
+      ),
+    { what: `${entry} in the raw viewer` },
+  );
+  await waitFor(
+    () =>
+      cdp.eval(
+        `(() => { const b = [...document.querySelectorAll('.raw__modes .segmented__item')]
+            .find(x => x.textContent.trim() === 'Hex');
+          if (!b) return false;
+          if (!b.classList.contains("is-active")) b.click();
+          return b.classList.contains("is-active"); })()`,
+      ),
+    { what: `${entry} in Hex mode` },
+  );
+
+  const disabled = await cdp.eval(`!!document.querySelector('.raw__download')?.disabled`);
+  check("the download button is live in Hex mode", disabled === false, `disabled=${disabled}`);
+
+  await cdp.eval(`document.querySelector('.raw__download').click(), undefined`);
+  const got = await waitValue(
+    () => cdp.eval(`JSON.stringify(window.__dl)`).then((s) => JSON.parse(s ?? "null")),
+    (v) => v !== null,
+    { what: "the hex download to fire" },
+  );
+  check(
+    "Hex downloads the entry's bytes, all of them and unchanged",
+    got?.size === want.length && got?.hash === fnv(want),
+    `${got?.size} B / hash ${got?.hash} vs ${want.length} B / hash ${fnv(want)}`,
+  );
+  check(
+    "…under the archive entry's own name",
+    got?.name === entry,
+    `${got?.name} vs ${entry}`,
+  );
+  cdp.close();
+}
+
+/**
  * The `.alf` run report's decoded view inside an archive (`alf.md`,
  * `components/raw/DecodedAlf.tsx`).
  *
@@ -6122,6 +6230,7 @@ async function main() {
     await calibrationChecks(chrome, origin);
     await passwordChecks(chrome, origin, pw);
     await xmlViewChecks(chrome, origin, pw);
+    await rawHexDownloadChecks(chrome, origin);
     await alfViewChecks(chrome, origin);
     await thermalProfileChecks(chrome, origin);
     await instrumentRunChecks(chrome, origin);

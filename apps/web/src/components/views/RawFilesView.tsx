@@ -17,7 +17,13 @@ import { looksLikeXml, XmlTreeFromString } from "../../lib/xmlTree";
 import { usePltdPassword } from "../../state/pltdPassword";
 import { zpcrwebFromAnalysis } from "../../state/analysisSettings";
 import type { FileSettings } from "../../state/useZpcrStore";
-import { decodedToCsv, downloadText, plateReadCsvFilename, plateReadToCsv } from "../../lib/download";
+import {
+  decodedToCsv,
+  downloadBytes,
+  downloadText,
+  plateReadCsvFilename,
+  plateReadToCsv,
+} from "../../lib/download";
 import { DownloadIcon } from "../DownloadIcon";
 
 /** Drop the archive entry's extension, e.g. "RunInfo.xml" -> "RunInfo". */
@@ -195,9 +201,18 @@ export function RawFilesView({ zpcr, settings }: { zpcr: Zpcr; settings: FileSet
 
 
   const decodedRef = useRef<HTMLDivElement>(null);
-  const canDownload = mode === "decoded" ? hasDecoded : textDownload !== null;
+  const canDownload =
+    mode === "decoded" ? hasDecoded : mode === "hex" ? selected !== "" : textDownload !== null;
 
   const handleDownload = () => {
+    if (mode === "hex") {
+      // Hex shows the entry's stored bytes, so the download is those bytes under the entry's own
+      // name — no re-encoding, no extension swap, whatever the archive holds. `zpcrweb.json` is
+      // the one entry whose bytes are synthesized from live state rather than read (see
+      // `liveSettingsText`), and the download matches what the dump on screen shows.
+      downloadBytes(selected, isSettings ? settingsBytes : zpcr.archive.bytes(selected));
+      return;
+    }
     if (mode === "decoded") {
       if (decodedKind(selected) === "plateread") {
         const read = zpcr.reads.find((r) => r.fileName === selected);
@@ -285,7 +300,13 @@ export function RawFilesView({ zpcr, settings }: { zpcr: Zpcr; settings: FileSet
             onClick={handleDownload}
             disabled={!canDownload}
             aria-label="Download"
-            title={mode === "decoded" ? "Download table as CSV" : "Download as a file"}
+            title={
+              mode === "decoded"
+                ? "Download table as CSV"
+                : mode === "hex"
+                  ? "Download this file's bytes, exactly as stored"
+                  : "Download as a file"
+            }
           >
             <DownloadIcon />
           </button>
