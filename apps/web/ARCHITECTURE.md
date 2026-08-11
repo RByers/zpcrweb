@@ -1849,10 +1849,12 @@ and, on top of those, the run's **Cq table**.
   hover cards' Cq column all drop out together (`HoverCardRow.cq` distinguishes `null` — "has no
   Cq", shown as "—" — from `undefined`, "Cq doesn't apply", which hides the column).
 - **The dye-space solve is unconditional.** It used to be skipped while the Curves view was showing
-  channel space (`dyeSpace`, a fifth parameter) since one pseudo-inverse per well per cycle is real
-  work. It no longer is: the target thresholds and the CSV export are target-based in *every* view
-  mode and both read `cqTable`, which is empty without it — and `OverviewView` already pays for the
-  same solve on every run.
+  channel space (`dyeSpace`, a fifth parameter) since a pseudo-inverse per well per cycle was real
+  work. It no longer is, twice over: the target thresholds and the CSV export are target-based in
+  *every* view mode and both read `cqTable`, which is empty without it — `OverviewView` already
+  pays for the same solve on every run — and the pseudo-inverse is now taken once per calibration
+  matrix rather than once per well per cycle (`calibration.md` §5), leaving the solve itself a dot
+  product.
 
 ## A third format: Biomeme
 
@@ -2189,9 +2191,11 @@ only pieces the two views share.
 - **Color separation (dye space) and the channel/fluorophore/target selector** (also labelled
   "View" in the rail, distinct from the baseline `CurveView` toggle above): `@zpcrweb/core`'s
   `matchFluorCalibrations()`
-  matches the plate's fluorophores to this run's `.Dcal` data, builds one calibration matrix per step
-  (restricted to the scanned channels, so its RFU scale factors are measured over the right
-  rows), and solves every well/cycle — see [`calibration.md`](../../docs/calibration.md). `CurvesView`
+  matches the plate's fluorophores to this run's `.Dcal` data, builds a calibration matrix per step
+  (restricted to the scanned channels, so its RFU scale factors are measured over the right rows —
+  one matrix for the whole plate unless the plate mixes vessels or dye sets), and solves every
+  well/cycle against the pseudo-inverse that matrix carries — see
+  [`calibration.md`](../../docs/calibration.md). `CurvesView`
   assembles the §4 corrections that go in first: the per-scan reference level from the reference
   row: the per-scan reference level from the reference row, and nothing else.
 

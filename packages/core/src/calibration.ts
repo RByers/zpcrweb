@@ -5,10 +5,11 @@
  *
  * Pipeline: {@link buildDyeResponseCurve} turns one dye's calibration blocks into a
  * temperature→response curve per channel; {@link buildCalibrationMatrix} samples those curves
- * at a given block temperature (for several dyes at once) into a channel×dye matrix;
+ * at a given block temperature (for several dyes at once) into a channel×dye matrix — and
+ * inverts it there, once, since a whole run's wells and cycles solve the same matrix;
  * {@link preprocessChannelReadings} applies the same corrections a live plate read needs before
- * separation; {@link separateChannels} solves the matrix equation. {@link separateDyes} chains
- * all four for the common case.
+ * separation; {@link separateChannels} solves the matrix equation, which is by then a dot
+ * product. {@link separateDyes} chains all four for the common case.
  */
 
 import type { Dcal } from "./dcal.js";
@@ -158,6 +159,19 @@ export interface CalibrationMatrix {
    * {@link separateChannels}'s output on an RFU scale — see §5.
    */
   columnNorm: number[];
+  /**
+   * Moore-Penrose pseudo-inverse of {@link values} — a dye×channel matrix, so
+   * `inverse[dye] · reading` is that dye's raw solved coefficient. Computed here, once, because
+   * this object is immutable and a run solves the same matrix for every well and every cycle:
+   * {@link separateChannels} is then a dot product and nothing more (see §5).
+   */
+  inverse: number[][];
+  /**
+   * False when the matrix has no usable signal at all — every entry zero, i.e. no dye in it
+   * responds on any scanned channel. {@link separateChannels} reports `failed` for such a matrix
+   * rather than returning a meaningless solve.
+   */
+  hasSignal: boolean;
 }
 
 /** The per-column factors `mode` scales the raw matrix by. Always finite and non-zero. */
@@ -190,11 +204,16 @@ function columnScales(values: number[][], mode: NormalizationMode): number[] {
  * `normalization` is a conditioning choice with no effect on the reported concentration scale;
  * see {@link NormalizationMode}. The default is `"column"`, which equilibrates the columns of a
  * matrix whose dyes differ several-fold in brightness.
+ *
+ * The matrix's pseudo-inverse is taken here rather than at solve time, so `rcond` — the
+ * singular-value cutoff passed through to {@link pseudoInverse} — belongs to the matrix too.
+ * Raise it if a near-singular calibration matrix (e.g. two near-identical dyes) is producing
+ * implausibly large concentrations.
  */
 export function buildCalibrationMatrix(
   curves: DyeResponseCurve[],
   temperatureC: number,
-  options: { normalization?: NormalizationMode; channels?: number[] } = {},
+  options: { normalization?: NormalizationMode; channels?: number[]; rcond?: number } = {},
 ): CalibrationMatrix {
   const curveChannelCount = curves.reduce((max, c) => Math.max(max, c.channels.length), 0);
   const channels =
@@ -209,13 +228,18 @@ export function buildCalibrationMatrix(
     Math.sqrt(raw.reduce((sum, row) => sum + row[d]! ** 2, 0)),
   );
 
+  const values = raw.map((row) => row.map((v, d) => v * scale[d]!));
+  const hasSignal = values.some((row) => row.some((v) => v !== 0));
+
   return {
     dyes: curves.map((c) => c.dye),
     channels,
     channelCount: channels.length,
-    values: raw.map((row) => row.map((v, d) => v * scale[d]!)),
+    values,
     columnScale: scale,
     columnNorm,
+    inverse: pseudoInverse(values, options.rcond),
+    hasSignal,
   };
 }
 
@@ -287,12 +311,13 @@ export interface ColorSeparationResult {
 }
 
 /**
- * Solve `matrix · concentrations = channelReadings` for the per-dye intensities, via the
- * matrix's Moore-Penrose pseudo-inverse (see `linalg.ts`). This reduces to an ordinary matrix
- * solve when the matrix is square and well-conditioned (channel count == dye count), and to a
- * least-squares fit otherwise (e.g. more channels than dyes). `rcond` is the singular-value
- * cutoff passed through to the pseudo-inverse — raise it if a near-singular calibration matrix
- * (e.g. two near-identical dyes) is producing implausibly large concentrations.
+ * Solve `matrix · concentrations = channelReadings` for the per-dye intensities, against the
+ * pseudo-inverse the matrix already carries ({@link CalibrationMatrix.inverse}). That inverse
+ * reduces to an ordinary matrix solve when the matrix is square and well-conditioned (channel
+ * count == dye count), and to a least-squares fit otherwise (e.g. more channels than dyes);
+ * everything this function does is one dot product per dye, so a run can call it for every well
+ * and every cycle without redoing the decomposition. Pass `rcond` to
+ * {@link buildCalibrationMatrix} to move the singular-value floor.
  *
  * The raw solve is against the matrix as {@link buildCalibrationMatrix} scaled it, so its output
  * is in whatever units that scaling implies. Two factors put the result back on a fixed scale
@@ -303,15 +328,12 @@ export interface ColorSeparationResult {
 export function separateChannels(
   matrix: CalibrationMatrix,
   channelReadings: number[],
-  options: { rcond?: number } = {},
 ): ColorSeparationResult {
-  const hasSignal = matrix.values.some((row) => row.some((v) => v !== 0));
-  if (!hasSignal) {
+  if (!matrix.hasSignal) {
     return { dyes: matrix.dyes, concentrations: matrix.dyes.map(() => 0), failed: true };
   }
 
-  const inverse = pseudoInverse(matrix.values, options.rcond);
-  const concentrations = inverse.map((row, d) => {
+  const concentrations = matrix.inverse.map((row, d) => {
     const solved = row.reduce((sum, x, i) => sum + x * (channelReadings[i] ?? 0), 0);
     return solved * (matrix.columnScale[d] ?? 1) * (matrix.columnNorm[d] ?? 1);
   });
@@ -342,7 +364,8 @@ export function separateDyes(
   const matrix = buildCalibrationMatrix(curves, temperatureC, {
     normalization: options.normalization,
     channels: options.channels,
+    rcond: options.rcond,
   });
   const channelReadings = preprocessChannelReadings(rawChannelReadings, options.preprocess);
-  return separateChannels(matrix, channelReadings, { rcond: options.rcond });
+  return separateChannels(matrix, channelReadings);
 }

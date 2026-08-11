@@ -496,6 +496,17 @@ concentrations = pinv(M) · correctedChannelReadings
   gives the least-squares solution: the concentration vector that minimizes the squared error
   between `M · concentrations` and the observed reading.
 
+`pinv(M)` depends on nothing but the matrix, and the matrix is fixed for a whole run: the same
+`M` is solved against every well and every cycle. So it is taken **once, when the matrix is
+built** — `buildCalibrationMatrix` stores it on the matrix alongside `columnScale` and
+`columnNorm`, and a solve is then one dot product per dye. A 96-well, 45-cycle run takes one
+decomposition rather than 4,320 of them — measured at 33–42 ms down to 12–15 ms for a whole run's
+analysis on the committed samples, with every curve and Cq bit-identical. The singular-value floor
+below is therefore an option of `buildCalibrationMatrix`, not of the solve, and so is the
+"no signal at all" check: a matrix whose every entry is zero is recognized when it is built, and
+the solve reports `failed` with all-zero concentrations rather than returning a meaningless
+answer.
+
 **Numerical stability matters here.** A pseudo-inverse computed via singular value
 decomposition inverts each singular value (`1/σᵢ`); a calibration matrix with two very similar
 dyes (near-identical channel fingerprints) or an otherwise poorly-conditioned matrix can have a
@@ -583,7 +594,8 @@ import {
 // One curve per dye, from its .Dcal data (§2).
 const curves = dcals.map((dcal) => buildDyeResponseCurve(dcal));
 
-// Sample those curves at this reading's block temperature, over the scanned channels (§3).
+// Sample those curves at this reading's block temperature, over the scanned channels (§3), and
+// take its pseudo-inverse once (§5). `rcond` — the singular-value floor — is an option here.
 const matrix = buildCalibrationMatrix(curves, blockTemperatureC, { channels: zpcr.channels() });
 
 // The optional dark-current level (§4.2), from this plate read's own DARKDATA — one record per
@@ -604,7 +616,7 @@ const { dyes, concentrations, failed } = separateChannels(matrix, corrected);
 `separateDyes(dcals, rawChannelReadings, temperatureC, options)` chains all four steps for the
 common case of a one-off separation; use the individual functions instead when reusing a
 calibration matrix across many wells or cycles at the same temperature, since rebuilding it per
-call is wasted work.
+call re-runs the eigen-decomposition of §5 for a matrix that has not changed.
 
 ## 8. Limitations / open items
 

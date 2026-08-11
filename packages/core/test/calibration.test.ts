@@ -14,6 +14,7 @@ import {
   type ResponseKnot,
 } from "../src/index.js";
 import { findDcalBlock } from "../src/dcal.js";
+import { pseudoInverse } from "../src/linalg.js";
 import { readSampleBytes } from "./sample.js";
 
 function calibrations(): Map<string, Dcal> {
@@ -32,6 +33,8 @@ function rawMatrix(dyes: string[], values: number[][]): CalibrationMatrix {
     channels: values.map((_, i) => i),
     channelCount: values.length,
     values,
+    hasSignal: values.some((row) => row.some((v) => v !== 0)),
+    inverse: pseudoInverse(values),
     columnScale: dyes.map(() => 1),
     columnNorm: dyes.map((_, d) =>
       Math.sqrt(values.reduce((sum, row) => sum + row[d]! ** 2, 0)),
@@ -373,11 +376,12 @@ describe("separateChannels", () => {
     ];
     const base = rawMatrix(["A", "B"], values);
     // The same matrix, scaled down by 1e-4 and told so via columnScale — the shape
-    // `buildCalibrationMatrix` produces for `global` normalization.
+    // `buildCalibrationMatrix` produces for `global` normalization: `values` and the
+    // pseudo-inverse are the scaled ones, while `columnNorm` describes the raw columns (§5).
     const scaled: CalibrationMatrix = {
-      ...base,
-      values: values.map((row) => row.map((v) => v * 1e-4)),
+      ...rawMatrix(["A", "B"], values.map((row) => row.map((v) => v * 1e-4))),
       columnScale: [1e-4, 1e-4],
+      columnNorm: base.columnNorm,
     };
     const reading = [10, 5];
     const a = separateChannels(base, reading).concentrations;

@@ -183,7 +183,8 @@ Additional typed parsers for the archive files currently reachable only via the 
 
 ## Performance
 
-From a whole-project performance review (2026-08-07). Nothing here is implemented yet.
+From a whole-project performance review (2026-08-07). Checked items are landed; everything
+unchecked is still as reviewed, and its figures still relative to the baseline below.
 
 **How the numbers were obtained.** `--cpu-prof` over the real pipeline on the committed samples,
 plus wall-clock timing of `parseZpcr`/`parsePcrd`/`computeRunAnalysis` averaged over repeated
@@ -211,22 +212,19 @@ cannot possibly have affected.
 
 ### Win-win — less code *and* faster
 
-- [ ] **Hoist the calibration pseudo-inverse out of the per-well, per-cycle solve loop.**
-      **Measured: `computeRunAnalysis` 41.3 ms → 16.1 ms (−61%)**; the other samples move
-      34.1 → 14.5, 40.2 → 25.6, 64.7 → 48.7 ms. `separateChannels`
-      (`packages/core/src/calibration.ts`) calls `pseudoInverse` on `matrix.values` on every
-      invocation, and `computeFluorCurves` (`runAnalysis.ts`) invokes it once per well per cycle
-      — ~4,300 times per analysis — for a matrix that is *constant across the whole loop*. Each
-      call runs a full Jacobi eigen-decomposition; together they were **45% of total profile
-      time**. The fix is not a cache bolted on the side: `CalibrationMatrix` is already an
-      immutable value object built once per step (`runAnalysis.ts`'s "One representative matrix
-      per step" comment), so the inverse belongs to it as a field computed in
-      `buildCalibrationMatrix`. That leaves `separateChannels` as a plain dot product, deletes
-      `linalg`'s only hot call site, and makes the existing "one matrix per step" comment
-      structurally true instead of merely aspirational. **Complexity: negative** — one more
-      field on a type that already carries four derived ones, and one less thing to reason about
-      in the loop. Watch the `hasSignal` all-zeros guard, which currently re-scans the matrix per
-      call and should move with it.
+- [x] **Hoist the calibration pseudo-inverse out of the per-well, per-cycle solve loop.** Done
+      2026-08-10. `pseudoInverse` and the `hasSignal` all-zeros guard are now fields of the
+      immutable `CalibrationMatrix`, computed in `buildCalibrationMatrix`
+      (`packages/core/src/calibration.ts`); `separateChannels` is a dot product per dye and takes
+      no `rcond` of its own, since the singular-value floor belongs to the matrix that was
+      inverted. Counted before the change: **4,320 `pseudoInverse` calls per analysis** (96 wells
+      × 45 cycles) against **one** matrix — the per-well dye sets added since this item was
+      written change nothing here, because `computeRunAnalysis`'s solver cache already keys on
+      (vessel, dye set) and a normal plate resolves to a single entry; the mixed-vessel sample's
+      three matrices were still inverted 4,320 times between them. After: one call per matrix.
+      **Measured: `computeRunAnalysis` 33–42 ms → 12–15 ms** over the four amplification samples,
+      with every curve and Cq bit-identical (dumped and compared before/after) and all 590 core
+      tests passing.
 
 - [ ] **Parse each loaded run once, not all of them on every change.** **Estimated: removes
       ~11 ms per loaded `.zpcr` (~49 ms per `.pcrd`) from every keystroke in the protocol
