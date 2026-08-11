@@ -3,7 +3,7 @@
 Deferred work, captured so we can come back to it. The long-term goal is a **full
 visualizer for everything** inside a `.zpcr` archive.
 
-## Immediately next
+## Analysis improvements
 
 ### Match CFX Manager's Cq and end RFU
 
@@ -11,16 +11,6 @@ visualizer for everything** inside a `.zpcr` archive.
 `samples/20260726_S183-S185_RVP.pcrd` — per-cycle corrected RFU, per-well Cq and end-point RFU.
 Measuring against it turned most of the analysis chain from a guess into a fact.
 **[`threshold.md`](./docs/threshold.md) §A is the write-up.**
-
-**Landed** (2026-07-28): the measured crossing rule (linear two-point interpolation on the cycle
-index, longest-following-increasing-run selection, `T ∉ [min, max]` as the only no-Cq gate), the
-quality gates demoted to diagnostics, no smoothing of the analysed curve, the
-`LinearBaseLineNormalizedCurveFit` plateau filter, end-point RFU, baseline regions that take the
-whole run for a non-amplifying well and stop at `round(Cq) − 2` for an amplifying one, the
-per-fluorophore `thresholdOverrideValue` seeding the app's own override, and the regression test
-that asserts the Cq stage against CFX's own numbers (`packages/core/test/cfxExport.test.ts`). End
-to end the pipeline now lands within 0.11 cycles of CFX on every well it quantifies
-(`threshold.md` §A.8).
 
 Still open:
 
@@ -106,25 +96,11 @@ Still open:
 normalization, drift correction, cycle skips, the data sub-window, the `NoThreshold` Cq
 algorithm, display smoothing) — each understood, none exercised by any sample in hand.
 
-### Other
-
-- [ ] Review all indexeddb storage beyond the data files. Consider whether we can remove
-      everything from indexeddb other than the files now — what would we lose, and is it just
-      transient state which could be stored in the URL (like the active view mode)?
 
 ## Library (`@zpcrweb/core`)
 
-Additional typed parsers for the archive files currently reachable only via the low-level
-`archive` API (raw bytes / text / hex):
-
-- [ ] **`.alf` run log** — the `*_…_Luna_noRT.alf` tab/`*`-delimited step-by-step run log
-      (per-step temperatures, timestamps, elapsed time, error state).
-- [ ] **`runlog.xml`** — full structured run event log.
-
 ## Web app (`apps/web`)
 
-- [ ] Full visualizers replacing the raw viewers as typed parsers land above (`.alf` and the
-      remaining plaintext status files). `.Dcal` now has the Calibration view.
 - [ ] **Build a melt curve UI.** `zpcr.steps()`/`toSteps()` (`packages/core/src/pivot.ts`) groups
       plate reads purely by the raw `STEP` field, with no notion of "amplification" vs. "melt" —
       protocol-step *kind* is decoded separately in `prcl.ts` (`meltcurvestep`) but never joined
