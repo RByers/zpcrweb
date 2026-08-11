@@ -20,8 +20,8 @@ describe("fileKindFromName", () => {
     expect(fileKindFromName("20260720_Luna_noRT.pcrd")).toBe("pcrd");
     expect(fileKindFromName("biomeme-2024-01-17.bmrun")).toBe("biomeme");
     expect(fileKindFromName("QuickPlate_96 wells_All Channels.pltd")).toBe("pltd");
-    expect(fileKindFromName("S183-S185-RVP.plt.csv")).toBe("csv");
-    expect(fileKindFromName("Gradient.prcl.txt")).toBe("prcl");
+    expect(fileKindFromName("S183-S185-RVP.plt.csv")).toBe("platecsv");
+    expect(fileKindFromName("Gradient.prcl.txt")).toBe("prcltxt");
     expect(fileKindFromName("20260807_231326_CT019138_AGBLK1.alf")).toBe("alf");
   });
 

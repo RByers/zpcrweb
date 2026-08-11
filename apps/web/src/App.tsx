@@ -82,7 +82,7 @@ const PROTOCOL_VIEWS = ["overview", "protocol", "raw"] as const;
 const REPORT_VIEWS = ["overview", "protocol", "raw"] as const;
 
 /** A `.pltd`/`.plt.csv` uploaded on its own, rather than a run — only these three tabs apply. */
-const isStandaloneKind = (kind: string) => kind === "pltd" || kind === "csv";
+const isStandaloneKind = (kind: string) => kind === "pltd" || kind === "platecsv";
 
 /**
  * The views that are not lenses on the selected file, and so survive a selection that supports
@@ -103,7 +103,7 @@ const FILE_INDEPENDENT_VIEWS = new Set<ViewId>(["files", "about", "instrument"])
 function enabledViewsFor(kind: string, zpcr?: Zpcr | null): readonly ViewId[] {
   if (isStandaloneKind(kind)) return STANDALONE_VIEWS;
   if (kind === "biomeme") return BIOMEME_VIEWS;
-  if (kind === "prcl") return PROTOCOL_VIEWS;
+  if (kind === "prcltxt") return PROTOCOL_VIEWS;
   if (kind === "alf") return REPORT_VIEWS;
   if (!zpcr) return [];
   // Instrument isn't here: it is not a lens on this file, or on any file (see `ViewBar`). Which
@@ -733,7 +733,7 @@ export function App() {
     // be nothing to write into it. A protocol *with* a `PLATEREAD` does produce a run, and a run
     // wants the name, plate and identity an experiment carries — so that one still goes through
     // "New experiment" as before, and this returns nothing for it.
-    if (active?.kind === "prcl" && store.activeProtocolFile) {
+    if (active?.kind === "prcltxt" && store.activeProtocolFile) {
       const runDefinition = store.activeProtocolFile;
       const readsPlate = (() => {
         try {
@@ -838,7 +838,7 @@ export function App() {
   }
 
   const isStandalonePlate = !!active && isStandaloneKind(active.kind);
-  const isStandaloneProtocol = active?.kind === "prcl";
+  const isStandaloneProtocol = active?.kind === "prcltxt";
   const isStandaloneReport = active?.kind === "alf";
   const zpcr =
     isStandalonePlate || isStandaloneProtocol || isStandaloneReport
@@ -1002,7 +1002,7 @@ export function App() {
                 // `.pltd` gets the same view with no editor rather than an editor that couldn't
                 // save.
                 onChangePlate={
-                  active.kind === "csv"
+                  active.kind === "platecsv"
                     ? (plate) => store.setPlateText(active.name, plate)
                     : undefined
                 }

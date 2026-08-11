@@ -1,14 +1,13 @@
 /**
  * What a file *is*, as opposed to how it is encoded.
  *
- * This library reads seven file formats, but they are only four kinds of thing: a whole **run**, a
- * **plate** map, a thermal **protocol**, or a **report** of a run that happened. Each of those has
+ * This library reads six file formats, but they are only four kinds of thing: a whole **run**, a
+ * **plate** map, a thermal **protocol**, or a **report** of a run that happened. Two of those have
  * more than one encoding — a run arrives as a `.zpcr`, a `.pcrd` or a Biomeme `.bmrun`; a plate as
- * an encrypted `.pltd` or a `.plt.csv`; a protocol as a `.prcl` or this project's `.prcl.txt` —
- * and which encoding it came in is, for most purposes, an implementation detail of the parse. A
- * consumer asking "can this be the plate half of a run?" or "which icon does this get?" is asking
- * about the category, so the mapping belongs here rather than being re-derived from an extension
- * at each call site.
+ * an encrypted `.pltd` or a plain-text `.plt.csv` — and which encoding it came in is, for most
+ * purposes, an implementation detail of the parse. A consumer asking "can this be the plate half of
+ * a run?" or "which icon does this get?" is asking about the category, so the mapping belongs here
+ * rather than being re-derived from an extension at each call site.
  *
  * A **report** is the odd one out, and deliberately not a run: an `.alf` says a protocol executed,
  * when, for how long and whether it completed, and carries no fluorescence at all. It is what a
@@ -17,18 +16,26 @@
  * `usb.md` §7.10). Categorising it as a run would offer it everywhere a run belongs, and every one
  * of those places would then find it empty.
  *
+ * **Each kind is one encoding, named after that encoding**, which is why there is no bare `plate`
+ * or `protocol` kind: the category is the axis that abstracts over encodings, and {@link
+ * fileCategory} is how a consumer gets to it. The corollary is that a kind exists only once
+ * something can produce it — the encrypted binary `.prcl` has no kind here, because no reader for
+ * it is wired up (see {@link SUPPORTED_EXTENSIONS}) and so nothing can ever hold one. When one
+ * lands, it gets a `prcl` kind beside `prcltxt`, the same way `pltd` sits beside `platecsv`.
+ *
  * The format docs, one per encoding: `zpcr` → `ARCHITECTURE.md`, `pcrd` → `pcrd.md`, `biomeme` →
- * `biomeme.md`, `pltd` → `pltd.md`, `csv` → `plateCsv.ts`, `prcl` → `prcl.md` (§3.1 for the text
- * form), `alf` → `alf.md`.
+ * `biomeme.md`, `pltd` → `pltd.md`, `platecsv` → `pltcsv.md`, `prcltxt` → `prcl.md` §3.1,
+ * `alf` → `alf.md`.
  *
  * {@link SUPPORTED_EXTENSIONS} is the other half of the same idea: the file *names* worth offering
  * to a decoder, kept here so a directory listing, a file picker and the loader all agree on what
  * counts as openable.
  */
 
-/** One accepted encoding. `csv` is a `.plt.csv` plate table; `prcl` covers both `.prcl` and the
- * `.prcl.txt` text form; `alf` is an instrument run report. */
-export type FileKind = "zpcr" | "pcrd" | "biomeme" | "pltd" | "csv" | "prcl" | "alf";
+/** One accepted encoding. `platecsv` is a `.plt.csv` plate table — the only CSV this app reads, so
+ * a plain `.csv` is tried as one too; `prcltxt` is the plain-text run definition a `.prcl.txt`
+ * holds, not the encrypted binary `.prcl`; `alf` is an instrument run report. */
+export type FileKind = "zpcr" | "pcrd" | "biomeme" | "pltd" | "platecsv" | "prcltxt" | "alf";
 
 /** What the file describes, independent of encoding. A run carries the plate and protocol halves;
  * a report carries none of them. */
@@ -39,8 +46,8 @@ const CATEGORY: Record<FileKind, FileCategory> = {
   pcrd: "run",
   biomeme: "run",
   pltd: "plate",
-  csv: "plate",
-  prcl: "protocol",
+  platecsv: "plate",
+  prcltxt: "protocol",
   alf: "report",
 };
 
@@ -64,8 +71,8 @@ const DESCRIPTION: Record<FileKind, string> = {
   pcrd: "Bio-Rad CFX Manager saved experiment",
   biomeme: "Biomeme handheld device results",
   pltd: "Bio-Rad format",
-  csv: "zpcrweb comma-separated values",
-  prcl: "Bio-Rad CFX thermal-cycling protocol",
+  platecsv: "zpcrweb comma-separated values",
+  prcltxt: "Bio-Rad CFX run definition, plain text",
   alf: "Bio-Rad CFX run report",
 };
 
@@ -106,15 +113,16 @@ export function matchesSupportedExtension(name: string): boolean {
   return SUPPORTED_EXTENSIONS.some((ext) => lower.endsWith(ext));
 }
 
-/** Extension → the kind that extension is *decoded as*, longest first so `.plt.csv` is read as the
- * plate table it is before the bare `.csv` rule can claim it. */
+/** Extension → the kind that extension is *decoded as*. Every entry is a suffix match, so the two
+ * compound extensions need no rule of their own: a `.plt.csv` ends in `.csv` and a `.prcl.txt` ends
+ * in `.txt`, and each is the only thing its bare extension is ever decoded as. */
 const KIND_BY_EXTENSION: readonly (readonly [string, FileKind])[] = [
   [".zpcr", "zpcr"],
   [".pcrd", "pcrd"],
   [".bmrun", "biomeme"],
   [".pltd", "pltd"],
-  [".csv", "csv"],
-  [".txt", "prcl"],
+  [".csv", "platecsv"],
+  [".txt", "prcltxt"],
   [".alf", "alf"],
 ];
 

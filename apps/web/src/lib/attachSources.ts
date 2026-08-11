@@ -80,7 +80,7 @@ export function plateSources(
   const sources: AttachSource[] = [];
   for (const f of files) {
     if (f.name === excludeId) continue;
-    if (f.kind === "pltd" || f.kind === "csv") {
+    if (f.kind === "pltd" || f.kind === "platecsv") {
       sources.push({
         key: f.name,
         label: f.name,
@@ -114,7 +114,7 @@ export function protocolSources(
   const sources: AttachSource[] = [];
   for (const f of files) {
     if (f.name === excludeId) continue;
-    if (f.kind === "prcl") {
+    if (f.kind === "prcltxt") {
       sources.push({
         key: f.name,
         label: f.name,

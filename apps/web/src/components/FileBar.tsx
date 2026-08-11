@@ -93,11 +93,11 @@ function fileEncryptionStatus(
   plateFile: PlateFileResult | undefined,
   password: string,
 ): EncryptionStatus {
-  if (f.kind === "pltd" || f.kind === "csv") return plateFileEncryptionStatus(plateFile, password);
+  if (f.kind === "pltd" || f.kind === "platecsv") return plateFileEncryptionStatus(plateFile, password);
   // A `.prcl.txt` is plaintext by definition — it is admitted only once it has parsed as one
   // (`useZpcrStore`'s `fileKind`), so there is no locked or failed state to show. An `.alf` report
   // is the same: plain text, admitted only once `parseAlf` has read it.
-  if (f.kind === "prcl" || f.kind === "alf") return { kind: "none" };
+  if (f.kind === "prcltxt" || f.kind === "alf") return { kind: "none" };
   return runEncryptionStatus(run, password);
 }
 
@@ -106,7 +106,7 @@ function fileEncryptionStatus(
  * (a `.pltd`/`.csv` carries no run date), so they share `filechip__date` rather than each
  * getting their own rule. */
 function wellsText(f: LoadedFile, plateFile: PlateFileResult | undefined): string {
-  if ((f.kind === "pltd" || f.kind === "csv") && plateFile?.plate) {
+  if ((f.kind === "pltd" || f.kind === "platecsv") && plateFile?.plate) {
     const n = plateFile.plate.wells.filter((w) => w.loaded).length;
     return `${n} well${n === 1 ? "" : "s"}`;
   }
@@ -121,8 +121,8 @@ function meta(f: LoadedFile, run: RunResult | undefined, plateFile: PlateFileRes
   // A protocol has no well count to report, and no longer needs the word "proto" either: the
   // chip's icon is what tells the two override kinds apart at a glance in the Instrument view.
   // A report has none either, and its own detail is its Overview.
-  if (f.kind === "prcl" || f.kind === "alf") return "";
-  if (f.kind === "pltd" || f.kind === "csv") {
+  if (f.kind === "prcltxt" || f.kind === "alf") return "";
+  if (f.kind === "pltd" || f.kind === "platecsv") {
     if (plateFile?.plate) return "";
     return plateFile?.needsPassword ? "🔒" : plateFile?.error ? "⚠" : "…";
   }

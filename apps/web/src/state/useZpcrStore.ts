@@ -131,7 +131,7 @@ const PERMISSION_LAPSED =
   "Access to the folder this file is in has expired — click the file to allow access again.";
 
 /** The two kinds a plate — standalone or attached to a run — can be uploaded as. */
-type PlateFileKind = "pltd" | "csv";
+type PlateFileKind = "pltd" | "platecsv";
 
 /** `"about"` is not a tab in `ViewBar` — it's reached by clicking the logo — but it
  * is a view like any other, so it's linkable (`#view=about`) and works with back/forward.
@@ -714,13 +714,13 @@ function fileKind(name: string, bytes?: Uint8Array): FileKind | null {
   if (/\.zpcr$/i.test(name)) return "zpcr";
   if (/\.pcrd$/i.test(name)) return "pcrd";
   if (/\.pltd$/i.test(name)) return "pltd";
-  if (/\.csv$/i.test(name)) return "csv";
+  if (/\.csv$/i.test(name)) return "platecsv";
   if (/\.bmrun$/i.test(name)) return "biomeme";
   if (isAlfName(name)) return "alf";
   // `.txt` is far too generic an extension to route on, so it is admitted only when the content
   // really is a run definition (`prcl.md` §3.1), unlike every extension above, which names its
   // format. That also lets an instrument's own `ProtocolRunDefinition.txt` in unrenamed.
-  if (/\.txt$/i.test(name) && bytes && looksLikeProtocolText(bytes)) return "prcl";
+  if (/\.txt$/i.test(name) && bytes && looksLikeProtocolText(bytes)) return "prcltxt";
   return null;
 }
 
@@ -769,7 +769,7 @@ function decodeFile(name: string, bytes: Uint8Array): { kind: FileKind; content:
   else if (kind === "biomeme") parseBiomeme(bytes);
   else if (kind === "pltd") parsePltd(bytes);
   // Already validated by `fileKind`'s content sniff — parsing again would only repeat it.
-  else if (kind === "prcl") void 0;
+  else if (kind === "prcltxt") void 0;
   // A report is validated by parsing it, the same as every binary format above: an `.alf` that
   // doesn't decode is not a report this app can show anything of.
   else if (kind === "alf") parseAlf(new TextDecoder().decode(bytes));
@@ -797,7 +797,7 @@ function fileNameFromUrl(url: string): string {
  * attaching a plate to a run (see the Plates view's upload control). */
 function plateFileKind(name: string): PlateFileKind | null {
   if (/\.pltd$/i.test(name)) return "pltd";
-  if (/\.csv$/i.test(name)) return "csv";
+  if (/\.csv$/i.test(name)) return "platecsv";
   return null;
 }
 
@@ -984,7 +984,7 @@ export interface ZpcrStore {
    * doesn't rewrite the record per keystroke. It is *not* deferred until the editor is closed —
    * "Done" is a UI mode, not a save button.
    *
-   * A no-op for a file that isn't `kind === "prcl"`.
+   * A no-op for a file that isn't `kind === "prcltxt"`.
    */
   setProtocolText: (fileName: string, runDefinition: string) => void;
   /**
@@ -997,7 +997,7 @@ export interface ZpcrStore {
    * write-behind throttle, same `modified` flag, and the same "Done is not Save" rule — the bytes
    * are updated on every edit, so leaving the view (or the app) can't lose one.
    *
-   * A no-op for a file that isn't `kind === "csv"`. A `.pltd` is deliberately not editable: this
+   * A no-op for a file that isn't `kind === "platecsv"`. A `.pltd` is deliberately not editable: this
    * app has no `.pltd` writer (`pltcsv.md`), so there is nothing to save an edit into.
    */
   setPlateText: (fileName: string, plate: PlateDefinition) => void;
@@ -1284,7 +1284,7 @@ export function useZpcrStore(): ZpcrStore {
       // text even when several edits coalesced into one trailing write.
       write: async (id) => {
         const file = loadedRef.current.find((f) => f.name === id);
-        if (!file || (file.kind !== "prcl" && file.kind !== "zpcr" && file.kind !== "csv")) return;
+        if (!file || (file.kind !== "prcltxt" && file.kind !== "zpcr" && file.kind !== "platecsv")) return;
         await persistFile(file, analysisRef.current[id], undefined, markDiskDirty);
       },
       onError: (e) => setError(e instanceof Error ? e.message : String(e)),
@@ -1713,7 +1713,7 @@ export function useZpcrStore(): ZpcrStore {
       // view's staging panel, which is a thing you go to when you mean to start a run. Done here
       // rather than at the call site so every entry point (the header button, a drop, `#load=`)
       // behaves alike.
-      if (lastKind === "prcl") setView("overview");
+      if (lastKind === "prcltxt") setView("overview");
       return lastName;
     },
     [install],
@@ -1967,7 +1967,7 @@ export function useZpcrStore(): ZpcrStore {
         const plateBytes = new Uint8Array(buf);
         // .csv has no password step, so validate eagerly; a .pltd's container is validated when
         // the archive is written back out, and its plate resolved reactively via `runs`.
-        if (kind === "csv") parsePlateCsv(new TextDecoder().decode(plateBytes));
+        if (kind === "platecsv") parsePlateCsv(new TextDecoder().decode(plateBytes));
         // Working on the archive itself: free for a run still in progress or not yet started (the
         // common case for attaching a plate), and an unzip + re-zip for a finished one, which is
         // what it always cost. See `fileContent.ts`.
@@ -2114,7 +2114,7 @@ export function useZpcrStore(): ZpcrStore {
   const setProtocolText = useCallback(
     (id: string, runDefinition: string) => {
       const file = loadedRef.current.find((f) => f.name === id);
-      if (!file || file.kind !== "prcl") return;
+      if (!file || file.kind !== "prcltxt") return;
       const next = withContent(
         file,
         plainContent(new TextEncoder().encode(formatRunDefinitionText(runDefinition))),
@@ -2136,7 +2136,7 @@ export function useZpcrStore(): ZpcrStore {
   const setPlateText = useCallback(
     (id: string, plate: PlateDefinition) => {
       const file = loadedRef.current.find((f) => f.name === id);
-      if (!file || file.kind !== "csv") return;
+      if (!file || file.kind !== "platecsv") return;
       const next = withContent(file, plainContent(new TextEncoder().encode(plateToCsv(plate))));
       // Same reasoning as `setProtocolText`, line for line — see the comments there.
       loadedRef.current = replaceFile(loadedRef.current, next);
@@ -2341,7 +2341,7 @@ export function useZpcrStore(): ZpcrStore {
   const plateFiles = useMemo(() => {
     const map = new Map<string, PlateFileResult>();
     for (const f of loadedFiles) {
-      if (f.kind === "pltd" || f.kind === "csv") {
+      if (f.kind === "pltd" || f.kind === "platecsv") {
         map.set(f.name, parsePlateBytes(f.kind, fileBytes(f), password, f.name));
       }
     }
@@ -2358,7 +2358,7 @@ export function useZpcrStore(): ZpcrStore {
   const protocolFiles = useMemo(() => {
     const map = new Map<string, string>();
     for (const f of loadedFiles) {
-      if (f.kind !== "prcl") continue;
+      if (f.kind !== "prcltxt") continue;
       try {
         map.set(f.name, parseRunDefinitionText(new TextDecoder().decode(fileBytes(f))));
       } catch {

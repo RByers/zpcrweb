@@ -43,7 +43,7 @@
 
 const DB_NAME = "zpcrweb";
 /** Bumping this **erases the database**. See {@link openDb}. */
-const DB_VERSION = 7;
+const DB_VERSION = 8;
 const CONTENT = "content";
 const CATALOG = "catalog";
 const FOLDERS = "folders";
@@ -89,7 +89,7 @@ function normalize(bytes: Uint8Array): Uint8Array {
     : bytes.slice();
 }
 
-type FileKindName = "zpcr" | "pcrd" | "biomeme" | "pltd" | "csv" | "prcl" | "alf";
+type FileKindName = "zpcr" | "pcrd" | "biomeme" | "pltd" | "platecsv" | "prcltxt" | "alf";
 
 /**
  * Where a disk-backed file actually is: which granted folder, and the path to it within that

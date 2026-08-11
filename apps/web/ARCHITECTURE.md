@@ -268,7 +268,7 @@ written inline in a component.
 
 ## A protocol on its own
 
-A `.prcl.txt` (`prcl.md` §3.1) is the third kind of top-level file, `LoadedFile.kind === "prcl"`,
+A `.prcl.txt` (`prcl.md` §3.1) is the third kind of top-level file, `LoadedFile.kind === "prcltxt"`,
 resolved via `protocolFiles`/`activeProtocolFile` — a plain string, the canonical one-line run
 definition, since unlike a run or a plate it needs no password and cannot fail to decode (the
 store's `fileKind` only admits bytes that already parsed).
@@ -494,14 +494,14 @@ archive holding two would drop the other. Anything else keeps the read-only grid
 
 ## Standalone plate entries and attach
 
-Two more `LoadedFile` kinds, `"pltd"` and `"csv"` (a bare `.csv` upload is treated leniently as
+Two more `LoadedFile` kinds, `"pltd"` and `"platecsv"` (a bare `.csv` upload is treated leniently as
 zpcrweb's own `.plt.csv` format — see root `ARCHITECTURE.md`'s "Plate CSV + attaching a plate"),
 alongside `"zpcr"`/`"pcrd"`:
 
 - **Standalone entries** — a `.pltd` or `.plt.csv` dropped with no run selected becomes its own
   top-level file, resolved via `plateFiles`/`activePlateFile` (a `PlateFileResult`, parallel to
   `runs`/`activeRun` but with no `Zpcr` involved). `App.tsx` detects `active.kind === "pltd" |
-  "csv"` and enables only three of the tabs (`enabled={["overview","plates","raw"]}`; the rest
+  "platecsv"` and enables only three of the tabs (`enabled={["overview","plates","raw"]}`; the rest
   grey out) routing to `StandalonePlateOverviewView`/`StandalonePlateView`/`StandaloneRawView`
   instead of the normal `Zpcr`-gated branch — `PlatesView`/`RawFilesView` get thin, `Zpcr`-free
   counterparts operating directly on the file's own bytes and the `PlateFileResult`, while Overview
