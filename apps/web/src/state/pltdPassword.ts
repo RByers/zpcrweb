@@ -95,6 +95,17 @@ function subscribe(cb: () => void): () => void {
   return () => listeners.delete(cb);
 }
 
+/**
+ * The password as it stands right now — for the code that has to ask outside a render.
+ *
+ * The hook below is how a component reads it, and how it re-renders when it changes. A file
+ * arriving is not a render: `useZpcrStore`'s decode path parses a `.pcrd` in an event handler, and
+ * has to key that parse by the same password the next render will look it up with.
+ */
+export function currentPltdPassword(): string {
+  return read();
+}
+
 /** React hook: `[password, setPassword]`, backed by `localStorage`. */
 export function usePltdPassword(): [string, (value: string) => void] {
   const password = useSyncExternalStore(subscribe, read, () => "");

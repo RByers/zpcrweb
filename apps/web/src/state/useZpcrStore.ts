@@ -98,7 +98,7 @@ import {
   type ExperimentIdentity,
 } from "../lib/experiment";
 import { sampleNameFromUrl } from "../lib/samples";
-import { usePltdPassword } from "./pltdPassword";
+import { currentPltdPassword, usePltdPassword } from "./pltdPassword";
 import { onHashChange, readHash, writeHash } from "./urlHash";
 
 export { DEFAULT_THRESHOLD_MULTIPLIER } from "./analysisSettings";
@@ -508,8 +508,50 @@ export interface RunResult {
 }
 
 /**
+ * Every run parsed so far, by the identity of the content it was parsed from — see
+ * {@link parseRunCached}. A `WeakMap`, so a file that is closed, replaced or edited takes its old
+ * parse with it: nothing here outlives the bytes it describes.
+ */
+const parsedRuns = new WeakMap<FileContent, { password: string; result: RunResult }>();
+
+/**
+ * Parse one run — but only once per version of its bytes.
+ *
+ * The store's `runs` map is derived state, rebuilt whenever the loaded set changes identity, and
+ * *any* edit to *any* file changes it (`replaceFile` returns a new array). Parsing every run in the
+ * body of that memo meant an edit to one file re-decoded every other open run: ~5 ms of main-thread
+ * work per loaded `.zpcr`, ~50 ms per `.pcrd`, on each commit of a protocol edit. Keying the parse
+ * on the content object instead is both faster and the honest dependency — a run's decode depends
+ * on its own bytes, not on how many other files happen to be open.
+ *
+ * **The key is the whole dependency.** Content objects are immutable and a new one is built for
+ * every edit (`withContent`), so identity is exactly "these bytes"; the password is the only other
+ * input, and only a `.pcrd`'s decode reads it, so a `.zpcr` is not re-parsed when one is entered.
+ * That makes this pure as far as a render can tell — the same content and password always produce
+ * the same result — which is what lets a memo read it.
+ *
+ * It is also seeded from the *validation* parse in {@link decodeFile}, so a dropped file is decoded
+ * once rather than twice: once to prove the app can open it, and again on the first render.
+ */
+function parseRunCached(
+  content: FileContent,
+  kind: "zpcr" | "pcrd" | "biomeme",
+  password: string,
+): RunResult {
+  // Only a `.pcrd` is encrypted, so nothing else's parse is keyed by the password.
+  const key = kind === "pcrd" ? password : "";
+  const hit = parsedRuns.get(content);
+  if (hit && hit.password === key) return hit.result;
+  const result = parseRun(content, kind, password);
+  parsedRuns.set(content, { password: key, result });
+  return result;
+}
+
+/**
  * The app's format boundary: every source format goes in, one {@link RunResult} comes out. Every
  * `kind === "pcrd"` test in the app that isn't about the raw view should be here instead.
+ *
+ * Called through {@link parseRunCached}, which is what decides whether a parse is owed at all.
  */
 function parseRun(
   content: FileContent,
@@ -814,6 +856,10 @@ function looksLikeProtocolText(bytes: Uint8Array): boolean {
  * it and what the app goes on holding — a run still being written to is never re-zipped just to be
  * put away. See `fileContent.ts`.
  *
+ * A run is likewise *parsed* exactly once: the validation parse is kept ({@link parseRunCached}),
+ * so the decode that proves the file is openable is the same one the first render reads, rather
+ * than one thrown away and immediately repeated.
+ *
  * Shared by every way bytes arrive: an upload, a `#load=` URL, and a file read out of a granted
  * folder. Throws with a message meant for the user.
  */
@@ -828,14 +874,19 @@ function decodeFile(name: string, bytes: Uint8Array): { kind: FileKind; content:
         : "not a .zpcr, .pcrd, .pltd, .csv, .prcl, .prcl.txt, .alf or .bmrun file",
     );
   }
-  if (kind === "zpcr") {
-    const content = archiveContent(unzipArchive(bytes));
-    parseContent(content);
+  if (kind === "zpcr" || kind === "pcrd" || kind === "biomeme") {
+    const content = kind === "zpcr" ? archiveContent(unzipArchive(bytes)) : plainContent(bytes);
+    // Validate by parsing, and *keep* the parse: this is the same decode the first render wants,
+    // so caching it here is what makes a dropped file cost one parse instead of two.
+    const result = parseRunCached(content, kind, currentPltdPassword());
+    // A `.zpcr`/`.bmrun` that doesn't decode is not a file this app can open — rejected at the
+    // door, as it was when the parse threw and its result was discarded. A `.pcrd` is admitted
+    // with whatever it said: a container it can't decrypt yet is a state the run views report
+    // (`needsPassword`), not a bad file.
+    if (kind !== "pcrd" && result.error) throw new Error(result.error);
     return { kind, content };
   }
-  if (kind === "pcrd") parsePcrd(bytes);
-  else if (kind === "biomeme") parseBiomeme(bytes);
-  else if (kind === "pltd") parsePltd(bytes);
+  if (kind === "pltd") parsePltd(bytes);
   // The container only, exactly as for a `.pltd`: `parsePrcl` reports a payload that needs a
   // password (or failed to decrypt) rather than throwing, and that is resolved reactively later
   // (`protocolFiles`). What can be rejected here is a file that is neither an encrypted ZIP nor
@@ -936,8 +987,9 @@ export interface ZpcrStore {
    */
   activeName: string | null;
   active: LoadedFile | null;
-  /** Parse result for every loaded `.zpcr`/`.pcrd` file, keyed by id — recomputed when the
-   * shared decryption password changes, so a `.pcrd` unlocks reactively without reloading. */
+  /** Parse result for every loaded `.zpcr`/`.pcrd` file, keyed by id. A file is parsed once per
+   * version of its bytes and re-parsed when they change — or, for a `.pcrd`, when the shared
+   * decryption password does, so one unlocks reactively without reloading (`parseRunCached`). */
   runs: Map<string, RunResult>;
   activeRun: RunResult | null;
   /** Parse result for every loaded standalone `.pltd`/`.csv` file, keyed by id. */
@@ -1814,7 +1866,10 @@ export function useZpcrStore(): ZpcrStore {
         const content = archiveContent(
           held?.archive ? { ...held.files, ...archive } : archive,
         );
-        parseContent(content);
+        // Validated by parsing, and the parse is kept (`parseRunCached`) — a run being followed
+        // arrives here once per cycle, so decoding the archive twice would be twice per cycle.
+        const validated = parseRunCached(content, "zpcr", currentPltdPassword());
+        if (validated.error) throw new Error(validated.error);
         const size = contentSize(content);
         // A run's snapshots are one file getting longer under one name, so they are one record,
         // rewritten in place. Nothing about the key moves as the run grows — which is what keeps a
@@ -2407,7 +2462,7 @@ export function useZpcrStore(): ZpcrStore {
     const map = new Map<string, RunResult>();
     for (const f of loadedFiles) {
       if (f.kind === "zpcr" || f.kind === "pcrd" || f.kind === "biomeme") {
-        map.set(f.name, parseRun(f.content, f.kind, password));
+        map.set(f.name, parseRunCached(f.content, f.kind, password));
       }
     }
     return map;
