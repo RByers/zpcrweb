@@ -343,50 +343,13 @@ Noted so a future review doesn't "optimize" them again:
 Simplification / dead-code removal, from a whole-project review (2026-07-27). Items marked
 **needs input** are judgment calls left for the repo owner rather than mechanical wins.
 
-### `@zpcrweb/core`
-
-- [x] **Un-export four module-private symbols.** `symmetricEigenDecomposition` (`linalg.ts`),
-      `byChannel` (`pltd.ts`), `parseAttrs` (`xmlLite.ts`) and `ZIPCRYPTO_HEADER_LEN`
-      (`zipcrypto.ts`) are each used only inside their own file and are not re-exported from
-      `index.ts`. Dropping `export` narrows the module surface with no behavior change.
-- [x] **`pltd.ts`: a doc comment sits on the wrong function.** The block describing
-      `parsePlatesetup2` is attached to `byChannel`, which was inserted between the function
-      and its comment; `parsePlatesetup2` is left undocumented.
-- [x] **`refCalComparison()` recomputes `parseFactoryRefRowCal`.** Both `zpcr.ts` and `pcrd.ts`
-      call it with the arguments `factoryRefCal()` already used. Reuse the existing result
-      (preserving laziness).
-- [x] **The ZipCrypto test-encryption helper exists three times.**
-      `test/pcrd.test.ts`, `test/pcrd-synthetic.test.ts` and `test/prcl.test.ts` each carried an
-      identical ~120-line copy of `CRC_TABLE`/`crc32`/`EncryptKeys`/`zipCryptoEncrypt` and the
-      synthetic-archive builders — ~240 lines of duplication. Collapsed into a shared
-      `test/zipCrypto.ts` (alongside `test/sample.ts`, `test/secrets.ts`) exporting
-      `buildEncryptedZip(plaintext, password, entryName)` plus `TEST_PASSWORD`; the three copies
-      differed only in the ZIP entry name, now a parameter.
-
 ### `apps/web`
-
-- [x] **Dead CSS: the `.baseline-range*` block.** `app.css` still carries ~75 lines styling the
-      `BaselineRangeSlider` deleted in `523ecb3` ("Replace baseline configuration with always-on
-      auto linear baselining"). No `.ts`/`.tsx` references any `baseline-range*` class.
-- [x] **Dead CSS selector `.refcal__tbl td.refcal__drift-big`.** `refcal__tbl` survives nowhere —
-      `RefCalPanel.tsx` uses `refcal__grid`. Drop the stale half of the compound selector.
-- [x] **Triplicated `Pair` component.** A byte-identical private `Pair({ k, v })` is defined in
-      `raw/DecodedDcal.tsx`, `raw/DecodedProtocol.tsx` and `raw/DecodedPlate.tsx`. Extract one
-      shared copy. Done as `raw/Pair.tsx` — a fourth identical copy turned up in
-      `plate/PlateViewer.tsx`, and `raw/PlateTable.tsx`'s four hand-written rows now use it too.
 
 - [ ] **needs input — `DecodedPlateread.tsx`'s four inline `.decoded__pair` rows.** They are the
       last hand-written copies of the markup `Pair` renders, but their values are numbers and
       mixed JSX (`{size.toLocaleString()} B`) rather than plain strings, so folding them in means
       widening `Pair`'s `v` to `ReactNode` (or stringifying at each call site). Worth it only if
       you'd rather have one row component than a narrow string-typed one.
-- [x] **Narrow ~12 unused exports.** Re-exports nothing imports (`ANALYSIS_BASELINE_MODE` in
-      `lib/cq.ts`, `AnalysisSettings` in `state/useZpcrStore.ts`, `NormalizationMode` in
-      `lib/fluorCurves.ts` — every consumer imports these straight from `@zpcrweb/core`), plus
-      symbols used only inside their own file: `PlateFileKind`, `NEUTRAL_COLOR`,
-      `MIN_INTERVAL_MS`, `AnalysisFlushTarget`, `setStoredPltdPassword`, `formatHash`,
-      `plusOpacity`, `stepSummary`, and the `HoverCard` component itself (reached only through
-      the `useHoverCard` hook that renders it).
 - [ ] **needs input — `CurvesView.tsx`'s four `cardFor*` hover-card builders.** `cardForWell`,
       `cardForDyeLabel`, `cardForChannel` and `cardForSample` share one shape (filter
       `allPlotCurves`, bail if empty, map through `selectedFirst`, return `{title, subtitle?,
