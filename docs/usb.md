@@ -15,11 +15,13 @@ messages before parsing anything — see §8 for why that reassembly step matter
 byte offset below was checked against the raw pcapng bytes, not assumed; §9 collects the handful
 of claims that rest on a single observation rather than a cross-checked pattern.
 
-A third source has since been added: **`usb-cancel`**, this project's own traffic log of a run it
-started and then aborted from the host (a `.zpcr`'s `usb-traffic.log` entry, written by the web
-app's Instrument view rather than by USBPcap, so it is decoded messages rather than raw packets).
-It is the only capture of a run that did not complete, and §7.8 is measured from it — including
-one correction to what that section previously asserted.
+Further sources have since been added: this project's **own traffic logs**, of runs it started
+itself (a `.zpcr`'s `usb-traffic.bin` entry, written by the web app's Instrument view rather than
+by USBPcap, so it is decoded messages rather than raw packets — `usb-traffic.md`). Two are cited
+below. **`usb-cancel`** is a run started and then aborted from the host; it is the only capture of
+a run that did not complete, and §7.8 is measured from it, including one correction to what that
+section previously asserted. The log inside `samples/20260807-YouSeq_RT_-_S56.zpcr` is a complete
+session — connect, author, start, watch, finish — behind §7.10 and §7's own live-run note.
 
 **This protocol is now implemented, and the implementation has been driven against live
 hardware** — see §10. Talking to the same CT019138 confirmed §1's descriptors, §2's framing and
@@ -27,7 +29,9 @@ every query in §3 unchanged, and corrected four things the captures alone could
 what `GETFILESLEN` actually returns (§3), that it is a *required prologue* to `LISTALLFILES`
 rather than the sanity check it looked like (§5), what the header's `passThrough` bit means
 (§2), and what the two binary `GETFILESLEN` replies mean — "empty" and "no such directory", not
-"unlistable" (§5). Those are marked **measured live** where they appear.
+"unlistable" (§5). Those are marked **measured live** where they appear. It has since **performed
+runs of its own** on that instrument, start to finish — see §7's opening for which runs, and §10
+for what implements them.
 
 **§7 is the run.** §1–§5 are the protocol's pieces in isolation; §7 reconstructs the complete
 sequence a run is made of — pre-flight, authoring, start, file deposit, plate-read collection,
@@ -671,9 +675,10 @@ Manager, and the firmware looks to have been left alone; the encrypted pair in t
 reads as the PC software round-tripping its own config files through a run's results, so that
 CFX Manager can reopen the run with its plate map intact. If that's right, the plaintext
 directive list of `prcl.md` §3 is what actually matters to the instrument, and the ASCII step
-list CFX Manager sends in parallel (below) is not redundant at all. Confirming it takes one
-experiment on live hardware: author a run over the ASCII channel only, upload nothing, and see
-whether it cycles.
+list CFX Manager sends in parallel (below) is not redundant at all. **Measured live, and it is
+right:** every run this project has performed authors over the ASCII channel and uploads no
+`.prcl`/`.pltd` at all — the §7.10 run uploads nothing whatsoever — and the instrument cycles
+them exactly as it does CFX Manager's.
 
 **Listing a directory** is a two-command operation that has to stay together (measured live):
 
@@ -832,10 +837,21 @@ capture that actually exercises that path.
 ## 7. Performing a run
 
 §3 and §5 give the vocabulary; this section is the **order the pieces go in**, start to finish,
-reconstructed command-by-command from `usb-run` — the one capture in which a complete run happens.
-It describes what a client has to do, not what CFX Manager's UI happens to do around it: the
-timings and the one operator intervention are that instrument and that operator, the sequence is
-the protocol.
+reconstructed command-by-command from `usb-run` — the one USBPcap capture in which a complete run
+happens. It describes what a client has to do, not what CFX Manager's UI happens to do around it:
+the timings and the one operator intervention are that instrument and that operator, the sequence
+is the protocol.
+
+**The sequence below has since been driven, end to end, against a live CFX96** (`CT019138`) by
+this project's own client, and everything in §7.1–§7.6 held as written. Four runs stand behind
+that: a 45-cycle qPCR run whose plate reads were collected one per cycle as §7.5 describes
+(`samples/20260806-YouSeq_RP_Validation.zpcr`), a reverse-transcription hold with no `PLATEREAD`
+(§7.10, `samples/20260807-YouSeq_RT_-_S56.zpcr` — which also carries the whole session's decoded
+wire log as `usb-traffic.bin`), a thermal-only `METHOD BLOCK` run (§7.10's table), and a run
+aborted mid-flight (§7.8, `usb-cancel`). What the live runs *added* is marked where it appears:
+§7.4's deposit is accepted by the firmware in this project's own plaintext formats, §7.5's
+open question about the final plate read is settled, and §7.10 is entirely theirs. Nothing in
+them contradicted the capture.
 
 Six phases, and the shape is not what §5's upload machinery suggests:
 
@@ -1007,6 +1023,14 @@ means the `.zpcr` the folder becomes states it, so it survives a reload, a renam
 another machine. `RunInfo.xml` and `GlobData.xml` are not written: the instrument writes its own
 `RunInfo.xml`, and the host inventory describes a PC application this isn't.
 
+**The firmware accepts all four, and reads none of them** (measured live). The deposit was the one
+phase where our own formats might have been refused — `.prcl.txt`/`.plt.csv` where CFX Manager
+puts an encrypted `.prcl`/`.pltd` pair — and no `CRCSENDFILE` was ever refused by extension or by
+content. Nor did depositing them change anything about the run, which is what §7.4's ordering
+predicts: `samples/20260806-YouSeq_RP_Validation.zpcr` is a 45-cycle run pulled back off the
+instrument with this project's `YouSeq_RP_validation.plt.csv` and `zpcrweb.json` sitting in it,
+alongside the `RunInfo.xml` and `ProtocolRunDefinition.txt` the instrument wrote for itself.
+
 `ProtocolName.txt`'s own name is fixed rather than derived, because the instrument writes an entry
 by that exact name itself — §7.5 measures it appearing in the run folder as a touchscreen- or CFX
 Manager-started run finishes. Observed in practice: a run started here through `RemoteRun` never
@@ -1077,9 +1101,12 @@ exactly the format `plateread.md` documents. `GETFILE`'s reply is raw bytes with
 **The last read of a run needs separate handling.** When the final `PLATEREAD` is also the last
 step, the transition this whole mechanism watches for is `PLATEREAD` → `IDLE`, not `PLATEREAD` →
 another step, and in the capture no listing was attempted at that moment at all: the second read
-was picked up after the run was acknowledged (§7.6), 66 s later. Whether it would have been
-listable earlier is untested — so a client should re-list once at the end rather than assume the
-step-transition rule caught everything.
+was picked up after the run was acknowledged (§7.6), 66 s later. **Measured live since: re-listing
+once at the end is what a client should do, and it is enough.** The last plate read, the `ended`
+marker and the `.alf` all become visible in the same moment the §7.6 acknowledgement releases
+them, so a run's finish always changes the listing — which is also how a client tells this run's
+folder from the stale one left by a previous run (§7.10). The step-transition rule collects every
+read but the last; the end re-list collects that one.
 
 The run folder also accumulates **marker files** the instrument writes as it goes:
 `calibrationfilescopied` and `begun` are already there by the first listing after the start,
@@ -1557,14 +1584,16 @@ instance, rather than a cross-checked pattern:
   demonstrated**: no run here was started from the touchscreen, run without the heated lid, or run
   non-autonomously. §7.3's account of what `False` for `<sierra mode>` would entail is the weakest
   claim in that table, and the one a client has no reason to test.
-- **The run sequence** (§7) — one run, one operator, one instrument. The *ordering* claims are
-  strong (they are what the wire did, and the run-starts-at-`RemoteRun` and `PROCEED`-skips-a-step
-  findings each rest on a `STATUS?` transition, not on inference), but nothing here varies the
-  protocol, the plate, `RemoteRun`'s booleans, or the failure paths. In particular: no run was
-  aborted mid-flight, no step failed authoring, and no error code other than `0000` was ever seen,
-  so what a client should do when something goes wrong is not documented because it was never
-  observed. The pre-flight burst of §7.1 is likewise "what this client sends", not a demonstrated
-  requirement — none of it changes instrument state.
+- **The run sequence** (§7) — still one instrument, but no longer one run: the capture's run has
+  been joined by four this project drove itself (§7's opening), which varied the protocol, the
+  plate, the method, and the abort path (§7.8). The *ordering* claims are strong (they are what
+  the wire did, and the run-starts-at-`RemoteRun` and `PROCEED`-skips-a-step findings each rest on
+  a `STATUS?` transition, not on inference). What no run has varied is **`RemoteRun`'s three
+  booleans** (see the entry above — every run sent `True`, `False`, `True`) and the **failure
+  paths**: no step has failed authoring and no error code other than `0000` has ever come back, so
+  what a client should do when something goes wrong is still not documented, because it has still
+  never been observed. The pre-flight burst of §7.1 is likewise "what this client sends", not a
+  demonstrated requirement — none of it changes instrument state.
 - **`STATUS?`'s and `RTSTATUS?`'s quiet fields** (§3.2, §3.3) — the field maps are complete, but
   one run on one healthy instrument exercises only part of them. Nothing paused, nothing errored,
   no fault list was ever populated, the lid only ever took 4 of its 9 positions, and 4 of the

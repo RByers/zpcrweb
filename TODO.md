@@ -106,55 +106,6 @@ Still open:
 normalization, drift correction, cycle skips, the data sub-window, the `NoThreshold` Cq
 algorithm, display smoothing) — each understood, none exercised by any sample in hand.
 
-### Confirm the first live run
-
-Starting a run is implemented (`usb.md` §7, §10) but **has never touched hardware** — it was built
-from the `usb-run` capture alone. Everything below is a question the first real run answers; none
-of it needs a second run, so do them in one sitting with the **USB traffic console open**
-(Instrument view, bottom panel — it decodes every message in both directions, and is the only
-record of what actually happened).
-
-> The upload checksum's byte order used to be the one genuine unknown here. It is **settled**:
-> five even-length files sent to a C1000 all matched the interleaved XOR `usb.md` §7.4 states, and
-> not the CRC-16 shift register the command names suggest. Vectors in `usb.md` §9.2, pinned by
-> `packages/core/test/runPlan.test.ts`. A checksum mismatch on a live run is now just a transfer
-> problem — check the console for a truncated `CRCSENDFILE`.
-
-The things that should just work, in the order they'd fail:
-
-- [ ] **Does the authored protocol run at all?** `RemoteRun` should return `0000` and `STATUS?`
-      should leave `IDLE` within ~10 s. Expect the **lid** to heat first — the block sits at
-      ambient for ~3 minutes while it does (§7.3), which looks exactly like a hang. If a directive
-      is rejected, the console names the step: authoring is one command per directive, each acked
-      individually (`protocol.md` §7).
-- [ ] **Does the instrument accept our own file formats?** We deposit `.prcl.txt`/`.plt.csv` where
-      CFX Manager deposits an encrypted `.prcl`/`.pltd` pair (`usb/runPlan.ts`'s module comment).
-      Nothing should read them — §7.4 measures the deposit starting 13 s *after* the run is
-      already cycling — so this should be inert, and a rejection would be genuinely new
-      information about the firmware. If `CRCSENDFILE` is refused by extension or content, fall
-      back to depositing nothing (the run is unaffected) and note it in §7.4.
-- [ ] **Confirm `PROTOCOL 'PCRUN'` and the three `RemoteRun` booleans.** `<lid on>`, `<remote
-      start>` and `<sierra mode>` are **stated, never varied** in the capture (§9). If the run
-      starts and cycles, all three are confirmed at the values we send; nothing else needs trying.
-- [ ] **Does the watcher see each cycle?** A new `.zpcr` should appear in the file bar within a
-      poll or two of each `PLATEREAD` completing, glowing, with the Curves view growing if it is
-      the file on screen. The signal is `STATUS?`'s step *leaving* a `PLATEREAD` (§7.5), with a
-      30 s listing as backstop — if updates only ever arrive on the 30 s beat, the step-transition
-      rule isn't firing and `isPlateRead()` in `state/useRunWatch.ts` is the place to look.
-- [ ] **Does the finish complete cleanly?** On the last step the app auto-sends the §7.6
-      acknowledgement, after which the **final** plate read, `ended` and the `.alf` should appear
-      and one last snapshot should land — the file stops glowing and Overview's banner clears.
-      This is the most intricate part and the least corroborated: §7.5 notes the capture never
-      tried to list at the final `PLATEREAD` → `IDLE` transition, so if the last read is missing,
-      that re-list is where to look.
-- [ ] **Does the resulting `.zpcr` open as a complete experiment?** It should carry the plate
-      (from our `.plt.csv`, via `zpcr.plates()`), the protocol, and per-dye curves in the Curves
-      view — the whole reason for depositing anything at all.
-
-Once all of the above is answered, **fold the results into `usb.md` §7** the way §10's opening
-paragraph already does for the read-only client ("what the instrument corrected"), and drop this
-section.
-
 ### Other
 
 - [ ] Review all indexeddb storage beyond the data files. Consider whether we can remove
