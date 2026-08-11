@@ -214,6 +214,150 @@ async function noPlateReadRunChecks(chrome, origin) {
 }
 
 /**
+ * A standalone Bio-Rad `.prcl` protocol opens as a file of its own — the encrypted form of the
+ * same thing a `.prcl.txt` holds.
+ *
+ * The point of this block is the *container*: a `.prcl` is the ZipCrypto ZIP a `.pltd` is
+ * (`zipcrypto.md`), so the file is unreadable until the password is supplied, and everything the
+ * app shows for it has a locked state to get right first. That is the half a plain-text fixture
+ * cannot exercise, and the half most likely to break — hence a locked page and an unlocked one,
+ * against the same real sample.
+ *
+ * The rest is the rule the kind exists to state: it is a *protocol*, so it lands where a protocol
+ * lands and offers the tabs a protocol offers, whichever encoding it arrived in. The one visible
+ * difference from a `.prcl.txt` is that it cannot be edited — this project reads that container
+ * but has no writer for it, the same standing a `.pltd` has against a `.plt.csv`.
+ */
+async function prclFileChecks(chrome, origin, pw) {
+  console.log("\na standalone .prcl protocol");
+  const PRCL = join(REPO, "samples/Qualification_Plate_96.prcl");
+
+  // Locked first, from a page that has never been told the password. `emptyReload` twice around
+  // the removal, as `passwordChecks` does: the key is read at startup, so clearing it has to be
+  // followed by a reload for the app to come up without one.
+  const locked = await openPage(chrome.base, origin);
+  await emptyReload(locked, origin);
+  await locked.eval(`localStorage.removeItem("zpcr:pltdPassword")`);
+  await emptyReload(locked, origin);
+  await loadFile(locked, PRCL);
+  await waitFor(() => chipPresent(locked, "Qualification"), { what: "the locked .prcl chip" });
+  // A protocol file opens on Overview whichever encoding it is in (the store's `addFiles`), so
+  // the padlock on its chip is the whole of what a locked one says before you go looking.
+  const lockedBadge = await waitValue(
+    () =>
+      locked.eval(
+        `document.querySelector(".filebar .filechip.is-active .filechip__meta")?.textContent.trim() ?? ""`,
+      ),
+    (b) => b !== "",
+    { what: "the locked .prcl's chip badge" },
+  );
+  check(
+    "a locked .prcl wears the padlock a locked .pltd wears — same container, same answer",
+    lockedBadge === "\u{1F512}",
+    JSON.stringify(lockedBadge),
+  );
+  // And the prompt is on the tab the protocol would be on, which is where someone who clicked
+  // through to read it arrives.
+  await clickTab(locked, "Protocol");
+  await tabBecomes(locked, "Protocol");
+  const lockedShape = await locked
+    .eval(
+      `JSON.stringify({
+         prompt: !!document.querySelector(".plate__pwform"),
+         steps: document.querySelectorAll(".decoded__tbl tbody tr").length,
+         listing: document.querySelectorAll(".decoded__protoline").length,
+       })`,
+    )
+    .then(JSON.parse);
+  check(
+    "…and its Protocol tab asks for the password rather than showing an empty protocol",
+    lockedShape.prompt && lockedShape.steps === 0 && lockedShape.listing === 0,
+    JSON.stringify(lockedShape),
+  );
+  locked.close();
+
+  // Unlocked, against the same file: the password goes in through the hash, as everywhere else.
+  const cdp = await openPage(chrome.base, `${origin}#cfxPassword=${encodeURIComponent(pw)}`);
+  await emptyReload(cdp, `${origin}#cfxPassword=${encodeURIComponent(pw)}`);
+  await loadFile(cdp, PRCL);
+  await waitFor(() => chipPresent(cdp, "Qualification"), { what: "the .prcl chip" });
+
+  const tabs = await cdp
+    .eval(
+      `JSON.stringify(Object.fromEntries([...document.querySelectorAll('.viewbar [role="tab"]')]
+         .map((b) => [b.textContent.trim(), !b.disabled])))`,
+    )
+    .then(JSON.parse);
+  check(
+    "a .prcl enables exactly the tabs a .prcl.txt does — same thing, different encoding",
+    tabs.Overview === true &&
+      tabs.Protocol === true &&
+      tabs.Raw === true &&
+      tabs.Curves === false &&
+      tabs.Plates === false &&
+      tabs.Reference === false &&
+      tabs.Calibration === false,
+    JSON.stringify(tabs),
+  );
+
+  await clickTab(cdp, "Protocol");
+  await tabBecomes(cdp, "Protocol");
+  // The XML step list, not the directive listing: a `.prcl` carries a structured `protocol2`
+  // exactly as a `.pcrd` does, and this is the same table that shows for one (`ProtocolView`
+  // prefers real steps over the text they were rendered from).
+  await waitFor(() => cdp.eval(`document.querySelectorAll(".decoded__tbl tbody tr").length > 0`), {
+    what: "the decrypted .prcl's step table",
+  });
+  const listing = await cdp
+    .eval(
+      `JSON.stringify({
+         rows: [...document.querySelectorAll(".decoded__tbl tbody tr")]
+           .map((r) => r.textContent.replace(/\\s+/g, " ").trim()),
+         edit: [...document.querySelectorAll("button")]
+           .some((b) => /^Edit this protocol$/.test(b.getAttribute("aria-label") ?? "")),
+       })`,
+    )
+    .then(JSON.parse);
+  check(
+    "…and decrypts into the protocol it holds, step by step",
+    listing.rows.length === 5 &&
+      listing.rows.some((r) => /98/.test(r)) &&
+      listing.rows.some((r) => /Return to step/.test(r)),
+    JSON.stringify(listing.rows),
+  );
+  check(
+    "a .prcl gets no editor, having no writer to save an edit through",
+    listing.edit === false,
+    JSON.stringify({ edit: listing.edit }),
+  );
+
+  // Raw shows the decrypted payload, which is XML — the same tree the standalone `.pltd` gets,
+  // and for the same reason: the container is the same one.
+  await clickTab(cdp, "Raw");
+  await tabBecomes(cdp, "Raw");
+  await waitFor(() => cdp.eval(`!!document.querySelector(".decoded__xml, .raw__dump")`), {
+    what: "the .prcl's raw payload",
+  });
+  const raw = await cdp
+    .eval(
+      `JSON.stringify({
+         label: [...document.querySelectorAll(".raw__modes .segmented__item")]
+           .map((b) => b.textContent.trim()),
+         tree: !!document.querySelector(".decoded__xml"),
+         dump: !!document.querySelector(".raw__dump"),
+         text: (document.querySelector(".decoded__xml")?.textContent ?? "").slice(0, 200),
+       })`,
+    )
+    .then(JSON.parse);
+  check(
+    "a .prcl's Raw tab decrypts to its XML payload, rendered as the XML tree",
+    raw.label.includes("XML") && raw.tree && !raw.dump && /protocol2/.test(raw.text),
+    JSON.stringify({ label: raw.label, tree: raw.tree, head: raw.text.slice(0, 80) }),
+  );
+  cdp.close();
+}
+
+/**
  * A standalone `.alf` run report opens as a file of its own.
  *
  * This is what a thermal-only run produces instead of a `.zpcr` — the instrument writes no run
@@ -6238,6 +6382,7 @@ async function main() {
     await incompleteRunChecks(chrome, origin);
     await noPlateReadRunChecks(chrome, origin);
     await reportFileChecks(chrome, origin);
+    await prclFileChecks(chrome, origin, pw);
     await explodedStorageChecks(chrome, origin);
     await experimentNameChecks(chrome, origin);
     await closeConfirmChecks(chrome, origin);

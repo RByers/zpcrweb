@@ -1,4 +1,4 @@
-import type { RunResult, PlateFileResult } from "../state/useZpcrStore";
+import type { RunResult, PlateFileResult, ProtocolFileResult } from "../state/useZpcrStore";
 
 /**
  * Whether a loaded file (or something inside it) is encrypted, and if so, whether it's been
@@ -43,4 +43,21 @@ export function plateFileEncryptionStatus(
 ): EncryptionStatus {
   if (!plateFile?.container?.encrypted) return { kind: "none" };
   return plateFile.plate ? { kind: "decrypted", password } : { kind: "locked" };
+}
+
+/**
+ * Encryption status for a standalone `.prcl`/`.prcl.txt` protocol file — the protocol-side
+ * counterpart of {@link plateFileEncryptionStatus}, and the same shape of answer, because the
+ * container is literally the same one (`zipcrypto.md`).
+ *
+ * A `.prcl.txt` has no container and answers "none", as does the bare-text `.prcl` variant
+ * (`prcl.md` §1.1): both are protocols nobody encrypted, and the question is about the bytes on
+ * disk rather than about the extension.
+ */
+export function protocolFileEncryptionStatus(
+  protocolFile: ProtocolFileResult | undefined,
+  password: string,
+): EncryptionStatus {
+  if (!protocolFile?.container?.encrypted) return { kind: "none" };
+  return protocolFile.runDefinition ? { kind: "decrypted", password } : { kind: "locked" };
 }

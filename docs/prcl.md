@@ -46,6 +46,14 @@ executed (`Short Qualification_Plate_96.prcl` in the committed 2019 sample). It 
 the same format there, encrypted with the same password, so `zpcr.archive.bytes(name)` feeds
 straight into the pipeline above. Not every archive includes one — the 2026 sample has none.
 
+A `.prcl` is also **a file the app opens on its own**, not only an entry found inside something
+else: it is one of the file kinds (`fileKind.ts`'s `prcl`, beside `prcltxt` for the §3.1 text
+form), so a protocol lifted straight out of a CFX installation can be read here without being
+converted first. Both forms are the same document in the same views; only the text one can be
+*edited*, there being no writer for the container above. See `apps/web/ARCHITECTURE.md`,
+"A protocol on its own". The committed `samples/Qualification_Plate_96.prcl` is the encrypted
+variant, and `samples/…SHORT_QUALIF.zpcr`'s entry the in-archive one.
+
 ### 1.1 The plaintext variant
 
 At least one shipped protocol (`BurnIn.prcl`) is **not a ZIP at all**. It is the bare

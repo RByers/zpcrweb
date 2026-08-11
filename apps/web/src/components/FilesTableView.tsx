@@ -41,7 +41,13 @@
 import { useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { fileKindDescription, plateTargets, type FileKind } from "@zpcrweb/core";
-import type { FileEntry, PlateFileResult, RunResult, ViewId } from "../state/useZpcrStore";
+import type {
+  FileEntry,
+  PlateFileResult,
+  ProtocolFileResult,
+  RunResult,
+  ViewId,
+} from "../state/useZpcrStore";
 import { formatCompactDateTime, type ExperimentIdentity } from "../lib/experiment";
 import { plateDisplayName } from "../lib/plateNames";
 import { fluorColor } from "../lib/fluorColors";
@@ -62,6 +68,7 @@ interface Props {
    * table is read out of (`ZpcrStore.runs`/`plateFiles`/`experiments`). */
   runs: Map<string, RunResult>;
   plateFiles: Map<string, PlateFileResult>;
+  protocolFiles: Map<string, ProtocolFileResult>;
   experiments: Map<string, ExperimentIdentity>;
   /** Select this file, close the table, and land on its own view; see `App.tsx`'s wiring. `view`,
    * when given, overrides the usual first-enabled-tab landing spot — the Protocol/Plate/Reads cells
@@ -384,6 +391,7 @@ export function FilesTableView({
   unreadableIds,
   runs,
   plateFiles,
+  protocolFiles,
   experiments,
   onSelectFile,
   onCloseFile,
@@ -414,7 +422,11 @@ export function FilesTableView({
         dateText: identity?.dateText ?? "",
         dateMs: identity?.date?.getTime() ?? 0,
         size: f.size,
-        protocol: zpcr?.protocol()?.name || null,
+        // A standalone protocol file *is* a protocol, so the column names it from the file's own
+        // decode rather than leaving the row's most relevant cell empty — the same way the plate
+        // cell above prefers a standalone plate file's plate to a run's. A locked `.prcl` has no
+        // name to show yet and falls back to the dash like anything undecoded.
+        protocol: protocolFiles.get(f.name)?.protocol?.name || zpcr?.protocol()?.name || null,
         plateName: plate ? plateDisplayName(plate) : "—",
         reads: zpcr ? zpcr.reads.length : undefined,
         targets: plate ? plateTargets(plate) : [],
@@ -424,7 +436,7 @@ export function FilesTableView({
         unreadable: unreadableIds.get(f.name) ?? null,
       };
     });
-  }, [files, modifiedIds, unreadableIds, runs, plateFiles, experiments, password]);
+  }, [files, modifiedIds, unreadableIds, runs, plateFiles, protocolFiles, experiments, password]);
 
   const sorted = useMemo(() => sortRows(rows, sortKey, dir), [rows, sortKey, dir]);
 

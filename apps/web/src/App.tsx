@@ -62,9 +62,10 @@ const STANDALONE_VIEWS = ["overview", "plates", "raw"] as const;
  * same {@link StandaloneRawView} a `.plt.csv` gets, for the same reason (one text file, no
  * container around it). */
 const BIOMEME_VIEWS = ["overview", "protocol", "curves", "plates", "raw"] as const;
-/** A `.prcl.txt` is a document to read and edit (Protocol, the annotated directive listing of
- * `protocol.md`) and a file to inspect verbatim (Raw — it's plain text, so this is the same view a
- * `.plt.csv` gets). Overview stays minimal — just the filename, per
+/** A protocol file — `.prcl.txt` or `.prcl` — is a document to read (Protocol, the annotated
+ * directive listing of `protocol.md`, editable for the text form) and a file to inspect verbatim
+ * (Raw: the text as typed for a `.prcl.txt`, the decrypted XML for a `.prcl`, the same way a
+ * `.pltd` shows its payload). Overview stays minimal — just the filename, per
  * {@link StandaloneProtocolOverview} — since Protocol is where the content actually lives. It has
  * no curves and no plate, and no longer lists Instrument: a protocol file is not something that
  * can be started, only attached to an experiment that can (see {@link InstrumentView}). */
@@ -83,6 +84,13 @@ const REPORT_VIEWS = ["overview", "protocol", "raw"] as const;
 
 /** A `.pltd`/`.plt.csv` uploaded on its own, rather than a run — only these three tabs apply. */
 const isStandaloneKind = (kind: string) => kind === "pltd" || kind === "platecsv";
+
+/** A thermal protocol on its own, in either encoding: Bio-Rad's encrypted `.prcl` or this
+ * project's `.prcl.txt`. They are the same document in the same tabs — which is why they share
+ * {@link PROTOCOL_VIEWS} and the one branch below — and differ in exactly two visible ways, both
+ * decided at the `ProtocolView` call site: only the text form can be *edited* (there is no
+ * encrypted-container writer), and only the `.prcl` carries a structured *step list* of its own. */
+const isProtocolKind = (kind: string) => kind === "prcl" || kind === "prcltxt";
 
 /**
  * The views that are not lenses on the selected file, and so survive a selection that supports
@@ -103,7 +111,7 @@ const FILE_INDEPENDENT_VIEWS = new Set<ViewId>(["files", "about", "instrument"])
 function enabledViewsFor(kind: string, zpcr?: Zpcr | null): readonly ViewId[] {
   if (isStandaloneKind(kind)) return STANDALONE_VIEWS;
   if (kind === "biomeme") return BIOMEME_VIEWS;
-  if (kind === "prcltxt") return PROTOCOL_VIEWS;
+  if (isProtocolKind(kind)) return PROTOCOL_VIEWS;
   if (kind === "alf") return REPORT_VIEWS;
   if (!zpcr) return [];
   // Instrument isn't here: it is not a lens on this file, or on any file (see `ViewBar`). Which
@@ -647,8 +655,8 @@ export function App() {
     [store.loaded, store.runs, active, pltdPassword],
   );
   const protocolAttachSources = useMemo(
-    () => protocolSources(store.loaded, store.runs, active?.name ?? null),
-    [store.loaded, store.runs, active],
+    () => protocolSources(store.loaded, store.runs, active?.name ?? null, store.protocolFiles),
+    [store.loaded, store.runs, store.protocolFiles, active],
   );
   /**
    * A row in the full files table: select the file — which **loads** it if it wasn't (see
@@ -727,14 +735,18 @@ export function App() {
    * plain answer was enough.
    */
   const instrumentExperiment = useMemo(() => {
-    // A standalone `.prcl.txt` is startable as itself, but only when it never reads the plate.
+    // A standalone protocol file is startable as itself, but only when it never reads the plate.
     // Such a run leaves the instrument's run folder untouched and so produces no `.zpcr`
     // (`RunPlan.producesRunFile`), which is exactly why it needs no experiment file: there would
     // be nothing to write into it. A protocol *with* a `PLATEREAD` does produce a run, and a run
     // wants the name, plate and identity an experiment carries — so that one still goes through
     // "New experiment" as before, and this returns nothing for it.
-    if (active?.kind === "prcltxt" && store.activeProtocolFile) {
-      const runDefinition = store.activeProtocolFile;
+    //
+    // Which encoding it arrived in makes no difference: what gets typed at the instrument is the
+    // directive text (`protocol.md` §7), and a decoded `.prcl` has exactly the same text a
+    // `.prcl.txt` does. A locked one has no text at all, so it simply isn't offered.
+    if (active && isProtocolKind(active.kind) && store.activeProtocolFile?.runDefinition) {
+      const runDefinition = store.activeProtocolFile.runDefinition;
       const readsPlate = (() => {
         try {
           return parseRunDefinition(runDefinition).directives.some((d) => d.verb === "PLATEREAD");
@@ -838,7 +850,7 @@ export function App() {
   }
 
   const isStandalonePlate = !!active && isStandaloneKind(active.kind);
-  const isStandaloneProtocol = active?.kind === "prcltxt";
+  const isStandaloneProtocol = isProtocolKind(active?.kind ?? "");
   const isStandaloneReport = active?.kind === "alf";
   const zpcr =
     isStandalonePlate || isStandaloneProtocol || isStandaloneReport
@@ -889,6 +901,7 @@ export function App() {
         files={store.loaded}
         runs={store.runs}
         plateFiles={store.plateFiles}
+        protocolFiles={store.protocolFiles}
         activeName={store.activeName}
         modifiedIds={store.modifiedIds}
         inProgressIds={store.inProgressIds}
@@ -930,6 +943,7 @@ export function App() {
             unreadableIds={store.unreadableIds}
             runs={store.runs}
             plateFiles={store.plateFiles}
+            protocolFiles={store.protocolFiles}
             experiments={store.experiments}
             onSelectFile={selectFromTable}
             onCloseFile={store.closeFile}
@@ -1022,27 +1036,44 @@ export function App() {
                 onAutoEditHandled={clearEditName}
               />
             )}
-            {view === "protocol" && store.activeProtocolFile !== null && (
-              <ProtocolView
-                key={active.name}
-                protocolText={store.activeProtocolFile}
-                file={active}
-                protocolSources={protocolAttachSources}
-                addFiles={store.addFiles}
-                // A protocol file is always a draft: it is a document you author, with no run behind
-                // it that editing it could contradict.
-                editable
-                onChangeProtocol={(text) => store.setProtocolText(active.name, text)}
-                // A standalone protocol has no `ProtocolName.txt` — its name *is* its file name, so
-                // the headline edits that, extension preserved.
-                name={splitFileName(active.name).base}
-                onRenameProtocol={(name) =>
-                  void store.renameFile(active.name, `${name}${splitFileName(active.name).ext}`)
-                }
-                autoFocusName={nameProtocolFor === active.name}
-                onAutoFocusHandled={clearNameProtocol}
-              />
-            )}
+            {view === "protocol" &&
+              store.activeProtocolFile !== null &&
+              // A Bio-Rad `.prcl` is an encrypted container, so its protocol may not be readable
+              // yet. The prompt sits where the protocol would be — the same place, and the same
+              // component, a locked `.pltd` puts it on the Plates tab.
+              (store.activeProtocolFile.needsPassword || store.activeProtocolFile.error ? (
+                <div className="decoded">
+                  <PasswordPrompt
+                    wrong={!!store.activeProtocolFile.error}
+                    onSubmit={setPassword}
+                  />
+                </div>
+              ) : (
+                <ProtocolView
+                  key={active.name}
+                  protocolText={store.activeProtocolFile.runDefinition}
+                  // Only Bio-Rad's own form carries a structured step list; a `.prcl.txt` is the
+                  // directive text and nothing else, and gets the annotated listing instead.
+                  steps={store.activeProtocolFile.protocol?.steps ?? null}
+                  file={active}
+                  protocolSources={protocolAttachSources}
+                  addFiles={store.addFiles}
+                  // A `.prcl.txt` is always a draft: a document you author, with no run behind it
+                  // that editing it could contradict. A `.prcl` is a draft too, but this app can
+                  // only read that container, never write one — so it is shown, not edited, for
+                  // the same reason a `.pltd`'s plate grid has no pencil on it.
+                  editable={active.kind === "prcltxt"}
+                  onChangeProtocol={(text) => store.setProtocolText(active.name, text)}
+                  // A standalone protocol has no `ProtocolName.txt` — its name *is* its file name,
+                  // so the headline edits that, extension preserved.
+                  name={splitFileName(active.name).base}
+                  onRenameProtocol={(name) =>
+                    void store.renameFile(active.name, `${name}${splitFileName(active.name).ext}`)
+                  }
+                  autoFocusName={nameProtocolFor === active.name}
+                  onAutoFocusHandled={clearNameProtocol}
+                />
+              ))}
             {view === "raw" && <StandaloneRawView key={active.name} file={active} />}
           </>
         ) : isStandaloneReport ? (

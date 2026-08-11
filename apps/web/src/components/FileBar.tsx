@@ -1,11 +1,17 @@
 import { useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { FileKind } from "@zpcrweb/core";
-import type { LoadedFile, PlateFileResult, RunResult } from "../state/useZpcrStore";
+import type {
+  LoadedFile,
+  PlateFileResult,
+  ProtocolFileResult,
+  RunResult,
+} from "../state/useZpcrStore";
 import { usePltdPassword } from "../state/pltdPassword";
 import { fluorColor } from "../lib/fluorColors";
 import {
   plateFileEncryptionStatus,
+  protocolFileEncryptionStatus,
   runEncryptionStatus,
   type EncryptionStatus,
 } from "../lib/encryptionStatus";
@@ -31,6 +37,7 @@ interface Props {
   files: LoadedFile[];
   runs: Map<string, RunResult>;
   plateFiles: Map<string, PlateFileResult>;
+  protocolFiles: Map<string, ProtocolFileResult>;
   /** The **primary selection** — one chip, in cyan, that a click switches and can never clear.
    * Usually `ZpcrStore.activeName`, the file every view is pointed at; in the Instrument view,
    * which shows no file, it is the run being staged (`App.tsx`). */
@@ -91,13 +98,19 @@ function fileEncryptionStatus(
   f: LoadedFile,
   run: RunResult | undefined,
   plateFile: PlateFileResult | undefined,
+  protocolFile: ProtocolFileResult | undefined,
   password: string,
 ): EncryptionStatus {
   if (f.kind === "pltd" || f.kind === "platecsv") return plateFileEncryptionStatus(plateFile, password);
-  // A `.prcl.txt` is plaintext by definition — it is admitted only once it has parsed as one
-  // (`useZpcrStore`'s `fileKind`), so there is no locked or failed state to show. An `.alf` report
-  // is the same: plain text, admitted only once `parseAlf` has read it.
-  if (f.kind === "prcltxt" || f.kind === "alf") return { kind: "none" };
+  // Bio-Rad's `.prcl` is the same encrypted container a `.pltd` is, so it gets the same three
+  // colours from the same question asked of its own decode. A `.prcl.txt` is plaintext by
+  // definition — admitted only once it has parsed as one (`useZpcrStore`'s `fileKind`) — and so
+  // always answers "none" through the same call.
+  if (f.kind === "prcl" || f.kind === "prcltxt")
+    return protocolFileEncryptionStatus(protocolFile, password);
+  // An `.alf` report is plain text too, admitted only once `parseAlf` has read it, so there is no
+  // locked or failed state to show.
+  if (f.kind === "alf") return { kind: "none" };
   return runEncryptionStatus(run, password);
 }
 
@@ -113,15 +126,26 @@ function wellsText(f: LoadedFile, plateFile: PlateFileResult | undefined): strin
   return "";
 }
 
-/** Chip badge: a lock/error/loading glyph while a `.pcrd`/`.pltd`/run password is unresolved.
- * Run chips (`.zpcr`/`.pcrd`) carry no badge once loaded — their detail lives in the hover card
- * instead — and a loaded plate file's badge is its well count, shown below the name instead (see
- * {@link wellsText}). */
-function meta(f: LoadedFile, run: RunResult | undefined, plateFile: PlateFileResult | undefined): string {
-  // A protocol has no well count to report, and no longer needs the word "proto" either: the
-  // chip's icon is what tells the two override kinds apart at a glance in the Instrument view.
-  // A report has none either, and its own detail is its Overview.
-  if (f.kind === "prcltxt" || f.kind === "alf") return "";
+/** Chip badge: a lock/error/loading glyph while a `.pcrd`/`.pltd`/`.prcl`/run password is
+ * unresolved. Run chips (`.zpcr`/`.pcrd`) carry no badge once loaded — their detail lives in the
+ * hover card instead — and a loaded plate file's badge is its well count, shown below the name
+ * instead (see {@link wellsText}). */
+function meta(
+  f: LoadedFile,
+  run: RunResult | undefined,
+  plateFile: PlateFileResult | undefined,
+  protocolFile: ProtocolFileResult | undefined,
+): string {
+  // A report has no well count to report, and its own detail is its Overview.
+  if (f.kind === "alf") return "";
+  // A protocol has no well count either, and no longer needs the word "proto": the chip's icon is
+  // what tells the two override kinds apart at a glance in the Instrument view. A locked `.prcl`
+  // still gets the padlock, for the same reason a locked `.pltd` does — the chip is where you find
+  // out the file needs a password before you click it.
+  if (f.kind === "prcl" || f.kind === "prcltxt") {
+    if (protocolFile?.runDefinition) return "";
+    return protocolFile?.needsPassword ? "🔒" : protocolFile?.error ? "⚠" : "…";
+  }
   if (f.kind === "pltd" || f.kind === "platecsv") {
     if (plateFile?.plate) return "";
     return plateFile?.needsPassword ? "🔒" : plateFile?.error ? "⚠" : "…";
@@ -224,6 +248,7 @@ function FileChip({
   identity,
   run,
   plateFile,
+  protocolFile,
   password,
   isActive,
   isModified,
@@ -237,6 +262,7 @@ function FileChip({
   identity: ExperimentIdentity;
   run: RunResult | undefined;
   plateFile: PlateFileResult | undefined;
+  protocolFile: ProtocolFileResult | undefined;
   password: string;
   isActive: boolean;
   /** See {@link Props.modifiedIds} — the "unsaved" dot under the ✕, and the second click it
@@ -253,7 +279,7 @@ function FileChip({
 }) {
   const mainRef = useRef<HTMLButtonElement>(null);
   const [cardPos, setCardPos] = useState<{ top: number; left: number } | null>(null);
-  const encStatus = fileEncryptionStatus(f, run, plateFile, password);
+  const encStatus = fileEncryptionStatus(f, run, plateFile, protocolFile, password);
 
   return (
     <div
@@ -310,7 +336,7 @@ function FileChip({
             <span className="filechip__date mono">{wellsText(f, plateFile)}</span>
           )}
         </span>
-        <span className="filechip__meta mono">{meta(f, run, plateFile)}</span>
+        <span className="filechip__meta mono">{meta(f, run, plateFile, protocolFile)}</span>
       </button>
       {cardPos &&
         createPortal(
@@ -344,6 +370,7 @@ export function FileBar({
   files,
   runs,
   plateFiles,
+  protocolFiles,
   activeName,
   onSelect,
   onClose,
@@ -375,6 +402,7 @@ export function FileBar({
           }
           run={runs.get(f.name)}
           plateFile={plateFiles.get(f.name)}
+          protocolFile={protocolFiles.get(f.name)}
           password={password}
           isActive={f.name === activeName}
           isModified={modifiedIds.has(f.name)}

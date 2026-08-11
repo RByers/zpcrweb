@@ -268,10 +268,28 @@ written inline in a component.
 
 ## A protocol on its own
 
-A `.prcl.txt` (`prcl.md` §3.1) is the third kind of top-level file, `LoadedFile.kind === "prcltxt"`,
-resolved via `protocolFiles`/`activeProtocolFile` — a plain string, the canonical one-line run
-definition, since unlike a run or a plate it needs no password and cannot fail to decode (the
-store's `fileKind` only admits bytes that already parsed).
+A thermal protocol is the third kind of top-level file, and it arrives in **two encodings**, the
+same way a plate does: Bio-Rad's own `.prcl` (`prcl.md` — a ZipCrypto container, or the bare-text
+variant of §1.1) and this project's `.prcl.txt` (§3.1). `LoadedFile.kind` is `"prcl"` or
+`"prcltxt"` accordingly, and both resolve through `protocolFiles`/`activeProtocolFile` to one
+`ProtocolFileResult` — the canonical one-line run definition plus the decoded `ProtocolDocument`,
+alongside `needsPassword`/`error`/`container`, exactly mirroring `PlateFileResult`. It is a result
+wrapper rather than a bare string precisely because of `.prcl`: a protocol file can now be present
+and unreadable, which is a state a string cannot hold. (A `.prcl.txt` still never reaches it — the
+store's `fileKind` admits only bytes that already parsed.)
+
+The two encodings differ in exactly **two** visible ways, and `App.tsx`'s `isProtocolKind` is where
+everything they share is kept shared:
+
+- **Only a `.prcl.txt` is editable.** This project reads Bio-Rad's container but has no writer for
+  one, so `editable` is false for a `.prcl` and the Edit pencil never appears — the same standing a
+  `.pltd` has against a `.plt.csv` on the Plates tab.
+- **Only a `.prcl` carries a structured step list.** Its `protocol2` XML has real steps, so
+  `ProtocolView` gets them as `steps` and draws the step table it draws for a `.pcrd`; a
+  `.prcl.txt` is directive text and nothing else, and gets the annotated listing.
+
+Everything else — the tabs, where opening one lands, what the Instrument view will start — asks
+the category, not the encoding.
 
 It enables **four** tabs, `["overview","protocol","raw","instrument"]`, because it is several
 things:
@@ -281,12 +299,16 @@ things:
   the download/edit/clone toolbar, and nothing else. All the protocol's own content lives on
   Protocol instead, the same split a run's Overview/Protocol pair uses.
 - **Protocol** (`ProtocolView` — the *same* component a run's Protocol tab uses, see "One Protocol
-  view" below) — the protocol *as a document*, editable here because a `.prcl.txt` is a draft rather
-  than a record. Its name leads the view and the annotated `ProtocolDecoded` listing follows, behind
-  an Edit pencil (`components/protocol/`, see "Editing a protocol" below). Everything shown is
-  `parseRunDefinition`'s (`protocol.md`) — the view reads nothing out of the text itself.
+  view" below) — the protocol *as a document*, editable for a `.prcl.txt` because it is a draft
+  rather than a record. Its name leads the view and the annotated `ProtocolDecoded` listing follows,
+  behind an Edit pencil (`components/protocol/`, see "Editing a protocol" below). Everything shown is
+  `parseRunDefinition`'s (`protocol.md`) — the view reads nothing out of the text itself. For a
+  locked `.prcl` this tab is where the shared `PasswordPrompt` goes, in place of the protocol, the
+  same place and the same component a locked `.pltd` puts it on Plates.
 - **Raw** (`StandaloneRawView`, shared with `.pltd`/`.plt.csv`/Biomeme) — the file's own bytes
-  verbatim, since a `.prcl.txt` is already plain UTF-8 text with nothing to decrypt.
+  verbatim for a `.prcl.txt`, which is already plain UTF-8 with nothing to decrypt; for a `.prcl`,
+  the decrypted `protocol2` XML in the same collapsible tree a `.pltd`'s payload gets, since it is
+  the same container (`zipcrypto.md`).
 A `.prcl.txt` **with a `PLATEREAD` in it** is not something that can be started, only attached to
 an experiment that can (see "The Instrument view"): the run it would produce wants the name, plate
 and identity an experiment file carries. The Instrument tab is still reachable while one is
@@ -294,10 +316,17 @@ selected — it is reachable always, being about no file — but selecting such 
 about what the instrument should run, and the view goes on showing the experiment it was already
 pointed at.
 
+Both encodings are also offered by the **attach/replace protocol** menus (`lib/attachSources.ts`),
+but a `.prcl` is offered as its decoded directive text rendered to `.prcl.txt` rather than as its
+own bytes — `attachProtocol` writes text into the archive, and there is no encrypted-container
+writer to write anything else with. A `.prcl` nobody has unlocked has no text to offer and so is
+not listed, unlike a locked `.pltd`, whose bytes can be attached verbatim without ever being read.
+
 **A protocol with no `PLATEREAD` is the exception, and is started as itself.** The instrument
 builds no run folder for one (`usb.md` §7.10), so there is no `.zpcr` coming and an experiment file
 would be a container for results that never arrive. `App`'s `instrumentExperiment` therefore makes
-such a `.prcl.txt` the Instrument view's subject directly, named after the file, and
+such a protocol file — either encoding, since what gets typed at the instrument is the directive
+text (`protocol.md` §7) — the Instrument view's subject directly, named after the file, and
 `startExperiment` sends it without marking anything begun. What comes back is the run's `.alf`
 report — see "A run report on its own" below.
 

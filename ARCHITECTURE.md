@@ -82,7 +82,9 @@ npm workspaces:
 - `samples/` — committed real `.zpcr` files and a matching `.pcrd` (~350 KB) for the same run,
   used by tests as ground truth (see `pcrd.test.ts`'s cross-validation against
   `20260720_FirstQualification.zpcr`), plus a standalone `.pltd` saved outside any run
-  (`QuickPlate_96 wells_All Channels.pltd`, the DEFLATE64 container variant). Each encrypted
+  (`QuickPlate_96 wells_All Channels.pltd`, the DEFLATE64 container variant) and a standalone
+  `.prcl` (`Qualification_Plate_96.prcl`, the protocol-side equivalent — the encrypted container
+  the UI suite opens to prove the `.prcl` file kind end to end). Each encrypted
   sample's decrypted payload is committed beside it as `<name>.xml`, so the structural tests
   parse plaintext and only the pipeline tests need the password.
 

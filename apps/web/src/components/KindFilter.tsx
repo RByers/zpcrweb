@@ -28,6 +28,7 @@ export const EXTENSION_TEXT: Record<FileKind, string> = {
   biomeme: "bmrun",
   pltd: "pltd",
   platecsv: "plt.csv",
+  prcl: "prcl",
   prcltxt: "prcl.txt",
   alf: "alf",
 };

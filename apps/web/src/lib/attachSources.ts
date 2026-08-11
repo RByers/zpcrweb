@@ -7,7 +7,12 @@ import {
 } from "@zpcrweb/core";
 import { plateCsvFileName, plateDisplayName } from "./plateNames";
 import { protocolFileBase } from "./protocolFileBase";
-import { fileBytes, type LoadedFile, type RunResult } from "../state/useZpcrStore";
+import {
+  fileBytes,
+  type LoadedFile,
+  type ProtocolFileResult,
+  type RunResult,
+} from "../state/useZpcrStore";
 
 /**
  * What the attach/replace menus offer: **every plate (or protocol) this browser is holding, not
@@ -32,7 +37,7 @@ export interface AttachSource {
   /** The item's own name — a plate's identity, a protocol's name, or a standalone file's name. */
   label: string;
   /** The loaded file it came out of, when that isn't the item itself. Absent for a standalone
-   * `.pltd`/`.plt.csv`/`.prcl.txt`, where {@link label} is already the file. */
+   * `.pltd`/`.plt.csv`/`.prcl`/`.prcl.txt`, where {@link label} is already the file. */
   from?: string;
   /**
    * The bytes to attach, built on demand. Lazy because serializing a plate to CSV to render a menu
@@ -99,17 +104,25 @@ export function plateSources(
 }
 
 /**
- * Every protocol that can be attached: the standalone `.prcl.txt` files, plus the protocol inside
+ * Every protocol that can be attached: the standalone protocol files, plus the protocol inside
  * any *other* loaded run — including a run that has already happened, which is the common case
  * worth having (running the same protocol again is what a past run's protocol is *for*).
  *
  * The `File` is named after the protocol rather than after the file it came out of, because that
  * name is what `attachProtocol` stores as the archive's `ProtocolName.txt`.
+ *
+ * `protocols` is the store's decoded standalone protocols, needed for the same reason `password`
+ * is needed above: a Bio-Rad `.prcl` is an encrypted container, and what gets attached is the
+ * directive text inside it rather than the container — `attachProtocol` reads text (there is no
+ * encrypted-container writer, and an archive's protocol entry is text anyway). A `.prcl` that has
+ * not been unlocked has no text to offer and so is not offered, unlike a locked `.pltd`, whose
+ * bytes can be attached verbatim without ever being read.
  */
 export function protocolSources(
   files: LoadedFile[],
   runs: Map<string, RunResult>,
   excludeId: string | null,
+  protocols?: Map<string, ProtocolFileResult>,
 ): AttachSource[] {
   const sources: AttachSource[] = [];
   for (const f of files) {
@@ -119,6 +132,17 @@ export function protocolSources(
         key: f.name,
         label: f.name,
         file: () => new File([fileBytes(f).slice()], f.name),
+      });
+      continue;
+    }
+    if (f.kind === "prcl") {
+      const text = protocols?.get(f.name)?.runDefinition;
+      if (!text) continue;
+      const base = f.name.replace(/\.prcl$/i, "");
+      sources.push({
+        key: f.name,
+        label: f.name,
+        file: () => new File([encode(formatRunDefinitionText(text))], `${base}.prcl.txt`),
       });
       continue;
     }

@@ -10,6 +10,7 @@ import {
   formatRunDefinitionText,
   hasZpcrwebSettings,
   isAlfName,
+  isPrclName,
   markExperimentBegun,
   matchesSupportedExtension,
   SUPPORTED_EXTENSIONS,
@@ -18,7 +19,9 @@ import {
   parsePcrd,
   parsePlateCsv,
   parsePltd,
+  parsePrcl,
   parseRunDefinitionText,
+  protocolDocumentFromRunDefinition,
   parseZpcr,
   parseZpcrArchive,
   parseZpcrwebSettings,
@@ -36,6 +39,8 @@ import {
   type NormalizationMode,
   type PlateDefinition,
   type PltdContainer,
+  type PrclContainer,
+  type ProtocolDocument,
   type Zpcr,
 } from "@zpcrweb/core";
 
@@ -132,6 +137,10 @@ const PERMISSION_LAPSED =
 
 /** The two kinds a plate — standalone or attached to a run — can be uploaded as. */
 type PlateFileKind = "pltd" | "platecsv";
+
+/** The two encodings a standalone thermal protocol arrives in: Bio-Rad's own encrypted `.prcl`,
+ * and this project's plain-text `.prcl.txt`. */
+type ProtocolFileKind = "prcl" | "prcltxt";
 
 /** `"about"` is not a tab in `ViewBar` — it's reached by clicking the logo — but it
  * is a view like any other, so it's linkable (`#view=about`) and works with back/forward.
@@ -577,6 +586,64 @@ function parsePlateBytes(
   }
 }
 
+/** The outcome of parsing a standalone protocol file — a `.prcl.txt` or a `.prcl` — against the
+ * current password. The protocol-side counterpart of {@link PlateFileResult}, and a result wrapper
+ * for the same reason: Bio-Rad's own `.prcl` is an encrypted container, so a protocol file can be
+ * present and unreadable, which a bare string couldn't say. */
+export interface ProtocolFileResult {
+  /** The canonical one-line run definition (`prcl.md` §3), or null when nothing decoded. */
+  runDefinition: string | null;
+  /** The full decoded document, when the encoding carries more than the directive text: a `.prcl`
+   * also has the XML step list the Protocol tab prefers over the listing. Null when locked. */
+  protocol: ProtocolDocument | null;
+  needsPassword: boolean;
+  error: string | null;
+  /** `.prcl` container metadata (including `encrypted`), available even before/without a working
+   * password. Undefined for a `.prcl.txt`, which has no container. */
+  container?: PrclContainer;
+}
+
+function parseProtocolBytes(
+  kind: ProtocolFileKind,
+  bytes: Uint8Array,
+  password: string,
+  name: string,
+): ProtocolFileResult {
+  if (kind === "prcl") {
+    const prcl = parsePrcl(bytes, password ? { password } : undefined);
+    return {
+      runDefinition: prcl.protocol?.runDefinition ?? null,
+      protocol: prcl.protocol ?? null,
+      needsPassword: !!prcl.needsPassword,
+      // A `.prcl` that decrypts but carries no `<protocol2>` is as unreadable as one that didn't
+      // decrypt, and would otherwise show as an empty protocol with no explanation.
+      error:
+        prcl.error ??
+        (!prcl.needsPassword && !prcl.protocol ? "No protocol in this file." : null),
+      container: prcl.container,
+    };
+  }
+  try {
+    const runDefinition = parseRunDefinitionText(new TextDecoder().decode(bytes));
+    return {
+      runDefinition,
+      // The file name is the protocol's identity — a `.prcl.txt` carries no `identityKey`, the
+      // same way a `.plt.csv` carries no plate name of its own.
+      protocol: protocolDocumentFromRunDefinition(name, runDefinition),
+      needsPassword: false,
+      error: null,
+    };
+  } catch (e) {
+    // Admitted only if it parsed once (`fileKind`), so this means the bytes changed underneath us.
+    return {
+      runDefinition: null,
+      protocol: null,
+      needsPassword: false,
+      error: e instanceof Error ? e.message : String(e),
+    };
+  }
+}
+
 /** The display half of the defaults; the analysis half comes from
  * {@link defaultAnalysisSettings}, and from the file when it has a `zpcrweb.json`. */
 function defaultSettings(): FileSettings {
@@ -716,6 +783,7 @@ function fileKind(name: string, bytes?: Uint8Array): FileKind | null {
   if (/\.pltd$/i.test(name)) return "pltd";
   if (/\.csv$/i.test(name)) return "platecsv";
   if (/\.bmrun$/i.test(name)) return "biomeme";
+  if (isPrclName(name)) return "prcl";
   if (isAlfName(name)) return "alf";
   // `.txt` is far too generic an extension to route on, so it is admitted only when the content
   // really is a run definition (`prcl.md` §3.1), unlike every extension above, which names its
@@ -757,7 +825,7 @@ function decodeFile(name: string, bytes: Uint8Array): { kind: FileKind; content:
         ? // The name got this far, so say what was wrong with the *content* rather than repeating
           // the extension list — a `.txt` is only ever rejected for that.
           "not a thermal protocol (.prcl.txt)"
-        : "not a .zpcr, .pcrd, .pltd, .csv, .prcl.txt, .alf or .bmrun file",
+        : "not a .zpcr, .pcrd, .pltd, .csv, .prcl, .prcl.txt, .alf or .bmrun file",
     );
   }
   if (kind === "zpcr") {
@@ -768,6 +836,11 @@ function decodeFile(name: string, bytes: Uint8Array): { kind: FileKind; content:
   if (kind === "pcrd") parsePcrd(bytes);
   else if (kind === "biomeme") parseBiomeme(bytes);
   else if (kind === "pltd") parsePltd(bytes);
+  // The container only, exactly as for a `.pltd`: `parsePrcl` reports a payload that needs a
+  // password (or failed to decrypt) rather than throwing, and that is resolved reactively later
+  // (`protocolFiles`). What can be rejected here is a file that is neither an encrypted ZIP nor
+  // the bare-text variant — `parseSingleEntryZip` throws on it.
+  else if (kind === "prcl") parsePrcl(bytes);
   // Already validated by `fileKind`'s content sniff — parsing again would only repeat it.
   else if (kind === "prcltxt") void 0;
   // A report is validated by parsing it, the same as every binary format above: an `.alf` that
@@ -869,8 +942,8 @@ export interface ZpcrStore {
   activeRun: RunResult | null;
   /** Parse result for every loaded standalone `.pltd`/`.csv` file, keyed by id. */
   plateFiles: Map<string, PlateFileResult>;
-  /** `.prcl.txt` entries, id → canonical one-line run definition (`prcl.md` §3.1). */
-  protocolFiles: Map<string, string>;
+  /** Parse result for every loaded standalone `.prcl`/`.prcl.txt` file, keyed by id. */
+  protocolFiles: Map<string, ProtocolFileResult>;
   /**
    * What each loaded file is called and when it was run, keyed by id — the file bar's chip text
    * and the Overview view's headline (see `lib/experiment.ts`).
@@ -882,9 +955,9 @@ export interface ZpcrStore {
    */
   experiments: Map<string, ExperimentIdentity>;
   activePlateFile: PlateFileResult | null;
-  /** The selected file's run definition, when the selection is a `.prcl.txt` — what the
-   * protocol Overview renders, the counterpart of {@link activePlateFile}. */
-  activeProtocolFile: string | null;
+  /** The selected file's protocol, when the selection is a `.prcl`/`.prcl.txt` — what the
+   * Protocol tab renders, the counterpart of {@link activePlateFile}. */
+  activeProtocolFile: ProtocolFileResult | null;
   /**
    * Ids of the files whose content has been edited since they were opened and not since
    * downloaded — thresholds, the experiment name, an attached plate (see
@@ -984,7 +1057,9 @@ export interface ZpcrStore {
    * doesn't rewrite the record per keystroke. It is *not* deferred until the editor is closed —
    * "Done" is a UI mode, not a save button.
    *
-   * A no-op for a file that isn't `kind === "prcltxt"`.
+   * A no-op for a file that isn't `kind === "prcltxt"` — including a Bio-Rad `.prcl`, which this
+   * project can read but not write: there is no encrypted-container writer, the same reason a
+   * `.pltd` gets a plate grid with no pencil on it.
    */
   setProtocolText: (fileName: string, runDefinition: string) => void;
   /**
@@ -1708,12 +1783,14 @@ export function useZpcrStore(): ZpcrStore {
         }
       }
       if (lastName && options?.activate !== false) setActiveName(lastName);
-      // A `.prcl.txt` is a document first: opening one shows what the protocol *is* — the
-      // annotated directive listing on Overview — rather than dropping you into the Instrument
-      // view's staging panel, which is a thing you go to when you mean to start a run. Done here
+      // A protocol file is a document first: opening one shows the file — its identity card, with
+      // the protocol itself one tab over — rather than dropping you into the Instrument view's
+      // staging panel, which is a thing you go to when you mean to start a run. Done here
       // rather than at the call site so every entry point (the header button, a drop, `#load=`)
-      // behaves alike.
-      if (lastKind === "prcltxt") setView("overview");
+      // behaves alike. Both protocol encodings, since which one a protocol arrived in is not a
+      // reason to open it somewhere else — a locked `.prcl` then wears its padlock on its chip and
+      // finds its prompt on the Protocol tab, exactly as a locked `.pltd` does on Plates.
+      if (lastKind === "prcltxt" || lastKind === "prcl") setView("overview");
       return lastName;
     },
     [install],
@@ -2351,22 +2428,18 @@ export function useZpcrStore(): ZpcrStore {
   const activePlateFile = activeName ? plateFiles.get(activeName) ?? null : null;
 
   /**
-   * Decoded `.prcl.txt` entries. Unlike a run or a plate file this needs no password and cannot
-   * fail here — `fileKind` only admits bytes that already parsed — so the value is the canonical
-   * one-line run definition itself rather than a result wrapper.
+   * Decoded standalone protocol files — `.prcl.txt` and `.prcl` alike, keyed by id, recomputed
+   * when the shared password changes so an encrypted `.prcl` unlocks reactively exactly as a
+   * `.pltd` does.
    */
   const protocolFiles = useMemo(() => {
-    const map = new Map<string, string>();
+    const map = new Map<string, ProtocolFileResult>();
     for (const f of loadedFiles) {
-      if (f.kind !== "prcltxt") continue;
-      try {
-        map.set(f.name, parseRunDefinitionText(new TextDecoder().decode(fileBytes(f))));
-      } catch {
-        /* admitted only if it parsed; a failure here means the bytes changed underneath us */
-      }
+      if (f.kind !== "prcltxt" && f.kind !== "prcl") continue;
+      map.set(f.name, parseProtocolBytes(f.kind, fileBytes(f), password, f.name));
     }
     return map;
-  }, [loadedFiles]);
+  }, [loadedFiles, password]);
 
   const activeProtocolFile = activeName ? protocolFiles.get(activeName) ?? null : null;
 

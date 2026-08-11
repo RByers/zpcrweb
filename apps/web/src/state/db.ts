@@ -89,7 +89,15 @@ function normalize(bytes: Uint8Array): Uint8Array {
     : bytes.slice();
 }
 
-type FileKindName = "zpcr" | "pcrd" | "biomeme" | "pltd" | "platecsv" | "prcltxt" | "alf";
+type FileKindName =
+  | "zpcr"
+  | "pcrd"
+  | "biomeme"
+  | "pltd"
+  | "platecsv"
+  | "prcl"
+  | "prcltxt"
+  | "alf";
 
 /**
  * Where a disk-backed file actually is: which granted folder, and the path to it within that
