@@ -240,16 +240,16 @@ cannot possibly have affected.
       a more honest statement of the dependency. **Complexity: roughly neutral** — the memo body
       shrinks, one cache map appears.
 
-- [ ] **`median` sorts through a JS comparator.** **Measured: a further −24% on top of the
-      pseudo-inverse fix (16.1 → 12.2 ms)**, making it 23.7% of self time in the post-fix profile.
-      `threshold.ts`'s `median` does `values.slice().sort((a, b) => a - b)`; every comparison is a
-      JS callback. `Float64Array.from(values).sort()` is numeric by default — no comparator, no
-      boxing — and is a one-line change with identical results (all tests pass). It is called for
-      every curve, twice per `computeCqTable` pass, via `baselineNoise`. **Complexity: none** —
-      the line gets shorter.
+- [x] **`median` sorts through a JS comparator.** Done: `threshold.ts`'s `median` now sorts a
+      `Float64Array`, whose `sort` is numeric with no comparator. Measured *before* the
+      pseudo-inverse fix (which is still open), so the number here is the standalone win, not the
+      −24% originally quoted on top of it: on `20260720_FirstQualification.zpcr` (288 curves,
+      ~2300 `median` calls per analysis) `computeRunAnalysis` goes **33.0 → 27.7 ms** (min
+      29.6 → 24.5), and the median work alone **7.5 → 1.8 ms**. Results are identical for every
+      real input — the only ordering difference is `NaN`, which no input on this path carries.
 
-  Together the three above take the interactive analysis from **41.3 ms to 12.2 ms, a 3.4×
-  speedup**, with less code than today.
+  With the two above still open, the interactive analysis stands at ~27.7 ms; the original
+  **41.3 ms → 12.2 ms** figure for all three assumed a different order of landing.
 
 - [ ] **Don't parse a dropped file twice.** `useZpcrStore.ts`'s add path parses eagerly to
       validate the container (`parsePcrd(bytes)` / `parseContent(content)`), throws the result
