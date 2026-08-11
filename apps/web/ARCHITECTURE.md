@@ -111,9 +111,10 @@ views" below. `App.tsx` picks `RawFilesView` vs `PcrdRawView` based on the activ
 Unlike a `.zpcr`'s embedded `.pltd` (locked per-file, browsable independently), a whole `.pcrd`
 document is encrypted — nothing (metadata, reads) exists until the password succeeds.
 `useZpcrStore` reflects this: `LoadedFile` holds only raw `bytes` + `kind`; the actual `Zpcr` is
-derived reactively per file (`runs: Map<id, RunResult>`, recomputed whenever the shared
+derived reactively per file (`runs: Map<id, RunResult>`, re-parsed whenever the shared
 password changes via `usePltdPassword` — see `state/pltdPassword.ts`, which despite the name
-now covers `.pltd`/`.prcl`/`.pcrd` alike). The password can also be seeded from the
+now covers `.pltd`/`.prcl`/`.pcrd` alike; the password is part of the parse cache's key, so a
+`.pcrd` unlocks the moment one is entered while nothing else re-parses). The password can also be seeded from the
 `#cfxPassword=` URL hash key on load (same module), so scripted/UI testing never has to
 click through the prompt. `App.tsx` renders the shared `PasswordPrompt`
 (`components/PasswordPrompt.tsx`) in place of the view area whenever the active file's `RunResult`
@@ -678,6 +679,22 @@ under it (`components/FileBar.tsx`).
    `loadOne` (which reads them from IndexedDB or off the disk) — and the derived
    `runs`/`plateFiles`/`protocolFiles` maps are built from the loaded set alone. Nothing else may
    open an archive.
+
+   *Exactly once* is enforced rather than merely intended, by `useZpcrStore`'s `parseRunCached`: a
+   `WeakMap` from a file's `FileContent` object to the `RunResult` parsed from it. That is what
+   makes the two decodes above one decode — the validating parse at the door is the parse the first
+   render reads — and what keeps the `runs` memo from re-decoding *every* open run whenever the
+   loaded array changes identity, which any edit to any file does (`replaceFile`). Measured, with
+   three runs open: committing an edit in a `.prcl.txt`'s protocol editor went from three parses
+   (9–21 ms of main-thread work, none of it about the file being edited) to none, and dropping the
+   third run from four parses to one.
+
+   The key is the whole dependency. Content objects are immutable and every edit builds a new one
+   (`withContent`), so identity means "these exact bytes"; the only other input is the password,
+   and only a `.pcrd` reads it, so entering one does not re-parse a `.zpcr`. Same content and
+   password always give the same result, which is what makes it safe to read during a render. A
+   `WeakMap` also means nothing outlives what it describes: closing, replacing or editing a file
+   drops its parse with the content object it was keyed on.
 2. **Everything shown about a file is derived live from the decoded file.** There is no cached
    per-file summary: every row of the Files table reads its cells out of `runs`/`plateFiles`/
    `experiments` (`FilesTableView`'s `rows`), which are the same values every other view is drawing

@@ -226,17 +226,16 @@ cannot possibly have affected.
       with every curve and Cq bit-identical (dumped and compared before/after) and all 590 core
       tests passing.
 
-- [ ] **Parse each loaded run once, not all of them on every change.** **Estimated: removes
-      ~11 ms per loaded `.zpcr` (~49 ms per `.pcrd`) from every keystroke in the protocol
-      editor.** `useZpcrStore.ts`'s `runs` memo is keyed on `[loadedFiles, password]` and rebuilds
-      the whole map by re-parsing *every* loaded run whenever that array's identity changes. But
-      `setProtocolText` calls `replaceFile` on each keystroke, and `replaceFile` returns a new
-      array — so typing one character in the protocol editor re-parses every unrelated run in the
-      catalog too. With three or four runs open that is tens of ms of pure waste per keypress, on
-      the UI thread. Keying the parse per file (a `Map` from the `LoadedFile.content` identity to
-      its `RunResult`, so only the file whose bytes actually changed re-parses) is both faster and
-      a more honest statement of the dependency. **Complexity: roughly neutral** — the memo body
-      shrinks, one cache map appears.
+- [x] **Parse each loaded run once, not all of them on every change.** **Measured, with three
+      `.zpcr` runs open: committing one edit in a `.prcl.txt`'s protocol editor went from 3 parses
+      (9.1 / 20.6 / 15.2 ms across three edits) to 0.** `useZpcrStore.ts`'s `runs` memo was keyed
+      on `[loadedFiles, password]` and rebuilt the whole map by re-parsing *every* loaded run
+      whenever that array's identity changed — and every edit to every file changes it, since
+      `replaceFile` returns a new array. The parse is now keyed per file: `parseRunCached`, a
+      `WeakMap` from the `FileContent` object to its `RunResult`, so only the file whose bytes
+      actually changed re-parses, and a closed file's parse dies with it. (The editors commit per
+      *change* rather than per keystroke — a step form's Apply, not each character — so the
+      original "per keypress" framing was pessimistic; the waste per commit was real.)
 
 - [x] **`median` sorts through a JS comparator.** Done: `threshold.ts`'s `median` now sorts a
       `Float64Array`, whose `sort` is numeric with no comparator. Measured *before* the
@@ -246,16 +245,19 @@ cannot possibly have affected.
       29.6 → 24.5), and the median work alone **7.5 → 1.8 ms**. Results are identical for every
       real input — the only ordering difference is `NaN`, which no input on this path carries.
 
-  With the two above still open, the interactive analysis stands at ~27.7 ms; the original
-  **41.3 ms → 12.2 ms** figure for all three assumed a different order of landing.
+  All three have now landed. The interactive analysis measures **12–15 ms** over the four
+  amplification samples, against 33–42 ms before any of them — close to the **41.3 ms → 12.2 ms**
+  originally projected, which assumed a different order of landing. The parse win above is not in
+  those numbers: it is main-thread work *around* the analysis, not inside it.
 
-- [ ] **Don't parse a dropped file twice.** `useZpcrStore.ts`'s add path parses eagerly to
-      validate the container (`parsePcrd(bytes)` / `parseContent(content)`), throws the result
-      away, and then `runs` parses it again to actually use it. For a `.pcrd` that is ~49 ms
-      spent twice on the one interaction where the user is already waiting. Keeping the
-      validation parse's result and seeding the cache from it removes the second parse *and* the
-      "validate by parsing and discarding" idiom. **Complexity: neutral-to-negative**, and it
-      composes with the per-file cache above — do them together.
+- [x] **Don't parse a dropped file twice.** **Measured: dropping the first, second and third
+      `.zpcr` cost 2, 3 and 4 parses; now 1 each.** `decodeFile` parsed eagerly to validate the
+      container and threw the result away, and `runs` then parsed it again. It now keeps that
+      parse — `parseRunCached` with the password as it stands (`currentPltdPassword()`), which is
+      the key the next render looks it up with — so the decode that proves a file is openable is
+      the decode the first render reads. `addRunArchive` does the same, which matters most: a run
+      being followed lands there once per cycle. The "validate by parsing and discarding" idiom is
+      gone with it, and the three run formats share one branch instead of three.
 
 ### Perf win, but genuinely more complexity — judgment calls
 
