@@ -245,10 +245,13 @@ cannot possibly have affected.
       29.6 → 24.5), and the median work alone **7.5 → 1.8 ms**. Results are identical for every
       real input — the only ordering difference is `NaN`, which no input on this path carries.
 
-  All three have now landed. The interactive analysis measures **12–15 ms** over the four
-  amplification samples, against 33–42 ms before any of them — close to the **41.3 ms → 12.2 ms**
-  originally projected, which assumed a different order of landing. The parse win above is not in
-  those numbers: it is main-thread work *around* the analysis, not inside it.
+  All three have now landed, and the interactive analysis measures **8.7–10.7 ms** over the four
+  amplification samples (median of 21, after warm-up), against 33–42 ms before any of them — a
+  **3.5–4× speedup**, slightly past the **41.3 ms → 12.2 ms** originally projected. Each item above
+  reports the win as its own author measured it, one fix at a time; the totals compound a little
+  better than those separate figures suggest, which is why this line is measured on the landed
+  code rather than added up from them. The parse win above is not in these numbers: it is
+  main-thread work *around* the analysis, not inside it.
 
 - [x] **Don't parse a dropped file twice.** **Measured: dropping the first, second and third
       `.zpcr` cost 2, 3 and 4 parses; now 1 each.** `decodeFile` parsed eagerly to validate the
