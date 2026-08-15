@@ -695,6 +695,13 @@ under it (`components/FileBar.tsx`).
    password always give the same result, which is what makes it safe to read during a render. A
    `WeakMap` also means nothing outlives what it describes: closing, replacing or editing a file
    drops its parse with the content object it was keyed on.
+
+   `plateFiles` is cached the same way (`parsePlateCached`), because it had the same problem: a
+   `.pltd` is an encrypted container, so each rebuild of that map re-*decrypted* every open one —
+   ~1.7 ms apiece on every edit to any file. Its key carries one input a run's does not: a
+   `.plt.csv` has no plate identity of its own, so the file's name becomes the plate's
+   (`sourceName`), and `renameFile` renames a file without building new content for it. The name is
+   therefore part of the key, or a renamed CSV would keep serving a plate under its old name.
 2. **Everything shown about a file is derived live from the decoded file.** There is no cached
    per-file summary: every row of the Files table reads its cells out of `runs`/`plateFiles`/
    `experiments` (`FilesTableView`'s `rows`), which are the same values every other view is drawing

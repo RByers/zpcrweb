@@ -596,6 +596,44 @@ export interface PlateFileResult {
   container?: PltdContainer;
 }
 
+/**
+ * Every plate file parsed so far, by the identity of the content it was parsed from — the
+ * plate-side twin of {@link parsedRuns}, and a `WeakMap` for the same reason: a closed, replaced or
+ * edited file takes its old parse with it.
+ */
+const parsedPlateFiles = new WeakMap<FileContent, { key: string; result: PlateFileResult }>();
+
+/**
+ * Parse one plate file — but only once per version of its bytes.
+ *
+ * Same problem, same shape, and the same fix as {@link parseRunCached}: the store's `plateFiles`
+ * map is derived from the loaded set, which changes identity on *any* edit to *any* file, so
+ * committing a protocol edit re-ran every open plate file's parse. For a `.pltd` that parse is a
+ * decryption — ~1.7 ms of main-thread work per loaded `.pltd`, on every edit, about a file the
+ * user did not touch.
+ *
+ * **The key is the whole dependency**, and here that is two things beyond the bytes. The password,
+ * as for a run, and only for the encrypted format — a `.plt.csv` is not re-parsed when one is
+ * entered. And the *name*: a `.plt.csv` carries no plate identity of its own, so the file's name
+ * becomes the plate's (`sourceName`), and `renameFile` renames a file without building new content
+ * for it. Leaving the name out would leave a renamed CSV showing its old plate name.
+ */
+function parsePlateCached(
+  content: FileContent,
+  kind: PlateFileKind,
+  password: string,
+  name: string,
+): PlateFileResult {
+  // Only a `.pltd` is encrypted; only a `.plt.csv` reads the name.
+  const key = kind === "pltd" ? `pltd ${password}` : `csv ${name}`;
+  const hit = parsedPlateFiles.get(content);
+  if (hit && hit.key === key) return hit.result;
+  const result = parsePlateBytes(kind, contentBytes(content), password, name);
+  parsedPlateFiles.set(content, { key, result });
+  return result;
+}
+
+/** Called through {@link parsePlateCached}, which is what decides whether a parse is owed at all. */
 function parsePlateBytes(
   kind: PlateFileKind,
   bytes: Uint8Array,
@@ -2474,7 +2512,7 @@ export function useZpcrStore(): ZpcrStore {
     const map = new Map<string, PlateFileResult>();
     for (const f of loadedFiles) {
       if (f.kind === "pltd" || f.kind === "platecsv") {
-        map.set(f.name, parsePlateBytes(f.kind, fileBytes(f), password, f.name));
+        map.set(f.name, parsePlateCached(f.content, f.kind, password, f.name));
       }
     }
     return map;
