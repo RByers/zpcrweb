@@ -31,6 +31,8 @@ run, and one short enough to be quick is a flake).
 | `activeTab` / `drainProblems` | read the selected view; collect console and page errors |
 | `buildCore()` | refresh `@zpcrweb/core`'s `dist/` so a Node-side import isn't testing the page's current source against a months-old build |
 | `cfxPassword()` | read the CFX password from the gitignored `secrets.json` |
+| `cdp.on(method, fn)` | react to a CDP event as it arrives, for anything that has to *answer* one |
+| `stubGithubApi(cdp, {repo, files, token})` | answer `api.github.com` in the page from a made-up repository (see below) |
 | `REPO`, `sleep` | repo root; the raw timer, for negative assertions only |
 
 Two things in here are load-bearing and easy to undo by accident:
@@ -49,6 +51,25 @@ Chrome is launched `--headless=new`, always. This account has no interactive des
 headful Chrome has no display to open a window on: it hangs rather than showing anything, and
 nobody is watching a screen for it. Set `CHROME_PATH` if Chrome isn't at
 `/Applications/Google Chrome.app`.
+
+## The stubbed GitHub API
+
+`stubGithubApi` intercepts `https://api.github.com/*` with the CDP `Fetch` domain and answers the
+two calls the app makes — a directory listing and a file's raw bytes — out of a repository described
+in the test: a map of repository path → local file, with directories derived from those paths.
+Passing a `token` makes the repository private, so a request without that bearer token gets the same
+bare 404 GitHub answers with (it does not admit a private repo exists).
+
+Stubbed rather than pointed at a real repository, because the alternative is a test that depends on
+somebody else's repo still existing, on the network, and on 60 anonymous requests an hour. The bytes
+served are real samples, so the app decodes exactly what it would from GitHub. The returned
+`{ paths }` records every contents path requested, in order, which is how a check asserts the tree is
+listed one directory at a time rather than walked.
+
+Two mechanics worth knowing before changing it. The app's requests carry `Authorization` and
+`X-GitHub-Api-Version`, neither CORS-safelisted, so **every request is preflighted** and the `OPTIONS`
+has to be answered too. And a fulfilled response still faces the browser's CORS check, so the
+`Access-Control-Allow-*` headers are not decoration.
 
 ## Gotcha: hover
 

@@ -55,14 +55,25 @@ own JS/CSS/HTML. This is a hard architectural constraint, not an incidental prop
 current feature set: this is qPCR data from someone's own lab, and the app has no business
 being a place it can leak from.
 
-The one network call the app makes with user involvement is *inbound*: `addUrl` in
-`apps/web/src/state/useZpcrStore.ts` fetches a URL the user supplies (a shared `#load=` link) to
-load a file into the app, the same as a drag-and-drop — nothing about the user's existing data
-is sent to reach it, and `credentials: "omit"` keeps it from riding on the recipient's cookies.
-That's the only `fetch` call in the app today; anything else that starts sending bytes off the
-device — telemetry, crash reporting, a CDN-hosted analytics snippet, a new outbound `fetch` —
-is a violation of this constraint even if the data looks anonymized, and needs a decision at the
-architecture level, not a quiet addition.
+The network calls the app makes with user involvement are all *inbound* — they fetch a file **into**
+the app, and send nothing about the data it is already holding. There are two:
+
+- `addUrl` in `apps/web/src/state/useZpcrStore.ts` fetches a URL the user supplies (a shared
+  `#load=` link), the same as a drag-and-drop.
+- `apps/web/src/lib/github.ts` reads a GitHub repository the user has pointed the app at with a
+  `#github=owner/repo` link: one call to list a directory as it is opened, one to fetch a file when
+  it is ticked open. This is the one place a request carries anything of the user's, and it is worth
+  being precise about what: the repository and path being *asked for*, and — if they supplied one —
+  their GitHub token, as an `Authorization` header. Nothing about the files already open, nothing
+  derived from them, and nothing at all unless a link put a repository here. Nothing is ever written
+  back: there is no commit path, which is why a file opened from a repository is a copy.
+
+Both use `credentials: "omit"`, so a link someone was sent cannot spend their cookies on a fetch.
+Anything that starts sending bytes off the device for the app's *own* purposes — telemetry, crash
+reporting, a CDN-hosted analytics snippet, an outbound upload of user data — is a violation of this
+constraint even if the data looks anonymized, and needs a decision at the architecture level, not a
+quiet addition. The distinction that matters is not "does it touch the network" but "who asked, and
+what is being sent": both calls above exist because the user followed a link to a file they wanted.
 
 Because this property is easy to violate by accident (a debugging `fetch` left in, a dependency
 that bundles its own analytics, an error handler that stringifies parsed file content into a

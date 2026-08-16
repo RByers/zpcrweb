@@ -214,6 +214,32 @@ rather than rewriting the whole archive after every cycle.
 This needs the File System Access API, so it's Chromium-only today; the option simply isn't shown
 where it's unavailable.
 
+### Working from a GitHub repository
+
+The app can also read files straight out of a **GitHub repository**, which is how a link can point
+somebody at a run in a lab's own repo without either of you sending files around. Open the app with
+`#github=<owner>/<repo>` and that repository joins the Files view as another folder: the same tree,
+listed one directory at a time as you open it, and the same checkbox that opens a file. Add
+`@<branch>` (`#github=owner/repo@main`) to read it at a particular branch, tag or commit, and repeat
+the key to bring in more than one repository.
+
+The repository is remembered, so it is there on your next visit — with a ✕ that forgets it again —
+and that is what makes the second half of such a link work: `#github=owner/repo&file=runs/a.zpcr`
+names the file *relative to the repository*, so nobody has to write the repo's name twice. Once it
+opens, the address bar holds the file's full name (`owner/repo/runs/a.zpcr`), which is the link to
+copy for anyone who already has that repository.
+
+Private repositories need a **personal access token** with read access to the repo's contents:
+add `#githubToken=<token>` alongside the `#github=` key. It is kept in this browser and sent to
+nobody but GitHub, and — like the decryption password below — the app takes it out of the address
+bar the moment it reads it, so a URL copied afterwards carries no secret. A token also raises
+GitHub's limit of 60 anonymous requests an hour, which browsing a large repository by hand can
+otherwise reach. Public repositories need no token at all.
+
+**What you open is a copy.** Nothing is committed back — an edit you make lives in this browser, as
+it would for a file you dropped in, and the repository is untouched. That is the one way this
+differs from a folder on your disk.
+
 ### Sample files
 
 Below your own folders, the Files tab always ends with a **samples** folder: the example files that
@@ -251,11 +277,13 @@ view is expected to work fine regardless.
 
 - `#file=<name>&view=<overview|protocol|curves|plates|reference|calibration|raw|instrument|files|about>`
   selects the active file and view. Every view the app can show is nameable here: `files` is the
-  open files and the folders (on disk, plus the bundled samples), `instrument` the USB panel, and `about` the credits page —
+  open files and the folders (on disk, a GitHub repository, plus the bundled samples), `instrument`
+  the USB panel, and `about` the credits page —
   the last of these has no tab, and none of the three needs a file.
   A `#file=` naming a file that isn't open is looked for in the folders: a file's name is its
-  folder and path (`runs/2026-07/a.zpcr`, `samples/run.zpcr`), so if that folder is one this
-  browser has been granted — or the bundled `samples` — the file is opened from it. Nothing is
+  folder and path (`runs/2026-07/a.zpcr`, `samples/run.zpcr`, `owner/repo/runs/a.zpcr`), so if that
+  folder is one this browser has been granted — or the bundled `samples`, or a repository it has
+  been pointed at — the file is opened from it. Nothing is
   searched; only the directory the name points at is read. A folder's access usually has to be
   granted again after a page load, and the app says which folder a link is waiting on and takes you
   to the Files view to grant it; the file opens as soon as it can be read.
@@ -270,15 +298,27 @@ view is expected to work fine regardless.
   Like `#load=` it is consumed on arrival rather than kept in the address bar: it writes the
   selection into the file's own display settings, where clicking a well writes it too, so the
   selection persists and the user's next click replaces it.
+- `#github=<owner>/<repo>` adds a GitHub repository as a folder, so a `#file=` in the same link is
+  resolved against it — `#github=RByers/MolBioLab&file=runs/a.zpcr`. `owner/repo@<ref>` pins a
+  branch, tag or commit, and the key may be repeated for more than one repository. Like `#load=` it
+  is consumed on arrival rather than kept in the address bar, but what it produces persists: the
+  repository stays in the Files view (with a ✕ to forget it), which is what lets the file's own
+  full name — `owner/repo/runs/a.zpcr`, the name the app rewrites the hash to — resolve on the next
+  reload. See "Working from a GitHub repository" above.
+- `#githubToken=<token>` seeds a GitHub personal access token, which is what reaches a **private**
+  repository (and raises the anonymous rate limit). Handled exactly like `#cfxPassword=` below —
+  in the fragment because it is a secret, kept in this browser, and stripped from the address bar
+  the moment it is read.
 - `#cfxPassword=<value>` seeds the decryption password so encrypted files decrypt instead of
   sitting behind the prompt. URL-escape it — the password can contain characters like `#`.
 
 All are hash keys in one query string (`#cfxPassword=…&view=curves`), parsed by
-`state/pltdPassword.ts` and `state/urlHash.ts`. **The password is in the fragment because it's a
+`state/pltdPassword.ts`, `state/githubToken.ts`, `state/githubRepos.ts` and `state/urlHash.ts`. **The password is in the fragment because it's a
 secret**: fragments are never sent to the server, so they can't reach access logs, proxies, or a
 `Referer` header — `?cfxPassword=` would reach all three. The app strips the password from the
 address bar the moment it reads it, so a URL copied afterwards can be shared safely. The legacy
-`?cfxPassword=` query form still works but is deprecated; don't write new links with it.
+`?cfxPassword=` query form still works but is deprecated; don't write new links with it. The same
+reasoning is why `#githubToken=` is a fragment key with no query form at all.
 
 ## Tools
 
@@ -347,7 +387,7 @@ It walks the requested views and writes **one labelled contact-sheet PNG** —
 console errors, uncaught exceptions and failed page loads, which catch breakage a screenshot
 can't show.
 
-**`tools/uitest.mjs` (`npm run test:ui`) — assert it.** 242 browser assertions covering what
+**`tools/uitest.mjs` (`npm run test:ui`) — assert it.** 406 browser assertions covering what
 nothing else can catch: the two URL contracts — hash routing (deep links, back/forward,
 unknown-file and invalid-view fallbacks) and password handling (stripped from both URL forms,
 never leaked into the routing hash, an encrypted `.pcrd` still decrypting) — plus `#load=`, the
@@ -411,7 +451,12 @@ model the app rests on: closing a file takes it out of IndexedDB then and there,
 back holding exactly what was open and nothing else — plus the file
 chip's icon, whose shape is what the file *is* (core's `fileCategory`, so the two plate encodings
 draw alike) while its colour stays the encryption status, two claims a screenshot can only show
-one at a time.
+one at a time — and a **GitHub repository as a folder**, answered by the harness rather than by
+GitHub (`stubGithubApi`) so the check owes nothing to a repository still existing: a
+`#github=owner/repo&file=runs/a.zpcr` link resolving the bare name against the repository it names,
+the token reaching a private one and being stripped from the address bar with it, the tree listing
+one directory at a time and no more, a file opening as a copy with nothing to write back to, and
+the ✕ forgetting the repository across a reload.
 
 A screenshot can't show that the back button works, that a secret reached the address bar, that a
 hover put a curve back, or that eight rows are in the right order — and the core Vitest suite has

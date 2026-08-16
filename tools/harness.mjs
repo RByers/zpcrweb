@@ -252,8 +252,22 @@ export class Cdp {
         else p.resolve(msg.result);
       } else {
         this.events.push(msg);
+        for (const fn of this.listeners?.get(msg.method) ?? []) fn(msg.params);
       }
     });
+  }
+
+  /**
+   * React to a CDP event as it arrives, rather than finding it later in {@link events}.
+   *
+   * Needed by anything that has to *answer* an event within the browser's own wait — request
+   * interception, where the page is blocked until the handler replies (see
+   * {@link stubGithubApi}). Draining `events` after the fact can't do that. Handlers still leave
+   * the event in `events`, so `drainProblems` and the polling checks are unaffected.
+   */
+  on(method, fn) {
+    this.listeners ??= new Map();
+    this.listeners.set(method, [...(this.listeners.get(method) ?? []), fn]);
   }
 
   static async connect(wsUrl) {
@@ -444,6 +458,112 @@ export async function loadFile(cdp, absPath, { timeout = 60000 } = {}) {
     timeout,
     what: "file to load (view tabs)",
   });
+}
+
+/**
+ * Answer `https://api.github.com` in the page with a repository made up here — what the app's
+ * GitHub folder is tested against (`apps/web/src/lib/github.ts`).
+ *
+ * **Stubbed rather than pointed at a real repository**, because the alternative is a test whose
+ * result depends on somebody else's repo still existing, on the network being up, and on 60
+ * anonymous requests an hour being enough. It answers the two calls the app makes — a directory
+ * listing (`application/vnd.github+json`) and a file's bytes (`application/vnd.github.raw`) —
+ * which is the whole of the API surface being tested, and it serves *real* sample files, so the
+ * app decodes and renders what it fetches exactly as it would from GitHub.
+ *
+ * `files` maps a path in the repository to a local file whose bytes it serves; directories are
+ * derived from those paths, so a fixture is written by listing the files it has and nothing else.
+ * A `token` makes the repository **private**: a request without that bearer token gets the 404
+ * GitHub really answers with (it does not admit a private repo exists), which is what the app's
+ * "if the repository is private, it needs a token" message is asserted against.
+ *
+ * Returns `{ paths }`, every contents path requested in order — what lets a check assert the tree
+ * is listed one directory at a time rather than walked.
+ */
+export async function stubGithubApi(cdp, { repo, files, token = null }) {
+  const paths = [];
+  const bytesFor = (p) => readFileSync(files[p]);
+  const listing = (dir) => {
+    const prefix = dir ? `${dir}/` : "";
+    const rows = new Map();
+    for (const p of Object.keys(files)) {
+      if (!p.startsWith(prefix)) continue;
+      const rest = p.slice(prefix.length);
+      const slash = rest.indexOf("/");
+      if (slash === -1) rows.set(rest, { name: rest, path: p, type: "file", size: bytesFor(p).length });
+      else {
+        const name = rest.slice(0, slash);
+        rows.set(name, { name, path: `${prefix}${name}`, type: "dir" });
+      }
+    }
+    return [...rows.values()];
+  };
+  const cors = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Headers": "authorization,accept,x-github-api-version",
+    "Access-Control-Allow-Methods": "GET,OPTIONS",
+  };
+  const fulfill = (requestId, code, headers, body) =>
+    cdp.send("Fetch.fulfillRequest", {
+      requestId,
+      responseCode: code,
+      responseHeaders: Object.entries({ ...cors, ...headers }).map(([name, value]) => ({
+        name,
+        value: String(value),
+      })),
+      ...(body === undefined ? {} : { body: Buffer.from(body).toString("base64") }),
+    });
+
+  cdp.on("Fetch.requestPaused", (params) => {
+    void (async () => {
+      const { requestId, request } = params;
+      // The app's requests carry `Authorization` and `X-GitHub-Api-Version`, neither of which is a
+      // CORS-safelisted header, so the browser preflights every one of them — as it does against
+      // the real API, which allows them.
+      if (request.method === "OPTIONS") {
+        await fulfill(requestId, 204, { "Access-Control-Max-Age": "600" }, "");
+        return;
+      }
+      const url = new URL(request.url);
+      const match = url.pathname.match(/^\/repos\/([^/]+)\/([^/]+)\/contents\/(.*)$/);
+      const headers = Object.fromEntries(
+        Object.entries(request.headers).map(([k, v]) => [k.toLowerCase(), v]),
+      );
+      const json = (code, body) =>
+        fulfill(requestId, code, { "Content-Type": "application/json" }, JSON.stringify(body));
+      if (!match || `${match[1]}/${match[2]}` !== repo) {
+        await json(404, { message: "Not Found" });
+        return;
+      }
+      const path = decodeURIComponent(match[3]).replace(/\/$/, "");
+      paths.push(path);
+      if (token && headers.authorization !== `Bearer ${token}`) {
+        // Exactly what GitHub answers for a private repository seen without credentials.
+        await json(404, { message: "Not Found" });
+        return;
+      }
+      if (files[path]) {
+        if ((headers.accept ?? "").includes("raw")) {
+          await fulfill(
+            requestId,
+            200,
+            { "Content-Type": "application/octet-stream" },
+            bytesFor(path),
+          );
+        } else {
+          await json(200, { name: path.split("/").at(-1), path, type: "file" });
+        }
+        return;
+      }
+      const rows = listing(path);
+      if (rows.length === 0 && path !== "") await json(404, { message: "Not Found" });
+      else await json(200, rows);
+    })().catch(() => {
+      // The tab went away mid-request (a reload, or the check finished). Nothing to answer.
+    });
+  });
+  await cdp.send("Fetch.enable", { patterns: [{ urlPattern: "https://api.github.com/*" }] });
+  return { paths };
 }
 
 /** Text of the currently selected view tab, or "none". */

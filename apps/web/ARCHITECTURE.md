@@ -1332,11 +1332,58 @@ rebuilding is the whole procedure; the filter for *which* files is core's `match
 exactly as it would be in a folder on disk. This replaced a `public/examples/` directory holding one
 symlink per offered file, which could only ever list what someone had remembered to link.
 
+### A GitHub repository as a folder
+
+The third kind of group in the tree column is not on the disk either: a **GitHub repository** the
+app has been pointed at, listed over the API one directory at a time. `lib/github.ts` is the client
+(two calls, both to `/repos/{owner}/{repo}/contents/{path}` — the JSON `Accept` lists a directory,
+the `raw` one returns a file's bytes), `state/githubRepos.ts` owns which repositories the app knows
+about and the listing cache over them, and `state/githubToken.ts` holds the optional token.
+`useDiskTree` routes a node's listing to one or the other by label (`isGithubFolder`), and
+`FolderSection` draws the same tree, the same file column and the same checkbox.
+
+**A repository arrives through the URL and stays.** `#github=owner/repo` — optionally
+`owner/repo@branch`, and repeatable — is consumed at module evaluation like `#load=`: read,
+stripped from the address bar, and remembered in `localStorage`. It is a folder this browser has
+from then on, with a ✕ that forgets it. That persistence is what makes the *other* half of such a
+link work: `#github=owner/repo&file=runs/a.zpcr` names a file **relative to the repository**, and
+once it opens the app rewrites the hash to the file's own full name, which still resolves on the
+next reload because the repository is still there. `useZpcrStore`'s `openFromGithub` tries a
+`#file=` both ways — prefixed (`owner/repo/runs/a.zpcr`, the name the app itself produces) and bare
+— confirming the file is in the one directory it would be in before opening it, so a bare name that
+belongs to some other folder moves on quietly.
+
+It differs from a folder on disk in three ways, each a consequence of it being somebody's
+repository rather than the user's disk:
+
+- **The label is `owner/repo`** (with `@ref` when the link pinned one), not a bare directory name.
+  It is the first component of every file name beneath it — `owner/repo/runs/a.zpcr` — which says
+  where the file came from and cannot collide with a disk folder's label, since that is one
+  directory name and never contains a `/`.
+- **There is no permission to grant.** A public repository needs none; a private one needs the
+  token, and its absence is a *listing that failed* with GitHub's reason said in a sentence
+  (`github.ts`'s `describeFailure` rewrites the two failures this app provokes — an exhausted
+  anonymous rate limit, and the 404 GitHub answers for a private repo — into what would fix them),
+  not a folder waiting to be unlocked.
+- **Opening a file gives a copy**, exactly as a bundled sample does and for the same reason: there
+  is no commit from here, so nothing is ever written back. `addGithubFiles` installs it with no
+  `DiskSource`, which is the whole definition of "not disk-backed".
+
+The **token** (`#githubToken=…`) is handled exactly as the CFX decryption password is
+(`state/pltdPassword.ts`): in the fragment because it is a secret, read and stripped at module
+evaluation, kept in `localStorage`, and sent to nobody but `api.github.com` — as a `Bearer` header
+rather than in the URL, which is where GitHub wants it and where it stays out of logs. It is also
+what raises GitHub's anonymous rate limit of 60 requests an hour, which is few enough that browsing
+a repository by hand can reach it.
+
 ### Nothing is walked up front
 
 A folder handed to the app may be an entire lab archive, so there is no recursive scan anywhere.
 `listDirectory` reads **one** directory level and caches it, and the tree calls it as nodes are
-opened. It also de-duplicates listings in flight, because selecting a directory and expanding it are
+opened. A repository makes the same promise for the same reason (`listGithubDirectory`): the Git
+trees API would fetch a whole repository in one request, and is deliberately not used — a repository
+is somebody's entire history, and the anonymous request budget goes a lot further when each request
+is a directory somebody actually looked at. It also de-duplicates listings in flight, because selecting a directory and expanding it are
 now one click and both want the same read. What opens by itself is derived from the open files, not from the disk: the ancestors of the
 disk-backed ones, so the work in progress is in front of the user and every other branch stays shut
 and unread. A directory row therefore shows no child count — counting means

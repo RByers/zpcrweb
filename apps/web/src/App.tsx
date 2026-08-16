@@ -27,6 +27,7 @@ import { downloadBytes } from "./lib/download";
 import { useHeaderFit } from "./state/useHeaderFit";
 import { DropZone } from "./components/DropZone";
 import { useDiskTree } from "./state/useDiskTree";
+import { listGithubFolders } from "./state/githubRepos";
 import { FileBar } from "./components/FileBar";
 import { FilesTableView } from "./components/FilesTableView";
 import { ViewBar } from "./components/ViewBar";
@@ -247,7 +248,18 @@ export function App() {
    * granting is what reads those files in (`retryUnread`). See `useDiskTree`.
    */
   const openDiskSources = useMemo(
-    () => store.files.flatMap((f) => (f.source ? [f.source] : [])),
+    () => [
+      ...store.files.flatMap((f) => (f.source ? [f.source] : [])),
+      // A file opened out of a repository has no `source` — it is a copy, since nothing is written
+      // back (`state/githubRepos.ts`) — but its *name* is still the folder it came from and the
+      // path under it, which is all the tree needs to open the branch it lives on. Without this,
+      // following a link into a repository lands on the repository's root with the file it just
+      // opened two directories away.
+      ...store.files.flatMap((f) => {
+        const label = listGithubFolders().find((g) => f.name.startsWith(`${g.label}/`))?.label;
+        return label ? [{ folder: label, path: f.name.slice(label.length + 1).split("/") }] : [];
+      }),
+    ],
     [store.files],
   );
   const diskTree = useDiskTree(openDiskSources, store.view === "files", store.retryUnread);
@@ -816,7 +828,7 @@ export function App() {
   // app's own bundled `samples` folder pointedly does not count — it is in that list on every
   // browser, and treating it as "something in this browser" would mean the welcome screen never
   // appeared again. What it offers is on the welcome screen already, as the example link.
-  const userFolders = diskTree.folders.filter((f) => !f.builtin).length;
+  const userFolders = diskTree.folders.filter((f) => f.kind !== "builtin").length;
   if (store.files.length === 0 && userFolders === 0 && store.view !== "instrument") {
     // Nothing in the browser at all, so About *is* the welcome screen — it carries the drop
     // target. There's no previous view to go back to, hence no `onBack`, and no view bar: with an
@@ -967,6 +979,13 @@ export function App() {
               for (const name of names) last = await store.addUrl(sampleUrl(name));
               if (goToFile && last) setPendingLanding(last);
             }}
+            // A repository's file is fetched from GitHub and lands as a copy too — same gesture,
+            // same ending (`state/githubRepos.ts`).
+            onAddGithubFiles={(sources, goToFile) =>
+              store.addGithubFiles(sources).then((name) => {
+                if (goToFile && name) setPendingLanding(name);
+              })
+            }
           />
         ) : view === "about" ? (
           <AboutView

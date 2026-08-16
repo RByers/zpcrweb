@@ -19,13 +19,14 @@
  * pressed. Files that are *loaded* do refresh by themselves — those are watched individually
  * (`diskFolders.ts`), which is a per-file cost the app can afford and a per-tree one it cannot.
  *
- * **The last folder is not on the disk.** `samples` is the app's own, bundled at build time
- * (`lib/samples.ts`), and it is here rather than in a section of its own so that one component
- * draws every folder and the two cannot drift apart. It differs in exactly three ways, each of
- * them a consequence of being built in: it is always last, it cannot be removed, and its listing
- * comes from the manifest instead of a directory read — which also means it is present on browsers
- * with no File System Access API at all, where {@link DiskTree.supported} is false and there is
- * nothing else in the pane.
+ * **Two of the folders are not on the disk.** A GitHub repository the app has been pointed at
+ * (`state/githubRepos.ts`) lists exactly like a folder — one directory level at a time, over the
+ * network instead of over a directory handle — and `samples` is the app's own, bundled at build
+ * time (`lib/samples.ts`). Both are here rather than in sections of their own so that one component
+ * draws every folder and the three cannot drift apart. What differs is per folder and small: a
+ * repository has no permission to grant, and the bundled folder is always last, cannot be removed,
+ * has nothing to re-read and is flat. Neither needs the File System Access API, so both are present
+ * — and are the whole pane — on a browser where {@link DiskTree.supported} is false.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -42,15 +43,27 @@ import {
   type DiskEntry,
 } from "./diskFolders";
 import type { DiskSource } from "./db";
+import {
+  invalidateGithubListings,
+  isGithubFolder,
+  listGithubDirectory,
+  listGithubFolders,
+  removeGithubRepo,
+} from "./githubRepos";
 import { SAMPLE_FILES_LIST, SAMPLES_LABEL } from "../lib/samples";
 
-/** One folder as the Files view needs it — a granted one on disk, or the bundled `samples`. */
+/** Where a folder's files come from: the user's disk, a GitHub repository the app has been pointed
+ * at (`state/githubRepos.ts`), or the app's own bundle (`lib/samples.ts`). */
+export type FolderKind = "disk" | "github" | "builtin";
+
+/** One folder as the Files view needs it — a granted one on disk, a repository, or the bundled
+ * `samples`. */
 export interface FolderView {
   label: string;
+  /** Always `granted` for a folder that isn't on disk: there is no handle to ask about. A
+   * repository that can't be read fails its *listing* instead, with GitHub's reason. */
   permission: PermissionState;
-  /** The app's own bundled folder rather than one on the user's disk: no permission to ask for,
-   * nothing to re-read, and no way to remove it. Exactly one folder has this, and it is last. */
-  builtin: boolean;
+  kind: FolderKind;
 }
 
 /** The bundled samples as a directory listing, so the same pane draws them as a disk folder's.
@@ -74,7 +87,7 @@ const sampleEntries = (): DiskEntry[] =>
 const samplesFolder: FolderView = {
   label: SAMPLES_LABEL,
   permission: "granted",
-  builtin: true,
+  kind: "builtin",
 };
 
 /** What is known about one directory node, keyed by {@link nodeKey}. */
@@ -182,7 +195,11 @@ export function useDiskTree(
       return next;
     });
     try {
-      const entries = await listDirectory(label, path);
+      // A repository is listed over the network and a disk folder over a directory handle; both
+      // answer the same one-directory-level question, so the node knows nothing about which it is.
+      const entries = isGithubFolder(label)
+        ? await listGithubDirectory(label, path)
+        : await listDirectory(label, path);
       setNodes((prev) => new Map(prev).set(key, { entries, pending: false, error: null }));
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
@@ -198,18 +215,25 @@ export function useDiskTree(
   );
 
   const readFolders = useCallback(async () => {
-    // `samples` is last always — after however many folders the user has granted, so the app's
-    // own files never sit above theirs — and is the whole list on a browser that can't do disk
-    // folders at all.
+    // Granted folders first, then the repositories the app has been pointed at, then `samples`
+    // last always — so the app's own files never sit above the user's — which is also the whole
+    // list on a browser that can't do disk folders at all.
     const stored = supported ? await listFolders() : [];
     setFolders([
       ...(await Promise.all(
         stored.map(async (f) => ({
           label: f.label,
           permission: await folderPermission(f.label),
-          builtin: false,
+          kind: "disk" as const,
         })),
       )),
+      ...listGithubFolders().map((f) => ({
+        label: f.label,
+        // Nothing to ask a browser for: a public repository needs no permission and a private one
+        // needs a token, which is a failed listing rather than a locked folder.
+        permission: "granted" as PermissionState,
+        kind: "github" as const,
+      })),
       samplesFolder,
     ]);
   }, [supported]);
@@ -221,9 +245,14 @@ export function useDiskTree(
   // Opening the Files view is the only routine chance the app gets to notice work done on disk
   // while it wasn't looking, since it deliberately doesn't watch directories.
   useEffect(() => {
-    if (!active || !supported) return;
-    invalidateListings();
-    retryFailedWatches();
+    if (!active) return;
+    // Not gated on `supported`: a repository is listed over the network, so the Files view is a
+    // "look again" moment even on a browser that can't be granted a folder on disk at all.
+    if (supported) {
+      invalidateListings();
+      retryFailedWatches();
+    }
+    invalidateGithubListings();
     void readFolders();
     // The expanded nodes *and* the selected ones: a directory picked for the file pane isn't
     // necessarily expanded in the tree, and it is the one whose contents are actually on screen.
@@ -326,6 +355,7 @@ export function useDiskTree(
   const refresh = useCallback(
     (label: string) => {
       invalidateListings(label);
+      invalidateGithubListings(label);
       retryFailedWatches();
       void readFolders();
       for (const key of liveNodes()) {
@@ -389,7 +419,10 @@ export function useDiskTree(
       // The bundled folder is part of the app; the UI offers no ✕ for it, and this is the
       // backstop that keeps that true if some other caller ever asks.
       if (label === SAMPLES_LABEL) return;
-      await removeFolder(label);
+      // Forgetting a repository is local and immediate — no handle to release, and the files
+      // already opened out of it are copies this browser owns.
+      if (isGithubFolder(label)) removeGithubRepo(label);
+      else await removeFolder(label);
       for (const k of [...expanded.current]) {
         if (k === `folder:${label}` || k.startsWith(`file:["${label}"`)) expanded.current.delete(k);
       }

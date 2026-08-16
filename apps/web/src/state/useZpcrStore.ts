@@ -72,6 +72,13 @@ import {
   type DiskFileEvent,
 } from "./diskFolders";
 import {
+  githubFileExists,
+  githubFileName,
+  listGithubFolders,
+  readGithubFile,
+  type GithubSource,
+} from "./githubRepos";
+import {
   ANALYSIS_KEYS,
   DEFAULT_THRESHOLD_MULTIPLIER,
   analysisFromZpcrweb,
@@ -1281,6 +1288,16 @@ export interface ZpcrStore {
    */
   addDiskFiles: (sources: DiskSource[], options?: AddFilesOptions) => Promise<string | null>;
   /**
+   * Open files out of a GitHub repository the app has been pointed at (`state/githubRepos.ts`).
+   *
+   * Shaped like {@link addDiskFiles} — a folder label and a path under it — but what lands is a
+   * **copy**, exactly as a bundled sample's is: there is no writing back to a repository from here,
+   * so the file carries no `source` and is never marked as being in sync with anything. Its name is
+   * the repository's label and the path beneath it, `owner/repo/runs/a.zpcr`, which is what makes a
+   * link to it resolvable on the next machine that follows one.
+   */
+  addGithubFiles: (sources: GithubSource[], options?: AddFilesOptions) => Promise<string | null>;
+  /**
    * Re-read a loaded disk-backed file, because it changed on disk.
    *
    * Called by the file's own watch, not by the UI. The file keeps its display settings and analysis
@@ -2098,6 +2115,44 @@ export function useZpcrStore(): ZpcrStore {
     [install],
   );
 
+  /** See {@link ZpcrStore.addGithubFiles}. */
+  const addGithubFiles = useCallback(
+    async (sources: GithubSource[], options?: AddFilesOptions) => {
+      let lastName: string | null = null;
+      for (const source of sources) {
+        const name = githubFileName(source);
+        try {
+          const bytes = await readGithubFile(source);
+          const { kind, content } = decodeFile(name, bytes);
+          // No `source`: unlike a folder on disk, a repository is not somewhere this app can write
+          // back to, so what is installed is an ordinary copy — the same thing opening a bundled
+          // sample gives, and the same thing a dropped file is. `replacing: true` because the
+          // repository is the authority on what that name holds right now.
+          await install(
+            // `lastModified` is when this copy arrived, not when the file was committed: the
+            // contents listing carries no timestamp, and asking for one would be a commits query
+            // per file. The same answer a `#load=` fetch gives, for the same reason.
+            {
+              name,
+              size: contentSize(content),
+              addedAt: Date.now(),
+              kind,
+              content,
+              lastModified: Date.now(),
+            },
+            { modified: options?.modified === true, replacing: true },
+          );
+          lastName = name;
+        } catch (e) {
+          setError(`${name}: ${e instanceof Error ? e.message : String(e)}`);
+        }
+      }
+      if (lastName && options?.activate !== false) setActiveName(lastName);
+      return lastName;
+    },
+    [install],
+  );
+
   /** See {@link ZpcrStore.refreshDiskFile}. */
   const refreshDiskFile = useCallback(
     async (id: string) => {
@@ -2192,6 +2247,48 @@ export function useZpcrStore(): ZpcrStore {
   }, [loading, pendingLoad, addUrl]);
 
   /**
+   * The GitHub half of {@link openNamedFile}: find the file a `#file=` names in one of the
+   * repositories the app has been pointed at, and open a copy of it. Answers whether it managed to.
+   *
+   * A name is tried **two ways**, because a link can be written either way:
+   *
+   * - *prefixed* — `owner/repo/runs/a.zpcr`, the name the app itself produces once the file is
+   *   open, and the one a copied URL carries;
+   * - *bare* — `runs/a.zpcr`, resolved against the repository the same link named with `#github=`.
+   *   That is the point of the pair: `#github=owner/repo&file=runs/a.zpcr` says "this file, in this
+   *   repository" without the sender having to write the repository's name twice.
+   *
+   * Prefixed candidates are tried first, and repositories newest-first within each, so the
+   * repository a link has just introduced answers before one this browser happened to be holding
+   * already. The file is confirmed present before it is opened — one directory listing, of the one
+   * directory it would be in — so a bare name that belongs to some *other* folder moves on quietly
+   * rather than reporting a GitHub error the user never asked about.
+   */
+  const openFromGithub = useCallback(
+    async (name: string): Promise<boolean> => {
+      const repos = [...listGithubFolders()].sort((a, b) => b.addedAt - a.addedAt);
+      const candidates: GithubSource[] = [
+        ...repos
+          .filter((f) => name.startsWith(`${f.label}/`))
+          .map((f) => ({ folder: f.label, path: name.slice(f.label.length + 1).split("/") })),
+        ...repos.map((f) => ({ folder: f.label, path: name.split("/") })),
+      ];
+      for (const source of candidates) {
+        try {
+          if (!(await githubFileExists(source))) continue;
+        } catch {
+          // A repository that can't be read right now — no token for a private one, a rate limit,
+          // no network — is not this link's answer. Try the next.
+          continue;
+        }
+        if (await addGithubFiles([source])) return true;
+      }
+      return false;
+    },
+    [addGithubFiles],
+  );
+
+  /**
    * Open the file a `#file=` names but the catalog doesn't hold, by finding it in a folder the app
    * can reach. Answers whether it managed to.
    *
@@ -2255,6 +2352,15 @@ export function useZpcrStore(): ZpcrStore {
           return true;
         }
       }
+      // No folder on this disk answered. A repository the app has been pointed at is the fallback
+      // rather than the first guess: the user's own folders cost nothing to look through, and a
+      // bare name that a granted folder can answer should be answered from the disk — where the
+      // file can be written back to — rather than from a repository that happens to hold the same
+      // path. This is also where a *prefixed* repository name lands, no disk label having matched.
+      if (await openFromGithub(name)) {
+        noteAwaitingGrant(null);
+        return true;
+      }
       // Nothing opened. If a folder that could have answered was locked, the link isn't dead — it
       // is waiting on a click the app cannot make for itself, since asking for a permission needs
       // a user gesture and arriving on a link is not one. `retryUnread` finishes it when the grant
@@ -2262,7 +2368,7 @@ export function useZpcrStore(): ZpcrStore {
       noteAwaitingGrant(blocked ?? null);
       return false;
     },
-    [addDiskFiles, addUrl, noteAwaitingGrant],
+    [addDiskFiles, addUrl, noteAwaitingGrant, openFromGithub],
   );
 
   // Look for a `#file=` the catalog didn't have, once hydration has finished — until then there is
@@ -2949,6 +3055,7 @@ export function useZpcrStore(): ZpcrStore {
     addFiles,
     addRunArchive,
     addDiskFiles,
+    addGithubFiles,
     refreshDiskFile,
     canRename,
     addUrl,

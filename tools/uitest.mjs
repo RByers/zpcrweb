@@ -29,6 +29,7 @@ import {
   softTimeoutsSeen,
   startChrome,
   startDevServer,
+  stubGithubApi,
   waitFor,
   waitStable,
   waitValue,
@@ -6927,6 +6928,208 @@ async function folderNameCollisionChecks(chrome, origin) {
   cdp.close();
 }
 
+/**
+ * A GitHub repository as a folder: the `#github=` link, the token, the lazy listing, and what
+ * opening a file out of one gives you.
+ *
+ * Answered by {@link stubGithubApi} rather than by GitHub, so the check doesn't depend on somebody
+ * else's repository still existing — but the bytes it serves are a real sample, so the app decodes
+ * and renders exactly what it would from the real API. The repository here is **private** (the stub
+ * demands a bearer token and 404s without one, as GitHub does), which is what makes the token half
+ * of the contract assertable at all.
+ */
+async function githubChecks(chrome, origin) {
+  console.log("\na GitHub repository as a folder");
+  const REPO_SPEC = "RByers/MolBioLab";
+  const TOKEN = "ghp_uitest_token";
+  const RUN_PATH = `${REPO_SPEC}/runs/20260720_FirstQualification.zpcr`;
+  const PLATE_PATH = `${REPO_SPEC}/plates/QuickPlate.pltd`;
+  const GH = ".folders__folder--github";
+  const FILES = ".folders__pane--files";
+  const cdp = await openPage(chrome.base, origin);
+  await emptyReload(cdp, origin);
+  // Two directories plus a file the app has no decoder for, so the tree and the name filter each
+  // have something to be wrong about.
+  const stub = await stubGithubApi(cdp, {
+    repo: REPO_SPEC,
+    token: TOKEN,
+    files: {
+      "README.md": join(REPO, "README.md"),
+      "runs/20260720_FirstQualification.zpcr": ZPCR,
+      "plates/QuickPlate.pltd": PLTD,
+    },
+  });
+
+  // ── The link ──────────────────────────────────────────────────────────────────────────────
+  // Everything a shared link carries, at once: which repository, the token to read it with, and a
+  // file named *relative to that repository* — which is the point of the pair, since the sender
+  // should not have to write the repository's name twice.
+  await navigateBlank(cdp);
+  await cdp.send("Page.navigate", {
+    url: `${origin}#github=${encodeURIComponent(REPO_SPEC)}&githubToken=${TOKEN}&file=runs/20260720_FirstQualification.zpcr&view=curves`,
+  });
+  await waitFor(() => cdp.eval("document.readyState==='complete'"), { what: "the link to load" });
+  await waitFor(() => chipPresent(cdp, "FirstQualification"), {
+    timeout: 30000,
+    what: "the run fetched from the repository",
+  });
+  const names = await catalogNames(cdp);
+  check(
+    "A #github= link resolves a bare #file= against that repository and opens it",
+    names.includes(RUN_PATH),
+    JSON.stringify(names),
+  );
+  check(
+    "…on the view the link asked for, the fetched bytes having decoded like any other file's",
+    (await tabBecomes(cdp, "Curves")) === "Curves",
+    await activeTab(cdp),
+  );
+  const hash = await waitStable(() => cdp.eval("location.hash"), {
+    what: "the hash to settle after the link",
+  });
+  check(
+    "…and the hash left behind names the file in full, so the same link works on the next reload",
+    hash.includes(encodeURIComponent(RUN_PATH)),
+    hash,
+  );
+  check(
+    "…with neither the repository nor the token still in the address bar",
+    !/github=/.test(hash) && !(await cdp.eval("location.href")).includes(TOKEN),
+    hash,
+  );
+
+  // ── The folder ────────────────────────────────────────────────────────────────────────────
+  await clickTab(cdp, "Files");
+  await waitFor(() => cdp.eval(`!!document.querySelector("${GH}")`), {
+    what: "the repository's folder section",
+  });
+  const shape = await cdp
+    .eval(
+      `(() => { const g = document.querySelector("${GH}");
+         return JSON.stringify({
+           label: g.querySelector(".folders__title")?.textContent.trim(),
+           buttons: [...g.querySelectorAll(".folders__actions .btn")].map((b) => b.textContent.trim()),
+           grant: [...g.querySelectorAll(".folders__actions button")].some((b) => /Grant/.test(b.textContent)),
+           dirs: [...g.querySelectorAll(".folders__dir")].map((b) => b.textContent.trim()),
+         }); })()`,
+    )
+    .then(JSON.parse);
+  check(
+    "The repository is a folder in the Files view, named for the repository",
+    shape.label === REPO_SPEC,
+    JSON.stringify(shape.label),
+  );
+  check(
+    "…with a ↻ and a ✕ but nothing to grant, a repository having no permission to ask about",
+    shape.buttons.includes("↻") && shape.buttons.includes("✕") && !shape.grant,
+    JSON.stringify({ buttons: shape.buttons, grant: shape.grant }),
+  );
+  check(
+    "…and its top-level directories under its heading",
+    shape.dirs.includes("runs") && shape.dirs.includes("plates"),
+    JSON.stringify(shape.dirs),
+  );
+  // The app opened the branch holding the file it fetched, and nothing else: `plates/` has not been
+  // asked for at all, which is the one-directory-at-a-time promise (`state/githubRepos.ts`).
+  check(
+    "…listed one directory at a time — the branch holding the open file, and no other",
+    stub.paths.includes("runs") && !stub.paths.includes("plates"),
+    JSON.stringify(stub.paths),
+  );
+  const rootFiles = await cdp
+    .eval(
+      `JSON.stringify([...document.querySelectorAll("${FILES} .folders__name")].map((b) => b.textContent.trim()))`,
+    )
+    .then(JSON.parse);
+  check(
+    "…and leaves out what the app has no decoder for, exactly as a folder on disk does",
+    !rootFiles.includes("README.md"),
+    JSON.stringify(rootFiles),
+  );
+
+  // ── Opening a file out of it ──────────────────────────────────────────────────────────────
+  await cdp.eval(
+    `[...document.querySelectorAll("${GH} .folders__dir")]
+       .find((b) => b.textContent.trim() === "plates")?.click()`,
+  );
+  const row = (name) =>
+    `[...document.querySelectorAll("${FILES} .folders__name")].find((b) => b.textContent.trim() === ${JSON.stringify(name)})`;
+  await waitFor(() => cdp.eval(`!!(${row("QuickPlate.pltd")})`), {
+    what: "the plates directory listing",
+  });
+  await cdp.eval(`(${row("QuickPlate.pltd")})?.click()`);
+  await waitFor(async () => (await catalogNames(cdp)).includes(PLATE_PATH), {
+    timeout: 20000,
+    what: "the plate fetched from the repository",
+  });
+  const sources = await cdp
+    .eval(
+      `new Promise((res) => { const q = indexedDB.open("zpcrweb");
+         q.onsuccess = () => { const db = q.result;
+           const g = db.transaction("catalog", "readonly").objectStore("catalog").getAll();
+           g.onsuccess = () => { res(JSON.stringify(g.result.map((r) => ({ name: r.name, source: r.source ?? null })))); db.close(); }; };
+         q.onerror = () => res("[]"); })`,
+      { awaitPromise: true },
+    )
+    .then(JSON.parse);
+  check(
+    "Ticking a file in a repository opens a copy — no source to write back to, unlike a disk file",
+    sources.length > 0 && sources.every((f) => f.source === null),
+    JSON.stringify(sources),
+  );
+
+  // ── Without the token ─────────────────────────────────────────────────────────────────────
+  // The repository is private, and forgetting the token is what a link forwarded to somebody else
+  // amounts to. The folder stays — this browser still knows about the repository — and it is the
+  // *listing* that fails, saying what would fix it.
+  await cdp.eval(`localStorage.removeItem("zpcr:githubToken")`);
+  await navigateBlank(cdp);
+  await cdp.send("Page.navigate", { url: `${origin}#view=files` });
+  await waitFor(() => cdp.eval("document.readyState==='complete'"), { what: "the reload" });
+  await clickTab(cdp, "Files");
+  const failure = await waitValue(
+    () =>
+      cdp.eval(
+        `document.querySelector("${GH} .folders__note--error")?.textContent.trim()
+           ?? document.querySelector("${FILES} .folders__note--error")?.textContent.trim() ?? ""`,
+      ),
+    (v) => !!v,
+    { timeout: 15000, what: "the listing to fail without a token" },
+  );
+  check(
+    "Without the token a private repository fails its listing, and names the token as the fix",
+    /token/i.test(failure),
+    JSON.stringify(failure),
+  );
+  check(
+    "…while the files already opened out of it stay open, being copies in this browser",
+    (await catalogNames(cdp)).includes(PLATE_PATH),
+    JSON.stringify(await catalogNames(cdp)),
+  );
+
+  // ── Forgetting the repository ─────────────────────────────────────────────────────────────
+  await cdp.eval(
+    `[...document.querySelectorAll("${GH} .folders__actions .btn")]
+       .find((b) => b.textContent.trim() === "✕")?.click()`,
+  );
+  await waitFor(async () => !(await cdp.eval(`!!document.querySelector("${GH}")`)), {
+    what: "the repository to be removed",
+  });
+  await navigateBlank(cdp);
+  await cdp.send("Page.navigate", { url: `${origin}#view=files` });
+  await waitFor(() => cdp.eval("document.readyState==='complete'"), { what: "the reload" });
+  await clickTab(cdp, "Files");
+  // A negative assertion — the folder does not come back — so there is no state change to wait
+  // for, and a fixed pause is the right tool.
+  await sleep(500);
+  check(
+    "Its ✕ forgets the repository, and it stays forgotten across a reload",
+    !(await cdp.eval(`!!document.querySelector("${GH}")`)),
+  );
+
+  cdp.close();
+}
+
 async function main() {
   const pw = cfxPassword();
   if (!pw) {
@@ -6984,6 +7187,7 @@ async function main() {
     await sampleFolderChecks(chrome, origin);
     await folderChecks(chrome, origin);
     await folderNameCollisionChecks(chrome, origin);
+    await githubChecks(chrome, origin);
   } finally {
     chrome.stop();
     dev.stop();

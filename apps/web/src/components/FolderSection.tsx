@@ -57,6 +57,15 @@
  * else won't appear on its own. The ↻ re-reads. (Files that are *loaded* do refresh by themselves;
  * those are watched one by one.)
  *
+ * **A GitHub repository is the same group over the network.** A repository the app has been pointed
+ * at (`state/githubRepos.ts`) is a folder here like any other: the same tree, listed one directory
+ * at a time as you open it, the same file column, the same checkbox that opens a file. Two things
+ * differ, and both are consequences of it being somebody else's repository rather than your disk.
+ * It has no "Grant access" button — a public repo needs no permission, and a private one needs the
+ * token the link carried, which shows up as a listing that failed with GitHub's own reason rather
+ * than as a folder waiting to be unlocked. And opening a file gives you a **copy**, as a sample
+ * does: this app cannot commit, so an edit is never written back.
+ *
  * **The bundled samples are the same group, three things fewer.** The app ships a folder of
  * example files (`lib/samples.ts`), and it is drawn here rather than in a panel of its own so there
  * is one folder UI to learn and one to maintain. Being built in rather than on disk, it has no ↻
@@ -71,15 +80,16 @@
 import { useRef, useState } from "react";
 import { fileKindDescription, fileKindFromName, type FileKind } from "@zpcrweb/core";
 import type { DiskSource } from "../state/db";
-import type { DiskTree } from "../state/useDiskTree";
+import type { DiskTree, FolderKind } from "../state/useDiskTree";
 import { nodeKey } from "../state/useDiskTree";
+import { githubFileName } from "../state/githubRepos";
 import { diskFileName } from "../state/diskFolders";
 import type { DiskEntry } from "../state/diskFolders";
 import type { FileEntry } from "../state/useZpcrStore";
 import { formatCompactDateTime } from "../lib/experiment";
 import { FileKindIcon } from "./FileIcons";
 import { countKinds, KindFilter } from "./KindFilter";
-import { FolderIcon } from "./ViewIcons";
+import { FolderIcon, GithubIcon } from "./ViewIcons";
 import { sampleFileName } from "../lib/samples";
 
 interface Props {
@@ -98,6 +108,12 @@ interface Props {
    * an ordinary copy — under `samples/<name>`, like any other folder's file. See `lib/samples.ts`.
    * Called with the plain file names; the prefix is the store's business. */
   onAddSampleFiles: (names: string[], goToFile?: boolean) => void | Promise<void>;
+  /** The same again for a file in a GitHub repository — fetched over the API and landing as a copy,
+   * under the repository's own `owner/repo/…` name (`state/githubRepos.ts`). */
+  onAddGithubFiles: (
+    sources: { folder: string; path: string[] }[],
+    goToFile?: boolean,
+  ) => void | Promise<void>;
   /** Select it *and* go look at it, on whichever view that kind of file is for (`App.tsx`'s
    * `defaultViewFor`) — a double click. */
   onOpenFile: (id: string) => void;
@@ -116,6 +132,7 @@ export function FolderSection({
   onCloseFile,
   onAddDiskFiles,
   onAddSampleFiles,
+  onAddGithubFiles,
   onOpenFile,
 }: Props) {
   const shown = tree.folders.find((f) => f.label === tree.activeFolder) ?? null;
@@ -137,9 +154,15 @@ export function FolderSection({
           const isOpen = !tree.collapsed.has(folder.label);
           const selected = tree.selected.get(folder.label) ?? [];
           const isShowing = folder.label === tree.activeFolder;
+          const builtin = folder.kind === "builtin";
+          const github = folder.kind === "github";
           return (
             <section
-              className={"folders__folder" + (folder.builtin ? " folders__folder--builtin" : "")}
+              className={
+                "folders__folder" +
+                (builtin ? " folders__folder--builtin" : "") +
+                (github ? " folders__folder--github" : "")
+              }
               key={folder.label}
             >
               {/* Not a <details>/<summary>: the heading carries three separate actions — collapse
@@ -161,21 +184,24 @@ export function FolderSection({
                     "folders__title mono" + (isShowing && selected.length === 0 ? " is-selected" : "")
                   }
                   title={
-                    folder.builtin
+                    builtin
                       ? "Example files that come with the app"
-                      : `Show the files directly in ${folder.label}`
+                      : github
+                        ? `Show the files at the top of the ${folder.label} repository on GitHub`
+                        : `Show the files directly in ${folder.label}`
                   }
                   onClick={() => tree.select(folder.label, [])}
                 >
                   <span className="folders__icon">
-                    <FolderIcon />
+                    {github ? <GithubIcon /> : <FolderIcon />}
                   </span>
                   {folder.label}
                 </button>
                 <span className="folders__actions">
                   {/* Nothing to re-read and nothing to give up: the bundled folder's listing is
-                      fixed when the app is built, and it is part of the app. */}
-                  {!folder.builtin && folder.permission !== "granted" && (
+                      fixed when the app is built, and it is part of the app. A repository has no
+                      permission to ask about either — see the module comment. */}
+                  {folder.kind === "disk" && folder.permission !== "granted" && (
                     /* The grant does not survive a reload unless the browser has been told to keep
                        it, so this is the ordinary state on a fresh session rather than an error.
                        A button because re-asking needs a user gesture. */
@@ -186,18 +212,22 @@ export function FolderSection({
                       Grant access
                     </button>
                   )}
-                  {!folder.builtin && (
+                  {!builtin && (
                     <>
                       <button
                         className="btn btn--sm"
-                        title="Read this folder again"
+                        title={github ? "Read this repository again" : "Read this folder again"}
                         onClick={() => tree.refresh(folder.label)}
                       >
                         ↻
                       </button>
                       <button
                         className="btn btn--sm"
-                        title="Stop using this folder. Nothing on disk is deleted."
+                        title={
+                          github
+                            ? "Stop reading this repository. Nothing on GitHub is changed, and files already opened from it stay open."
+                            : "Stop using this folder. Nothing on disk is deleted."
+                        }
                         onClick={() => void tree.remove(folder.label)}
                       >
                         ✕
@@ -210,7 +240,7 @@ export function FolderSection({
                 (folder.permission === "granted"
                   ? /* No tree under the bundled folder: it is one flat directory, and a branch
                        whose only content would be "no subfolders" is one worth not drawing. */
-                    !folder.builtin && (
+                    !builtin && (
                       <div className="folders__tree">
                         <DirectoryLevel
                           tree={tree}
@@ -245,7 +275,7 @@ export function FolderSection({
             tree={tree}
             label={shown.label}
             path={shownPath}
-            builtin={shown.builtin}
+            kind={shown.kind}
             kinds={kinds}
             onToggleKind={toggleKind}
             entries={entries}
@@ -253,6 +283,7 @@ export function FolderSection({
             onCloseFile={onCloseFile}
             onAddDiskFiles={onAddDiskFiles}
             onAddSampleFiles={onAddSampleFiles}
+            onAddGithubFiles={onAddGithubFiles}
             onOpenFile={onOpenFile}
           />
         )}
@@ -362,7 +393,7 @@ function FilePane({
   tree,
   label,
   path,
-  builtin,
+  kind,
   kinds,
   onToggleKind,
   entries,
@@ -370,12 +401,14 @@ function FilePane({
   onCloseFile,
   onAddDiskFiles,
   onAddSampleFiles,
+  onAddGithubFiles,
   onOpenFile,
 }: {
   tree: DiskTree;
   label: string;
   path: readonly string[];
-  builtin: boolean;
+  /** Which sort of folder this column is showing — what decides how a file is opened out of it. */
+  kind: FolderKind;
   /** The type filter — see {@link FolderSection}. */
   kinds: ReadonlySet<FileKind>;
   onToggleKind: (kind: FileKind) => void;
@@ -440,12 +473,13 @@ function FilePane({
               label={label}
               path={path}
               entry={entry}
-              builtin={builtin}
+              kind={kind}
               entries={entries}
               activeName={activeName}
               onCloseFile={onCloseFile}
               onAddDiskFiles={onAddDiskFiles}
               onAddSampleFiles={onAddSampleFiles}
+              onAddGithubFiles={onAddGithubFiles}
               onOpenFile={onOpenFile}
             />
           ))}
@@ -459,25 +493,34 @@ function FileRow({
   label,
   path,
   entry,
-  builtin,
+  kind,
   entries,
   activeName,
   onCloseFile,
   onAddDiskFiles,
   onAddSampleFiles,
+  onAddGithubFiles,
   onOpenFile,
 }: {
   label: string;
   path: readonly string[];
   entry: DiskEntry;
-  builtin: boolean;
+  kind: FolderKind;
 } & Omit<Props, "tree">) {
   const source: DiskSource = { folder: label, path: [...path, entry.name] };
-  // Either way the file is known by its folder-rooted path. For a disk file that path *is* the
-  // file; for a sample it is only where the copy came from, but everything in the app is keyed by
-  // name, and a sample under its bare name would replace a file of that name someone had dropped
-  // in themselves (`lib/samples.ts`).
-  const name = builtin ? sampleFileName(entry.name) : diskFileName(source);
+  const builtin = kind === "builtin";
+  const github = kind === "github";
+  /** A copy in this browser rather than the file itself — every folder but a disk one. */
+  const copy = kind !== "disk";
+  // However it was opened, the file is known by its folder-rooted path. For a disk file that path
+  // *is* the file; for a sample or a repository's file it is only where the copy came from, but
+  // everything in the app is keyed by name, and one under its bare name would replace a file of
+  // that name someone had dropped in themselves (`lib/samples.ts`).
+  const name = builtin
+    ? sampleFileName(entry.name)
+    : github
+      ? githubFileName(source)
+      : diskFileName(source);
   const open = entries.find((e) => e.name === name);
   // What the click of this gesture did: which way it left the file, and when that has finished.
   // A `dblclick` arrives after its own two clicks have been handled and after `open` was last
@@ -493,7 +536,11 @@ function FileRow({
       : {
           open: true,
           settled: Promise.resolve(
-            builtin ? onAddSampleFiles([entry.name]) : onAddDiskFiles([source]),
+            builtin
+              ? onAddSampleFiles([entry.name])
+              : github
+                ? onAddGithubFiles([{ folder: label, path: [...path, entry.name] }])
+                : onAddDiskFiles([source]),
           ),
         };
   };
@@ -513,7 +560,9 @@ function FileRow({
             open
               ? builtin
                 ? "Close this file. The example itself stays here."
-                : "Close this file. Nothing on disk is deleted."
+                : github
+                  ? "Close this file. Nothing on GitHub is changed."
+                  : "Close this file. Nothing on disk is deleted."
               : "Open this file"
           }
           aria-label={open ? `Close ${entry.name}` : `Open ${entry.name}`}
@@ -527,8 +576,8 @@ function FileRow({
           title={
             open
               ? `${name} — click to close it`
-              : builtin
-                ? `${name} — click to open a copy of this example, double-click to go to it`
+              : copy
+                ? `${name} — click to open a copy${github ? " of this file from GitHub" : " of this example"}, double-click to go to it`
                 : `${name} — click to open it off disk, double-click to go to it`
           }
           // `detail` is the click count, so the toggle runs once per gesture rather than again as

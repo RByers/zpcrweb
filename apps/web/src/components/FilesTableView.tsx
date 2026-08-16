@@ -90,6 +90,11 @@ interface Props {
   onAddDiskFiles: (sources: DiskSource[], goToFile?: boolean) => void | Promise<void>;
   /** The same, for a bundled sample — see `lib/samples.ts`. */
   onAddSampleFiles: (names: string[], goToFile?: boolean) => void | Promise<void>;
+  /** The same, for a file in a GitHub repository — see `state/githubRepos.ts`. */
+  onAddGithubFiles: (
+    sources: { folder: string; path: string[] }[],
+    goToFile?: boolean,
+  ) => void | Promise<void>;
 }
 
 /** `12.3 kB` under 1000 kB, `1.24 MB` above — the same threshold a file manager uses, so a run
@@ -399,6 +404,7 @@ export function FilesTableView({
   tree,
   onAddDiskFiles,
   onAddSampleFiles,
+  onAddGithubFiles,
 }: Props) {
   const [sortKey, setSortKey] = useState<SortKey>("date");
   const [dir, setDir] = useState<1 | -1>(-1);
@@ -524,6 +530,7 @@ export function FilesTableView({
             onCloseFile={onCloseFile}
             onAddDiskFiles={onAddDiskFiles}
             onAddSampleFiles={onAddSampleFiles}
+            onAddGithubFiles={onAddGithubFiles}
             // No view: the double-click lands wherever that kind of file belongs, the same place
             // clicking its row in the table above lands (`App.tsx`'s `defaultViewFor`).
             onOpenFile={(id) => onSelectFile(id)}

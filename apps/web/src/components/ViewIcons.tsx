@@ -142,6 +142,21 @@ export function FolderIcon() {
   );
 }
 
+/** A GitHub repository, in the Files view's folder list: a branch — two commits on a line and a
+ * third branching off it. The octocat is a filled mark and would sit badly among these stroked
+ * ones; what the row has to say is "this folder is a repository", which a branch says. */
+export function GithubIcon() {
+  return (
+    <Svg>
+      <circle cx="4.4" cy="3.6" r="1.5" />
+      <circle cx="4.4" cy="12.4" r="1.5" />
+      <circle cx="11.6" cy="3.6" r="1.5" />
+      <path d="M4.4 5.1v5.8" />
+      <path d="M11.6 5.1v1.3a2.6 2.6 0 0 1-2.6 2.6H7a2.6 2.6 0 0 0-2.6 2.6" />
+    </Svg>
+  );
+}
+
 /** Load file: an arrow rising out of an open tray. */
 export function UploadIcon() {
   return (

@@ -221,6 +221,9 @@ sample-type quick selectors, and the ring a hovered curve puts on its own well �
 `state/diskFolders.ts`, `state/useDiskTree.ts`, `components/FolderSection.tsx` or
 `components/DropZone.tsx` (the disk-backed folder route — and note the picker itself cannot be
 driven from CDP, so `folderChecks` substitutes an OPFS directory for it),
+`lib/github.ts`, `state/githubRepos.ts` or `state/githubToken.ts` (a GitHub repository as a folder,
+and the `#github=`/`#githubToken=` link — `githubChecks`, which answers `api.github.com` itself with
+`harness.mjs`'s `stubGithubApi` rather than depending on a real repository),
 `lib/samples.ts`, `apps/web/vite.config.ts`'s samples plugin or `App.tsx`'s welcome-screen test
 (the bundled `samples` folder — `sampleFolderChecks`),
 `state/useCfxDevice.ts`'s `cancelRun`/`setRunPaused`
