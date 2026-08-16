@@ -3457,7 +3457,7 @@ Three economies make the once-a-cycle refresh affordable:
   400 KB transfer and an unrequested file. But a browser reload mid-run, or a connect that happens
   after the run had already started, presents a first listing that is itself `begun` and not yet
   `ended`; `runProgressFromNames` tells the two cases apart, and an in-progress first sighting is
-  pulled right away instead of waiting for the next transition or the 30 s backstop.
+  pulled right away instead of waiting for the next plate read's transition.
 
   **Not pulling it is not the same as not mentioning it.** That rule used to make connecting after
   a run had finished a dead end: the rail reported `finished, 45 plate reads` and the only way to
@@ -3471,6 +3471,22 @@ Three economies make the once-a-cycle refresh affordable:
   holding none of it. The offer is a property of the connection — it clears when the run lands, and
   on disconnect — so a run deleted later reappears as an offer on the next connect rather than
   being watched for continuously.
+
+  Two things the offer has to say honestly. When the file the run *belongs* to is already open —
+  the pending experiment it was started from, which holds none of the run yet and so cannot be
+  recognised by `isSameRun` — `available.into` names it, the text drops the "you don't have" claim
+  about a file sitting in the bar, and the button reads **Collect run**. And clicking either
+  acknowledges a finished run the instrument is still holding before it lists: §7.6's
+  acknowledgement is what makes the last plate read, the `ended` marker and the `.alf` report
+  appear, so collecting without it would file a run permanently one cycle short and reading as in
+  progress for ever. The end-of-run effect refuses to acknowledge a run it never saw cycling; a
+  click on this button is the consent that refusal was waiting for.
+
+  **Stop is not what releases a held run.** It used to be shown in that state on the reasoning that
+  it was, but `CfxDevice.cancelRun` deliberately stops *at* §7.6's finished-and-held state and
+  hands the release to the acknowledgement path — so the button sat lit and enabled on an idle
+  instrument and sent nothing. The rail's run controls now appear only while a run is actually
+  underway (`InstrumentRail`'s `showRunControls`), and collecting the run is what releases it.
 - **The refresh doesn't steal the selection — except for the run's first file.** `addRunArchive`
   takes an `activate` option: ordinarily the refreshed file becomes active only if the user was already on the one it
   supersedes, which is what makes the Curves view grow a cycle at a time without dragging anyone

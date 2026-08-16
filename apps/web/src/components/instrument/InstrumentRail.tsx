@@ -216,11 +216,17 @@ export function InstrumentRail({
   // A run is *this rail's business* whenever the instrument is doing one or is about to — which
   // is not the same as `status.running`. The start window (`usb.md` §7.3) is precisely the gap
   // where a run exists and `STATUS?` still says idle, and it is where a cancel is most often
-  // wanted and least likely to work, so `runPending` counts. So does §7.6's finished-but-held
-  // state, where Stop is what releases the instrument.
+  // wanted and least likely to work, so `runPending` counts.
+  //
+  // §7.6's finished-but-held state deliberately does *not*. Stop used to show there, on the
+  // reasoning that it is what releases the instrument — but `CfxDevice.cancelRun` stops at exactly
+  // that state and hands the release to the §7.6 acknowledgement rather than sending anything, so
+  // the button was lit, enabled and inert on an idle instrument reporting a finished run. What
+  // actually collects that run is the offer below ("Collect run"), which acknowledges as part of
+  // asking for it.
   const paused = !!status && isPaused(status);
   const runUnderway = !!status?.running || runPending;
-  const showRunControls = connected && (runUnderway || !!status?.runName);
+  const showRunControls = connected && runUnderway;
   // What the last stop reported, so a cancel that had to wait for a plate read, resume a pause or
   // take two attempts says so rather than just appearing to have taken a long time.
   const [stopNote, setStopNote] = useState<string[] | null>(null);
@@ -505,9 +511,11 @@ export function InstrumentRail({
                   "btn instrument__stop" + (busyBriefly ? " instrument__stop--armed" : "")
                 }
                 disabled={!!busy}
+                // No file citation in the copy — the reader has a thermocycler, not this
+                // repository. The sequence this drives is `usb.md` §7.8.
                 title={
                   "Stop the run in progress. Waits for a plate read in flight to finish, so the " +
-                  "cycle already under way isn't thrown away (usb.md §7.8)."
+                  "cycle already under way isn't thrown away."
                 }
                 confirm={runUnderway}
                 confirmLabel="Stop the run?"
@@ -654,10 +662,21 @@ export function InstrumentRail({
           {runWatch.available && (
             <div className="instrument__offer">
               <div className="instrument__offertext">
-                {runWatch.available.inProgress
-                  ? "A run is in progress here and isn't in your files yet."
-                  : "The instrument is holding a finished run you don't have."}
-                <span className="instrument__offername mono">{runWatch.available.name}</span>
+                {/* Three claims, not two. A run whose own file is already open — the pending
+                    experiment it was started from, which holds none of the run yet — is not a run
+                    "you don't have", and saying so about a file sitting in the bar reads as a
+                    mistake. What is missing there is the data, and the offer names where it goes
+                    (`useRunWatch`'s `available.into`). */}
+                {runWatch.available.into
+                  ? runWatch.available.inProgress
+                    ? "A run is in progress here. Collect it into your file for it:"
+                    : "The instrument is holding a finished run. Collect it into your file for it:"
+                  : runWatch.available.inProgress
+                    ? "A run is in progress here and isn't in your files yet."
+                    : "The instrument is holding a finished run you don't have."}
+                <span className="instrument__offername mono">
+                  {runWatch.available.into ?? runWatch.available.name}
+                </span>
                 <span className="instrument__offerreads">
                   {runWatch.available.plateReads} plate read
                   {runWatch.available.plateReads === 1 ? "" : "s"}
@@ -666,16 +685,23 @@ export function InstrumentRail({
               <button
                 className="btn btn--primary btn--sm"
                 disabled={!!busy}
-                title="Retrieve every file of this run from the instrument and open it as a .zpcr."
+                title={
+                  runWatch.available.into
+                    ? "Retrieve every file of this run from the instrument and add it to the " +
+                      "file it was started from."
+                    : "Retrieve every file of this run from the instrument and open it as a .zpcr."
+                }
                 onClick={() => void runWatch.downloadAvailable()}
               >
-                Download run
+                {runWatch.available.into ? "Collect run" : "Download run"}
               </button>
             </div>
           )}
           <div className="rail__note instrument__footnote">
+            {/* Says what the watcher actually does: it lists the run folder as each plate read
+                ends, and once more when the run finishes — not on a timer. */}
             {runWatch.note ??
-              "The run folder is listed every few seconds; when it changes, the run is pulled " +
+              "The run folder is listed as each plate read finishes; whatever is new is pulled " +
                 "and kept in the file bar as a .zpcr."}
           </div>
         </div>

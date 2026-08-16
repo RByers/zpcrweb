@@ -188,8 +188,15 @@ export interface RunWatchState {
    * Costs the same ~8 KB identity read a pass already does (`runIdentityFileNames`), once per
    * connection, and answers exactly — the run's own `RunInfo.xml` against the file's
    * (`isSameRun`), not a guess from the name.
+   *
+   * `into` is the file the download would land in, when that is one the user already has open: the
+   * pending experiment this run was started from, which holds none of the run yet and so cannot be
+   * recognised by `isSameRun` (see `pull`'s adoption). Saying "a run you don't have" about a run
+   * whose own file is sitting open in the bar reads as a mistake — the accurate claim is that the
+   * *data* hasn't been collected yet, and this is where it will go. Null when the run would arrive
+   * as a new file, which is the ordinary case.
    */
-  available: { name: string; plateReads: number; inProgress: boolean } | null;
+  available: { name: string; plateReads: number; inProgress: boolean; into: string | null } | null;
   /** Download the run {@link available} describes, whole, and put it in the file bar. */
   downloadAvailable: () => Promise<void>;
 }
@@ -348,11 +355,19 @@ export function useRunWatch(
       if (!files) return; // a failed read leaves the last answer standing; the rail reports it
       const progress = runProgressFromNames(names);
       const name = zpcrNameFromRunFiles(files, namingRef.current);
-      setAvailable(
-        isSameRun(heldRunRef.current(name)?.files, files)
-          ? null
-          : { name, plateReads: progress.plateReads, inProgress: progress.inProgress },
-      );
+      const candidate = heldRunRef.current(name);
+      if (isSameRun(candidate?.files, files)) {
+        setAvailable(null); // already in the bar, run and all — nothing to offer
+        return;
+      }
+      setAvailable({
+        name,
+        plateReads: progress.plateReads,
+        inProgress: progress.inProgress,
+        // The same adoption `pull` makes, so the offer says where the click will actually put the
+        // run rather than implying a file the user hasn't got.
+        into: candidate && !hasRunIdentity(candidate.files) ? candidate.id : null,
+      });
     },
     [fetchDirectoryFiles],
   );
@@ -591,8 +606,17 @@ export function useRunWatch(
     // a run starting during this session gets (see `onRun`'s `activate`).
     activateNext.current = true;
     setNote("Downloading the run on the instrument…");
+    // A run that finished while this session wasn't watching is still *held* by the instrument
+    // (§7.6), and the folder is correspondingly short of the run's last moments: acknowledging is
+    // what makes the final plate read, the `ended` marker and the `.alf` report appear. Collecting
+    // without it would file a run missing its last cycle and reading as in progress for ever,
+    // with nothing left in the app to finish it. The finished-run effect below deliberately won't
+    // acknowledge a run it never saw cycling — but this is the user asking for exactly this run,
+    // which is the consent that judgement was waiting for. Safe for the in-progress offer too:
+    // `acknowledgeFinishedRun` re-reads the status and sends nothing to a run still cycling.
+    await acknowledgeFinishedRun();
     await check(true);
-  }, [check]);
+  }, [check, acknowledgeFinishedRun]);
 
   // --- the step-transition rule (§7.5) -------------------------------------------------------
   const lastStep = useRef<string | null>(null);
