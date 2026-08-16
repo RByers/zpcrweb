@@ -174,6 +174,18 @@ export type Baseline = "raw" | "delta" | "percent";
  */
 export type CurveView = "relative" | "absolute";
 /**
+ * Curves view, melt mode only — what the melt step is shown as.
+ *
+ * `"derivative"` plots −dF/dT, on which a melting product is a peak and the melting temperature
+ * is that peak's position; `"raw"` plots the fluorescence it was taken from. The derivative by
+ * default, because it is the one that answers the question a melt is run to ask (`melt.md` §1).
+ * Neither changes a number: the Tm is taken from the derivative whichever is drawn.
+ *
+ * `"table"` swaps the chart for the melting temperatures themselves, the same way
+ * {@link FluorViewMode}'s own `"table"` does for Cq.
+ */
+export type MeltView = "derivative" | "raw" | "table";
+/**
  * Calibration view only — which of the two levels a `.Dcal` carries the chart plots.
  * `"relative"` is the response the algorithm actually consumes, `max(0, dye − empty)`
  * (`calibration.md` §2); `"absolute"` plots the two raw readings that difference is taken
@@ -220,6 +232,8 @@ export interface FileSettings extends AnalysisSettings {
   baseline: Baseline;
   /** Curves view's display mode; see {@link CurveView}. */
   curveView: CurveView;
+  /** Curves view in melt mode; see {@link MeltView}. */
+  meltView: MeltView;
   /** Curves view: overlay the auto-detected linear baseline itself on each curve, at 50%
    * opacity of the curve's own color. Off by default. */
   drawBaseline: boolean;
@@ -746,6 +760,7 @@ function defaultSettings(): FileSettings {
     // Relative (baseline-corrected) shows the curve every Cq is actually taken against —
     // threshold.md §4's `LinearBaseLineNormalized`.
     curveView: "relative",
+    meltView: "derivative",
     drawBaseline: false,
     scale: "linear",
     showDark: false,
@@ -793,6 +808,7 @@ function viewOf(s: FileSettings): StoredView {
     enabledRefCols: [...s.enabledRefCols],
     baseline: s.baseline,
     curveView: s.curveView,
+    meltView: s.meltView,
     drawBaseline: s.drawBaseline,
     scale: s.scale,
     showDark: s.showDark,
@@ -833,6 +849,7 @@ function fromStored(e: StoredFile): FileSettings {
     enabledRefCols: new Set(v.enabledRefCols),
     baseline: v.baseline,
     curveView: v.curveView,
+    meltView: v.meltView,
     drawBaseline: v.drawBaseline,
     scale: v.scale,
     showDark: v.showDark,

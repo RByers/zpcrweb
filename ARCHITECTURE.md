@@ -664,6 +664,23 @@ raw bytes ─▶ fflate.unzipSync ─▶ { name: Uint8Array }
   median noise of the curves it was computed *with* — so recomputing over a filtered subset yields
   a different, equally defensible answer for the same well. Consumers build the table once over the
   whole plate and filter it for display; see `runAnalysis.ts`'s `computeRunAnalysis`.
+- **`melt.ts` / `meltAnalysis.ts`** — the other thing a run's reads can be. A plate-read step whose
+  reads *sweep* temperature rather than repeating one is a **melt curve**, and none of the pipeline
+  above applies to it: no cycles, no baseline region, no threshold, no Cq. `meltSegments()` finds
+  such a step from the read data alone — no protocol, no `.prcl`, no password, and the margin is
+  three orders of magnitude (measured: 0.01 °C of span on the amplification step of the committed
+  run against 29.88 °C on its melt). `computeMeltAnalysis()` then gives each curve a −dF/dT and a
+  melting temperature: Savitzky–Golay smoothing, a central difference, and the tallest interior
+  peak refined below the sampling grid by a parabolic fit. A Tm is only called for a curve whose
+  fluorescence actually moved — `hasMeltSignal()` — because every curve has a highest point and an
+  empty well's is noise. See [`melt.md`](./docs/melt.md), whose Appendix B records the
+  signal-to-noise gate that looks obvious and does not work.
+  **The one format difference is absorbed here**: a Biomeme melt export ships its own derivative,
+  so `biomeme.ts` converts it to a per-°C rate on `WellCurve.meltDerivativePerC` and
+  `computeMeltAnalysis` reads it where present and derives it where absent. Everything downstream
+  sees one derivative and one Tm, which is why there is no melt counterpart to the file-vs-computed
+  toggles baseline and Cq have — the file supplies an input to one shared computation, not a
+  competing answer.
 - **`runinfo.ts`** — a small regex scan over the flat `<KeyValuePairs>` list. No XML
   dependency: the structure is regular and self-closing `<Value />` maps to `""`.
 - **`temps.ts`** — pulls temperatures out of the `.Plateread` ICFF index. It matches on the

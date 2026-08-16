@@ -2352,6 +2352,45 @@ only pieces the two views share.
   (`"(none)"`, or a target loaded as more than one dye) has no single dye to borrow from, so its
   chip takes `NEUTRAL_COLOR` rather than one member's hue.
 
+### Melt mode
+
+**A plate-read step whose reads sweep temperature is a melt curve, and the Curves view becomes a
+different view for it.** Detection is core's (`melt.md` §2 — `meltSegments`, from the reads alone,
+needing no protocol, no `.prcl` and no password); this view asks `computeMeltAnalysisFor(zpcr,
+activeStep)` and switches on the answer. On the committed two-step sample the step selector's
+second entry is the melt, and picking it swaps:
+
+- **the chart**, for `MeltChart` + `lib/uplot/meltChart.ts` — temperature on x, and on y either
+  −dF/dT or the fluorescence it came from. A fourth uPlot builder, for the reason `calChart.ts`
+  and `thermalChart.ts` give in their own headers: the cycle chart's x axis *is* the cycle, and its
+  integer splits, per-cycle baselines, Cq rings and min/max whiskers mean nothing on a ramp. The
+  section carries `curves__plot--melt`, which is also what the browser check asserts on — the two
+  charts' markup is otherwise identical, and a check that only looked for a canvas passed happily
+  while the melt chart was being rendered into the wrong branch entirely.
+- **the "Values" toggle**, for `meltView` (`−dF/dT` / `Raw` / `Table`, derivative by default) in the
+  same rail slot `curveView` occupies otherwise. Like `curveView` it changes only what is drawn:
+  the Tm comes off the derivative either way.
+- **the table and the CSV**, for `buildMeltRows`/`meltCsv` — well, channel, Tm, peak height. Folded
+  in as a third option on the same toggle, exactly as table mode is folded into the View toggle.
+
+**What it hides is as much of the design as what it shows.** Threshold editor, Cq range filter,
+File↔Computed source toggles, both right-axis chip sections, "Draw baseline", "Scale", "Show dark",
+"Min/max band" — every one is an amplification concept, and a melt has no cycles, no baseline and
+no threshold to cross. Wells, Channels and Samples stay, because they are selection and selection
+still means what it always did.
+
+**Channel space always.** No colour separation is done for a melt: it is read on one channel in
+practice, and staying in channel space is what lets melt mode work on a run whose plate is
+encrypted — which the committed melt sample is, so this is the ordinary case rather than a corner
+one. A `dyeSpace` source (Biomeme) is already per-dye and arrives in the same shape.
+
+**There is no melt File↔Computed toggle**, and that is deliberate — see "File vs. computed
+analysis" below for the pair that does exist. A Biomeme melt export ships its own derivative, but
+core absorbs that at the parser (`melt.md` §6): `MeltCurve.derivative` is read from the file where
+there is one and computed where there isn't, and one `meltPeak` runs over both. The file supplies
+an *input* to one shared computation, not a competing answer, so there is nothing for a reader to
+choose between and no setting to persist.
+
 ### Table mode
 
 The former standalone **Analysis** view, folded into the Curves view as the fourth option of the

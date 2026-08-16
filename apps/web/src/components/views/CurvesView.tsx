@@ -3,6 +3,11 @@ import {
   analysisCsv,
   analysisCsvFilename,
   buildAnalysisRows,
+  buildMeltRows,
+  computeMeltAnalysisFor,
+  meltCsv,
+  meltSegments,
+  meltCsvFilename,
   NO_TARGET,
   wellLabel,
   type LedCurve,
@@ -17,6 +22,7 @@ import {
   type CurveView,
   type FileSettings,
   type FluorViewMode,
+  type MeltView,
   type Scale,
 } from "../../state/useZpcrStore";
 import { usePltdPassword } from "../../state/pltdPassword";
@@ -37,6 +43,8 @@ import { useHoverCard, type HoverCardData, type HoverCardRow } from "../curves/H
 import { WellMatrix } from "../curves/WellMatrix";
 import { CurveChart, type CqDragTarget } from "../curves/CurveChart";
 import { CurveTable } from "../curves/CurveTable";
+import { MeltChart } from "../curves/MeltChart";
+import { MeltTable } from "../curves/MeltTable";
 import { CqRange } from "../curves/CqRange";
 import {
   ThresholdSection,
@@ -51,6 +59,7 @@ import { Switch } from "../Switch";
 import { ResetIcon } from "../ResetIcon";
 import { DownloadIcon } from "../DownloadIcon";
 import type { HighlightMatch, PlotCurve } from "../../lib/uplot/chart";
+import type { MeltHighlight, MeltPlotCurve } from "../../lib/uplot/meltChart";
 
 interface Props {
   zpcr: Zpcr;
@@ -79,6 +88,27 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
     settings.step != null && steps.some((s) => s.step === settings.step)
       ? settings.step
       : (steps[0]?.step ?? undefined);
+
+  /**
+   * Melt mode. A plate-read step whose reads sweep temperature is a melt curve rather than an
+   * amplification one (`melt.md` §2), and almost nothing this view normally does applies to it:
+   * there are no cycles, no baseline, no threshold and no Cq. When the selected step is one, the
+   * chart, the table, the CSV and most of the rail below switch over.
+   *
+   * Channel space always — a melt is read on one channel, and staying in channel space is what
+   * lets this work on a run whose plate is encrypted, which the committed melt sample is.
+   */
+  const melt = useMemo(
+    () => computeMeltAnalysisFor(zpcr, activeStep),
+    [zpcr, activeStep],
+  );
+  const meltMode = melt !== undefined;
+  /** Every melt step of the run, so the step selector can name one for what it is rather than by
+   * its index — a run's melt is the step people go looking for. */
+  const meltSteps = useMemo(() => meltSegments(zpcr), [zpcr]);
+  const stepMelt = (step: number) => meltSteps.find((m) => m.step === step);
+  /** A ramp endpoint, written the way the instrument's own protocol writes it: 65, not 65.0. */
+  const fmtTemp = (c: number) => (Number.isInteger(c) ? String(c) : c.toFixed(1));
 
   // The run-level derivation this view is built on — plate, targets, color separation and, above
   // all, the run's single Cq table. See `runAnalysis.ts`: the chart, the hover cards and table mode
@@ -874,6 +904,59 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
       "text/csv",
     );
 
+  // ---- Melt mode ----------------------------------------------------------------------------
+
+  /** The rail's well and channel filters, applied to the melt step's curves. The same predicate
+   * `visibleChannel` uses — a melt is plotted in channel space, so it filters the same way. */
+  const visibleMelt: MeltPlotCurve[] = useMemo(
+    () =>
+      (melt?.curves ?? [])
+        .filter(
+          (c) =>
+            (melt as NonNullable<typeof melt>).available.includes(c.channel) &&
+            (settings.enabledChannels.has(c.channel) || isHoveredChannel(c.channel)) &&
+            (settings.enabledWells.has(wellKey(c.row, c.col)) || isHoveredWell(c.row, c.col)) &&
+            sampleVisible(c.row, c.col),
+        )
+        .map((c) => ({ key: `${c.row},${c.col}|${c.channel}`, curve: c })),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [
+      melt,
+      settings.enabledChannels,
+      settings.enabledWells,
+      settings.disabledSamples,
+      wellSample,
+      hoverHighlight,
+    ],
+  );
+
+  const meltRows = useMemo(
+    () =>
+      melt
+        ? buildMeltRows(
+            melt,
+            (row, col, channel) =>
+              settings.enabledChannels.has(channel) &&
+              settings.enabledWells.has(wellKey(row, col)) &&
+              sampleVisible(row, col),
+          )
+        : [],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [melt, settings.enabledChannels, settings.enabledWells, settings.disabledSamples, wellSample],
+  );
+
+  const downloadMeltCsv = () =>
+    downloadText(meltCsvFilename(zpcr.metadata.dataFile), meltCsv(meltRows), "text/csv");
+
+  /** The rail's hover peek, in the shape the melt chart takes — the two kinds of highlight that
+   * mean anything on a plot with no dyes or targets on it. */
+  const meltHighlight: MeltHighlight | null =
+    hoverHighlight?.kind === "wells"
+      ? { kind: "wells", labels: hoverHighlight.labels }
+      : hoverHighlight?.kind === "channel"
+        ? { kind: "channel", channel: hoverHighlight.channel }
+        : null;
+
   /** `raw` empty clears the override, putting the group back on the auto threshold. Values are
    * rounded to whole RFU to match what the input displays and steps by. */
   const setThresholdOverride = (group: string, raw: string) => {
@@ -1006,9 +1089,13 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
                     "segmented__item" + (s.step === activeStep ? " is-active" : "")
                   }
                   onClick={() => onChange({ step: s.step })}
-                  title={`Protocol STEP ${s.step}, ${s.readCount} cycles`}
+                  title={
+                    stepMelt(s.step)
+                      ? `Melt curve — ${s.readCount} reads from ${fmtTemp(stepMelt(s.step)!.startTempC)} to ${fmtTemp(stepMelt(s.step)!.endTempC)} °C`
+                      : `Protocol STEP ${s.step}, ${s.readCount} cycles`
+                  }
                 >
-                  {i} · {s.readCount}c
+                  {stepMelt(s.step) ? `Melt · ${s.readCount}` : `${i} · ${s.readCount}c`}
                 </button>
               ))}
             </div>
@@ -1027,6 +1114,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
               <div className="rail__note mono">{plateEntry.pltd.error}</div>
             ) : (
               <>
+                {!meltMode && (
                 <div className="rail__row">
                   {/* "Table" is a fourth option here rather than a tab of its own: it shows the
                       same run, grouped by target like "Target" mode, as a Cq/ΔRFU table instead of
@@ -1048,6 +1136,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
                     }
                   />
                 </div>
+                )}
                 {/* Where a "Normalization" toggle used to sit. It was a no-op by construction:
                     calibration.md §5.1 divides the column scaling back out, so every mode
                     reports identical RFU unless the matrix is rank-deficient. The setting still
@@ -1187,7 +1276,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
           </details>
         )}
 
-        {allTemps.length > 0 && (
+        {!meltMode && allTemps.length > 0 && (
           <details className="rail__section rail__details">
             <summary className="rail__title">
               <span>
@@ -1223,7 +1312,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
           </details>
         )}
 
-        {allLeds.length > 0 && (
+        {!meltMode && allLeds.length > 0 && (
           <details className="rail__section rail__details">
             <summary className="rail__title">
               <span>
@@ -1257,8 +1346,26 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
           </details>
         )}
 
+        {meltMode && (
+          <div className="rail__section rail__row">
+            {/* Same slot, same label as the amplification "Values" toggle below — what the y axis
+                reads. The derivative is the default: it is the form a melting product is a peak
+                on, and the melting temperature is that peak's position. */}
+            <Toggle
+              label="Values"
+              options={[
+                ["derivative", "−dF/dT"],
+                ["raw", "Raw"],
+                ["table", "Table"],
+              ]}
+              value={settings.meltView}
+              onChange={(v) => onChange({ meltView: v as MeltView })}
+            />
+          </div>
+        )}
+
         {/* Chart-only controls — nothing they change is visible in table mode. */}
-        {!tableMode && (
+        {!meltMode && !tableMode && (
           <>
             <div className="rail__section rail__row">
               {/* "Values", not "View": the mode toggle above is already labelled View, and these
@@ -1326,7 +1433,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
             "Subtract dark" below rather than with the chart-only display controls because, like
             it, it applies in table mode too — it's a selection filter, the same kind as the wells
             and chips above, and it feeds the table and the CSV export exactly as they do. */}
-        {calibrationOn && cycleCount > 0 && (
+        {!meltMode && calibrationOn && cycleCount > 0 && (
           <div className="rail__section">
             <CqRange
               cycleCount={cycleCount}
@@ -1343,7 +1450,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
             own Cq call while still inspecting this app's baseline fit, or the reverse — see
             `runAnalysis.ts`'s `blendWithFileAnalysis`. Shown in every view mode, like Threshold
             below, since both act on the one Cq table every view reads. */}
-        {hasFileAnalysis && (
+        {!meltMode && hasFileAnalysis && (
           <div className="rail__section">
             <div className="rail__row">
               <Toggle
@@ -1380,7 +1487,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
             because that's what the run's one Cq table is keyed on. It used to be hidden there,
             which made the multiplier below silently move the channel chart's Cq markers with no
             visible cause. */}
-        {calibrationAvailable && (
+        {!meltMode && calibrationAvailable && (
           <details className="rail__section rail__details" ref={thresholdDetailsRef}>
             <summary className="rail__title">
               <span>
@@ -1407,19 +1514,39 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
             so there's no mode you have to switch to first. Disabled, not hidden, when the run has
             no rows to export (no usable calibration, or the rail filtered everything out). */}
         <div className="rail__section">
-          <button
-            className="raw__download analysis__download"
-            onClick={downloadCsv}
-            disabled={tableRows.length === 0}
-            aria-label="Download the Cq/ΔRFU table as CSV"
-            title="Download the Cq/ΔRFU table as CSV"
-          >
-            <DownloadIcon /> CSV
-          </button>
+          {meltMode ? (
+            <button
+              className="raw__download analysis__download"
+              onClick={downloadMeltCsv}
+              disabled={meltRows.length === 0}
+              aria-label="Download the melting-temperature table as CSV"
+              title="Download the melting-temperature table as CSV"
+            >
+              <DownloadIcon /> CSV
+            </button>
+          ) : (
+            <button
+              className="raw__download analysis__download"
+              onClick={downloadCsv}
+              disabled={tableRows.length === 0}
+              aria-label="Download the Cq/ΔRFU table as CSV"
+              title="Download the Cq/ΔRFU table as CSV"
+            >
+              <DownloadIcon /> CSV
+            </button>
+          )}
         </div>
 
         <div className="rail__stat mono">
-          {tableMode ? (
+          {meltMode ? (
+            <>
+              {settings.meltView === "table"
+                ? `${meltRows.length} rows`
+                : `${visibleMelt.length} / ${melt.curves.length} curves`}
+              {" · "}
+              {meltRows.filter((r) => r.tmC != null).length} with a Tm
+            </>
+          ) : tableMode ? (
             <>{tableRows.length} rows</>
           ) : (
             <>
@@ -1431,14 +1558,29 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
             </>
           )}
         </div>
-        {!tableMode && logBaselined && (
+        {!meltMode && !tableMode && logBaselined && (
           <div className="rail__note mono">
             Log + baseline: all curves shifted alike so the plot's minimum reads 1.
           </div>
         )}
       </aside>
 
-      {tableMode ? (
+      {meltMode ? (
+        settings.meltView === "table" ? (
+          <section className="analysis__table-wrap">
+            <MeltTable rows={meltRows} onPickWell={pickWell} />
+          </section>
+        ) : (
+          <section className="curves__plot curves__plot--melt">
+            <MeltChart
+              curves={visibleMelt}
+              temperaturesC={melt.segment.temperaturesC}
+              view={settings.meltView}
+              highlight={meltHighlight}
+            />
+          </section>
+        )
+      ) : tableMode ? (
         <section className="analysis__table-wrap">
           <CurveTable
             rows={tableRows}

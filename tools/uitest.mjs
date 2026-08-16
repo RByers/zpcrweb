@@ -42,6 +42,8 @@ const PLTD = join(REPO, "samples/QuickPlate_96 wells_All Channels.pltd");
 /** The Biomeme run export — the one input format that isn't Bio-Rad's, and the one that names
  * its own run rather than encoding the name in a filename. */
 const BIOMEME = join(REPO, "samples/biomeme-2024-01-17.bmrun");
+const BIOMEME_MELT = join(REPO, "samples/biomeme-2025-10-15-melt.bmrun");
+const MELT_ZPCR = join(REPO, "samples/20230829_135443_CT019138_SINGLE_STEP_.zpcr");
 /** The run whose `.pcrd` persists a hand-set FAM threshold — see {@link persistedThresholdChecks}. */
 const RVP_PCRD = join(REPO, "samples/20260726_S183-S185_RVP.pcrd");
 const EXAMPLE = "20260726_S183-S185_RVP.zpcr";
@@ -6392,6 +6394,216 @@ async function folderChecks(chrome, origin) {
  * granted one comes in as `samples (2)`, each lists its own files, and the ✕ removes the one it
  * is on.
  */
+/**
+ * The rail's "Values" toggle, scoped to itself.
+ *
+ * Deliberately not `clickButton`: melt mode's options include "Raw", and so does the view bar —
+ * a label search across every button on the page clicks the *view tab* and navigates out of
+ * Curves, which is exactly the silent wrong-turn this returns a scoped selector to avoid.
+ */
+const valuesToggle = `[...document.querySelectorAll(".toggle")]
+    .find((t) => t.querySelector(".toggle__label")?.textContent.trim() === "Values")`;
+
+const valuesOptions = (cdp) =>
+  cdp.eval(`(() => { const t = ${valuesToggle}; if (!t) return null;
+      return [...t.querySelectorAll(".segmented__item")].map((b) => ({
+        text: b.textContent.trim(),
+        active: b.classList.contains("is-active"),
+      })); })()`);
+
+const clickValues = async (cdp, text) => {
+  const sel = `${valuesToggle}?.querySelector(".segmented__item")` ;
+  await waitFor(() => cdp.eval(`!!(${valuesToggle})`), { what: `the Values toggle` });
+  await cdp.eval(`(() => { [...(${valuesToggle}).querySelectorAll(".segmented__item")]
+      .find((b) => b.textContent.trim() === ${JSON.stringify(text)}).click(); })()`);
+  void sel;
+};
+
+/**
+ * Melt mode: selecting a plate-read step whose reads sweep temperature switches the Curves view
+ * from cycles to temperature, and reports a melting temperature instead of a Cq.
+ *
+ * Worth a browser check rather than a unit test because the whole point is a *substitution* — one
+ * step selector click has to swap the chart, the rail's controls and the CSV, and the failure mode
+ * is amplification furniture surviving into a view where it means nothing. (The axis labels
+ * themselves are drawn on uPlot's canvas, not into the DOM, so what is asserted here is the state
+ * that chooses them.)
+ */
+async function meltChecks(chrome, origin) {
+  console.log("\nmelt mode");
+  const cdp = await openPage(chrome.base, origin);
+  await loadFile(cdp, MELT_ZPCR);
+  await waitFor(() => cdp.eval(`!!document.querySelector(".chanbar")`), { what: "curves rail" });
+
+  // The run has two plate-read steps, and the selector names the melt one for what it is rather
+  // than by its index — it is the step people go looking for.
+  const stepLabels = () =>
+    cdp.eval(`[...document.querySelectorAll(".stepsel .segmented__item")].map((b) => b.textContent.trim())`);
+  const labels =
+    (await waitValue(stepLabels, (l) => l?.length === 2, { what: "the step selector" })) ?? [];
+  check(
+    "the melt step is named as a melt in the step selector",
+    labels.length === 2 && labels[0] === "0 · 40c" && labels[1].startsWith("Melt"),
+    labels.join(" | "),
+  );
+
+  // Before the click this is an ordinary amplification view: Values offers Relative/Absolute.
+  const before = (await valuesOptions(cdp)) ?? [];
+  check(
+    "the amplification step offers the amplification value modes",
+    before.map((o) => o.text).join(",") === "Relative,Absolute",
+    before.map((o) => o.text).join(","),
+  );
+
+  await cdp.eval(`(() => { [...document.querySelectorAll(".stepsel .segmented__item")]
+      .find((b) => b.textContent.trim().startsWith("Melt")).click(); })()`);
+
+  const meltOptions =
+    (await waitValue(() => valuesOptions(cdp), (o) => o?.some((x) => x.text.includes("dF/dT")), {
+      what: "melt mode's Values toggle",
+    })) ?? [];
+  const meltPlot = await waitValue(
+    () => cdp.eval(`!!document.querySelector(".curves__plot--melt")`),
+    (v) => v === true,
+    { what: "the melt chart to replace the amplification one" },
+  );
+  check("the melt chart replaces the amplification chart", meltPlot === true);
+  check(
+    "selecting the melt step switches the view to the derivative by default",
+    meltOptions.map((o) => o.text).join(",") === "−dF/dT,Raw,Table" &&
+      meltOptions[0].active === true,
+    meltOptions.map((o) => `${o.text}${o.active ? "*" : ""}`).join(","),
+  );
+
+  // The amplification rail is gone: no threshold editor, no Cq filter, no right-hand axis — none
+  // of which mean anything on a ramp.
+  const titles = (await cdp.eval(
+    `[...document.querySelectorAll(".rail__title")].map((e) => e.textContent.trim()).join(" | ")`,
+  )) ?? "";
+  check(
+    "the rail drops threshold, Cq and right-axis controls in melt mode",
+    !titles.includes("Threshold") &&
+      !titles.includes("Temperature (right axis)") &&
+      !titles.includes("LED current"),
+    titles,
+  );
+
+  // Raw keeps the chart and changes only what it draws.
+  await clickValues(cdp, "Raw");
+  const rawActive = await waitValue(
+    () => valuesOptions(cdp),
+    (o) => o?.find((x) => x.text === "Raw")?.active === true,
+    { what: "the Raw value mode" },
+  );
+  // `--melt` distinguishes the melt plot from the amplification one, which is otherwise identical
+  // markup — without it this check passes on the very chart melt mode is supposed to replace, as
+  // it did while the melt chart was being rendered into the wrong branch entirely.
+  const stillCharting = await cdp.eval(
+    `!!document.querySelector(".curves__plot--melt .chart__host canvas")`,
+  );
+  check(
+    "the Values toggle swaps what the melt chart draws without leaving the view",
+    (rawActive ?? []).find((o) => o.text === "Raw")?.active === true && stillCharting === true,
+    `melt chart present=${stillCharting}`,
+  );
+
+  // The table reports melting temperatures, and the strong wells agree with each other — the
+  // measurement `melt.md` Appendix A quotes, read off the screen rather than out of the library.
+  await clickValues(cdp, "Table");
+  const headers = await waitValue(
+    // The sorted column appends a ▲/▼ glyph to its own header, so compare the label text only.
+    () =>
+      cdp.eval(`[...document.querySelectorAll(".atbl thead th")]
+        .map((e) => e.textContent.trim().replace(/[▲▼]$/, "").trim())`),
+    (h) => h?.length === 4,
+    { what: "the melt table" },
+  );
+  check(
+    "table mode reports a melting temperature, not a Cq",
+    JSON.stringify(headers) === JSON.stringify(["Well", "Channel", "Tm (°C)", "Peak (RFU/°C)"]),
+    JSON.stringify(headers),
+  );
+
+  const tms = await cdp.eval(`(() => {
+      const rows = [...document.querySelectorAll(".atbl tbody tr")];
+      return rows.map((r) => {
+        const cells = [...r.querySelectorAll("td")].map((c) => c.textContent.trim());
+        return { channel: cells[1], tm: parseFloat(cells[2]), peak: parseFloat(cells[3]) };
+      }).filter((r) => r.channel === "Ch1" && r.peak > 3000).map((r) => r.tm);
+    })()`);
+  const spread = tms.length ? Math.max(...tms) - Math.min(...tms) : NaN;
+  check(
+    "the strongest wells' melting temperatures agree to within a fifth of a degree",
+    tms.length >= 20 && spread < 0.2 && Math.abs(tms[0] - 85.6) < 0.3,
+    `n=${tms.length} spread=${spread.toFixed(3)} first=${tms[0]}`,
+  );
+
+  cdp.close();
+}
+
+/**
+ * A Biomeme melt export ships its own derivative, and the app must show it through exactly the
+ * same melt mode — the format difference stops in the parser (`melt.md` §6).
+ */
+async function biomemeMeltChecks(chrome, origin) {
+  console.log("\nbiomeme melt");
+  const cdp = await openPage(chrome.base, origin);
+  // From an empty database: the CFX melt run left open by `meltChecks` shows an identical Values
+  // toggle, so with both files present a wait for that toggle matches whichever is selected and
+  // this check can assert against the wrong run.
+  await emptyReload(cdp, origin);
+  await loadFile(cdp, BIOMEME_MELT);
+  await waitFor(() => cdp.eval(`!!document.querySelector(".chanbar, .chart")`), {
+    what: "the curves view",
+  });
+
+  const options =
+    (await waitValue(() => valuesOptions(cdp), (o) => o?.some((x) => x.text.includes("dF/dT")), {
+      what: "melt mode's Values toggle",
+    })) ?? [];
+  check(
+    "a melt-only run opens straight into melt mode, with no step to pick",
+    options.map((o) => o.text).join(",") === "−dF/dT,Raw,Table",
+    options.map((o) => o.text).join(","),
+  );
+  const steps = await cdp.eval(`document.querySelectorAll(".stepsel .segmented__item").length`);
+  check("a run with one step shows no step selector", steps === 0, `${steps} step buttons`);
+
+  // A melt run carries no Cq, so the File/Computed toggles an ordinary Biomeme run shows must not
+  // appear — there is no competing answer for them to switch between.
+  const toggleLabels = await cdp.eval(
+    `[...document.querySelectorAll(".toggle__label")].map((e) => e.textContent.trim()).join(",")`,
+  );
+  check(
+    "no Baseline/Cq source toggles on a run that has neither",
+    !/(^|,)Cq(,|$)/.test(toggleLabels ?? "") && !/(^|,)Baseline(,|$)/.test(toggleLabels ?? ""),
+    toggleLabels,
+  );
+
+  // The device's own derivative reaches the table as melting temperatures.
+  await clickValues(cdp, "Table");
+  const tms = await waitValue(
+    () =>
+      cdp.eval(`(() => [...document.querySelectorAll(".atbl tbody tr")]
+        .map((r) => parseFloat([...r.querySelectorAll("td")][2]?.textContent))
+        .filter((v) => !Number.isNaN(v)))()`),
+    (v) => v?.length > 0,
+    { what: "melting temperatures in the table" },
+  );
+  check(
+    "the device's own derivative yields melting temperatures in the low 80s",
+    (tms ?? []).length >= 4 && tms.every((t) => t > 60 && t < 95),
+    `n=${(tms ?? []).length} → ${(tms ?? []).map((t) => t.toFixed(1)).join(" ")}`,
+  );
+
+  // Leave the database as this check found it. Every other check tolerates the files its
+  // predecessors left open because loading its own selects it; a *melt* run left selected does
+  // not, since it renders a table of its own that the next check can read before its own file has
+  // finished parsing — which is how the table-sort check came to assert against 9 Biomeme tubes.
+  await emptyReload(cdp, origin);
+  cdp.close();
+}
+
 async function folderNameCollisionChecks(chrome, origin) {
   console.log("\na folder named like the app's own");
   const DISK = ".folders__folder:not(.folders__folder--builtin)";
@@ -6543,6 +6755,8 @@ async function main() {
     await headerFitChecks(chrome, origin);
     await routingChecks(chrome, origin, pw);
     await rightAxisChecks(chrome, origin);
+    await meltChecks(chrome, origin);
+    await biomemeMeltChecks(chrome, origin);
     await tableSortChecks(chrome, origin);
     await tablePickChecks(chrome, origin);
     await persistedThresholdChecks(chrome, origin, pw);

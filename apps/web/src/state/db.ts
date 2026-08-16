@@ -43,7 +43,7 @@
 
 const DB_NAME = "zpcrweb";
 /** Bumping this **erases the database**. See {@link openDb}. */
-const DB_VERSION = 8;
+const DB_VERSION = 9;
 const CONTENT = "content";
 const CATALOG = "catalog";
 const FOLDERS = "folders";
@@ -200,6 +200,8 @@ export interface StoredView {
   baseline: "raw" | "delta" | "percent";
   /** Curves view's display mode. */
   curveView: "relative" | "absolute";
+  /** Curves view in melt mode: the derivative, the fluorescence it came from, or the table. */
+  meltView: "derivative" | "raw" | "table";
   /** Overlay the auto-detected linear baseline on each curve. */
   drawBaseline: boolean;
   scale: "linear" | "log";
