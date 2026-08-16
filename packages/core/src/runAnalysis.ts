@@ -830,7 +830,7 @@ export function computeRunAnalysis(
     const t = tubeByWell.get(key) ?? tube;
     const cals = calibratedByTube.get(t) ?? [];
     const dyes = wellDyeSet(wellFluors.get(key) ?? new Set(), cals, rank);
-    const cacheKey = `${t}|${dyes.map((f) => f.fluor).join(" ")}`;
+    const cacheKey = `${t}|${dyes.map((f) => f.fluor).join("\0")}`;
     const hit = solverCache.get(cacheKey);
     if (hit !== undefined || solverCache.has(cacheKey)) return hit;
     const solver: DyeSolver | undefined =
