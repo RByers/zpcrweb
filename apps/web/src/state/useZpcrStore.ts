@@ -25,6 +25,7 @@ import {
   parseZpcr,
   parseZpcrArchive,
   parseZpcrwebSettings,
+  parseWellSelection,
   plateToCsv,
   runCompleteness,
   runProgressFromNames,
@@ -99,7 +100,7 @@ import {
 } from "../lib/experiment";
 import { sampleNameFromUrl } from "../lib/samples";
 import { currentPltdPassword, usePltdPassword } from "./pltdPassword";
-import { onHashChange, readHash, writeHash } from "./urlHash";
+import { onHashChange, readHash, writeHash, type HashState } from "./urlHash";
 
 export { DEFAULT_THRESHOLD_MULTIPLIER } from "./analysisSettings";
 
@@ -955,6 +956,33 @@ function fileNameFromUrl(url: string): string {
   }
 }
 
+/**
+ * A `#wells=` selection waiting to be applied, and the file it belongs to.
+ *
+ * The selection is resolved to well keys here, at the edge, so an unparseable selector is
+ * dropped before it reaches any state — and so a selector that names no real well never blanks
+ * out a perfectly good selection with an empty set.
+ */
+interface WellsInstruction {
+  /** Well keys (`wellKey`) to enable. Never empty. */
+  keys: string[];
+  /**
+   * The file to apply them to — the one `#file=` names, or the one `#load=` is about to fetch,
+   * since the two ways a link can point at a file are equally likely to carry a selection. Null
+   * when the hash names neither, in which case the selection lands on whatever file is active.
+   */
+  file: string | null;
+}
+
+/** Read a {@link WellsInstruction} out of a parsed hash, or null if it carries no usable one. */
+function wellsInstruction(h: HashState): WellsInstruction | null {
+  if (!h.wells) return null;
+  const keys = parseWellSelection(h.wells);
+  if (keys.length === 0) return null;
+  const file = h.file ?? (h.load ? sampleNameFromUrl(h.load) ?? fileNameFromUrl(h.load) : null);
+  return { keys, file };
+}
+
 /** `.pltd` or `.csv`/`.plt.csv` (case-insensitive), or `null` — the two formats accepted for
  * attaching a plate to a run (see the Plates view's upload control). */
 function plateFileKind(name: string): PlateFileKind | null {
@@ -1324,6 +1352,12 @@ export function useZpcrStore(): ZpcrStore {
   // (the welcome screen's example button is one). Captured during the first render — i.e. before
   // any effect, and so before the state→URL sync below rewrites the hash without it.
   const [pendingLoad, setPendingLoad] = useState<string | null>(() => readHash().load ?? null);
+  // A `#wells=` selection to apply, and the file it is meant for. Captured with `pendingLoad`
+  // and for the same reason: the state→URL sync rewrites the hash without either key, so both
+  // have to be read before any effect runs. See {@link wellsInstruction}.
+  const [pendingWells, setPendingWells] = useState<WellsInstruction | null>(() =>
+    wellsInstruction(readHash()),
+  );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const saveTimers = useRef<Record<string, number>>({});
@@ -1654,6 +1688,8 @@ export function useZpcrStore(): ZpcrStore {
       const h = readHash();
       if (h.view) setView(h.view);
       if (h.load) setPendingLoad(h.load);
+      const wells = wellsInstruction(h);
+      if (wells) setPendingWells(wells);
       if (h.file) {
         // Against the catalog, not the loaded set: the file may be one the app hasn't managed to
         // read yet, and following the link is a fresh attempt at it rather than nothing at all.
@@ -2495,6 +2531,22 @@ export function useZpcrStore(): ZpcrStore {
     },
     [activeName, setModifiedFlag],
   );
+
+  // Apply a pending `#wells=`, once hydration has finished and the file it names is the active
+  // one — a link that carries both a file and a selection has to wait for the file to be
+  // selected (and, with `#load=`, fetched) before the selection has anywhere to go. A selection
+  // for a file that never arrives is simply never applied, which is the same answer the app
+  // already gives a `#file=` naming a file this browser doesn't have.
+  //
+  // It goes in through `updateSettings` like any control in the UI: the wells are ordinary
+  // display state, so a URL selection persists, survives a reload and is overwritten the moment
+  // the user clicks a well — it is a starting point, not a mode the file is stuck in.
+  useEffect(() => {
+    if (loading || !pendingWells || !activeName) return;
+    if (pendingWells.file && pendingWells.file !== activeName) return;
+    setPendingWells(null);
+    updateSettings({ enabledWells: new Set(pendingWells.keys) });
+  }, [loading, pendingWells, activeName, updateSettings]);
 
   const runs = useMemo(() => {
     const map = new Map<string, RunResult>();

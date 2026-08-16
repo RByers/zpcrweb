@@ -17,12 +17,19 @@
  * view. The hash is a bookmark within *this* browser's loaded set, plus a way to make
  * back/forward work across view switches.
  *
- * `#load=<url>` is the exception that lets a link carry the file itself: the app fetches that
- * URL and loads the result as if it had been dropped on the drop zone (see `useZpcrStore`'s
- * `addUrl`). Unlike `file`/`view` it is an **instruction, not state** — {@link formatHash}
- * never writes it back, so it's consumed once and then replaced by the ordinary
- * `#file=…&view=…` the loaded file produces. That's what keeps a reload from re-fetching (the
- * file is in IndexedDB by then) and keeps a copied URL a plain bookmark.
+ * Two keys are **instructions rather than state**, and {@link formatHash} never writes either
+ * back: `#load=` (fetch this file) and `#wells=` (enable these wells on it). Both are consumed
+ * once and then replaced by the ordinary `#file=…&view=…` the app produces, which is what keeps
+ * a reload from re-fetching and keeps a copied URL a plain bookmark.
+ *
+ * `#load=<url>` lets a link carry the file itself: the app fetches that URL and loads the result
+ * as if it had been dropped on the drop zone (see `useZpcrStore`'s `addUrl`). By the time the
+ * hash is rewritten the file is in IndexedDB, so a reload finds it by name instead of fetching
+ * it again.
+ *
+ * `#wells=<selector>` carries a well selection for the file — `#file=run.zpcr&view=curves&
+ * wells=A1,C4-E8` — and writes it into that file's display settings, where the user's own
+ * selection lives (see `useZpcrStore`'s `pendingWells`).
  */
 import type { ViewId } from "./useZpcrStore";
 
@@ -46,6 +53,15 @@ export interface HashState {
   /** URL to fetch a file from, relative to the app or absolute. Read-only: parsed from the
    * hash, never serialized back into it — see the module comment. */
   load?: string;
+  /**
+   * Wells to enable for the file being opened, as a well selector (`A1,A2,C4-E8` — core's
+   * `parseWellSelection` defines the grammar). Like {@link load} this is **an instruction, not
+   * state**: it is applied to the file's own display settings and never serialized back, so a
+   * link can say "look at these wells" without every ordinary URL in the app growing a
+   * 96-entry list, and without the selection you then make by hand being fought over by the
+   * hash.
+   */
+  wells?: string;
 }
 
 function isViewId(v: string | null): v is ViewId {
@@ -61,10 +77,12 @@ export function readHash(): HashState {
     const view = q.get("view");
     const file = q.get("file");
     const load = q.get("load");
+    const wells = q.get("wells");
     return {
       file: file || undefined,
       view: isViewId(view) ? view : undefined,
       load: load || undefined,
+      wells: wells || undefined,
     };
   } catch {
     return {};
@@ -72,9 +90,10 @@ export function readHash(): HashState {
 }
 
 /**
- * Serialize state to a hash string (no leading `#`). `load` is deliberately not written: it
- * describes a fetch to perform, not a state to restore, and the file it produces is already
- * described by `file`.
+ * Serialize state to a hash string (no leading `#`). `load` and `wells` are deliberately not
+ * written: each describes something to *do* to the app's state rather than a state to restore,
+ * and what each produces — a loaded file, a well selection — is already held elsewhere (by
+ * `file`, and by the file's own display settings).
  */
 function formatHash(state: HashState): string {
   const q = new URLSearchParams();

@@ -256,6 +256,13 @@ view is expected to work fine regardless.
   already have into the app. It's consumed on load and replaced by the `#file=` the loaded file
   produces, so it never survives in the address bar. The welcome screen's "Load an example file"
   button is a link to one of these, pointing at a bundled sample (see "Sample files" below).
+- `#wells=<selector>` enables a set of wells on the file the link points at, so a link can say
+  "look at these wells" as well as which file and view — `#file=run.zpcr&view=curves&wells=A1,C4-E8`.
+  A selector is a comma- (or space-) separated list of well labels and rectangular ranges,
+  case-insensitive, with `R1`–`R12` addressing the reference row; unrecognized pieces are ignored.
+  Like `#load=` it is consumed on arrival rather than kept in the address bar: it writes the
+  selection into the file's own display settings, where clicking a well writes it too, so the
+  selection persists and the user's next click replaces it.
 - `#cfxPassword=<value>` seeds the decryption password so encrypted files decrypt instead of
   sitting behind the prompt. URL-escape it — the password can contain characters like `#`.
 

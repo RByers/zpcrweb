@@ -25,6 +25,8 @@ export {
   toChannels,
   wellLabel,
   wellKey,
+  parseWellLabel,
+  parseWellSelection,
   REFERENCE_ROW,
 } from "./pivot.js";
 export { parseFactoryRefRowCal, compareRefToCal } from "./refcal.js";

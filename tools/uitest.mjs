@@ -866,6 +866,79 @@ async function routingChecks(chrome, origin, pw) {
   const junk = await waitValue(() => activeTab(cdp), (t) => t !== "none");
   check("invalid view value falls back to a real tab", junk !== "none", `tab "${junk}"`);
 
+  // ── `#wells=`, a selection in a link ───────────────────────────────────────────────────
+  // The well grid is the observable: `is-on` is exactly the enabled set, so the labels say
+  // which wells a selector actually reached.
+  const wellsOn = () =>
+    cdp
+      .eval(
+        `JSON.stringify([...document.querySelectorAll(".wm-cell.is-on")]
+           .map((e) => (e.getAttribute("aria-label") || "").replace(/^Well /, "").split(" — ")[0])
+           .sort())`,
+      )
+      .then(JSON.parse);
+
+  const FILE = "20260720_FirstQualification.zpcr";
+  await coldLoad(`${origin}#file=${FILE}&view=curves&wells=A1,C4-E6`);
+  await waitFor(() => cdp.eval(`!!document.querySelector(".wm-cell")`), { what: "the well grid" });
+  // 1 + a 3×3 rectangle: the range is the block its corners bound, not reading order.
+  const linked = await waitValue(() => wellsOn(), (w) => w.length === 10, {
+    what: "the linked wells to be the only ones enabled",
+  });
+  check(
+    "a #wells= link enables exactly the wells it names",
+    linked.join(",") === "A1,C4,C5,C6,D4,D5,D6,E4,E5,E6",
+    linked.join(","),
+  );
+  const wellsHash = await waitStable(() => cdp.eval("window.location.hash"), {
+    what: "the hash after a #wells= link",
+  });
+  check("#wells= is consumed rather than left in the hash", !/wells=/.test(wellsHash), wellsHash);
+
+  // It went in as ordinary display state, so it is in IndexedDB and survives a real reload —
+  // the record, not the screen, is what proves that (the 300 ms settings write has no on-screen
+  // signal of its own).
+  const storedWells = await waitValue(
+    () =>
+      cdp
+        .eval(
+          `new Promise((res) => { const q = indexedDB.open("zpcrweb");
+             q.onsuccess = () => { const db = q.result;
+               const g = db.transaction("catalog", "readonly").objectStore("catalog").get(${JSON.stringify(FILE)});
+               g.onsuccess = () => { res((g.result?.view?.enabledWells ?? []).length); db.close(); }; };
+             q.onerror = () => res(-1); })`,
+          { awaitPromise: true },
+        ),
+    (n) => n === 10,
+    { what: "the linked selection to reach IndexedDB" },
+  );
+  check("a linked selection is persisted like a hand-made one", storedWells === 10, `${storedWells}`);
+  await navigateBlank(cdp);
+  await coldLoad(`${origin}#file=${FILE}&view=curves`);
+  await waitFor(() => cdp.eval(`!!document.querySelector(".wm-cell")`), { what: "the well grid" });
+  const reloaded = await waitValue(() => wellsOn(), (w) => w.length === 10, {
+    what: "the persisted selection after a reload",
+  });
+  check("the selection survives a reload without the key", reloaded.length === 10, `${reloaded.length} wells`);
+
+  // A later link replaces the selection rather than adding to it.
+  await cdp.eval(`window.location.hash = "file=${FILE}&view=curves&wells=B2", undefined`);
+  const relinked = await waitValue(() => wellsOn(), (w) => w.length === 1, {
+    what: "a second #wells= link to replace the selection",
+  });
+  check("a later link replaces the selection", relinked.join(",") === "B2", relinked.join(","));
+
+  // Negative: a selector naming no real well is ignored outright, so the selection stands. There
+  // is no state change to wait for — hence a sleep, the one thing it is for.
+  await cdp.eval(`window.location.hash = "file=${FILE}&view=curves&wells=Q13", undefined`);
+  await sleep(500);
+  const afterJunk = await wellsOn();
+  check(
+    "a selector matching no well leaves the selection alone",
+    afterJunk.join(",") === "B2",
+    afterJunk.join(","),
+  );
+
   cdp.close();
 }
 

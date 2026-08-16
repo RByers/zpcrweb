@@ -246,8 +246,8 @@ or its `gridRef` (the grid takes focus on a click, which is what lets the keyboa
 `lib/cloneName.ts` or `App.tsx`'s `cloneActiveFile`,
 core's `runSeed.ts` or `App.tsx`'s `runViews`, `state/useRunWatch.ts`,
 `state/writeThrottle.ts`, `state/useZpcrStore.ts`'s
-`modifiedIds`/`markDownloaded`/`setProtocolText`, its settings seeding or `fileKind`, or
-view selection.
+`modifiedIds`/`markDownloaded`/`setProtocolText`/`pendingWells` (the `#wells=` link, with core's
+`parseWellSelection`), its settings seeding or `fileKind`, or view selection.
 
 ### Don't write a fixed `sleep` into a check
 

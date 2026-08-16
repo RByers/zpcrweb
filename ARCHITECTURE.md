@@ -675,7 +675,10 @@ raw bytes ─▶ fflate.unzipSync ─▶ { name: Uint8Array }
   optical channel's excitation-LED drive setting, in DAC counts (`RunInfo.xml`'s
   `LEDDACValsCal`), with no invented conversion to milliamps.
 - **`pivot.ts`** — transforms run-centric reads into well-centric curves, per-channel dark
-  curves, per-field temperature series, and per-channel LED-current series.
+  curves, per-field temperature series, and per-channel LED-current series. Also owns well
+  coordinates as text: `wellLabel`/`wellKey`, their inverse `parseWellLabel`, and
+  `parseWellSelection`, which reads a human-written well selector (`A1,C4-E8`, ranges meaning
+  rectangles) into keys — the form the web app's `#wells=` link carries.
 - **`pltd.ts`** — decodes `.pltd` plate-definition entries into a typed `PlateDefinition`
   (`zpcr.plates()`): each `.pltd` is a single-entry ZIP whose payload is ZipCrypto-encrypted
   and DEFLATE/DEFLATE64-compressed, wrapping a `<platesetup2>` XML plate map. See

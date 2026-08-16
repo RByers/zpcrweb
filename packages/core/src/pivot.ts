@@ -52,6 +52,65 @@ export function wellKey(row: number, col: number): string {
 }
 
 /**
+ * The inverse of {@link wellLabel}: `A3` → row 0, col 2; `R3` → the reference row. Case
+ * insensitive, and tolerant of surrounding whitespace. Returns null for anything that isn't a
+ * well on a 96-well plate (a bad letter, a column outside 1–12, trailing junk), so a caller
+ * parsing a list can skip a token instead of guessing at it.
+ */
+export function parseWellLabel(label: string): { row: number; col: number } | null {
+  const m = /^([A-Za-z])(\d{1,2})$/.exec(label.trim());
+  if (!m || !m[1] || !m[2]) return null;
+  const letter = m[1].toUpperCase();
+  // Sample rows are lettered A–H; the reference row is `R`, not the ninth letter. `I` is
+  // rejected rather than quietly landing on the reference row by arithmetic, since no label
+  // {@link wellLabel} writes has ever meant that.
+  const sampleRow = letter.charCodeAt(0) - 65;
+  if (letter !== "R" && (sampleRow < 0 || sampleRow >= REFERENCE_ROW)) return null;
+  const row = letter === "R" ? REFERENCE_ROW : sampleRow;
+  const col = Number(m[2]) - 1;
+  if (col < 0 || col >= COLUMNS) return null;
+  return { row, col };
+}
+
+/**
+ * Parse a **well selector** — the human-writable form of a set of wells, e.g.
+ * `A1,A2,C4-E8,R12` — into {@link wellKey}s.
+ *
+ * A token is either a single label or a `from-to` **rectangle**, whose corners bound the block
+ * in both axes: `C4-E8` is rows C–E crossed with columns 4–8, 15 wells, and not the 53 wells
+ * that lie between them in reading order. That is what a person drags on a plate, so it is what
+ * the text form means. Corners may be given in either order (`E8-C4` is the same block).
+ *
+ * Separators are commas or whitespace, and unparseable tokens are **dropped** rather than
+ * failing the whole selector: this is written by hand into a URL, where salvaging the wells that
+ * do make sense beats discarding the lot. Callers that need to tell "nothing valid" from "no
+ * selection" check for an empty result.
+ *
+ * Order is first-appearance, and duplicates collapse.
+ */
+export function parseWellSelection(spec: string): string[] {
+  const keys = new Set<string>();
+  for (const token of spec.split(/[,\s]+/)) {
+    if (!token) continue;
+    const dash = token.indexOf("-", 1);
+    if (dash < 0) {
+      const w = parseWellLabel(token);
+      if (w) keys.add(wellKey(w.row, w.col));
+      continue;
+    }
+    const from = parseWellLabel(token.slice(0, dash));
+    const to = parseWellLabel(token.slice(dash + 1));
+    if (!from || !to) continue;
+    for (let row = Math.min(from.row, to.row); row <= Math.max(from.row, to.row); row++) {
+      for (let col = Math.min(from.col, to.col); col <= Math.max(from.col, to.col); col++) {
+        keys.add(wellKey(row, col));
+      }
+    }
+  }
+  return [...keys];
+}
+
+/**
  * Pivot run-centric reads into well-centric amplification curves. Each curve is one
  * (channel, row, col) coordinate's mean fluorescence across all cycles, ready to plot.
  *

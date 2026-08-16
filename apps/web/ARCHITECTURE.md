@@ -197,6 +197,35 @@ an external deep link are one code path and the resulting URL is shareable. The 
 the bundled samples, at the same `/examples/<name>` path the samples folder opens its files from
 (see "The bundled samples folder" below) — one copy of the file, one way of reaching it.
 
+### `#wells=<selector>` — a selection in a link
+
+`#file=` and `#view=` get a recipient to the right file and the right view; `#wells=` gets them to
+the right *wells*. `#file=run.zpcr&view=curves&wells=A1,C4-E8` opens the run with those wells
+enabled and every other well off, which is how one person points another at the four wells that
+matter out of ninety-six.
+
+The selector is the human-writable form of a well set, parsed by core's `parseWellSelection`
+(`pivot.ts`, beside `wellLabel`, whose inverse it is): comma- or space-separated labels and
+`from-to` ranges, case-insensitive, `R1`–`R12` for the reference row. A range is the **rectangle**
+its corners bound — `C4-E8` is 15 wells, not the 53 that lie between them in reading order —
+because that is what dragging on the plate selects, and the text form should mean what the gesture
+means. Unparseable pieces are dropped rather than failing the whole selector: it is written by
+hand into a URL, and salvaging the wells that do parse beats discarding all of them. A selector
+that yields *no* wells is ignored entirely, so a typo can't blank the selection out.
+
+Like `#load=` it is an **instruction, not state** — `formatHash` never writes it back. That is
+what keeps every ordinary URL in the app from growing a 96-entry well list, and keeps the hash
+from fighting the selection the user then makes by hand. What it writes to is the file's own
+display settings (`updateSettings`, the same path a click on the well grid takes), so a linked
+selection persists across a reload like any other, and one click on the grid replaces it.
+
+`useZpcrStore` captures it in a `useState` initializer as `pendingWells` — same reason as
+`pendingLoad`, the state → URL sync would otherwise strip it first — along with **which file it
+is for**: the one `#file=` names, or, with `#load=`, the name that URL will produce. The effect
+applies it only once that file is the active one, so a link that carries a file and a selection
+can't drop the selection on whichever file happened to be open first. A selection for a file that
+never arrives is never applied, the same answer a `#file=` naming an absent file already gets.
+
 ### Same name replaces
 
 `addFiles` drops any already-loaded file with the same **name** before adding a new one. Ids
