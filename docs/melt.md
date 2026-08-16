@@ -127,9 +127,9 @@ temperature that point was **sampled at**.
   below the product's — and every peak stays visible on the plotted derivative, but only the
   tallest gets a number. *(Future: calling secondary peaks by prominence.)*
 - **The peak is not interpolated.** The Tm is the winning sample's own temperature, so a melt on
-  the usual 0.5 °C grid can only report a multiple of 0.5. CFX Maestro reports on the grid as well,
-  and agreeing with the instrument the operator compares against is worth more than resolving a
-  peak position the ramp never sampled. A sub-grid parabolic refinement used to live here; §B.2 is
+  the usual 0.5 °C grid can only report a multiple of 0.5. CFX Master reports on the grid as well,
+  and agreeing with the software the operator compares against is worth more than resolving a peak
+  position the ramp never sampled. A sub-grid parabolic refinement used to live here; §B.2 is
   what it cost.
 - **The result is rounded to 0.1 °C** (`TM_ROUNDING_C`), so a Tm never prints a digit the reading
   doesn't support, and is rounded once — in the value itself — so a chart marker, a tooltip, a
@@ -355,9 +355,9 @@ solves far outside the three samples it came from. Clamping the offset to half a
 that particular failure.
 
 **The precision it bought was not real.** Even clamped, it reported a position on the ramp that was
-never sampled, and CFX Maestro — the instrument's own software, and what an operator checks this
-app against — reports melting temperatures on the grid. A number that disagrees with the instrument
-in the first decimal is worse than a coarser number that matches it, so the refinement was removed
+never sampled, and CFX Master — Bio-Rad's own software, and what this app is checked against —
+reports melting temperatures on the grid. A number that disagrees with it in the first decimal is
+worse than a coarser number that matches, so the refinement was removed
 and the sampled temperature is reported instead. The clamp went with it; with no offset to bound,
 there is nothing left to escape the data.
 

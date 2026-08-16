@@ -164,8 +164,9 @@ export interface MeltPeak {
  *
  * The Tm is the winning **sample's own temperature**, not a position between samples. A parabola
  * through the peak and its neighbours was fitted here once, to recover a Tm below the 0.5 °C grid;
- * it is gone because CFX Maestro reports melting temperatures on the grid too, and matching the
- * instrument matters more than a refinement whose extra precision the ramp doesn't support.
+ * it is gone because CFX Master reports melting temperatures on the grid too, and matching the
+ * software an operator checks this against matters more than a refinement whose extra precision
+ * the ramp doesn't support.
  */
 export function meltPeak(temperaturesC: number[], derivative: number[]): MeltPeak | null {
   const first = PEAK_EDGE_EXCLUDE;
