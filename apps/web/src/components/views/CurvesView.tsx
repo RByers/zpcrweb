@@ -13,6 +13,7 @@ import {
   wellLabel,
   type LedCurve,
   type MeltCurve,
+  type SampleType,
   type Zpcr,
   type TemperatureCurve,
 } from "@zpcrweb/core";
@@ -43,6 +44,7 @@ import { FluorBar, type FluorChip } from "../curves/FluorBar";
 import { SampleBar } from "../curves/SampleBar";
 import { useHoverCard, type HoverCardData, type HoverCardRow } from "../curves/HoverCard";
 import { WellMatrix } from "../curves/WellMatrix";
+import { WellTypeBar, type WellTypeGroup } from "../curves/WellTypeBar";
 import { CurveChart, type CqDragTarget } from "../curves/CurveChart";
 import { CurveTable } from "../curves/CurveTable";
 import { MeltChart } from "../curves/MeltChart";
@@ -60,8 +62,17 @@ import { Toggle } from "../Toggle";
 import { Switch } from "../Switch";
 import { ResetIcon } from "../ResetIcon";
 import { DownloadIcon } from "../DownloadIcon";
-import type { HighlightMatch, PlotCurve } from "../../lib/uplot/chart";
+import type { HighlightMatch, PlotCurve, PlotDarkCurve } from "../../lib/uplot/chart";
 import type { MeltHighlight, MeltPlotCurve } from "../../lib/uplot/meltChart";
+
+/**
+ * Stable "no dark curves" reference, for the same reason `CurveChart` keeps one for the factory
+ * overlay: `darkCurves` is in the chart's build-effect dependencies, so a fresh `[]` on every
+ * render tears the plot down and builds it again — which drops the cursor, the tooltip and any
+ * hover in progress. Harmless while nothing in this view re-rendered on a chart hover; not
+ * harmless now that hovering a curve marks its well in the rail.
+ */
+const NO_DARK_CURVES: PlotDarkCurve[] = [];
 
 interface Props {
   zpcr: Zpcr;
@@ -330,6 +341,84 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
     plateRows === 1 ? String(col + 1) : wellLabel(row, col);
   const isHoveredWell = (row: number, col: number) =>
     hoverHighlight?.kind === "wells" && hoverHighlight.labels.includes(cellLabel(row, col));
+
+  // The well the pointer is on *in the chart* (see `CurveChart`/`MeltChart`'s `onHoverWell`),
+  // which is a highlight the rail doesn't drive and so isn't in `hoverHighlight`.
+  const [hoveredChartWell, setHoveredChartWell] = useState<string | null>(null);
+
+  /** Display label → well key, over the plate's own shape, for turning a label-keyed highlight
+   * back into the keys the grid draws in. Built from `cellLabel` rather than core's
+   * `wellLabel()` for the single-row reason above. */
+  const wellKeyByLabel = useMemo(() => {
+    const m = new Map<string, string>();
+    const cols = plate?.columns ?? 12;
+    for (let r = 0; r < plateRows; r++)
+      for (let c = 0; c < cols; c++) m.set(cellLabel(r, c), wellKey(r, c));
+    return m;
+    // `cellLabel` is a pure function of `plateRows`, which is already a dependency.
+  }, [plateRows, plate?.columns]);
+
+  /**
+   * Wells the grid rings without the pointer being in it: whichever well or wells are highlighted
+   * anywhere else — a curve hovered on the chart, a curve or well hovered in the Threshold rail,
+   * a sample-type selector. A highlight that dims every other curve should also say *where* the
+   * surviving curves sit on the plate; that answer is a cell away and was being left unsaid.
+   */
+  const peekWells = useMemo(() => {
+    const labels =
+      hoverHighlight?.kind === "curve"
+        ? [hoverHighlight.label]
+        : hoverHighlight?.kind === "wells"
+          ? hoverHighlight.labels
+          : [];
+    const keys = new Set<string>();
+    for (const l of [...labels, hoveredChartWell]) {
+      const k = l == null ? undefined : wellKeyByLabel.get(l);
+      if (k) keys.add(k);
+    }
+    return keys;
+  }, [hoverHighlight, hoveredChartWell, wellKeyByLabel]);
+
+  /**
+   * The plate's sample types, each with the wells carrying it — the quick selectors in the Wells
+   * heading row ("turn the NTCs off"). Only types actually on the plate get a selector, in
+   * `SAMPLE_TYPE_META`'s own order so the row is stable as the file changes, and the whole bar
+   * disappears when there's no plate to type the wells by.
+   *
+   * Built here rather than in `WellTypeBar` because the labels have to be this plate's labels:
+   * a hover highlight speaks in display labels, which a single-row plate writes differently
+   * (see `cellLabel`).
+   */
+  const wellTypeGroups = useMemo<WellTypeGroup[]>(() => {
+    if (!wellTypes) return [];
+    const byType = new Map<SampleType, WellTypeGroup>();
+    const cols = plate?.columns ?? 12;
+    for (let r = 0; r < plateRows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const key = wellKey(r, c);
+        const type = wellTypes.get(key);
+        if (!type) continue;
+        let g = byType.get(type);
+        if (!g) byType.set(type, (g = { type, keys: [], labels: [] }));
+        g.keys.push(key);
+        g.labels.push(cellLabel(r, c));
+      }
+    }
+    return (Object.keys(SAMPLE_TYPE_META) as SampleType[])
+      .map((t) => byType.get(t))
+      .filter((g): g is WellTypeGroup => g !== undefined);
+    // `cellLabel` is a pure function of `plateRows`, already a dependency.
+  }, [wellTypes, plate?.columns, plateRows]);
+
+  /** Clicking a sample-type selector: all of that type's wells off if every one was on,
+   * otherwise all on — the same rule the grid's row/column headers follow. */
+  const toggleWellType = (g: WellTypeGroup) => {
+    const allOn = g.keys.every((k) => settings.enabledWells.has(k));
+    const next = new Set(settings.enabledWells);
+    for (const k of g.keys) (allOn ? next.delete(k) : next.add(k));
+    onChange({ enabledWells: next });
+  };
+
   const isHoveredChannel = (channel: number) =>
     hoverHighlight?.kind === "channel" && hoverHighlight.channel === channel;
   const isHoveredSample = (sample: string | undefined) =>
@@ -1260,6 +1349,15 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
         <div className="rail__section">
           <div className="rail__title">
             Wells
+            {/* Sample-type shortcuts sit in the heading, between the section's name and its
+                reset: they are the same selection the grid below holds, addressed a faster way. */}
+            <WellTypeBar
+              groups={wellTypeGroups}
+              enabled={settings.enabledWells}
+              onToggle={toggleWellType}
+              onSolo={(g) => soloWells(g.keys)}
+              onHover={(g) => setHoverHighlight(g ? { kind: "wells", labels: g.labels } : null)}
+            />
             <button
               className="rail__link rail__icon-btn"
               onClick={resetWells}
@@ -1278,6 +1376,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
             onHoverWells={(labels) => setHoverHighlight(labels ? { kind: "wells", labels } : null)}
             onSoloWells={soloWells}
             cardData={cardForWell}
+            peekWells={peekWells}
           />
         </div>
 
@@ -1673,6 +1772,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
               temperaturesC={melt.segment.temperaturesC}
               view={settings.meltView}
               highlight={meltHighlight}
+              onHoverWell={setHoveredChartWell}
             />
           </section>
         )
@@ -1692,7 +1792,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
         <section className="curves__plot">
           <CurveChart
             curves={plotCurves}
-            darkCurves={!calibrationOn && settings.showDark ? enabledDark : []}
+            darkCurves={!calibrationOn && settings.showDark ? enabledDark : NO_DARK_CURVES}
             aux={rightAxis}
             baseline="raw"
             curveView={settings.curveView}
@@ -1709,6 +1809,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
             // `channelAnalysis`) — so the handles are simply absent there.
             onCqDrag={calibrationOn ? dragCq : undefined}
             onCqDragEnd={endCqDrag}
+            onHoverWell={setHoveredChartWell}
           />
         </section>
       )}

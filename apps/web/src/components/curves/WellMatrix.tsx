@@ -35,6 +35,11 @@ interface Props {
   /** Hover-card content for a well's label (see {@link cellLabel}), or `null`/undefined to show
    * none. */
   cardData?: (label: string) => HoverCardData | null | undefined;
+  /** Wells to ring from outside the grid, by key — the highlight already running somewhere else
+   * ("this curve", "these wells"), shown here so a curve hovered on the chart or in the rail
+   * says *which well* it belongs to. Drawn with the grid's own hover cue, since it is the same
+   * statement about the same wells; unioned with whatever the pointer is over here. */
+  peekWells?: ReadonlySet<string>;
 }
 
 /** Cq at or below which a well's `+` is drawn at full strength. */
@@ -97,6 +102,7 @@ export function WellMatrix({
   onHoverWells,
   onSoloWells,
   cardData,
+  peekWells,
 }: Props) {
   const { show, hide, node } = useHoverCard(cardData ?? (() => null));
   const singleRow = rows === 1;
@@ -179,7 +185,11 @@ export function WellMatrix({
         return (
           <button
             key={`w${r}-${c}`}
-            className={"wm-cell" + (on ? " is-on" : "") + (peek?.has(key) ? " is-peek" : "")}
+            className={
+              "wm-cell" +
+              (on ? " is-on" : "") +
+              (peek?.has(key) || peekWells?.has(key) ? " is-peek" : "")
+            }
             style={
               meta
                 ? {

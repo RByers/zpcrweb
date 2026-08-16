@@ -2179,6 +2179,103 @@ async function wellHeaderChecks(chrome, origin) {
     `${await cellsOn()} wells on, expected ${grid.rows}`,
   );
 
+  // ---- Sample-type quick selectors (the Wells heading row) --------------------------------
+  // Back to the plate's own selection, so a type's wells are all on and clicking one is a
+  // subtraction with a known size.
+  // The Wells reset is an icon button, so it is found by its title rather than by `clickButton`,
+  // which matches on a label this one hasn't got.
+  await waitFor(() => cdp.eval(`!!document.querySelector('[title^="Reset to the wells present"]')`), {
+    what: "the Wells reset button",
+  });
+  await cdp.eval(`(document.querySelector('[title^="Reset to the wells present"]').click(), undefined)`);
+  await waitValue(cellsOn, (n) => n === grid.loaded, {
+    what: "the reset to restore the plate's wells",
+  });
+
+  /** Each selector's short code, how many wells it covers and how many of those are on — the
+   * last two off its own title, which is the only place the grouping is stated. */
+  const types = () =>
+    cdp.eval(`[...document.querySelectorAll(".welltype")].map((b) => {
+      const m = /(\\d+) wells? \\((\\d+) on\\)/.exec(b.title);
+      return { code: b.textContent.trim(), wells: Number(m?.[1] ?? -1), on: Number(m?.[2] ?? -1),
+               all: b.className.includes("is-on"), some: b.className.includes("is-some") };
+    })`);
+  const before = await types();
+  check(
+    "the Wells heading offers a selector per sample type on the plate",
+    before.length > 0 && before.every((t) => t.wells > 0),
+    before.map((t) => `${t.code}:${t.on}/${t.wells}`).join(" ") || "(none)",
+  );
+
+  // A type holding at least one *loaded* well — turning off a type whose wells are all off
+  // (the plate's 92 empty positions, say) would change neither the selection nor the curves.
+  const loadedType = before.findIndex((t) => t.on > 0);
+  const target = before[loadedType];
+  const typeBtn = `document.querySelectorAll(".welltype")[${loadedType}]`;
+  const onBefore = await cellsOn();
+  const curvesBefore = await curveCount();
+  await cdp.eval(`(${typeBtn}.click(), undefined)`);
+  await waitValue(cellsOn, (n) => n !== onBefore, { what: `the ${target.code} wells to turn off` });
+  const offWells = await cellsOn();
+  const offCurves = await curveCount();
+  check(
+    `clicking the ${target.code} selector turns off exactly that type's wells`,
+    offWells === onBefore - target.on && offCurves < curvesBefore,
+    `${onBefore} → ${offWells} wells (expected −${target.on}), ${curvesBefore} → ${offCurves} curves`,
+  );
+  check(
+    "…and the selector says so",
+    (await types())[loadedType].all === false,
+    JSON.stringify((await types())[loadedType]),
+  );
+
+  await cdp.eval(`(${typeBtn}.click(), undefined)`);
+  await waitValue(cellsOn, (n) => n !== offWells, { what: `the ${target.code} wells to come back` });
+  check(
+    "clicking it again turns them back on",
+    (await cellsOn()) === onBefore && (await curveCount()) === curvesBefore,
+    `${offWells} → ${await cellsOn()} wells, ${offCurves} → ${await curveCount()} curves`,
+  );
+
+  await hover(typeBtn);
+  const typePeek = await peeked();
+  await hover(null);
+  check(
+    `hovering the ${target.code} selector peeks at that type's wells`,
+    typePeek === target.wells && (await peeked()) === 0,
+    `${typePeek} cells marked, expected ${target.wells}`,
+  );
+
+  // ---- Hovering a curve marks its well ------------------------------------------------------
+  // A Cq ring is a point known to sit *on* a curve, which is what makes this a hover of a curve
+  // rather than of a patch of empty plot.
+  await waitFor(() => cdp.eval(`document.querySelectorAll(".u-over svg circle").length > 0`), {
+    what: "Cq rings",
+  });
+  const ring = await cdp.eval(`(() => {
+    const cs = [...document.querySelectorAll(".u-over svg circle")]
+      .map((c) => { const r = c.getBoundingClientRect();
+                    return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })
+      .sort((a, b) => a.y - b.y);
+    return cs[Math.floor(cs.length / 2)];
+  })()`);
+  await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", ...ring, buttons: 0 });
+  const ringPeek = await waitValue(peeked, (n) => n > 0, {
+    what: "the hovered curve's well to be marked",
+  });
+  const named = await cdp.eval(`(() => {
+    const tip = document.querySelector(".chart__tip strong")?.textContent.trim() ?? "";
+    const cell = document.querySelector(".wm-cell.is-peek")?.getAttribute("aria-label") ?? "";
+    return { tip, cell };
+  })()`);
+  check(
+    "hovering a curve marks its own well in the grid",
+    ringPeek === 1 && !!named.tip && named.cell.split(" ")[1] === named.tip,
+    `${ringPeek} cells marked; tooltip "${named.tip}", cell "${named.cell}"`,
+  );
+  await hover(null);
+  check("…and unmarks it on leaving", (await peeked()) === 0);
+
   cdp.close();
 }
 

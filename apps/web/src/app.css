@@ -2185,6 +2185,43 @@
   outline: 1px solid var(--ink-muted);
   outline-offset: 1px;
 }
+/* Sample-type quick selectors, in the Wells section's heading row (`WellTypeBar`). Sized to sit
+   inside that row's line rather than to be a bar of its own: the grid below is the control, these
+   are shortcuts into it. `--wt` is the type's own color from `SAMPLE_TYPE_META`, so a chip reads
+   as the cells it selects. Three states, matching the wells it covers — all on (filled), some on
+   (outlined) and none (muted) — since a type is rarely all-or-nothing once wells are picked by
+   hand. `margin-right: auto` pushes the reset button to the far end of the row, where it sits on
+   every other section. */
+.welltypes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin-right: auto;
+}
+.welltype {
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--ink-muted);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  line-height: 1;
+  padding: 3px 4px;
+  cursor: pointer;
+}
+.welltype:hover {
+  border-color: var(--wt);
+  color: var(--wt);
+}
+.welltype.is-some {
+  border-color: color-mix(in srgb, var(--wt) 55%, transparent);
+  color: var(--wt);
+}
+.welltype.is-on {
+  border-color: var(--wt);
+  background: color-mix(in srgb, var(--wt) 22%, transparent);
+  color: var(--ink);
+}
 .wm-cell.is-on {
   background: var(--neon-cyan-dim);
   border-color: var(--neon-cyan);

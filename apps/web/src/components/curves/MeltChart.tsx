@@ -17,6 +17,10 @@ interface Props {
   temperaturesC: number[];
   view: MeltView;
   highlight?: MeltHighlight | null;
+  /** The well whose curve the pointer is on, by display label (`null` on leave) — the melt
+   * chart's half of `CurveChart`'s `onHoverWell`, so a hovered melt curve rings its cell in the
+   * rail's well grid exactly as an amplification curve does. */
+  onHoverWell?: (label: string | null) => void;
 }
 
 /**
@@ -25,11 +29,26 @@ interface Props {
  * melting temperature is where the curve is steepest, not a value anyone sets, so there is nothing
  * to drag it to.
  */
-export function MeltChart({ curves, temperaturesC, view, highlight = null }: Props) {
+export function MeltChart({
+  curves,
+  temperaturesC,
+  view,
+  highlight = null,
+  onHoverWell,
+}: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const plotRef = useRef<uPlot | null>(null);
   const metaRef = useRef<MeltSeriesMeta[]>([]);
   const [tip, setTip] = useState<MeltTooltipData | null>(null);
+  // See `CurveChart`'s copy: the hovered well is the tooltip's own well, reported through a ref
+  // so a caller's fresh closure doesn't re-fire the effect, and cleared on unmount.
+  const onHoverWellRef = useRef(onHoverWell);
+  onHoverWellRef.current = onHoverWell;
+  const hoveredWell = tip?.wellLabel ?? null;
+  useEffect(() => {
+    onHoverWellRef.current?.(hoveredWell);
+  }, [hoveredWell]);
+  useEffect(() => () => onHoverWellRef.current?.(null), []);
   // Kept current on every render so the build effect can apply whatever highlight is active now
   // without depending on it — that dependency would rebuild the whole plot on every hover.
   const highlightRef = useRef(highlight);

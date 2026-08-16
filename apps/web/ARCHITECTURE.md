@@ -2070,7 +2070,16 @@ only pieces the two views share.
   plate definition is available (password permitting), each cell is tinted by
   `SAMPLE_TYPE_META` (see **Plates** below) so selection state reads alongside sample type; a
   reset button next to the "Wells" label restores the selection to exactly the plate's
-  non-empty wells. The matrix sits directly under the View toggle, above the channel/target bar:
+  non-empty wells. Between the label and that reset sit the **sample-type quick selectors**
+  (`components/curves/WellTypeBar.tsx`) — one small chip per sample type the plate actually
+  uses, in `SAMPLE_TYPE_META`'s own order and its own colors, turning every well of that type
+  on or off at once ("drop the NTCs"). Sample type follows neither rows nor columns, so it is
+  the one common selection the grid alone can only express well by well. A chip shows the state
+  of the wells it covers rather than a state of its own — all on, some on, none — since the two
+  drift apart the moment wells are picked by hand; click toggles (all off if all were on, else
+  all on), double-click isolates, and hover peeks at exactly the wells the click would move.
+  They are deliberately not `ChipBar` chips: those are a plotting dimension with an enabled set
+  of their own, while these are a shortcut into the well selection the grid below owns. The matrix sits directly under the View toggle, above the channel/target bar:
   besides being the selection reached for first, it doubles as a positives map — a well holding
   any curve the run's Cq table gave a Cq is marked with a `+` in its own sample-type color
   (`WellMatrix`'s `positiveWells`), so a positive NTC reads red. The mark is a drawn SVG cross,
@@ -2235,7 +2244,18 @@ only pieces the two views share.
   `"wells"` carries a *list* of well labels, so one hovered cell and a hovered row/column header
   take the identical path, differing only in how many labels they send — the
   former keyed by the well's `PlotCurve.sample` (which
-  `CurvesView` fills in from the `wellSample` map alongside every other per-curve field). Each of
+  `CurvesView` fills in from the `wellSample` map alongside every other per-curve field).
+  The **highlight also runs the other way**: whichever wells are highlighted anywhere — a curve
+  hovered on the chart or the melt chart (`CurveChart`/`MeltChart`'s `onHoverWell`, taken off
+  the tooltip's own hit test, so the ringed cell is by construction the well the tooltip names),
+  a curve or well hovered in the Threshold rail, a sample-type selector — are ringed in the well
+  grid with its own hover cue (`WellMatrix`'s `peekWells`). Dimming every other curve says
+  *which* curve; the ring says *where on the plate* it sits, an answer that was one cell away
+  and left unsaid. That made a chart hover re-render `CurvesView` for the first time, which
+  exposed a latent bug: `CurveChart`'s build effect depends on `darkCurves`, and the view passed
+  a fresh `[]` for it on every render, so the plot was torn down and rebuilt each time — dropping
+  the very tooltip the hover had just raised. Hence `NO_DARK_CURVES`, the same stable-empty-array
+  trick `CurveChart` already keeps for the factory overlay. Each of
   `ChannelBar`/`FluorBar`/`WellMatrix`/`SampleBar` also renders a small floating hover card (see
   `components/curves/HoverCard.tsx`'s `useHoverCard` hook — a fixed-position portal to
   `document.body`, positioned from the hovered element's own bounding rect, mirroring `FileBar`'s

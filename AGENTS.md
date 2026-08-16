@@ -212,6 +212,9 @@ touch `state/urlHash.ts`, `state/useHeaderFit.ts`, `state/pltdPassword.ts`,
 `components/curves/ChipBar.tsx`, `components/curves/CurveTable.tsx`, `components/curves/CqRange.tsx`,
 `components/curves/CurveChart.tsx` or `components/curves/ThresholdSection.tsx` (or `lib/uplot/chart.ts`'s
 Cq markers — the rings are drag handles for a curve's threshold),
+`components/curves/WellMatrix.tsx` or `components/curves/WellTypeBar.tsx` (the well grid, its
+sample-type quick selectors, and the ring a hovered curve puts on its own well — see
+`CurveChart`/`MeltChart`'s `onHoverWell`),
 `components/instrument/InstrumentRun.tsx`, `state/useRunStaging.ts`, `state/useRunNaming.ts`,
 `components/instrument/InstrumentRail.tsx`, `state/fileContent.ts` (or `state/db.ts`'s
 `StoredFile`, or `useZpcrStore.ts`'s `addRunArchive`),

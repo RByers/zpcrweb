@@ -70,6 +70,16 @@ interface Props {
   /** The drag is over — released, or ended with Escape (which stops the drag where it is; the
    * threshold it set is an override like any other, undone with the row's own reset button). */
   onCqDragEnd?: () => void;
+  /**
+   * The well whose curve the pointer is on (`null` when it leaves, or is over an overlay that
+   * belongs to no well), by display label. uPlot's own cursor focus already dims the other
+   * curves; this reports the same hover outward so the rail can say which well it is — the
+   * Curves view rings that cell in the well grid.
+   *
+   * Derived from the tooltip's own hit test rather than from a second one, so the well the grid
+   * rings is by construction the well the tooltip names.
+   */
+  onHoverWell?: (label: string | null) => void;
 }
 
 /** Which curve a dragged Cq ring belongs to — enough to key a per-curve threshold override
@@ -101,6 +111,7 @@ export function CurveChart({
   onCqDragStart,
   onCqDrag,
   onCqDragEnd,
+  onHoverWell,
 }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const plotRef = useRef<uPlot | null>(null);
@@ -108,6 +119,18 @@ export function CurveChart({
   const cqMarkersRef = useRef<CqMarker[]>([]);
   const thresholdLineStateRef = useRef<ThresholdLineState | null>(null);
   const [tip, setTip] = useState<TooltipData | null>(null);
+  // Which well the pointer is on, reported outward (see `onHoverWell`). Read off the tooltip's
+  // own hit test: for a well series its `label` is the well's display label, and every other
+  // series kind (dark, factory, aux) belongs to no single well. Through a ref so a caller that
+  // passes a fresh closure each render doesn't re-fire the effect.
+  const onHoverWellRef = useRef(onHoverWell);
+  onHoverWellRef.current = onHoverWell;
+  const hoveredWell = tip?.kind === "well" ? tip.label : null;
+  useEffect(() => {
+    onHoverWellRef.current?.(hoveredWell);
+  }, [hoveredWell]);
+  // Leaving the view (or switching to the melt chart) mid-hover must not strand the highlight on.
+  useEffect(() => () => onHoverWellRef.current?.(null), []);
   // Kept current on every render (not just inside an effect) so the build effect below can
   // apply whatever highlight is active right now without depending on `highlight` itself —
   // that dependency would tear down and rebuild the whole uPlot instance on every hover.
