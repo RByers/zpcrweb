@@ -307,6 +307,26 @@ export interface WellCurve {
   /** This curve's baseline/threshold/Cq as its source file reports them, when it carries its
    * own — see {@link FileAnalysis}. Absent for `.zpcr`/`.pcrd`, which carry no such thing. */
   fileAnalysis?: FileAnalysis;
+  /**
+   * The temperature each point was read at, °C — aligned index-for-index with {@link mean}, and
+   * shared by every curve of one `curves()` call the way {@link cycles} is. Undefined when the
+   * source states no per-point temperature.
+   *
+   * This is what makes a **melt curve** expressible in the same shape as an amplification one: a
+   * melt is a plate-read step whose reads sweep temperature rather than repeating one (`melt.md`
+   * §2), so its x axis lives here while {@link mean} stays where it always was.
+   */
+  temperaturesC?: number[];
+  /**
+   * −dF/dT per °C as the **source itself** reports it, for the rare format that stores the melt
+   * derivative rather than only the fluorescence it is taken from (a Biomeme melt export —
+   * `biomeme.md` §5). Undefined for every other source, and for a non-melt run.
+   *
+   * **No consumer should branch on this.** `computeMeltAnalysis` reads it where it is present and
+   * derives it where it isn't, so everything downstream sees one {@link MeltCurve.derivative} and
+   * one Tm, whichever instrument the run came off (`melt.md` §6).
+   */
+  meltDerivativePerC?: number[];
 }
 
 // Re-exported so the Zpcr interface can reference them without a circular import.

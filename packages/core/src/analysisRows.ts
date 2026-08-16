@@ -8,6 +8,7 @@
  */
 
 import { safeFileBase } from "./fileName.js";
+import type { MeltAnalysis } from "./meltAnalysis.js";
 import type { SampleType } from "./pltd.js";
 import { curveKey, formatBaselineFormula, type RunAnalysis } from "./runAnalysis.js";
 
@@ -141,4 +142,72 @@ export function analysisCsv(rows: AnalysisRow[]): string {
 export function analysisCsvFilename(dataFile: string): string {
   const runName = safeFileBase(dataFile.replace(/\.(zpcr|pcrd)$/i, "")) || "run";
   return `${runName}_analysis.csv`;
+}
+
+// ---------------------------------------------------------------------------
+// The melt equivalent (`melt.md`)
+// ---------------------------------------------------------------------------
+
+/** One row of a melt step's results: a well, a channel and the melting temperature it gave. */
+export interface MeltRow {
+  row: number;
+  col: number;
+  wellLabel: string;
+  /** Optical channel — melt analysis stays in channel space, so there is no fluor or target. */
+  channel: number;
+  /** Melting temperature, °C, or null where no peak stood clear of the noise. */
+  tmC: number | null;
+  /** The derivative's height at the peak, or null when there is no Tm. */
+  peakHeight: number | null;
+}
+
+/**
+ * Whether a given well/channel curve should appear in the melt table — the melt counterpart of
+ * {@link CurveVisible}, keyed on the channel because a melt is analysed in channel space.
+ */
+export type MeltCurveVisible = (row: number, col: number, channel: number) => boolean;
+
+/**
+ * Rows for every melt curve `visible` lets through, sorted by plate position then channel.
+ *
+ * Unlike {@link buildAnalysisRows} this needs no plate: a melt is read per channel, so a run whose
+ * plate definition is missing or encrypted still tabulates completely. Curves with no Tm are kept
+ * rather than dropped — "this well melted at nothing" is a result, and dropping it would silently
+ * shorten the table.
+ */
+export function buildMeltRows(analysis: MeltAnalysis, visible: MeltCurveVisible): MeltRow[] {
+  const out: MeltRow[] = [];
+  for (const curve of analysis.curves) {
+    if (curve.isReference) continue;
+    if (!visible(curve.row, curve.col, curve.channel)) continue;
+    out.push({
+      row: curve.row,
+      col: curve.col,
+      wellLabel: curve.wellLabel,
+      channel: curve.channel,
+      tmC: curve.tmC,
+      peakHeight: curve.peakHeight,
+    });
+  }
+  return out.sort((a, b) => a.row - b.row || a.col - b.col || a.channel - b.channel);
+}
+
+/** The melt table as CSV — the same columns in the same order. */
+export function meltCsv(rows: MeltRow[]): string {
+  let csv = csvRow(["well", "channel", "tm", "peakHeight"]);
+  for (const r of rows) {
+    csv += csvRow([
+      r.wellLabel,
+      channelLabel(r.channel),
+      r.tmC != null ? r.tmC.toFixed(2) : "",
+      r.peakHeight != null ? r.peakHeight.toFixed(1) : "",
+    ]);
+  }
+  return csv;
+}
+
+/** `<run name>_melt.csv` — the same `dataFile`-derived naming {@link analysisCsvFilename} uses. */
+export function meltCsvFilename(dataFile: string): string {
+  const runName = safeFileBase(dataFile.replace(/\.(zpcr|pcrd)$/i, "")) || "run";
+  return `${runName}_melt.csv`;
 }

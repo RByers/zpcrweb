@@ -81,7 +81,17 @@ interface BiomemeTarget {
    * read back, so it's not what a "channel" means here. */
   emissionColor?: string;
   rawData?: number[];
+  /**
+   * **Two different things, depending on the run.** On an ordinary run this is the device's own
+   * baseline-corrected amplification curve (§2). On a **melt** run it is the device's melt
+   * derivative — smoothed −ΔF per temperature *step*, not per °C — and there is no baseline
+   * anywhere in the file to correct against (§5).
+   */
   baselineData?: number[];
+  /** Melt runs only: the temperature of each `rawData` point, °C. Empty on every other run. */
+  meltTemperatures?: number[];
+  /** Melt runs only: the device's own called melt peak, °C. `0` means it called none. */
+  peak?: number | null;
   details?: BiomemeTargetDetails;
 }
 
@@ -92,6 +102,8 @@ interface BiomemeRun {
   date?: string;
   device?: string;
   location?: string;
+  /** `"melt"` for a melt run, `"qualitative"`/… otherwise. Corroborates {@link meltTemperatures}. */
+  runType?: string;
   targets?: BiomemeTarget[];
 }
 
@@ -224,11 +236,55 @@ export function parseBiomeme(data: Uint8Array | ArrayBuffer): Zpcr {
     col: colOfWellNumber.get(t.details?.wellNumber ?? 0) ?? 0,
   });
 
+  /**
+   * The device's melt derivative, converted to the per-°C rate everything else means by −dF/dT.
+   *
+   * The file states −ΔF per temperature *step* — measured: its own values are half the per-degree
+   * rate on a run stepping 0.5 °C — so the conversion is a division by each point's own step. Done
+   * here, once, at the format boundary, so no consumer has to know the file's convention
+   * (`biomeme.md` §5).
+   */
+  function perDegreeDerivative(temperaturesC: number[], perStep: number[]): number[] | undefined {
+    if (perStep.length !== temperaturesC.length || perStep.length < 2) return undefined;
+    return perStep.map((v, i) => {
+      // Each point's own spacing rather than a run-wide constant: the two melt protocols seen step
+      // 0.5 °C and 1.0 °C, and nothing promises a uniform ramp.
+      const prev = temperaturesC[Math.max(0, i - 1)] as number;
+      const next = temperaturesC[Math.min(temperaturesC.length - 1, i)] as number;
+      const span = i === 0 ? (temperaturesC[1] as number) - (temperaturesC[0] as number) : next - prev;
+      return span === 0 ? 0 : v / span;
+    });
+  }
+
   const curves: WellCurve[] = targets.map((t) => {
     const { row, col } = positionOf(t);
     const raw = t.rawData ?? [];
-    const corrected = t.baselineData ?? raw.map(() => 0);
     const cycles = raw.map((_, i) => i + 1);
+
+    // A melt run is a different measurement wearing the same JSON (`biomeme.md` §5): `rawData` is
+    // fluorescence against `meltTemperatures` rather than against cycles, and `baselineData` holds
+    // the device's melt derivative rather than a baseline-corrected curve. None of the
+    // amplification fields mean anything on one — `cq`, `threshold` and the background range are
+    // all zero — so no `fileAnalysis` is built, rather than one made of zeroes.
+    const meltTemperaturesC = t.meltTemperatures ?? [];
+    if (meltTemperaturesC.length === raw.length && meltTemperaturesC.length > 0) {
+      return {
+        channel: channelOfFluor.get(t.fluorophore ?? "") ?? 0,
+        row,
+        col,
+        wellLabel: singleRowAwareLabel(row, col, rows),
+        isReference: false,
+        cycles,
+        mean: raw,
+        std: raw.map(() => 0),
+        min: raw,
+        max: raw,
+        temperaturesC: meltTemperaturesC,
+        meltDerivativePerC: perDegreeDerivative(meltTemperaturesC, t.baselineData ?? []),
+      };
+    }
+
+    const corrected = t.baselineData ?? raw.map(() => 0);
     const lastCycle = cycles.length > 0 ? (cycles.at(-1) as number) : 1;
     const region: BaselineRegion = {
       beginCycle: Math.max(1, Math.min(t.details?.backgroundLeft ?? 1, lastCycle)),

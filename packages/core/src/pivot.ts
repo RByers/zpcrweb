@@ -10,6 +10,7 @@ import type {
   WellCurve,
 } from "./types.js";
 import { CHANNELS, COLUMNS, ROWS } from "./plateread.js";
+import { readTemperatureAxis } from "./melt.js";
 import { parseScanMask } from "./runDefinition.js";
 
 /**
@@ -127,6 +128,10 @@ export function toCurves(
       ? allReads
       : allReads.filter((r) => r.step === options.step);
   const cycles = reads.map((r) => r.cycle);
+  // The temperature each point was read at — one array, shared by every curve of this call the
+  // way `cycles` is, so filling it in costs one array rather than one per well. No melt judgement
+  // here: it is a fact about the reads, and `melt.ts` is what decides whether it is a ramp.
+  const temperaturesC = readTemperatureAxis(reads)?.temperaturesC;
 
   const channels =
     options.channel === undefined
@@ -161,6 +166,7 @@ export function toCurves(
           std,
           min,
           max,
+          ...(temperaturesC ? { temperaturesC } : {}),
         });
       }
     }

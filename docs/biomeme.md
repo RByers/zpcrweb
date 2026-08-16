@@ -15,6 +15,7 @@ Implemented by `packages/core/src/biomeme.ts`, entry point `parseBiomeme(bytes)`
 ```
 {
   id, name, protocol, date, device, location,   // run identity/metadata
+  runType,                                      // "melt" for a melt run — see §5
   targets: [
     {
       well,                    // wellNumber as a string, e.g. "3"
@@ -25,6 +26,9 @@ Implemented by `packages/core/src/biomeme.ts`, entry point `parseBiomeme(bytes)`
       endRfu,                    // end-point RFU
       rawData: [...],            // raw fluorescence, one value per cycle
       baselineData: [...],       // the device's own baseline-corrected curve — see §2
+                                 //   (on a melt run, its derivative instead — §5)
+      meltTemperatures: [...],   // melt runs only: °C per rawData point — §5; [] otherwise
+      peak,                      // melt runs only: the device's called Tm, °C; null otherwise
       details: {
         strip,                   // tube strip letter, e.g. "A" (informational only — see below)
         wellNumber,               // 0-based position, numbered across all strips
@@ -47,7 +51,7 @@ One `targets[]` entry is one (well, fluorophore) pair — the same granularity a
 `RunMetadata.experimentName`, and the app shows it rather than deriving a name from the file
 name, which is what a `.zpcr`/`.pcrd` has to fall back on (`zpcrweb-json.md` §1.1). `date` is an
 ISO-8601 instant and becomes `runStartDate`; `protocol` is the protocol's name, not a step list —
-there is none to decode (§4). A name typed for a Biomeme run lasts the session only: the run is
+there is none to decode (§6). A name typed for a Biomeme run lasts the session only: the run is
 one JSON document, with no archive to hold a `zpcrweb.json`.
 
 **Wells are one row, not a grid.** A handheld device's tube positions are a single strip of
@@ -151,7 +155,41 @@ The divergence is large enough that neither number should be presented as "the" 
 saying which algorithm produced it — the motivation for the web app's file/computed toggle
 (`apps/web/ARCHITECTURE.md`'s "File vs. computed analysis") rather than picking one silently.
 
-## 4. What's absent
+## 5. Melt runs
+
+A `.bmrun` whose top-level **`runType` is `"melt"`** is a different measurement wearing the same
+JSON, and three fields change meaning. The device runs a melt as a run of its own — there is no
+amplification data in the file at all.
+
+| Field | On an ordinary run | On a melt run |
+|---|---|---|
+| `rawData` | fluorescence per cycle | fluorescence per **temperature** |
+| `meltTemperatures` | `[]` | °C, one per `rawData` point |
+| `baselineData` | the baseline-corrected curve (§2) | the device's **melt derivative** |
+| `peak` | `null` | the device's called melt peak, °C (`0` = none) |
+| `cq`, `threshold`, `details.background*`, `details.baselineType` | real | all `0`/`null` |
+
+Three things are worth knowing before touching this:
+
+- **`baselineData` is a derivative, and it is per temperature *step*, not per °C.** Measured on
+  `samples/biomeme-2025-10-15-melt.bmrun`: it tracks a 3-point centred moving average of the
+  negative first difference of `rawData` to within 0.5 RFU on a curve peaking at 55, its `argmax`
+  lands exactly on the file's own `peak`, and its magnitude is half the per-degree rate on a run
+  stepping 0.5 °C. `parseBiomeme` divides by each point's own step to get the per-°C rate the rest
+  of this project means by −dF/dT, and puts it on `WellCurve.meltDerivativePerC`
+  (`melt.md` §6). `endRfu` is simply its last value, which is not an amplification endpoint.
+- **The step size is per run, not fixed.** The two melt runs seen step 0.5 °C (60 → 95, 71 points)
+  and 1.0 °C (70 → 90, 21 points). Read it from `meltTemperatures`; never assume it. The array is
+  byte-identical on every target — it is a run-level axis duplicated per target.
+- **No `FileAnalysis` is built for a melt run.** Its amplification fields are all zero, and a
+  `FileAnalysis` made of those is a degenerate one-cycle baseline region — which is exactly what
+  this used to produce, alongside presenting the derivative as a baseline-corrected curve.
+
+`meltTemperatures.length > 0` is what `parseBiomeme` actually branches on, `runType` being
+corroboration; the two agree on all four `.bmrun` files this project has seen. An ordinary run
+carries both keys with empty/`null` values, so their presence alone says nothing.
+
+## 6. What's absent
 
 No `.Dcal` calibration (there is no channel mixing to calibrate against — see `dyeSpace`
 above), no `.prcl`/protocol step list (only the protocol's name), no reference row, no

@@ -43,6 +43,23 @@ export function readGradientBytes(): Uint8Array {
 }
 
 /**
+ * A committed run whose second plate-read step is a **melt curve**: 40 amplification reads at
+ * 60 °C, then 61 reads ramping 65 → 95 °C in 0.5 °C steps (`melt.md` §2). Its `.prcl` is
+ * encrypted and its protocol text carries no `MELT` directive, so it is also the case that proves
+ * melt detection needs neither.
+ */
+export const MELT_SAMPLE_PATH = resolve(
+  here,
+  "../../../samples/20230829_135443_CT019138_SINGLE_STEP_.zpcr",
+);
+
+/** Raw bytes of the melt-curve sample. */
+export function readMeltBytes(): Uint8Array {
+  const buf = readFileSync(MELT_SAMPLE_PATH);
+  return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
+}
+
+/**
  * A committed **standalone** `.pltd` — a plate definition saved on its own, not inside a
  * `.zpcr`. Method-9 (DEFLATE64) and 5 dyes, so it also covers the compression variant and the
  * multi-dye layout the in-archive samples don't. Its decrypted plaintext sits beside it as

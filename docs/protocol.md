@@ -294,6 +294,13 @@ it:
 The compact `MELT` form (§3.2) says the same thing in one directive with the end temperature
 explicit. No carrier here contains one.
 
+> **Recognizing a melt in the *data* is a separate question, answered separately.**
+> [`melt.md`](./melt.md) §2 detects a melt from the plate reads themselves — a step whose reads
+> sweep temperature — rather than from this idiom. Deliberately: the idiom needs a mapping from a
+> `.Plateread`'s `STEP` field to the step numbering above, which `melt.md` §2.1 measures and finds
+> is *not* the identity, and a run's `.prcl` (which states a `MeltCurveStep` outright) is usually
+> encrypted. This section stays the authority on what the instrument was *told* to do.
+
 ## 7. Delivering a protocol over USB
 
 The instrument does not read a `.prcl`. A protocol is **typed at it, one directive per command

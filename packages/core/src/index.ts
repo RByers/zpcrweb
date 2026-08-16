@@ -261,8 +261,32 @@ export {
   buildAnalysisRows,
   analysisCsv,
   analysisCsvFilename,
+  buildMeltRows,
+  meltCsv,
+  meltCsvFilename,
   UNKNOWN_CHANNEL_LABEL,
 } from "./analysisRows.js";
+export type { MeltRow, MeltCurveVisible } from "./analysisRows.js";
+export {
+  meltSegments,
+  meltSegmentFor,
+  meltSegmentFromAxis,
+  readTemperatureAxis,
+  MELT_MIN_POINTS,
+  MELT_MIN_SPAN_C,
+  MELT_MIN_INCREMENT_C,
+} from "./melt.js";
+export type { MeltSegment, MeltAxisSource } from "./melt.js";
+export {
+  computeMeltAnalysis,
+  computeMeltAnalysisFor,
+  meltDerivative,
+  meltPeak,
+  hasMeltSignal,
+  savitzkyGolay5,
+  MELT_MIN_SIGNAL_FRACTION,
+} from "./meltAnalysis.js";
+export type { MeltAnalysis, MeltCurve, MeltAnalysisOptions, MeltPeak } from "./meltAnalysis.js";
 
 export type {
   Zpcr,
