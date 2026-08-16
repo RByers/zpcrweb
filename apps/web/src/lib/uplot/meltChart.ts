@@ -98,6 +98,13 @@ export function buildMeltChart(cfg: BuildMeltChartConfig): {
       label: `${plot.curve.wellLabel} · ${channelLabel(plot.curve.channel)}`,
       stroke: color,
       width: 1,
+      // uPlot draws a marker on every reading by default once the points are far enough apart,
+      // and a melt's 61 of them clear that threshold easily — which put a dot on every sample of
+      // every curve. The Curves chart hides them on every series it draws and this matches it.
+      // (`calChart.ts` is the one chart that shows them, because a calibration curve is four
+      // measured knots and which four they are is the point; a 61-point ramp reads as a curve.)
+      // The cursor's own hover point is a separate thing and stays — see `cursor` below.
+      points: { show: false },
     });
   }
 
