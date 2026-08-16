@@ -930,9 +930,6 @@ export function App() {
             instrument={instrument}
             runWatch={runWatch}
             onStartExperiment={startExperiment}
-            // Nothing to pass: the experiment that was started is the selected file, so its
-            // Overview is already pointed at it (`instrumentExperiment`).
-            onStarted={() => store.setView("overview")}
             onCloneExperiment={cloneExperiment}
           />
         ) : view === "files" ? (

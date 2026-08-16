@@ -126,7 +126,6 @@ export function InstrumentRail({
   plan,
   runWatch,
   onStart,
-  onStarted,
 }: {
   instrument: CfxDeviceHandle;
   /** The experiment the active file is, or null when it isn't one (`InstrumentView`). */
@@ -141,8 +140,6 @@ export function InstrumentRail({
    * named explicitly rather than taken from the app's selection, which this view no longer follows.
    */
   onStart: (plan: RunPlan, fileName: string) => Promise<void> | void;
-  /** The run has been sent — go show the file it is now writing itself into (`InstrumentView`). */
-  onStarted: () => void;
 }) {
   const { connection, info, status, rtStatus, busy, lastAction, runProgress, runPending } = instrument;
   const connected = connection === "connected";
@@ -256,11 +253,10 @@ export function InstrumentRail({
     const result = await instrument.startRun(plan);
     const notes = result ? result.uploadErrors : null;
     setStartNote(notes);
-    // The run is under way, so the thing worth looking at is the file it is filling in — its
-    // Overview, which carries the "still going" banner and every result as it arrives. Handing
-    // over happens *after* the send rather than on the click, so that a deposit with something to
-    // say keeps us here to say it: `startNote` lives in this rail and would go with it.
-    if (!notes || notes.length === 0) onStarted();
+    // Stay on this tab. The run is under way and this view is where it is watched from — the rail
+    // shows the instrument's own progress, and anything the deposit had to say (`startNote`) is
+    // here. The started experiment is still the selected file, so its Overview is one click away
+    // whenever the user wants it.
   };
 
   return (

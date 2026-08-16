@@ -1070,11 +1070,11 @@ tabs is stated on each end rather than left to be discovered:
   the "Experiment parts" cards (`OverviewView`'s `ReadyToRun`) whose "Instrument tab" is a link to
   that tab. A plate is deliberately not one of its conditions — it is optional, and an experiment
   without one still runs (it just labels nothing).
-- The Instrument tab hands back the other way: the click on Start switches to the started
-  experiment's Overview, which is where the "still going" banner and the arriving results are. The
-  switch happens after the run has been *sent*, not on the click, and not at all when the deposit
-  had something to report — that report lives in the rail (`InstrumentRail`'s `startNote`) and
-  would go with the view.
+- The Instrument tab does **not** hand back: starting a run leaves the user on Instrument, which is
+  where the run is watched from — the rail carries the instrument's own progress, and whatever the
+  deposit had to say (`InstrumentRail`'s `startNote`) is there too. The started experiment stays the
+  selected file, so its Overview — the "still going" banner and the arriving results — is one tab
+  click away whenever it is wanted.
 
 ### Closing an edited file
 
