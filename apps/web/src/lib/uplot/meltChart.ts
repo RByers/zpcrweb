@@ -193,6 +193,81 @@ export function applyMeltHighlight(
  */
 const MAX_TM_MARKERS = 12;
 
+/** Label geometry, in CSS pixels: 11px monospace advance, line height, and the gap to the peak. */
+const LABEL_CHAR_W = 6.6;
+const LABEL_LINE_H = 13;
+const LABEL_PEAK_GAP = 6;
+
+interface LabelBox {
+  left: number;
+  right: number;
+  y: number;
+}
+
+/**
+ * The plotted value at a called melting temperature.
+ *
+ * A Tm is interpolated between two readings (`melt.md` §5), so it rarely lands on one — this
+ * interpolates the plotted curve the same linear way, which is also the way uPlot draws the
+ * segment, so the returned point sits exactly on the line as displayed. Null when the temperature
+ * is outside the ramp, or the readings either side of it are missing.
+ */
+function valueAtTemperature(
+  temperaturesC: number[],
+  values: number[],
+  tm: number,
+): number | null {
+  for (let i = 1; i < temperaturesC.length; i++) {
+    const t0 = temperaturesC[i - 1]!;
+    const t1 = temperaturesC[i]!;
+    if (tm < Math.min(t0, t1) || tm > Math.max(t0, t1)) continue;
+    const v0 = values[i - 1];
+    const v1 = values[i];
+    if (v0 == null || v1 == null || Number.isNaN(v0) || Number.isNaN(v1)) return null;
+    const span = t1 - t0;
+    return span === 0 ? v0 : v0 + ((tm - t0) / span) * (v1 - v0);
+  }
+  return null;
+}
+
+/**
+ * Where to draw one Tm label: just above the peak it names, which is what separates labels that
+ * a shared top edge used to stack on top of each other — two melts a fraction of a degree apart
+ * are still different heights.
+ *
+ * Peaks of near-equal height put their labels back on the same line, so a label that would collide
+ * with one already placed steps up a line at a time until it clears (and back down if that runs it
+ * off the top of the plot). Only labels whose x ranges actually overlap are considered.
+ */
+function placeLabel(
+  placed: LabelBox[],
+  left: number,
+  width: number,
+  peakY: number,
+  height: number,
+): number {
+  const right = left + width;
+  const min = LABEL_LINE_H;
+  const max = height - 2;
+  const clamp = (y: number) => Math.max(min, Math.min(max, y));
+  const hits = (y: number) =>
+    placed.some(
+      (p) => p.left < right && left < p.right && Math.abs(p.y - y) < LABEL_LINE_H,
+    );
+
+  // A peak off the top of the y range, or one whose value couldn't be read, falls back to the
+  // top edge the labels used to share.
+  let y = clamp(Number.isFinite(peakY) ? peakY - LABEL_PEAK_GAP : min);
+  const start = y;
+  while (hits(y) && y - LABEL_LINE_H >= min) y -= LABEL_LINE_H;
+  if (hits(y)) {
+    y = start;
+    while (hits(y) && y + LABEL_LINE_H <= max) y += LABEL_LINE_H;
+  }
+  placed.push({ left, right, y });
+  return y;
+}
+
 function meltOverlayPlugin(
   meta: MeltSeriesMeta[],
   temperaturesC: number[],
@@ -228,6 +303,9 @@ function meltOverlayPlugin(
         if (called.length === 0 || called.length > MAX_TM_MARKERS) return;
         const height = u.bbox.height / devicePixelRatio;
         const width = u.bbox.width / devicePixelRatio;
+        // Labels are placed at the peak each marker names, and nudged apart only where two of
+        // them would actually overlap — see `placeLabel`.
+        const placed: LabelBox[] = [];
         for (const m of called) {
           const tm = m.plot.curve.tmC as number;
           const x = u.valToPos(tm, "x");
@@ -242,17 +320,23 @@ function meltOverlayPlugin(
           line.setAttribute("stroke-dasharray", TM_DASH);
           line.setAttribute("opacity", "0.7");
           const label = document.createElementNS(SVG_NS, "text");
+          const text = `${tm.toFixed(1)} °C`;
           const flip = x > width - 56;
+          const textWidth = text.length * LABEL_CHAR_W;
+          const left = flip ? x - 4 - textWidth : x + 4;
+          const peak = valueAtTemperature(temperaturesC, m.values, tm);
+          const peakY = peak == null ? NaN : u.valToPos(peak, "y");
+          const y = placeLabel(placed, left, textWidth, peakY, height);
           label.setAttribute("x", String(x + (flip ? -4 : 4)));
           label.setAttribute("text-anchor", flip ? "end" : "start");
-          label.setAttribute("y", "14");
+          label.setAttribute("y", String(y));
           label.setAttribute("font-size", "11");
           label.setAttribute("font-family", "ui-monospace, monospace");
           label.setAttribute("fill", TM_COLOR);
           label.setAttribute("paint-order", "stroke");
           label.setAttribute("stroke", "#0b0d12");
           label.setAttribute("stroke-width", "3");
-          label.textContent = `${tm.toFixed(1)} °C`;
+          label.textContent = text;
           marks.append(line, label);
         }
       },

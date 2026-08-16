@@ -2386,7 +2386,12 @@ second entry is the melt, and picking it swaps:
   integer splits, per-cycle baselines, Cq rings and min/max whiskers mean nothing on a ramp. The
   section carries `curves__plot--melt`, which is also what the browser check asserts on — the two
   charts' markup is otherwise identical, and a check that only looked for a canvas passed happily
-  while the melt chart was being rendered into the wrong branch entirely.
+  while the melt chart was being rendered into the wrong branch entirely. Each called Tm gets a
+  dashed vertical marker, labelled **at the peak it names** rather than along the top of the plot:
+  replicates melt within a degree of each other, so a shared top edge stacked the labels into an
+  unreadable run of digits, while their peaks differ in height. Labels that still collide step a
+  line apart (`placeLabel`), and only up to `MAX_TM_MARKERS` curves are marked at all — a plot with
+  hundreds of near-identical vertical lines says less than one with none.
 - **the "Values" toggle**, for `meltView` (`−dF/dT` / `Raw`, derivative by default) in the
   same rail slot `curveView` occupies otherwise. Like `curveView` it changes only what is drawn:
   the Tm comes off the derivative either way.

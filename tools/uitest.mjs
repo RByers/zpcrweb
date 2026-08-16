@@ -6746,6 +6746,36 @@ async function biomemeMeltChecks(chrome, origin) {
     toggleLabels,
   );
 
+  // Each Tm marker is labelled at the peak it names, so replicates melting within a degree of
+  // each other don't stack their labels into one unreadable row of digits along the top of the
+  // plot — which is what they did while every label was drawn at a fixed y. Four tubes here, four
+  // labels: assert they are on four different lines, and that none overlaps another it also
+  // overlaps horizontally.
+  const tmLabels =
+    (await waitValue(
+      () =>
+        cdp.eval(`[...document.querySelectorAll(".curves__plot--melt svg text")]
+          .map((t) => ({ text: t.textContent.trim(), x: +t.getAttribute("x"), y: +t.getAttribute("y") }))`),
+      (l) => l?.length > 0,
+      { what: "the melt chart's Tm labels" },
+    )) ?? [];
+  // 6.6px per character at 11px monospace, the same advance `meltChart.ts` places them with.
+  const overlaps = tmLabels.filter((a, i) =>
+    tmLabels.some(
+      (b, j) =>
+        j > i &&
+        Math.abs(a.y - b.y) < 13 &&
+        Math.abs(a.x - b.x) < Math.max(a.text.length, b.text.length) * 6.6,
+    ),
+  );
+  check(
+    "every Tm label is drawn at its own peak rather than along the top of the plot",
+    tmLabels.length >= 4 &&
+      new Set(tmLabels.map((l) => Math.round(l.y))).size === tmLabels.length &&
+      overlaps.length === 0,
+    tmLabels.map((l) => `${l.text}@${Math.round(l.y)}`).join(" "),
+  );
+
   // The device's own derivative reaches the table as melting temperatures.
   await clickView(cdp, "Table");
   const tms = await waitValue(
