@@ -252,8 +252,12 @@ view is expected to work fine regardless.
   selects the active file and view. Every view the app can show is nameable here: `files` is the
   open files and the folders (on disk, plus the bundled samples), `instrument` the USB panel, and `about` the credits page —
   the last of these has no tab, and none of the three needs a file.
-- `#load=<url>` fetches a file and loads it — the only key that can put a file the browser doesn't
-  already have into the app. It's consumed on load and replaced by the `#file=` the loaded file
+  A `#file=` naming a file that isn't open is looked for in the folders: a file's name is its
+  folder and path (`runs/2026-07/a.zpcr`, `samples/run.zpcr`), so if that folder is one this
+  browser has been granted — or the bundled `samples` — the file is opened from it. Nothing is
+  searched; only the directory the name points at is read.
+- `#load=<url>` fetches a file and loads it — the only key that can put a file into the app from
+  somewhere it can't otherwise reach. It's consumed on load and replaced by the `#file=` the loaded file
   produces, so it never survives in the address bar. The welcome screen's "Load an example file"
   button is a link to one of these, pointing at a bundled sample (see "Sample files" below).
 - `#wells=<selector>` enables a set of wells on the file the link points at, so a link can say

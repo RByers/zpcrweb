@@ -12,10 +12,11 @@
  *
  * `URLSearchParams` handles the encoding in both directions.
  *
- * Files themselves live only in the browser's IndexedDB — a link naming a file the recipient
- * hasn't loaded can't fetch it, so the caller falls back to the default file and keeps the
- * view. The hash is a bookmark within *this* browser's loaded set, plus a way to make
- * back/forward work across view switches.
+ * A file's name is where it came from — the folder it was opened out of, and its path beneath it
+ * — so `#file=` naming a file that isn't open is still a place the caller can go and look
+ * (`useZpcrStore`'s `openNamedFile`). What it can't do is fetch: a name in no reachable folder
+ * leaves the app with no file selected, keeping the view. The hash is a bookmark within what
+ * *this* browser can reach, plus a way to make back/forward work across view switches.
  *
  * Two keys are **instructions rather than state**, and {@link formatHash} never writes either
  * back: `#load=` (fetch this file) and `#wells=` (enable these wells on it). Both are consumed

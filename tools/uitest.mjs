@@ -5554,6 +5554,24 @@ async function sampleFolderChecks(chrome, origin) {
     JSON.stringify(reportTab),
   );
 
+  // ── A link to a sample nobody has opened ───────────────────────────────────────────────────
+  // A sample's name is `samples/<file>`, which says which folder it is in, so the app can go and
+  // get it rather than shrugging at a name it isn't holding. Started from an empty browser and via
+  // `about:blank`, because what is being asserted is how the app *starts up* on such a link.
+  await emptyReload(cdp, origin);
+  await navigateBlank(cdp);
+  await cdp.send("Page.navigate", { url: `${origin}#file=samples/${EXAMPLE}&view=curves` });
+  await waitFor(async () => (await catalogNames(cdp)).includes(`samples/${EXAMPLE}`), {
+    timeout: 20000,
+    what: "the linked sample to open itself",
+  });
+  const sampleLinkTab = await tabBecomes(cdp, "Curves", 15000);
+  check(
+    "A link to a sample the browser has never opened fetches it out of the bundled folder",
+    sampleLinkTab === "Curves" && (await chipPresent(cdp, "RVP")),
+    JSON.stringify({ tab: sampleLinkTab, catalog: await catalogNames(cdp) }),
+  );
+
   cdp.close();
 }
 
@@ -6144,6 +6162,48 @@ async function folderChecks(chrome, origin) {
     openedDisk === "Curves" && JSON.parse(openedRow).loaded && JSON.parse(openedRow).selected,
     JSON.stringify({ tab: openedDisk, row: openedRow }),
   );
+
+  // ── A link to a file that is only on disk ──────────────────────────────────────────────────
+  // `attic/old.zpcr` has never been opened and sits in the one branch nothing has read all along,
+  // so a link to it is a name the app has never held, in a folder it can reach. Its name *is* the
+  // folder and the path, which is what lets the app go and get it — the point of sending someone
+  // at the same bench a link to a run. Via `about:blank` so this is a startup, not a hash change,
+  // and not `emptyReload`: the grant is what makes the file reachable.
+  await navigateBlank(cdp);
+  await cdp.send("Page.navigate", { url: `${origin}#file=runs/attic/old.zpcr&view=curves` });
+  await waitFor(async () => (await catalogNames(cdp)).includes("runs/attic/old.zpcr"), {
+    timeout: 20000,
+    what: "the linked disk file to open itself",
+  });
+  const diskLinkTab = await tabBecomes(cdp, "Curves", 15000);
+  const diskLinkHash = await cdp.eval(`location.hash`);
+  check(
+    "A link to a file only on disk opens it out of the granted folder it is named for",
+    diskLinkTab === "Curves" && diskLinkHash.includes("file=runs%2Fattic%2Fold.zpcr"),
+    JSON.stringify({ tab: diskLinkTab, hash: diskLinkHash }),
+  );
+  // A name in no folder the app can reach is still nobody's file: it must not open something else,
+  // and it must not go looking beyond the directory the name points at.
+  await navigateBlank(cdp);
+  await cdp.send("Page.navigate", { url: `${origin}#file=runs/attic/absent.zpcr&view=curves` });
+  // The hash losing its `file=` is the app saying the search is *over*: it is held while a name is
+  // still being looked for, so waiting for it is what keeps this from passing before the look.
+  const absentHash = await waitValue(() => cdp.eval(`location.hash`), (h) => !h.includes("file="), {
+    what: "the unfindable name to be given up on",
+  });
+  check(
+    "…while a link naming a file that folder doesn't hold selects nothing",
+    !(await catalogNames(cdp)).includes("runs/attic/absent.zpcr") &&
+      (await cdp.eval(`!!document.querySelector(".app__noselection")`)),
+    JSON.stringify({ hash: absentHash, catalog: await catalogNames(cdp) }),
+  );
+  // Back on a real file, since the checks below open one and count what is loaded.
+  await navigateBlank(cdp);
+  await cdp.send("Page.navigate", { url: origin });
+  await waitFor(() => cdp.eval("document.readyState==='complete'"), { what: "reload" });
+  await waitFor(() => cdp.eval(`!!document.querySelector(".filechip")`), {
+    what: "the app to come back holding its files",
+  });
 
   // ── When the grant expires underneath the app ──────────────────────────────────────────────
   // First, a *second* granted folder with a file open in it. The recovery checked below is

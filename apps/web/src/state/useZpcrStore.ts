@@ -61,7 +61,10 @@ import {
   type StoredView,
 } from "./db";
 import {
+  folderPermission,
   isPermissionError,
+  listDirectory,
+  listFolders,
   readDiskFile,
   unwatchDiskFile,
   watchDiskFile,
@@ -98,7 +101,7 @@ import {
   restampExperimentDate,
   type ExperimentIdentity,
 } from "../lib/experiment";
-import { sampleNameFromUrl } from "../lib/samples";
+import { SAMPLE_FILES_LIST, sampleFileName, sampleNameFromUrl, sampleUrl } from "../lib/samples";
 import { currentPltdPassword, usePltdPassword } from "./pltdPassword";
 import { onHashChange, readHash, writeHash, type HashState } from "./urlHash";
 
@@ -1358,6 +1361,11 @@ export function useZpcrStore(): ZpcrStore {
   const [pendingWells, setPendingWells] = useState<WellsInstruction | null>(() =>
     wellsInstruction(readHash()),
   );
+  // A `#file=` naming a file the catalog doesn't hold, waiting to be looked for in the folders the
+  // app can reach (see {@link openNamedFile}). Set by hydration and by the hash listener, and held
+  // until the attempt is over — the state→URL sync below waits on it, so the link's own `#file=`
+  // isn't stripped out from under the file it names while it is still being opened.
+  const [pendingFile, setPendingFile] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const saveTimers = useRef<Record<string, number>>({});
@@ -1634,13 +1642,16 @@ export function useZpcrStore(): ZpcrStore {
         for (const e of stored) map[e.name] = fromStored(e);
         setEntries(catalog);
         // A `#file=` from the URL picks the selection; without one, the most recently added file.
-        // A link naming a file this browser doesn't have selects **nothing** rather than silently
-        // substituting another — the app then shows the file bar with no tab available, which is
-        // the truthful answer to "that file isn't here".
+        // A link naming a file that isn't open is worth a look before it is given up on: the name
+        // is a folder-rooted path, so if the folder is one this browser can reach the file can be
+        // opened from it ({@link openNamedFile}). Failing that the app selects **nothing** rather
+        // than silently substituting another file — the file bar with no tab available is the
+        // truthful answer to "that file isn't here".
         const wanted = readHash().file;
         const target = wanted
           ? catalog.find((f) => f.name === wanted) ?? null
           : catalog.at(-1) ?? null;
+        if (wanted && !target) setPendingFile(wanted);
         setSettingsMap(map);
         if (!cancelled) setActiveName(target?.name ?? null);
         // The selected file is read first, so the app has something to draw before the rest arrive.
@@ -1675,12 +1686,14 @@ export function useZpcrStore(): ZpcrStore {
   const syncedOnce = useRef(false);
 
   // State → URL. Held until hydration finishes: before that `active` is still null, and
-  // writing would strip the `#file=` we were opened with before we could honor it.
+  // writing would strip the `#file=` we were opened with before we could honor it. Held for the
+  // same reason while a named file is still being looked for in the folders — that search reads
+  // from disk, and a write in the middle of it would drop the name being searched for.
   useEffect(() => {
-    if (loading) return;
+    if (loading || pendingFile) return;
     writeHash({ file: active?.name, view }, { replace: !syncedOnce.current });
     syncedOnce.current = true;
-  }, [loading, active, view]);
+  }, [loading, pendingFile, active, view]);
 
   // URL → state, for back/forward and hand-edited links.
   useEffect(() => {
@@ -1695,6 +1708,9 @@ export function useZpcrStore(): ZpcrStore {
         // read yet, and following the link is a fresh attempt at it rather than nothing at all.
         const match = entries.find((f) => f.name === h.file);
         if (match) void selectRef.current(match.name);
+        // Not open at all: the same look through the folders hydration does, so a link followed
+        // in a running app behaves like the same link pasted into a fresh one.
+        else setPendingFile(h.file);
       }
     });
   }, [entries]);
@@ -2113,6 +2129,77 @@ export function useZpcrStore(): ZpcrStore {
     setPendingLoad(null);
     void addUrl(pendingLoad);
   }, [loading, pendingLoad, addUrl]);
+
+  /**
+   * Open the file a `#file=` names but the catalog doesn't hold, by finding it in a folder the app
+   * can reach. Answers whether it managed to.
+   *
+   * A file's name *is* where it came from — `runs/2026-07/a.zpcr` is the folder labelled `runs` and
+   * the path under it (`db.ts`'s `diskFileName`), and a bundled sample is named the same way — so a
+   * link naming one is a link to a place, and the place can be looked at. That is what makes a link
+   * to a run worth sending to the next person at the same bench: they granted the same folder, so
+   * the run opens for them instead of the app shrugging at a name it has never seen.
+   *
+   * The search is a lookup, not a walk: the label prefix says which folder, the rest says which
+   * file in it, and the only directory read is of the one directory that would contain it. Longest
+   * label first, because one label can be a prefix of another (`runs` and `runs archive`), and the
+   * more specific reading is the one that names a real file.
+   *
+   * A folder whose permission has lapsed is skipped in silence rather than reported: re-granting it
+   * needs a click the user hasn't made yet, so it is not a failure to tell them about — the Files
+   * view is where that grant lives and where the file can then be opened by hand.
+   */
+  const openNamedFile = useCallback(
+    async (name: string) => {
+      const sample = SAMPLE_FILES_LIST.find((s) => sampleFileName(s.name) === name);
+      // The bundled folder is not on disk: its files are fetched, exactly as the Files view's own
+      // samples rows fetch them (`lib/samples.ts`).
+      if (sample) return (await addUrl(sampleUrl(sample.name))) !== null;
+      let folders;
+      try {
+        folders = await listFolders();
+      } catch {
+        return false;
+      }
+      const candidates = folders
+        .filter((f) => name.startsWith(`${f.label}/`))
+        .sort((a, b) => b.label.length - a.label.length);
+      for (const folder of candidates) {
+        const path = name.slice(folder.label.length + 1).split("/");
+        try {
+          if ((await folderPermission(folder.label)) !== "granted") continue;
+          // Confirm the file is there before opening it, so a label that matched the name but not
+          // the file (the `runs` / `runs archive` case above) moves on to the next candidate
+          // quietly instead of reporting a missing file the user never asked for.
+          const listing = await listDirectory(folder.label, path.slice(0, -1));
+          if (!listing.some((e) => e.kind === "file" && e.name === path.at(-1))) continue;
+        } catch {
+          continue;
+        }
+        if (await addDiskFiles([{ folder: folder.label, path }])) return true;
+      }
+      return false;
+    },
+    [addDiskFiles, addUrl],
+  );
+
+  // Look for a `#file=` the catalog didn't have, once hydration has finished — until then there is
+  // no telling whether it is missing at all. One attempt per name: `pendingFile` is cleared when
+  // the search is over (found or not), and the ref keeps a re-render during the search from
+  // starting a second one.
+  const searching = useRef(false);
+  useEffect(() => {
+    if (loading || !pendingFile || searching.current) return;
+    searching.current = true;
+    void (async () => {
+      try {
+        await openNamedFile(pendingFile);
+      } finally {
+        searching.current = false;
+        setPendingFile(null);
+      }
+    })();
+  }, [loading, pendingFile, openNamedFile]);
 
   /** See {@link ZpcrStore.closeFile}. */
   const closeFile = useCallback(

@@ -154,15 +154,32 @@ optional and order-independent (an old link degrades instead of failing to parse
 shareable state can be added later without inventing path segments.
 
 The file is identified by **name**, which is also its key in IndexedDB — so `#file=` names a
-stored record directly, with nothing to resolve. Files themselves live only in IndexedDB and can't
-be fetched from a link, so a hash naming a file the user hasn't loaded falls back to the default
-active file while still honoring the `view`.
+stored record directly, with nothing to resolve.
+
+A name the catalog doesn't hold is **looked for in the folders** before it is given up on
+(`useZpcrStore`'s `openNamedFile`). A file opened out of a folder is named for it —
+`runs/2026-07/a.zpcr` is the folder labelled `runs` and the path beneath it (`state/db.ts`'s
+`diskFileName`), and a bundled sample is named the same way — so the name says where the file came
+from, and that place can be looked at: the label prefix picks the folder, the rest picks the file
+in it, and the app reads the one directory that would contain it. This is what makes a link to a
+run worth sending to someone at the same bench: they granted the same folder, so the run opens for
+them rather than the app shrugging at a name it has never seen. Nothing is walked or searched —
+the promise `state/useDiskTree.ts` makes about never scanning a granted archive holds here too.
+
+The search is quiet when it comes up empty. A label that matches the name but not the file (`runs`
+where `runs archive` was meant — the longer label is tried first, and a missing file moves on to
+the next candidate), and a folder whose permission has lapsed, both fall through without an error:
+re-granting needs a click the user hasn't made, and the Files view is where that click lives. A
+name that is nowhere reachable selects **nothing** rather than substituting another file — the file
+bar with no tab available is the truthful answer to "that file isn't here" — while still honoring
+the `view`.
 
 `useZpcrStore` syncs both directions, each guarded by an "is it already that value?" check so
 the echo one direction provokes in the other terminates rather than looping:
 
-- **State → URL** is deferred until IndexedDB hydration finishes. Before that, `active` is
-  still `null`, and writing would strip the incoming `#file=` before it could be honored. The
+- **State → URL** is deferred until IndexedDB hydration finishes, and until any folder search the
+  incoming `#file=` started has finished with it. Before either, `active` is still `null`, and
+  writing would strip the incoming `#file=` before it could be honored. The
   first post-hydration write uses `replaceState` (the app choosing its own initial state
   shouldn't create a history entry); later writes `pushState`, which is what makes back/forward
   step through view switches.
@@ -174,7 +191,8 @@ link opens on the right tab with no flash of the default one.
 
 ### `#load=<url>` — the file itself in a link
 
-`#file=` can only name a file the recipient already has. `#load=<url>` closes that gap: the app
+`#file=` can only name a file the recipient already has or can reach in a folder they granted.
+`#load=<url>` closes that gap: the app
 fetches the URL and runs the bytes through the same `addFiles` path a drop uses
 (`useZpcrStore`'s `addUrl`), naming the file after the URL's last path segment. The fetch is
 `credentials: "omit"` — the URL arrives in a link, so it must not be able to use the recipient's
