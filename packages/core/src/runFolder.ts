@@ -296,6 +296,20 @@ export function isSameRun(held: ZpcrArchive | null | undefined, folder: ZpcrArch
 }
 
 /**
+ * Has this archive ever had a run's own identity record written into it?
+ *
+ * The complement to {@link isSameRun}, for the case that comparison cannot speak to: an archive
+ * with no `RunInfo.xml` isn't a *different* run, it is a `.zpcr` that has never received anything
+ * from an instrument — a pending experiment, made in the app and not yet started, or started
+ * somewhere else so that this copy of it is still the pre-run one. A caller deciding which file a
+ * run belongs to can treat that as the file the run came from, where a mismatched `RunInfo.xml`
+ * has to be treated as somebody else's run.
+ */
+export function hasRunIdentity(held: ZpcrArchive | null | undefined): boolean {
+  return held?.[RUNINFO_NAME] !== undefined;
+}
+
+/**
  * Which of a run folder's files an archive of that run still needs — the download list for a
  * caller following a run as it happens (the app's `useRunWatch`).
  *

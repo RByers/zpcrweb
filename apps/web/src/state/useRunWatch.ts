@@ -76,6 +76,7 @@ import {
   runFilesToFetch,
   runIdentityFileNames,
   isSameRun,
+  hasRunIdentity,
   runProgressFromNames,
   type ZpcrArchive,
 } from "@zpcrweb/core";
@@ -110,6 +111,11 @@ import type { CfxDeviceHandle } from "./useCfxDevice";
  */
 const REFETCH_AT_END = new Set(["runinfo.xml", "runlog.xml", "lastplatereadstatus"]);
 
+/** The last path component of a file's id — a disk-backed file's is its path within its folder. */
+function baseNameOf(id: string): string {
+  return id.slice(id.lastIndexOf("/") + 1);
+}
+
 /** Identity of a listing, for "has anything changed?" — order-independent. */
 function signatureOf(names: readonly string[]): string {
   return [...names].sort().join(" ");
@@ -118,6 +124,13 @@ function signatureOf(names: readonly string[]): string {
 /** True when `STATUS?`'s step text is a plate read (`usb.md` §7.5's live echo of §3.1). */
 function isPlateRead(stepText: string | undefined): boolean {
   return !!stepText && /^PLATEREAD\b/i.test(stepText.trim());
+}
+
+/** A run the app is already holding: the file's id, and the entries it holds. */
+export interface HeldRun {
+  /** The id the run is filed under — a bare name, or a folder-rooted path for a disk-backed file. */
+  id: string;
+  files: ZpcrArchive;
 }
 
 export interface RunWatchState {
@@ -231,7 +244,13 @@ export function useRunWatch(
    */
   onReport: (name: string, bytes: Uint8Array) => Promise<string | null>,
   /**
-   * Read back the entries of a run this app is holding, or `null` if it isn't holding that file.
+   * Read back the entries of a run this app is holding, or `null` if it isn't holding that run.
+   *
+   * Answers with the **id** it found the run under as well as its entries, because that id is not
+   * always the name asked for: a run's name comes from the instrument's folder and is bare, while
+   * the app keys a file opened out of a granted folder by its path within it. `findRunFile`
+   * (`lib/experiment.ts`) is what reconciles the two, and taking its answer back is what keeps
+   * every later snapshot landing on that one file — see `pull` below.
    *
    * **This is the watcher's only memory of what it has downloaded.** The run's file is the app's
    * copy of the run, so keeping a second copy here — as this hook used to, a name→bytes map of the
@@ -246,7 +265,7 @@ export function useRunWatch(
    * are watching, and the alternative — reading it back out of IndexedDB — would make every pass
    * of the watcher wait on a disk read for the ordinary case where the file is right there.
    */
-  heldRun: (fileName: string) => ZpcrArchive | null,
+  heldRun: (fileName: string) => HeldRun | null,
   /**
    * What the Instrument view's two name fields currently hold (`state/useRunNaming.ts`). Only the
    * archive's *name* depends on it, and only for a run this app started and is still staging —
@@ -330,7 +349,7 @@ export function useRunWatch(
       const progress = runProgressFromNames(names);
       const name = zpcrNameFromRunFiles(files, namingRef.current);
       setAvailable(
-        isSameRun(heldRunRef.current(name), files)
+        isSameRun(heldRunRef.current(name)?.files, files)
           ? null
           : { name, plateReads: progress.plateReads, inProgress: progress.inProgress },
       );
@@ -359,6 +378,10 @@ export function useRunWatch(
       // from the top, keep it and only what the instrument has newly written is fetched.
       let file = identified.current ? fileNameRef.current : null;
       let held = file ? heldRunRef.current(file) : null;
+      // Where a *whole* pass should land, when it isn't simply a new file: the pending experiment
+      // this run was started from, found under the run's own name but holding nothing of the run
+      // yet. Null the rest of the time, and never consulted when there is a `held` run to update.
+      let adoptId: string | null = null;
       let identity: ZpcrArchive = {};
       if (!held) {
         // We don't know which file this folder's run belongs to — a fresh connection, a folder the
@@ -374,11 +397,20 @@ export function useRunWatch(
           const candidate = heldRunRef.current(file);
           // A file of the right name is not necessarily the right run: the instrument clears the
           // folder when a run starts, so `RunInfo.xml` has to agree before we append to it.
-          held = isSameRun(candidate, fetched) ? candidate : null;
+          held = isSameRun(candidate?.files, fetched) ? candidate : null;
+          // A candidate that can't agree because it has no `RunInfo.xml` at all is a different
+          // case, and the common one for a run started from a shared folder: a run in progress
+          // buffers to IndexedDB and is only written back to disk when it ends
+          // (`useZpcrStore`'s `persistFile`), so the copy this browser opened mid-run is still the
+          // pre-run experiment the run was started from. There is nothing there to merge into —
+          // the pass stays whole — but it is that file the run belongs in, rather than a second
+          // one beside it. A candidate whose `RunInfo.xml` merely *differs* is somebody else's run
+          // and is left alone.
+          if (!held && candidate && !hasRunIdentity(candidate.files)) adoptId = candidate.id;
           identified.current = true;
         }
       }
-      const wanted = runFilesToFetch(held, names, finalAssembly ? REFETCH_AT_END : undefined);
+      const wanted = runFilesToFetch(held?.files ?? null, names, finalAssembly ? REFETCH_AT_END : undefined);
       const fetched: ZpcrArchive = {};
       const missing = wanted.filter((n) => identity[n] === undefined);
       if (missing.length > 0) {
@@ -390,7 +422,7 @@ export function useRunWatch(
         const already = identity[name];
         if (already) fetched[name] = already;
       }
-      const files: ZpcrArchive = { ...held, ...fetched };
+      const files: ZpcrArchive = { ...held?.files, ...fetched };
       if (finalAssembly) {
         const log = trafficLogForRun();
         if (log) {
@@ -415,10 +447,22 @@ export function useRunWatch(
         // move mid-run. An update is only a run when laid over the rest of one; where that is
         // missing, everything we have goes over instead, including whatever the user had added to
         // the file it came from.
-        const whole = held === null || run.name !== file;
+        //
+        // A rename is the one case a held run still goes over whole, and it goes under the *new*
+        // name — that is the point of it — so it is kept apart from `whole` here. The comparison
+        // is against the held file's *base* name, since the id it is filed under may be a path
+        // into a granted folder while the run only ever names itself bare: a run has not been
+        // renamed merely by being kept in a shared folder.
+        const renamed = held !== null && run.name !== baseNameOf(held.id);
+        const whole = held === null || renamed;
         const update = whole ? files : fetched;
+        // Handed over under the id the run was **found** under rather than the name it derives for
+        // itself: the two differ for a file opened out of a granted folder (a path, not a bare
+        // name), and the id is the one the store can merge into. Failing that, the pending
+        // experiment this run was started from (`adoptId`), and failing that the derived name —
+        // a run this browser has nothing of yet, which is a new file.
         const id = await onRunRef.current(
-          { name: run.name, archive: update, whole },
+          { name: renamed ? run.name : (held?.id ?? adoptId ?? run.name), archive: update, whole },
           fileNameRef.current,
           activate,
         );

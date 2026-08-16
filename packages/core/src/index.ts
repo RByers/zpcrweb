@@ -75,6 +75,7 @@ export {
   zpcrNameFromRunFiles,
   runIdentityFileNames,
   isSameRun,
+  hasRunIdentity,
   runFilesToFetch,
   runProgressFromNames,
   runCompleteness,

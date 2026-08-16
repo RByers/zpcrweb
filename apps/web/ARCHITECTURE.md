@@ -908,10 +908,31 @@ for byte (`isSameRun`) before anything is appended to it, since the instrument c
 when a run starts. That question is re-asked on every connection and whenever a name disappears
 from the listing, which is what stops one run's reads being appended to another run's file.
 
+**The folder a run's file sits in is not part of the question.** A run names itself from the
+instrument's own folder, so what comes back is a bare file name, while a file opened out of a
+granted folder is keyed by its path within that folder (`addDiskFiles`). Matching those by id alone
+missed every time: connect to an instrument mid-run with that very run's file open from a shared
+folder and the app concluded it held nothing, downloaded the run again, and filed it as a second,
+browser-only copy that the one on disk then never caught up with. So `lib/experiment.ts`'s
+`findRunFile` takes an exact id match first and otherwise ignores the path, restricted to a `.zpcr`
+whose run is not over — a finished run of the same base name elsewhere is a record of its own, not
+something to append to — and `isSameRun` still has to agree before a byte is merged. `heldRun`
+answers with the **id** it found the run under, and that is what the pass hands the store, which is
+what keeps every later snapshot landing on the file in the shared folder.
+
+`isSameRun` can only speak for a file that already holds instrument data, and mid-run the shared
+copy usually doesn't: a run in progress buffers to IndexedDB and is written back to disk only when
+it ends, so what this browser opens out of the folder is still the pending experiment the run was
+started from. Core's `hasRunIdentity` names that case — no `RunInfo.xml` at all, as against one
+that *disagrees* — and the watcher adopts such a file as the run's: there is nothing to merge into,
+so the pass still goes over whole, but it lands on that file instead of beside it. A candidate
+whose `RunInfo.xml` merely differs is somebody else's run and is left alone.
+
 A pass sends the whole folder when there is nothing to merge into: a run the app isn't holding, or
 one whose file has just been renamed out from under it (the derived name can move when
-`RunInfo.xml` is re-read at the end of a run). Then everything the pass has goes over — including
-whatever the user had added to the file it was reading from.
+`RunInfo.xml` is re-read at the end of a run — compared against the held file's base name, since
+sitting in a folder is not a rename). Then everything the pass has goes over — including whatever
+the user had added to the file it was reading from.
 
 Every write here is a read-modify-write — a catalog write merges into what is stored, and a content
 write reads back the entry keys it should delete — and several fire at once on one file: an edit

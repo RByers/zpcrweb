@@ -6,6 +6,7 @@ import {
   runFilesToFetch,
   runIdentityFileNames,
   isSameRun,
+  hasRunIdentity,
   parseZpcr,
 } from "../src/index.js";
 import { unzipArchive } from "../src/archive.js";
@@ -179,6 +180,18 @@ describe("is the folder still holding the run we have?", () => {
     expect(isSameRun(rest, runFiles)).toBe(false);
     expect(isSameRun(runFiles, rest)).toBe(false);
     expect(isSameRun(null, runFiles)).toBe(false);
+  });
+
+  it("tells 'never been near an instrument' apart from 'a different run'", () => {
+    // The distinction the app's run watcher files a run by: an archive with no RunInfo.xml is a
+    // pending experiment, which a run may be adopted into; one whose RunInfo.xml disagrees is
+    // somebody else's run, which it may not.
+    expect(hasRunIdentity(runFiles)).toBe(true);
+    const { "RunInfo.xml": _drop, ...pending } = runFiles;
+    expect(hasRunIdentity(pending)).toBe(false);
+    expect(hasRunIdentity({})).toBe(false);
+    expect(hasRunIdentity(null)).toBe(false);
+    expect(hasRunIdentity(undefined)).toBe(false);
   });
 
   it("names the two files that answer the question", () => {

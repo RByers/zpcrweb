@@ -19,7 +19,7 @@ import { useRunWatch } from "./state/useRunWatch";
 import { usePltdPassword } from "./state/pltdPassword";
 import { formatLoadHash } from "./state/urlHash";
 import { cloneFileName, splitFileName } from "./lib/cloneName";
-import { isPendingExperiment } from "./lib/experiment";
+import { findRunFile, isPendingExperiment } from "./lib/experiment";
 import { plateSources, protocolSources } from "./lib/attachSources";
 import { plateCsvFileName } from "./lib/plateNames";
 import { sampleUrl } from "./lib/samples";
@@ -340,8 +340,11 @@ export function App() {
     // thing (see `useRunWatch`'s `heldRun`). A file that isn't loaded reads as nothing held.
     useCallback(
       (fileName: string) => {
-        const file = store.loaded.find((f) => f.name === fileName);
-        return file && file.content.archive ? file.content.files : null;
+        // By base name, not by id: the run names itself from the instrument's own folder and knows
+        // nothing of where this browser keeps it, which for a file opened out of a granted folder
+        // is a path (`findRunFile`).
+        const file = findRunFile(store.loaded, fileName);
+        return file && file.content.archive ? { id: file.name, files: file.content.files } : null;
       },
       [store.loaded],
     ),

@@ -20,6 +20,7 @@ import {
   type FileKind,
   type Zpcr,
 } from "@zpcrweb/core";
+import { contentEntryNames } from "../state/fileContent";
 import type { LoadedFile, RunResult } from "../state/useZpcrStore";
 
 export interface ExperimentIdentity {
@@ -66,6 +67,45 @@ export function formatCompactDateTime(date: Date): string {
  * folder-rooted path) is returned unchanged. */
 function baseName(name: string): string {
   return name.slice(name.lastIndexOf("/") + 1);
+}
+
+/**
+ * The open file a run of this name is, **wherever it happens to sit** — the run watcher's "do we
+ * already have this run?" (`state/useRunWatch.ts`'s `heldRun`).
+ *
+ * The instrument names a run from the folder it is writing (`core/runFolder.ts`'s
+ * `zpcrNameFromRunFiles`), and what comes back is a bare file name — the run has no idea where the
+ * browser keeps it. A file opened out of a granted folder is keyed by its folder-rooted path
+ * (`state/useZpcrStore.ts`'s `addDiskFiles`), so an exact-name lookup misses it every time: connect
+ * to an instrument mid-run with that run's own file open from a shared folder and the app used to
+ * conclude it held nothing, download the whole run again, and file it as a second, browser-only
+ * copy beside the one on disk — which then never received another plate read.
+ *
+ * So the folder part is ignored, and the candidate is confirmed two ways instead:
+ *
+ * - **The run isn't over.** A finished `.zpcr` of the same base name in some other folder is a run
+ *   of its own, and appending to it would rewrite a record of something already done. Only a run
+ *   still open to more — pending or in progress — can be what the instrument is writing now.
+ * - **The caller checks identity.** Every caller compares the candidate's `RunInfo.xml` against the
+ *   folder's (`isSameRun`) before a byte is merged, so a same-named file that is a *different* run
+ *   is rejected there rather than here.
+ *
+ * An exact match is taken first and unconditionally: that is the file the watcher has already been
+ * writing to, and it stays the answer whatever state its run is in.
+ */
+export function findRunFile(
+  loaded: readonly LoadedFile[],
+  name: string,
+): LoadedFile | undefined {
+  const exact = loaded.find((f) => f.name === name);
+  if (exact) return exact;
+  const base = baseName(name);
+  return loaded.find(
+    (f) =>
+      f.kind === "zpcr" &&
+      baseName(f.name) === base &&
+      !runProgressFromNames(contentEntryNames(f.content)).ended,
+  );
 }
 
 export function experimentIdentity(
