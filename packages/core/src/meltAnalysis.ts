@@ -125,10 +125,10 @@ export function hasMeltSignal(values: number[]): boolean {
 /**
  * Quantum a melting temperature is reported at, °C.
  *
- * The sub-grid refinement in {@link meltPeak} resolves a peak to far more decimal places than the
- * measurement supports; replicates of one product agree to about 0.1 °C (`melt.md` §A.2), so that
- * is where the number is cut. Rounding once, here, is what keeps a chart marker, a tooltip and a
- * table row showing the same Tm rather than three roundings of one value.
+ * Replicates of one product agree to about 0.1 °C (`melt.md` §A.2), so that is where the number is
+ * cut. Rounding once, here, is what keeps a chart marker, a tooltip and a table row showing the
+ * same Tm rather than three roundings of one value. Since {@link meltPeak} reports a sampled
+ * temperature, this changes nothing on a `SAMPLETEMP` axis and tidies the `BLOCKTEMP` fallback.
  */
 export const TM_ROUNDING_C = 0.1;
 
@@ -151,7 +151,7 @@ export interface MeltPeak {
 }
 
 /**
- * The highest point of a derivative curve, refined to finer than the grid it was sampled on.
+ * The highest point of a derivative curve, at the temperature that point was sampled at.
  *
  * A **primitive**: it locates the maximum and says where it is, and does not judge whether the
  * curve deserved to have one located. That judgement is {@link hasMeltSignal}, applied by
@@ -162,9 +162,10 @@ export interface MeltPeak {
  * One peak, deliberately: a melt often has more than one (a primer-dimer peak sits below the
  * product's), and they remain visible on the plotted derivative, but only the tallest is *called*.
  *
- * The refinement fits a parabola through the winning point and its two neighbours and reports its
- * vertex, which recovers a Tm between grid points — worth doing because the grid is coarse next to
- * the precision the number is read at (a 0.5 °C rung against replicate spreads of about 0.1 °C).
+ * The Tm is the winning **sample's own temperature**, not a position between samples. A parabola
+ * through the peak and its neighbours was fitted here once, to recover a Tm below the 0.5 °C grid;
+ * it is gone because CFX Maestro reports melting temperatures on the grid too, and matching the
+ * instrument matters more than a refinement whose extra precision the ramp doesn't support.
  */
 export function meltPeak(temperaturesC: number[], derivative: number[]): MeltPeak | null {
   const first = PEAK_EDGE_EXCLUDE;
@@ -180,28 +181,10 @@ export function meltPeak(temperaturesC: number[], derivative: number[]): MeltPea
   // A curve whose fluorescence only ever rises has no melting transition in it at all.
   if (!(height > 0)) return null;
 
-  const y0 = derivative[best - 1] as number;
-  const y1 = height;
-  const y2 = derivative[best + 1] as number;
-  const denominator = y0 - 2 * y1 + y2;
-  // A flat trio has no vertex to find; the sample's own temperature is then the best answer.
-  const raw = denominator === 0 ? 0 : (0.5 * (y0 - y2)) / denominator;
-  // Clamp to half a grid step. The parabola is a *refinement* of a maximum this code has already
-  // located, so its vertex belongs between that sample's neighbours; a fit through a near-flat or
-  // still-rising trio (which is what the ends of the search window give) otherwise solves to a
-  // vertex far outside the data — unclamped, this put melting temperatures at 38 °C on a ramp
-  // that starts at 65.
-  const offset = Number.isFinite(raw) ? Math.max(-0.5, Math.min(0.5, raw)) : 0;
-  const below = temperaturesC[best] as number;
-  const spacing =
-    offset >= 0
-      ? (temperaturesC[best + 1] as number) - below
-      : below - (temperaturesC[best - 1] as number);
-
-  // Reported to 0.1 °C, the precision the number is actually good to: replicates of the same
-  // product spread by about that much, so further digits are the parabola's arithmetic rather
-  // than anything the run measured (`melt.md` §5).
-  return { tmC: roundTm(below + offset * spacing), height };
+  // Reported to 0.1 °C (`melt.md` §5). A no-op on the 0.5 °C `SAMPLETEMP` grid a melt normally
+  // has; it only bites on the measured `BLOCKTEMP` fallback, whose rungs carry digits the reading
+  // doesn't support.
+  return { tmC: roundTm(temperaturesC[best] as number), height };
 }
 
 /** One well's melt curve — on one optical channel, or on one fluorophore — its derivative and

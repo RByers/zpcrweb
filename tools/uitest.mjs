@@ -6599,11 +6599,11 @@ async function meltChecks(chrome, origin, pw) {
   // curves sit on.
   const tms = (await meltRows()).filter((r) => r.peak > 3000).map((r) => r.tm);
   const spread = tms.length ? Math.max(...tms) - Math.min(...tms) : NaN;
-  // Reported to 0.1 °C (`melt.md` §5), so this cohort's 0.12 °C of real spread shows up as two
-  // adjacent rungs: one rounding step, not less.
+  // A Tm is the sampled temperature of the peak (`melt.md` §5), so a replicate cohort whose
+  // scatter is below the 0.5 °C grid reports one number, not a spread.
   check(
-    "the strongest wells' melting temperatures agree to within one rounding step",
-    tms.length >= 20 && spread <= 0.2 + 1e-9 && Math.abs(tms[0] - 85.6) < 0.3,
+    "the strongest wells all report the same melting temperature",
+    tms.length >= 20 && spread === 0 && Math.abs(tms[0] - 85.5) < 0.01,
     `n=${tms.length} spread=${spread.toFixed(3)} first=${tms[0]}`,
   );
 

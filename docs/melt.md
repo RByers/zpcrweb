@@ -116,7 +116,8 @@ The smoothing is in index space, exact on a uniform grid and an approximation ot
 
 ## 5. The melting temperature
 
-`meltPeak(temperaturesC, derivative)` finds the derivative's highest interior point and refines it.
+`meltPeak(temperaturesC, derivative)` finds the derivative's highest interior point and reports the
+temperature that point was **sampled at**.
 
 - **The ends are excluded** — two points at each end (`PEAK_EDGE_EXCLUDE`). This is where the
   smoothing window is truncated and the ramp is still settling, and it is exactly where spurious
@@ -125,16 +126,16 @@ The smoothing is in index space, exact on a uniform grid and an approximation ot
 - **One peak is called**, the tallest. A melt often has more than one — a primer-dimer peak sits
   below the product's — and every peak stays visible on the plotted derivative, but only the
   tallest gets a number. *(Future: calling secondary peaks by prominence.)*
-- **The peak is refined below the grid** by fitting a parabola through the winning point and its
-  two neighbours and taking its vertex. Worth doing because the grid is coarse next to the
-  precision the number is read at: a 0.5 °C rung against replicate spreads of 0.12 °C (§A.2).
-  The vertex is **clamped to half a grid step** — the parabola refines a maximum already located,
-  so its vertex belongs between that sample's neighbours. Unclamped, a fit through a near-flat trio
-  solves far outside the data; it put melting temperatures at 38 °C on a ramp starting at 65 (§B.2).
-- **The result is rounded to 0.1 °C** (`TM_ROUNDING_C`), which is the precision the number is good
-  to: replicates of one product spread by 0.12 °C (§A.2), so the digits below that are the
-  parabola's arithmetic rather than anything the run measured. Rounded once here, in the value
-  itself, so a chart marker, a tooltip, a table row and the exported CSV cannot disagree.
+- **The peak is not interpolated.** The Tm is the winning sample's own temperature, so a melt on
+  the usual 0.5 °C grid can only report a multiple of 0.5. CFX Maestro reports on the grid as well,
+  and agreeing with the instrument the operator compares against is worth more than resolving a
+  peak position the ramp never sampled. A sub-grid parabolic refinement used to live here; §B.2 is
+  what it cost.
+- **The result is rounded to 0.1 °C** (`TM_ROUNDING_C`), so a Tm never prints a digit the reading
+  doesn't support, and is rounded once — in the value itself — so a chart marker, a tooltip, a
+  table row and the exported CSV cannot disagree. On a `SAMPLETEMP` axis this changes nothing,
+  since those rungs are already multiples of 0.5; it only tidies the measured `BLOCKTEMP` fallback
+  of §3.
 
 ### 5.1 When no Tm is reported
 
@@ -166,8 +167,8 @@ one shared computation, not a competing answer. `MeltAnalysis.derivativeSource` 
 happened, for display, and forks nothing.
 
 The device's own called peak is parsed and shown in the decoded view — nothing a file contains is
-dropped — but drives nothing. It agrees with §5 to within 0.2 °C on every well where the signal is
-unambiguous (§A.4).
+dropped — but drives nothing. It agrees with §5 exactly on every well where the signal is
+unambiguous (§A.4): both pick a sample of the same 0.5 °C grid.
 
 ## 7. The two spaces a melt is read in
 
@@ -195,10 +196,9 @@ extrapolated from the last calibrated segment and floored at zero.
 Two consequences worth stating plainly:
 
 - **The Tm does not move.** On the committed run — one dye, SYBR, on one channel — the separation
-  is close to a rescaling, and the 54 curves carrying real product report the same peak in both
-  spaces to within 0.5 °C, median shift 0.000 °C (§A.5). Where the two disagree at all is on five
-  flat wells whose derivative peaks at 10–13 RFU/°C against the product's 100–5900, i.e. wells with
-  no melting transition to locate.
+  is close to a rescaling, and the 54 curves carrying real product report the identical Tm in both
+  spaces (§A.5). Where the two disagree at all is on four flat wells whose derivative peaks at
+  10–13 RFU/°C against the product's 100–5900, i.e. wells with no melting transition to locate.
 - **Thermal quenching is still visible on the plotted curve.** Fluorescence falls with temperature
   whether or not anything is melting — **measured** from the committed calibration set, between 60
   and 80 °C FAM's response falls 18% and Cy5's 38% — and a separated value is deliberately reported
@@ -247,16 +247,20 @@ in 0.5 °C steps.)
 Of the 576 curves on the melt step, 27 channel-0 curves have a peak taller than 3000 RFU/°C — one
 product across replicate wells:
 
+**All 27 report 85.5 °C** — one rung of the ramp, no scatter at all, because §5 reports the sampled
+temperature and every one of these curves peaks at the same sample.
+
+The scatter is real but sits below the grid. Measured with the sub-grid refinement §B.2 describes,
+before it was removed, the same 27 curves read:
+
 ```
 85.55 85.56 85.57 85.58 85.58 85.58 85.60 85.60 85.60 85.60 85.60 85.60 85.60 85.60
 85.60 85.61 85.61 85.61 85.61 85.61 85.62 85.62 85.62 85.64 85.64 85.66 85.67
 ```
 
-**Spread 0.120 °C**, median 85.60 °C. (These are the unrounded refinements, which is what the
-spread has to be measured on; §5 rounds the reported Tm to 0.1 °C precisely because this spread is
-the same size as the rounding.) Six further curves are called between 76.07 and 83.82 °C —
-genuinely different products, not scatter. Channels 3 and 4, which carry no signal, are called
-**zero** times.
+**Spread 0.120 °C** — a quarter of a grid step, which is the measurement that says how little the
+grid is costing. Six further curves are called between 76 and 84 °C — genuinely different products,
+not scatter. Channels 3 and 4, which carry no signal, are called **zero** times.
 
 ### A.3 The signal gate (§5.1), both runs
 
@@ -278,12 +282,14 @@ Wells clearing §5.1's gate, file value against this library's:
 
 | Well / dye | file `peak` | computed Tm |
 |---|---|---|
-| FAM well 0 | 79.5 | 79.58 |
-| FAM well 3 | 81 | 80.81 |
-| FAM well 1 | 89 | 89.09 |
-| FAM well 2 | 79 | 78.79 |
+| FAM well 0 | 79.5 | 79.5 |
+| FAM well 3 | 81 | 81 |
+| FAM well 1 | 89 | 89 |
+| FAM well 2 | 79 | 79 |
 
-Worst disagreement 0.21 °C, under half the file's own 0.5 °C grid step.
+**Identical on all four**, the device and §5 having picked the same sample of the same grid. (With
+the removed refinement of §B.2 these differed by up to 0.21 °C — the disagreement was entirely the
+interpolation.)
 
 ### A.5 Channel space against dye space (§7)
 
@@ -292,11 +298,11 @@ matrix per read (`calibration.md` §2.1). 96 wells, one dye:
 
 | Cohort | n | Tm agreement |
 |---|---|---|
-| peak > 100 RFU/°C (real product) | 54 | all within 0.5 °C; **median shift 0.000 °C** |
-| all called wells | 96 | 91 within 0.5 °C |
-| the five that disagree | 5 | peaks of 10.2 – 13.4 RFU/°C, three tallest derivative points within 1% of each other |
+| peak > 100 RFU/°C (real product) | 54 | **the identical rung on all 54** |
+| all called wells | 96 | 92 identical; **median shift 0.000 °C** |
+| the four that disagree | 4 | peaks of 10.2 – 13.4 RFU/°C, three tallest derivative points within 1% of each other |
 
-The five are flat wells that squeaked past §5.1's gate; on those, reordering the top of a
+The four are flat wells that squeaked past §5.1's gate; on those, reordering the top of a
 featureless derivative is not a Tm changing but noise being noise. The plateau below the transition
 (65 → 75 °C) drifts −18.1% raw and −17.7% separated, which is §7's second point measured: the
 reported RFU scale carries the quenching back in on purpose.
@@ -337,14 +343,23 @@ height was tried too and separates no better (real 0.80 – 0.99, junk −2.19 �
 distinguishes a melt is not that its peak is sharp but that its fluorescence *moved*, which is what
 §5.1 measures.
 
-### B.2 An unclamped parabolic vertex
+### B.2 Refining the peak below the grid
 
-The sub-grid refinement of §5 originally used the parabola's vertex as computed. On real data this
-produced melting temperatures of 38.37 °C on a ramp spanning 65 – 95 °C, and 52.94 °C on one
-spanning 60 – 95 °C. The cause: at the edge of the search window the trio the parabola is fitted
-through is often still rising or nearly flat, and its vertex then solves to a point far outside the
-three samples it was fitted to. Clamping the offset to half a grid step fixes it, and is what the
-refinement always meant — it adjusts *within* a maximum already located.
+§5 originally fitted a parabola through the winning point and its two neighbours and reported the
+vertex, to recover a Tm between the 0.5 °C rungs. Two things were wrong with it.
+
+**It misfired at the edges.** Used as computed, the vertex produced melting temperatures of
+38.37 °C on a ramp spanning 65 – 95 °C, and 52.94 °C on one spanning 60 – 95 °C: near the edge of
+the search window the trio being fitted is often still rising or nearly flat, and the vertex then
+solves far outside the three samples it came from. Clamping the offset to half a grid step fixed
+that particular failure.
+
+**The precision it bought was not real.** Even clamped, it reported a position on the ramp that was
+never sampled, and CFX Maestro — the instrument's own software, and what an operator checks this
+app against — reports melting temperatures on the grid. A number that disagrees with the instrument
+in the first decimal is worse than a coarser number that matches it, so the refinement was removed
+and the sampled temperature is reported instead. The clamp went with it; with no offset to bound,
+there is nothing left to escape the data.
 
 ### B.3 Running the amplification pipeline over a melt step
 

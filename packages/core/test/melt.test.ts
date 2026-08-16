@@ -99,16 +99,16 @@ describe("the derivative and the peak (melt.md §4–§5)", () => {
     expect(dense.height / coarse.height).toBeLessThan(1.25);
   });
 
-  it("puts the Tm between grid points rather than on them", () => {
-    // The peak of this one sits off the 0.5 °C grid; the parabolic refinement is what finds it.
+  it("puts the Tm on a sampled temperature, never between two", () => {
+    // The peak of this one sits between grid points; the reported Tm is still the nearer rung,
+    // because the sampled temperature is the answer and nothing is interpolated (`melt.md` §5).
     const peak = meltPeak(axis, meltDerivative(axis, sigmoid(axis, 80.3)))!;
-    expect(peak.tmC).toBeCloseTo(80.3, 1);
-    expect(peak.tmC % 0.5).not.toBe(0);
+    expect(axis).toContain(peak.tmC);
+    expect(Math.abs(peak.tmC - 80.3)).toBeLessThanOrEqual(0.25);
   });
 
   it("reports the Tm rounded to 0.1 °C", () => {
-    // The refinement resolves far below the precision the measurement supports, so the value
-    // itself is cut to 0.1 °C — and cleanly, with no floating-point tail for a `toFixed` to hide.
+    // The value itself is cut to 0.1 °C, with no floating-point tail for a `toFixed` to hide.
     for (const mid of [80, 80.3, 82.37, 85.55555]) {
       const peak = meltPeak(axis, meltDerivative(axis, sigmoid(axis, mid)))!;
       expect(peak.tmC).toBe(Math.round(peak.tmC * 10) / 10);
@@ -117,8 +117,8 @@ describe("the derivative and the peak (melt.md §4–§5)", () => {
   });
 
   it("never places a Tm outside the ramp", () => {
-    // A parabola fitted through a near-flat trio solves to a vertex far outside the data; before
-    // the vertex was clamped this put melting temperatures at 38 °C on a ramp starting at 65.
+    // Free once the Tm is a sampled temperature, and worth keeping: the parabolic refinement this
+    // replaced put melting temperatures at 38 °C on a ramp starting at 65 (`melt.md` §B.2).
     for (const values of [axis.map(() => 500), axis.map((t) => t), axis.map((t) => -t)]) {
       const peak = meltPeak(axis, meltDerivative(axis, values));
       if (!peak) continue;
@@ -161,17 +161,16 @@ describe("melt analysis of the committed CFX run", () => {
     }
   });
 
-  it("puts the strongest curves' Tm within one rounding step of each other", () => {
-    // 27 replicate curves of one product. Unrounded they span 0.12 °C — the measurement
-    // `melt.md` Appendix A quotes, and the reason the reported Tm is cut at 0.1 °C — so after
-    // rounding they land on two adjacent rungs and span exactly one step.
+  it("gives every replicate of one product the same Tm", () => {
+    // 27 replicate curves of one product. Their peaks all fall on the same 0.5 °C rung, so with
+    // no interpolation they agree exactly — the 0.12 °C of scatter `melt.md` Appendix A measures
+    // is entirely below the grid.
     const tms = analysis.curves
       .filter((c) => c.channel === 0 && (c.peakHeight ?? 0) > 3000)
       .map((c) => c.tmC as number)
       .sort((a, b) => a - b);
     expect(tms).toHaveLength(27);
-    expect(tms[tms.length - 1]! - tms[0]!).toBeLessThan(0.21);
-    expect(tms[tms.length >> 1]!).toBeCloseTo(85.6, 1);
+    expect(new Set(tms)).toEqual(new Set([85.5]));
   });
 
   it("calls nothing at all on the channels that carry no signal", () => {
@@ -239,7 +238,8 @@ describe("melt analysis of a Biomeme melt export (biomeme.md §5)", () => {
     for (const curve of called) {
       const index = analysis.curves.indexOf(curve);
       const filePeak = raw.targets[index]?.peak as number;
-      expect(Math.abs((curve.tmC as number) - filePeak)).toBeLessThan(0.5);
+      // Exactly, not approximately: both are now a point of the file's own 0.5 °C grid.
+      expect(curve.tmC).toBe(filePeak);
     }
   });
 
@@ -295,15 +295,15 @@ describe("a melt in dye space (calibration.md §2.1)", () => {
         .curves.filter((c) => c.channel === 0)
         .map((c) => [c.wellLabel, c.tmC]),
     );
-    // Only the curves with a peak worth calling. The five wells that disagree on this run all
+    // Only the curves with a peak worth calling. The four wells that disagree on this run all
     // have peaks of 10–13 RFU/°C — flat curves that squeaked past `hasMeltSignal`, whose three
     // tallest derivative points sit within 1% of each other, so the tilt the temperature
     // correction removes is enough to reorder them. The 54 curves carrying real product peak at
-    // 100–5900 RFU/°C and none of them move.
+    // 100–5900 RFU/°C and every one of them lands on the same rung in both spaces.
     const real = dye.curves.filter((c) => (c.peakHeight ?? 0) > 100);
     expect(real.length).toBe(54);
     for (const c of real) {
-      expect(Math.abs((c.tmC as number) - (channelTm.get(c.wellLabel) as number))).toBeLessThan(0.5);
+      expect(c.tmC).toBe(channelTm.get(c.wellLabel));
     }
   });
 
