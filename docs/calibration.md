@@ -82,9 +82,48 @@ channel — a small piecewise-linear curve. To evaluate it at an arbitrary block
 just 20/40/60/80), interpolate linearly between the two bracketing points; below the first point
 or above the last, **extrapolate linearly** using that end segment's slope, so any temperature
 the instrument reports has a defined response rather than falling off the end of the curve.
+Extrapolation is **floored at zero**: the formula above is a `max(0, …)` at every knot, so a
+negative response is not a small one but a nonsensical one — it would flip the sign of that dye's
+contribution on that channel. That is reachable rather than hypothetical, since a melt ramps 15 °C
+past the last knot (§2.1).
 
 Repeat this independently for every channel and every dye in play — the result is one curve per
 (dye, channel) pair.
+
+### 2.1 Which temperature: one per step, or one per read
+
+Which point on that curve gets sampled is decided per **plate read**, not per run and not per step.
+
+Across an amplification `PLATEREAD` step it makes no difference: the block holds its setpoint, and
+on the committed two-step sample the 40 reads of the amplification step span **0.01 °C** in total.
+One representative temperature — the mean over the step's reads (`stepTemperature`) — is exact
+there for any purpose.
+
+It makes a large difference on a step that reads *while the block moves*. A melt ramps 65 → 95 °C
+and reads every half degree ([`melt.md`](./melt.md) §7), and dye response falls steeply over that
+span: on the same sample's calibration, Cy5's channel-3 response drops **58%** between 65 and 95 °C.
+Solving all 61 of those reads against one matrix applies the proportions the dyes had at the bottom
+of the ramp to readings taken at the top; measured on a three-dye plate, each dye's unmixing
+direction rotates 1.7°–3.7° between those two temperatures (`melt.md` §A.5).
+
+So `computeRunAnalysis` reads the step's per-read block temperatures (`stepTemperatures`) and, when
+they span more than one quantum, hands each read its own matrix (`DyeSolver.matrixAt`). Two things
+keep that cheap, and they are the whole of the efficiency story:
+
+- **The quantum.** Temperatures are rounded to `CALIBRATION_TEMP_QUANTUM_C` = **0.1 °C** before a
+  matrix is looked up. That collapses an amplification step's measurement jitter to a single
+  matrix — the step never leaves the path it was always on — and caps a ramp at one matrix per
+  rung. 0.1 °C is a two-hundredth of the 20 °C spacing between the `.Dcal` knots the response is
+  interpolated from, far below the noise on the readings being separated.
+- **The cache is per solver, not per well.** A solver is one (vessel, dye set) pair —
+  normally exactly one for a whole plate (§3.1, §3.2) — and its matrices are memoized by rounded
+  temperature. A 96-well, 61-read melt therefore costs **61 pseudo-inverses for the run**, not
+  61 × 96. The matrix is still built and inverted once per distinct temperature, exactly as §5
+  describes; there are simply 61 distinct temperatures instead of one.
+
+Above the last `.Dcal` knot the response is the extrapolation of §2, floored at zero — a melt's top
+15 °C are not calibrated by any measurement the instrument ships. What that does and does not
+change to a reported melting temperature is measured in `melt.md` §A.5.
 
 ## 3. The channel→dye calibration matrix
 
@@ -617,6 +656,10 @@ const { dyes, concentrations, failed } = separateChannels(matrix, corrected);
 common case of a one-off separation; use the individual functions instead when reusing a
 calibration matrix across many wells or cycles at the same temperature, since rebuilding it per
 call re-runs the eigen-decomposition of §5 for a matrix that has not changed.
+
+`stepTemperature(zpcr, step)` gives the one temperature a step is represented by, and
+`stepTemperatures(zpcr, step)` the temperature of each of its reads — the pair §2.1 chooses
+between. `computeRunAnalysis` reports which it used as `RunAnalysis.perReadCalibration`.
 
 ## 8. Limitations / open items
 

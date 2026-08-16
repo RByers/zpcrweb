@@ -200,7 +200,10 @@ export interface StoredView {
   baseline: "raw" | "delta" | "percent";
   /** Curves view's display mode. */
   curveView: "relative" | "absolute";
-  /** Curves view in melt mode: the derivative, the fluorescence it came from, or the table. */
+  /** Curves view in melt mode: the derivative, or the fluorescence it came from. `"table"` is a
+   * retired third value — the melt table moved onto the shared View toggle, alongside the
+   * amplification one — kept here because records written before that still hold it, and
+   * normalized away on read (`fromStored`). */
   meltView: "derivative" | "raw" | "table";
   /** Overlay the auto-detected linear baseline on each curve. */
   drawBaseline: boolean;

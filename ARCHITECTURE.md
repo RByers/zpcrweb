@@ -620,7 +620,11 @@ raw bytes ─▶ fflate.unzipSync ─▶ { name: Uint8Array }
 - **`calibration.ts`** — channel→dye color separation built on top of `.Dcal` data: per-dye
   response curves, a channel×dye calibration matrix, and a solve via `linalg.ts`'s
   pseudo-inverse. The matrix's normalization mode is a conditioning choice only — the solve
-  undoes it and reports per-dye RFU, so the mode never changes the scale. See
+  undoes it and reports per-dye RFU, so the mode never changes the scale. The temperature the
+  matrix is sampled at is per **plate read**, not per run: constant across an amplification step
+  (0.01 °C over 40 reads), and a 30 °C sweep on a melt, where each read gets its own matrix —
+  memoized per solver on a 0.1 °C quantum, so a 96-well melt costs one inversion per rung rather
+  than one per rung per well (`calibration.md` §2.1). See
   [`calibration.md`](./docs/calibration.md).
 - **`linalg.ts`** — the small dense-matrix routines `calibration.ts` needs, chiefly a
   pseudo-inverse via Jacobi eigen-decomposition of the Gram matrix. Both its convergence test
@@ -675,6 +679,13 @@ raw bytes ─▶ fflate.unzipSync ─▶ { name: Uint8Array }
   fluorescence actually moved — `hasMeltSignal()` — because every curve has a highest point and an
   empty well's is noise. See [`melt.md`](./docs/melt.md), whose Appendix B records the
   signal-to-noise gate that looks obvious and does not work.
+  **Two spaces, one derivation.** `computeMeltAnalysis()` is the channel-space form, which needs
+  neither a plate nor a password; `meltCurvesFromFluor()` is the same arithmetic over
+  colour-separated curves the caller already has — `computeRunAnalysis(…, meltStep).allFluorCurves`
+  — so nothing is separated twice. What makes that separation meaningful across a 30 °C ramp is
+  that the calibration matrix is sampled at each read's own `BLOCKTEMP` rather than once for the
+  step (`calibration.md` §2.1); it does not move the reported Tm (measured: 0.000 °C median shift,
+  `melt.md` §A.5), it corrects which share of a channel's reading belongs to which dye.
   **The one format difference is absorbed here**: a Biomeme melt export ships its own derivative,
   so `biomeme.ts` converts it to a per-°C rate on `WellCurve.meltDerivativePerC` and
   `computeMeltAnalysis` reads it where present and derives it where absent. Everything downstream

@@ -25,7 +25,8 @@ position. Everything below is in service of getting that peak's temperature righ
 None of this run through the amplification pipeline. A melt has no cycles, no baseline region in
 `threshold.md` §3's sense (the curve is sloping from its first point), and no threshold to cross.
 Implemented by `packages/core/src/melt.ts` (detection, §2–§3) and
-`packages/core/src/meltAnalysis.ts` (the rest), entry point `computeMeltAnalysis()`.
+`packages/core/src/meltAnalysis.ts` (the rest), entry points `computeMeltAnalysis()` for the
+channel-space form and `meltCurvesFromFluor()` for the colour-separated one (§7).
 
 ## 2. Recognizing a melt
 
@@ -164,25 +165,46 @@ The device's own called peak is parsed and shown in the decoded view — nothing
 dropped — but drives nothing. It agrees with §5 to within 0.2 °C on every well where the signal is
 unambiguous (§A.4).
 
-## 7. Future work
+## 7. The two spaces a melt is read in
 
-> **Future — correcting for the dye's own temperature response.** Fluorescence falls with
-> temperature whether or not anything is melting, so part of every melt curve's slope is thermal
-> quenching rather than dissociation. It is not small: **measured** from the committed calibration
-> set, between 60 and 80 °C, FAM's response falls 18% and Cy5's 38%. A high-resolution melt analysis
-> would divide it out using the `.Dcal` response curves (`calibration.md` §2) before
-> differentiating. This is **deliberately not implemented**, because those curves stop at **80 °C**
-> while a melt runs to 95 °C: correcting the top third of the ramp means extrapolating a
-> calibration well past its last measurement, and `interpolateResponse` extrapolates linearly
-> rather than clamping. It would change peak *heights*, not peak positions, so the Tm of §5 is
-> unaffected either way. Worth revisiting if calibration data above 80 °C appears.
+A melt is derived twice, from the same reads, and which one is on screen is the Curves view's own
+View toggle — the same Channel / Fluorophore / Target / Table control an amplification step gets.
 
-> **Future — colour separation.** Melt analysis stays in **channel space**: one curve per optical
-> channel, no channel→dye unmixing. A melt is read on a single channel in practice, and staying in
-> channel space is what lets it work with no plate definition and no password — which the committed
-> melt run requires, its plate being encrypted. A dye-space source (Biomeme) is already per-dye and
-> needs no separation. Doing the separation properly would mean per-temperature matrices, which
-> runs into the same 80 °C ceiling above.
+**Channel space** (`computeMeltAnalysis`) is one curve per optical channel, unmixed by nothing. It
+is the form that always works: it needs no plate definition and no password, which the committed
+melt run requires, its plate being encrypted. It is also where the number quoted in Appendix A was
+first measured.
+
+**Dye space** (`meltCurvesFromFluor`) is one curve per well and fluorophore, after the channel→dye
+colour separation of [`calibration.md`](./calibration.md). The caller supplies the separated curves
+rather than this recomputing them, because the app already holds them:
+`computeRunAnalysis(zpcr, …, meltStep).allFluorCurves` *is* the melt step's separation. A dye-space
+source (Biomeme) arrives per-dye already and needs no unmixing at all, so it reaches the same place
+by a shorter route.
+
+The separation is what makes the ramp tractable. A dye's response is a function of block
+temperature, and a melt sweeps 30 °C of it, so the matrix is sampled at **each read's own
+`BLOCKTEMP`** rather than once for the step — `calibration.md` §2.1, which is also where the cost
+of doing that is accounted for. Above 80 °C, where the `.Dcal` knots stop, the response is
+extrapolated from the last calibrated segment and floored at zero.
+
+Two consequences worth stating plainly:
+
+- **The Tm does not move.** On the committed run — one dye, SYBR, on one channel — the separation
+  is close to a rescaling, and the 54 curves carrying real product report the same peak in both
+  spaces to within 0.5 °C, median shift 0.000 °C (§A.5). Where the two disagree at all is on five
+  flat wells whose derivative peaks at 10–13 RFU/°C against the product's 100–5900, i.e. wells with
+  no melting transition to locate.
+- **Thermal quenching is still visible on the plotted curve.** Fluorescence falls with temperature
+  whether or not anything is melting — **measured** from the committed calibration set, between 60
+  and 80 °C FAM's response falls 18% and Cy5's 38% — and a separated value is deliberately reported
+  on an RFU scale (`calibration.md` §5.1), which carries that fall back into the number. What the
+  per-read matrix corrects is the *unmixing*: which share of a channel's reading belongs to which
+  dye, whose proportions do change across a ramp (§A.5 measures the rotation). Dividing the
+  quenching out as well would mean reporting a melt on a different scale from every other curve in
+  the app, and is not done.
+
+## 8. Future work
 
 > **Genuinely unknown:** how the Biomeme device chooses its own peak. Its value is the argmax of its
 > stored derivative on wells with signal, but not on flat ones, so there is peak-selection logic
@@ -256,6 +278,35 @@ Wells clearing §5.1's gate, file value against this library's:
 | FAM well 2 | 79 | 78.79 |
 
 Worst disagreement 0.21 °C, under half the file's own 0.5 °C grid step.
+
+### A.5 Channel space against dye space (§7)
+
+The same melt run, derived both ways — channel 0 raw, and SYBR after colour separation with a
+matrix per read (`calibration.md` §2.1). 96 wells, one dye:
+
+| Cohort | n | Tm agreement |
+|---|---|---|
+| peak > 100 RFU/°C (real product) | 54 | all within 0.5 °C; **median shift 0.000 °C** |
+| all called wells | 96 | 91 within 0.5 °C |
+| the five that disagree | 5 | peaks of 10.2 – 13.4 RFU/°C, three tallest derivative points within 1% of each other |
+
+The five are flat wells that squeaked past §5.1's gate; on those, reordering the top of a
+featureless derivative is not a Tm changing but noise being noise. The plateau below the transition
+(65 → 75 °C) drifts −18.1% raw and −17.7% separated, which is §7's second point measured: the
+reported RFU scale carries the quenching back in on purpose.
+
+What the per-read matrix does change is the unmixing, which only a multi-dye plate can show. On
+`samples/20260726_S183-S185_RVP.zpcr` (FAM / Tex 615 / Cy5, six channels), sampling the same
+calibration at 65 °C and at 95 °C:
+
+| Dye | channel-3 response, 65 °C → 95 °C | rotation of its unmixing direction |
+|---|---|---|
+| FAM | — | 3.72° |
+| Tex 615 | — | 2.05° |
+| Cy5 | 0.3549 → 0.1499 (−58%) | 1.68° |
+
+A single matrix for the whole ramp applies the 65 °C proportions to a 95 °C reading; a per-read
+matrix does not.
 
 ## Appendix B — What didn't work
 

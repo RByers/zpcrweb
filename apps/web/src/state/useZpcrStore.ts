@@ -181,10 +181,11 @@ export type CurveView = "relative" | "absolute";
  * default, because it is the one that answers the question a melt is run to ask (`melt.md` §1).
  * Neither changes a number: the Tm is taken from the derivative whichever is drawn.
  *
- * `"table"` swaps the chart for the melting temperatures themselves, the same way
- * {@link FluorViewMode}'s own `"table"` does for Cq.
+ * This is the y axis only. *Which* curves a melt shows — raw channels, fluorophores, targets, or
+ * the melting-temperature table instead of a chart — is {@link FluorViewMode}, exactly as it is
+ * for an amplification step, so one View toggle drives both kinds of step.
  */
-export type MeltView = "derivative" | "raw" | "table";
+export type MeltView = "derivative" | "raw";
 /**
  * Calibration view only — which of the two levels a `.Dcal` carries the chart plots.
  * `"relative"` is the response the algorithm actually consumes, `max(0, dye − empty)`
@@ -849,7 +850,9 @@ function fromStored(e: StoredFile): FileSettings {
     enabledRefCols: new Set(v.enabledRefCols),
     baseline: v.baseline,
     curveView: v.curveView,
-    meltView: v.meltView,
+    // A record written while "table" was still a melt y-axis value comes back on the derivative;
+    // the table is reached from the View toggle now (see `MeltView`).
+    meltView: v.meltView === "raw" ? "raw" : "derivative",
     drawBaseline: v.drawBaseline,
     scale: v.scale,
     showDark: v.showDark,

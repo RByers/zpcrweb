@@ -190,13 +190,29 @@ export interface FluorCurve {
    * curve never does, since separation is this library's own arithmetic with no file-side
    * equivalent. */
   fileAnalysis?: FileAnalysis;
+  /** −dF/dT per °C as the source itself reports it, carried through from {@link WellCurve} for a
+   * dye-space source whose channels already *are* dyes (`melt.md` §6). A color-separated curve
+   * never has one: the derivative of a solved concentration is this library's own arithmetic. */
+  meltDerivativePerC?: number[];
 }
 
 /** The calibration a single well is solved against — one vessel's matrix, plus each of its
  * columns' primary channel (aligned with `matrix.dyes`, and used only for the returned curves'
  * coloring, never fed into the solve). */
 export interface DyeSolver {
+  /**
+   * The matrix at the step's representative block temperature ({@link stepTemperature}) — what a
+   * step that holds one temperature solves every read against, and the answer {@link matrixAt}
+   * falls back to for a read index it has no temperature for.
+   */
   matrix: CalibrationMatrix;
+  /**
+   * The matrix for one read of the step, by read index, when the step's block temperature
+   * **moves** across its reads — a melt ramp, a gradient, anything that reads while the block is
+   * climbing (see {@link stepTemperatures}). Undefined for a step that holds one temperature, so
+   * the overwhelmingly common case still builds and inverts exactly one matrix.
+   */
+  matrixAt?: (readIndex: number) => CalibrationMatrix;
   dyeChannels: (number | undefined)[];
 }
 
@@ -296,6 +312,9 @@ export function computeFluorCurves(
     const { matrix, dyeChannels } = solver;
     const cycles = first.cycles;
     const perDye: number[][] = matrix.dyes.map(() => new Array<number>(cycles.length).fill(0));
+    // One matrix for the whole step, unless the block temperature moved across its reads — then
+    // each read solves against its own (see `DyeSolver.matrixAt`).
+    const matrixFor = solver.matrixAt;
     // Per well, not per cycle: the gain factors are a fixed property of the plate position.
     const wellFactor = corrections.wellFactor?.(first.row, first.col);
 
@@ -306,7 +325,7 @@ export function computeFluorCurves(
         wellFactor,
         backgroundLevel: columnAt(corrections.backgroundLevel, i),
       });
-      const { concentrations } = separateChannels(matrix, corrected);
+      const { concentrations } = separateChannels(matrixFor ? matrixFor(i) : matrix, corrected);
       concentrations.forEach((v, d) => {
         perDye[d]![i] = v;
       });
@@ -334,7 +353,8 @@ export function computeFluorCurves(
  * separation (`Zpcr.dyeSpace`, e.g. Biomeme): each raw curve's channel index already *is* a
  * dye, one-to-one, so this just relabels {@link WellCurve}s as {@link FluorCurve}s — no solve,
  * no calibration matrix — and carries each curve's `fileAnalysis` through untouched, which is
- * how the file/computed toggles reach a dye-space run's Cq table.
+ * how the file/computed toggles reach a dye-space run's Cq table, along with any
+ * `meltDerivativePerC`, which is how such a source's own melt derivative reaches dye space.
  */
 export function dyeSpaceFluorCurves(
   wellCurves: WellCurve[],
@@ -350,6 +370,7 @@ export function dyeSpaceFluorCurves(
     cycles: c.cycles,
     mean: c.mean,
     fileAnalysis: c.fileAnalysis,
+    meltDerivativePerC: c.meltDerivativePerC,
   }));
 }
 
@@ -475,10 +496,12 @@ export function darkCurveKey(channel: number): string {
 }
 
 /**
- * The block temperature a step's calibration matrix is built at: the mean across that step's
- * plate reads, defaulting to 60 °C for a run that reports none. Block temperature is essentially
- * constant across a single PLATEREAD step's cycles (see `plateread.md` §3), so one representative
- * temperature per step is accurate.
+ * The block temperature a step's calibration matrix is built at when one temperature stands for
+ * the whole step: the mean across that step's plate reads, defaulting to 60 °C for a run that
+ * reports none. Block temperature is essentially constant across an amplification `PLATEREAD`
+ * step's cycles (measured: 0.01 °C across 40 reads — see `melt.md` §2), so one representative
+ * temperature is accurate there. It is **not** on a step that reads while the block ramps; see
+ * {@link stepTemperatures}.
  */
 export function stepTemperature(zpcr: Zpcr, step: number | undefined): number {
   const temps = zpcr.reads
@@ -486,6 +509,45 @@ export function stepTemperature(zpcr: Zpcr, step: number | undefined): number {
     .map((r) => r.blockTempC)
     .filter((t): t is number => t != null);
   return temps.length ? temps.reduce((a, b) => a + b, 0) / temps.length : 60;
+}
+
+/**
+ * The block temperature of **each** of a step's reads, in read order — the per-read counterpart
+ * of {@link stepTemperature}, aligned index-for-index with the curves `Zpcr.curves({ step })`
+ * returns. A read that carries no `BLOCKTEMP` takes the step's representative temperature, so the
+ * array is always as long as the step's read list and always finite.
+ *
+ * The dye response the calibration matrix samples is a function of block temperature
+ * (`calibration.md` §2), and a melt step reads across a 30 °C ramp: solving all 61 of its reads
+ * against one matrix quantifies the top of the ramp with the response the dyes had at the bottom.
+ * This is what lets each read be solved against its own (`calibration.md` §2.1).
+ */
+export function stepTemperatures(zpcr: Zpcr, step: number | undefined): number[] {
+  const reads = zpcr.reads.filter((r) => r.step === step);
+  const fallback = stepTemperature(zpcr, step);
+  return reads.map((r) => (r.blockTempC != null && Number.isFinite(r.blockTempC) ? r.blockTempC : fallback));
+}
+
+/**
+ * Quantum, °C, that per-read block temperatures are rounded to before a matrix is built for one
+ * (`calibration.md` §2.1). Two purposes, both about cost: it collapses an amplification step's
+ * measurement jitter to a single matrix, and it caps a ramp at one matrix per rung rather than one
+ * per read. The error it admits is a fortieth of the spacing between the four `.Dcal` knots the
+ * response is interpolated from, well under the noise on the readings being separated.
+ */
+export const CALIBRATION_TEMP_QUANTUM_C = 0.1;
+
+/** Whether a step's reads span enough temperature to be worth more than one matrix — i.e. whether
+ * they cover more than one {@link CALIBRATION_TEMP_QUANTUM_C} bucket. */
+function temperatureMoves(temps: readonly number[]): boolean {
+  if (temps.length < 2) return false;
+  let min = Infinity;
+  let max = -Infinity;
+  for (const t of temps) {
+    if (t < min) min = t;
+    if (t > max) max = t;
+  }
+  return max - min >= CALIBRATION_TEMP_QUANTUM_C;
 }
 
 /** Where a curve's baseline/Cq numbers come from when its source file carries its own
@@ -634,6 +696,13 @@ export interface RunAnalysis {
   calibratedFluors: FluorCalibration[];
   calibrationAvailable: boolean;
   stepTemperatureC: number;
+  /** Block temperature of each of the step's reads, in read order ({@link stepTemperatures}).
+   * Equal to {@link stepTemperatureC} throughout for a step that holds one temperature; a ramp
+   * (a melt) is where the two differ, and where each read is separated against its own matrix. */
+  readTemperaturesC: number[];
+  /** Whether this step's separation used a per-read matrix — i.e. whether its block temperature
+   * moved by more than {@link CALIBRATION_TEMP_QUANTUM_C} across the reads. */
+  perReadCalibration: boolean;
   /** Target/gene assigned to each (well, fluor) pair — `Map<wellKey, Map<fluor, target>>`. */
   wellFluorTargets: Map<string, Map<string, string>>;
   /** Fluorophores the plate assigns to each well — `Map<wellKey, Set<fluor>>`. */
@@ -795,6 +864,10 @@ export function computeRunAnalysis(
 
   // One representative matrix per step — see `stepTemperature`.
   const stepTemperatureC = stepTemperature(zpcr, activeStep);
+  // …unless the block temperature moved while the step was being read, in which case each read is
+  // solved against a matrix built at its own block temperature (`calibration.md` §2.1).
+  const readTemperaturesC = stepTemperatures(zpcr, activeStep);
+  const perReadTemperature = temperatureMoves(readTemperaturesC);
 
   // A dye-space source has no channel mixing to solve for at all (see `RunAnalysis.dyeSpace`) —
   // `allFluorCurves` below reads its curves straight off `allCurves` instead.
@@ -833,19 +906,42 @@ export function computeRunAnalysis(
     const cacheKey = `${t}|${dyes.map((f) => f.fluor).join("\0")}`;
     const hit = solverCache.get(cacheKey);
     if (hit !== undefined || solverCache.has(cacheKey)) return hit;
-    const solver: DyeSolver | undefined =
-      dyes.length === 0
-        ? undefined
-        : {
-            // `channels` is passed in rather than slicing rows afterwards so the matrix's column
-            // norms — the RFU scale factor of calibration.md §5 — are computed over the rows the
-            // solve uses.
-            matrix: buildCalibrationMatrix(dyes.map((f) => f.curve!), stepTemperatureC, {
-              normalization: settings.calibrationNormalization ?? "global",
-              channels: available,
-            }),
-            dyeChannels: dyes.map((f) => f.channel),
-          };
+    let solver: DyeSolver | undefined;
+    if (dyes.length > 0) {
+      const curves = dyes.map((f) => f.curve!);
+      // `channels` is passed in rather than slicing rows afterwards so the matrix's column
+      // norms — the RFU scale factor of calibration.md §5 — are computed over the rows the
+      // solve uses.
+      const build = (temperatureC: number) =>
+        buildCalibrationMatrix(curves, temperatureC, {
+          normalization: settings.calibrationNormalization ?? "global",
+          channels: available,
+        });
+      // One matrix per distinct rounded temperature, shared by every well this solver serves —
+      // so a 61-read melt costs 61 inversions for the whole plate, not 61 per well, and a step
+      // whose temperature holds still costs the one it always did.
+      const byTemperature = new Map<number, CalibrationMatrix>();
+      const at = (temperatureC: number): CalibrationMatrix => {
+        const bucket = Math.round(temperatureC / CALIBRATION_TEMP_QUANTUM_C);
+        let m = byTemperature.get(bucket);
+        if (!m) {
+          m = build(bucket * CALIBRATION_TEMP_QUANTUM_C);
+          byTemperature.set(bucket, m);
+        }
+        return m;
+      };
+      const matrix = build(stepTemperatureC);
+      solver = {
+        matrix,
+        matrixAt: perReadTemperature
+          ? (i: number) => {
+              const t = readTemperaturesC[i];
+              return t == null ? matrix : at(t);
+            }
+          : undefined,
+        dyeChannels: dyes.map((f) => f.channel),
+      };
+    }
     solverCache.set(cacheKey, solver);
     return solver;
   };
@@ -950,6 +1046,8 @@ export function computeRunAnalysis(
     calibratedFluors,
     calibrationAvailable,
     stepTemperatureC,
+    readTemperaturesC,
+    perReadCalibration: perReadTemperature,
     wellFluorTargets,
     wellFluors,
     loadedFluors,

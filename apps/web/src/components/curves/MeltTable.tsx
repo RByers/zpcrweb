@@ -1,21 +1,23 @@
 import { useState } from "react";
-import type { MeltRow } from "@zpcrweb/core";
-import { channelColor, channelLabel } from "../../lib/channelColors";
+import { channelLabel, type MeltRow } from "@zpcrweb/core";
+import { curveColor } from "../../lib/fluorColors";
 
 interface Props {
   rows: MeltRow[];
+  /** What the second column holds — "Channel", "Fluorophore" or "Target", following the View
+   * toggle, the same way the chart's lines are labelled. */
+  seriesLabel: string;
   /** Isolate one well and go back to the chart — the same affordance `CurveTable` offers. */
   onPickWell: (row: number, col: number) => void;
 }
 
-type SortKey = "well" | "channel" | "tm" | "peakHeight";
+type SortKey = "well" | "series" | "tm" | "peakHeight";
 
-const COLUMNS: readonly { key: SortKey; label: string; numeric?: boolean }[] = [
-  { key: "well", label: "Well" },
-  { key: "channel", label: "Channel" },
-  { key: "tm", label: "Tm (°C)", numeric: true },
-  { key: "peakHeight", label: "Peak (RFU/°C)", numeric: true },
-];
+/** The series a row belongs to, written out: its target, its fluorophore, or its channel —
+ * whichever space the melt was analysed in and grouped by. */
+function seriesOf(r: MeltRow): string {
+  return r.target ?? r.dye ?? channelLabel(r.channel);
+}
 
 /** Plate position as one number, so Well sorts A1, A2, … B1 rather than A1, A10, A2. */
 const wellOrder = (r: MeltRow) => r.row * 1000 + r.col;
@@ -24,8 +26,8 @@ function sortValue(r: MeltRow, key: SortKey): number | null {
   switch (key) {
     case "well":
       return wellOrder(r);
-    case "channel":
-      return r.channel;
+    case "series":
+      return null; // a name, not a number — compared by `seriesOf` below
     case "tm":
       return r.tmC;
     case "peakHeight":
@@ -41,13 +43,19 @@ function SortArrow({ state }: { state: "asc" | "desc" | null }) {
  * Melt mode's table: one row per plotted curve, with the melting temperature it gave.
  *
  * The melt counterpart of `CurveTable`, and much smaller because a melt has far less to report —
- * no baseline, no threshold, no Cq, and no target or fluorophore either, melt analysis being done
- * in channel space (`melt.md` §1). A curve with no Tm still gets a row: "this well melted at
- * nothing" is a result, and dropping it would silently shorten the table.
+ * no baseline, no threshold and no Cq (`melt.md` §1). A curve with no Tm still gets a row: "this
+ * well melted at nothing" is a result, and dropping it would silently shorten the table.
  */
-export function MeltTable({ rows, onPickWell }: Props) {
+export function MeltTable({ rows, seriesLabel, onPickWell }: Props) {
   const [sortKey, setSortKey] = useState<SortKey>("well");
   const [dir, setDir] = useState<1 | -1>(1);
+
+  const columns: readonly { key: SortKey; label: string; numeric?: boolean }[] = [
+    { key: "well", label: "Well" },
+    { key: "series", label: seriesLabel },
+    { key: "tm", label: "Tm (°C)", numeric: true },
+    { key: "peakHeight", label: "Peak (RFU/°C)", numeric: true },
+  ];
 
   const toggle = (key: SortKey) => {
     if (key === sortKey) setDir((d) => (d === 1 ? -1 : 1));
@@ -58,6 +66,9 @@ export function MeltTable({ rows, onPickWell }: Props) {
   };
 
   const sorted = [...rows].sort((a, b) => {
+    if (sortKey === "series") {
+      return seriesOf(a).localeCompare(seriesOf(b)) * dir || wellOrder(a) - wellOrder(b);
+    }
     const av = sortValue(a, sortKey);
     const bv = sortValue(b, sortKey);
     // A curve with no Tm sorts last whichever way the column points, the way a missing Cq does
@@ -72,7 +83,7 @@ export function MeltTable({ rows, onPickWell }: Props) {
     <table className="analysis__tbl runlog__tbl atbl">
       <thead>
         <tr>
-          {COLUMNS.map((c) => {
+          {columns.map((c) => {
             const state = c.key === sortKey ? (dir === 1 ? "asc" : "desc") : null;
             return (
               <th
@@ -97,39 +108,44 @@ export function MeltTable({ rows, onPickWell }: Props) {
         </tr>
       </thead>
       <tbody>
-        {sorted.map((r) => (
-          <tr
-            key={`${r.wellLabel}-${r.channel}`}
-            className={"analysis__row" + (r.tmC == null ? " is-nocq" : "")}
-            style={{ "--rowc": channelColor(r.channel) } as React.CSSProperties}
-          >
-            <td>
-              <button
-                type="button"
-                className="atbl__pick"
-                onClick={() => onPickWell(r.row, r.col)}
-                title={`Chart well ${r.wellLabel} on its own`}
-              >
-                <span className="atbl__well mono">{r.wellLabel}</span>
-              </button>
-            </td>
-            <td>
-              <span className="mono" style={{ color: channelColor(r.channel) }}>
-                {channelLabel(r.channel)}
-              </span>
-            </td>
-            <td className="atbl__num mono">
-              {r.tmC == null ? <span className="atbl__none">—</span> : r.tmC.toFixed(2)}
-            </td>
-            <td className="atbl__num mono">
-              {r.peakHeight == null ? (
-                <span className="atbl__none">—</span>
-              ) : (
-                r.peakHeight.toFixed(1)
-              )}
-            </td>
-          </tr>
-        ))}
+        {sorted.map((r) => {
+          // A dye-space row colors by its dye, a channel-space one by its channel — the same rule
+          // the chart's lines follow, so a row and its line are the same color.
+          const color = curveColor({ fluor: r.dye, channel: r.channel });
+          return (
+            <tr
+              key={`${r.wellLabel}-${r.dye ?? r.channel}`}
+              className={"analysis__row" + (r.tmC == null ? " is-nocq" : "")}
+              style={{ "--rowc": color } as React.CSSProperties}
+            >
+              <td>
+                <button
+                  type="button"
+                  className="atbl__pick"
+                  onClick={() => onPickWell(r.row, r.col)}
+                  title={`Chart well ${r.wellLabel} on its own`}
+                >
+                  <span className="atbl__well mono">{r.wellLabel}</span>
+                </button>
+              </td>
+              <td>
+                <span className="mono" style={{ color }}>
+                  {seriesOf(r)}
+                </span>
+              </td>
+              <td className="atbl__num mono">
+                {r.tmC == null ? <span className="atbl__none">—</span> : r.tmC.toFixed(2)}
+              </td>
+              <td className="atbl__num mono">
+                {r.peakHeight == null ? (
+                  <span className="atbl__none">—</span>
+                ) : (
+                  r.peakHeight.toFixed(1)
+                )}
+              </td>
+            </tr>
+          );
+        })}
       </tbody>
     </table>
   );

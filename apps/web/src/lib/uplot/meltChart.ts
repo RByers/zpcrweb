@@ -18,7 +18,7 @@
 
 import uPlot from "uplot";
 import type { MeltCurve } from "@zpcrweb/core";
-import { channelColor, channelLabel } from "../channelColors";
+import { curveColor } from "../fluorColors";
 import type { MeltView } from "../../state/useZpcrStore";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -29,8 +29,13 @@ const TM_DASH = "3,3";
 
 /** One plotted melt curve: a core `MeltCurve` plus how this chart should draw it. */
 export interface MeltPlotCurve {
-  /** Unique per line — `${row},${col}|${channel}`. */
+  /** Unique per line — `${row},${col}|${channel}` in channel space, `${row},${col}|${dye}` in
+   * dye space. */
   key: string;
+  /** What the line is named and toggled by: the channel's label in channel space, and in dye
+   * space the fluorophore or the target, whichever the View toggle groups on — the same
+   * `dyeLabel` the amplification chart carries, so one rail drives both charts. */
+  dyeLabel: string;
   curve: MeltCurve;
 }
 
@@ -39,7 +44,9 @@ export type MeltHighlight =
   /** One or more whole wells, by display label — the same shape `chart.ts`'s `HighlightMatch`
    * uses, so the rail's existing hover state drives this chart without translation. */
   | { kind: "wells"; labels: string[] }
-  | { kind: "channel"; channel: number };
+  | { kind: "channel"; channel: number }
+  /** One fluorophore or target chip, by the label the chip carries. */
+  | { kind: "target"; dyeLabel: string };
 
 /** Per-series metadata, index-aligned with uPlot series (offset by the x row). */
 export interface MeltSeriesMeta {
@@ -51,7 +58,8 @@ export interface MeltSeriesMeta {
 
 export interface MeltTooltipData {
   wellLabel: string;
-  channel: number;
+  /** What the hovered line is: its channel's label, or its fluorophore/target. */
+  dyeLabel: string;
   color: string;
   temperatureC: number;
   /** The plotted value at the hovered temperature. */
@@ -91,11 +99,13 @@ export function buildMeltChart(cfg: BuildMeltChartConfig): {
 
   for (const plot of cfg.curves) {
     const values = plotted(plot.curve, cfg.view);
-    const color = channelColor(plot.curve.channel);
+    // A dye-space melt colors by the dye, a channel-space one by the channel — the same rule
+    // (and the same function) the amplification chart follows.
+    const color = curveColor({ fluor: plot.curve.dye, channel: plot.curve.channel });
     rows.push(values);
     meta.push({ plot, values, color });
     series.push({
-      label: `${plot.curve.wellLabel} · ${channelLabel(plot.curve.channel)}`,
+      label: `${plot.curve.wellLabel} · ${plot.dyeLabel}`,
       stroke: color,
       width: 1,
       // uPlot draws a marker on every reading by default once the points are far enough apart,
@@ -164,7 +174,9 @@ export function applyMeltHighlight(
       !match ||
       (match.kind === "channel"
         ? m.plot.curve.channel === match.channel
-        : match.labels.includes(m.plot.curve.wellLabel));
+        : match.kind === "target"
+          ? m.plot.dyeLabel === match.dyeLabel
+          : match.labels.includes(m.plot.curve.wellLabel));
     u.series[i + 1]!.alpha = isMatch ? 1 : 0.12;
   });
   u.redraw(false, false);
@@ -272,7 +284,7 @@ function meltOverlayPlugin(
         }
         onHover({
           wellLabel: m.plot.curve.wellLabel,
-          channel: m.plot.curve.channel,
+          dyeLabel: m.plot.dyeLabel,
           color: m.color,
           temperatureC: temperaturesC[idx] ?? 0,
           value: m.values[idx] ?? 0,

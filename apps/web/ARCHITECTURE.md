@@ -2367,11 +2367,12 @@ second entry is the melt, and picking it swaps:
   section carries `curves__plot--melt`, which is also what the browser check asserts on — the two
   charts' markup is otherwise identical, and a check that only looked for a canvas passed happily
   while the melt chart was being rendered into the wrong branch entirely.
-- **the "Values" toggle**, for `meltView` (`−dF/dT` / `Raw` / `Table`, derivative by default) in the
+- **the "Values" toggle**, for `meltView` (`−dF/dT` / `Raw`, derivative by default) in the
   same rail slot `curveView` occupies otherwise. Like `curveView` it changes only what is drawn:
   the Tm comes off the derivative either way.
-- **the table and the CSV**, for `buildMeltRows`/`meltCsv` — well, channel, Tm, peak height. Folded
-  in as a third option on the same toggle, exactly as table mode is folded into the View toggle.
+- **the table and the CSV**, for `buildMeltRows`/`meltCsv` — well, series, Tm, peak height. Reached
+  from the *View* toggle's "Table", the same control that swaps an amplification chart for its Cq
+  table, so one control means one thing on both kinds of step.
 
 **What it hides is as much of the design as what it shows.** Threshold editor, Cq range filter,
 File↔Computed source toggles, both right-axis chip sections, "Draw baseline", "Scale", "Show dark",
@@ -2379,10 +2380,20 @@ File↔Computed source toggles, both right-axis chip sections, "Draw baseline", 
 no threshold to cross. Wells, Channels and Samples stay, because they are selection and selection
 still means what it always did.
 
-**Channel space always.** No colour separation is done for a melt: it is read on one channel in
-practice, and staying in channel space is what lets melt mode work on a run whose plate is
-encrypted — which the committed melt sample is, so this is the ordinary case rather than a corner
-one. A `dyeSpace` source (Biomeme) is already per-dye and arrives in the same shape.
+**The same four View modes an amplification step has** — Channel, Fluorophore, Target, Table — and
+the same toggle, not a second one that appears when the step changes. Channel mode is core's
+`computeMeltAnalysis`; the dye modes are `meltCurvesFromFluor` over `allFluorCurves`, i.e. the run
+analysis the view already computed for this step, which for a melt step means every read solved
+against a matrix built at *that read's* block temperature (`calibration.md` §2.1). Nothing is
+separated twice.
+
+**The View toggle shows for a melt even with no readable plate**, which is the one place melt mode
+diverges from an amplification step's rail. A melt's channel curves and its Tm table need neither a
+plate nor a password — the committed melt sample's plate is encrypted, so this is the ordinary case
+rather than a corner one — and with no calibration to separate against, the dye modes fall back to
+the channel-space analysis and the rail keeps its channel chips (`dyeChips` in `CurvesView`) rather
+than offering dye chips that would filter nothing. A `dyeSpace` source (Biomeme) is already per-dye
+and arrives in the same shape, so it lands in dye space with no separation at all.
 
 **There is no melt File↔Computed toggle**, and that is deliberate — see "File vs. computed
 analysis" below for the pair that does exist. A Biomeme melt export ships its own derivative, but

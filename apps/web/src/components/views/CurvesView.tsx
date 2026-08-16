@@ -6,11 +6,13 @@ import {
   buildMeltRows,
   computeMeltAnalysisFor,
   meltCsv,
+  meltCurvesFromFluor,
   meltSegments,
   meltCsvFilename,
   NO_TARGET,
   wellLabel,
   type LedCurve,
+  type MeltCurve,
   type Zpcr,
   type TemperatureCurve,
 } from "@zpcrweb/core";
@@ -95,8 +97,10 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
    * there are no cycles, no baseline, no threshold and no Cq. When the selected step is one, the
    * chart, the table, the CSV and most of the rail below switch over.
    *
-   * Channel space always — a melt is read on one channel, and staying in channel space is what
-   * lets this work on a run whose plate is encrypted, which the committed melt sample is.
+   * This is the **channel-space** melt, which is always available: it needs no plate definition
+   * and no password, which is what lets melt mode work on a run whose plate is encrypted — the
+   * committed melt sample being exactly that. `meltFluor` below is the color-separated
+   * counterpart, for the View toggle's dye modes.
    */
   const melt = useMemo(
     () => computeMeltAnalysisFor(zpcr, activeStep),
@@ -906,25 +910,85 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
 
   // ---- Melt mode ----------------------------------------------------------------------------
 
-  /** The rail's well and channel filters, applied to the melt step's curves. The same predicate
-   * `visibleChannel` uses — a melt is plotted in channel space, so it filters the same way. */
+  /**
+   * The melt in **dye space** — the same color separation the amplification view does, over the
+   * melt step's reads. The separation itself is already in hand: `allFluorCurves` is the run
+   * analysis for the selected step, and for a melt step that means each read solved against a
+   * matrix built at *that read's* block temperature (`calibration.md` §2.1), which is what makes
+   * a color-separated melt mean anything across a 30 °C ramp.
+   *
+   * Undefined when the step isn't a melt, or when the run has no usable calibration — in which
+   * case the View toggle's channel mode is the only one with curves in it, exactly as for an
+   * amplification step.
+   */
+  const meltFluor = useMemo(
+    () =>
+      melt && allFluorCurves.length > 0
+        ? meltCurvesFromFluor(melt.segment, allFluorCurves, available)
+        : undefined,
+    [melt, allFluorCurves, available],
+  );
+  /** The melt analysis the chart, the table and the CSV all read — dye space when the View toggle
+   * is on a dye mode and there is a separation to show, channel space otherwise. */
+  const meltActive = calibrationOn && meltFluor ? meltFluor : melt;
+  /** Whether that active analysis is the color-separated one. Distinct from `calibrationOn`,
+   * which can be on for a run with nothing to separate. */
+  const meltInDyeSpace = meltActive === meltFluor && meltFluor !== undefined;
+  /** Whether the rail's series chips are dyes/targets rather than optical channels. Follows the
+   * View toggle, except that a melt with nothing to separate keeps its channel chips — those are
+   * what its curves are actually filtered by, and dead dye chips would filter nothing. */
+  const dyeChips = calibrationOn && (!meltMode || meltInDyeSpace);
+
+  /** The label a melt curve is drawn and toggled by — the target, the fluorophore or the
+   * channel, following the same View toggle the amplification chart follows. */
+  const meltLabel = (c: MeltCurve): string =>
+    c.dye ? labelForFluorCurve(c.row, c.col, c.dye) : channelLabel(c.channel);
+
+  /** The rail's filters over one melt curve, in whichever space it is in: the channel chips and
+   * wells in channel space, the fluor/target chips and wells in dye space. Deliberately not
+   * `fluorCurveVisible` — that also applies the Cq range, and a melt has no Cq at all, so a
+   * range left over from an amplification step would silently empty the plot. */
+  const meltCurveVisible = (c: MeltCurve): boolean => {
+    if (!(settings.enabledWells.has(wellKey(c.row, c.col)) || isHoveredWell(c.row, c.col))) {
+      return false;
+    }
+    if (!sampleVisible(c.row, c.col)) return false;
+    if (c.dye === undefined) {
+      return (
+        c.channel !== undefined &&
+        available.includes(c.channel) &&
+        (settings.enabledChannels.has(c.channel) || isHoveredChannel(c.channel))
+      );
+    }
+    const label = meltLabel(c);
+    if (settings.disabledFluors.has(label) && !isHoveredTarget(label)) return false;
+    // The same "Unloaded" switch the amplification view offers, for the same reason: a dye the
+    // plate never put in this well still has a solved curve, and it is off by default.
+    return (
+      settings.showUnloadedFluors || (wellFluors.get(wellKey(c.row, c.col))?.has(c.dye) ?? false)
+    );
+  };
+
   const visibleMelt: MeltPlotCurve[] = useMemo(
     () =>
-      (melt?.curves ?? [])
-        .filter(
-          (c) =>
-            (melt as NonNullable<typeof melt>).available.includes(c.channel) &&
-            (settings.enabledChannels.has(c.channel) || isHoveredChannel(c.channel)) &&
-            (settings.enabledWells.has(wellKey(c.row, c.col)) || isHoveredWell(c.row, c.col)) &&
-            sampleVisible(c.row, c.col),
-        )
-        .map((c) => ({ key: `${c.row},${c.col}|${c.channel}`, curve: c })),
+      (meltActive?.curves ?? []).filter(meltCurveVisible).map((c) => ({
+        key: `${c.row},${c.col}|${c.dye ?? c.channel}`,
+        dyeLabel: meltLabel(c),
+        curve: c,
+      })),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [
-      melt,
+      meltActive,
+      available,
       settings.enabledChannels,
       settings.enabledWells,
+      settings.disabledFluors,
+      settings.showUnloadedFluors,
       settings.disabledSamples,
+      fluorViewMode,
+      wellFluors,
+      wellFluorTargets,
+      hasNoTargetGroup,
       wellSample,
       hoverHighlight,
     ],
@@ -932,30 +996,42 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
 
   const meltRows = useMemo(
     () =>
-      melt
-        ? buildMeltRows(
-            melt,
-            (row, col, channel) =>
-              settings.enabledChannels.has(channel) &&
-              settings.enabledWells.has(wellKey(row, col)) &&
-              sampleVisible(row, col),
-          )
+      meltActive
+        ? buildMeltRows(meltActive, meltCurveVisible, {
+            targetOf: (row, col, dye) =>
+              groupByTarget ? labelForFluorCurve(row, col, dye) : undefined,
+          })
         : [],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [melt, settings.enabledChannels, settings.enabledWells, settings.disabledSamples, wellSample],
+    [
+      meltActive,
+      available,
+      settings.enabledChannels,
+      settings.enabledWells,
+      settings.disabledFluors,
+      settings.showUnloadedFluors,
+      settings.disabledSamples,
+      fluorViewMode,
+      wellFluors,
+      wellFluorTargets,
+      hasNoTargetGroup,
+      wellSample,
+    ],
   );
 
   const downloadMeltCsv = () =>
     downloadText(meltCsvFilename(zpcr.metadata.dataFile), meltCsv(meltRows), "text/csv");
 
-  /** The rail's hover peek, in the shape the melt chart takes — the two kinds of highlight that
-   * mean anything on a plot with no dyes or targets on it. */
+  /** The rail's hover peek, in the shape the melt chart takes. Wells and channels in channel
+   * space; a fluor/target chip resolves to the label its lines carry. */
   const meltHighlight: MeltHighlight | null =
     hoverHighlight?.kind === "wells"
       ? { kind: "wells", labels: hoverHighlight.labels }
       : hoverHighlight?.kind === "channel"
         ? { kind: "channel", channel: hoverHighlight.channel }
-        : null;
+        : hoverHighlight?.kind === "target"
+          ? { kind: "target", dyeLabel: hoverHighlight.dyeLabel }
+          : null;
 
   /** `raw` empty clears the override, putting the group back on the auto threshold. Values are
    * rounded to whole RFU to match what the input displays and steps by. */
@@ -1102,41 +1178,55 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
           </div>
         )}
 
-        {plateEntry && (
+        {(plateEntry || meltMode) && (
           <div className="rail__section">
-            {plateEntry.pltd.container.encrypted &&
+            {/* One View toggle for both kinds of step. A melt swaps what each mode *contains* —
+                melt curves and melting temperatures rather than amplification curves and Cq — but
+                the four modes mean the same four things, so there is one control rather than a
+                second one that appears when the step changes.
+
+                It shows for a melt even with no readable plate: a melt's channel curves and its
+                Tm table need neither a plate nor a password (`melt.md` §1), and the committed melt
+                run is exactly that case. For an amplification step there is nothing to choose
+                until the plate opens, so the prompt below stands in its place. */}
+            {(meltMode ||
+              !(
+                plateEntry?.pltd.container.encrypted &&
+                (plateEntry.pltd.needsPassword || plateEntry.pltd.error)
+              )) && (
+              <div className="rail__row">
+                {/* "Table" is a fourth option here rather than a tab of its own: it shows the
+                    same run, grouped by target like "Target" mode, as a Cq/ΔRFU table instead of
+                    a chart — a melt's melting temperatures instead of a melt chart — with the
+                    whole rail (wells, targets, samples, background, thresholds) still driving
+                    it. */}
+                <Toggle
+                  label="View"
+                  options={[
+                    ["channel", "Channel"],
+                    ["fluorophore", "Fluorophore"],
+                    ["target", "Target"],
+                    ["table", "Table"],
+                  ]}
+                  value={calibrationOn ? fluorViewMode : "channel"}
+                  onChange={(v) =>
+                    v === "channel"
+                      ? onChange({ calibration: false })
+                      : onChange({ calibration: true, fluorViewMode: v as FluorViewMode })
+                  }
+                />
+              </div>
+            )}
+            {plateEntry?.pltd.container.encrypted &&
             (plateEntry.pltd.needsPassword || plateEntry.pltd.error) ? (
               <PasswordPrompt
                 wrong={!!plateEntry.pltd.error}
                 onSubmit={setPltdPassword}
               />
-            ) : plateEntry.pltd.error ? (
+            ) : plateEntry?.pltd.error ? (
               <div className="rail__note mono">{plateEntry.pltd.error}</div>
             ) : (
               <>
-                {!meltMode && (
-                <div className="rail__row">
-                  {/* "Table" is a fourth option here rather than a tab of its own: it shows the
-                      same run, grouped by target like "Target" mode, as a Cq/ΔRFU table instead of
-                      a chart — with the whole rail (wells, targets, samples, background,
-                      thresholds) still driving it. */}
-                  <Toggle
-                    label="View"
-                    options={[
-                      ["channel", "Channel"],
-                      ["fluorophore", "Fluorophore"],
-                      ["target", "Target"],
-                      ["table", "Table"],
-                    ]}
-                    value={calibrationOn ? fluorViewMode : "channel"}
-                    onChange={(v) =>
-                      v === "channel"
-                        ? onChange({ calibration: false })
-                        : onChange({ calibration: true, fluorViewMode: v as FluorViewMode })
-                    }
-                  />
-                </div>
-                )}
                 {/* Where a "Normalization" toggle used to sit. It was a no-op by construction:
                     calibration.md §5.1 divides the column scaling back out, so every mode
                     reports identical RFU unless the matrix is rank-deficient. The setting still
@@ -1193,16 +1283,16 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
 
         <div className="rail__section">
           <div className="rail__title">
-            {!calibrationOn
+            {!dyeChips
               ? "Channels"
               : groupByTarget && usingTargets
                 ? "Targets"
                 : "Fluorophores"}
             <button
               className="rail__link rail__icon-btn"
-              onClick={!calibrationOn ? resetChannels : resetFluors}
+              onClick={!dyeChips ? resetChannels : resetFluors}
               title={
-                !calibrationOn
+                !dyeChips
                   ? "Reset to the channels present in the plate configuration"
                   : "Re-enable all"
               }
@@ -1210,7 +1300,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
               <ResetIcon />
             </button>
           </div>
-          {calibrationOn ? (
+          {dyeChips ? (
             <>
               <FluorBar
                 items={visibleChipItems}
@@ -1346,17 +1436,17 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
           </details>
         )}
 
-        {meltMode && (
+        {meltMode && !tableMode && (
           <div className="rail__section rail__row">
             {/* Same slot, same label as the amplification "Values" toggle below — what the y axis
-                reads. The derivative is the default: it is the form a melting product is a peak
-                on, and the melting temperature is that peak's position. */}
+                reads, and nothing about which curves are shown (that is View, above). The
+                derivative is the default: it is the form a melting product is a peak on, and the
+                melting temperature is that peak's position. */}
             <Toggle
               label="Values"
               options={[
                 ["derivative", "−dF/dT"],
                 ["raw", "Raw"],
-                ["table", "Table"],
               ]}
               value={settings.meltView}
               onChange={(v) => onChange({ meltView: v as MeltView })}
@@ -1540,9 +1630,9 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
         <div className="rail__stat mono">
           {meltMode ? (
             <>
-              {settings.meltView === "table"
+              {tableMode
                 ? `${meltRows.length} rows`
-                : `${visibleMelt.length} / ${melt.curves.length} curves`}
+                : `${visibleMelt.length} / ${(meltActive ?? melt).curves.length} curves`}
               {" · "}
               {meltRows.filter((r) => r.tmC != null).length} with a Tm
             </>
@@ -1566,9 +1656,15 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
       </aside>
 
       {meltMode ? (
-        settings.meltView === "table" ? (
+        tableMode ? (
           <section className="analysis__table-wrap">
-            <MeltTable rows={meltRows} onPickWell={pickWell} />
+            <MeltTable
+              rows={meltRows}
+              seriesLabel={
+                !meltInDyeSpace ? "Channel" : groupByTarget && usingTargets ? "Target" : "Fluorophore"
+              }
+              onPickWell={pickWell}
+            />
           </section>
         ) : (
           <section className="curves__plot curves__plot--melt">

@@ -104,6 +104,12 @@ export function buildDyeResponseCurve(dcal: Dcal, well = 0): DyeResponseCurve {
  * between the two bracketing knots, or linear extrapolation past the first/last knot using that
  * end segment's slope (so any block temperature the instrument reports — not just the four
  * calibration points — has a defined response). Returns `0` for a curve with no knots.
+ *
+ * Extrapolation is floored at zero. A response is `max(0, dyeReading − emptyReading)` at every
+ * knot, so a negative one is not a small response but a nonsensical one — it would flip the sign
+ * of that dye's contribution on that channel. It is reachable: a melt ramps to 95 °C while the
+ * `.Dcal` knots stop at 80, and this run's VIC clear response on channel 3 falls 16 → 7 across the
+ * calibrated range, which crosses zero a couple of degrees past the top of the ramp.
  */
 export function interpolateResponse(knots: ResponseKnot[], temperatureC: number): number {
   if (knots.length === 0) return 0;
@@ -115,9 +121,10 @@ export function interpolateResponse(knots: ResponseKnot[], temperatureC: number)
     return a.response + t * (b.response - a.response);
   };
 
-  if (temperatureC <= knots[0]!.temperatureC) return lerp(knots[0]!, knots[1]!);
+  if (temperatureC <= knots[0]!.temperatureC) return Math.max(0, lerp(knots[0]!, knots[1]!));
   const last = knots.length - 1;
-  if (temperatureC >= knots[last]!.temperatureC) return lerp(knots[last - 1]!, knots[last]!);
+  if (temperatureC >= knots[last]!.temperatureC)
+    return Math.max(0, lerp(knots[last - 1]!, knots[last]!));
 
   for (let i = 0; i < last; i++) {
     if (temperatureC <= knots[i + 1]!.temperatureC) return lerp(knots[i]!, knots[i + 1]!);

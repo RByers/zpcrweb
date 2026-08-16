@@ -181,10 +181,20 @@ export function meltPeak(temperaturesC: number[], derivative: number[]): MeltPea
   return { tmC: below + offset * spacing, height };
 }
 
-/** One well/channel melt curve, its derivative and its Tm. */
+/** One well's melt curve — on one optical channel, or on one fluorophore — its derivative and
+ * its Tm. */
 export interface MeltCurve {
-  /** Optical channel; for a `Zpcr.dyeSpace` source this indexes the dye, as everywhere else. */
-  channel: number;
+  /**
+   * Optical channel; for a `Zpcr.dyeSpace` source this indexes the dye, as everywhere else.
+   * Undefined only for a color-separated curve whose plate doesn't state the dye's channel — the
+   * same "carried through for coloring only" field `FluorCurve.channel` is.
+   */
+  channel?: number;
+  /**
+   * Fluorophore, when this curve is color-separated ({@link meltCurvesFromFluor}). Undefined in
+   * channel space, which is what {@link computeMeltAnalysis} produces.
+   */
+  dye?: string;
   /** Row index 0–8 (8 = reference row). */
   row: number;
   /** Column index 0–11. */
@@ -231,34 +241,31 @@ export interface MeltAnalysisOptions {
 }
 
 /**
- * **The** melt derivation: every curve of one melt step, with its derivative and its Tm.
- *
- * Melt curves are analysed in **channel space** — one curve per optical channel, with no
- * channel→dye color separation. A melt is read on a single channel in practice, and staying in
- * channel space is what lets this work with no plate definition and no password, which the
- * committed CFX melt run requires (its plate is encrypted). A `Zpcr.dyeSpace` source is already
- * per-dye and needs no separation to begin with, so both kinds arrive here in the same shape.
- *
- * > **Future:** a high-resolution melt analysis would want to correct each reading for the dye's
- * > own temperature response before differentiating — fluorescence falls with temperature whether
- * > or not anything is melting, and steeply (measured from the committed calibration set: FAM
- * > −18%, Cy5 −38% between 60 and 80 °C), so part of every melt curve's slope is thermal quenching
- * > rather than dissociation. It is deliberately not done here, because the `.Dcal` response
- * > curves stop at **80 °C** while a melt runs to 95 °C: correcting the top third of the ramp
- * > would mean extrapolating a calibration well past its last measurement, and `interpolateResponse`
- * > extrapolates rather than clamping. Worth revisiting if calibration data above 80 °C appears.
- * > It would shift peak heights, not peak positions, so the Tm this reports is unaffected.
+ * The least a series has to be for a melt to be derived from it — satisfied by both a raw
+ * per-channel {@link WellCurve} and a color-separated `FluorCurve`, which is what lets one
+ * derivation serve both spaces.
  */
-export function computeMeltAnalysis(
-  zpcr: Zpcr,
-  segment: MeltSegment,
-  options: MeltAnalysisOptions = {},
-): MeltAnalysis {
-  const includeReference = options.includeReference ?? false;
-  const wellCurves = zpcr.curves({ step: segment.step, includeReference });
+interface MeltSourceCurve {
+  channel?: number;
+  dye?: string;
+  row: number;
+  col: number;
+  wellLabel: string;
+  isReference: boolean;
+  /** Fluorescence at each read, aligned with the segment's temperature axis. */
+  mean: number[];
+  /** The source's own −dF/dT, where it states one (`melt.md` §6). */
+  meltDerivativePerC?: number[];
+}
 
+/** Derive one curve's derivative, Tm and peak height. The whole of the melt algorithm; both
+ * {@link computeMeltAnalysis} and {@link meltCurvesFromFluor} are wrappers around it. */
+function meltCurvesFrom(
+  segment: MeltSegment,
+  source: readonly MeltSourceCurve[],
+): { curves: MeltCurve[]; derivativeSource: "file" | "computed" } {
   let derivativeSource: "file" | "computed" = "computed";
-  const curves: MeltCurve[] = wellCurves.map((curve: WellCurve) => {
+  const curves = source.map((curve): MeltCurve => {
     // The source's own derivative where it has one, ours where it doesn't. This is the only place
     // in the codebase that difference exists.
     const stated = curve.meltDerivativePerC;
@@ -274,6 +281,7 @@ export function computeMeltAnalysis(
     const peak = hasMeltSignal(curve.mean) ? meltPeak(segment.temperaturesC, derivative) : null;
     return {
       channel: curve.channel,
+      dye: curve.dye,
       row: curve.row,
       col: curve.col,
       wellLabel: curve.wellLabel,
@@ -285,13 +293,64 @@ export function computeMeltAnalysis(
       peakHeight: peak ? peak.height : null,
     };
   });
+  return { curves, derivativeSource };
+}
 
-  return {
-    segment,
-    curves,
-    available: zpcr.channels(),
-    derivativeSource,
-  };
+/**
+ * **The** melt derivation: every curve of one melt step, with its derivative and its Tm.
+ *
+ * This is the **channel-space** form — one curve per optical channel, with no channel→dye color
+ * separation — and it is the one that always works: it needs no plate definition and no password,
+ * which the committed CFX melt run requires (its plate is encrypted). A `Zpcr.dyeSpace` source is
+ * already per-dye and needs no separation to begin with, so both kinds arrive here in the same
+ * shape. {@link meltCurvesFromFluor} is the dye-space counterpart, for a run whose plate *is*
+ * readable.
+ *
+ * Fluorescence falls with temperature whether or not anything is melting, and steeply (measured
+ * from the committed calibration set: FAM −18%, Cy5 −38% between 60 and 80 °C), so part of every
+ * melt curve's slope is thermal quenching rather than dissociation — in **both** spaces. A
+ * separated value is reported on an RFU scale (`calibration.md` §5.1), which carries that fall
+ * back into the number on purpose, so a melt is not on a different scale from every other curve in
+ * the app. What the per-read matrix corrects is the *unmixing*: `runAnalysis.ts` solves each read
+ * against a matrix built at that read's own block temperature (`calibration.md` §2.1), so the
+ * share of a channel's reading attributed to each dye follows the ramp instead of being frozen at
+ * its bottom. Above 80 °C that response is an extrapolation of the `.Dcal` curves, which stop
+ * there — see `melt.md` §7.
+ */
+export function computeMeltAnalysis(
+  zpcr: Zpcr,
+  segment: MeltSegment,
+  options: MeltAnalysisOptions = {},
+): MeltAnalysis {
+  const includeReference = options.includeReference ?? false;
+  const wellCurves: WellCurve[] = zpcr.curves({ step: segment.step, includeReference });
+  const { curves, derivativeSource } = meltCurvesFrom(segment, wellCurves);
+  return { segment, curves, available: zpcr.channels(), derivativeSource };
+}
+
+/**
+ * The same derivation over **color-separated** curves: one melt curve per well and fluorophore
+ * rather than per well and optical channel.
+ *
+ * The caller supplies the curves rather than this recomputing them, because the separation is the
+ * expensive half and the app already holds it — `computeRunAnalysis`'s `allFluorCurves` for the
+ * melt step *are* these curves, solved read-by-read against the ramp's own temperatures. Curves
+ * whose length doesn't match the segment's axis are dropped rather than mis-plotted; that can only
+ * happen if a caller passes another step's curves.
+ */
+export function meltCurvesFromFluor(
+  segment: MeltSegment,
+  fluorCurves: readonly MeltSourceCurve[],
+  available: number[],
+  options: MeltAnalysisOptions = {},
+): MeltAnalysis {
+  const includeReference = options.includeReference ?? false;
+  const usable = fluorCurves.filter(
+    (c) =>
+      (includeReference || !c.isReference) && c.mean.length === segment.temperaturesC.length,
+  );
+  const { curves, derivativeSource } = meltCurvesFrom(segment, usable);
+  return { segment, curves, available, derivativeSource };
 }
 
 /**

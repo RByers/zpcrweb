@@ -8,7 +8,7 @@
  */
 
 import { safeFileBase } from "./fileName.js";
-import type { MeltAnalysis } from "./meltAnalysis.js";
+import type { MeltAnalysis, MeltCurve } from "./meltAnalysis.js";
 import type { SampleType } from "./pltd.js";
 import { curveKey, formatBaselineFormula, type RunAnalysis } from "./runAnalysis.js";
 
@@ -148,13 +148,20 @@ export function analysisCsvFilename(dataFile: string): string {
 // The melt equivalent (`melt.md`)
 // ---------------------------------------------------------------------------
 
-/** One row of a melt step's results: a well, a channel and the melting temperature it gave. */
+/** One row of a melt step's results: a well, the series it was read on, and the melting
+ * temperature that series gave. */
 export interface MeltRow {
   row: number;
   col: number;
   wellLabel: string;
-  /** Optical channel — melt analysis stays in channel space, so there is no fluor or target. */
-  channel: number;
+  /** Optical channel, for a channel-space melt. Undefined for a color-separated curve whose
+   * plate doesn't state the dye's channel. */
+  channel?: number;
+  /** Fluorophore, for a color-separated melt; undefined in channel space. */
+  dye?: string;
+  /** Target/gene the plate assigns this well's dye, where the caller supplies one and it differs
+   * from the dye's own name. Undefined in channel space, and on a plate with no targets. */
+  target?: string;
   /** Melting temperature, °C, or null where no peak stood clear of the noise. */
   tmC: number | null;
   /** The derivative's height at the peak, or null when there is no Tm. */
@@ -162,43 +169,71 @@ export interface MeltRow {
 }
 
 /**
- * Whether a given well/channel curve should appear in the melt table — the melt counterpart of
- * {@link CurveVisible}, keyed on the channel because a melt is analysed in channel space.
+ * Whether a melt curve should appear in the table — the melt counterpart of
+ * {@link CurveVisible}. Takes the whole curve rather than a well/channel triple because a melt
+ * now comes in two spaces, and the caller's filters key on the channel in one and the dye in the
+ * other.
  */
-export type MeltCurveVisible = (row: number, col: number, channel: number) => boolean;
+export type MeltCurveVisible = (curve: MeltCurve) => boolean;
+
+/** Options for {@link buildMeltRows}. */
+export interface MeltRowOptions {
+  /** The target/gene a well's dye belongs to, for a color-separated melt. Left off for a
+   * channel-space one, which has no dye to look a target up by. */
+  targetOf?: (row: number, col: number, dye: string) => string | undefined;
+}
 
 /**
- * Rows for every melt curve `visible` lets through, sorted by plate position then channel.
+ * Rows for every melt curve `visible` lets through, sorted by plate position then by series.
  *
- * Unlike {@link buildAnalysisRows} this needs no plate: a melt is read per channel, so a run whose
- * plate definition is missing or encrypted still tabulates completely. Curves with no Tm are kept
- * rather than dropped — "this well melted at nothing" is a result, and dropping it would silently
- * shorten the table.
+ * Unlike {@link buildAnalysisRows} this needs no plate: a channel-space melt is read per channel,
+ * so a run whose plate definition is missing or encrypted still tabulates completely. Curves with
+ * no Tm are kept rather than dropped — "this well melted at nothing" is a result, and dropping it
+ * would silently shorten the table.
  */
-export function buildMeltRows(analysis: MeltAnalysis, visible: MeltCurveVisible): MeltRow[] {
+export function buildMeltRows(
+  analysis: MeltAnalysis,
+  visible: MeltCurveVisible,
+  options: MeltRowOptions = {},
+): MeltRow[] {
   const out: MeltRow[] = [];
   for (const curve of analysis.curves) {
     if (curve.isReference) continue;
-    if (!visible(curve.row, curve.col, curve.channel)) continue;
+    if (!visible(curve)) continue;
     out.push({
       row: curve.row,
       col: curve.col,
       wellLabel: curve.wellLabel,
       channel: curve.channel,
+      dye: curve.dye,
+      target: curve.dye ? options.targetOf?.(curve.row, curve.col, curve.dye) : undefined,
       tmC: curve.tmC,
       peakHeight: curve.peakHeight,
     });
   }
-  return out.sort((a, b) => a.row - b.row || a.col - b.col || a.channel - b.channel);
+  return out.sort(
+    (a, b) =>
+      a.row - b.row ||
+      a.col - b.col ||
+      (a.dye ?? "").localeCompare(b.dye ?? "") ||
+      (a.channel ?? -1) - (b.channel ?? -1),
+  );
 }
 
-/** The melt table as CSV — the same columns in the same order. */
+/**
+ * The melt table as CSV — the same columns in the same order.
+ *
+ * Both the channel and the fluorophore/target columns are always written, empty where the melt's
+ * space doesn't have one, so a file's shape doesn't depend on which view exported it.
+ */
 export function meltCsv(rows: MeltRow[]): string {
-  let csv = csvRow(["well", "channel", "tm", "peakHeight"]);
+  let csv = csvRow(["well", "channel", "fluor", "target", "tm", "peakHeight"]);
   for (const r of rows) {
     csv += csvRow([
       r.wellLabel,
-      channelLabel(r.channel),
+      r.channel != null ? channelLabel(r.channel) : "",
+      r.dye ?? "",
+      r.target ?? "",
       r.tmC != null ? r.tmC.toFixed(2) : "",
       r.peakHeight != null ? r.peakHeight.toFixed(1) : "",
     ]);

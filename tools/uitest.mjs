@@ -6404,6 +6404,17 @@ async function folderChecks(chrome, origin) {
 const valuesToggle = `[...document.querySelectorAll(".toggle")]
     .find((t) => t.querySelector(".toggle__label")?.textContent.trim() === "Values")`;
 
+/** The rail's "View" toggle — Channel/Fluorophore/Target/Table — scoped the same way, and for
+ * the same reason: "Table" and "Channel" are words that appear on buttons elsewhere. */
+const viewToggle = `[...document.querySelectorAll(".toggle")]
+    .find((t) => t.querySelector(".toggle__label")?.textContent.trim() === "View")`;
+
+const clickView = async (cdp, text) => {
+  await waitFor(() => cdp.eval(`!!(${viewToggle})`), { what: "the View toggle" });
+  await cdp.eval(`(() => { [...(${viewToggle}).querySelectorAll(".segmented__item")]
+      .find((b) => b.textContent.trim() === ${JSON.stringify(text)}).click(); })()`);
+};
+
 const valuesOptions = (cdp) =>
   cdp.eval(`(() => { const t = ${valuesToggle}; if (!t) return null;
       return [...t.querySelectorAll(".segmented__item")].map((b) => ({
@@ -6429,9 +6440,11 @@ const clickValues = async (cdp, text) => {
  * themselves are drawn on uPlot's canvas, not into the DOM, so what is asserted here is the state
  * that chooses them.)
  */
-async function meltChecks(chrome, origin) {
+async function meltChecks(chrome, origin, pw) {
   console.log("\nmelt mode");
-  const cdp = await openPage(chrome.base, origin);
+  // With the password, so the dye-space half below has a plate to separate against — this run's
+  // is encrypted. The channel-space half deliberately needs none of it.
+  const cdp = await openPage(chrome.base, `${origin}#cfxPassword=${encodeURIComponent(pw)}`);
   await loadFile(cdp, MELT_ZPCR);
   await waitFor(() => cdp.eval(`!!document.querySelector(".chanbar")`), { what: "curves rail" });
 
@@ -6470,9 +6483,20 @@ async function meltChecks(chrome, origin) {
   check("the melt chart replaces the amplification chart", meltPlot === true);
   check(
     "selecting the melt step switches the view to the derivative by default",
-    meltOptions.map((o) => o.text).join(",") === "−dF/dT,Raw,Table" &&
-      meltOptions[0].active === true,
+    meltOptions.map((o) => o.text).join(",") === "−dF/dT,Raw" && meltOptions[0].active === true,
     meltOptions.map((o) => `${o.text}${o.active ? "*" : ""}`).join(","),
+  );
+
+  // The View toggle is the same four options an amplification step offers, and it shows even
+  // though this run's plate is encrypted and unopened — a melt's channel curves and its Tm table
+  // need neither a plate nor a password.
+  const viewOptions = await cdp.eval(`(() => { const t = ${viewToggle}; if (!t) return null;
+      return [...t.querySelectorAll(".segmented__item")].map((b) => ({
+        text: b.textContent.trim(), active: b.classList.contains("is-active") })); })()`);
+  check(
+    "melt mode offers the same View modes an amplification step does",
+    (viewOptions ?? []).map((o) => o.text).join(",") === "Channel,Fluorophore,Target,Table",
+    JSON.stringify(viewOptions),
   );
 
   // The amplification rail is gone: no threshold editor, no Cq filter, no right-hand axis — none
@@ -6509,28 +6533,71 @@ async function meltChecks(chrome, origin) {
 
   // The table reports melting temperatures, and the strong wells agree with each other — the
   // measurement `melt.md` Appendix A quotes, read off the screen rather than out of the library.
-  await clickValues(cdp, "Table");
-  const headers = await waitValue(
+  // It is the View toggle's "Table" now, the same one that swaps an amplification chart for its
+  // Cq table, and its second column follows the View mode the table was reached from.
+  const headers = () =>
     // The sorted column appends a ▲/▼ glyph to its own header, so compare the label text only.
-    () =>
-      cdp.eval(`[...document.querySelectorAll(".atbl thead th")]
-        .map((e) => e.textContent.trim().replace(/[▲▼]$/, "").trim())`),
-    (h) => h?.length === 4,
-    { what: "the melt table" },
-  );
+    cdp.eval(`[...document.querySelectorAll(".atbl thead th")]
+        .map((e) => e.textContent.trim().replace(/[▲▼]$/, "").trim())`);
+  /** Every melt row on screen: its series, its Tm and its peak height. */
+  const meltRows = () =>
+    cdp.eval(`(() => [...document.querySelectorAll(".atbl tbody tr")].map((r) => {
+        const cells = [...r.querySelectorAll("td")].map((c) => c.textContent.trim());
+        return { series: cells[1], tm: parseFloat(cells[2]), peak: parseFloat(cells[3]) };
+      }))()`);
+  /** The rail's series section: its title, and the chips under it. */
+  const seriesBar = () =>
+    cdp.eval(`(() => {
+      const s = [...document.querySelectorAll(".rail__section")]
+        .find((e) => /Channels|Fluorophores|Targets/.test(e.querySelector(".rail__title")?.textContent || ""));
+      if (!s) return null;
+      return {
+        title: s.querySelector(".rail__title").textContent.trim(),
+        chips: [...s.querySelectorAll(".chanchip__ch")].map((c) => c.textContent.trim()),
+      };
+    })()`);
+
+  // Channel mode: the melt as the optical channels read it, needing neither plate nor password.
+  await clickView(cdp, "Channel");
+  const channelBar = await waitValue(seriesBar, (b) => b?.title === "Channels", {
+    what: "the melt's channel chips",
+  });
   check(
-    "table mode reports a melting temperature, not a Cq",
-    JSON.stringify(headers) === JSON.stringify(["Well", "Channel", "Tm (°C)", "Peak (RFU/°C)"]),
-    JSON.stringify(headers),
+    "the View toggle puts the melt into channel space",
+    channelBar?.title === "Channels" && (channelBar?.chips ?? []).includes("Ch1"),
+    JSON.stringify(channelBar),
   );
 
-  const tms = await cdp.eval(`(() => {
-      const rows = [...document.querySelectorAll(".atbl tbody tr")];
-      return rows.map((r) => {
-        const cells = [...r.querySelectorAll("td")].map((c) => c.textContent.trim());
-        return { channel: cells[1], tm: parseFloat(cells[2]), peak: parseFloat(cells[3]) };
-      }).filter((r) => r.channel === "Ch1" && r.peak > 3000).map((r) => r.tm);
-    })()`);
+  // Fluorophore mode: the same melt color-separated, each read solved against its own block
+  // temperature (`calibration.md` §2.1). The plate opens with the password this page carries.
+  await clickView(cdp, "Fluorophore");
+  const fluorBar = await waitValue(seriesBar, (b) => b?.title === "Fluorophores", {
+    what: "the melt's fluorophore chips",
+  });
+  check(
+    "…and into dye space, with the plate's own fluorophore",
+    fluorBar?.title === "Fluorophores" && (fluorBar?.chips ?? []).includes("SYBR"),
+    JSON.stringify(fluorBar),
+  );
+  const stillMelt = await cdp.eval(
+    `!!document.querySelector(".curves__plot--melt .chart__host canvas")`,
+  );
+  check("…still charting the melt, not the amplification step", stillMelt === true);
+
+  await clickView(cdp, "Table");
+  const meltHeaders = await waitValue(headers, (h) => h?.length === 4, {
+    what: "the melt table",
+  });
+  check(
+    "table mode reports a melting temperature, not a Cq",
+    JSON.stringify(meltHeaders) === JSON.stringify(["Well", "Target", "Tm (°C)", "Peak (RFU/°C)"]),
+    JSON.stringify(meltHeaders),
+  );
+
+  // The replicate cohort of `melt.md` Appendix A, now read through the color separation: solving
+  // each read against its own block temperature must not move the peak this single-dye run's
+  // curves sit on.
+  const tms = (await meltRows()).filter((r) => r.peak > 3000).map((r) => r.tm);
   const spread = tms.length ? Math.max(...tms) - Math.min(...tms) : NaN;
   check(
     "the strongest wells' melting temperatures agree to within a fifth of a degree",
@@ -6563,7 +6630,7 @@ async function biomemeMeltChecks(chrome, origin) {
     })) ?? [];
   check(
     "a melt-only run opens straight into melt mode, with no step to pick",
-    options.map((o) => o.text).join(",") === "−dF/dT,Raw,Table",
+    options.map((o) => o.text).join(",") === "−dF/dT,Raw",
     options.map((o) => o.text).join(","),
   );
   const steps = await cdp.eval(`document.querySelectorAll(".stepsel .segmented__item").length`);
@@ -6581,7 +6648,7 @@ async function biomemeMeltChecks(chrome, origin) {
   );
 
   // The device's own derivative reaches the table as melting temperatures.
-  await clickValues(cdp, "Table");
+  await clickView(cdp, "Table");
   const tms = await waitValue(
     () =>
       cdp.eval(`(() => [...document.querySelectorAll(".atbl tbody tr")]
@@ -6755,7 +6822,7 @@ async function main() {
     await headerFitChecks(chrome, origin);
     await routingChecks(chrome, origin, pw);
     await rightAxisChecks(chrome, origin);
-    await meltChecks(chrome, origin);
+    await meltChecks(chrome, origin, pw);
     await biomemeMeltChecks(chrome, origin);
     await tableSortChecks(chrome, origin);
     await tablePickChecks(chrome, origin);

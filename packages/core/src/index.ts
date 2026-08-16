@@ -252,6 +252,8 @@ export {
   channelCurveKey,
   darkCurveKey,
   stepTemperature,
+  stepTemperatures,
+  CALIBRATION_TEMP_QUANTUM_C,
   runAnalysisSettingsFromZpcrweb,
   computeRunAnalysis,
 } from "./runAnalysis.js";
@@ -266,7 +268,7 @@ export {
   meltCsvFilename,
   UNKNOWN_CHANNEL_LABEL,
 } from "./analysisRows.js";
-export type { MeltRow, MeltCurveVisible } from "./analysisRows.js";
+export type { MeltRow, MeltCurveVisible, MeltRowOptions } from "./analysisRows.js";
 export {
   meltSegments,
   meltSegmentFor,
@@ -280,6 +282,7 @@ export type { MeltSegment, MeltAxisSource } from "./melt.js";
 export {
   computeMeltAnalysis,
   computeMeltAnalysisFor,
+  meltCurvesFromFluor,
   meltDerivative,
   meltPeak,
   hasMeltSignal,

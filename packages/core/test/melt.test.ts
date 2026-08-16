@@ -10,13 +10,20 @@ import {
   meltCsv,
   meltDerivative,
   meltPeak,
+  meltCurvesFromFluor,
   meltSegmentFor,
   meltSegments,
   parseBiomeme,
   parseZpcr,
   savitzkyGolay5,
+  stepTemperatures,
+  computeRunAnalysis,
+  CALIBRATION_TEMP_QUANTUM_C,
 } from "../src/index.js";
 import { readMeltBytes, readSampleBytes } from "./sample.js";
+import { readCfxPassword } from "./secrets.js";
+
+const PW = readCfxPassword();
 
 const here = dirname(fileURLToPath(import.meta.url));
 function readBmrun(name: string): Uint8Array {
@@ -172,12 +179,14 @@ describe("melt analysis of the committed CFX run", () => {
   });
 
   it("tabulates and exports what it found", () => {
-    const rows = buildMeltRows(analysis, (_r, _c, channel) => channel === 0);
+    const rows = buildMeltRows(analysis, (c) => c.channel === 0);
     expect(rows).toHaveLength(96);
     expect(rows.every((r) => r.channel === 0)).toBe(true);
+    // Channel space names no fluor and no target, so both columns come out empty.
+    expect(rows.every((r) => r.dye === undefined && r.target === undefined)).toBe(true);
     const csv = meltCsv(rows);
-    expect(csv.split("\r\n")[0]).toBe("well,channel,tm,peakHeight");
-    expect(csv).toMatch(/A1,Ch1,/);
+    expect(csv.split("\r\n")[0]).toBe("well,channel,fluor,target,tm,peakHeight");
+    expect(csv).toMatch(/A1,Ch1,,,/);
   });
 
   it("answers nothing for a step that isn't a melt", () => {
@@ -234,5 +243,65 @@ describe("melt analysis of a Biomeme melt export (biomeme.md §5)", () => {
     expect(meltSegments(ordinary)).toEqual([]);
     expect(ordinary.curves().every((c) => c.temperaturesC === undefined)).toBe(true);
     expect(ordinary.curves()[0]!.fileAnalysis).toBeDefined();
+  });
+});
+
+describe("a melt in dye space (calibration.md §2.1)", () => {
+  // The plate is encrypted, so the password reaches it through `computeRunAnalysis` below rather
+  // than through the parse — which is exactly why the channel-space melt needs neither.
+  const zpcr = parseZpcr(readMeltBytes());
+  const segment = meltSegments(zpcr)[0]!;
+
+  it("reads a block temperature for every read of the ramp", () => {
+    const ramp = stepTemperatures(zpcr, segment.step);
+    expect(ramp).toHaveLength(61);
+    expect(ramp[0]).toBeCloseTo(64.98, 1);
+    expect(ramp.at(-1)).toBeCloseTo(94.86, 1);
+    // The amplification step holds one temperature — measured span 0.01 °C across its 40 reads,
+    // which is what keeps it on the single-matrix path.
+    const hold = stepTemperatures(zpcr, 3);
+    expect(hold).toHaveLength(40);
+    expect(Math.max(...hold) - Math.min(...hold)).toBeLessThan(CALIBRATION_TEMP_QUANTUM_C);
+  });
+
+  it.skipIf(!PW)("separates each read against its own block temperature", () => {
+    expect(computeRunAnalysis(zpcr, {}, 3, PW).perReadCalibration).toBe(false);
+    const run = computeRunAnalysis(zpcr, {}, segment.step, PW);
+    expect(run.perReadCalibration).toBe(true);
+    expect(run.readTemperaturesC).toHaveLength(61);
+  });
+
+  it.skipIf(!PW)("gives the same melting temperatures the raw channel does", () => {
+    const run = computeRunAnalysis(zpcr, {}, segment.step, PW);
+    const dye = meltCurvesFromFluor(segment, run.allFluorCurves, run.available);
+    // This run carries one dye (SYBR) on one channel, so the separation is close to a rescaling
+    // and the Tm it yields should be the raw channel's. What it is *not* is a different answer: a
+    // matrix sampled at the wrong temperature would tilt the curve and drag the peak with it.
+    expect(dye.curves).toHaveLength(96);
+    expect(dye.curves.every((c) => c.dye === "SYBR")).toBe(true);
+    const channelTm = new Map(
+      computeMeltAnalysis(zpcr, segment)
+        .curves.filter((c) => c.channel === 0)
+        .map((c) => [c.wellLabel, c.tmC]),
+    );
+    // Only the curves with a peak worth calling. The five wells that disagree on this run all
+    // have peaks of 10–13 RFU/°C — flat curves that squeaked past `hasMeltSignal`, whose three
+    // tallest derivative points sit within 1% of each other, so the tilt the temperature
+    // correction removes is enough to reorder them. The 54 curves carrying real product peak at
+    // 100–5900 RFU/°C and none of them move.
+    const real = dye.curves.filter((c) => (c.peakHeight ?? 0) > 100);
+    expect(real.length).toBe(54);
+    for (const c of real) {
+      expect(Math.abs((c.tmC as number) - (channelTm.get(c.wellLabel) as number))).toBeLessThan(0.5);
+    }
+  });
+
+  it.skipIf(!PW)("tabulates dye-space rows with their target", () => {
+    const run = computeRunAnalysis(zpcr, {}, segment.step, PW);
+    const dye = meltCurvesFromFluor(segment, run.allFluorCurves, run.available);
+    const rows = buildMeltRows(dye, () => true, { targetOf: () => "N gene" });
+    expect(rows).toHaveLength(96);
+    expect(rows.every((r) => r.dye === "SYBR" && r.target === "N gene")).toBe(true);
+    expect(meltCsv(rows)).toMatch(/A1,Ch1,SYBR,N gene,/);
   });
 });

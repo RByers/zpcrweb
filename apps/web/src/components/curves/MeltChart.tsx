@@ -9,7 +9,6 @@ import {
   type MeltSeriesMeta,
   type MeltTooltipData,
 } from "../../lib/uplot/meltChart";
-import { channelLabel } from "../../lib/channelColors";
 import type { MeltView } from "../../state/useZpcrStore";
 
 interface Props {
@@ -92,7 +91,7 @@ export function MeltChart({ curves, temperaturesC, view, highlight = null }: Pro
           <div className="chart__tip-head">
             <span className="chart__tip-swatch" style={{ background: tip.color }} />
             <strong>{tip.wellLabel}</strong>
-            <span className="chart__tip-dye">{channelLabel(tip.channel)}</span>
+            <span className="chart__tip-dye">{tip.dyeLabel}</span>
           </div>
           <table className="chart__tip-tbl mono">
             <tbody>

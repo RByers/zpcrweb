@@ -152,6 +152,19 @@ describe("interpolateResponse", () => {
     expect(interpolateResponse(knots, 100)).toBeCloseTo(0, 9);
   });
 
+  it("floors an extrapolation at zero rather than letting a response go negative", () => {
+    // Same slope, further out: −1/°C from 20 at 80 °C reaches −10 at 110. A response is
+    // `max(0, dye − empty)` at every knot, so a negative one would flip the sign of that dye's
+    // contribution on that channel — reachable on a melt, which ramps 15 °C past the last knot.
+    expect(interpolateResponse(knots, 110)).toBe(0);
+    // And below the first knot, where a rising curve extrapolates the other way.
+    const rising: ResponseKnot[] = [
+      { temperatureC: 60, response: 10 },
+      { temperatureC: 80, response: 50 },
+    ];
+    expect(interpolateResponse(rising, 20)).toBe(0);
+  });
+
   it("returns 0 for an empty curve and the single value for a one-knot curve", () => {
     expect(interpolateResponse([], 50)).toBe(0);
     expect(interpolateResponse([{ temperatureC: 60, response: 42 }], 20)).toBe(42);
