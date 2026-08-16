@@ -166,13 +166,21 @@ run worth sending to someone at the same bench: they granted the same folder, so
 them rather than the app shrugging at a name it has never seen. Nothing is walked or searched —
 the promise `state/useDiskTree.ts` makes about never scanning a granted archive holds here too.
 
-The search is quiet when it comes up empty. A label that matches the name but not the file (`runs`
+The search is quiet when it comes up empty: a label that matches the name but not the file (`runs`
 where `runs archive` was meant — the longer label is tried first, and a missing file moves on to
-the next candidate), and a folder whose permission has lapsed, both fall through without an error:
-re-granting needs a click the user hasn't made, and the Files view is where that click lives. A
-name that is nowhere reachable selects **nothing** rather than substituting another file — the file
-bar with no tab available is the truthful answer to "that file isn't here" — while still honoring
-the `view`.
+the next candidate) falls through without an error. A name that is nowhere reachable selects
+**nothing** rather than substituting another file — the file bar with no tab available is the
+truthful answer to "that file isn't here" — while still honoring the `view`.
+
+**A locked folder is a wait, not a failure.** A folder's grant comes back as `prompt` after almost
+every page load, so this is the state an ordinary link *lands* in, and the app cannot clear it by
+itself: `requestPermission` needs a user gesture and following a link is not one. Either way the
+browser says so — the permission query, or a `NotAllowedError` from the read — the store keeps the
+name and the folder that could answer it (`awaitingGrant`), and `App.tsx`'s no-selection state says
+which folder is in the way with a button to the Files view, where the grant lives. Granting calls
+`retryUnread`, which reads back every open file *and* resumes the waiting link — the file it names
+is not in the catalog, so re-reading the open ones alone would miss precisely the file the user
+followed a link to see.
 
 `useZpcrStore` syncs both directions, each guarded by an "is it already that value?" check so
 the echo one direction provokes in the other terminates rather than looping:
@@ -765,8 +773,9 @@ under it (`components/FileBar.tsx`).
    lenses on a file at all — with nothing selected, those are the ways out.
 4. **The selection is an open file, or nothing.** Closing the selected file moves the selection to
    another open file or clears it. "Nothing selected" is a real, reachable state — every file
-   closed, or a `#file=` naming a file this browser doesn't have — and the app renders it as itself
-   rather than substituting some other file.
+   closed, or a `#file=` naming a file this browser can't reach — and the app renders it as itself
+   rather than substituting some other file. When the name *is* reachable but its folder is locked,
+   that state says so and offers the way through (see "Hash routing").
 5. **A session reopens holding exactly what it was left holding.** The catalog is read as metadata
    on startup and then every file in it is read in, selected file first. A file that can't be read
    keeps its row rather than being dropped: a folder whose permission has lapsed is the ordinary

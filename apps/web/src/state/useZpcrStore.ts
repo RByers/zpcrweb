@@ -1019,6 +1019,15 @@ export interface AddFilesOptions {
   modified?: boolean;
 }
 
+/** A `#file=` link the app can't follow yet, and the folder standing between it and the file.
+ * See {@link ZpcrStore.awaitingGrant}. */
+export interface AwaitingGrant {
+  /** The name the link asked for, folder label and all. */
+  file: string;
+  /** The label of the granted folder that holds it, as the Files view shows it. */
+  folder: string;
+}
+
 export interface ZpcrStore {
   /**
    * Every open file, metadata only (see {@link FileEntry}) — the Files table's rows, and the set a
@@ -1264,8 +1273,23 @@ export interface ZpcrStore {
    * Read in any open file whose bytes the app doesn't have — what a folder granted its permission
    * back means for the files inside it. Called by the Files view when a grant lands; ordinary
    * selection retries too, so nothing depends on this having been called.
+   *
+   * A grant also finishes any link left waiting on it ({@link awaitingGrant}): the file it names
+   * isn't open yet, so re-reading the open ones would miss precisely the file the user followed a
+   * link to look at.
    */
   retryUnread: () => void;
+  /**
+   * The file a `#file=` link named, in a folder this browser has been granted but may not read
+   * right now — a `null` when there is no such link outstanding.
+   *
+   * A folder's permission comes back as `prompt` after almost every page load, so this is what an
+   * ordinary link to a file on disk meets, and the app can't clear it by itself: asking for a
+   * permission needs a user gesture, and following a link isn't one. The app says which folder is
+   * in the way and points at the Files view, where the grant lives; {@link retryUnread} — which the
+   * grant already calls — then opens the file.
+   */
+  awaitingGrant: AwaitingGrant | null;
   /**
    * Whether this file can be renamed. False for a disk-backed file: its name is its path on the
    * user's disk, and the File System Access API cannot rename — see {@link renameFile}.
@@ -1366,6 +1390,16 @@ export function useZpcrStore(): ZpcrStore {
   // until the attempt is over — the state→URL sync below waits on it, so the link's own `#file=`
   // isn't stripped out from under the file it names while it is still being opened.
   const [pendingFile, setPendingFile] = useState<string | null>(null);
+  // The file a link asked for that only a locked folder can produce — see {@link openNamedFile}
+  // and {@link ZpcrStore.awaitingGrant}.
+  const [awaitingGrant, setAwaitingGrant] = useState<AwaitingGrant | null>(null);
+  // Mirrored in a ref because `retryUnread` — a callback the Files view holds — has to read the
+  // current value without being rebuilt every time it changes.
+  const awaitingRef = useRef<AwaitingGrant | null>(null);
+  const noteAwaitingGrant = useCallback((next: AwaitingGrant | null) => {
+    awaitingRef.current = next;
+    setAwaitingGrant(next);
+  }, []);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const saveTimers = useRef<Record<string, number>>({});
@@ -1775,6 +1809,13 @@ export function useZpcrStore(): ZpcrStore {
    * nothing else changes the answer.
    */
   const retryUnread = useCallback(() => {
+    // The link that was waiting on exactly this grant. Handed back to the search rather than opened
+    // here: the file isn't in the catalog at all, so there is no entry below to re-read.
+    const waiting = awaitingRef.current;
+    if (waiting) {
+      noteAwaitingGrant(null);
+      setPendingFile(waiting.file);
+    }
     for (const entry of entriesRef.current) {
       if (loadedRef.current.some((f) => f.name === entry.name)) continue;
       void loadOne(entry).catch((e) => {
@@ -1782,7 +1823,7 @@ export function useZpcrStore(): ZpcrStore {
         noteReadFailure(entry.name, e);
       });
     }
-  }, [loadOne, noteReadFailure]);
+  }, [loadOne, noteReadFailure, noteAwaitingGrant]);
 
   /**
    * Put a validated file into the catalog *and* the loaded set: write the record, land it in both
@@ -2164,23 +2205,44 @@ export function useZpcrStore(): ZpcrStore {
       const candidates = folders
         .filter((f) => name.startsWith(`${f.label}/`))
         .sort((a, b) => b.label.length - a.label.length);
+      /** The first candidate the app couldn't read for want of a grant, if any — see below. */
+      let blocked: AwaitingGrant | undefined;
       for (const folder of candidates) {
         const path = name.slice(folder.label.length + 1).split("/");
         try {
-          if ((await folderPermission(folder.label)) !== "granted") continue;
+          if ((await folderPermission(folder.label)) !== "granted") {
+            // The folder is the right one and the app simply may not read it yet — which is the
+            // *ordinary* state of a granted folder after a page load, and so the ordinary state a
+            // link arrives in. Remember what was asked for and which folder can answer it, so
+            // granting access finishes the job instead of leaving the link half-followed.
+            blocked ??= { file: name, folder: folder.label };
+            continue;
+          }
           // Confirm the file is there before opening it, so a label that matched the name but not
           // the file (the `runs` / `runs archive` case above) moves on to the next candidate
           // quietly instead of reporting a missing file the user never asked for.
           const listing = await listDirectory(folder.label, path.slice(0, -1));
           if (!listing.some((e) => e.kind === "file" && e.name === path.at(-1))) continue;
-        } catch {
+        } catch (e) {
+          // A read that failed *because the app may not read that folder right now* is the same
+          // answer as the permission check above — the browser can say it either way — so it is
+          // the same waiting-on-a-grant state, not a dead link.
+          if (isPermissionError(e)) blocked ??= { file: name, folder: folder.label };
           continue;
         }
-        if (await addDiskFiles([{ folder: folder.label, path }])) return true;
+        if (await addDiskFiles([{ folder: folder.label, path }])) {
+          noteAwaitingGrant(null);
+          return true;
+        }
       }
+      // Nothing opened. If a folder that could have answered was locked, the link isn't dead — it
+      // is waiting on a click the app cannot make for itself, since asking for a permission needs
+      // a user gesture and arriving on a link is not one. `retryUnread` finishes it when the grant
+      // lands, and until then {@link ZpcrStore.awaitingGrant} is what the app tells the user.
+      noteAwaitingGrant(blocked ?? null);
       return false;
     },
-    [addDiskFiles, addUrl],
+    [addDiskFiles, addUrl, noteAwaitingGrant],
   );
 
   // Look for a `#file=` the catalog didn't have, once hydration has finished — until then there is
@@ -2873,6 +2935,7 @@ export function useZpcrStore(): ZpcrStore {
     setActive,
     closeFile,
     retryUnread,
+    awaitingGrant,
     updateSettings,
     exportBytes,
   };

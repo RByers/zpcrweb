@@ -984,6 +984,23 @@ export function App() {
           <div className="app__noselection mono">
             {store.activeName && store.loadingIds.has(store.activeName) ? (
               "opening…"
+            ) : store.awaitingGrant ? (
+              // A link to a file in a folder this browser has been granted, on a load where the
+              // browser has taken the grant back — the usual state after a reload. The app cannot
+              // ask for it here: a permission prompt needs a click, and arriving on a link isn't
+              // one. So it says which folder, and hands over the button that gets there.
+              <>
+                <p>{store.awaitingGrant.file}</p>
+                <p>
+                  This file is in the <strong>{store.awaitingGrant.folder}</strong> folder. Grant
+                  access to that folder and it will open.
+                </p>
+                <p>
+                  <button type="button" className="btn" onClick={() => store.setView("files")}>
+                    Go to Files
+                  </button>
+                </p>
+              </>
             ) : (
               <>
                 <p>No file selected.</p>

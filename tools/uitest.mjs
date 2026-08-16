@@ -5561,6 +5561,9 @@ async function sampleFolderChecks(chrome, origin) {
   await emptyReload(cdp, origin);
   await navigateBlank(cdp);
   await cdp.send("Page.navigate", { url: `${origin}#file=samples/${EXAMPLE}&view=curves` });
+  // Wait for the document before polling storage: an `indexedDB` read started against the page
+  // being replaced is collected mid-flight, which surfaces as a CDP error rather than a retry.
+  await waitFor(() => cdp.eval("document.readyState==='complete'"), { what: "the linked page" });
   await waitFor(async () => (await catalogNames(cdp)).includes(`samples/${EXAMPLE}`), {
     timeout: 20000,
     what: "the linked sample to open itself",
@@ -5606,9 +5609,11 @@ async function folderChecks(chrome, origin) {
          // A nested level, which must stay unread until it is opened…
          const y2026 = await runs.getDirectoryHandle("2026", { create: true });
          await write(y2026, "nested.zpcr", bytes);
-         // …and a sibling of it, which must stay unread even then.
+         // …and a sibling of it, which must stay unread even then. Its second file is only ever
+         // reached by a link, and only once the folder's grant has lapsed.
          const attic = await runs.getDirectoryHandle("attic", { create: true });
          await write(attic, "old.zpcr", bytes);
+         await write(attic, "linked.zpcr", bytes);
 
          window.__opfs = root;
          window.__reads = {};
@@ -6171,6 +6176,7 @@ async function folderChecks(chrome, origin) {
   // and not `emptyReload`: the grant is what makes the file reachable.
   await navigateBlank(cdp);
   await cdp.send("Page.navigate", { url: `${origin}#file=runs/attic/old.zpcr&view=curves` });
+  await waitFor(() => cdp.eval("document.readyState==='complete'"), { what: "the linked page" });
   await waitFor(async () => (await catalogNames(cdp)).includes("runs/attic/old.zpcr"), {
     timeout: 20000,
     what: "the linked disk file to open itself",
@@ -6186,6 +6192,7 @@ async function folderChecks(chrome, origin) {
   // and it must not go looking beyond the directory the name points at.
   await navigateBlank(cdp);
   await cdp.send("Page.navigate", { url: `${origin}#file=runs/attic/absent.zpcr&view=curves` });
+  await waitFor(() => cdp.eval("document.readyState==='complete'"), { what: "the linked page" });
   // The hash losing its `file=` is the app saying the search is *over*: it is held while a name is
   // still being looked for, so waiting for it is what keeps this from passing before the look.
   const absentHash = await waitValue(() => cdp.eval(`location.hash`), (h) => !h.includes("file="), {
@@ -6331,6 +6338,45 @@ async function folderChecks(chrome, origin) {
     "Granting access back reads in every open file, in every folder — not just the one clicked",
     granted.rows === 3 && granted.badges === 0 && chipsBack === 3,
     JSON.stringify({ ...granted, chips: chipsBack }),
+  );
+
+  // ── A link that arrives while the folder is locked ─────────────────────────────────────────
+  // The state nearly every real link lands in: a folder's grant does not survive a page load, and
+  // the app cannot ask for it back on its own — a permission prompt needs a gesture, and following
+  // a link is not one. So the link is not dead, it is *waiting*, and the app has to say so and
+  // then finish the job when the grant lands. `linked.zpcr` has never been opened, so this is a
+  // name the app is holding nothing for. (The reload re-arms the deny, which the injected script
+  // sets on every new document.)
+  await navigateBlank(cdp);
+  await cdp.send("Page.navigate", { url: `${origin}#file=runs/attic/linked.zpcr&view=curves` });
+  await waitFor(() => cdp.eval("document.readyState==='complete'"), { what: "the linked page" });
+  const waiting = await waitValue(
+    () => cdp.eval(`document.querySelector(".app__noselection")?.innerText ?? ""`),
+    (t) => t.includes("linked.zpcr"),
+    { timeout: 15000, what: "the link to report what it is waiting on" },
+  );
+  check(
+    "A link into a folder whose grant has lapsed says which folder to grant, rather than failing",
+    /linked\.zpcr/.test(waiting) && /\bruns\b/.test(waiting),
+    JSON.stringify(waiting),
+  );
+  // The way out it offers, then the answer the user gives the browser: the Files view, a row whose
+  // file can't be read, and a grant that this time succeeds.
+  await clickButton(cdp, "Go to Files");
+  await waitFor(() => cdp.eval(`!!document.querySelector(".filesview__row")`), {
+    what: "the Files view",
+  });
+  await cdp.eval(`window.__denyFs = false`);
+  await cdp.eval(`document.querySelector(".filesview__row").click()`);
+  const afterGrant = await waitValue(
+    () => catalogNames(cdp),
+    (n) => n.includes("runs/attic/linked.zpcr"),
+    { timeout: 20000, what: "the linked file to open once the grant is back" },
+  );
+  check(
+    "…and granting it opens the file the link asked for, not just the files already open",
+    afterGrant.includes("runs/attic/linked.zpcr"),
+    JSON.stringify(afterGrant),
   );
   cdp.close();
 }

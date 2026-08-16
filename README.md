@@ -255,7 +255,9 @@ view is expected to work fine regardless.
   A `#file=` naming a file that isn't open is looked for in the folders: a file's name is its
   folder and path (`runs/2026-07/a.zpcr`, `samples/run.zpcr`), so if that folder is one this
   browser has been granted — or the bundled `samples` — the file is opened from it. Nothing is
-  searched; only the directory the name points at is read.
+  searched; only the directory the name points at is read. A folder's access usually has to be
+  granted again after a page load, and the app says which folder a link is waiting on and takes you
+  to the Files view to grant it; the file opens as soon as it can be read.
 - `#load=<url>` fetches a file and loads it — the only key that can put a file into the app from
   somewhere it can't otherwise reach. It's consumed on load and replaced by the `#file=` the loaded file
   produces, so it never survives in the address bar. The welcome screen's "Load an example file"
