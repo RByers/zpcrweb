@@ -234,7 +234,7 @@ export function meltCsv(rows: MeltRow[]): string {
       r.channel != null ? channelLabel(r.channel) : "",
       r.dye ?? "",
       r.target ?? "",
-      r.tmC != null ? r.tmC.toFixed(2) : "",
+      r.tmC != null ? r.tmC.toFixed(1) : "",
       r.peakHeight != null ? r.peakHeight.toFixed(1) : "",
     ]);
   }

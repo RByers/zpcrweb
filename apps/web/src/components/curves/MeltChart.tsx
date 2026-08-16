@@ -112,7 +112,7 @@ export function MeltChart({ curves, temperaturesC, view, highlight = null }: Pro
               </tr>
               <tr>
                 <td>Tm</td>
-                <td>{tip.tmC == null ? "—" : `${tip.tmC.toFixed(2)} °C`}</td>
+                <td>{tip.tmC == null ? "—" : `${tip.tmC.toFixed(1)} °C`}</td>
               </tr>
             </tbody>
           </table>

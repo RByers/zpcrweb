@@ -131,6 +131,10 @@ The smoothing is in index space, exact on a uniform grid and an approximation ot
   The vertex is **clamped to half a grid step** — the parabola refines a maximum already located,
   so its vertex belongs between that sample's neighbours. Unclamped, a fit through a near-flat trio
   solves far outside the data; it put melting temperatures at 38 °C on a ramp starting at 65 (§B.2).
+- **The result is rounded to 0.1 °C** (`TM_ROUNDING_C`), which is the precision the number is good
+  to: replicates of one product spread by 0.12 °C (§A.2), so the digits below that are the
+  parabola's arithmetic rather than anything the run measured. Rounded once here, in the value
+  itself, so a chart marker, a tooltip, a table row and the exported CSV cannot disagree.
 
 ### 5.1 When no Tm is reported
 
@@ -248,7 +252,9 @@ product across replicate wells:
 85.60 85.61 85.61 85.61 85.61 85.61 85.62 85.62 85.62 85.64 85.64 85.66 85.67
 ```
 
-**Spread 0.120 °C**, median 85.60 °C. Six further curves are called between 76.07 and 83.82 °C —
+**Spread 0.120 °C**, median 85.60 °C. (These are the unrounded refinements, which is what the
+spread has to be measured on; §5 rounds the reported Tm to 0.1 °C precisely because this spread is
+the same size as the rounding.) Six further curves are called between 76.07 and 83.82 °C —
 genuinely different products, not scatter. Channels 3 and 4, which carry no signal, are called
 **zero** times.
 

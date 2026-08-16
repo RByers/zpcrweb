@@ -134,7 +134,7 @@ export function MeltTable({ rows, seriesLabel, onPickWell }: Props) {
                 </span>
               </td>
               <td className="atbl__num mono">
-                {r.tmC == null ? <span className="atbl__none">—</span> : r.tmC.toFixed(2)}
+                {r.tmC == null ? <span className="atbl__none">—</span> : r.tmC.toFixed(1)}
               </td>
               <td className="atbl__num mono">
                 {r.peakHeight == null ? (

@@ -106,6 +106,16 @@ describe("the derivative and the peak (melt.md §4–§5)", () => {
     expect(peak.tmC % 0.5).not.toBe(0);
   });
 
+  it("reports the Tm rounded to 0.1 °C", () => {
+    // The refinement resolves far below the precision the measurement supports, so the value
+    // itself is cut to 0.1 °C — and cleanly, with no floating-point tail for a `toFixed` to hide.
+    for (const mid of [80, 80.3, 82.37, 85.55555]) {
+      const peak = meltPeak(axis, meltDerivative(axis, sigmoid(axis, mid)))!;
+      expect(peak.tmC).toBe(Math.round(peak.tmC * 10) / 10);
+      expect(String(peak.tmC)).toMatch(/^\d+(\.\d)?$/);
+    }
+  });
+
   it("never places a Tm outside the ramp", () => {
     // A parabola fitted through a near-flat trio solves to a vertex far outside the data; before
     // the vertex was clamped this put melting temperatures at 38 °C on a ramp starting at 65.
@@ -151,15 +161,16 @@ describe("melt analysis of the committed CFX run", () => {
     }
   });
 
-  it("puts the strongest curves' Tm within 0.12 °C of each other", () => {
-    // 27 replicate curves of one product. The spread is the measurement `melt.md` Appendix A
-    // quotes, and the reason a Tm is worth reporting to two decimals at all.
+  it("puts the strongest curves' Tm within one rounding step of each other", () => {
+    // 27 replicate curves of one product. Unrounded they span 0.12 °C — the measurement
+    // `melt.md` Appendix A quotes, and the reason the reported Tm is cut at 0.1 °C — so after
+    // rounding they land on two adjacent rungs and span exactly one step.
     const tms = analysis.curves
       .filter((c) => c.channel === 0 && (c.peakHeight ?? 0) > 3000)
       .map((c) => c.tmC as number)
       .sort((a, b) => a - b);
     expect(tms).toHaveLength(27);
-    expect(tms[tms.length - 1]! - tms[0]!).toBeLessThan(0.13);
+    expect(tms[tms.length - 1]! - tms[0]!).toBeLessThan(0.21);
     expect(tms[tms.length >> 1]!).toBeCloseTo(85.6, 1);
   });
 

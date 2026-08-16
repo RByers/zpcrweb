@@ -122,6 +122,26 @@ export function hasMeltSignal(values: number[]): boolean {
   return (max - min) / level >= MELT_MIN_SIGNAL_FRACTION;
 }
 
+/**
+ * Quantum a melting temperature is reported at, °C.
+ *
+ * The sub-grid refinement in {@link meltPeak} resolves a peak to far more decimal places than the
+ * measurement supports; replicates of one product agree to about 0.1 °C (`melt.md` §A.2), so that
+ * is where the number is cut. Rounding once, here, is what keeps a chart marker, a tooltip and a
+ * table row showing the same Tm rather than three roundings of one value.
+ */
+export const TM_ROUNDING_C = 0.1;
+
+/**
+ * A Tm rounded to {@link TM_ROUNDING_C}. Divides by the reciprocal rather than multiplying by the
+ * quantum, because `803 * 0.1` is `80.30000000000001` in binary floating point and `803 / 10` is
+ * not — and a Tm that prints as `80.30000000000001` anywhere would defeat the point of rounding.
+ */
+function roundTm(tmC: number): number {
+  const scale = 1 / TM_ROUNDING_C;
+  return Math.round(tmC * scale) / scale;
+}
+
 /** A called melt peak. */
 export interface MeltPeak {
   /** Peak temperature, °C — the melting temperature. */
@@ -178,7 +198,10 @@ export function meltPeak(temperaturesC: number[], derivative: number[]): MeltPea
       ? (temperaturesC[best + 1] as number) - below
       : below - (temperaturesC[best - 1] as number);
 
-  return { tmC: below + offset * spacing, height };
+  // Reported to 0.1 °C, the precision the number is actually good to: replicates of the same
+  // product spread by about that much, so further digits are the parabola's arithmetic rather
+  // than anything the run measured (`melt.md` §5).
+  return { tmC: roundTm(below + offset * spacing), height };
 }
 
 /** One well's melt curve — on one optical channel, or on one fluorophore — its derivative and
