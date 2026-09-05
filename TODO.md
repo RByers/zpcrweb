@@ -3,6 +3,27 @@
 Deferred work, captured so we can come back to it. The long-term goal is a **full
 visualizer for everything** inside a `.zpcr` archive.
 
+## Immediately next
+
+- Build a CFX device emulator for testing purposes, uses the full raw USB protocol but without
+  an actual USB device. 
+  - Add a button to the UI "Connect to mock instrument" for manual testing purposes
+  - Generate realistic data / results based on saved recordings for PCR, melt and heat block runs.
+    But generate the same curves for all wells,
+  - Support both running in realtime (eg. for interactive use) and maximum accelerated time for
+    automated testing (should rely on no sleeps), with on option in the UI when using the mock instrument.
+- Clean up instrument UI to make it less confusing when moving between runs. Eg:
+  - The left panel should be exclusively about the state of the instrument. Eg.
+    showing the last completed run and offering to download it. Open / close lid,
+    but nothing about the actively selected file (like start experiment). Changing the selected
+    file should change nothing on the left.
+  - The main right panel should be mainly about the actively selected file,
+    the only place the "start experiment" button is located. Keeping the wide
+    instrument data (collapsed by default) such as USB log and files on instrument on
+    on the right is fine, but they should only be shown when the running file is selected, or
+    in the case of the USB log it should represent any saved log in a file.
+  - When a completed or other pending experiment file is selected while the instrument is running
+    another file, only the running file should pulse "running". 
 ## Analysis improvements
 
 ### Match CFX Manager's Cq and end RFU
@@ -183,58 +204,6 @@ two functions this section already does:
 between them. uPlot barely registered (~2%) — **the plot is not the bottleneck, the analysis is**,
 and the frame budget is spent re-deriving a whole plate's dye separation that the changed threshold
 cannot possibly have affected.
-
-### Win-win — less code *and* faster
-
-- [x] **Hoist the calibration pseudo-inverse out of the per-well, per-cycle solve loop.** Done
-      2026-08-10. `pseudoInverse` and the `hasSignal` all-zeros guard are now fields of the
-      immutable `CalibrationMatrix`, computed in `buildCalibrationMatrix`
-      (`packages/core/src/calibration.ts`); `separateChannels` is a dot product per dye and takes
-      no `rcond` of its own, since the singular-value floor belongs to the matrix that was
-      inverted. Counted before the change: **4,320 `pseudoInverse` calls per analysis** (96 wells
-      × 45 cycles) against **one** matrix — the per-well dye sets added since this item was
-      written change nothing here, because `computeRunAnalysis`'s solver cache already keys on
-      (vessel, dye set) and a normal plate resolves to a single entry; the mixed-vessel sample's
-      three matrices were still inverted 4,320 times between them. After: one call per matrix.
-      **Measured: `computeRunAnalysis` 33–42 ms → 12–15 ms** over the four amplification samples,
-      with every curve and Cq bit-identical (dumped and compared before/after) and all 590 core
-      tests passing.
-
-- [x] **Parse each loaded run once, not all of them on every change.** **Measured, with three
-      `.zpcr` runs open: committing one edit in a `.prcl.txt`'s protocol editor went from 3 parses
-      (9.1 / 20.6 / 15.2 ms across three edits) to 0.** `useZpcrStore.ts`'s `runs` memo was keyed
-      on `[loadedFiles, password]` and rebuilt the whole map by re-parsing *every* loaded run
-      whenever that array's identity changed — and every edit to every file changes it, since
-      `replaceFile` returns a new array. The parse is now keyed per file: `parseRunCached`, a
-      `WeakMap` from the `FileContent` object to its `RunResult`, so only the file whose bytes
-      actually changed re-parses, and a closed file's parse dies with it. (The editors commit per
-      *change* rather than per keystroke — a step form's Apply, not each character — so the
-      original "per keypress" framing was pessimistic; the waste per commit was real.)
-
-- [x] **`median` sorts through a JS comparator.** Done: `threshold.ts`'s `median` now sorts a
-      `Float64Array`, whose `sort` is numeric with no comparator. Measured *before* the
-      pseudo-inverse fix (which is still open), so the number here is the standalone win, not the
-      −24% originally quoted on top of it: on `20260720_FirstQualification.zpcr` (288 curves,
-      ~2300 `median` calls per analysis) `computeRunAnalysis` goes **33.0 → 27.7 ms** (min
-      29.6 → 24.5), and the median work alone **7.5 → 1.8 ms**. Results are identical for every
-      real input — the only ordering difference is `NaN`, which no input on this path carries.
-
-  All three have now landed, and the interactive analysis measures **8.7–10.7 ms** over the four
-  amplification samples (median of 21, after warm-up), against 33–42 ms before any of them — a
-  **3.5–4× speedup**, slightly past the **41.3 ms → 12.2 ms** originally projected. Each item above
-  reports the win as its own author measured it, one fix at a time; the totals compound a little
-  better than those separate figures suggest, which is why this line is measured on the landed
-  code rather than added up from them. The parse win above is not in these numbers: it is
-  main-thread work *around* the analysis, not inside it.
-
-- [x] **Don't parse a dropped file twice.** **Measured: dropping the first, second and third
-      `.zpcr` cost 2, 3 and 4 parses; now 1 each.** `decodeFile` parsed eagerly to validate the
-      container and threw the result away, and `runs` then parsed it again. It now keeps that
-      parse — `parseRunCached` with the password as it stands (`currentPltdPassword()`), which is
-      the key the next render looks it up with — so the decode that proves a file is openable is
-      the decode the first render reads. `addRunArchive` does the same, which matters most: a run
-      being followed lands there once per cycle. The "validate by parsing and discarding" idiom is
-      gone with it, and the three run formats share one branch instead of three.
 
 ### Perf win, but genuinely more complexity — judgment calls
 
