@@ -78,6 +78,7 @@ import {
   isSameRun,
   hasRunIdentity,
   runProgressFromNames,
+  isFinishedRun,
   type ZpcrArchive,
 } from "@zpcrweb/core";
 import type { CfxDeviceHandle } from "./useCfxDevice";
@@ -484,7 +485,7 @@ export function useRunWatch(
         setFileName(id);
         // Whatever was on offer is now in the file bar — this pass is what installed it.
         if (id) setAvailable(null);
-        const reads = names.filter((n) => /\.Plateread$/i.test(n)).length;
+        const reads = runProgressFromNames(names).plateReads;
         setNote(`Updated at ${new Date().toLocaleTimeString()} — ${reads} plate reads`);
         return id;
       } catch (e) {
@@ -671,7 +672,9 @@ export function useRunWatch(
   const lastElapsed = useRef<number | null>(null);
   useEffect(() => {
     if (connection !== "connected" || !watching || !status) return;
-    if (status.running || !status.runName) {
+    // Anything but §7.6's finished-run-still-held (core's `isFinishedRun`) is the bookkeeping
+    // case: a run going, or nothing there at all.
+    if (!isFinishedRun(status)) {
       // A new run clears the latch, so the next finish is acknowledged too. No listing here: the
       // step-transition rule's first plate read (or the baseline-on-connect pull, for a run found
       // already going) is what actually surfaces it — see the module comment.

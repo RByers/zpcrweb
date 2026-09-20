@@ -45,6 +45,7 @@ import {
   CfxDevice,
   parseAlf,
   runProgressFromNames,
+  isFinishedRun,
   type AlfReport,
   type CfxCommandName,
   type CfxDeviceInfo,
@@ -713,15 +714,15 @@ export function useCfxDevice() {
   /**
    * `CANCEL` a run the instrument has finished but is still holding (`usb.md` §7.6).
    *
-   * Guarded on the status this is *only* correct for: a completed protocol leaves `STATUS?`
-   * reporting `IDLE` with the run's name still attached, and acknowledging that releases the
-   * instrument and makes the final plate read, the `ended` marker and the `.alf` report appear.
-   * The same command sent to a run still cycling would abort it, which is why the check is here
-   * rather than trusted to the caller.
+   * Guarded on the status this is *only* correct for (core's `isFinishedRun`): a completed
+   * protocol leaves `STATUS?` reporting `IDLE` with the run's name still attached, and
+   * acknowledging that releases the instrument and makes the final plate read, the `ended` marker
+   * and the `.alf` report appear. The same command sent to a run still cycling would abort it,
+   * which is why the check is here rather than trusted to the caller.
    */
   const acknowledgeFinishedRun = useCallback(async () => {
     const current = statusRef.current;
-    if (!current || current.running || !current.runName) return false;
+    if (!current || !isFinishedRun(current)) return false;
     const res = await withBusy("Acknowledging the finished run", (d) => d.acknowledgeRun());
     if (res) {
       const d = deviceRef.current;

@@ -57,7 +57,7 @@ export {
   encodeFrame,
 } from "./frame.js";
 export type { CfxFrameHeader, CfxMessage } from "./frame.js";
-export { parseIdentity, parseRtStatus, parseStatus, isPaused } from "./status.js";
+export { parseIdentity, parseRtStatus, parseStatus, isPaused, isFinishedRun } from "./status.js";
 export type {
   CfxDeviceInfo,
   CfxFault,

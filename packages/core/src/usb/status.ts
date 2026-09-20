@@ -255,6 +255,20 @@ export function isPaused(status: CfxStatus): boolean {
   return status.flags.paused || status.paused;
 }
 
+/**
+ * Has a run finished, with the instrument still holding it? `usb.md` §7.6: a completed protocol
+ * leaves `STATUS?` reporting `IDLE` — so {@link CfxStatus.running} goes false — while field 6
+ * still carries the run's name. That pair is the whole of the condition, and it is what a client
+ * has to see before it sends the acknowledging `CANCEL`: the same command sent to a run still
+ * cycling aborts it instead.
+ *
+ * One predicate rather than one per caller, because the two halves are easy to write down in the
+ * wrong combination and the wrong combination stops a run.
+ */
+export function isFinishedRun(status: CfxStatus): boolean {
+  return !status.running && status.runName !== "";
+}
+
 /** One entry of `RTSTATUS?`'s fault list (`usb.md` §3.3) — a hex code with an optional
  * comma-separated extra value. Neither reference capture ever populated this list, so the format
  * is documented but unobserved beyond "empty". */
