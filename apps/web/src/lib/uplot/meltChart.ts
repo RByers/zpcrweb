@@ -23,9 +23,8 @@ import type { MeltView } from "../../state/useZpcrStore";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
-/** The vertical marker drawn at a curve's called melting temperature. */
+/** The label drawn at a curve's called melting temperature. */
 const TM_COLOR = "#e6e6e6";
-const TM_DASH = "3,3";
 
 /** One plotted melt curve: a core `MeltCurve` plus how this chart should draw it. */
 export interface MeltPlotCurve {
@@ -183,13 +182,15 @@ export function applyMeltHighlight(
 }
 
 /**
- * Cursor plugin: reports the nearest series for the tooltip, and — in derivative mode — draws a
- * vertical marker at each called melting temperature.
+ * Cursor plugin: reports the nearest series for the tooltip, and — in derivative mode — labels
+ * each called melting temperature at the peak it names. The label alone marks the Tm; a vertical
+ * rule through the whole plot was tried and removed, since replicates melt within a degree of
+ * each other and the stack of near-identical rules obscured the curves it was pointing at.
  *
- * The markers are drawn only when few enough curves are plotted to tell them apart. A melt step
+ * The labels are drawn only when few enough curves are plotted to tell them apart. A melt step
  * carries one curve per well per channel (576 on a full 96-well run), and a plot with hundreds of
- * near-identical vertical lines on it says less than one with none: past the limit the Tm is read
- * from the table and the hover card instead.
+ * overlapping labels says less than one with none: past the limit the Tm is read from the table
+ * and the hover card instead.
  */
 const MAX_TM_MARKERS = 12;
 
@@ -303,22 +304,13 @@ function meltOverlayPlugin(
         if (called.length === 0 || called.length > MAX_TM_MARKERS) return;
         const height = u.bbox.height / devicePixelRatio;
         const width = u.bbox.width / devicePixelRatio;
-        // Labels are placed at the peak each marker names, and nudged apart only where two of
+        // Labels are placed at the peak each one names, and nudged apart only where two of
         // them would actually overlap — see `placeLabel`.
         const placed: LabelBox[] = [];
         for (const m of called) {
           const tm = m.plot.curve.tmC as number;
           const x = u.valToPos(tm, "x");
           if (!Number.isFinite(x)) continue;
-          const line = document.createElementNS(SVG_NS, "line");
-          line.setAttribute("x1", String(x));
-          line.setAttribute("x2", String(x));
-          line.setAttribute("y1", "0");
-          line.setAttribute("y2", String(height));
-          line.setAttribute("stroke", m.color);
-          line.setAttribute("stroke-width", "1");
-          line.setAttribute("stroke-dasharray", TM_DASH);
-          line.setAttribute("opacity", "0.7");
           const label = document.createElementNS(SVG_NS, "text");
           const text = `${tm.toFixed(1)} °C`;
           const flip = x > width - 56;
@@ -337,7 +329,7 @@ function meltOverlayPlugin(
           label.setAttribute("stroke", "#0b0d12");
           label.setAttribute("stroke-width", "3");
           label.textContent = text;
-          marks.append(line, label);
+          marks.append(label);
         }
       },
 
