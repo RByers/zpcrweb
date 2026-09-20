@@ -24,6 +24,14 @@ visualizer for everything** inside a `.zpcr` archive.
     in the case of the USB log it should represent any saved log in a file.
   - When a completed or other pending experiment file is selected while the instrument is running
     another file, only the running file should pulse "running". 
+- There's a bug where a new zpcr file gets created for the experiment in progress. Review the code
+  and ensure run results are always saved into the file which started the run (if any).
+- There appears to be a bug with the temperature graph where it doesn't update when the sreen is
+  locked / page is not visible (or maybe only when the laptop is sleeping?). See if it's possible
+  to download the actual temperature logs during a run and draw the graph based on that. Not the
+  plan in the alf, but the actual measured temps if they exist anywhere. Then connecting to a
+  device while it's running an experiment should be able to show the whole graph. 
+
 ## Analysis improvements
 
 ### Match CFX Manager's Cq and end RFU
