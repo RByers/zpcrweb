@@ -43,6 +43,16 @@ export interface PlotCurve {
    * so this may be undefined there without costing it a color. */
   channel?: number;
   dyeLabel: string;
+  /**
+   * What to *write* where this curve is named, when that differs from {@link dyeLabel}.
+   *
+   * The two come apart when one target is loaded as more than one dye — a probe and an
+   * intercalating dye filed under one gene — where the target name alone names two curves per
+   * well. The label then carries the dye as well ("RNaseP · SYBR"), while `dyeLabel` stays the
+   * bare target, because that is the grouping key a rail chip toggles and a highlight matches on.
+   * Absent means the two are the same, which is every other curve.
+   */
+  displayLabel?: string;
   /** The raw fluorophore name, when this is a dye-space curve. Distinct from {@link dyeLabel},
    * which is the *display* grouping and carries the target name when the view groups by target.
    * Thresholds are resolved per fluorophore (see `RunAnalysis.thresholdGroupOf`), so the
@@ -272,6 +282,9 @@ export interface SeriesMeta {
   col: number;
   label: string;
   dyeLabel: string;
+  /** See {@link PlotCurve.displayLabel} — what the tooltip writes, where that isn't
+   * {@link dyeLabel}. */
+  displayLabel?: string;
   /** See {@link PlotCurve.fluor}. */
   fluor?: string;
   isReference: boolean;
@@ -611,6 +624,7 @@ export function buildChart(cfg: BuildChartConfig): {
       col: curve.col,
       label: curve.wellLabel,
       dyeLabel: curve.dyeLabel,
+      displayLabel: curve.displayLabel,
       fluor: curve.fluor,
       isReference: curve.isReference,
       cycles: curve.cycles,
@@ -623,7 +637,7 @@ export function buildChart(cfg: BuildChartConfig): {
       sample: curve.sample,
     });
     series.push({
-      label: `${curve.wellLabel} · ${curve.dyeLabel}`,
+      label: `${curve.wellLabel} · ${curve.displayLabel ?? curve.dyeLabel}`,
       stroke: curveColor(curve),
       width: 1,
       dash: curve.isReference ? REF_DASH : undefined,
@@ -650,6 +664,7 @@ export function buildChart(cfg: BuildChartConfig): {
         col: -1,
         label: curve.wellLabel,
         dyeLabel: curve.dyeLabel,
+        displayLabel: curve.displayLabel,
         fluor: curve.fluor,
         isReference: false,
         cycles: curve.cycles,
@@ -658,7 +673,7 @@ export function buildChart(cfg: BuildChartConfig): {
         parentIndex: i,
       });
       series.push({
-        label: `${curve.wellLabel} · ${curve.dyeLabel} baseline`,
+        label: `${curve.wellLabel} · ${curve.displayLabel ?? curve.dyeLabel} baseline`,
         stroke: hexToRgba(curveColor(curve), BASELINE_LINE_ALPHA),
         width: 1,
         points: { show: false },
@@ -1411,7 +1426,7 @@ function overlayPlugin(
                 label: m.label,
                 channel: m.channel,
                 col: m.col,
-                dye: m.dyeLabel,
+                dye: m.displayLabel ?? m.dyeLabel,
                 color,
                 cycle: m.cycles[idx] ?? 0,
                 xName,

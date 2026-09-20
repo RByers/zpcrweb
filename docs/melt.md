@@ -208,6 +208,22 @@ Two consequences worth stating plainly:
   quenching out as well would mean reporting a melt on a different scale from every other curve in
   the app, and is not done.
 
+### 7.1 Which series a melt opens on
+
+A melt's *useful* channel is the one an intercalating dye is read on — channel 1, the green band
+of SYBR and EvaGreen. What melts is double-stranded product; a hydrolysis probe was cleaved off its
+quencher during extension, and what its channel traces across the ramp is the thermal quenching
+described above, not a transition. On a run that multiplexes probes with a dye, the probe channels
+therefore carry a derivative with no melting peak in it, and a Tm called off one is noise with a
+number attached.
+
+The app's Curves view acts on that: a melt step opens showing the green channel alone (and, in dye
+space, the dyes and targets read on it), while the amplification step keeps every probe it has.
+The rule is this library's own — nothing in the file says which dye intercalates — and it is a
+default, not a filter: every other channel stays listed and one click from being shown. The two
+steps keep separate selections, which is an application concern; `apps/web/ARCHITECTURE.md`
+("Melt mode") has the reasoning and the state.
+
 ## 8. Future work
 
 > **Genuinely unknown:** how the Biomeme device chooses its own peak. Its value is the argmax of its

@@ -2440,6 +2440,15 @@ only pieces the two views share.
   (`"(none)"`, or a target loaded as more than one dye) has no single dye to borrow from, so its
   chip takes `NEUTRAL_COLOR` rather than one member's hue.
 
+**A target loaded as more than one dye names more than one curve**, and each curve is written with
+its dye: `RSV Ma · FAM` and `RSV Ma · Cy5`, not two lines both called `RSV Ma`. The duplex case is
+the real one — one gene read by both a probe and an intercalating dye — and it is a labelling
+change only. `PlotCurve.displayLabel` (and `MeltPlotCurve`'s, for the melt chart) carries the
+written form while `dyeLabel` stays the bare target, because that is the grouping key: one chip,
+one threshold group, one highlight match. `CurvesView`'s `displayLabelForFluorCurve` appends the
+dye only for the targets in `multiFluorTargets`, so a single-dye target's label is untouched. The
+`(none)` catch-all is usually one of these too, since it collects every untargeted dye on the plate.
+
 ### Melt mode
 
 **A plate-read step whose reads sweep temperature is a melt curve, and the Curves view becomes a
@@ -2473,6 +2482,31 @@ File↔Computed source toggles, both right-axis chip sections, "Draw baseline", 
 "Min/max band" — every one is an amplification concept, and a melt has no cycles, no baseline and
 no threshold to cross. Wells, Channels and Samples stay, because they are selection and selection
 still means what it always did.
+
+**A melt has its own series selection, and it opens on the green channel.** What melts is
+double-stranded product, and an intercalating dye is what reports it; a hydrolysis probe was
+cleaved off its quencher cycles ago, so its trace across the ramp is thermal quenching (`melt.md`
+§7) rather than a transition. A run that multiplexes probes with a dye therefore has exactly one
+series worth reading in a melt and four worth reading in the amplification step, which is why the
+two steps keep separate selections — `meltEnabledChannels`/`meltDisabledFluors` beside
+`enabledChannels`/`disabledFluors` (`FileSettings`, `db.ts`'s `StoredView`). Narrowing the shared
+pair instead would have taken the probes off the amplification chart, and off the Calibration and
+Reference views with it, since those read the same `enabledChannels`.
+
+The rule is the optical **channel** (`CurvesView`'s `MELT_CHANNEL` = 0, CFX channel 1), not a list
+of dye names: melt mode has to work with no plate and no password, where a channel index is the
+only thing there is to select on, and a plate that types its intercalating dye as "FAM" — common,
+since people pick from the instrument's own dye list — would defeat a name-based rule while still
+being read on that channel. In dye space the same rule reaches the chips through each dye's
+`primaryChannel`, and a target counts as green if any one of its dyes is.
+
+Both are computed defaults rather than seeded state: `null` means untouched, so a plate or a
+calibration that arrives after the first render still moves the default instead of being locked out
+by a value written before it was known. The first toggle turns the default into a concrete set; the
+section's reset glyph puts `null` back, which is why its title says "the channel a melt is read on"
+in melt mode. Every other channel stays **listed and off**, a click from being shown, because this
+app makes a disabled thing visible rather than absent. `meltChecks` in `uitest.mjs` crosses between
+the two steps in both directions, since an edit leaking either way is invisible in a screenshot.
 
 **The same four View modes an amplification step has** — Channel, Fluorophore, Target, Table — and
 the same toggle, not a second one that appears when the step changes. Channel mode is core's

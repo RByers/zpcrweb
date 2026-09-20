@@ -228,6 +228,14 @@ export interface StoredView {
   fluorViewMode: "fluorophore" | "target" | "table";
   /** Fluorophore (or, in target view mode, target) names hidden from the dye-space view. */
   disabledFluors: string[];
+  /** Curves view in melt mode: the channel/series selection, kept apart from
+   * {@link enabledChannels}/{@link disabledFluors} because a melt and an amplification step want
+   * different ones — a hydrolysis probe melts nothing, so a melt opens on the intercalating
+   * dye's channel alone while the amplification step keeps every probe it has. `null` means the
+   * user has never touched it, and the view's own default applies; a record written before this
+   * existed reads back as `null` too. */
+  meltEnabledChannels: number[] | null;
+  meltDisabledFluors: string[] | null;
   /** Curves view: sample names hidden from the plotted curves. */
   disabledSamples: string[];
   /** When true, dye-space curves are drawn for every enabled well/fluor pair, even ones the

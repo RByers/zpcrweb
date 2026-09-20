@@ -288,6 +288,23 @@ export interface FileSettings extends AnalysisSettings {
    * opt-out set, like `enabledChannels` inverted — new entries default to shown without needing
    * to know their names up front). */
   disabledFluors: Set<string>;
+  /**
+   * Curves view in melt mode: the channels shown, and the fluorophore/target names hidden — the
+   * melt's own copies of {@link enabledChannels} and {@link disabledFluors}.
+   *
+   * They are separate because the two kinds of step want opposite things from one plate. A melt
+   * is only interesting where an intercalating dye is reading it; a hydrolysis probe is cleaved
+   * long before the ramp and its trace melts nothing. So a melt opens on the green channel alone
+   * (see CurvesView's `MELT_CHANNEL`), while the amplification step — where every probe is the
+   * whole point — keeps all of them. Narrowing the shared sets instead would have taken the
+   * probes off the amplification chart, and off the Calibration and Reference views with it.
+   *
+   * `null` is "never touched": the view's computed default applies, and keeps applying as the
+   * plate and its calibration arrive. A toggle writes a concrete set and the default stops
+   * mattering; the reset button puts `null` back.
+   */
+  meltEnabledChannels: Set<number> | null;
+  meltDisabledFluors: Set<string> | null;
   /** Curves view: sample names (`PlateDefinition.samples`) hidden from the plotted curves — an
    * opt-out set, like {@link disabledFluors}. New samples default to shown. */
   disabledSamples: Set<string>;
@@ -785,6 +802,9 @@ function defaultSettings(): FileSettings {
     calibration: null,
     fluorViewMode: "target",
     disabledFluors: new Set<string>(),
+    // null = untouched; CurvesView's melt default (the green channel alone) applies.
+    meltEnabledChannels: null,
+    meltDisabledFluors: null,
     disabledSamples: new Set<string>(),
     showUnloadedFluors: false,
     // Unfiltered: every Cq, plus the curves that never crossed their threshold.
@@ -829,6 +849,8 @@ function viewOf(s: FileSettings): StoredView {
     calibration: s.calibration,
     fluorViewMode: s.fluorViewMode,
     disabledFluors: [...s.disabledFluors],
+    meltEnabledChannels: s.meltEnabledChannels && [...s.meltEnabledChannels],
+    meltDisabledFluors: s.meltDisabledFluors && [...s.meltDisabledFluors],
     disabledSamples: [...s.disabledSamples],
     showUnloadedFluors: s.showUnloadedFluors,
     cqMin: s.cqMin,
@@ -870,6 +892,10 @@ function fromStored(e: StoredFile): FileSettings {
     calibration: v.calibration,
     fluorViewMode: v.fluorViewMode,
     disabledFluors: new Set(v.disabledFluors),
+    // Absent on a record written before melt got its own selection — which reads as untouched,
+    // so such a file opens on the melt default like a new one.
+    meltEnabledChannels: v.meltEnabledChannels ? new Set(v.meltEnabledChannels) : null,
+    meltDisabledFluors: v.meltDisabledFluors ? new Set(v.meltDisabledFluors) : null,
     disabledSamples: new Set(v.disabledSamples),
     showUnloadedFluors: v.showUnloadedFluors,
     cqMin: v.cqMin,

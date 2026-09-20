@@ -63,6 +63,9 @@ const EDITABLE_TXT_BODY =
 /** A plate CSV naming its dyes and nothing else — the format records no channels, so the only
  * way these get one is the run they are staged with (`Zpcr.channelForDye`). */
 const PLATE_CSV = join(REPO, "tools/.uishot/dupe/Staged.plt.csv");
+/** The RVP run's own plate with one target moved onto a second dye — see
+ * {@link sharedTargetLabelChecks}. Written at test time, like every other fixture here. */
+const SHARED_TARGET_CSV = join(REPO, "tools/.uishot/dupe/RVP-shared-target.plt.csv");
 const PLATE_CSV_BODY =
   "# zpcrweb plate definition\r\n# vessel: BR Clear 8x12\r\n" +
   "Well,SampleType,Sample,FAM,Cy5\r\nA1,unknown,S1,TargetA,TargetB\r\n";
@@ -6705,6 +6708,253 @@ async function meltChecks(chrome, origin, pw) {
     `n=${tms.length} spread=${spread.toFixed(3)} first=${tms[0]}`,
   );
 
+  // ---- The melt's own series selection ----------------------------------------------------
+  // A melt opens on the green channel alone (`CurvesView`'s `MELT_CHANNEL`): what melts is
+  // double-stranded product, and an intercalating dye is what reports it — a hydrolysis probe
+  // was cleaved off its quencher cycles ago, and its trace across the ramp is thermal quenching
+  // rather than a transition. The other channels stay listed, a click from being shown.
+  //
+  // The half nothing else can catch is that this is a *separate* selection from the
+  // amplification step's: narrowing the shared one would have taken the probes off the
+  // amplification chart, and off the Calibration and Reference views with it. So the checks
+  // below cross back and forth between the two steps.
+
+  /** Every chip in the rail's series section, with whether it is on. */
+  const chanChips = () =>
+    cdp.eval(`(() => {
+      const s = [...document.querySelectorAll(".rail__section")]
+        .find((e) => /Channels/.test(e.querySelector(".rail__title")?.textContent || ""));
+      if (!s) return null;
+      return [...s.querySelectorAll(".chanchip")].map((c) => ({
+        ch: c.querySelector(".chanchip__ch").textContent.trim(),
+        on: c.classList.contains("is-on"),
+      }));
+    })()`);
+  /** Just the enabled ones, comma-joined — what each check below compares. */
+  const chansOn = (chips) => (chips ?? []).filter((c) => c.on).map((c) => c.ch).join(",");
+  /** Click one of the series section's chips, by its label. */
+  const clickChanChip = (label) =>
+    cdp.eval(`(() => { const s = [...document.querySelectorAll(".rail__section")]
+        .find((e) => /Channels/.test(e.querySelector(".rail__title")?.textContent || ""));
+       const b = [...s.querySelectorAll(".chanchip")]
+         .find((c) => c.querySelector(".chanchip__ch").textContent.trim() === ${JSON.stringify(label)});
+       if (b) b.click(); return !!b; })()`);
+  /** Click a step in the selector, by the start of its label. */
+  const clickStep = (prefix) =>
+    cdp.eval(`(() => { const b = [...document.querySelectorAll(".stepsel .segmented__item")]
+        .find((x) => x.textContent.trim().startsWith(${JSON.stringify(prefix)}));
+       if (b) b.click(); return !!b; })()`);
+  /** The melt chart is on screen exactly while the melt step is selected — the observable that
+   * says a step click has landed, rather than a chip count that would restate the assertion. */
+  const meltCharting = () => cdp.eval(`!!document.querySelector(".curves__plot--melt")`);
+
+  await clickView(cdp, "Channel");
+  const meltChips = await waitValue(chanChips, (c) => c?.length > 1, {
+    what: "the melt's channel chips",
+  });
+  check(
+    "a melt opens on the green channel alone",
+    chansOn(meltChips) === "Ch1" && (meltChips ?? []).length > 1,
+    JSON.stringify(meltChips),
+  );
+
+  // Now the isolation itself, edited from both sides. This run is single-dye, so its
+  // amplification step happens to default to the same one channel the melt does (the plate
+  // names SYBR and nothing else) — which is why each direction is proved by an *edit* that the
+  // other side must not acquire, not by the two defaults differing.
+  await clickStep(labels[0]);
+  await waitFor(async () => (await meltCharting()) === false, {
+    what: "the amplification step to come back",
+  });
+  await clickChanChip("Ch6");
+  const ampEdited = await waitValue(chanChips, (c) => chansOn(c) !== "Ch1", {
+    what: "Ch6 turned on in the amplification step",
+  });
+  check(
+    "a channel turned on in the amplification step joins its own selection",
+    chansOn(ampEdited) === "Ch1,Ch6",
+    JSON.stringify(ampEdited),
+  );
+
+  await clickStep("Melt");
+  await waitFor(meltCharting, { what: "the melt step again" });
+  const meltAfterAmpEdit = await chanChips();
+  check(
+    "…and the melt is still on green alone, not on what the amplification step was given",
+    chansOn(meltAfterAmpEdit) === "Ch1",
+    JSON.stringify(meltAfterAmpEdit),
+  );
+
+  // The same crossing the other way: a chip clicked in a melt writes the melt's own setting, so
+  // the amplification step has to come back exactly as it was left.
+  await clickChanChip("Ch4");
+  const withCh4 = await waitValue(chanChips, (c) => chansOn(c) !== "Ch1", {
+    what: "Ch4 turned on in the melt",
+  });
+  check(
+    "a channel turned on in a melt joins the melt's own selection",
+    chansOn(withCh4) === "Ch1,Ch4",
+    JSON.stringify(withCh4),
+  );
+
+  await clickStep(labels[0]);
+  await waitFor(async () => (await meltCharting()) === false, {
+    what: "the amplification step after the melt's own edit",
+  });
+  check(
+    "…and leaves the amplification step's channels exactly as they were",
+    chansOn(await chanChips()) === "Ch1,Ch6",
+    JSON.stringify(await chanChips()),
+  );
+
+  // The section's reset glyph means "back to the default" here as everywhere else in the rail —
+  // which for a melt is the green channel, not every channel the run scanned.
+  await clickStep("Melt");
+  await waitFor(meltCharting, { what: "the melt step before the reset" });
+  await cdp.eval(`(() => { const s = [...document.querySelectorAll(".rail__section")]
+      .find((e) => /Channels/.test(e.querySelector(".rail__title")?.textContent || ""));
+     const b = s.querySelector(".rail__title .rail__icon-btn");
+     if (b) b.click(); return !!b; })()`);
+  const afterReset = await waitValue(chanChips, (c) => chansOn(c) !== "Ch1,Ch4", {
+    what: "the melt's channel selection to reset",
+  });
+  check(
+    "resetting a melt's channels goes back to green, not to all of them",
+    chansOn(afterReset) === "Ch1",
+    JSON.stringify(afterReset),
+  );
+
+  cdp.close();
+}
+
+/**
+ * A target loaded as **two dyes** — the duplex case, where one gene is read by both a probe and
+ * an intercalating dye — and what a curve of it is called.
+ *
+ * The target is the grouping: one chip, one threshold group, one name. That leaves two curves per
+ * well wearing one label, distinguishable on the chart only by colour, so each curve is *written*
+ * with its dye appended (`CurvesView`'s `displayLabelForFluorCurve` → `PlotCurve.displayLabel`).
+ * The grouping key stays the bare target, which is what a chip toggles and a hover matches on —
+ * a distinction invisible in a screenshot and easy to break by "simplifying" the two into one.
+ *
+ * No committed sample has a target on two dyes, so the plate is written here: the RVP run's own
+ * layout with FAM's target renamed to the Cy5 one, attached to the run through the app's own
+ * attach menu.
+ */
+async function sharedTargetLabelChecks(chrome, origin) {
+  console.log("\none target, two dyes");
+  mkdirSync(dirname(SHARED_TARGET_CSV), { recursive: true });
+  // The run's own plate, with FAM reading what Cy5 reads — one target, two dyes, everything else
+  // about the layout left alone so the run still matches it well for well.
+  writeFileSync(
+    SHARED_TARGET_CSV,
+    readFileSync(join(REPO, "samples/S183-S185-RVP.plt.csv"), "utf8").replaceAll("HRV Ma", "RSV Ma"),
+  );
+
+  const cdp = await openPage(chrome.base, origin);
+  await emptyReload(cdp, origin);
+  await loadFile(cdp, join(REPO, "samples/", EXAMPLE));
+  await waitFor(() => chipPresent(cdp, "S183"), { what: "the run's chip" });
+  await loadFile(cdp, SHARED_TARGET_CSV);
+  await waitFor(() => chipPresent(cdp, "RVP-shared-target"), { what: "the fixture plate's chip" });
+
+  // Back to the run, and attach the fixture to it — the menu asks before replacing a plate the
+  // run already has, which is the case here.
+  // By the name the bar shows — which is the file's, without its extension.
+  await waitFor(
+    () =>
+      cdp.eval(`(() => { const c = [...document.querySelectorAll(".filebar .filechip")]
+          .find((x) => /^S183/.test(x.querySelector(".filechip__name")?.textContent.trim() || ""));
+         c?.querySelector(".filechip__main").click(); return !!c; })()`),
+    { what: "the run's chip in the bar" },
+  );
+  await clickTab(cdp, "Plates");
+  await tabBecomes(cdp, "Plates");
+  // The menu is a native <details>, so each step is: click, then wait for what the click opened.
+  await waitFor(
+    () =>
+      cdp.eval(`(() => { const e = [...document.querySelectorAll(".dlmenu > summary")]
+          .find((x) => /^(attach|replace) plate$/i.test(x.getAttribute("aria-label") || ""));
+         if (e) e.click(); return !!e; })()`),
+    { what: "the attach-plate menu" },
+  );
+  await waitFor(() => cdp.eval(`!!document.querySelector(".dlmenu[open] .dlmenu__item")`), {
+    what: "the attach menu's list of plates",
+  });
+  const picked = await cdp.eval(`(() => { const b = [...document.querySelectorAll(".dlmenu[open] .dlmenu__item")]
+      .find((x) => /RVP-shared-target/.test(x.textContent));
+     if (b) b.click();
+     return JSON.stringify({ hit: !!b, items: [...document.querySelectorAll(".dlmenu__item")]
+       .map((x) => x.textContent.trim()) }); })()`).then(JSON.parse);
+  check(
+    "the attach menu offers the loaded plate",
+    picked.hit === true,
+    JSON.stringify(picked.items),
+  );
+  // Attaching over a plate the run already has may ask first; confirm it when it does, which is
+  // a branch rather than a wait — the prompt legitimately never appears otherwise.
+  await waitFor(
+    () =>
+      cdp.eval(`!!document.querySelector(".dlmenu__confirm") ||
+         !document.querySelector(".dlmenu[open]")`),
+    { what: "the attach menu to answer" },
+  );
+  if (await cdp.eval(`!!document.querySelector(".dlmenu__confirm")`)) {
+    await cdp.eval(`(() => { const b = [...document.querySelectorAll(".dlmenu__item")]
+        .find((x) => x.textContent.trim() === "Replace plate");
+       if (b) b.click(); return !!b; })()`);
+    await waitFor(() => cdp.eval(`!document.querySelector(".dlmenu__confirm")`), {
+      what: "the plate to be replaced",
+    });
+  }
+
+  await clickTab(cdp, "Curves");
+  await tabBecomes(cdp, "Curves");
+  await waitFor(() => cdp.eval(`!!document.querySelector(".wm-cell")`), { what: "the well grid" });
+
+  /** The rail's target chips, by their primary label — the grouping, which must not change. */
+  const targetChips = () =>
+    cdp.eval(`(() => { const s = [...document.querySelectorAll(".rail__section")]
+        .find((e) => /Targets/.test(e.querySelector(".rail__title")?.textContent || ""));
+       return s ? [...s.querySelectorAll(".chanchip__ch")].map((e) => e.textContent.trim()) : null;
+     })()`);
+  const chips = await waitValue(targetChips, (c) => c?.some((t) => /RSV Ma/.test(t)), {
+    what: "the shared target's chip",
+  });
+  check(
+    "a target on two dyes is still one chip, under its own bare name",
+    (chips ?? []).filter((t) => t === "RSV Ma").length === 1,
+    JSON.stringify(chips),
+  );
+
+  // The well card lists that well's curves one per row — which is where two curves under one
+  // target name would otherwise be two identical rows.
+  const hoverWell = async (label) => {
+    const box = await cdp.eval(`(() => { const el = [...document.querySelectorAll(".wm-cell")]
+        .find((c) => (c.getAttribute("aria-label") || "").startsWith("Well " + ${JSON.stringify(label)} + " "));
+       if (!el) return null;
+       el.scrollIntoView({ block: "center" });
+       const r = el.getBoundingClientRect();
+       return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
+    if (box) await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", ...box, buttons: 0 });
+    return !!box;
+  };
+  const cardRows = () =>
+    cdp.eval(`[...document.querySelectorAll(".curvecard__row .curvecard__label")]
+        .map((e) => e.textContent.trim())`);
+  await hoverWell("A4");
+  const rows = await waitValue(cardRows, (r) => r?.length > 0, { what: "the well's hover card" });
+  check(
+    "each curve of a two-dye target is written with its own dye",
+    (rows ?? []).includes("RSV Ma · FAM") && (rows ?? []).includes("RSV Ma · Cy5"),
+    JSON.stringify(rows),
+  );
+  check(
+    "…and a target with one dye is left alone, since its name names one curve",
+    (rows ?? []).includes("HMPV Ma"),
+    JSON.stringify(rows),
+  );
+
   cdp.close();
 }
 
@@ -7156,6 +7406,7 @@ async function main() {
     await rightAxisChecks(chrome, origin);
     await meltChecks(chrome, origin, pw);
     await biomemeMeltChecks(chrome, origin);
+    await sharedTargetLabelChecks(chrome, origin);
     await tableSortChecks(chrome, origin);
     await tablePickChecks(chrome, origin);
     await persistedThresholdChecks(chrome, origin, pw);

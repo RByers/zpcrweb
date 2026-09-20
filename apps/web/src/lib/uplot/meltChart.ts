@@ -35,6 +35,9 @@ export interface MeltPlotCurve {
    * space the fluorophore or the target, whichever the View toggle groups on — the same
    * `dyeLabel` the amplification chart carries, so one rail drives both charts. */
   dyeLabel: string;
+  /** What to write where the line is named, when that isn't {@link dyeLabel} — see
+   * `chart.ts`'s `PlotCurve.displayLabel`, which this mirrors so one rail labels both charts. */
+  displayLabel?: string;
   curve: MeltCurve;
 }
 
@@ -104,7 +107,7 @@ export function buildMeltChart(cfg: BuildMeltChartConfig): {
     rows.push(values);
     meta.push({ plot, values, color });
     series.push({
-      label: `${plot.curve.wellLabel} · ${plot.dyeLabel}`,
+      label: `${plot.curve.wellLabel} · ${plot.displayLabel ?? plot.dyeLabel}`,
       stroke: color,
       width: 1,
       // uPlot draws a marker on every reading by default once the points are far enough apart,
@@ -360,7 +363,7 @@ function meltOverlayPlugin(
         }
         onHover({
           wellLabel: m.plot.curve.wellLabel,
-          dyeLabel: m.plot.dyeLabel,
+          dyeLabel: m.plot.displayLabel ?? m.plot.dyeLabel,
           color: m.color,
           temperatureC: temperaturesC[idx] ?? 0,
           value: m.values[idx] ?? 0,

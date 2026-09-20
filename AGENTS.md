@@ -257,6 +257,10 @@ counts as a melt, and what the Curves view swaps out for one; the View toggle dr
 both spaces, so core's `runAnalysis.ts` `stepTemperatures`/`DyeSolver.matrixAt` and
 `calibration.ts`'s `interpolateResponse` are in this list too — they are what a color-separated
 melt is solved with),
+`CurvesView.tsx`'s `MELT_CHANNEL` or its `meltChannels`/`meltHiddenFluors` (a melt has its own
+series selection and opens on the green channel — an edit leaking between the two steps is
+invisible in a screenshot), or its `displayLabelForFluorCurve` and the `displayLabel` that carries
+it through `lib/uplot/chart.ts`/`meltChart.ts` (what a curve of a two-dye target is called),
 `state/writeThrottle.ts`, `state/useZpcrStore.ts`'s
 `modifiedIds`/`markDownloaded`/`setProtocolText`/`pendingWells` (the `#wells=` link, with core's
 `parseWellSelection`), its settings seeding or `fileKind`, or view selection.

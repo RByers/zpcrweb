@@ -74,6 +74,22 @@ import type { MeltHighlight, MeltPlotCurve } from "../../lib/uplot/meltChart";
  */
 const NO_DARK_CURVES: PlotDarkCurve[] = [];
 
+/**
+ * The optical channel a melt is worth reading on: channel 1, the green band SYBR and EvaGreen
+ * are read in. What melts is double-stranded product, and an intercalating dye is what reports
+ * it; a hydrolysis probe has been cleaved off its quencher since the extension step and its
+ * trace across the ramp is thermal quenching, not a transition (`melt.md` §7). So a run that
+ * multiplexes probes with an intercalating dye opens its melt on green alone — the rest are
+ * still listed in the rail, off, a click from being shown.
+ *
+ * Deliberately the *channel* and not a list of dye names. Melt mode has to work with no plate
+ * and no password (the committed melt sample's plate is encrypted), where a channel index is the
+ * only thing there is to select on; and a plate that types its intercalating dye as "FAM" — the
+ * common case, since the instrument's own dye list is what people pick from — would defeat a
+ * name-based rule while still being read on this channel.
+ */
+const MELT_CHANNEL = 0;
+
 interface Props {
   zpcr: Zpcr;
   settings: FileSettings;
@@ -272,8 +288,78 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
     }
   }, [plate, plateChannelSet, defaultEnabledChannels, settings.enabledChannels, onChange]);
 
-  const resetChannels = () => onChange({ enabledChannels: defaultEnabledChannels });
-  const resetFluors = () => onChange({ disabledFluors: new Set<string>() });
+  // ---- The melt's own series selection ----------------------------------------------------
+  // A melt and an amplification step disagree about which dyes are worth plotting, so they keep
+  // separate selections (`FileSettings.meltEnabledChannels`/`meltDisabledFluors`). Everything
+  // below computes what a melt defaults to; the rail reads `seriesChannels`/`seriesHiddenFluors`
+  // and writes whichever pair the current step owns.
+
+  /** Optical channel of each of the plate's dyes — the dye's own calibration first
+   * (`FluorCalibration.primaryChannel`, the optical fact), falling back to whatever the plate
+   * recorded, and absent for a dye neither knows (a `.plt.csv` opened with no run, say). */
+  const channelOfFluor = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const f of fluorCals) {
+      const ch = f.primaryChannel ?? f.channel;
+      if (ch != null) m.set(f.fluor, ch);
+    }
+    for (const f of plate?.fluors ?? []) {
+      if (f.channel !== undefined && !m.has(f.fluor)) m.set(f.fluor, f.channel);
+    }
+    return m;
+  }, [fluorCals, plate]);
+
+  /** Whether any dye on this plate is read on the melt channel. When none is, every default
+   * below falls back to showing everything: narrowing to a channel the run never used would
+   * leave an empty plot with no visible reason for it. */
+  const hasMeltChannel = useMemo(
+    () => [...channelOfFluor.values()].includes(MELT_CHANNEL),
+    [channelOfFluor],
+  );
+
+  /** A melt's default channel selection: the intercalating dye's channel alone — unless this
+   * plate names channels and none of them is that one, in which case there is nothing green to
+   * narrow to and the amplification default is the honest answer. A run with no plate at all
+   * (an encrypted one, the ordinary case for a melt) still narrows: a channel index is all there
+   * is to go on, and it is the channel the dye would be read on. */
+  const defaultMeltChannels = useMemo(() => {
+    if (channelOfFluor.size > 0 && !hasMeltChannel) return defaultEnabledChannels;
+    return available.includes(MELT_CHANNEL) ? new Set([MELT_CHANNEL]) : new Set<number>(available);
+  }, [available, channelOfFluor, hasMeltChannel, defaultEnabledChannels]);
+
+  /** The same default in dye space, as the opt-out set the rail's chips use: every chip whose
+   * dyes are all read on some other channel starts off.
+   *
+   * Keyed for *both* view modes at once — fluorophore names and target names — because one
+   * `disabledFluors`-shaped set backs both, and each mode only ever looks up its own keys. A
+   * target spanning several dyes counts as green if any one of them is: a group holding both the
+   * probe and the dye has something to show in a melt. */
+  const defaultMeltDisabledFluors = useMemo(() => {
+    const off = new Set<string>();
+    if (!hasMeltChannel) return off;
+    const onMeltChannel = (fluors: string[]) =>
+      fluors.some((f) => channelOfFluor.get(f) === MELT_CHANNEL);
+    for (const f of fluorCals) if (!onMeltChannel([f.fluor])) off.add(f.fluor);
+    for (const g of groupInfos) if (!onMeltChannel(g.fluors)) off.add(g.target);
+    return off;
+  }, [hasMeltChannel, channelOfFluor, fluorCals, groupInfos]);
+
+  /** The melt's live selection: the user's, once they have touched it, and the default until
+   * then — computed rather than seeded, so a plate or a calibration that arrives after the view
+   * first rendered still moves the default rather than being locked out by it. */
+  const meltChannels = settings.meltEnabledChannels ?? defaultMeltChannels;
+  const meltHiddenFluors = settings.meltDisabledFluors ?? defaultMeltDisabledFluors;
+
+  /** What the rail's chips show and filter on, for whichever kind of step is selected. */
+  const seriesChannels = meltMode ? meltChannels : settings.enabledChannels;
+  const seriesHiddenFluors = meltMode ? meltHiddenFluors : settings.disabledFluors;
+
+  const resetChannels = () =>
+    onChange(
+      meltMode ? { meltEnabledChannels: null } : { enabledChannels: defaultEnabledChannels },
+    );
+  const resetFluors = () =>
+    onChange(meltMode ? { meltDisabledFluors: null } : { disabledFluors: new Set<string>() });
 
   const calibrationOn = settings.calibration ?? calibrationAvailable;
   /** Names the plastic the calibration warnings below are talking about — both of them, on a
@@ -305,6 +391,24 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
     groupByTarget
       ? (wellFluorTargets.get(wellKey(row, col))?.get(dye) ?? (hasNoTargetGroup ? NO_TARGET : dye))
       : dye;
+
+  /** Targets loaded as more than one dye. A duplex that reads one gene with both a probe and an
+   * intercalating dye is the case that matters: two curves per well, one target name between
+   * them, and nothing in the label to say which is which. The `(none)` catch-all is usually one
+   * of these too, since it collects every untargeted dye on the plate. */
+  const multiFluorTargets = useMemo(
+    () => new Set(groupInfos.filter((g) => g.fluors.length > 1).map((g) => g.target)),
+    [groupInfos],
+  );
+
+  /** How one curve is *written* — the label above, with the dye appended where the label alone
+   * names more than one curve in a well. Only ever a display string: the grouping key stays
+   * `labelForFluorCurve`, so a chip still toggles the whole target and a hover still isolates
+   * it. In fluorophore mode the label is already the dye, so there is nothing to add. */
+  const displayLabelForFluorCurve = (row: number, col: number, dye: string): string => {
+    const label = labelForFluorCurve(row, col, dye);
+    return groupByTarget && multiFluorTargets.has(label) ? `${label} · ${dye}` : label;
+  };
 
   // Hovering a target/fluor chip or a well-grid cell in the rail highlights the matching
   // curve(s) in the chart, the same way hovering the chart itself dims every other curve.
@@ -637,6 +741,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
         ? visibleFluor.map((c) => ({
             channel: c.channel,
             dyeLabel: labelForFluorCurve(c.row, c.col, c.dye),
+            displayLabel: displayLabelForFluorCurve(c.row, c.col, c.dye),
             fluor: c.dye,
             row: c.row,
             col: c.col,
@@ -693,6 +798,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
             .map((c) => ({
               channel: c.channel,
               dyeLabel: labelForFluorCurve(c.row, c.col, c.dye),
+              displayLabel: displayLabelForFluorCurve(c.row, c.col, c.dye),
               fluor: c.dye,
               row: c.row,
               col: c.col,
@@ -761,7 +867,8 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
         .filter((c) => c.wellLabel === label)
         .map((c) => ({
           key: `${c.dyeLabel}-${c.channel}`,
-          label: c.dyeLabel,
+          // The written label, so a well holding one target as two dyes doesn't list it twice.
+          label: c.displayLabel ?? c.dyeLabel,
           cq: c.analysis?.cq,
           color: curveColor(c),
           selected: isSelected(c),
@@ -834,26 +941,33 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
     onChange({ leds: next });
   };
 
+  // The chip handlers write to whichever selection the current step owns — the melt's own pair
+  // in melt mode, the shared one otherwise (see `seriesChannels`). Each starts from the *live*
+  // set, so the first toggle in a melt turns the computed default into a concrete selection
+  // rather than starting from everything-on.
   const toggleChannel = (ch: number) => {
-    const next = new Set(settings.enabledChannels);
+    const next = new Set(seriesChannels);
     next.has(ch) ? next.delete(ch) : next.add(ch);
-    onChange({ enabledChannels: next });
+    onChange(meltMode ? { meltEnabledChannels: next } : { enabledChannels: next });
   };
 
   const toggleFluor = (dye: string) => {
-    const next = new Set(settings.disabledFluors);
+    const next = new Set(seriesHiddenFluors);
     next.has(dye) ? next.delete(dye) : next.add(dye);
-    onChange({ disabledFluors: next });
+    onChange(meltMode ? { meltDisabledFluors: next } : { disabledFluors: next });
   };
 
   // Double-clicking any legend item isolates it within its own dimension — every other
   // channel/target/well/sample turns off, leaving only the one that was double-clicked.
-  const soloChannel = (ch: number) => onChange({ enabledChannels: new Set([ch]) });
+  const soloChannel = (ch: number) =>
+    onChange(
+      meltMode ? { meltEnabledChannels: new Set([ch]) } : { enabledChannels: new Set([ch]) },
+    );
 
   const soloFluor = (key: string) => {
     const next = new Set(chipItems.map((c) => c.key));
     next.delete(key);
-    onChange({ disabledFluors: next });
+    onChange(meltMode ? { meltDisabledFluors: next } : { disabledFluors: next });
   };
 
   const soloWells = (keys: string[]) => onChange({ enabledWells: new Set(keys) });
@@ -1033,6 +1147,10 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
   const meltLabel = (c: MeltCurve): string =>
     c.dye ? labelForFluorCurve(c.row, c.col, c.dye) : channelLabel(c.channel);
 
+  /** The same, as it is written on the chart — see `displayLabelForFluorCurve`. */
+  const meltDisplayLabel = (c: MeltCurve): string =>
+    c.dye ? displayLabelForFluorCurve(c.row, c.col, c.dye) : channelLabel(c.channel);
+
   /** The rail's filters over one melt curve, in whichever space it is in: the channel chips and
    * wells in channel space, the fluor/target chips and wells in dye space. Deliberately not
    * `fluorCurveVisible` — that also applies the Cq range, and a melt has no Cq at all, so a
@@ -1046,11 +1164,11 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
       return (
         c.channel !== undefined &&
         available.includes(c.channel) &&
-        (settings.enabledChannels.has(c.channel) || isHoveredChannel(c.channel))
+        (meltChannels.has(c.channel) || isHoveredChannel(c.channel))
       );
     }
     const label = meltLabel(c);
-    if (settings.disabledFluors.has(label) && !isHoveredTarget(label)) return false;
+    if (meltHiddenFluors.has(label) && !isHoveredTarget(label)) return false;
     // The same "Unloaded" switch the amplification view offers, for the same reason: a dye the
     // plate never put in this well still has a solved curve, and it is off by default.
     return (
@@ -1063,15 +1181,16 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
       (meltActive?.curves ?? []).filter(meltCurveVisible).map((c) => ({
         key: `${c.row},${c.col}|${c.dye ?? c.channel}`,
         dyeLabel: meltLabel(c),
+        displayLabel: meltDisplayLabel(c),
         curve: c,
       })),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [
       meltActive,
       available,
-      settings.enabledChannels,
+      meltChannels,
       settings.enabledWells,
-      settings.disabledFluors,
+      meltHiddenFluors,
       settings.showUnloadedFluors,
       settings.disabledSamples,
       fluorViewMode,
@@ -1095,9 +1214,9 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
     [
       meltActive,
       available,
-      settings.enabledChannels,
+      meltChannels,
       settings.enabledWells,
-      settings.disabledFluors,
+      meltHiddenFluors,
       settings.showUnloadedFluors,
       settings.disabledSamples,
       fluorViewMode,
@@ -1391,9 +1510,11 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
               className="rail__link rail__icon-btn"
               onClick={!dyeChips ? resetChannels : resetFluors}
               title={
-                !dyeChips
-                  ? "Reset to the channels present in the plate configuration"
-                  : "Re-enable all"
+                meltMode
+                  ? "Reset to the channel a melt is read on"
+                  : !dyeChips
+                    ? "Reset to the channels present in the plate configuration"
+                    : "Re-enable all"
               }
             >
               <ResetIcon />
@@ -1403,7 +1524,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
             <>
               <FluorBar
                 items={visibleChipItems}
-                disabled={settings.disabledFluors}
+                disabled={seriesHiddenFluors}
                 onToggle={toggleFluor}
                 onHover={(key) => setHoverHighlight(key ? { kind: "target", dyeLabel: key } : null)}
                 onSolo={soloFluor}
@@ -1420,7 +1541,7 @@ export function CurvesView({ zpcr, settings, onChange }: Props) {
             </>
           ) : (
             <ChannelBar
-              enabled={settings.enabledChannels}
+              enabled={seriesChannels}
               available={available}
               onToggle={toggleChannel}
               onHover={(ch) => setHoverHighlight(ch != null ? { kind: "channel", channel: ch } : null)}
