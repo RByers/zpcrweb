@@ -222,6 +222,12 @@ PLATEREAD #h3F;     step 4     GOTO 2,44;          step 5     END;            �
 
 So `GOTO 2,44` returns to `TEMP 95.0,10` and the run performs 45 cycles of steps 2–4.
 
+Executing those loops — which step runs next, and how many times — is `runDefinition.ts`'s
+`walkProgram(program)`, a generator over the steps in the order the instrument runs them. It is
+the single implementation of this section: `expectedPlateReads` counts its `PLATEREAD`s to say
+how many reads a run should have produced, and anything that runs a protocol for real steps
+through the same walk.
+
 Both halves of the rule are **measured**, from the instrument's own accounts of its own runs
 rather than inferred (Appendix A): the `.alf` execution log inside two committed samples numbers a
 melt's plate read `8` rather than `10`, which is only true if `PLATEREAD` and `GOTO` are counted
