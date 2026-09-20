@@ -131,6 +131,29 @@ algorithm, display smoothing) — each understood, none exercised by any sample 
 
 ## Web app (`apps/web`)
 
+- [ ] **Diagnose why a run's `.zpcr` comes back without its USB traffic log.** The console's
+      "save log" switch has been on for the last several lab runs and not one of their files
+      carries a `usb-traffic.bin`: `20260816-HRV_ys_validation.zpcr`,
+      `20260905-S186_YouSeq_cold_check.zpcr` and `20260919-Q12_Sequencing.zpcr` all hold a
+      `zpcrweb.json` and no log entry. `samples/20260807-YouSeq_RT_-_S56.zpcr` (2026-08-08) is
+      the only file ever written with one, so whatever this is, it has been broken since about
+      then. Until it is fixed there is no way to add the missing sample coverage below.
+
+      Three candidates, cheapest first:
+
+      - **The rail's Download button never asks for one.** `downloadAvailable` ends in
+        `check(true)` — forced, but `finalAssembly` defaults to false, and `finalAssembly` is
+        the only thing that attaches the log (`useRunWatch.ts`'s `pull`). A run collected after
+        the fact, rather than watched live to its last cycle, therefore *cannot* get a log no
+        matter what the switch says. Most likely the whole story.
+      - **The switch doesn't survive a reload.** `saveLog` is `useState(false)` with nothing
+        persisting it, and the recorder is per page session, so a tab reloaded mid-run comes
+        back with recording restarted and the switch silently off. A qPCR run is hours long.
+      - **The stale-folder path bypasses it.** `check`'s `finalAssembly && !changed` branch
+        returns before `pull`, handing off to `collectReport`, which attaches nothing.
+
+      Whichever it is, the end state wanted is the same: a run whose log the user asked for gets
+      one, on every path that produces the run's final file.
 - [ ] **Build a melt curve UI.** `zpcr.steps()`/`toSteps()` (`packages/core/src/pivot.ts`) groups
       plate reads purely by the raw `STEP` field, with no notion of "amplification" vs. "melt" —
       protocol-step *kind* is decoded separately in `prcl.ts` (`meltcurvestep`) but never joined
@@ -162,6 +185,13 @@ algorithm, display smoothing) — each understood, none exercised by any sample 
 - [ ] Add a browser-mode Vitest run to prove isomorphism in a real browser environment.
 - [ ] Add more sample `.zpcr` files (different block types, channel counts, cycle counts)
       as they become available.
+- [ ] **Add a sample `.zpcr` with a USB traffic log for each kind of run.** Today
+      `samples/20260807-YouSeq_RT_-_S56.zpcr` is the only file in the repo with a
+      `usb-traffic.bin`, and it is a plain 45-cycle qPCR — nothing exercises the reader against
+      a melt run's traffic. A heat-block run is a harder case and may want the app to change
+      first: a thermal-only protocol writes no run folder (`runPlan.ts`'s `producesRunFile`),
+      so its log has nowhere to go but the console's download button. Blocked on the log bug
+      under "Web app" above.
 
 ### UI tooling follow-ups
 
