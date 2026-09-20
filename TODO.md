@@ -5,6 +5,7 @@ visualizer for everything** inside a `.zpcr` archive.
 
 ## Immediately next
 
+- Fix ROX->Cy5 bleed, eg. as seen in 9/5 run. Does the BioRad software have this too?
 - Build a CFX device emulator for testing purposes, uses the full raw USB protocol but without
   an actual USB device. 
   - Add a button to the UI "Connect to mock instrument" for manual testing purposes
