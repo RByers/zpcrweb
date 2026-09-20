@@ -17,87 +17,24 @@ import {
   type UsbDeviceLike,
   type UsbInTransferResultLike,
 } from "../src/usb/index.js";
+import { EmulatorTransport } from "../src/usb/emulator/transport.js";
 
 const text = (s: string) => new TextEncoder().encode(s);
 
-/** A scripted instrument: answers each command line from `replies`, and can be told to emit
- * unsolicited channel-2 traffic the way the real one does. */
-class MockInstrument implements UsbDeviceLike {
-  vendorId = 0x0614;
-  productId = 0x057b;
-  opened = false;
-  configuration: unknown = null;
-  claimed: number[] = [];
-  /** Commands received, in order — the assertion surface for sequencing. */
-  sent: string[] = [];
-  /** Queued IN frames the pump will drain. */
-  private outbox: Uint8Array[] = [];
-  private waiters: ((v: UsbInTransferResultLike) => void)[] = [];
-  /** Errors `transferIn` throws instead of resolving, one per call, oldest first. */
-  transferInFailures: Error[] = [];
-  /** Errors `transferOut` throws instead of resolving, one per call, oldest first. */
-  transferOutFailures: Error[] = [];
-  /** Every `clearHalt` the pump asked for, as `direction:endpoint`. */
-  halts: string[] = [];
-
+/**
+ * A scripted instrument: answers each command line from `replies`, and can be told to emit
+ * unsolicited channel-2 traffic the way the real one does.
+ *
+ * The framing shell underneath — a parking `transferIn`, reassembly on the way out, and the
+ * failure injection the read-pump tests need — is the emulator's {@link EmulatorTransport}, so
+ * this file and `usb/emulator/` cannot drift apart on what a frame looks like. All this adds is
+ * "answer from a lookup table" in place of the emulator's whole instrument.
+ */
+class MockInstrument extends EmulatorTransport {
   constructor(
-    private readonly replies: (cmd: string) => { payload: Uint8Array; passThrough?: boolean; channel?: number } | null,
-  ) {}
-
-  async open() {
-    this.opened = true;
-  }
-  async close() {
-    this.opened = false;
-  }
-  async selectConfiguration(n: number) {
-    this.configuration = { configurationValue: n };
-  }
-  async claimInterface(n: number) {
-    this.claimed.push(n);
-  }
-  async releaseInterface() {}
-  async clearHalt(direction: "in" | "out", endpointNumber: number) {
-    this.halts.push(`${direction}:${endpointNumber}`);
-  }
-
-  /** Push a frame toward the host, waking a blocked `transferIn` if one is parked. */
-  push(payload: Uint8Array, { channel = 1, passThrough = false } = {}): void {
-    this.pushRaw(encodeFrame({ ...REQUEST_HEADER, channel, passThrough }, payload));
-  }
-
-  /** Push already-framed bytes, so a test can split one message across several transfers. */
-  pushRaw(bytes: Uint8Array): void {
-    const waiter = this.waiters.shift();
-    if (waiter) waiter({ data: new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength) });
-    else this.outbox.push(bytes);
-  }
-
-  async transferOut(_ep: number, data: ArrayBuffer | ArrayBufferView) {
-    const failure = this.transferOutFailures.shift();
-    if (failure) throw failure;
-    const bytes = data instanceof ArrayBuffer ? new Uint8Array(data) : new Uint8Array(
-      (data as ArrayBufferView).buffer,
-      (data as ArrayBufferView).byteOffset,
-      (data as ArrayBufferView).byteLength,
-    );
-    const { payloadLength } = decodeHeader(bytes);
-    const cmd = new TextDecoder().decode(
-      bytes.slice(FRAME_HEADER_BYTES, FRAME_HEADER_BYTES + payloadLength),
-    ).replace(/\r?\n$/, "");
-    this.sent.push(cmd);
-    const reply = this.replies(cmd);
-    if (reply) this.push(reply.payload, { channel: reply.channel ?? 1, passThrough: reply.passThrough });
-    return {};
-  }
-
-  async transferIn(): Promise<UsbInTransferResultLike> {
-    const failure = this.transferInFailures.shift();
-    if (failure) throw failure;
-    const next = this.outbox.shift();
-    if (next) return { data: new DataView(next.buffer, next.byteOffset, next.byteLength) };
-    // Park until something is pushed — the real endpoint blocks the same way.
-    return new Promise((resolve) => this.waiters.push(resolve));
+    replies: (cmd: string) => { payload: Uint8Array; passThrough?: boolean; channel?: number } | null,
+  ) {
+    super((cmd) => replies(cmd));
   }
 }
 
