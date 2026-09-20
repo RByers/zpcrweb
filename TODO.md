@@ -131,29 +131,41 @@ algorithm, display smoothing) — each understood, none exercised by any sample 
 
 ## Web app (`apps/web`)
 
-- [ ] **Diagnose why a run's `.zpcr` comes back without its USB traffic log.** The console's
-      "save log" switch has been on for the last several lab runs and not one of their files
-      carries a `usb-traffic.bin`: `20260816-HRV_ys_validation.zpcr`,
-      `20260905-S186_YouSeq_cold_check.zpcr` and `20260919-Q12_Sequencing.zpcr` all hold a
-      `zpcrweb.json` and no log entry. `samples/20260807-YouSeq_RT_-_S56.zpcr` (2026-08-08) is
-      the only file ever written with one, so whatever this is, it has been broken since about
-      then. Until it is fixed there is no way to add the missing sample coverage below.
+- [x] **Diagnosed: why a run's `.zpcr` came back without its USB traffic log.** Three things were
+      wrong and two of them were enough on their own. All three are fixed, in core's
+      `usb/runFollower.ts` and `usb/session.ts`, and pinned by
+      `packages/core/test/runFollower.test.ts`.
 
-      Three candidates, cheapest first:
+      - **The rail's Download button never asked for one** — confirmed, and the easiest half of
+        it. `downloadAvailable` ended in `check(true)`: forced, but `finalAssembly` defaulted to
+        false, and `finalAssembly` was the only thing that attached the log. A run collected
+        after the fact therefore *could not* get one whatever the switch said. The two booleans
+        are now one named `CheckReason` of four values, `download` is a completing pass like
+        `final`, and the broken combination cannot be spelled.
+      - **The end-of-run pass was being lost to a race** — not on the original list, and the
+        cause for runs that *were* watched live to their last cycle, which is most of the three
+        named below. A run's finish is also a step transition out of its last `PLATEREAD`, so
+        the step-transition rule and the §7.6 finish both fired on the same status. Whichever
+        listing got there first won and the other was dropped: if the edge won, the run's last
+        files were collected as an ordinary cycle — which attaches no log and re-reads no
+        `REFETCH_AT_END` file — and the finish then found the listing unchanged and filed the
+        folder as somebody else's. The last read appears only when the acknowledgement releases
+        it (`usb.md` §7.7), so the step rule now stands down for the whole of a finish, and
+        listings are queued rather than dropped.
+      - **The switch didn't survive a reload** — confirmed, and a real loss on its own for an
+        hours-long run. It is persisted in `localStorage` now (`useCfxDevice.ts`'s
+        `SAVE_LOG_KEY`), which is where it belongs: the recording itself is per page session,
+        but what the user asked for is not.
 
-      - **The rail's Download button never asks for one.** `downloadAvailable` ends in
-        `check(true)` — forced, but `finalAssembly` defaults to false, and `finalAssembly` is
-        the only thing that attaches the log (`useRunWatch.ts`'s `pull`). A run collected after
-        the fact, rather than watched live to its last cycle, therefore *cannot* get a log no
-        matter what the switch says. Most likely the whole story.
-      - **The switch doesn't survive a reload.** `saveLog` is `useState(false)` with nothing
-        persisting it, and the recorder is per page session, so a tab reloaded mid-run comes
-        back with recording restarted and the switch silently off. A qPCR run is hours long.
-      - **The stale-folder path bypasses it.** `check`'s `finalAssembly && !changed` branch
-        returns before `pull`, handing off to `collectReport`, which attaches nothing.
+      **The stale-folder path was *not* a cause.** `check`'s `finalAssembly && !changed` branch
+      does return before `pull` and `collectReport` attaches nothing — but what it produces is an
+      `.alf` report, not a `.zpcr`, so it cannot be the reason a `.zpcr` came back without a log.
+      It is reached legitimately only for a run that wrote no run folder, and it stays.
 
-      Whichever it is, the end state wanted is the same: a run whose log the user asked for gets
-      one, on every path that produces the run's final file.
+      Not retro-fixable for the three files already written — `20260816-HRV_ys_validation.zpcr`,
+      `20260905-S186_YouSeq_cold_check.zpcr`, `20260919-Q12_Sequencing.zpcr` — but the next lab
+      run recorded with "save log" on should carry one, which is what unblocks the sample
+      coverage below.
 - [ ] **Build a melt curve UI.** `zpcr.steps()`/`toSteps()` (`packages/core/src/pivot.ts`) groups
       plate reads purely by the raw `STEP` field, with no notion of "amplification" vs. "melt" —
       protocol-step *kind* is decoded separately in `prcl.ts` (`meltcurvestep`) but never joined
@@ -190,8 +202,9 @@ algorithm, display smoothing) — each understood, none exercised by any sample 
       `usb-traffic.bin`, and it is a plain 45-cycle qPCR — nothing exercises the reader against
       a melt run's traffic. A heat-block run is a harder case and may want the app to change
       first: a thermal-only protocol writes no run folder (`runPlan.ts`'s `producesRunFile`),
-      so its log has nowhere to go but the console's download button. Blocked on the log bug
-      under "Web app" above.
+      so its log has nowhere to go but the console's download button. No longer blocked — the log
+      bug under "Web app" above is fixed, so the next melt run recorded with "save log" on is the
+      sample this wants.
 
 ### UI tooling follow-ups
 

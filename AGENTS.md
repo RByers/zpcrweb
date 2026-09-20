@@ -227,7 +227,9 @@ and the `#github=`/`#githubToken=` link — `githubChecks`, which answers `api.g
 `lib/samples.ts`, `apps/web/vite.config.ts`'s samples plugin or `App.tsx`'s welcome-screen test
 (the bundled `samples` folder — `sampleFolderChecks`),
 `state/useCfxDevice.ts`'s `cancelRun`/`setRunPaused`
-(or core's `usb/device.ts` `cancelRun`), `lib/protocolSource.ts`,
+(or core's `usb/device.ts` `cancelRun`), core's `usb/session.ts` or `usb/runFollower.ts` (the
+instrument session and the run follower — the hooks above them are shells, so a change here is a
+change to the Instrument view), `lib/protocolSource.ts`,
 `lib/experiment.ts` (or core's `experiment.ts`), `components/ViewSelector.tsx` or `App.tsx`'s
 `enabledViewsFor`/`selectFile`/`defaultViewFor` (where opening a file lands, per kind) or its
 `pendingLanding`, `components/KindFilter.tsx` (or core's `fileKindFromName`),

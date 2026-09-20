@@ -324,10 +324,20 @@ thin presentation + persistence shell. Concretely:
 - The app only owns view state (which channels/wells are selected, view/scale toggles),
   rendering, and IndexedDB storage.
 
-Consequence for testing: there are **no app-level tests yet** — coverage rides on the
-library's suite. If UI bugs prove frequent we can add Playwright e2e later (tracked in the
-root `TODO.md`). Any new analytical transform must be added to the library with tests, not
-written inline in a component.
+- **The instrument stack is an instance of this, and the most recent one.** The USB session and the
+  run follower were ~1800 lines of React — the status poll and its busy gate, the reconnect
+  backoff, the traffic window, and every edge a run is followed by. They are now core's
+  `CfxSession` and `RunFollower`, driven against the emulator in `packages/core/test/`, and
+  `state/useCfxDevice.ts` and `state/useRunWatch.ts` are shells: `navigator.usb`, a `window.confirm`
+  and its `localStorage` acknowledgement, the button state a click changes before the instrument
+  can answer, and a `useSyncExternalStore`.
+
+Consequence for testing: there are still **no app-level unit tests** — coverage rides on the
+library's suite and on `tools/uitest.mjs`'s browser checks. What has changed is how much of the
+app's *behaviour* that suite now reaches: a run start, its reads, its finish and the file it
+assembles are all assertable in `vitest` in milliseconds, where until recently the only witness
+was an operator driving real hardware. Any new analytical transform — or any new decision about a
+run — must be added to the library with tests, not written inline in a component.
 
 ## A protocol on its own
 
@@ -427,8 +437,7 @@ The report is parsed once, in `App.tsx` (`activeReport`), and handed to both vie
 Protocol read the same fields, and parsing it twice is how the two would drift.
 
 Reports arrive two ways: dropped in like any other file, or collected from the instrument at the
-end of a **thermal-only run**, which produces one instead of a `.zpcr` (`state/useRunWatch.ts`'s
-`collectReport`). Either way it is an ordinary file of the user's from that moment — in the bar, in
+end of a **thermal-only run**, which produces one instead of a `.zpcr` (core's `runFollower.ts`). Either way it is an ordinary file of the user's from that moment — in the bar, in
 the catalog, in IndexedDB, renameable and deletable like any other.
 
 ### One Protocol view (`ProtocolView`)
@@ -888,7 +897,7 @@ just arrived. Same precedent as `renameFile` and `setRunProtocolName`.
 
 A pass of the run watcher hands the store **the entries the instrument just wrote**, not the run
 re-assembled: one plate read, and at the end of a run the last read plus `ended`, the `.alf` report
-and the three files the instrument rewrites (`useRunWatch`'s `REFETCH_AT_END`). `addRunArchive`'s
+and the three files the instrument rewrites (core's `runFollower.ts` `REFETCH_AT_END`). `addRunArchive`'s
 `merge` lays them over the file of that name and leaves every other entry as it stands.
 
 It used to hand over the whole folder — which is the instrument's copy of the run, and knows
@@ -899,7 +908,7 @@ even if nothing else would have. Sending only what the instrument wrote means an
 touched cannot be overwritten by it, and the end of a run does what it says — adds the last plate
 read and the run's own closing files.
 
-**The file is also the record of what has been downloaded.** The watcher keeps no copy of the run:
+**The file is also the record of what has been downloaded.** The follower keeps no copy of the run:
 each pass reads back the archive the app is holding (`App.tsx`'s `heldRun`) and fetches what the
 folder has that it lacks (core's `runFilesToFetch`). It used to keep its own name→bytes map of the
 folder — the same ~400 KB held twice, and free to disagree with the file the user actually has —
@@ -1048,7 +1057,7 @@ unpacked archive (`ZpcrArchive`), every writer takes and returns one (`attachPla
 zipping is a separate step — `zipArchive` — that only a caller wanting a *file* takes. `parseZpcr`
 is the one byte-level entry point kept, since bytes are how a `.zpcr` arrives from disk;
 `parseZpcrArchive` is what this app uses. A run being followed therefore goes from the wire into
-the store without ever being packed: `useRunWatch` hands the store the entries the instrument just
+the store without ever being packed: the run follower hands the store the entries the instrument just
 wrote, `addRunArchive` merges them into the run's file, and a cycle's cost is the one plate read
 that arrived.
 
@@ -3198,15 +3207,17 @@ service of starting an experiment and following the run that comes out of it. Ev
 knows about the protocol comes from `@zpcrweb/core`'s `CfxDevice` (see the root
 [`ARCHITECTURE.md`](../../ARCHITECTURE.md#talking-to-an-instrument-not-a-file-srcusb) and
 [`usb.md`](../../docs/usb.md)), per the standing rule that logic lives in the library — the app side is
-`state/useCfxDevice.ts`, which owns only what a browser session adds: obtaining the instrument through
-`navigator.usb`, a poll timer, the traffic recording and its bounded display window, and the React
-state the components render.
+core's `CfxSession` (`packages/core/src/usb/session.ts`), which owns the poll and its busy gate,
+reconnect, the traffic recording and its bounded display window, and the state the components
+render. `state/useCfxDevice.ts` is the shell over it: obtaining the instrument through
+`navigator.usb`, the unofficial-software warning, and the button state a click changes before the
+instrument can answer.
 
-**A dropped connection is retried, because the run isn't dropped with it.** The library reports the
-pipe dying and stops there; deciding what to do about it is this hook's, since re-obtaining a
-device handle is the browser-specific part. A close carrying an error, with `connect` not having
-been undone by `disconnect`, puts the session in `reconnecting` and retries `getDevices()` on a
-backoff — for as long as it takes, since the instrument goes on cycling either way and a run is
+**A dropped connection is retried, because the run isn't dropped with it.** `CfxDevice` reports the
+pipe dying and stops there; deciding what to do about it is `CfxSession`'s, and the only
+browser-specific part — re-obtaining a device handle — is the hook's `acquire`. A close carrying an
+error, with `connect` not having been undone by `disconnect`, puts the session in `reconnecting`
+and asks for a handle again on a backoff — for as long as it takes, since the instrument goes on cycling either way and a run is
 hours long, and since an attempt while the cable is out costs one resolved promise returning
 nothing. A replug fires `navigator.usb`'s `connect` event, which short-circuits the wait. The
 picker (`requestDevice()`) is never used here: it needs a user gesture, and the only reason it
@@ -3305,7 +3316,7 @@ Curves watching its amplification curves arrive. The connection is a property of
 
 ### What the instrument last ran
 
-**The instrument's `.alf` report is read on connect, unasked** — `useCfxDevice.refreshLastReport`,
+**The instrument's `.alf` report is read on connect, unasked** — `CfxSession.refreshLastReport`,
 once per connection, into `lastReport`; `InstrumentLastRun` is the panel that shows it, between the
 experiment and the file browser.
 
@@ -3450,7 +3461,9 @@ actually read one, so that warning is suppressed for these.
 
 ### Following a run
 
-`state/useRunWatch.ts`, and it follows `usb.md` §7.5 rather than polling the filesystem hopefully:
+Core's `RunFollower` (`packages/core/src/usb/runFollower.ts`), through the
+`state/useRunWatch.ts` shell, and it follows `usb.md` §7.5 rather than polling the filesystem
+hopefully:
 `STATUS?` is already being polled for the rail, its current-step field carries the running step's
 command text verbatim, and a completed `.Plateread` appears when a `PLATEREAD` step *ends* — so the
 watcher lists the run folder on that transition. Listing is **edge-triggered, never on a timer**: a
@@ -3460,7 +3473,7 @@ the transition rule structurally can't catch — the **final** read, whose trans
 → `IDLE` — is caught by the §7.6 acknowledgement instead: when the run finishes (`STATUS?` reports
 `IDLE` with the run's name still attached) it goes out automatically, because the last read and
 `ended` only appear after it, and that is the one instrument-actuating command the app sends on its
-own, with `useCfxDevice` re-checking the status immediately before sending it since the same
+own, with the session re-checking the status immediately before sending it since the same
 `CANCEL` aborts a run still cycling. It goes out only for a run **this page session watched
 cycling**, remembered by name in `watchedRuns` — an instrument left holding a run that finished
 yesterday presents an identical status, and acknowledging that one would send an unasked-for
@@ -3580,7 +3593,7 @@ Three economies make the once-a-cycle refresh affordable:
   takes an `activate` option: ordinarily the refreshed file becomes active only if the user was already on the one it
   supersedes, which is what makes the Curves view grow a cycle at a time without dragging anyone
   back from whatever else they had open. But the pull that follows a run *starting* during this
-  session — the `running` false→true edge above — always activates: `useRunWatch` passes `onRun` an
+  session — the `running` false→true edge above — always activates: the follower passes `onRun` an
   `activate` flag, set on that edge and consumed by the next successful pull (typically the first
   plate read's), and `App.tsx` ORs it into the store's own `activate` decision. Someone watching a
   run start wants it on screen, and there is no prior view of *that* run to preserve. (A run
@@ -3662,8 +3675,9 @@ Four components, under `components/instrument/`:
   finished run's `.alf` report. `useLiveThermalHistory` is the one place that turns the poll loop's
   overwrite-each-tick `CfxStatus` into a series: it appends a sample whenever `status.running` and
   starts a fresh one when `runName` changes or `elapsedS` goes backwards, either of which means a
-  new run has begun. It is called **from `useCfxDevice`**, and the rail only renders what the
-  handle hands it (`instrument.liveThermal`). Buffering it in the rail instead meant the history
+  new run has begun. It is called **from `useCfxDevice`**, which is deliberately where it stayed
+  — it is a display buffer with no decisions in it — and the rail only renders what the handle
+  hands it (`instrument.liveThermal`). Buffering it in the rail instead meant the history
   belonged to a mounted component: opening Curves, or picking another file, unmounted the view and
   the chart came back empty on a run that was still going — a history is worth having only if it
   spans the whole run, so it lives with the connection, which `App` mounts once for the session.
@@ -3690,12 +3704,12 @@ Four components, under `components/instrument/`:
   finish so the cycle isn't thrown away, resumes a paused run first, and above all *keeps
   watching*: a `CANCEL` sent in the measured ~6 s between `RemoteRun` and the block actually
   starting is answered `0000` and ignored, so a fire-and-forget button reports success over a run
-  that goes on cycling. `useCfxDevice` supplies the two things only the browser session knows —
-  `runPending`, which is how the cancel recognises that window at all, and an `onStatus` callback,
-  since `withBusy` stands the status poll down for the duration of an operation the user is
-  especially keen to watch. The stop deliberately stops at §7.6's finished state and leaves the
-  acknowledgement to `useRunWatch`, so the partial run is still collected and filed by the one
-  component that owns that. Pause toggles to **Resume** off the status register's pause bit
+  that goes on cycling. The two things the wire can't supply come from above it —
+  `runPending`, the hook's own React state, which is how the cancel recognises that window at all,
+  and the session's `onStatus`, since holding the channel stands the status poll down for the
+  duration of an operation the user is especially keen to watch. The stop deliberately stops at
+  §7.6's finished state and leaves the acknowledgement to the run follower, so the partial run is
+  still collected and filed by the one component that owns that. Pause toggles to **Resume** off the status register's pause bit
   (`isPaused`, which per §7.9 accepts either indicator); the rail also explains that a run armed
   to start from the touchscreen reports itself paused in the same way, because that state is
   otherwise indistinguishable and looks like a fault.
@@ -3761,10 +3775,11 @@ Four components, under `components/instrument/`:
   line: a reply arriving on channel 2 rather than 1 is exactly the thing that would otherwise be
   invisible. Polling is hidden by default (it would otherwise be all there is to see).
 
-  **"Hide polling" suppresses at capture, not at render.** The check lives in `useCfxDevice`'s
-  `pushLine`, which decides whether a line reaches the `traffic` state at all; the console just
-  renders what it is given. Filtering in the component instead meant the 1.5 s poll pushed six
-  lines a minute into React state only for the render to discard them — a re-render and a
+  **"Hide polling" suppresses at capture, not at render.** The check lives in the session's own
+  line buffer, which decides whether a line reaches the published `traffic` window at all; the
+  console just renders what it is given, and a hidden poll notifies no subscriber. Filtering in the
+  component instead meant the 1.5 s poll pushed six lines a minute into React state only for the
+  render to discard them — a re-render and a
   follow-scroll per poll, visible as a flash on an idle console. A poll reply carries no copy of
   its request, so each line is classified on arrival (`poll: boolean`) against the outbound
   message before it, which is the one point where the answer is cheap. The recording below takes
@@ -3790,9 +3805,10 @@ Four components, under `components/instrument/`:
   the recorder stores *records*, not the text they render to — payload bytes plus the three facts
   about a message that aren't in them — at ~16 bytes per message against an ~85-byte line. The
   console's `save log` switch (off by default) decides one thing: whether the finished run's
-  `.zpcr` carries that log, which is the copy that outlives the session. `useCfxDevice`'s
-  `trafficLogForRun()` is where both conditions live — the switch, and "the recording isn't
-  empty" — so `useRunWatch` just asks for bytes or nothing. It is read at the moment of
+  `.zpcr` carries that log, which is the copy that outlives the session — and the switch is
+  persisted in `localStorage`, because a tab reloaded during an hours-long run used to come back
+  with it silently off. `CfxSession`'s `trafficLogForRun()` is where both conditions live — the
+  switch, and "the recording isn't empty" — so the follower just asks for bytes or nothing. It is read at the moment of
   attachment, at the end of the run, so switching it on part-way through still saves the *whole*
   run, and switching it off leaves the file without the entry rather than with half of one.
 
@@ -3840,7 +3856,7 @@ That provenance is for whoever maintains the table, though, so **the buttons car
 each spec's `note` cites `usb.md` sections, which mean nothing to an operator, and the labels say
 what the buttons do. `CANCEL`'s reads just **Cancel run** for the same reason — its other job,
 acknowledging a run the instrument has finished but is still holding, is done automatically by
-`useRunWatch` (`usb.md` §7.6), so it is never something to ask an operator for.
+the run follower (`usb.md` §7.6), so it is never something to ask an operator for.
 
 Two of these were briefly shipped *as* guesses, which is why the mechanism exists — and then a
 re-read of the `usb-basic` capture against the operator's account of it (flash, then open, then

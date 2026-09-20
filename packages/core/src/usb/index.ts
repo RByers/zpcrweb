@@ -68,6 +68,14 @@ export type {
   TrafficLine,
   TransferErrorLine,
 } from "./session.js";
+export { RunFollower } from "./runFollower.js";
+export type {
+  CheckReason,
+  HeldRun,
+  RunFollowerMemory,
+  RunFollowerPorts,
+  RunFollowerState,
+} from "./runFollower.js";
 export { parseIdentity, parseRtStatus, parseStatus, isPaused, isFinishedRun } from "./status.js";
 export type {
   CfxDeviceInfo,

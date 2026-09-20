@@ -244,7 +244,7 @@ function runStartDate(runInfo: Uint8Array): Date {
  * holding one holds the archive too, and the only question left is its name. (A caller that wants
  * a file writes `zipArchive(files)`; a caller following a live run does not, because zipping ~40
  * cached files every cycle only for the receiving side to unzip them again was the single most
- * expensive thing a plate read cost — see the app's `useRunWatch` and `state/fileContent.ts`.)
+ * expensive thing a plate read cost — see `usb/runFollower.ts` and the app's `state/fileContent.ts`.)
  *
  * Throws when `RunInfo.xml` is absent: without it there is no run metadata and `parseZpcr` would
  * reject the archive anyway, so failing here names the actual problem — an incomplete set of
@@ -308,7 +308,7 @@ export function hasRunIdentity(held: ZpcrArchive | null | undefined): boolean {
 
 /**
  * Which of a run folder's files an archive of that run still needs — the download list for a
- * caller following a run as it happens (the app's `useRunWatch`).
+ * caller following a run as it happens (`usb/runFollower.ts`).
  *
  * **The run's own file is the only copy there is.** Nothing else remembers what has been
  * downloaded, so this answers it from the archive itself, which is what makes the app's copy of a

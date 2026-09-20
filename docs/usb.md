@@ -785,7 +785,7 @@ exactly. `STATUS?` says what is happening now; the report says what happened, an
 **The useful time to read it is on connect.** It is the only directory that describes *every* run —
 `CurrentRun` exists only for a run with a `PLATEREAD` (§7.10) and otherwise still holds the last
 such run's files — so a client that wants to say what the instrument last did, whatever was run and
-whoever started it, reads this one. That is what this project's app does (`useCfxDevice`'s
+whoever started it, reads this one. That is what this project's client does (`CfxSession`'s
 `refreshLastReport`, one listing and one `GETFILE`), and it is also the only chance to keep the
 report, since §7.1 will delete it at the next start.
 
@@ -1294,7 +1294,7 @@ report are not in the run folder yet. The second `CANCEL` is §7.6's ordinary ac
 after which they appear. A client that already implements §7.6 should therefore stop here and let
 its existing end-of-run path take over — otherwise the acknowledgement has two owners and the
 final read can be collected twice or not at all. (`CfxDevice.cancelRun` stops here for exactly
-that reason; `useRunWatch` does the rest.)
+that reason; `RunFollower` does the rest.)
 
 The register value on the way through is **`160`**, not `128` — bit 7 arrives *on top of* the
 finished state's bit 5, and it is the one signal that distinguishes "the run I stopped" from "the
@@ -1742,7 +1742,7 @@ starts it. The staged pair is fed through `planRun()` on every render, so the wa
 between the two halves and the state of the **Start run** button are the same object; a check that
 blocks the start says why, in the place where the file that caused it is on screen.
 
-**Following a run** is `state/useRunWatch.ts`, and it is the §7.5 rule rather than filesystem
+**Following a run** is `usb/runFollower.ts`, and it is the §7.5 rule rather than filesystem
 polling: the status poll is already running, its current-step field carries the step's command text
 verbatim, and the completed `.Plateread` appears when a `PLATEREAD` step *ends* — so the watcher
 lists the run folder on that transition. Listing is entirely edge-triggered, never on a timer — a
