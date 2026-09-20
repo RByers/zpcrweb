@@ -49,6 +49,7 @@ export {
   COLUMNS,
   ROWS,
 } from "./plateread.js";
+export { encodePlateRead, decodePlateReadSpec } from "./platereadEncode.js";
 export { parsePltd, parsePlatesetup2, isPltdName, SAMPLE_TYPES, SAMPLE_TYPE_TO_RAW } from "./pltd.js";
 export { plateToCsv, parsePlateCsv, isPlateCsvName, isBlankWell } from "./plateCsv.js";
 export {
@@ -326,6 +327,7 @@ export type {
 } from "./analysis.js";
 export type { IcffEntry } from "./icff.js";
 export type { PlatereadDetail } from "./plateread.js";
+export type { PlateReadHeader, PlateReadSpec } from "./platereadEncode.js";
 export type {
   Pltd,
   PltdContainer,

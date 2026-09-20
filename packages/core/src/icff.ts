@@ -85,9 +85,12 @@ export function parseIcff(bytes: Uint8Array): IcffEntry[] {
       offset,
       length,
       flag,
-      hex: offset > 0 && offset < bytes.length ? hexOf(bytes, offset, length) : "",
+      // `offset` 0 is a real offset, not "absent": the first field of every ICFF file here sits
+      // at it (`PRFILEVERSION` in a `.Plateread`, `SHUTTLEENCODING` in a `.Dcal`), and treating
+      // it as absent left that one field of every file undecoded.
+      hex: length > 0 && offset < bytes.length ? hexOf(bytes, offset, length) : "",
     };
-    if (offset > 0 && offset + length <= bytes.length) {
+    if (length > 0 && offset + length <= bytes.length) {
       if (length === 4) {
         entry.int = view.getInt32(offset, false); // big-endian scalar
         entry.float = view.getFloat32(offset, false);

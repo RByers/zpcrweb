@@ -149,7 +149,10 @@ out of scope here.
 ## 5. Open items
 
 - `CRC` — present in some files, algorithm not identified; not needed to read the file.
-- `REFSPOTS`, `USERDUPLICATED`, `SHUTTLEENCODING` — present in some files, not decoded.
+- `REFSPOTS`, `USERDUPLICATED`, `SHUTTLEENCODING` — present in some files, meaning not
+  identified. `SHUTTLEENCODING` sits at offset `0`, the file's first field; the index reader used
+  to mistake that offset for "absent" and skipped it, and now reads its `int32` like any other
+  scalar (`plateread.md` §7).
 - The `180°`-rotation blocks (`Dye180:*:PR`, `Empty180:*:PR`) are defined by the key naming
   scheme but have not been observed in any file; `dcal.ts` parses them if present.
 - A legacy, differently-keyed dye-file variant (lowercase keys, a different magic string) is

@@ -13,6 +13,9 @@ import { extractLeds } from "./leds.js";
  * Binary decoder for Bio-Rad CFX `.Plateread` files. See `plateread.md` for the full
  * reverse-engineered format. All multi-byte numbers are little-endian; fluorescence and
  * temperature values are IEEE-754 32-bit floats.
+ *
+ * The matching writer is `platereadEncode.ts` (`plateread.md` §7) — for synthesizing a read
+ * rather than reading one.
  */
 
 /** Number of optical channels stored (ScanMask 63 = all six). */

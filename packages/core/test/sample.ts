@@ -103,3 +103,16 @@ export const MIXED_VESSEL_PLATE_PATH = resolve(
 export function readMixedVesselPlateText(): string {
   return readFileSync(MIXED_VESSEL_PLATE_PATH, "utf8");
 }
+
+/**
+ * The two 2026 45-cycle runs off the second instrument — the newest `.Plateread` files committed
+ * here, and the only ones written by firmware this project has also watched over USB
+ * (`20260807-YouSeq_RT_-_S56.zpcr` carries the session's own `usb-traffic.bin`).
+ */
+export const RT_S56_SAMPLE_PATH = resolve(here, "../../../samples/20260807-YouSeq_RT_-_S56.zpcr");
+
+/** See {@link RT_S56_SAMPLE_PATH}. */
+export const RP_VALIDATION_SAMPLE_PATH = resolve(
+  here,
+  "../../../samples/20260806-YouSeq_RP_Validation.zpcr",
+);

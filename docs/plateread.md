@@ -45,7 +45,7 @@ variable-length in principle but constant across this run):
 | **`WELLDATA`** | `0x1A4` | `uint32` float-count (`2592`, **little-endian**) then 648 records × 4 floats — **the fluorescence table** (§2) |
 | **`DARKDATA`** | `0x2A28` | `uint32` float-count (`24`, **little-endian**) then 6 records × 4 floats — dark/background reading per channel |
 | `FILEPATH` | `0x2A8C` | ASCII `\Storage Card\CurrentRun\Read0004N.xlateread` |
-| Descriptor dictionary | `0x2AB0` | ICFF index: field-name table + descriptors mapping names → data (§4, [`icff.md`](./icff.md)) |
+| Descriptor dictionary | `0x2AB9` | ICFF index: `ICFF` magic + one 264-byte descriptor per field, mapping names → data (§4, [`icff.md`](./icff.md)) |
 | ICFF footer | end (last 8 bytes) | `[index_offset][entry_stride]`, both u32 LE — points back at the dictionary |
 
 Array fields are framed as **`[uint32 count_of_floats][float32 × count]`**, both little-endian.
@@ -150,7 +150,16 @@ Decoded values for Read45 (offset from the descriptor dictionary; BE int / BE fl
 | `DATETIME` | `0x182` | 30 | `Tue, 21 Jul 2026 06:22:23 GMT` | NUL-terminated string |
 | `DELTATIME` | `0x1A0` | 4 | 0 | |
 
-`STEP` and `STEPIDENTIFICATION` both point at `0x121` (they alias the same 4 bytes).
+`STEPIDENTIFICATION` (`0x121`) and `STEP` (`0x125`) are **two fields, not one** — an earlier
+reading of this table had them aliasing the same four bytes. They hold different values in every
+committed sample: `STEPIDENTIFICATION` is `0` throughout, while `STEP` is the protocol step the
+read belongs to (`2` in the qPCR runs, `3` in the melt run's melt step — see `melt.md` §2).
+
+**Every field is packed back to back, from offset `0x000` to the dictionary, with no padding and
+no overlaps.** Measured over all 294 `.Plateread` files in the committed archives: the 42
+descriptors tile that region exactly. So the offsets above are not a layout the instrument chose
+independently — they are a consequence of the field order and the lengths of the variable-length
+strings, which is what makes §7's writer possible.
 
 ### Temperatures
 
@@ -272,6 +281,57 @@ print(rec(2, 0, 2))   # -> ~6852
 - `DARKDATA` (6 records, one per channel) is the LED-off/background reading used for baseline
   subtraction; same 4-float record layout as `WELLDATA`. **Both arrays are little-endian**, unlike
   the big-endian metadata.
+
+## 7. Writing a `.Plateread` — *this library's own*
+
+Everything above is reverse-engineered from files an instrument wrote. **This section is not.**
+No CFX ever asks to be sent a plate read, so nothing here was observed: it is what
+`packages/core/src/platereadEncode.ts` does, and its only claim to being right is that it
+reproduces the instrument's own files exactly.
+
+**Why it exists.** The CFX emulator — the device model this project tests its instrument stack
+against — has to answer `GETFILE` for a read its own run just took, and a run with a curve in it has to be *synthesized* — replaying a recorded file
+verbatim would give every emulated run the recorded run's cycle numbers, temperatures and
+timestamps. So the writer takes readings and a header and produces the bytes.
+
+**What it writes.** One shape: the 42-field `PLATEREADVERSION 2` schema above, in the order §4
+lists, packed from offset `0x000` with no padding, then the ICFF dictionary, then the 8-byte
+footer. The schema table in `platereadEncode.ts` is the single statement of the layout — which
+field is a big-endian `int32`, which a big-endian `float32`, which a NUL-terminated string, and
+which of the two little-endian `[count][float32 × count]` arrays. Nothing is hardcoded at an
+offset: each field's offset is wherever the fields before it ended, so a longer serial number or
+firmware banner shifts what follows exactly as the instrument's own files do.
+
+```ts
+encodePlateRead({ header, readings: (channel, well) => …, dark: (channel) => … }): Uint8Array
+decodePlateReadSpec(bytes): PlateReadSpec   // the exact inverse
+```
+
+`readings` is asked for one reading at a time — `channel` 0–5, `well` the row-major `row*12+col`
+of §2 — which is how the emulator gives all 108 wells the same curve. `header` carries the
+scalars of §3 under their own names (`cycle`, `blockTempC`, `filePath`, …), so a synthesized read
+is an existing read's header with the fields that moved changed.
+
+**The gate: a byte-identical re-encode.** `platereadEncode.test.ts` decodes and re-encodes every
+`.Plateread` in every committed `.zpcr` — **294 files across 7 archives**, two instruments,
+2019–2026, including a melt run and a gradient run — and requires the result to equal the
+original byte for byte. Nothing is carried over from the source file: `decodePlateReadSpec` hands
+the encoder *values*, and the encoder recomputes every offset, length and descriptor itself. That
+is what says the writer knows the format rather than knowing one file, and it is why **no region
+of the file is template-derived** — there are none left over to be.
+
+**What it refuses.** A file whose string field is not exactly text-plus-one-NUL, whose array
+field is the wrong length, or which is missing a schema field, throws rather than round-tripping
+to something shorter. `CRC` is written as given (it is `0` in every observed file); this library
+computes no checksum for a `.Plateread` and does not know what would be checked.
+
+> **Future:** only `PLATEREADVERSION 2` with a 96-well block is writable, because that is every
+> file here. A different plate size would need `NUMBERROWS`/`NUMBERCOLUMNS` to drive the array
+> length rather than the constants of §2.
+
+**One decoder gap this closed.** `parseIcff` treated offset `0` as "field absent", which left the
+*first* field of every ICFF file undecoded — `PRFILEVERSION` here, `SHUTTLEENCODING` in a `.Dcal`
+([`dcal.md`](./dcal.md)). It is a real offset; the raw view now shows its value like any other.
 
 ## DARKDATA vs. the reference row
 

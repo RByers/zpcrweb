@@ -611,6 +611,12 @@ raw bytes ─▶ fflate.unzipSync ─▶ { name: Uint8Array }
 - **`plateread.ts`** — `DataView`-based decoder for the 22037-byte `.Plateread` layout, driven
   by the ICFF index: mixed-endian (big-endian scalars, little-endian WELLDATA / DARKDATA float
   arrays). Scalars are guarded (returned only when they validate).
+- **`platereadEncode.ts`** — the matching **writer**, and the only encoder here that isn't
+  reverse-engineered: no instrument asks to be sent a plate read, so it exists to *synthesize*
+  one (the emulator gives every well the same curve). `encodePlateRead(spec)` packs the 42-field
+  schema, the fluorescence arrays and the ICFF dictionary from values alone — no template bytes —
+  and `decodePlateReadSpec` is its exact inverse. Trusted because re-encoding every `.Plateread`
+  in every committed archive reproduces it byte for byte; see [`plateread.md`](./docs/plateread.md) §7.
 - **`dcal.ts`** — decodes `.Dcal` pure-dye calibration entries (`zpcr.calibrations()`): one
   dye's fluorescence response across all 6 channels at 4 block temperatures, plus a matching
   empty-plate baseline, also on top of the ICFF index. Also exports `dyeChannelLookup`, the
