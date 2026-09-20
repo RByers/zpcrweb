@@ -790,8 +790,14 @@ whoever started it, reads this one. That is what this project's app does (`useCf
 report, since §7.1 will delete it at the next start.
 
 The name is `<yyyymmdd>_<hhmmss>_<serial>_<RUN NAME>.alf` — start timestamp, the base-unit serial
-`*IDN?` reports, and the run name from `RemoteRun`'s operand 4 in full (uppercased, unlike the
-8-character truncation `STATUS?` shows). Reading it needs nothing new: `GETFILESLEN` +
+`*IDN?` reports, and the run name from `RemoteRun`'s operand 4 — **uppercased and truncated to
+twelve characters**, with anything filename-hostile replaced. This section previously said "in
+full"; both committed reports say otherwise, and both are cut to exactly twelve:
+`Single Step RT-QPCR` → `SINGLE_STEP_` and `YouSeq_RP_validation` → `YOUSEQ_RP_VA`. The same
+twelve-character form is the report's own first header field (`alf.md` §4). A shorter name is
+untouched, which is why the capture's `singletest` → `…_SINGLETEST.alf` looked like the whole
+name. `STATUS?`'s truncation is a different and harsher one — eight characters (§7.3).
+Reading it needs nothing new: `GETFILESLEN` +
 `LISTALLFILES` to find the name, `GETFILESIZE` + `GETFILE` to pull it, and `DELFILE` to clear it.
 Sizes seen are small — 693 bytes for a 2-cycle run, ~7 KB for a 45-cycle one — because the file
 grows with the number of protocol steps executed, not with plate size or channel count.
@@ -1656,6 +1662,7 @@ The earlier `x^16 + 1` hypothesis is therefore **wrong**, and so is the name: `C
 | `crc.ts` | §7.4 — the upload checksum and its wire format. Its byte order is measured, §9.2. |
 | `runPlan.ts` | §7.2–§7.4 as *data*: `planRun()` turns a run definition plus a plate (optional — a run may have none) into the exact command lines, the `RemoteRun` line and the files that would be deposited, and `checkRunPlan()` is the plate↔`PLATEREAD` compatibility check below. Pure — no device involved — which is what lets a UI review a run before any of it is sent. |
 | `device.ts` | §3–§5 and §7 — the read pump, the command queue, the typed operations, `sendFile()` (§5's upload cycle), `startRun()` (§7.1–§7.4) and `acknowledgeRun()` (§7.6). |
+| `emulator/` | A **second implementation, of the other side** — an imitation instrument satisfying `UsbDeviceLike`, so the client above can be driven with no hardware present. Not evidence: see below. |
 
 **Starting a run is implemented, and its shape follows §7 rather than §5's.** `startRun()` clears
 the old report (§7.1), types the protocol one directive per command (§7.2), sends `RemoteRun`
@@ -1685,6 +1692,18 @@ Two clients drive it: `tools/cfx.mjs` (a CLI — `info`, `status`, `ls`, `get`, 
 the raw message log) and the web app's **Device** view, which adds live status polling, a file
 browser, action buttons and a console of decoded traffic. The optional `usb` dependency is needed
 only by the CLI.
+
+**And a third thing speaks this protocol, from the other end.** `packages/core/src/usb/emulator/`
+is an imitation CFX96 — a `UsbDeviceLike` that frames, answers the command language, keeps a
+filesystem and executes a protocol over a clock the caller controls, so `new CfxDevice(emulator)`
+exercises the whole client with nothing plugged in. It exists because everything past
+`startRun()` was verified only by driving real hardware; `packages/core/test/emulator.test.ts`
+now drives it in `vitest` instead. **It settles nothing in §1–§9.** The emulator was written from
+this document, so the two agreeing means only that they read it the same way — and where this
+document is silent, the emulator has had to choose. What it answers per command, and whether that
+answer is measured, derived or invented, belongs in a doc of its own beside this one,
+`emulator.md`; until that lands, the module comments under `usb/emulator/` carry it, each choice
+marked where it is made. Only the live-hardware runs above confirm the protocol itself.
 
 **The client sends only command lines it builds itself.** `CfxDevice`'s public surface is named
 operations — `status()`, `listFiles(dir)`, `getFile(path)`, `runAction(name)` — and the primitives
