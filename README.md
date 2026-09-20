@@ -329,6 +329,8 @@ up a run, live-instrument access over USB, and browser-automation checks for the
 node tools/zpcr.mjs samples/20260720_FirstQualification.zpcr results   # results table as CSV
 node tools/zpcr.mjs samples/20260720_FirstQualification.zpcr curves \
   --wells B3 -o b3.png                                                 # curves as a PNG
+node tools/zpcr.mjs samples/biomeme-2025-10-15-melt.bmrun melt \
+  -o melt.png                                                          # melt curves as a PNG
 node tools/zpcr.mjs 20260810_RVP.zpcr new --name "S190 RVP" \
   --protocol Luna_qPCR.prcl.txt --plate S190.plt.csv                   # a new experiment
 node tools/cfx.mjs info                                                # talk to a live instrument

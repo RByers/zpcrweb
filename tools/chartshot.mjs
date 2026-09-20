@@ -1,20 +1,21 @@
 /**
- * Render the web app's Curves chart to a PNG, from Node, without the web app.
+ * Render one of the web app's Curves charts to a PNG, from Node, without the web app.
  *
- * `zpcr.mjs curves` needs a picture that *is* the chart, not one that resembles it. The renderer
- * is `apps/web/src/lib/uplot/chart.ts` — a real module with real behaviour (log floors, baseline
- * projection, Cq markers placed off `correctedValues`), and any second implementation of it is a
- * second answer waiting to disagree with the first. So this runs the actual module: esbuild
- * bundles `buildChart` plus uPlot into one self-contained HTML page, headless Chrome opens it
- * from a `file://` URL, the caller's already-computed curves go in as JSON, and the rendered
- * page comes back out as a PNG.
+ * `zpcr.mjs curves` and `zpcr.mjs melt` each need a picture that *is* the chart, not one that
+ * resembles it. The renderers are `apps/web/src/lib/uplot/chart.ts` and its melt counterpart
+ * `meltChart.ts` — real modules with real behaviour (log floors, baseline projection, Cq markers
+ * placed off `correctedValues`; Tm labels placed off the derivative's peak) — and any second
+ * implementation of either is a second answer waiting to disagree with the first. So this runs
+ * the actual module: esbuild bundles the chosen `build*Chart` plus uPlot into one self-contained
+ * HTML page, headless Chrome opens it from a `file://` URL, the caller's already-computed curves
+ * go in as JSON, and the rendered page comes back out as a PNG.
  *
  * What that buys, over drawing the chart a second time in Node: the picture cannot drift. A
  * change to the chart's axes, colors, dashes or marker placement reaches the CLI with no edit
  * here at all — and the bundle is rebuilt on every run (esbuild takes ~50ms, noise beside
  * Chrome's ~1s), so there is no stale artifact to mislead anyone.
  *
- * What it costs: Chrome. Unlike `results`, `curves` is not a plain Node command — see
+ * What it costs: Chrome. Unlike `results`, `curves` and `melt` are not plain Node commands — see
  * `AGENTS.md`'s UI-testing section for the flags that matter and why headless is not optional
  * here.
  *
@@ -38,7 +39,19 @@ import { REPO, openPage, startChrome } from "./harness.mjs";
 const require = createRequire(import.meta.url);
 
 /**
- * Bundle `buildChart` and uPlot into one IIFE exposing `window.renderChart(config, host)`.
+ * The two chart modules this can render, by the name {@link renderChartPng}'s `kind` takes.
+ *
+ * Both export a builder of the same shape — `(config) => { data, options }` over a config whose
+ * only non-JSON member is `onHover` — which is what lets one bundler, one page and one capture
+ * serve both. A third chart would join by adding a row here.
+ */
+const CHARTS = {
+  amplification: { module: "./apps/web/src/lib/uplot/chart", builder: "buildChart" },
+  melt: { module: "./apps/web/src/lib/uplot/meltChart", builder: "buildMeltChart" },
+};
+
+/**
+ * Bundle one chart builder and uPlot into an IIFE exposing `window.renderChart(config, host)`.
  *
  * The entry lives here as a string rather than as a file on disk: it is four lines of glue no
  * one else has any use for, and a stray `.ts` file in `tools/` would look like something a
@@ -49,14 +62,16 @@ const require = createRequire(import.meta.url);
  * `vite.config.ts` uses — so the bundle sees the same core the browser does, and needs no built
  * `dist/` (see "Why the web app imports core's source" in `ARCHITECTURE.md`).
  */
-async function bundleChart() {
+async function bundleChart(kind) {
+  const chart = CHARTS[kind];
+  if (!chart) throw new Error(`unknown chart: ${kind}`);
   const result = await build({
     stdin: {
       contents: `
         import uPlot from "uplot";
-        import { buildChart } from "./apps/web/src/lib/uplot/chart";
+        import { ${chart.builder} as build } from "${chart.module}";
         window.renderChart = (config, host) => {
-          const { data, options } = buildChart({ ...config, onHover: () => {} });
+          const { data, options } = build({ ...config, onHover: () => {} });
           return new uPlot(options, data, host);
         };
       `,
@@ -112,20 +127,25 @@ html, body { margin: 0; padding: 0; background: #0b0e14; }
 /**
  * Render one chart and return the PNG bytes.
  *
- * `config` is a `BuildChartConfig` minus its `onHover` — `wellCurves` and the display mode,
- * exactly as the web app passes them, plus `width`/`height`. Everything in it must survive
+ * `config` is the chosen builder's config minus its `onHover`, exactly as the web app passes it,
+ * plus `width`/`height`: `wellCurves` and the display mode for an amplification chart, `curves`
+ * plus `temperaturesC` and `view` for a melt one. Everything in it must survive
  * `JSON.stringify`, which the run's analysis records already do: plain numbers and arrays.
  *
+ * `kind` picks the chart — `"amplification"` (the default, so existing callers are unchanged) or
+ * `"melt"`. It is a separate argument rather than a field on `config` because it selects the
+ * *builder*, and everything in `config` is handed to that builder untouched.
+ *
  * `dpr` (default 1) is the device pixel ratio to render at, the one thing here that has no
- * counterpart in `BuildChartConfig`: the chart is laid out at `width`×`height` CSS pixels and
+ * counterpart in the builder's config: the chart is laid out at `width`×`height` CSS pixels and
  * captured at `dpr` times that many device pixels. It is not a zoom — uPlot reads
  * `devicePixelRatio` to size its canvas backing store, so `dpr: 2` is the same chart a retina
  * browser draws, text and hairlines included, rather than the different (smaller-lettered)
  * chart that asking for twice the CSS width would lay out.
  */
-export async function renderChartPng(config) {
+export async function renderChartPng(config, kind = "amplification") {
   const dpr = config.dpr ?? 1;
-  const bundle = await bundleChart();
+  const bundle = await bundleChart(kind);
   const css = readFileSync(require.resolve("uplot/dist/uPlot.min.css"), "utf-8");
   const dir = mkdtempSync(join(tmpdir(), "zpcr-chartshot-"));
   const page = join(dir, "chart.html");
