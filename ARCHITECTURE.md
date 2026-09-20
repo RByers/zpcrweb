@@ -291,6 +291,30 @@ the 5-byte application frame, the ASCII command channel, and file retrieval. Ent
 subsystem with an internal seam (framing → commands → device), and because "this one talks to
 hardware" is worth being able to see in the tree.
 
+**`src/usb/emulator/` is the same protocol spoken from the other end.** The `UsbDeviceLike` seam
+takes anything with the right shape, so an object that frames replies, keeps a filesystem and
+executes a protocol over a clock is a device as far as `CfxDevice` is concerned — and that is what
+makes the whole instrument stack testable in `vitest`, milliseconds, no Chrome and no hardware.
+Three things about it are worth knowing before changing it:
+
+- **It speaks the raw protocol, with no shortcuts.** Real 5-byte frames, real command lines, the
+  two response shapes, the `passThrough` binary replies, and the `GETFILESLEN`+`LISTALLFILES`
+  argument quirk reproduced deliberately. A mock that answered decoded commands would make its
+  own tests meaningless.
+- **Its clock is the only thing a real instrument does not have.** One interface, three
+  implementations: wall time at a live-changeable speed, an accelerated mode with *no timers at
+  all* (each `STATUS?` advances the run to the end of the current step, so a run's progress is a
+  pure function of how many polls have happened), and a manual clock for tests. Simulated time
+  never jumps in either direction — a speed change rebases rather than rescales, because every
+  edge the app detects is a difference between successive status replies.
+- **It is not evidence about the instrument.** It was written from `usb.md`, as the client was, so
+  the two agreeing proves only that they read it the same way (`usb.md` §10). Its fluorescence is
+  lifted from a committed recording, one well's curve replicated across all 108 — never
+  synthesized — and `encodePlateRead` writes it out as a genuine `.Plateread`.
+
+It ships as the `@zpcrweb/core/emulator` subpath, a second `tsup` entry, so the web app can reach
+it through a lazy `import()` and a build that never asks for it never carries it.
+
 **It stays isomorphic, the same as everything else, and for a cheaper reason than expected.** The
 obvious design is two backends — WebUSB in the browser, libusb in Node — behind an abstract
 transport. That isn't needed: node-usb already ships a WebUSB implementation, so a browser

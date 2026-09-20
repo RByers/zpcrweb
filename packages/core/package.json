@@ -11,6 +11,11 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "require": "./dist/index.cjs"
+    },
+    "./emulator": {
+      "types": "./dist/emulator.d.ts",
+      "import": "./dist/emulator.js",
+      "require": "./dist/emulator.cjs"
     }
   },
   "files": ["dist"],
