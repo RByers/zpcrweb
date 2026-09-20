@@ -250,7 +250,7 @@ or its `gridRef` (the grid takes focus on a click, which is what lets the keyboa
 `components/views/OverviewView.tsx`'s completeness banner or core's `runCompleteness`/
 `expectedPlateReads`,
 `lib/cloneName.ts` or `App.tsx`'s `cloneActiveFile`,
-core's `runSeed.ts` or `App.tsx`'s `runViews`, `state/useRunWatch.ts`,
+core's `experimentArchive.ts` or `App.tsx`'s `runViews`, `state/useRunWatch.ts`,
 `components/curves/MeltChart.tsx`, `components/curves/MeltTable.tsx`,
 `lib/uplot/meltChart.ts` or core's `melt.ts`/`meltAnalysis.ts` (melt mode — which plate-read step
 counts as a melt, and what the Curves view swaps out for one; the View toggle drives a melt in

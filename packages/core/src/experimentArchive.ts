@@ -5,8 +5,9 @@
  * marker, created explicitly and by name, editable in place (a protocol written directly, a plate
  * attached) until "Start experiment" turns it into an ordinary run.
  *
- * Unlike `runSeed.ts`'s seed archive (which this file replaces — see that module's removal), this
- * writes no `begun` marker: starting happens later, from the app, on a file that already exists.
+ * Unlike the seed archive this file replaced — built only at the click on Start run, from the run
+ * plan about to be sent — this writes no `begun` marker: starting happens later, from the app, on
+ * a file that already exists.
  */
 import type { ZpcrArchive } from "./archive.js";
 import { parseRunDefinitionText } from "./prcl.js";

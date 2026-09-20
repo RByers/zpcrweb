@@ -75,8 +75,8 @@ const PRCL_TXT_BODY =
   "GRAD 50.0,60.0,30;\nPLATEREAD #h3F;\nGOTO 4,39;\nEND;\n";
 
 /** The `.zpcr` a run gets the moment Start run is clicked, written at test time from the same
- * core call the app makes — a protocol, a plate and a name, with no `RunInfo.xml`, no plate reads
- * and no calibration set (`core/runSeed.ts`). */
+ * core calls the app makes (see {@link makeSeed}) — a protocol, a plate and a name, with no
+ * `RunInfo.xml`, no plate reads and no calibration set. */
 const SEED_ZPCR = join(REPO, "tools/.uishot/dupe/20260802-Seeded_Run.zpcr");
 
 /** A real run with its last two plate reads removed — the shape a cancelled run's archive has,

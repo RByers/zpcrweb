@@ -195,12 +195,14 @@ Three properties keep it from colliding with §5–§6:
 
 The deposited name has one further use on the way back in: it is what tells
 `zpcrNameFromRunFiles` (`packages/core/src/runFolder.ts`) that a run folder belongs to a run
-*this app started*, and so keeps the file name that run's seed already took (fixed at the click,
+*this app started*, and so keeps the file name that run's own file already took (fixed at the click,
 pinned for the run's duration — `apps/web/src/state/useRunNaming.ts`) rather than being named from
 `RunInfo.xml`'s `DataFile`. Nothing else writes the entry into a run folder.
 
-The same bytes are also the *local* copy: at the click on Start run the app writes a seed `.zpcr`
-(`packages/core/src/runSeed.ts`) so the run has a file before it has data, and that archive's
-`zpcrweb.json` is the deposited upload copied in verbatim rather than a second document generated
-alongside it. So the run's name reads the same whether the archive came from the seed or from the
-folder, and the snapshots that replace the seed as cycles arrive carry it unchanged.
+The run already has a *local* file before it has data, and it is not created by the start: it is
+the pending experiment the run was started from (`packages/core/src/experimentArchive.ts`, marked
+begun at the click on Start run — `App`'s `startExperiment`). That file carries its own
+`zpcrweb.json` under §5's rules, holding the same `experimentName` the upload deposits, because
+both are written from the name the user typed. So the run's name reads the same whether the
+archive came from that file or from the folder, and the snapshots that supersede it as cycles
+arrive carry it unchanged.
