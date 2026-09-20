@@ -7,7 +7,6 @@ import {
   parseZpcr,
   parseZpcrArchive,
   runCompleteness,
-  zpcrFromRunFiles,
 } from "../src/index.js";
 import { unzipArchive } from "../src/archive.js";
 import {
@@ -153,5 +152,5 @@ function withoutLastReads(
     .sort();
   for (const name of reads.slice(reads.length - n)) delete files[name];
   if (options.dropEnded) delete files["ended"];
-  return parseZpcrArchive(zpcrFromRunFiles(files).archive);
+  return parseZpcrArchive(files);
 }

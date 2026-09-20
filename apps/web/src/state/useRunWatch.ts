@@ -71,7 +71,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   CFX_CURRENT_RUN_DIR,
   USB_TRAFFIC_LOG_NAME,
-  zpcrFromRunFiles,
+  zpcrNameForRunFolder,
   zpcrNameFromRunFiles,
   runFilesToFetch,
   runIdentityFileNames,
@@ -276,7 +276,7 @@ export function useRunWatch(
   /**
    * What the Instrument view's two name fields currently hold (`state/useRunNaming.ts`). Only the
    * archive's *name* depends on it, and only for a run this app started and is still staging —
-   * `zpcrFromRunFiles` decides that from the `zpcrweb.json` in the folder, so a run started at
+   * `zpcrNameForRunFolder` decides that from the `zpcrweb.json` in the folder, so a run started at
    * the touchscreen keeps the name the instrument gave it whatever is typed here.
    */
   naming?: { experimentName: string; fileName: string },
@@ -453,9 +453,9 @@ export function useRunWatch(
         // a cycle costs the one plate read that arrived and no ZIP work at either end.
         //
         // The folder as a whole — what the file holds plus what this pass fetched — is what names
-        // the run (`zpcrFromRunFiles`) and what proves it is one; what goes *to the store* is only
-        // what this pass fetched, unless there is nothing there to lay it over.
-        const run = zpcrFromRunFiles(files, namingRef.current);
+        // the run (`zpcrNameForRunFolder`) and what proves it is one; what goes *to the store* is
+        // only what this pass fetched, unless there is nothing there to lay it over.
+        const runName = zpcrNameForRunFolder(files, namingRef.current);
         // A pass is whole when there is no file of ours to update: a run this browser doesn't
         // have, or one whose file has just been renamed out from under us — the name is re-derived
         // here from the folder's own `RunInfo.xml`, which the end-of-run pass re-reads, so it can
@@ -468,7 +468,7 @@ export function useRunWatch(
         // is against the held file's *base* name, since the id it is filed under may be a path
         // into a granted folder while the run only ever names itself bare: a run has not been
         // renamed merely by being kept in a shared folder.
-        const renamed = held !== null && run.name !== baseNameOf(held.id);
+        const renamed = held !== null && runName !== baseNameOf(held.id);
         const whole = held === null || renamed;
         const update = whole ? files : fetched;
         // Handed over under the id the run was **found** under rather than the name it derives for
@@ -477,7 +477,7 @@ export function useRunWatch(
         // experiment this run was started from (`adoptId`), and failing that the derived name —
         // a run this browser has nothing of yet, which is a new file.
         const id = await onRunRef.current(
-          { name: renamed ? run.name : (held?.id ?? adoptId ?? run.name), archive: update, whole },
+          { name: renamed ? runName : (held?.id ?? adoptId ?? runName), archive: update, whole },
           fileNameRef.current,
           activate,
         );

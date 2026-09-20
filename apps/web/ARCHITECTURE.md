@@ -3506,7 +3506,7 @@ listing that would otherwise discover the same thing, and stops the run's last m
 fetching a folder already known not to be ours.
 
 On each changed listing the watcher reads back the run's file, fetches what the folder holds that
-the file lacks, checks and names the result with `zpcrFromRunFiles`, and hands what it *fetched* to
+the file lacks, checks and names the result with `zpcrNameForRunFolder`, and hands what it *fetched* to
 `store.addRunArchive` as entries to merge into that file — the same validate → IndexedDB path a
 drop takes, minus the ZIP: the store holds a `.zpcr` as its entries (see "A `.zpcr` is stored as
 its entries, never as a ZIP"), so a cycle's cost is the one plate read that arrived rather than a
@@ -3743,8 +3743,8 @@ Four components, under `components/instrument/`:
   A whole directory is different, and is what **Open run** does: a `.zpcr` *is* a ZIP of a run
   directory (root `ARCHITECTURE.md`, "A run directory is a `.zpcr`"), so the button pulls every
   file — sequentially, since the command channel carries one request at a time, with the busy
-  label counting them off — hands them to the library's `zpcrFromRunFiles`, and drops the
-  result into `store.addRunArchive`. From there it is an ordinary loaded file: the same validate →
+  label counting them off — names them with the library's `zpcrNameForRunFolder`, and drops them
+  into `store.addRunArchive`. From there it is an ordinary loaded file: the same validate →
   IndexedDB path as a drop, under the name the run calls itself, then a switch to Overview so a
   successful open goes somewhere. It is offered for any directory whose listing contains a `RunInfo.xml`
   (what makes a directory a run, and what `parseZpcr` refuses an archive without) — in practice

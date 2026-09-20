@@ -797,7 +797,7 @@ Sizes seen are small — 693 bytes for a 2-cycle run, ~7 KB for a 45-cycle one �
 grows with the number of protocol steps executed, not with plate size or channel count.
 
 **The same report is also copied into `\Storage Card\CurrentRun`**, which means a client that
-takes the whole run directory (`zpcrFromRunFiles`, §7.7 step 10) already has it. Worth knowing:
+takes the whole run directory (`zpcrNameForRunFolder`, §7.7 step 10) already has it. Worth knowing:
 that copy has been seen in the run folder of a run started **from the instrument's own
 touchscreen**, so the report is a property of any run, not of PC-driven ones — despite the "PC" in
 the directory name. Whether a front-panel run also deposits a copy into `PCRunReport` is untested.
@@ -1205,10 +1205,10 @@ plate reads:
    then pull the `.alf` from `\Storage Card\PCRunReport\` if wanted.
 10. To take the *whole* run rather than its pieces: pull every file `LISTALLFILES` reported for
     `\Storage Card\CurrentRun` and zip them unchanged — a `.zpcr` is a plain ZIP of exactly that
-    directory, so no conversion is involved. `zpcrFromRunFiles`
+    directory, so no conversion is involved. `zpcrNameForRunFolder`
     (`packages/core/src/runFolder.ts`) checks the folder is a run and works out what the file
-    should be called, handing the entries back as they are; `zipArchive` is the separate step that
-    makes them a file. It is what the web app's Instrument view "Open run" button calls.
+    should be called; the entries are already the archive, and `zipArchive` is the separate step
+    that makes them a file. It is what the web app's Instrument view "Open run" button calls.
 
 A client that also offers a **Stop** button needs one more step, §7.8.
 
@@ -1741,7 +1741,7 @@ assembles, not of the rail's live state, so they can wait for whichever real edg
 
 Each time the listing changes, the folder is pulled — **only the names not already cached**, since
 28 of a `CurrentRun`'s ~40 files are the `.Dcal` set and never change — named by
-`zpcrFromRunFiles` and handed to the store as the archive it already is (no zip: the app keeps a
+`zpcrNameForRunFolder` and handed to the store as the archive it already is (no zip: the app keeps a
 run in progress unpacked until it ends), which replaces the previous snapshot. The connection
 therefore lives in `App`, not in the Instrument view: a run has to keep being followed while the
 user sits in Curves watching its amplification curves arrive.

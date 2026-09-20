@@ -91,19 +91,18 @@ const IN_PROGRESS_ZPCR = join(REPO, "tools/.uishot/dupe/20260725-Still_Running.z
 
 /** Write {@link IN_PROGRESS_ZPCR}: a finished sample, minus the marker that says it finished. */
 async function makeInProgressRun() {
-  const { zpcrFromRunFiles, unzipArchive, zipArchive } = await import("../packages/core/dist/index.js");
+  const { unzipArchive, zipArchive } = await import("../packages/core/dist/index.js");
   const files = unzipArchive(
     new Uint8Array(readFileSync(join(REPO, "samples/20260725_GRADIENTTEST.zpcr"))),
   );
   delete files["ended"];
-  const { archive } = zpcrFromRunFiles(files, { fileName: "20260725-Still_Running" });
   mkdirSync(dirname(IN_PROGRESS_ZPCR), { recursive: true });
-  writeFileSync(IN_PROGRESS_ZPCR, Buffer.from(zipArchive(archive)));
+  writeFileSync(IN_PROGRESS_ZPCR, Buffer.from(zipArchive(files)));
 }
 
 /** Write {@link SHORT_ZPCR} by deleting plate reads from a committed sample's own files. */
 async function makeShortRun() {
-  const { zpcrFromRunFiles, unzipArchive, zipArchive } = await import("../packages/core/dist/index.js");
+  const { unzipArchive, zipArchive } = await import("../packages/core/dist/index.js");
   const files = unzipArchive(
     new Uint8Array(readFileSync(join(REPO, "samples/20260725_GRADIENTTEST.zpcr"))),
   );
@@ -111,9 +110,8 @@ async function makeShortRun() {
     .filter((n) => /\.Plateread$/i.test(n))
     .sort();
   for (const name of reads.slice(-2)) delete files[name];
-  const { archive } = zpcrFromRunFiles(files, { fileName: "20260725-Cut_Short" });
   mkdirSync(dirname(SHORT_ZPCR), { recursive: true });
-  writeFileSync(SHORT_ZPCR, Buffer.from(zipArchive(archive)));
+  writeFileSync(SHORT_ZPCR, Buffer.from(zipArchive(files)));
 }
 
 /** A finished run that never read the plate — an incubation or reverse-transcription hold, whose
@@ -127,7 +125,7 @@ const NO_READ_ZPCR = join(REPO, "tools/.uishot/dupe/20260725-RT_Incubation.zpcr"
  * never asks for one — which is what makes it a run that finished exactly as written rather than
  * one that was cut short (`runCompleteness` declines to guess at a protocol with no PLATEREAD). */
 async function makeNoReadRun() {
-  const { zpcrFromRunFiles, unzipArchive, zipArchive } = await import("../packages/core/dist/index.js");
+  const { unzipArchive, zipArchive } = await import("../packages/core/dist/index.js");
   const files = unzipArchive(
     new Uint8Array(readFileSync(join(REPO, "samples/20260725_GRADIENTTEST.zpcr"))),
   );
@@ -151,9 +149,8 @@ async function makeNoReadRun() {
   files["ProtocolRunDefinition.txt"] = enc.encode(
     "METHOD CALC;HOTLID 105,30;VOLUME 20;TEMP 50.0,600;TEMP 95.0,120;END;\n",
   );
-  const { archive } = zpcrFromRunFiles(files, { fileName: "20260725-RT_Incubation" });
   mkdirSync(dirname(NO_READ_ZPCR), { recursive: true });
-  writeFileSync(NO_READ_ZPCR, Buffer.from(zipArchive(archive)));
+  writeFileSync(NO_READ_ZPCR, Buffer.from(zipArchive(files)));
 }
 
 /**

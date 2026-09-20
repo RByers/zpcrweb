@@ -7,14 +7,14 @@
  *
  * A whole directory is a different matter, and is what **Open run** does: a `.zpcr` *is* a ZIP of
  * a run directory, so pulling every file yields a real run — not a reconstruction — which then goes
- * through exactly the same validate/persist path as a dropped file (`zpcrFromRunFiles`, then
+ * through exactly the same validate/persist path as a dropped file (`zpcrNameForRunFolder`, then
  * the store's `addRunArchive`; whether it is stored as a ZIP or kept open depends on whether the
  * run has ended, and is the store's business, not this view's). The button is offered for any
  * directory whose listing has a `RunInfo.xml`, which is what makes it a run rather than an
  * arbitrary folder.
  */
 import { useState } from "react";
-import { CFX_DIRECTORIES, zpcrFromRunFiles, type ZpcrArchive } from "@zpcrweb/core";
+import { CFX_DIRECTORIES, zpcrNameForRunFolder, type ZpcrArchive } from "@zpcrweb/core";
 import { downloadBytes } from "../../lib/download";
 import type { CfxDeviceHandle } from "../../state/useCfxDevice";
 
@@ -64,8 +64,7 @@ export function InstrumentFiles({
     // `undefined` means the fetch itself failed, which the rail already reports.
     if (!files) return;
     try {
-      const run = zpcrFromRunFiles(files);
-      await onOpenRun(run.name, run.archive);
+      await onOpenRun(zpcrNameForRunFolder(files), files);
     } catch (e) {
       setOpenError(e instanceof Error ? e.message : String(e));
     }

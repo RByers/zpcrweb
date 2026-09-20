@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   zipArchive,
-  zpcrFromRunFiles,
+  zpcrNameForRunFolder,
   zpcrNameFromRunFiles,
   runFilesToFetch,
   runIdentityFileNames,
@@ -17,13 +17,16 @@ import { readSampleBytes } from "./sample.js";
  * Unzipping a real sample and zipping it straight back is the closest thing to a live instrument
  * this suite can have — the entries are exactly what `CurrentRun` holds.
  */
-describe("zpcrFromRunFiles", () => {
+describe("zpcrNameForRunFolder", () => {
   const runFiles = unzipArchive(readSampleBytes());
 
   it("round-trips a sample's own files back into a parseable .zpcr", () => {
-    // Through a real ZIP: the archive it hands back is what a caller writes to disk with
-    // `zipArchive`, and that file has to be the run the folder held.
-    const rebuilt = parseZpcr(zipArchive(zpcrFromRunFiles(runFiles).archive));
+    // Through a real ZIP: the folder's files *are* the archive a caller writes to disk with
+    // `zipArchive`, and that file has to be the run the folder held. This is the premise that
+    // lets `zpcrNameForRunFolder` answer only the name question — so it is asserted here, and
+    // the folder is put past that guard on the way.
+    expect(zpcrNameForRunFolder(runFiles)).toBeTruthy();
+    const rebuilt = parseZpcr(zipArchive(runFiles));
     const original = parseZpcr(readSampleBytes());
 
     expect(rebuilt.archive.entries.sort()).toEqual(original.archive.entries.sort());
@@ -36,7 +39,7 @@ describe("zpcrFromRunFiles", () => {
   });
 
   it("names the archive after RunInfo.xml's DataFile", () => {
-    expect(zpcrFromRunFiles(runFiles).name).toBe("20260720_211747_CT019138_Luna_noRT.zpcr");
+    expect(zpcrNameForRunFolder(runFiles)).toBe("20260720_211747_CT019138_Luna_noRT.zpcr");
   });
 
   it("falls back when DataFile is absent, empty, or a full path", () => {
@@ -117,7 +120,7 @@ describe("zpcrFromRunFiles", () => {
 
   it("refuses a set of files with no RunInfo.xml", () => {
     const { "RunInfo.xml": _drop, ...rest } = runFiles;
-    expect(() => zpcrFromRunFiles(rest)).toThrow(/RunInfo\.xml/);
+    expect(() => zpcrNameForRunFolder(rest)).toThrow(/RunInfo\.xml/);
   });
 });
 

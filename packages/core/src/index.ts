@@ -71,7 +71,7 @@ export type { ExperimentArchiveParts } from "./experimentArchive.js";
 export { unzipArchive, zipArchive } from "./archive.js";
 export type { ZpcrArchive } from "./archive.js";
 export {
-  zpcrFromRunFiles,
+  zpcrNameForRunFolder,
   zpcrNameFromRunFiles,
   runIdentityFileNames,
   isSameRun,

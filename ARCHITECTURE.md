@@ -377,12 +377,12 @@ exploded") pays no ZIP at all. `parseZpcr(bytes)` is the single exception, since
 
 The instrument keeps a run in `\Storage Card\CurrentRun` as loose files — `RunInfo.xml`, the
 `Read*.Plateread` series, the `.Dcal` set, the marker files. A `.zpcr` is a plain ZIP of exactly
-those entries — a run directory already *is* a `ZpcrArchive`. So `zpcrFromRunFiles(files)` hands
-the same entries straight back, along with the name the run should carry: no conversion, no
-synthesis, and no zip (`zipArchive` is the caller's separate step, and what
+those entries — a run directory already *is* a `ZpcrArchive`. So the caller already holds the
+archive, and the only open question is the name: `zpcrNameForRunFolder(files)` answers it. No
+conversion, no synthesis, and no zip (`zipArchive` is the caller's separate step, and what
 `packages/core/test/runFolder.test.ts` checks the round trip through, byte-for-byte against a
-committed sample). The call throws when `RunInfo.xml` is missing rather than handing back an
-archive `parseZpcr` would reject.
+committed sample). The call throws when `RunInfo.xml` is missing rather than naming an archive
+`parseZpcr` would reject.
 
 Naming the archive takes three rungs, in `zpcrNameFromRunFiles`. A run *this app started* has its
 own `zpcrweb.json` in the folder (`usb/runPlan.ts` deposits it — nothing else writes one there),

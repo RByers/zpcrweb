@@ -24,7 +24,7 @@ import {
   unzipArchive,
   writeZpcrwebSettings,
   zipArchive,
-  zpcrFromRunFiles,
+  zpcrNameForRunFolder,
   RUN_BEGUN_MARKER,
   ZPCRWEB_SETTINGS_NAME,
   type ZpcrArchive,
@@ -113,18 +113,16 @@ describe("archive writers", () => {
   });
 });
 
-describe("zpcrFromRunFiles", () => {
-  it("hands a run directory back as the archive it already is, with the name it should carry", () => {
+describe("zpcrNameForRunFolder", () => {
+  it("names a run directory, which is already the archive itself — nothing is repacked", () => {
     const files = readSampleArchive();
-    const run = zpcrFromRunFiles(files);
 
-    expect(run.name).toBe("20260720_211747_CT019138_Luna_noRT.zpcr");
-    expect(run.archive).toBe(files); // the same archive, not a copy and not a repack
-    expect(parseZpcrArchive(run.archive).reads.length).toBe(parseZpcr(readSampleBytes()).reads.length);
+    expect(zpcrNameForRunFolder(files)).toBe("20260720_211747_CT019138_Luna_noRT.zpcr");
+    expect(parseZpcrArchive(files).reads.length).toBe(parseZpcr(readSampleBytes()).reads.length);
   });
 
-  it("refuses a folder with no RunInfo.xml, rather than yielding an unopenable archive", () => {
+  it("refuses a folder with no RunInfo.xml, rather than naming something unopenable", () => {
     const { "RunInfo.xml": _dropped, ...rest } = readSampleArchive();
-    expect(() => zpcrFromRunFiles(rest)).toThrow(/RunInfo\.xml/);
+    expect(() => zpcrNameForRunFolder(rest)).toThrow(/RunInfo\.xml/);
   });
 });

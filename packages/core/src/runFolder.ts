@@ -5,8 +5,8 @@
  * (see `archive.ts` and `usb.md` §7): `RunInfo.xml`, the `Read*.Plateread` series, the `.Dcal`
  * set, the marker files, and whatever plate/protocol the run carried. So a run directory already
  * *is* a {@link ZpcrArchive} — there is no format conversion here, and nothing to assemble. All
- * {@link zpcrFromRunFiles} does is check that the folder is a run and work out what it should be
- * called; `zipArchive` is the separate step that makes it a file, for a caller that wants one.
+ * {@link zpcrNameForRunFolder} does is check that the folder is a run and work out what it should
+ * be called; `zipArchive` is the separate step that makes it a file, for a caller that wants one.
  */
 
 import type { ZpcrArchive } from "./archive.js";
@@ -237,27 +237,24 @@ function runStartDate(runInfo: Uint8Array): Date {
 }
 
 /**
- * Read a run directory as the `.zpcr` archive it already is: the same entries back, plus what the
- * run should be called (see {@link zpcrNameFromRunFiles}).
+ * What a run directory's files should be saved as, having first checked that they really are a
+ * run — {@link zpcrNameFromRunFiles} with the folder guard in front of it.
  *
- * The archive is returned rather than zipped because that is what a caller following a live run
- * wants — every cycle re-assembles the whole run from ~40 cached files, and zipping that to hand
- * it over, only for the receiving side to unzip it again to read it, was the single most expensive
- * thing a plate read cost (the app's `useRunWatch` and `state/fileContent.ts`). A caller that
- * wants a file writes `zipArchive(archive)`.
+ * Nothing assembles anything: a run directory already *is* a {@link ZpcrArchive}, so a caller
+ * holding one holds the archive too, and the only question left is its name. (A caller that wants
+ * a file writes `zipArchive(files)`; a caller following a live run does not, because zipping ~40
+ * cached files every cycle only for the receiving side to unzip them again was the single most
+ * expensive thing a plate read cost — see the app's `useRunWatch` and `state/fileContent.ts`.)
  *
  * Throws when `RunInfo.xml` is absent: without it there is no run metadata and `parseZpcr` would
  * reject the archive anyway, so failing here names the actual problem — an incomplete set of
- * files — rather than handing back something that cannot be opened.
+ * files — rather than handing back a name for something that cannot be opened.
  */
-export function zpcrFromRunFiles(
-  files: ZpcrArchive,
-  naming?: RunFolderNaming,
-): { name: string; archive: ZpcrArchive } {
+export function zpcrNameForRunFolder(files: ZpcrArchive, naming?: RunFolderNaming): string {
   if (files[RUNINFO_NAME] === undefined) {
     throw new Error(`Can't assemble a .zpcr: no ${RUNINFO_NAME} among the run's files`);
   }
-  return { name: zpcrNameFromRunFiles(files, naming), archive: files };
+  return zpcrNameFromRunFiles(files, naming);
 }
 
 /**
