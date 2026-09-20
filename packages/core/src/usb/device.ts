@@ -71,6 +71,7 @@ import {
 } from "./status.js";
 import { cfxFileCrc, formatCfxFileCrc } from "./crc.js";
 import { CFX_RUN_REPORT_DIR, type RunPlan } from "./runPlan.js";
+import { usbTrafficText } from "../usbTraffic.js";
 import {
   CFX_CONFIGURATION,
   CFX_ENDPOINT_IN,
@@ -327,17 +328,6 @@ interface Pending {
   timer: ReturnType<typeof setTimeout> | null;
 }
 
-const TEXT_DECODER = new TextDecoder("latin1");
-
-/** Whether a payload is plausibly the ASCII the command channel normally carries. Used only to
- * decide how to *present* a message; nothing branches on it. */
-function asText(payload: Uint8Array): string | null {
-  for (const b of payload) {
-    if (b !== 0x09 && b !== 0x0a && b !== 0x0d && (b < 0x20 || b > 0x7e)) return null;
-  }
-  return TEXT_DECODER.decode(payload);
-}
-
 export class CfxDevice {
   private readonly opts: CfxDeviceOptions;
   private readonly inbound = new FrameReassembler();
@@ -477,7 +467,7 @@ export class CfxDevice {
       channel: msg.channel,
       payload: msg.payload,
       // A `passThrough` reply is raw by declaration, so don't even try to read it as text.
-      text: msg.passThrough ? null : asText(msg.payload),
+      text: msg.passThrough ? null : usbTrafficText(msg.payload),
       unsolicited,
       at: Date.now(),
     });
@@ -719,15 +709,6 @@ export class CfxDevice {
       const names = v === "" ? [] : v.split(",").filter((n) => n !== "");
       return { path: dir, names, listingBytes, status: "ok", listed: true };
     });
-  }
-
-  /** `GETFILESIZE <path>` — the file's size in bytes. */
-  async fileSize(path: string): Promise<number> {
-    assertCommandArgument("path", path);
-    const res = await this.command(`GETFILESIZE ${path}`);
-    const n = Number(res.value);
-    if (!Number.isFinite(n)) throw new Error(`GETFILESIZE ${path}: unparseable size ${res.raw}`);
-    return n;
   }
 
   /**

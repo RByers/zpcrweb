@@ -30,10 +30,10 @@ import {
   toTemperatureCurves,
 } from "./pivot.js";
 import { compareRefToCal, parseFactoryRefRowCal } from "./refcal.js";
+import { PROTOCOL_NAME_TXT } from "./usb/runPlan.js";
 
 const RUNINFO_NAME = "RunInfo.xml";
 const PROTOCOL_NAME = "ProtocolRunDefinition.txt";
-const PROTOCOL_NAME_TXT = "ProtocolName.txt";
 const textDecoder = new TextDecoder("utf-8");
 
 /** Normalize the accepted isomorphic input types into a `Uint8Array`. */

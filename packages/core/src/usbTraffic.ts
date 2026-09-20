@@ -96,9 +96,9 @@ const TEXT_ENCODER = new TextEncoder();
 const TEXT_DECODER = new TextDecoder("latin1");
 
 /**
- * The payload as text, or `null` when it holds anything unprintable — the same test
- * `CfxDevice.asText` applies when it decides what to put in a traffic event, kept in step with it
- * deliberately so a record read back renders the line the live console showed.
+ * The payload as text, or `null` when it holds anything unprintable. `CfxDevice` calls this too,
+ * when it decides what to put in a traffic event, so a record read back renders exactly the line
+ * the live console showed — one predicate, rather than two kept in step by hand.
  */
 export function usbTrafficText(payload: Uint8Array): string | null {
   for (const b of payload) {

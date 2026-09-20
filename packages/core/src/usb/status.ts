@@ -29,28 +29,17 @@ export function parseIdentity(res: CfxResponse): CfxIdentity {
   };
 }
 
-/** Lid position as reported by `STATUS?` field 17 (`usb.md` §3.2). */
-export type LidState =
-  | "OPEN"
-  | "CLOSED"
-  | "OPENING"
-  | "CLOSING"
-  | "MANUAL"
-  | "STOP"
-  | "ERROR"
-  | "NONE"
-  | "UNKNOWN";
+/** The lid positions the instrument itself reports. `"UNKNOWN"` is deliberately absent: this is
+ * the list a received field is matched against, and the instrument never sends that word. */
+const LID_STATES = ["OPEN", "CLOSED", "OPENING", "CLOSING", "MANUAL", "STOP", "ERROR", "NONE"] as const;
 
-const LID_STATES: readonly LidState[] = [
-  "OPEN",
-  "CLOSED",
-  "OPENING",
-  "CLOSING",
-  "MANUAL",
-  "STOP",
-  "ERROR",
-  "NONE",
-];
+/** Lid position as reported by `STATUS?` field 17 (`usb.md` §3.2), plus this parser's own
+ * `"UNKNOWN"` for a field that matches none of them. */
+export type LidState = (typeof LID_STATES)[number] | "UNKNOWN";
+
+function isLidState(v: string): v is LidState {
+  return (LID_STATES as readonly string[]).includes(v);
+}
 
 /**
  * `STATUS?` field 7, an 8-bit flag word (`usb.md` §3.2 "Field 7, the status register") — not an
@@ -239,7 +228,7 @@ export function parseStatus(res: CfxResponse): CfxStatus {
     errors: parseErrors(f[14]),
     stepCount: num(f[15]),
     sampleTempC: num(f[16]),
-    lid: (LID_STATES as string[]).includes(lidRaw) ? (lidRaw as LidState) : "UNKNOWN",
+    lid: isLidState(lidRaw) ? lidRaw : "UNKNOWN",
     sensor: num(f[18]),
     running: stepText !== "" && stepText !== "IDLE",
     phase: derivePhase(flags),

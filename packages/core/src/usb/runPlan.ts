@@ -87,7 +87,9 @@ const DEFAULT_METHOD = "CALC";
 /** The three method names `RemoteRun`'s eighth operand enumerates (`usb.md` §7.3). */
 const METHODS = new Set(["CALC", "BLOCK", "OTHER"]);
 
-/** The operator name `RemoteRun` records. `admin` in the capture; nothing reads it back. */
+/** The operator name `RemoteRun` records. `admin` in the capture; nothing reads it back, and
+ * nothing in this app has ever wanted to say anything else, so it is a constant rather than an
+ * option. */
 const DEFAULT_USER = "admin";
 
 /** The block letter, the same one `ERRORLIST A` uses. A CFX96 has exactly one. */
@@ -208,8 +210,6 @@ export interface PlanRunOptions {
    * (§7.3) and the `.alf` report, which is where it belongs.
    */
   plateName?: string;
-  /** `RemoteRun`'s operator field. Purely a label. */
-  user?: string;
 }
 
 /**
@@ -408,7 +408,6 @@ export function planRun(options: PlanRunOptions): RunPlan {
   const { runDefinition, plate } = options;
   const program = parseRunDefinition(runDefinition);
   const name = runNameBase(options.name || "");
-  const user = options.user ?? DEFAULT_USER;
   const method = program.method ?? DEFAULT_METHOD;
 
   // `PROTOCOL` first, then the run definition's own directives verbatim, one per line — the
@@ -493,14 +492,13 @@ export function planRun(options: PlanRunOptions): RunPlan {
   //   <lid on>       True — use the heated lid, whose temperature `HOTLID` already set
   //   <remote start> False — start now, rather than staging it for the touchscreen's own start
   //   <run name>     what the run is called; reaches STATUS? and the .alf report's filename
-  //   <user>         free text, recorded in the report
+  //   <user>         free text, recorded in the report — always DEFAULT_USER here
   //   <sample ID>    free text, empty here as in the capture
   //   <sierra mode>  True — the instrument drives its own optics and writes its own plate reads,
   //                  which is what lets the run survive this browser going away
   //   <method>       repeated from METHOD; this is the copy STATUS? reports back
-  const safeUser = runNameBase(user);
   const remoteRun =
-    `RemoteRun "${BLOCK}","True","False","${name}","${safeUser}","","True","${method}"`;
+    `RemoteRun "${BLOCK}","True","False","${name}","${DEFAULT_USER}","","True","${method}"`;
   assertCommandArgument("RemoteRun", remoteRun);
 
   // The name is a property of the run rather than of the protocol/plate pair, so it is checked
