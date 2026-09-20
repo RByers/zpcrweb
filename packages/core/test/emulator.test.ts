@@ -1,0 +1,597 @@
+/**
+ * The real `CfxDevice`, driven against the emulator — `emulator.md` §10.
+ *
+ * This is the point of the emulator existing. `startRun`, `cancelRun`, `sendFile`, `runReport`,
+ * `clearRunReports` and `deviceInfo` are ~300 lines of `device.ts` that had **no automated
+ * coverage at all** and were verified only by an operator driving real hardware; a mistake in
+ * them was invisible until a run in the lab went wrong. Everything below goes over the wire —
+ * framing, command lines, replies — so a regression here is a regression in the client, not in a
+ * fixture.
+ *
+ * What it does **not** prove is anything about the instrument: the emulator was written from the
+ * same `usb.md` the client was, so the two agreeing says only that they read it the same way.
+ */
+import { describe, expect, it } from "vitest";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import {
+  CfxDevice,
+  isFinishedRun,
+  isPlateReadName,
+  parseAlf,
+  planRun,
+  unzipArchive,
+  type CfxStatus,
+} from "../src/index.js";
+import {
+  acceleratedClock,
+  createCfxEmulator,
+  manualClock,
+  recordedRunData,
+  realtimeClock,
+  type CfxEmulator,
+  type ScaledClock,
+} from "../src/emulator.js";
+import { MELT_SAMPLE_PATH, RT_S56_SAMPLE_PATH } from "./sample.js";
+
+const CURRENT_RUN = "\\Storage Card\\CurrentRun";
+const RUN_REPORTS = "\\Storage Card\\PCRunReport";
+
+/** The reference capture's own protocol: two cycles, two plate reads (`usb.md` §7.2). */
+const TWO_CYCLE =
+  "METHOD CALC;HOTLID 105,30;VOLUME 25;TEMP 95.0,180;TEMP 95.0,10;TEMP 55.0,30;" +
+  "PLATEREAD #h3F;GOTO 2,1;END";
+
+/** A melt spelled out the long way — a `PLATEREAD` inside a loop with an `INC` on its hold step,
+ * which is how every stored protocol in this repo writes one (`protocol.md` §6). */
+const MELT =
+  "METHOD CALC;HOTLID 105,30;VOLUME 20;TEMP 95.0,60;TEMP 65.0,30;TEMP 65.0,5;INC 0.5;" +
+  "PLATEREAD #h3F;GOTO 3,4;END";
+
+/** A thermal-only protocol: no `PLATEREAD`, so no run folder at all (`usb.md` §7.10). */
+const THERMAL_ONLY = "METHOD BLOCK;HOTLID 105,30;VOLUME 10;TEMP 37.0,30;END";
+
+function archiveAt(path: string) {
+  const buf = readFileSync(path);
+  return unzipArchive(new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength));
+}
+
+let pcrArchive: ReturnType<typeof archiveAt> | null = null;
+function pcrData() {
+  pcrArchive ??= archiveAt(RT_S56_SAMPLE_PATH);
+  return recordedRunData(pcrArchive);
+}
+
+let meltArchive: ReturnType<typeof archiveAt> | null = null;
+function meltData() {
+  meltArchive ??= archiveAt(MELT_SAMPLE_PATH);
+  return recordedRunData(meltArchive);
+}
+
+interface Rig {
+  emulator: CfxEmulator;
+  device: CfxDevice;
+  close: () => Promise<void>;
+}
+
+async function connect(options: Parameters<typeof createCfxEmulator>[0] = {}): Promise<Rig> {
+  const emulator = createCfxEmulator({ clock: acceleratedClock(), ...options });
+  const device = new CfxDevice(emulator);
+  await device.open();
+  return { emulator, device, close: () => device.close() };
+}
+
+/**
+ * Poll until `done`, the way a client does — and, with the accelerated clock, the polling *is*
+ * the passage of time: one `STATUS?` advances the run to the end of the step it is on. So this
+ * waits on state rather than on a duration, and there is no timer anywhere in the run.
+ */
+async function pollUntil(
+  device: CfxDevice,
+  done: (s: CfxStatus) => boolean,
+  limit = 400,
+): Promise<CfxStatus> {
+  let status = await device.status();
+  for (let i = 0; i < limit && !done(status); i++) status = await device.status();
+  if (!done(status)) throw new Error(`gave up after ${limit} polls; last step ${status.stepText}`);
+  return status;
+}
+
+describe("the emulator answers the identification block", () => {
+  it("identifies itself, and deviceInfo gathers every static query", async () => {
+    const { device, emulator, close } = await connect();
+    expect(await device.identify()).toMatchObject({
+      manufacturer: "BIO-RAD LABORATORIES",
+      model: "C1000",
+      serial: "CT019138",
+      firmware: "2.0.231.0",
+    });
+    const info = await device.deviceInfo();
+    expect(info).toMatchObject({
+      serial: "CT019138",
+      baseSerial: "CT019138",
+      alphaSerial: "RN050773",
+      alphaId: "4",
+      // `BLOCKDESC?` comes back quoted and `deviceInfo` unquotes it.
+      blockDescription: "96FX",
+      blockCount: 1,
+      cpld: "B",
+      superLockdown: "OFF",
+      errorCount: 0,
+    });
+    expect(info.freeSpaceBytes).toBeGreaterThan(0);
+    expect(info.totalRamBytes).toBeGreaterThan(0);
+    // Every one of them went out as its own command line — `deviceInfo` is fifteen round trips,
+    // not one composite query.
+    expect(emulator.sent).toContain("FrontEndSoftware?");
+    expect(emulator.sent).toContain("GETTOTALRAM");
+    await close();
+  });
+
+  it("takes an overridden identity", async () => {
+    const { device, close } = await connect({ identity: { serial: "CT000001" } });
+    expect((await device.identify()).serial).toBe("CT000001");
+    await close();
+  });
+
+  it("reports an idle status that parses as idle", async () => {
+    const { device, close } = await connect();
+    const status = await device.status();
+    expect(status.running).toBe(false);
+    expect(status.phase).toBe("idle");
+    expect(status.runName).toBe("");
+    expect(status.stepText).toBe("IDLE");
+    expect(status.lid).toBe("CLOSED");
+    // Twenty fields, as `usb.md` §3.2 defines the record — nineteen plus the trailing code.
+    expect(status.fields).toHaveLength(19);
+    const rt = await device.rtStatus();
+    expect(rt.shuttleTempC).toBeCloseTo(18.31, 2);
+    expect(rt.faults).toEqual([]);
+    expect(await device.errorList()).toEqual([]);
+    await close();
+  });
+});
+
+describe("the filesystem, quirks included", () => {
+  it("replays the preceding GETFILESLEN's buffer, whatever path LISTALLFILES is given", async () => {
+    const { device, emulator, close } = await connect({
+      initialRunFolder: { "a.txt": new Uint8Array(1), "b.txt": new Uint8Array(2) },
+    });
+    // The pair must stay adjacent, which is what `CfxDevice.listFiles` holds the channel for:
+    // two interleaved listings would each report the other's directory.
+    const [current, reports] = await Promise.all([
+      device.listFiles(CURRENT_RUN),
+      device.listFiles(RUN_REPORTS),
+    ]);
+    expect(current.names).toEqual(["a.txt", "b.txt"]);
+    expect(current.status).toBe("ok");
+    // An empty directory answers with `07 00 09 00` and no listing is attempted at all.
+    expect(reports.status).toBe("empty");
+    expect(reports.names).toEqual([]);
+    expect(emulator.sent).toEqual([
+      `GETFILESLEN ${CURRENT_RUN}`,
+      `LISTALLFILES ${CURRENT_RUN}`,
+      `GETFILESLEN ${RUN_REPORTS}`,
+    ]);
+    await close();
+  });
+
+  it("answers a missing directory, and `\\Storage Card` itself, with their status codes", async () => {
+    const { device, close } = await connect();
+    expect(await device.listFiles("\\Nonexistent")).toMatchObject({
+      status: "missing",
+      listed: false,
+    });
+    // Listings cover files only, so the volume root — which holds nothing but its two
+    // subdirectories — reports itself empty rather than naming them (`usb.md` §5).
+    expect(await device.listFiles("\\Storage Card")).toMatchObject({ status: "empty" });
+    await close();
+  });
+
+  it("round-trips a file through sendFile's five-command upload cycle", async () => {
+    const { device, emulator, close } = await connect();
+    // An even length, so the checksum's byte order is actually exercised (`usb.md` §9.2).
+    const bytes = new Uint8Array(1000).map((_, i) => (i * 37 + 13) % 256);
+    const path = `${CURRENT_RUN}\\probe.bin`;
+    const result = await device.sendFile(path, bytes);
+    expect(result.verified).toBe(true);
+    expect(result.crcStored).toBe(result.crcSent);
+    expect(result.storedPath).toMatch(/^\\Storage Card\\CurrentRun\\[0-9a-f-]+$/);
+    expect(result.bytes).toBe(1000);
+    expect(emulator.sent.filter((c) => !c.startsWith("CRCSENDFILE"))).toEqual([
+      `DELFILE ${path}`,
+      `COMPUTEFILECRC "${path}"`,
+      `GETFILESLEN ${CURRENT_RUN}`,
+      `LISTALLFILES ${CURRENT_RUN}`,
+      `GETFILECRC "${result.storedPath}"`,
+    ]);
+    // And the bytes really landed: the same file comes back down.
+    expect(Array.from(await device.getFile(path))).toEqual(Array.from(bytes));
+    await close();
+  });
+});
+
+describe("a run, start to collected", () => {
+  it("authors every directive, starts on RemoteRun, and deposits afterwards", async () => {
+    const { device, emulator, close } = await connect({ data: pcrData() });
+    const plan = planRun({ runDefinition: TWO_CYCLE, name: "demo", protocolName: "twocycle" });
+    expect(plan.startable).toBe(true);
+    const result = await device.startRun(plan);
+    expect(result.uploadErrors).toEqual([]);
+    expect(result.uploads.every((u) => u.verified)).toBe(true);
+
+    const sent = emulator.sent;
+    // §7.1 first: the previous report is cleared so the new one is the directory's only entry.
+    expect(sent[0]).toBe(`GETFILESLEN ${RUN_REPORTS}`);
+    // §7.2: the protocol typed in, one command per directive, in order.
+    const author = sent.slice(sent.indexOf("PROTOCOL 'PCRUN'"));
+    expect(author.slice(0, 10)).toEqual([
+      "PROTOCOL 'PCRUN'",
+      "METHOD CALC",
+      "HOTLID 105,30",
+      "VOLUME 25",
+      "TEMP 95.0,180",
+      "TEMP 95.0,10",
+      "TEMP 55.0,30",
+      "PLATEREAD #h3F",
+      "GOTO 2,1",
+      "END",
+    ]);
+    // §7.3, then the no-op §7.3 sends as ordinary setup — and the deposit only after both.
+    expect(author[10]).toBe('RemoteRun "A","True","False","demo","admin","","True","CALC"');
+    expect(author[11]).toBe("ADDCYCLES 0");
+    expect(author.slice(12).some((c) => c.startsWith("CRCSENDFILE"))).toBe(true);
+    await close();
+  });
+
+  it("holds the empty idle through the start window, then runs", async () => {
+    const clock = manualClock();
+    const { device, close } = await connect({ data: pcrData(), clock });
+    await device.startRun(planRun({ runDefinition: TWO_CYCLE, name: "demo" }));
+    // Measured: `RemoteRun` is accepted and for ~6 s `STATUS?` still reports the empty idle, so
+    // an armed run and a genuinely idle instrument are the same reply (`usb.md` §7.8 step 0).
+    clock.advance(4_500);
+    expect(await device.status()).toMatchObject({ running: false, runName: "", stepText: "IDLE" });
+    clock.advance(2_000);
+    const started = await device.status();
+    expect(started.running).toBe(true);
+    expect(started.runName).toBe("DEMO");
+    // And the lid heats first, with the run's own clocks still at zero (`usb.md` §7.3).
+    expect(started.flags.lidPreheating).toBe(true);
+    expect(started.elapsedS).toBe(0);
+    expect(started.blockTempC).toBeCloseTo(18.4, 1);
+    await close();
+  });
+
+  it("materialises each plate read as its step ends, and the last only on acknowledgement", async () => {
+    const { device, close } = await connect({ data: pcrData() });
+    await device.startRun(planRun({ runDefinition: TWO_CYCLE, name: "demo" }));
+
+    // Watch for the first read's step to end, exactly as `useRunWatch` does.
+    await pollUntil(device, (s) => s.stepText.startsWith("PLATEREAD"));
+    expect((await device.listFiles(CURRENT_RUN)).names.filter(isPlateReadName)).toEqual([]);
+    await pollUntil(device, (s) => !s.stepText.startsWith("PLATEREAD") || !s.running);
+    expect((await device.listFiles(CURRENT_RUN)).names.filter(isPlateReadName)).toEqual([
+      "Read00001.Plateread",
+    ]);
+
+    const finished = await pollUntil(device, (s) => isFinishedRun(s));
+    // §7.6: finished, and still held — `IDLE`, counters zero, the name still attached.
+    expect(finished.stepText).toBe("IDLE");
+    expect(finished.cycle).toBe(0);
+    expect(finished.runName).toBe("DEMO");
+    expect(finished.flags.raw).toBe(32);
+    expect(finished.phase).toBe("finished");
+
+    const before = await device.listFiles(CURRENT_RUN);
+    expect(before.names).not.toContain("ended");
+    await device.acknowledgeRun();
+    const after = await device.listFiles(CURRENT_RUN);
+    expect(after.names).toContain("ended");
+    expect(after.names.filter(isPlateReadName)).toEqual([
+      "Read00001.Plateread",
+      "Read00002.Plateread",
+    ]);
+    // Released: the name is gone and the instrument is back to the empty idle.
+    expect(await device.status()).toMatchObject({ runName: "", stepText: "IDLE" });
+
+    // And what came back is a real plate read, with this run's cycle in its header.
+    const read = await device.getFile(`${CURRENT_RUN}\\Read00002.Plateread`);
+    expect(read.length).toBeGreaterThan(20_000);
+    await close();
+  });
+
+  it("collects a report whose step log is the run that actually executed", async () => {
+    const { device, close } = await connect({ data: pcrData() });
+    await device.startRun(planRun({ runDefinition: TWO_CYCLE, name: "demo" }));
+    await pollUntil(device, (s) => isFinishedRun(s));
+    await device.acknowledgeRun();
+
+    const report = await device.runReport();
+    expect(report).not.toBeNull();
+    expect(report!.name).toMatch(/^\d{8}_\d{6}_CT019138_DEMO\.alf$/);
+    const alf = parseAlf(report!.bytes);
+    expect(alf.problems).toEqual([]);
+    expect(alf.header.runName).toBe("DEMO");
+    expect(alf.header.user).toBe("admin");
+    expect(alf.plateReadCount).toBe(2);
+    // The instrument supplies the lid and volume settings it is holding, even when the host
+    // never sent them — measured on the thermal-only run (`usb.md` §7.10).
+    expect(alf.runDefinition).toContain("HOTLID 105,30");
+    expect(alf.completionPhrase).toBe("Protocol completed.");
+    // Seven executed steps: three of cycle 1 plus the read, then cycle 2's three.
+    expect(alf.steps.map((s) => s.stepNumber)).toEqual([1, 2, 3, 4, 2, 3, 4]);
+    expect(alf.steps.map((s) => s.repeat)).toEqual([1, 1, 1, 1, 2, 2, 2]);
+    await close();
+  });
+
+  it("empties the run-report directory at the start, so the new report is the only entry", async () => {
+    const { device, emulator, close } = await connect({ data: pcrData() });
+    emulator.instrument.fs.write(`${RUN_REPORTS}\\20260101_000000_CT019138_OLD.alf`, new Uint8Array(1));
+    expect(await device.clearRunReports()).toEqual(["20260101_000000_CT019138_OLD.alf"]);
+    expect((await device.listFiles(RUN_REPORTS)).status).toBe("empty");
+    await close();
+  });
+});
+
+describe("pausing, skipping and stopping", () => {
+  it("pauses and resumes, with the run's clock frozen in between", async () => {
+    const clock = manualClock();
+    const { device, close } = await connect({ data: pcrData(), clock });
+    await device.startRun(planRun({ runDefinition: TWO_CYCLE, name: "demo" }));
+    clock.advance(6_000 + 168_000 + 20_000);
+    const before = await device.status();
+    expect(before.running).toBe(true);
+
+    await device.pauseRun();
+    const paused = await device.status();
+    // `usb.md` §7.9: bit 1 of the register is the indicator to trust, and field 13 sits beside
+    // it. `isPaused` takes either, which is what this must satisfy.
+    expect(paused.flags.paused).toBe(true);
+    expect(paused.elapsedS).toBe(before.elapsedS);
+    expect(before.elapsedS).not.toBeNull();
+
+    clock.advance(30_000);
+    expect((await device.status()).elapsedS).toBe(before.elapsedS);
+
+    await device.resumeRun();
+    clock.advance(5_000);
+    const resumed = await device.status();
+    expect(resumed.flags.paused).toBe(false);
+    // The pause cost the run nothing: five seconds after resuming, five seconds have elapsed.
+    expect(resumed.elapsedS).toBeCloseTo(before.elapsedS! + 5, 1);
+    await close();
+  });
+
+  it("PROCEED skips to the next step rather than starting or resuming anything", async () => {
+    const clock = manualClock();
+    const { device, close } = await connect({ data: pcrData(), clock });
+    await device.startRun(planRun({ runDefinition: TWO_CYCLE, name: "demo" }));
+    clock.advance(6_000 + 168_000 + 20_000);
+    // Step 1 is a 3-minute hold the run is 20 s into — it cannot have run out.
+    expect((await device.status()).stepText).toBe("TEMP 95.0,180");
+    await device.runAction("skipStep");
+    expect((await device.status()).stepText).toBe("TEMP 95.0,10");
+    await close();
+  });
+
+  it("cancelRun stops a running protocol and leaves it in the finished state", async () => {
+    const { device, close } = await connect({ data: pcrData() });
+    await device.startRun(planRun({ runDefinition: TWO_CYCLE, name: "demo" }));
+    await pollUntil(device, (s) => s.running && !s.flags.lidPreheating);
+
+    const result = await device.cancelRun({ pollMs: 1, timeoutMs: 5_000 });
+    expect(result.startedFrom).toBe("running");
+    expect(result.stopped).toBe(true);
+    // Bit 7 on top of the finished state — the one signal that says "the run I stopped" rather
+    // than "the run that finished while I was deciding" (`usb.md` §3.2, §7.8).
+    expect(result.sawCancelledFlag).toBe(true);
+    expect(result.status.flags.raw).toBe(160);
+    expect(result.errors).toEqual([]);
+    expect(result.timedOut).toBe(false);
+    // It stops at §7.6's finished state and hands the acknowledgement to the end-of-run path —
+    // having two owners of that is how a run loses its last read.
+    expect(isFinishedRun(result.status)).toBe(true);
+
+    await device.acknowledgeRun();
+    const names = (await device.listFiles(CURRENT_RUN)).names;
+    expect(names).toContain("ended");
+    // A cancelled run is simply a run with fewer reads than its protocol implies — that count is
+    // the only durable evidence the run was cut short (`usb.md` §7.8 step 6).
+    expect(names.filter(isPlateReadName).length).toBeLessThan(2);
+    await close();
+  });
+
+  it("does not cancel into a plate read: it waits for the step to end first", async () => {
+    // The manual clock, because this is the one case that needs the run to sit *inside* a step
+    // while the host decides: the optics are mid-scan and that cycle's file does not exist yet
+    // (`usb.md` §7.8 step 1). `cancelRun`'s own `onStatus` is what moves time on here, which is
+    // also the callback a caller uses to keep its display live while the channel is held.
+    const clock = manualClock();
+    const { device, close } = await connect({ data: pcrData(), clock });
+    await device.startRun(planRun({ runDefinition: TWO_CYCLE, name: "demo" }));
+    // Start window, lid preheat, then 190 s + 20 s + 40 s of thermal steps: five seconds into
+    // the first plate read.
+    clock.advance(6_000 + 168_000 + 255_000);
+    expect((await device.status()).stepText).toBe("PLATEREAD #h3F");
+
+    const result = await device.cancelRun({
+      pollMs: 1,
+      readWaitMs: 5_000,
+      timeoutMs: 10_000,
+      onStatus: () => clock.advance(3_000),
+    });
+    expect(result.waitedForRead).toBe(true);
+    expect(result.stopped).toBe(true);
+    await device.acknowledgeRun();
+    // The read in flight became a file rather than being thrown away.
+    expect((await device.listFiles(CURRENT_RUN)).names).toContain("Read00001.Plateread");
+    await close();
+  });
+
+  it("survives the start window, where a bare CANCEL is answered 0000 and ignored", async () => {
+    const clock = manualClock();
+    const { device, emulator, close } = await connect({ data: pcrData(), clock });
+    await device.startRun(planRun({ runDefinition: TWO_CYCLE, name: "demo" }));
+
+    // A fire-and-forget button: accepted, and the run starts anyway. This is the bug.
+    expect((await device.acknowledgeRun()).ok).toBe(true);
+    clock.advance(6_500);
+    expect((await device.status()).running).toBe(true);
+    await close();
+    expect(emulator.sent.filter((c) => c === "CANCEL")).toHaveLength(1);
+  });
+
+  it("cancelRun with expectStart waits the run out and then stops it for real", async () => {
+    // A real clock this time, scaled hard: `cancelRun`'s own loop sleeps in wall time, so the
+    // start window has to pass in wall time too for the watch-and-retry path to be exercised.
+    const clock = realtimeClock(200);
+    const { device, close } = await connect({ data: pcrData(), clock });
+    await device.startRun(planRun({ runDefinition: TWO_CYCLE, name: "demo" }));
+    const result = await device.cancelRun({
+      expectStart: true,
+      pollMs: 5,
+      startWindowMs: 2_000,
+      timeoutMs: 10_000,
+    });
+    expect(result.startedFrom).toBe("idle");
+    expect(result.stopped).toBe(true);
+    // More than one CANCEL: the first fell in the window and did nothing.
+    expect(result.attempts).toBeGreaterThan(1);
+    expect(result.status.runName).toBe("DEMO");
+    await close();
+  });
+});
+
+describe("the other two kinds of run", () => {
+  it("runs a melt, whose reads climb in temperature", async () => {
+    const { device, close } = await connect({ data: meltData() });
+    const plan = planRun({ runDefinition: MELT, name: "melt" });
+    expect(plan.startable).toBe(true);
+    await device.startRun(plan);
+    await pollUntil(device, (s) => isFinishedRun(s));
+    await device.acknowledgeRun();
+
+    const names = (await device.listFiles(CURRENT_RUN)).names.filter(isPlateReadName);
+    // `GOTO 3,4` — five passes over the 65 °C step and its read.
+    expect(names).toHaveLength(5);
+    const report = await device.runReport();
+    const alf = parseAlf(report!.bytes);
+    // `INC 0.5` walks the setpoint up half a degree a pass, which is what makes it a melt.
+    expect(alf.steps.filter((s) => s.stepNumber === 3).map((s) => s.setpointText)).toEqual([
+      "65.0",
+      "65.5",
+      "66.0",
+      "66.5",
+      "67.0",
+    ]);
+    await close();
+  });
+
+  it("a thermal-only run writes no run folder at all, only its report", async () => {
+    const previous = { "Read00001.Plateread": new Uint8Array(10), begun: new Uint8Array(0) };
+    const { device, close } = await connect({ initialRunFolder: previous });
+    const plan = planRun({ runDefinition: THERMAL_ONLY, name: "agblk" });
+    expect(plan.producesRunFile).toBe(false);
+    // And therefore nothing to deposit: the files would land in the *previous* run's folder.
+    expect(plan.uploads).toEqual([]);
+    await device.startRun(plan);
+    await pollUntil(device, (s) => isFinishedRun(s));
+    await device.acknowledgeRun();
+
+    // Not one entry appeared or disappeared, from before the run to after the acknowledgement
+    // (`usb.md` §7.10, measured on a CFX96).
+    expect((await device.listFiles(CURRENT_RUN)).names.sort()).toEqual([
+      "Read00001.Plateread",
+      "begun",
+    ]);
+    const report = await device.runReport();
+    expect(report!.name).toMatch(/_AGBLK\.alf$/);
+    const alf = parseAlf(report!.bytes);
+    expect(alf.plateReadCount).toBe(0);
+    expect(alf.runDefinition).toBe("METHOD BLOCK;HOTLID 105,30;VOLUME 10;TEMP 37.0,30;END");
+    await close();
+  });
+});
+
+describe("the clock never jumps", () => {
+  const readings = (clock: ScaledClock, wall: { t: number }, plan: [number, number][]) => {
+    const out: number[] = [];
+    for (const [speed, advanceMs] of plan) {
+      const before = clock.now();
+      clock.setSpeed(speed);
+      const after = clock.now();
+      // The change itself moves the clock not at all — the whole of the rebasing rule.
+      expect(after).toBe(before);
+      wall.t += advanceMs;
+      out.push(clock.now());
+    }
+    return out;
+  };
+
+  it("is monotonically non-decreasing across speed changes up and down", () => {
+    const wall = { t: 1_000 };
+    const clock = realtimeClock(1, () => wall.t);
+    wall.t += 1_000;
+    expect(clock.now()).toBe(1_000);
+    const seen = readings(clock, wall, [
+      [60, 1_000],
+      [1, 1_000],
+      [600, 1_000],
+      [0.5, 1_000],
+      [1, 1_000],
+    ]);
+    // 1 000 + 60 000, then +1 000, +600 000, +500, +1 000 — and never once backwards.
+    expect(seen).toEqual([61_000, 62_000, 662_000, 662_500, 663_500]);
+    for (let i = 1; i < seen.length; i++) expect(seen[i]!).toBeGreaterThanOrEqual(seen[i - 1]!);
+  });
+
+  it("advances only when asked, in the accelerated clock", async () => {
+    const clock = acceleratedClock();
+    expect(clock.now()).toBe(0);
+    // No timer exists: waiting does nothing at all.
+    await new Promise((r) => setTimeout(r, 20));
+    expect(clock.now()).toBe(0);
+    clock.poll(5_000);
+    expect(clock.now()).toBe(5_000);
+    // And it never goes backwards, whatever it is told.
+    clock.poll(1_000);
+    expect(clock.now()).toBe(5_000);
+  });
+
+  it("refuses to run backwards on the manual clock", () => {
+    const clock = manualClock();
+    clock.advance(10);
+    expect(() => clock.advance(-1)).toThrow(/never goes backwards/);
+    expect(clock.now()).toBe(10);
+  });
+});
+
+describe("@zpcrweb/core/emulator is a subpath of its own", () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const pkg = JSON.parse(readFileSync(resolve(here, "../package.json"), "utf8")) as {
+    exports: Record<string, { import: string }>;
+  };
+
+  it("is declared in package.json and built as its own tsup entry", () => {
+    expect(pkg.exports["./emulator"]?.import).toBe("./dist/emulator.js");
+    const tsup = readFileSync(resolve(here, "../tsup.config.ts"), "utf8");
+    expect(tsup).toContain('"src/emulator.ts"');
+    // The entry exists and re-exports the module the app will lazily import.
+    expect(readFileSync(resolve(here, "../src/emulator.ts"), "utf8")).toContain(
+      'export * from "./usb/emulator/index.js"',
+    );
+  });
+
+  // `npm test` runs against `src`, so there need not be a `dist` — but when there is one, the
+  // path the export map points at has to be a module that really loads and really carries the
+  // entry point. Skipped rather than failed without a build, since building is not this suite's
+  // job and a red test for "you have not run tsup" would be noise.
+  const built = resolve(here, "..", pkg.exports["./emulator"]!.import);
+  it.skipIf(!existsSync(built))("loads from the path its export map names", async () => {
+    const module = (await import(pathToFileURL(built).href)) as typeof import("../src/emulator.js");
+    expect(typeof module.createCfxEmulator).toBe("function");
+    expect(module.createCfxEmulator().vendorId).toBe(0x0614);
+  });
+});
