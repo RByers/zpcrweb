@@ -346,15 +346,26 @@ their definitions:
   because the only recovery is a new connection and retrying just delays it. Either way, failing
   pending commands and calling `onClose` is how the pump ends — see `isUnrecoverableTransferError`
   and the constants at the top of `readLoop` in `device.ts`.
-- **Reconnecting is the web app's job, not the library's.** `CfxDevice` reports the drop and stops;
-  `useCfxDevice` decides what to do about it, since obtaining a device handle is the part that is
-  browser-specific. On an error close with the user still wanting a connection it retries
-  `navigator.usb.getDevices()` on a backoff, indefinitely, and also reconnects immediately on the
-  `connect` event a replug fires. It never calls `requestDevice()` there — a picker needs a user
-  gesture — which works only because WebUSB permission persists, so an already-granted device comes
-  back with no prompt. The case this is for is a run in progress: the instrument keeps cycling
-  regardless, so a dropped pipe costs only the host's view of it, and `useRunWatch` re-establishes
-  its listing baseline on the way back.
+- **Reconnecting is `CfxSession`'s job, not `CfxDevice`'s.** The device reports the drop and stops;
+  the session decides what to do about it. On an error close with the caller still wanting a
+  connection it asks for a handle again on a backoff, indefinitely, and `reconnectNow()` lets the
+  caller short-circuit the wait when it has an event saying the device is back (`navigator.usb`'s
+  `connect`, which a replug fires). The case this is for is a run in progress: the instrument keeps
+  cycling regardless, so a dropped pipe costs only the host's view of it, and the run watcher
+  re-establishes its listing baseline on the way back.
+
+**A *session* is a connection kept alive, and it is in the library** (`session.ts`). `CfxDevice`
+speaks the protocol and knows nothing about staying connected; `CfxSession` adds the status poll
+and the `busy` gate that serialises it against a file transfer, the reconnect above, the traffic
+recording and the capped display window, and the accumulated view of the instrument. It publishes a
+`subscribe`/`state` snapshot in the shape `useSyncExternalStore` wants, so the React hook above it
+is a shell.
+
+One port keeps core free of browser types, and there is only one because a port that exists so a
+single caller can pass a single implementation is a longer path to the same call:
+`CfxSessionOptions.acquire` — *find me a device*, which is the one thing only a browser can do.
+Everything else is ordinary timers and ordinary calls, which is why the session is driven end to
+end in `test/session.test.ts` against the emulator, with no DOM.
 
 **A run without a `PLATEREAD` is a different shape of run, not a degenerate one.** The instrument
 builds no `CurrentRun` folder for an incubation or an RT hold — measured, the folder is unchanged

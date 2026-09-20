@@ -117,7 +117,7 @@ const READ_ERROR_RETRY_DELAY_MS = 200;
  *
  * For all three the recovery is a *new connection*, which is the caller's business, not this
  * loop's: reporting them as fatal immediately hands off to whoever reconnects (in the web app,
- * `useCfxDevice`'s reconnect loop) instead of spending {@link READ_ERROR_RETRY_LIMIT} ×
+ * `CfxSession`'s reconnect loop) instead of spending {@link READ_ERROR_RETRY_LIMIT} ×
  * {@link READ_ERROR_RETRY_DELAY_MS} failing the same way four more times first. Anything
  * unrecognized keeps the benefit of the doubt and is retried, since the retry is bounded anyway.
  */
@@ -867,7 +867,7 @@ export class CfxDevice {
    * That newest-by-name rule is also what makes this usable **outside** a run this client started:
    * the app reads it on connect to say what the instrument last ran, where the §7.1 guarantee does
    * not apply and the answer is simply the most recent report the instrument is holding (the app's
-   * `useCfxDevice.refreshLastReport`).
+   * `CfxSession.refreshLastReport`).
    */
   async runReport(): Promise<{ name: string; bytes: Uint8Array } | null> {
     const dir = await this.listFiles(CFX_RUN_REPORT_DIR);

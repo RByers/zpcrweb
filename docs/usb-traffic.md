@@ -15,7 +15,7 @@ The obvious way to store it is the way you read it — one formatted line per me
 
 That line is 85 bytes, of which the payload is 8. The rest is a re-printed ISO timestamp, a hex
 expansion at three characters per byte, and the same handful of words every time. It is also
-relentless: the status poll alone is six messages every 1.5 s (`useCfxDevice`'s `POLL_MS`), so an
+relentless: the status poll alone is six messages every 1.5 s (`usb/session.ts`'s `POLL_MS`), so an
 hour is 14 400 messages and 1.3 MB before anything interesting has happened, held in browser memory
 for the whole session and then written into the run's file.
 
@@ -40,7 +40,7 @@ Three things about a message are **not** in its payload bytes, so each gets a fl
 | Fact | Why it can't be derived |
 |------|-------------------------|
 | `unsolicited` | An unsolicited channel-1 message and a reply to a command look identical on the wire (`usb.md` §2). Only the client, which knows what it asked for, can tell them apart. |
-| `poll` | Whether a line is status-poll chatter. A reply carries no copy of its request, so it is classified on arrival against the message before it (`useCfxDevice`'s `classifyPoll`). |
+| `poll` | Whether a line is status-poll chatter. A reply carries no copy of its request, so it is classified on arrival against the message before it (`usb/session.ts`'s poll classifier). |
 | *binary* | Whether the device offered a text decode at all. A `passThrough` reply is left as bytes even when every one of them is printable, so re-testing the payload would invent a decode the client never had. |
 
 Everything else is derived at format time: the direction arrow from the direction bit, the byte
@@ -126,7 +126,7 @@ client sends is a short command, so the cutoff only ever applies to the replies 
 The cut lives in `usbTrafficPreview(msg)`, exported alongside the constant, because there are two
 renderings of the same traffic and they must agree: this one, and the app's **live console**, which
 builds its lines as messages arrive rather than from stored records
-(`apps/web/src/state/useCfxDevice.ts`). Eliding at that end also keeps a fetched file's bytes out of
+(`packages/core/src/usb/session.ts`). Eliding at that end also keeps a fetched file's bytes out of
 React state, where a few transfers would otherwise sit in the display buffer as megabytes of hex
 nobody can read.
 

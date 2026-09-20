@@ -57,6 +57,17 @@ export {
   encodeFrame,
 } from "./frame.js";
 export type { CfxFrameHeader, CfxMessage } from "./frame.js";
+export { CfxSession, RECONNECT_DELAYS_MS } from "./session.js";
+export type {
+  ActionResult,
+  CfxSessionOptions,
+  CfxSessionState,
+  ConnectionState,
+  ConsoleLine,
+  LastRunReport,
+  TrafficLine,
+  TransferErrorLine,
+} from "./session.js";
 export { parseIdentity, parseRtStatus, parseStatus, isPaused, isFinishedRun } from "./status.js";
 export type {
   CfxDeviceInfo,

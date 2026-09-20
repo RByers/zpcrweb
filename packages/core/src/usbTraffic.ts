@@ -491,7 +491,7 @@ function elide(s: string, total: number): string {
  *
  * Exported because there are two renderings of the same traffic and they must cut in the same
  * place: {@link formatUsbTrafficLog} below, and the app's live console, which builds its lines as
- * messages arrive rather than from stored records (`state/useCfxDevice.ts`). Eliding at that end
+ * messages arrive rather than from stored records (`usb/session.ts`). Eliding at that end
  * also keeps the whole of a fetched file out of React state, where a few of them would otherwise
  * sit in the display buffer as megabytes of hex nobody can read.
  */
