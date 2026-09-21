@@ -43,6 +43,20 @@ it also swallows the magic into the field name (`"ICFF" + "PRFILEVERSION"` reads
 | 259 | 4 | Value length in bytes, **u32 LE** |
 | 263 | 1 | Flag/count byte, `0x01` in every entry observed |
 
+### An absent field is one of **length** zero, not offset zero
+
+A reader deciding whether an entry carries a value has to test its **length**. Offset zero is an
+ordinary offset — it is where the *first* field of every ICFF file in this repo sits
+(`PRFILEVERSION` in a `.Plateread`, `SHUTTLEENCODING` in a `.Dcal`), because the value blob starts
+at 0 and the index that describes it lives at the end. A reader that treats `offset === 0` as
+"no value" therefore drops exactly one real field per file, silently, and a raw view built on it
+shows every field but the first.
+
+This library got that wrong until 2026-09-20 (`icff.ts`'s `parseIcff`); it was found while writing
+a `.Plateread` *writer*, which has to account for every byte and so cannot skip a field the reader
+merely failed to mention. Measured: across the seven committed `.zpcr` archives, every file's
+offset-zero entry has a non-zero length, and no entry anywhere has length zero.
+
 ## Endianness
 
 The container's own bookkeeping (`index_offset`/`entry_stride` in the footer, and each entry's

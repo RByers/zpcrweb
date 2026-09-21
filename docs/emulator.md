@@ -170,7 +170,10 @@ await device.startRun(planRun({ runDefinition, plate, name }));
 
 **Browser** — `#mock` in the URL (`README.md`'s hash-key list). The connect button reads
 "Connect (mock USB)" and the rail says outright that nothing here is an instrument. `#mock=60`
-scales time; `#mock=max` is the accelerated clock, which is what the browser checks use. The
+scales time; `#mock=max` advances a step per poll and is what the browser checks use. (The app
+runs its own `switchableClock` — `apps/web/src/state/mockInstrument.ts` — rather than core's
+`acceleratedClock()`, so that changing speed mid-run never has to rebuild the instrument and lose
+the run inside it. Same contract, same rebasing rule.) The
 emulator is built once per page, not per connection, so disconnecting is unplugging a cable: the
 run goes on running and connecting again finds it mid-run.
 
@@ -251,9 +254,13 @@ never be more permissive than the instrument**: a command the real one rejects h
 here, or the app grows a dependency on leniency that fails in the lab. Where we do not know whether
 the real one rejects something, that is an *invented* answer and Appendix A marks it as one.
 
-**How far it reaches, stated plainly: one recorded session, of one kind of run — and that kind is
-the heat block.** The qPCR path's run execution and the melt path have no recorded traffic at all.
-Nothing validates them.
+**How far it reaches, stated plainly: one *replayable* session, of one kind of run — and that kind
+is the heat block.** Be careful with what that does and does not say. A qPCR run *was* captured
+from real hardware — `usb-run`, two cycles with two plate reads, is one of the two USBPcap captures
+`usb.md` was reverse-engineered from, so §7's read-collection sequence is measured rather than
+guessed. What is missing is a qPCR log **the fidelity comparison can replay**: the captures live
+outside the repo (§10.2), so nothing automatically checks the emulator against them, and the
+by-hand comparison remains undone. The melt path has neither — no capture and no log.
 
 ## 11. Unwitnessed cases — the standing list
 
@@ -264,7 +271,7 @@ to the emulator adds its entry here in the same commit, unless they have a recor
 
 | case | what would settle it |
 |---|---|
-| A qPCR run's traffic | a `.zpcr` with a `usb-traffic.bin` from a run with a `PLATEREAD` in it. §10.1's session pulls a qPCR run's *files*, but never watched one execute — so reads appearing as their steps end, and the §7.6 hold releasing the last one, are still prose |
+| A qPCR run's traffic, *replayably* | a `.zpcr` with a `usb-traffic.bin` from a run with a `PLATEREAD` in it. The behaviour itself is measured — `usb-run` captured two cycles and two reads, and Appendix A lists it as such — but §10.1's replayable session only pulls a qPCR's *files* without watching one execute, so nothing automatically re-checks it |
 | A melt run's traffic | a `.zpcr` with a `usb-traffic.bin` from a melt |
 | Cancel **inside** the start window | a recorded session that cancels within ~6 s of `RemoteRun` |
 | Cancel **outside** it, mid-`PLATEREAD` | `usb-cancel` covers the abort; the wait-for-the-read-to-end path is prose |

@@ -37,7 +37,7 @@ const LID_STATES = ["OPEN", "CLOSED", "OPENING", "CLOSING", "MANUAL", "STOP", "E
  * `"UNKNOWN"` for a field that matches none of them. */
 export type LidState = (typeof LID_STATES)[number] | "UNKNOWN";
 
-function isLidState(v: string): v is LidState {
+function isLidState(v: string): v is (typeof LID_STATES)[number] {
   return (LID_STATES as readonly string[]).includes(v);
 }
 

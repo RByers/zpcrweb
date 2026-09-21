@@ -499,8 +499,11 @@ describe("the emulator against the one recorded session", () => {
     // Of the 222 commands that are not a status poll, all but the handful in the divergence list
     // come back exactly as the instrument's did — including the whole final pull: 45 plate
     // reads, 32 `.Dcal`s, the run log and the report, and the CRCs computed over them.
-    expect(session.exact).toBeGreaterThan(205);
-    expect(session.filesExact).toBeGreaterThan(80);
+    // Pinned, not bounded: the nine replies that don't match are enumerated in
+    // {@link KNOWN_DIVERGENCES}, so any other one moving is a change in what the emulator says
+    // and should have to be looked at. A `>` here would let 213 rot to 206 in silence.
+    expect(session.exact).toBe(213);
+    expect(session.filesExact).toBe(82);
   });
 
   it("reports the same twenty `STATUS?` fields, populated the same way in each phase", () => {
