@@ -533,7 +533,7 @@ export function App() {
    * (`RunPlan.producesRunFile`), so there is nothing for the watcher to adopt and nothing for a
    * `begun` marker to mean — and the file it was started from is a `.prcl.txt`, a document rather
    * than a record of this run, which marking would quietly rewrite. So the run is simply sent, and
-   * what comes back is the instrument's own report (`useRunWatch`'s `collectReport`).
+   * what comes back is the instrument's own report (core's `RunFollower`, which collects it).
    */
   const startExperiment = useCallback(
     async (plan: RunPlan, fileName: string) => {

@@ -321,7 +321,7 @@ view is expected to work fine regardless.
   session again.
 
 All are hash keys in one query string (`#cfxPassword=…&view=curves`), parsed by
-`state/pltdPassword.ts`, `state/githubToken.ts`, `state/githubRepos.ts` and `state/urlHash.ts`. **The password is in the fragment because it's a
+`state/pltdPassword.ts`, `state/githubToken.ts`, `state/githubRepos.ts`, `state/mockInstrument.ts` and `state/urlHash.ts`. **The password is in the fragment because it's a
 secret**: fragments are never sent to the server, so they can't reach access logs, proxies, or a
 `Referer` header — `?cfxPassword=` would reach all three. The app strips the password from the
 address bar the moment it reads it, so a URL copied afterwards can be shared safely. The legacy
