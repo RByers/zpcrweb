@@ -3654,6 +3654,328 @@ async function instrumentRunChecks(chrome, origin) {
 
 
 /**
+ * A pending experiment for the simulated instrument to run: a protocol, a plate, a name, and no
+ * results — the state a clone arrives in (see {@link instrumentRunChecks}), which is the only
+ * state Start is offered for. Deliberately short: under `#mock=max` a run advances one step per
+ * status poll, so three cycles is the whole lifecycle in about a dozen polls.
+ */
+const MOCK_ZPCR = join(REPO, "tools/.uishot/dupe/20260920-Mock_Run.zpcr");
+/** The same, long enough that a run is unmistakably *mid*-run while it is interrupted. */
+const MOCK_LONG_ZPCR = join(REPO, "tools/.uishot/dupe/20260920-Long_Mock_Run.zpcr");
+
+/** Write one: `extraPasses` GOTO passes, so the run reads the plate `extraPasses + 1` times. */
+async function makeMockExperiment(path, experimentName, extraPasses) {
+  const { buildExperimentArchive, writeZpcrwebSettings, zipArchive, plateToCsv, parsePlateCsv } =
+    await import("../packages/core/dist/index.js");
+  const runDefinition =
+    "METHOD CALC;HOTLID 105,30;VOLUME 20;TEMP 95.0,10;TEMP 95.0,5;TEMP 60.0,5;PLATEREAD #h3F;" +
+    `GOTO 2,${extraPasses};END;`;
+  const plate = parsePlateCsv(PLATE_CSV_BODY, { sourceName: "Staged.plt.csv" });
+  // Named but *not* marked begun: a begun experiment is one the instrument already has, and the
+  // rail refuses to start it. Everything else is the same three core calls `makeSeed` makes.
+  const archive = writeZpcrwebSettings(
+    buildExperimentArchive({
+      protocol: { runDefinition, name: "MockCycling" },
+      plate: { name: "Staged.plt.csv", bytes: new TextEncoder().encode(plateToCsv(plate)) },
+    }),
+    { experimentName },
+  );
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, Buffer.from(zipArchive(archive)));
+}
+
+/**
+ * One `.devstat` from the Instrument rail, by the section it sits in.
+ *
+ * The section matters: the rail shows two rows labelled `State`, and they answer different
+ * questions — the instrument's own (`Status`, which reads the step it is executing) and the run
+ * watcher's (`Current run`, which reads whether this app has a run to collect). Reading whichever
+ * comes first in the document would silently swap one for the other.
+ */
+const railStat = (cdp, section, label) =>
+  cdp.eval(`(() => {
+    const box = [...document.querySelectorAll(".instrument__rail .rail__section")]
+      .find((s) => s.querySelector(".rail__title")?.textContent.includes(${JSON.stringify(section)}));
+    if (!box) return null;
+    const stat = [...box.querySelectorAll(".devstat")]
+      .find((d) => d.querySelector(".devstat__label").textContent.trim() === ${JSON.stringify(label)});
+    return stat ? stat.querySelector(".devstat__value").textContent.trim() : null;
+  })()`);
+
+/**
+ * A hash of the live thermal chart's pixels, or `"gone"` when it isn't on screen.
+ *
+ * The chart is a `<canvas>` fed a growing series held in React state (`LiveThermalChart`), so
+ * there is no DOM to read the trace out of — what it drew is the only evidence that it drew
+ * anything. Hashing the bitmap turns "the trace advanced" into a value that changes, which is
+ * what a wait needs.
+ */
+const LIVE_CHART_INK = `(() => {
+  const canvas = document.querySelector(".thermal--live canvas");
+  if (!canvas) return "gone";
+  const url = canvas.toDataURL();
+  let h = 0;
+  for (let i = 0; i < url.length; i++) h = (h * 31 + url.charCodeAt(i)) | 0;
+  return String(h);
+})()`;
+
+/** Click the rail's one connect button, whatever it currently says. */
+const clickConnect = (cdp) =>
+  clickButton(cdp, "Connect (mock USB)");
+
+/**
+ * Open the app as a simulated session, with `experiment` loaded and the Instrument view up.
+ *
+ * `#mock=max` rather than a speed: with no clock at all the run advances one step per status poll
+ * (`state/mockInstrument.ts`), so a whole run costs a dozen polls instead of the ~20 minutes of
+ * wall time the protocol describes, and every wait below is still a wait on state rather than on
+ * a duration. The flag is consumed at module load, so it has to be in the URL the app *boots*
+ * with — which is why this reloads through `emptyReload` rather than assigning `location.hash`.
+ */
+async function openMockSession(chrome, origin, experiment) {
+  const cdp = await openPage(chrome.base, origin);
+  await emptyReload(cdp, `${origin}#mock=max`);
+  await loadFile(cdp, experiment);
+  await cdp.eval(`window.location.hash = "view=instrument", undefined`);
+  await waitFor(() => cdp.eval(`!!document.querySelector(".instrument__rail")`), {
+    what: "the instrument rail",
+  });
+  return cdp;
+}
+
+/**
+ * The simulated instrument, driven exactly as the real one is (`state/mockInstrument.ts`).
+ *
+ * This is the only check group that exercises what the Instrument view is *for*: connecting,
+ * starting a run, watching it arrive and collecting it. Everything else about that view has to be
+ * asserted against an instrument that isn't there — {@link instrumentRunChecks} stops at the point
+ * where Start appears — so a regression anywhere between the rail's button and the `.zpcr` that
+ * lands in the file bar used to be invisible to every test in this repo.
+ *
+ * What it does *not* prove is anything about a CFX96: the emulator was written from the same
+ * `usb.md` the client was. It proves the app drives it end to end.
+ */
+async function mockInstrumentChecks(chrome, origin) {
+  console.log("\nthe simulated instrument");
+  await makeMockExperiment(MOCK_ZPCR, "Mock Run", 2);
+  await makeMockExperiment(MOCK_LONG_ZPCR, "Long Mock Run", 15);
+
+  // ── A run, start to collected ───────────────────────────────────────────────────────────────
+  const cdp = await openMockSession(chrome, origin, MOCK_ZPCR);
+  const idle = await cdp.eval(`(() => ({
+    connect: [...document.querySelectorAll(".instrument__rail button")].map((b) => b.textContent.trim()),
+    says: document.querySelector(".instrument__mock")?.textContent.trim() ?? null,
+    start: !!document.querySelector(".instrument__start"),
+  }))()`);
+  check(
+    "a #mock session offers the simulated instrument on the view's one connect button",
+    idle.connect.join(",") === "Connect (mock USB)" && !idle.start,
+    JSON.stringify(idle.connect),
+  );
+  check(
+    "…and says plainly that there is no hardware here",
+    /no hardware here/.test(idle.says ?? ""),
+    JSON.stringify(idle.says),
+  );
+
+  await clickConnect(cdp);
+  const model = await waitValue(() => railStat(cdp, "Identity", "Model"), (v) => v !== null, {
+    timeout: 15000,
+    what: "the instrument to identify itself",
+  });
+  const identity = await cdp.eval(`(() => ({
+    serial: [...document.querySelectorAll(".instrument__rail .devstat")]
+      .find((d) => d.querySelector(".devstat__label").textContent.trim() === "Serial")
+      ?.querySelector(".devstat__value").textContent.trim() ?? null,
+    speeds: [...document.querySelectorAll(".instrument__speed .segmented__item")].map((b) => b.textContent.trim()),
+    start: !!document.querySelector(".instrument__start"),
+  }))()`);
+  check(
+    "connecting to it answers the identification block the same way a real one does",
+    model === "BIO-RAD C1000" && identity.serial === "CT019138" && identity.start,
+    JSON.stringify({ model, ...identity }),
+  );
+  check(
+    "…and a connected mock offers its speeds, Max among them",
+    identity.speeds.join(",") === "1×,10×,60×,Max",
+    JSON.stringify(identity.speeds),
+  );
+
+  await clickButton(cdp, "Start experiment");
+  const started = await waitValue(
+    () => railStat(cdp, "Current run", "State"),
+    (v) => v === "in progress",
+    { timeout: 20000, what: "the run to start" },
+  );
+  const executing = await railStat(cdp, "Status", "State");
+  check(
+    "Start runs the experiment: the instrument reports a protocol under way",
+    started === "in progress" && /^(TEMP|PLATEREAD|GOTO)/.test(executing ?? ""),
+    JSON.stringify({ watcher: started, instrument: executing }),
+  );
+
+  const firstInk = await cdp.eval(LIVE_CHART_INK);
+  const nextInk = await waitValue(() => cdp.eval(LIVE_CHART_INK), (v) => v !== firstInk, {
+    timeout: 12000,
+    what: "the live thermal chart to redraw",
+  });
+  check(
+    "the live thermal chart tracks the block as the run proceeds",
+    firstInk !== "gone" && nextInk !== "gone" && nextInk !== firstInk,
+    JSON.stringify({ firstInk, nextInk }),
+  );
+
+  const readsDuring = await waitValue(
+    () => railStat(cdp, "Current run", "Plate reads"),
+    (v) => Number(v) > 0,
+    { timeout: 30000, what: "the first plate read to be collected" },
+  );
+  check(
+    "the run watcher pulls each plate read while the run is still going",
+    Number(readsDuring) > 0 && Number(readsDuring) < 3,
+    `${readsDuring} plate reads, of 3`,
+  );
+
+  const finished = await waitValue(
+    () => railStat(cdp, "Current run", "State"),
+    (v) => v === "finished",
+    { timeout: 45000, what: "the run to finish" },
+  );
+  check(
+    "…and all three of them by the time the run is over",
+    finished === "finished" && (await railStat(cdp, "Current run", "Plate reads")) === "3",
+    JSON.stringify({ state: finished, reads: await railStat(cdp, "Current run", "Plate reads") }),
+  );
+
+  // The collected run arrives as a file of its own beside the experiment it was started from,
+  // rather than merged into it: the emulator carries `RunInfo.xml` verbatim from the recording it
+  // replays, so the run identifies itself as that recording. That is a property of the simulated
+  // instrument, not of the app — so what is asserted here is that the run *landed*, complete and
+  // readable, and not what it ended up called.
+  await flushWrites(cdp);
+  const collected = await waitValue(() => catalogNames(cdp), (n) => n.length > 1, {
+    timeout: 20000,
+    what: "the collected run's record in IndexedDB",
+  });
+  const run = collected.find((n) => n !== MOCK_ZPCR.split("/").at(-1)) ?? "";
+  const chips = await cdp.eval(`document.querySelectorAll(".filebar .filechip").length`);
+  check(
+    "the run it produced is a .zpcr in the file bar, and a record in IndexedDB",
+    /\.zpcr$/.test(run) && chips === 2,
+    JSON.stringify({ collected, chips }),
+  );
+
+  await cdp.eval(`window.location.hash = "file=${run}&view=overview", undefined`);
+  await waitFor(() => cdp.eval(`!!document.querySelector(".overview__infotable")`), {
+    what: "the collected run's Overview",
+  });
+  const complete = await cdp.eval(`(() => ({
+    incomplete: !!document.querySelector(".overview__incomplete"),
+    flagged: document.querySelectorAll(".filechip__date--incomplete").length,
+  }))()`);
+  check(
+    "…a complete run: it read the plate every cycle its protocol asked for",
+    !complete.incomplete && complete.flagged === 0,
+    JSON.stringify(complete),
+  );
+
+  await clickTab(cdp, "Curves");
+  await tabBecomes(cdp, "Curves");
+  const curves = await waitValue(
+    () => cdp.eval(`document.querySelector(".curves__rail .rail__stat")?.textContent.trim() ?? ""`),
+    (v) => /curves/.test(v),
+    { timeout: 20000, what: "the Curves view's curve count" },
+  );
+  check(
+    "…whose readings the Curves view draws — 96 wells across all six channels",
+    /\/ 576 curves/.test(curves),
+    curves,
+  );
+  cdp.close();
+
+  // ── Interrupting one ────────────────────────────────────────────────────────────────────────
+  // A 16-cycle run this time, so "mid-run" is unambiguous however fast the polls arrive.
+  const long = await openMockSession(chrome, origin, MOCK_LONG_ZPCR);
+  await clickConnect(long);
+  await waitFor(() => long.eval(`!!document.querySelector(".instrument__start")`), {
+    what: "the connected rail's Start",
+  });
+  await clickButton(long, "Start experiment");
+  await waitValue(() => railStat(long, "Current run", "State"), (v) => v === "in progress", {
+    timeout: 20000,
+    what: "the long run to start",
+  });
+  const cycleAtUnplug = await waitValue(
+    () => railStat(long, "Status", "Cycle"),
+    (v) => Number(v) > 0,
+    { timeout: 20000, what: "the long run to reach its first cycle" },
+  );
+
+  // Disconnecting is unplugging a cable, not switching the instrument off. This is the case the
+  // emulator being one instrument *per page* rather than per connection exists to cover, and the
+  // one that found a real defect in it: the read parked on the closed handle used to hang.
+  await clickButton(long, "Disconnect");
+  const unplugged = await waitValue(
+    () => long.eval(`[...document.querySelectorAll(".instrument__rail button")].map((b) => b.textContent.trim()).join(",")`),
+    (v) => /Connect/.test(v ?? ""),
+    { timeout: 10000, what: "the rail to report itself disconnected" },
+  );
+  check(
+    "disconnecting mid-run leaves the rail offering to connect again",
+    unplugged === "Connect (mock USB)",
+    unplugged,
+  );
+
+  await clickConnect(long);
+  const backOn = await waitValue(
+    () => railStat(long, "Current run", "State"),
+    (v) => v === "in progress",
+    { timeout: 20000, what: "the run to still be going on reconnection" },
+  );
+  const advanced = await waitValue(
+    () => railStat(long, "Status", "Cycle"),
+    (v) => Number(v) > Number(cycleAtUnplug),
+    { timeout: 30000, what: "the run to go on cycling after reconnection" },
+  );
+  check(
+    "reconnecting finds the same run still going, and it goes on cycling",
+    backOn === "in progress" && Number(advanced) > Number(cycleAtUnplug),
+    JSON.stringify({ cycleAtUnplug, advanced }),
+  );
+
+  // Stop asks twice while a run is cycling (`ActionButton`), so the label is the observable
+  // between the two clicks — a second click sent before React has armed it would be swallowed.
+  await long.eval(`document.querySelector(".instrument__stop").click()`);
+  await waitValue(
+    () => long.eval(`document.querySelector(".instrument__stop")?.textContent.trim() ?? ""`),
+    (v) => /\?$/.test(v),
+    { timeout: 5000, what: "Stop run to arm itself" },
+  );
+  await long.eval(`document.querySelector(".instrument__stop").click()`);
+  const stopped = await waitValue(() => railStat(long, "Status", "State"), (v) => v === "Idle", {
+    timeout: 45000,
+    what: "the instrument to report the run stopped",
+  });
+  const aborted = await long.eval(`(() => ({
+    reads: Number([...document.querySelectorAll(".instrument__rail .devstat")]
+      .find((d) => d.querySelector(".devstat__label").textContent.trim() === "Plate reads")
+      ?.querySelector(".devstat__value").textContent ?? "0"),
+    notes: [...document.querySelectorAll(".instrument__startnote li")].map((l) => l.textContent.trim()),
+  }))()`);
+  check(
+    "Stop run cancels a run in progress, well short of the 16 cycles it asked for",
+    stopped === "Idle" && aborted.reads > 0 && aborted.reads < 16,
+    JSON.stringify({ state: stopped, reads: aborted.reads }),
+  );
+  check(
+    "…and the rail reports the abort the instrument confirmed, rather than a silent stop",
+    aborted.notes.some((n) => /confirmed the abort/.test(n)),
+    JSON.stringify(aborted.notes),
+  );
+  long.close();
+}
+
+/**
  * Type into the Overview header's name field and commit it — a rename, which is also the cheapest
  * way to make a file *modified* (see {@link closeConfirmChecks}). The two halves are separate
  * turns on purpose: the field commits on blur from the *committed* draft state, so blurring in the
@@ -7487,6 +7809,7 @@ async function main() {
     await alfViewChecks(chrome, origin);
     await thermalProfileChecks(chrome, origin);
     await instrumentRunChecks(chrome, origin);
+    await mockInstrumentChecks(chrome, origin);
     await runSeedChecks(chrome, origin);
     await incompleteRunChecks(chrome, origin);
     await noPlateReadRunChecks(chrome, origin);

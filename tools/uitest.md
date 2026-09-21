@@ -24,6 +24,25 @@ columns, run staging and naming, view selection per file kind, file closing and 
 and the disk-backed folder route — whose directory picker cannot be driven from CDP, so an
 origin-private (OPFS) directory stands in for it.
 
+It also runs a **whole experiment on a simulated instrument** (`mockInstrumentChecks`): the app is
+opened with `#mock=max`, connects to the emulated CFX96 through the rail's one connect button,
+starts a pending experiment, and the checks follow the run to its end — the live thermal chart
+redrawing, each plate read being pulled as it lands, the finished `.zpcr` in the file bar and in
+IndexedDB, complete, with its readings drawn in the Curves view. Then the two interruptions:
+disconnecting mid-run and reconnecting to find the same run still cycling, and stopping a run that
+is under way. Nothing else here exercises the Instrument view past the point where Start appears.
+
+`#mock=max` is what makes that affordable. The simulated instrument has no clock in that mode: the
+run advances one step per status poll, so a three-cycle experiment is a dozen polls rather than the
+twenty minutes of wall time its protocol describes, and every wait stays a wait on state. The
+experiments themselves are built at test time from core's own calls, like the other fixtures here —
+a protocol, a plate and a name, with no results, which is the one state Start is offered for.
+
+The run the instrument produces arrives as a file of its own rather than merged into the experiment
+it was started from: the emulator replays a recording and carries that recording's `RunInfo.xml`
+verbatim, so the run identifies itself as the recording. The checks assert that the run landed,
+complete and readable, and deliberately not what it ended up called.
+
 `AGENTS.md`'s "UI testing" section carries the authoritative list of source files that should make
 you run this; keep that list current when you add a check here.
 

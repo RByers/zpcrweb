@@ -229,7 +229,10 @@ and the `#github=`/`#githubToken=` link — `githubChecks`, which answers `api.g
 `state/useCfxDevice.ts`'s `cancelRun`/`setRunPaused`
 (or core's `usb/device.ts` `cancelRun`), core's `usb/session.ts` or `usb/runFollower.ts` (the
 instrument session and the run follower — the hooks above them are shells, so a change here is a
-change to the Instrument view), `lib/protocolSource.ts`,
+change to the Instrument view), `state/mockInstrument.ts` or core's `usb/emulator/` (the `#mock`
+link and the simulated instrument behind it — `mockInstrumentChecks` runs a whole experiment on
+it, which is the only coverage the Instrument view has past the point where Start appears),
+`lib/protocolSource.ts`,
 `lib/experiment.ts` (or core's `experiment.ts`), `components/ViewSelector.tsx` or `App.tsx`'s
 `enabledViewsFor`/`selectFile`/`defaultViewFor` (where opening a file lands, per kind) or its
 `pendingLanding`, `components/KindFilter.tsx` (or core's `fileKindFromName`),

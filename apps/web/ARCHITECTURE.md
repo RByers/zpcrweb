@@ -259,6 +259,41 @@ applies it only once that file is the active one, so a link that carries a file 
 can't drop the selection on whichever file happened to be open first. A selection for a file that
 never arrives is never applied, the same answer a `#file=` naming an absent file already gets.
 
+### `#mock` — a simulated instrument in a link
+
+`#mock` makes this page load a **simulated session**: the Instrument view connects to an emulated
+CFX96 running in this tab instead of to hardware (`state/mockInstrument.ts`). It is how the whole
+run lifecycle — connect, start, plate reads arriving, cancel, collect — is reachable without a
+thermocycler on the bench, and it is what `tools/uitest.mjs`'s `mockInstrumentChecks` drives.
+
+Like `#load=` and `#wells=` it is an **instruction, not state**: read once at module load, before
+`urlHash.ts`'s first write rebuilds the hash out of `file` and `view` alone, so the address bar
+goes back to an ordinary bookmark. A link hands someone a simulated session; a reload of the
+rewritten URL is a real one.
+
+**One port, no second code path.** The value of the flag is that it changes as little as possible:
+a `CfxSession` is built from one `acquire` callback that answers with a `UsbDeviceLike`
+(`useCfxDevice.ts`), and the emulator *is* one — so the flag is read there and nowhere else, and
+every layer above (the device, the session's poll, the run follower, the rail) is the same code a
+real instrument drives. The connect button changes its label, and the rail gains a speed control
+and a note saying there is no hardware here; nothing else in the app knows.
+
+The emulator is loaded **lazily** — `@zpcrweb/core/emulator` is reached through a dynamic
+`import()` from `acquireMockDevice` and from nowhere else — so a build nobody points `#mock` at
+never downloads an imitation instrument.
+
+`#mock=10` / `#mock=60` run simulated time that many times faster; `#mock=max` has no clock at
+all, and the run advances one step per status poll, which is what makes a whole run cost a dozen
+polls in a test rather than the minutes its protocol describes. The speed is switchable mid-run
+from the rail, and switching rebases rather than jumping: simulated time never moves backwards,
+because everything above the wire reads it as a difference between successive replies.
+
+**One instrument per page, not one per connection.** The emulated device is built on the first
+connect and kept. Disconnecting is unplugging a cable, not switching the machine off — a run goes
+on running, and connecting again finds it mid-run. That is deliberate: it is the case the app most
+needs to get right, and the one nothing could exercise before. A page *reload* is a different
+matter, since the instrument lives in the tab: there is then no instrument left to reconnect to.
+
 ### Same name replaces
 
 `addFiles` drops any already-loaded file with the same **name** before adding a new one. Ids
