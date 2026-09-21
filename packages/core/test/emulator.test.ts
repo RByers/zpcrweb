@@ -267,6 +267,32 @@ describe("a run, start to collected", () => {
     await close();
   });
 
+  it("keeps what the host deposited, once the run's own files arrive on top", async () => {
+    // §7.4's deposit lands inside the start window, before the run is visible in `STATUS?` at
+    // all, and the emulator empties `CurrentRun` for a new run. The order of those two is not a
+    // free choice: clear the folder when the run *appears* and the deposit is already in it and
+    // is destroyed — which is how a collected run came back named after the recording the
+    // emulator replays instead of the experiment it was started from, with no plate for the
+    // Curves view to offer targets from. A real instrument cannot work that way, or a deposited
+    // run would never survive its own start. Found by driving a run from the browser.
+    const clock = manualClock();
+    const { device, close } = await connect({ data: pcrData(), clock });
+    await device.startRun(planRun({ runDefinition: TWO_CYCLE, name: "demo", protocolName: "twocycle" }));
+
+    const deposited = CURRENT_RUN + "\\zpcrweb.json";
+    const mine = new TextEncoder().encode('{"experimentName":"mine"}');
+    expect((await device.sendFile(deposited, mine)).verified).toBe(true);
+
+    // Past the start window and the lid preheat, so the run writes its own files — the moment
+    // the folder used to be emptied.
+    clock.advance(600_000);
+    const listed = await device.listFiles(CURRENT_RUN);
+    expect(listed.names).toContain("zpcrweb.json");
+    expect(listed.names).toContain("begun");
+    expect(Array.from(await device.getFile(deposited))).toEqual(Array.from(mine));
+    await close();
+  });
+
   it("holds the empty idle through the start window, then runs", async () => {
     const clock = manualClock();
     const { device, close } = await connect({ data: pcrData(), clock });
