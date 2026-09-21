@@ -13,6 +13,11 @@ import { matchesSupportedExtension } from "../../packages/core/src/fileKind";
 // the library hot-reloads here without a separate `tsup --watch`. The matching `paths` entry
 // in tsconfig.json keeps tsc and the editor pointed at the same files — change both together.
 const coreSrc = fileURLToPath(new URL("../../packages/core/src/index.ts", import.meta.url));
+// The emulator is a second entry point of the same package (`@zpcrweb/core/emulator`), aliased
+// separately because the alias above matches the bare specifier only. The app reaches it through
+// a lazy `import()`, so it lands in a chunk of its own and a session that never sets `#mock`
+// never downloads it.
+const emulatorSrc = fileURLToPath(new URL("../../packages/core/src/emulator.ts", import.meta.url));
 
 /** The repo's `samples/` directory — the one copy of these files. */
 const samplesDir = fileURLToPath(new URL("../../samples", import.meta.url));
@@ -117,6 +122,9 @@ export default defineConfig({
   server: { port: 5173, host: true },
   resolve: {
     alias: {
+      // Before the bare entry: an alias matches a prefix, so `@zpcrweb/core` alone would
+      // otherwise swallow the subpath.
+      "@zpcrweb/core/emulator": emulatorSrc,
       "@zpcrweb/core": coreSrc,
       react: "preact/compat",
       "react-dom/test-utils": "preact/test-utils",

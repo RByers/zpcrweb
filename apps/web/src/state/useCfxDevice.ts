@@ -30,6 +30,7 @@ import {
   type UsbDeviceLike,
 } from "@zpcrweb/core";
 import { useLiveThermalHistory } from "./useLiveThermalHistory";
+import { acquireMockDevice, mockInstrumentEnabled } from "./mockInstrument";
 
 export type {
   ActionResult,
@@ -84,7 +85,16 @@ function writeFlag(key: string, on: boolean): void {
 }
 
 export function useCfxDevice() {
-  const supported = useMemo(() => usbApi() !== null, []);
+  /**
+   * Whether this page load is a simulated session (`state/mockInstrument.ts`). Fixed for the life
+   * of the page, and the *only* thing that differs below: the emulator satisfies the same
+   * `UsbDeviceLike` a real device does, so it goes in through the session's one `acquire` port and
+   * everything past it — the protocol client, the poll, the follower, the view — is unchanged.
+   */
+  const mock = mockInstrumentEnabled();
+  // A simulated instrument needs no WebUSB at all, so there is something to connect to even in a
+  // browser that has none.
+  const supported = useMemo(() => mock || usbApi() !== null, [mock]);
   const sessionRef = useRef<CfxSession | null>(null);
   if (!sessionRef.current) {
     sessionRef.current = new CfxSession({
@@ -100,6 +110,10 @@ export function useCfxDevice() {
        * dismissed the picker, which is not an error worth shouting.
        */
       acquire: async (reason) => {
+        // The mock session's whole reach into the app: one port, answered with an emulated
+        // instrument instead of a found one. It is kept across disconnects, so a reconnect gets
+        // the same instrument back — still running, if it was.
+        if (mockInstrumentEnabled()) return acquireMockDevice();
         const api = usbApi();
         if (!api) return null;
         const known = await api.getDevices();
@@ -155,8 +169,10 @@ export function useCfxDevice() {
   useEffect(() => () => void session.dispose(), [session]);
 
   const connect = useCallback(async () => {
-    if (!usbApi()) return;
-    if (!readFlag(USB_WARNING_ACK_KEY)) {
+    if (!mock && !usbApi()) return;
+    // A simulated instrument has nothing at stake — no block to heat, no plate to consume — so
+    // the warning that guards a real one would be asking about a machine that isn't there.
+    if (!mock && !readFlag(USB_WARNING_ACK_KEY)) {
       const ok = window.confirm(
         "This software is unofficial and likely contains bugs. Are you sure you want to " +
           "connect to your instrument?",
@@ -165,7 +181,7 @@ export function useCfxDevice() {
       writeFlag(USB_WARNING_ACK_KEY, true);
     }
     await session.connect();
-  }, [session]);
+  }, [session, mock]);
 
   const setSaveLog = useCallback(
     (on: boolean) => {
@@ -235,6 +251,9 @@ export function useCfxDevice() {
   return {
     ...state,
     connection: supported ? state.connection : ("unsupported" as ConnectionState),
+    /** True when what this is connected to is simulated — the rail says so, and offers the one
+     * control a real instrument has no equivalent of (how fast time runs). */
+    mock,
     ...ops,
     liveThermal,
     session,

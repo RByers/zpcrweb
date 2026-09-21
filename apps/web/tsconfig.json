@@ -17,7 +17,8 @@
     // Mirrors the @zpcrweb/core alias in vite.config.ts so tsc and the editor read the same
     // source the bundler does, instead of a possibly-stale packages/core/dist/index.d.ts.
     "paths": {
-      "@zpcrweb/core": ["../../packages/core/src/index.ts"]
+      "@zpcrweb/core": ["../../packages/core/src/index.ts"],
+      "@zpcrweb/core/emulator": ["../../packages/core/src/emulator.ts"]
     }
   },
   "include": ["src"]

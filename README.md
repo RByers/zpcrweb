@@ -311,6 +311,13 @@ view is expected to work fine regardless.
   the moment it is read.
 - `#cfxPassword=<value>` seeds the decryption password so encrypted files decrypt instead of
   sitting behind the prompt. URL-escape it — the password can contain characters like `#`.
+- `#mock` connects the Instrument view to a **simulated CFX96** instead of a real one — no
+  hardware, no WebUSB, the whole protocol answered in the browser. The connect button says
+  "Connect (mock USB)" and the rail says plainly that nothing here is an instrument. `#mock=10`
+  or `#mock=60` run simulated time that many times faster; `#mock=max` has no clock at all and
+  advances the run one step per status poll, which is what the browser tests use. Like `#load=`
+  it is consumed on arrival rather than kept in the address bar, so a reload is an ordinary
+  session again.
 
 All are hash keys in one query string (`#cfxPassword=…&view=curves`), parsed by
 `state/pltdPassword.ts`, `state/githubToken.ts`, `state/githubRepos.ts` and `state/urlHash.ts`. **The password is in the fragment because it's a

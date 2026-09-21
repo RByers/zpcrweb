@@ -4157,6 +4157,25 @@ body.is-cqdrag * {
   background: var(--ink-muted);
   flex: 0 0 auto;
 }
+/* The simulated-instrument notice. Warm rather than red: nothing is wrong, but nothing on this
+   rail is real either, and it has to read that way at a glance. */
+.instrument__mock {
+  margin-top: 8px;
+  border-left: 2px solid var(--neon-magenta);
+  padding-left: 8px;
+  color: var(--ink-2);
+}
+.instrument__speed {
+  margin-top: 10px;
+}
+.instrument__speed .segmented {
+  margin-top: 4px;
+  width: 100%;
+}
+.instrument__speed .segmented__item {
+  flex: 1 1 auto;
+  justify-content: center;
+}
 .instrument__dot.is-on {
   background: var(--good);
   box-shadow: 0 0 8px var(--good);

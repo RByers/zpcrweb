@@ -8,6 +8,7 @@
 import { useEffect, useState } from "react";
 import { CFX_COMMANDS, isPaused, type CfxCommandName, type CfxStatusFlags, type RunPlan } from "@zpcrweb/core";
 import type { CfxDeviceHandle } from "../../state/useCfxDevice";
+import { MOCK_SPEEDS, mockSpeedLabel, useMockSpeed } from "../../state/mockInstrument";
 import type { RunWatchState } from "../../state/useRunWatch";
 import type { InstrumentExperiment } from "../views/InstrumentView";
 import { LiveThermalChart } from "./LiveThermalChart";
@@ -141,8 +142,10 @@ export function InstrumentRail({
    */
   onStart: (plan: RunPlan, fileName: string) => Promise<void> | void;
 }) {
-  const { connection, info, status, rtStatus, busy, lastAction, runProgress, runPending } = instrument;
+  const { connection, info, status, rtStatus, busy, lastAction, runProgress, runPending, mock } =
+    instrument;
   const connected = connection === "connected";
+  const [mockSpeed, setMockSpeed] = useMockSpeed();
   // What the last start did — kept so the deposit phase can report itself. A run whose files
   // didn't copy is still a run (`usb.md` §7.4), so this is a note, never a failure.
   const [startNote, setStartNote] = useState<string[] | null>(null);
@@ -292,7 +295,12 @@ export function InstrumentRail({
                 ? "Disconnect"
                 : connection === "connecting"
                   ? "Connecting…"
-                  : "Connect over USB"}
+                  : // One button, whichever kind of instrument this page is talking to: which one
+                    // it reaches was decided by the link that opened the app, not by a second
+                    // control here, so there is never more than one way to connect on screen.
+                    mock
+                    ? "Connect (mock USB)"
+                    : "Connect over USB"}
             </button>
             <span
               className={
@@ -301,6 +309,40 @@ export function InstrumentRail({
               }
               aria-hidden="true"
             />
+          </div>
+        )}
+        {mock && (
+          // Said plainly, and said whether or not anything is connected: a simulated instrument
+          // answers exactly as the real one does — that is the point of it — so nothing else on
+          // this rail would ever give it away.
+          <div className="rail__note mono instrument__mock">
+            Simulated instrument — there is no hardware here. The status, the files and the
+            readings are all produced in this browser, with a recorded run standing in for what
+            the optics would have measured.
+          </div>
+        )}
+        {mock && connected && (
+          <div className="instrument__speed">
+            <div className="rail__title">Simulated speed</div>
+            <div className="segmented segmented--sm" role="group" aria-label="Simulated speed">
+              {MOCK_SPEEDS.map((s) => (
+                <button
+                  key={String(s)}
+                  className={"segmented__item" + (s === mockSpeed ? " is-active" : "")}
+                  aria-pressed={s === mockSpeed}
+                  onClick={() => setMockSpeed(s)}
+                >
+                  {mockSpeedLabel(s)}
+                </button>
+              ))}
+            </div>
+            <div className="rail__note instrument__footnote">
+              How fast simulated time runs. 1× is an instrument's own pace, 60× an hour of
+              protocol a minute. Max has no clock at all: the run moves on one step each time the
+              app asks for status, so it takes as many polls as it has steps rather than any
+              amount of time. Changing this applies from that moment on — a run already under way
+              carries on from where it had got to, and never jumps.
+            </div>
           </div>
         )}
         {connection === "reconnecting" && (
@@ -544,10 +586,12 @@ export function InstrumentRail({
             </div>
           )}
           {showRunControls && paused && (
+            /* The touchscreen case is `usb.md` §7.9 — kept in this comment rather than in the
+               copy, since the reader has a thermocycler and not this repository. */
             <div className="rail__note instrument__footnote">
               This run is paused — the block is holding its current temperature. A run armed to
-              start from the instrument's own touchscreen reports itself paused in the same way
-              (<code>usb.md</code> §7.9), so if this run has not begun yet, press Start there.
+              start from the instrument's own touchscreen reports itself paused in the same way,
+              so if this run has not begun yet, press Start there.
             </div>
           )}
           {stopNote && stopNote.length > 0 && (
