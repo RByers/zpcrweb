@@ -83,15 +83,34 @@ export class EmulatorTransport implements UsbDeviceLike {
 
   private readonly inbound = new FrameReassembler();
   private readonly outbox: Uint8Array[] = [];
-  private readonly waiters: ((v: UsbInTransferResultLike) => void)[] = [];
+  private readonly waiters: {
+    resolve: (v: UsbInTransferResultLike) => void;
+    reject: (e: Error) => void;
+  }[] = [];
 
   constructor(private readonly respond: EmulatorResponder) {}
 
   async open(): Promise<void> {
     this.opened = true;
   }
+  /**
+   * Close the handle — and **tear down the read parked on the endpoint**, which is what a real
+   * one does: WebUSB rejects an in-flight `transferIn` when the device is closed, and
+   * `CfxDevice`'s read pump reads that rejection as "the handle, not the endpoint, is broken" and
+   * stops.
+   *
+   * Without it a closed client's pump stays parked here forever, and because a reply goes to the
+   * oldest waiter, the *next* client's first answer is delivered to the dead one and every
+   * command after it times out. Nothing in Node noticed: a test opens one client and ends. The
+   * app's disconnect → reconnect — a cable pulled mid-run, or a user pressing Disconnect and
+   * connecting again — is exactly that second client.
+   */
   async close(): Promise<void> {
     this.opened = false;
+    const parked = this.waiters.splice(0);
+    // The pipe is gone with the handle, so anything queued for it goes too.
+    this.outbox.length = 0;
+    for (const w of parked) w.reject(new Error("Cancelled: the device was closed"));
   }
   async selectConfiguration(n: number): Promise<void> {
     this.configuration = { configurationValue: n };
@@ -112,7 +131,7 @@ export class EmulatorTransport implements UsbDeviceLike {
   /** Push already-framed bytes, so a caller can split one message across several transfers. */
   pushRaw(bytes: Uint8Array): void {
     const waiter = this.waiters.shift();
-    if (waiter) waiter({ data: new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength) });
+    if (waiter) waiter.resolve({ data: new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength) });
     else this.outbox.push(bytes);
   }
 
@@ -147,7 +166,7 @@ export class EmulatorTransport implements UsbDeviceLike {
     if (next) return { data: new DataView(next.buffer, next.byteOffset, next.byteLength) };
     // Park until something is pushed — a real bulk endpoint blocks the same way, and this is what
     // makes the read pump's "one long-lived transferIn" shape meaningful here.
-    return new Promise((resolve) => this.waiters.push(resolve));
+    return new Promise((resolve, reject) => this.waiters.push({ resolve, reject }));
   }
 }
 

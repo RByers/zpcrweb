@@ -151,6 +151,28 @@ describe("the emulator answers the identification block", () => {
     expect(await device.errorList()).toEqual([]);
     await close();
   });
+
+  /**
+   * A second client on the same instrument — the app's disconnect → reconnect, and the case a
+   * Node test never reached because it opens one client and ends.
+   *
+   * The first client's read pump is parked in `transferIn` when it closes. Until the transport
+   * rejected those parked reads the way WebUSB does, the reply to the *second* client's first
+   * command went to the dead pump, and every command after it timed out — an emulator that
+   * worked perfectly until something unplugged it.
+   */
+  it("answers a client that connects after another has closed", async () => {
+    const emulator = createCfxEmulator({ clock: acceleratedClock() });
+    const first = new CfxDevice(emulator);
+    await first.open();
+    expect((await first.status()).phase).toBe("idle");
+    await first.close();
+
+    const second = new CfxDevice(emulator);
+    await second.open();
+    expect((await second.status()).phase).toBe("idle");
+    await second.close();
+  });
 });
 
 describe("the filesystem, quirks included", () => {
