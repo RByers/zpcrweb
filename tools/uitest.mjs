@@ -3847,11 +3847,23 @@ async function mockInstrumentChecks(chrome, origin) {
     JSON.stringify({ state: finished, reads: await railStat(cdp, "Current run", "Plate reads") }),
   );
 
-  // The collected run arrives as a file of its own beside the experiment it was started from,
-  // rather than merged into it: the emulator carries `RunInfo.xml` verbatim from the recording it
-  // replays, so the run identifies itself as that recording. That is a property of the simulated
-  // instrument, not of the app — so what is asserted here is that the run *landed*, complete and
-  // readable, and not what it ended up called.
+  // **The collected run arrives as a file of its own, beside the experiment it was started
+  // from.** `TODO.md` reports that as an app bug ("a new zpcr file gets created for the
+  // experiment in progress"), and this looks exactly like it — but the cause visible here is the
+  // emulator's, so this is not yet a witness for that report.
+  //
+  // A run's file is named for the experiment in the `zpcrweb.json` the host deposited, prefixed
+  // with the run-start date out of `RunInfo.xml` (`runFolder.ts`). The emulator carries
+  // `RunInfo.xml` verbatim from the recording it replays (`emulator.md` §8), so that date is the
+  // recording's rather than this run's, and the two names differ by their prefix alone —
+  // `20260806-Mock_Run.zpcr` against today's `20260920-Mock_Run.zpcr`. Against real hardware the
+  // date would be the run's own and the names would agree.
+  //
+  // So what is asserted is that the run *landed* — complete and readable — and the duplication is
+  // left described rather than blessed. Teaching the emulator to write a `RunInfo.xml` for the
+  // run it actually ran is what would turn this into a real test of `TODO.md`'s report: if the
+  // second file survives that, the app bug is reproduced; if it doesn't, the report has another
+  // cause.
   await flushWrites(cdp);
   const collected = await waitValue(() => catalogNames(cdp), (n) => n.length > 1, {
     timeout: 20000,
@@ -3887,8 +3899,11 @@ async function mockInstrumentChecks(chrome, origin) {
     { timeout: 20000, what: "the Curves view's curve count" },
   );
   check(
-    "…whose readings the Curves view draws — 96 wells across all six channels",
-    /\/ 576 curves/.test(curves),
+    // Two dyes, not six: the plate the host deposited survives into the run now, and it names
+    // the two this experiment was built with, so the Curves view offers those and not every
+    // channel the optics read. Before the deposit survived, this read 576.
+    "…whose readings the Curves view draws — 96 wells across the plate's two dyes",
+    /\/ 192 curves/.test(curves),
     curves,
   );
   cdp.close();
