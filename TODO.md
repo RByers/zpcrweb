@@ -215,12 +215,15 @@ algorithm, display smoothing) — each understood, none exercised by any sample 
       as they become available.
 - [ ] **Add a sample `.zpcr` with a USB traffic log for each kind of run.** Today
       `samples/20260807-YouSeq_RT_-_S56.zpcr` is the only file in the repo with a
-      `usb-traffic.bin`, and it is a plain 45-cycle qPCR — nothing exercises the reader against
-      a melt run's traffic. A heat-block run is a harder case and may want the app to change
-      first: a thermal-only protocol writes no run folder (`runPlan.ts`'s `producesRunFile`),
-      so its log has nowhere to go but the console's download button. No longer blocked — the log
-      bug under "Web app" above is fixed, so the next melt run recorded with "save log" on is the
-      sample this wants.
+      `usb-traffic.bin`, and replaying it against the emulator (`emulator.md` §10.1) showed it is
+      not the qPCR it was taken for: the session's own run is `METHOD BLOCK` with three `TEMP`
+      steps and no `PLATEREAD`, and the 45 reads in the archive are the *previous* run's files,
+      still in `CurrentRun` because a thermal-only run writes no run folder. So the heat-block
+      case is witnessed — its log survived only because the folder was pulled anyway — and what
+      is missing is **a qPCR run's own traffic and a melt's**: nothing has ever recorded reads
+      appearing as their steps end, or the acknowledgement releasing the last one. Not blocked —
+      the log bug under "Web app" above is fixed, so the next run of either kind recorded with
+      "save log" on is the sample this wants, and `emulator.md` §11 says what to do with it.
 
 ### UI tooling follow-ups
 

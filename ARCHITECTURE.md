@@ -310,7 +310,10 @@ Three things about it are worth knowing before changing it:
 - **It is not evidence about the instrument.** It was written from `usb.md`, as the client was, so
   the two agreeing proves only that they read it the same way (`usb.md` §10). Its fluorescence is
   lifted from a committed recording, one well's curve replicated across all 108 — never
-  synthesized — and `encodePlateRead` writes it out as a genuine `.Plateread`.
+  synthesized — and `encodePlateRead` writes it out as a genuine `.Plateread`. The one check with
+  an outside witness is `test/emulatorFidelity.test.ts`, which replays the 5 390 commands of a
+  real recorded session at it and compares every answer; `emulator.md` §10.1 says what that covers
+  and — at least as important — what it does not.
 
 It ships as the `@zpcrweb/core/emulator` subpath, a second `tsup` entry, so the web app can reach
 it through a lazy `import()` and a build that never asks for it never carries it.

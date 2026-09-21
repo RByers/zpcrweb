@@ -22,6 +22,9 @@ below. **`usb-cancel`** is a run started and then aborted from the host; it is t
 a run that did not complete, and §7.8 is measured from it, including one correction to what that
 section previously asserted. The log inside `samples/20260807-YouSeq_RT_-_S56.zpcr` is a complete
 session — connect, author, start, watch, finish — behind §7.10 and §7's own live-run note.
+It has since been replayed command for command against this project's emulator
+(`emulator.md` §10.1), which is where §3.2's reading of field 16 under `METHOD BLOCK`, the
+at-target bit's fallback, and §7.3's run-name mangling come from.
 
 **This protocol is now implemented, and the implementation has been driven against live
 hardware** — see §10. Talking to the same CT019138 confirmed §1's descriptors, §2's framing and
@@ -429,6 +432,16 @@ protocol running set with block active clear. Every value this capture produced 
 160 = 0xA0   the same, plus protocol cancelled                   ← the §7.8 aborted state
 ```
 
+A second, independent witness — the hour-long `METHOD BLOCK` session logged in
+`samples/20260807-YouSeq_RT_-_S56.zpcr`, on the same instrument but a different run — produces
+exactly the same five values for the same five states, and adds one observation the two-cycle
+capture is too short to contain: **bit 0 can fall back to 0 after the hold has already begun.**
+One poll of 2 585 reported `96` with the step's hold clock
+(field 12) running at 0.31 s and the block at 30.39 against a 30.0 setpoint — an overshoot, read
+as "not at target" for a poll and then gone. So bit 0 answers "is the block at its setpoint right
+now", not "has this step arrived": a client that treats the falling edge as a step boundary will
+see one that isn't there. Field 12, which does not reset, is the durable signal.
+
 The last two are worth noting. The finished-but-unacknowledged state of §7.6 is not an odd corner
 the firmware backed into, it is the register's own "completion" encoding — and `160` is that same
 encoding with bit 7 added, which is **the one place in the whole system that says a run was
@@ -444,11 +457,21 @@ parsed out of field 4 — and bit 3 is the honest way to detect the preheat. The
 
 #### Field 16, the sample temperature
 
-**It is a modelled sample temperature, not a repeat of the setpoint.** It settles on exactly `55.00`
-and `95.00`, which invites the setpoint reading, but through a ramp it *lags* the block: block
-19.36 → 27.22 → 31.35 → 35.82 while field 16 reads 17.15 → 20.14 → 22.91 → 26.52. That is a thermal
-model of the well contents, which is what `CALC` (`protocol.md` §3.2) means — and it is why the
-public app labels it `Sample*` with a footnote rather than presenting it as a measurement.
+**Under `METHOD CALC` it is a modelled sample temperature, not a repeat of the setpoint.** It
+settles on exactly `55.00` and `95.00`, which invites the setpoint reading, but through a ramp it
+*lags* the block: block 19.36 → 27.22 → 31.35 → 35.82 while field 16 reads 17.15 → 20.14 → 22.91
+→ 26.52. That is a thermal model of the well contents, which is what `CALC` (`protocol.md` §3.2)
+means — and it is why the public app labels it `Sample*` with a footnote rather than presenting it
+as a measurement.
+
+**Under `METHOD BLOCK` there is no model and no lag**: field 16 reads the block temperature back,
+to the hundredth, through every ramp, and reads the *setpoint* once the block has arrived — block
+45.40/49.56/53.64 with field 16 identical, then `95.00` flat against a block wandering 94.99–95.02.
+During the lid preheat it tracks the block as well, sitting at ambient while the first setpoint is
+30 °C. Measured over the 2 585 status replies of the `METHOD BLOCK` session logged in
+`samples/20260807-YouSeq_RT_-_S56.zpcr`, which is the only traffic this document has for that
+method. Which reading applies is therefore a property of the run's method, and a client that wants
+"what the sample is at" has an answer only under `CALC`.
 
 #### Fields 8–12, the four clocks
 
@@ -951,7 +974,7 @@ Eight positional operands, comma-separated, each quoted:
 | 1 | `<block>` | `A` or `B` | which block. A base unit carries at most two, lettered `A` and `B`; `BLOCKCOUNT?` says how many exist, and a CFX96 has one, so `"A"`. This is the same letter `ERRORLIST A` takes |
 | 2 | `<lid on>` | `True`/`False` | **run the heated lid.** `HOTLID` (§7.2) sets its temperature; this decides whether it is used at all. `STATUS?`'s run descriptor echoes it as the third element — `"SINGLETE",CALC,ON` while running, flipping to `OFF` when the run ends and the lid heater is released |
 | 3 | `<remote start>` | `True`/`False` | **start it at the instrument, not from here.** `False` (this capture) means run *now* — measured below. `True` is the language's "prepare the run and wait for someone to press start on the instrument's own touchscreen", the front panel's counterpart to the host's start; it is what a client declines by sending `False` |
-| 4 | `<run name>` | string | the run's name, and the only place it is given — `PROTOCOL`'s operand is not it (§7.2). It reaches `STATUS?` (uppercased and truncated to 8 characters: `singletest` → `"SINGLETE"`) and the report's filename in full (`…_SINGLETEST.alf`), so keep it to characters that are safe in a filename. Filenames are *all* it reaches: nothing in the run's own metadata records it, which is why this project also deposits it as a `zpcrweb.json` (§7.4) |
+| 4 | `<run name>` | string | the run's name, and the only place it is given — `PROTOCOL`'s operand is not it (§7.2). It reaches `STATUS?` uppercased, with filename-hostile characters replaced, and truncated to 8 characters (`singletest` → `"SINGLETE"`; `YouSeq RT - S56` → `"YOUSEQ_R"`, the space become an underscore — measured in the `usb-traffic.bin` session named in the provenance note above), and the report's filename under the same rule at twelve characters (§5.2), so keep it to characters that are safe in a filename. Filenames are *all* it reaches: nothing in the run's own metadata records it, which is why this project also deposits it as a `zpcrweb.json` (§7.4) |
 | 5 | `<user>` | string | the operator, recorded in the run report. Free text; `admin` here |
 | 6 | `<sample ID>` | string | free-text sample/plate identifier, empty in this capture |
 | 7 | `<sierra mode>` | `True`/`False` | **run autonomously.** `True` — the instrument owns the whole run, driving its own optics at each `PLATEREAD` step and writing each `Read0000N.Plateread` to its own storage, which is why the host never speaks to the optical head (§6) and why the run survives the host going away: everything it produced is on the instrument to be collected whenever. `False` is the non-autonomous mode, in which the optical head is *not* the instrument's own business — and driving it is the gap §6 describes, so a client has no reason to ask for it |

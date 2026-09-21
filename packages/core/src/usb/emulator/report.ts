@@ -51,12 +51,27 @@ function elapsedText(seconds: number): string {
   return `${pad(Math.floor(s / 3600))}:${pad(Math.floor(s / 60) % 60)}:${pad(s % 60)}`;
 }
 
-/** The run name as the report spells it: uppercase, filename-safe, twelve characters. */
-export function reportRunName(name: string): string {
+/**
+ * The run name as the instrument spells it back: uppercased, anything filename-hostile replaced
+ * with `_`, and cut to `chars`.
+ *
+ * One rule at two widths, and both are measured. The report and its filename take twelve
+ * characters (see the module comment); `STATUS?`'s run descriptor takes eight (`usb.md` §7.3).
+ * The substitution is measured at both: `Single Step RT-QPCR` → `SINGLE_STEP_` in a committed
+ * report, and `YouSeq RT - S56` → `YOUSEQ_R` in the recorded session's status replies
+ * (`emulator.md` §10.1). It was written twice here before that recording was compared against,
+ * and the copy without the substitution was wrong.
+ */
+export function mangleRunName(name: string, chars: number): string {
   return name
     .toUpperCase()
     .replace(/[^A-Z0-9_-]/g, "_")
-    .slice(0, REPORT_NAME_CHARS);
+    .slice(0, chars);
+}
+
+/** The run name as the report spells it: uppercase, filename-safe, twelve characters. */
+export function reportRunName(name: string): string {
+  return mangleRunName(name, REPORT_NAME_CHARS);
 }
 
 /** `<yyyymmdd>_<hhmmss>_<serial>_<RUN NAME>.alf` (`usb.md` §5.2). */

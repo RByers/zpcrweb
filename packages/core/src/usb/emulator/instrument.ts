@@ -25,6 +25,7 @@ import { isRunDefinitionVerb } from "../../runDefinition.js";
 import type { EmulatorClock } from "./clock.js";
 import type { EmulatorRunData } from "./data.js";
 import { EmulatorFilesystem, FILE_MISSING } from "./filesystem.js";
+import { mangleRunName } from "./report.js";
 import { AMBIENT_C, EmulatedRun, type RunRequest, type RunSnapshot } from "./run.js";
 import type { EmulatorReply } from "./transport.js";
 
@@ -530,8 +531,9 @@ function parseOperands(rest: string): string[] | null {
   return out;
 }
 
-/** The run name as `STATUS?` reports it back: uppercased and cut to eight characters
- * (`usb.md` §7.3 — `singletest` → `SINGLETE`). */
+/** The run name as `STATUS?` reports it back: uppercased, filename-hostile characters replaced
+ * and cut to eight (`usb.md` §7.3 — `singletest` → `SINGLETE`, `YouSeq RT - S56` →
+ * `YOUSEQ_R`). The same mangling the report applies at twelve. */
 function reportedRunName(name: string): string {
-  return name.toUpperCase().slice(0, 8);
+  return mangleRunName(name, 8);
 }

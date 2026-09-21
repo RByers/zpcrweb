@@ -132,7 +132,7 @@ Three kinds of run, from three committed samples:
 
 | kind | recording |
 |---|---|
-| qPCR | `samples/20260807-YouSeq_RT_-_S56.zpcr` (45 reads) |
+| qPCR | `samples/20260807-YouSeq_RT_-_S56.zpcr` (45 reads — the file is named for the heat-block run that pulled them, whose folder still held the previous qPCR's output; see §10.1) |
 | melt | `samples/20230829_135443_CT019138_SINGLE_STEP_.zpcr` (the melt `melt.md` §A.1 measures) |
 | heat block | none needed — a thermal-only run writes no reads, so `data` is optional |
 
@@ -176,17 +176,73 @@ run goes on running and connecting again finds it mid-run.
 
 ## 10. How it is validated, and how far
 
-Three checks, in decreasing strength:
+Three checks, in decreasing strength.
 
-1. **Message-for-message against a real session.** `samples/20260807-YouSeq_RT_-_S56.zpcr` carries
-   a `usb-traffic.bin` of a complete run — connect, author, start, watch, finish. Replaying its
-   command lines at the emulator and comparing reply *shape*, result code, `STATUS?` field
-   population and the order of edges is the closest thing to a ground truth this project has.
-2. **Against the two USBPcap captures**, `usb-basic` and `usb-run`, which are CFX Manager talking
-   to the real CT019138 and are what `usb.md` was reverse-engineered from. They live outside the
-   repo, so this is a by-hand check rather than part of `npm test`.
-3. **End to end**: a run the emulator produced parses, analyses and renders exactly as a real
-   run's `.zpcr` does. If the app cannot tell the two apart, the emulator is doing its job.
+### 10.1 Message-for-message against a real session
+
+`samples/20260807-YouSeq_RT_-_S56.zpcr` carries a `usb-traffic.bin` of a complete session against
+CT019138 — 10 780 messages, connect → author → start → watch → finish → pull, recorded by this app
+itself. `packages/core/test/emulatorFidelity.test.ts` replays its **5 390 host→device commands**,
+in order, at an emulator whose clock is advanced to the recording's own timestamps, and compares
+every answer with the instrument's. It is the only check in the suite with an outside witness.
+
+**What the recorded run actually is matters, and it is not what this document first assumed.** The
+session's protocol is `METHOD BLOCK` with three `TEMP` steps and **no `PLATEREAD`** — a
+**heat-block run** (`usb.md` §7.10), an hour of reverse transcription. The 45 plate reads and the
+`.alf` it pulls at the end belong to the *previous* qPCR run, whose files were still sitting in
+`\Storage Card\CurrentRun` because a thermal-only run writes no run folder. So this log witnesses
+the thermal run path and the whole file-transfer path; **a qPCR run's own execution — reads
+appearing as their steps end — is not witnessed by it**, and neither is a melt, a cancel or a
+pause.
+
+What is compared, per command:
+
+| | |
+|---|---|
+| reply shape | value + `;` + code, a bare code, or raw bytes — per command, against the instrument's |
+| result code | exactly. Every code in this session is `0000`, on both sides |
+| whole replies | 213 of the 222 non-poll replies match **byte for byte**, GUIDs and the terminator aside — including 82 whole-file transfers (45 plate reads, 32 `.Dcal`s, the run log, the report) and the three `GETFILECRC` checksums computed over them |
+| `STATUS?` | 20 fields, and **which** of them are populated, per phase of the run — the values cannot match, so they are checked for plausible range and for an elapsed clock that only advances |
+| the run descriptor | exactly: field 6 is built from `RemoteRun`'s own operands, so both sides must spell it the same |
+| the sequence | the run's edges — idle → preheat → each step's ramp and hold in order → the finished-and-held state — as a *sequence*, never per poll |
+
+Every remaining difference is printed by the test rather than tolerated silently, and anything
+outside the list it knows about fails the run naming the command. What it found, and what each
+one means:
+
+| difference | what it is |
+|---|---|
+| **Reply terminators** | the instrument ends some replies `\r\n` and others bare, *per command*: `*IDN?`, `BASESN?`, `ALPHASN?`, `ALPHAID?`, `BLOCKDESC?`, `BLOCKCOUNT?`, `CPLD?`, `VOLUME?`, `LIDFORCE?`, `LIDVERSION?`, `LIDBVERSION?`, `ERRORS?`, `PROTOCOL`, `METHOD`, `HOTLID`, `TEMP`, `END`, `ADDCYCLES` and `CANCEL` carry CRLF; `STATUS?`, `RTSTATUS?`, `RemoteRun`, `FrontEndSoftware?`, `SUPERLOCKDOWNMODE?`, `GETFREESPACE`, `GETTOTALRAM` and every file command do not. The emulator emits none. `parseResponse` strips either, so nothing in the client notices — but a client that compared a reply to `"0000"` would pass here and fail in the lab |
+| **`GETFILE` is not `passThrough`** | printable files come back through this app's own recorder as *text*, which only happens when the response header's passThrough bit is clear. The emulator sets it |
+| **Listing order** | a file deleted and written again keeps its place in the instrument's listing (and the staging GUID always lands last, in the slot the previous one freed — FAT directory-entry reuse, in all likelihood). The emulator's listing moves a rewritten file to the end |
+| **Staging GUID lifetime** | the GUID copy `CRCSENDFILE` leaves behind is gone from the instrument's listing by the end of the run. The emulator keeps it until the next upload, so its final listing is one name and 37 bytes longer |
+| **The at-target bit can fall back** | one poll of 2 585 reported *not* at target with the hold clock already running — the block had overshot to 30.39 against a 30.0 setpoint. The emulator's at-target bit never falls back once a step has arrived |
+| **Run duration** | the emulator's model of this protocol runs ~20 s long (a 168 s lid preheat against this instrument's ~155 s, and 10 s per ramp against ~8 s). Small — except that the session's last `CANCEL` is the acknowledgement of a *finished* run, and 20 s early it is an abort instead, so the emulator's run ends cancelled where the instrument's ended clean |
+| **`GETFREESPACE`, GUIDs, temperatures, clocks** | instrument-specific by nature; compared for shape only |
+| **Two files** | the archive is not a byte-identical copy of what the instrument held: the app overwrote `zpcrweb.json` during the session, and rewrote the plate `.csv`'s header (`FAM Ch1` → `FAM`) on the way in. The emulator serves what it was handed, so this is a fact about the app, not about the emulator |
+
+One disagreement was a plain bug and was **fixed** rather than recorded: `STATUS?`'s run
+descriptor is uppercased, cut to eight characters **and has filename-hostile characters replaced**
+— `YouSeq RT - S56` comes back `"YOUSEQ_R"`, not `"YOUSEQ R"`. The report's twelve-character name
+already did this; the status copy did not (`usb.md` §7.3, corrected in the same commit).
+
+**And the thing this check cannot do at all:** every result code in the recording is `0000`. The
+instrument was never asked anything it refused, so the property Appendix A cares about most —
+that the emulator is never *more permissive* than the real thing — has no witness here. All this
+proves on that front is that the emulator invents no failure where the instrument succeeded.
+
+### 10.2 Against the two USBPcap captures
+
+`usb-basic` and `usb-run` are CFX Manager talking to the real CT019138 and are what `usb.md` was
+reverse-engineered from. They live outside the repository (`~/lab/BioRad/`), so this is a by-hand
+check rather than part of `npm test` — and **it has not been run yet**: no script extracts their
+command/response pairs and diffs them against the emulator. Until it is, Appendix A's
+measured/derived/invented split rests on `usb.md`'s prose and on §10.1's one session.
+
+### 10.3 End to end
+
+A run the emulator produced parses, analyses and renders exactly as a real run's `.zpcr` does. If
+the app cannot tell the two apart, the emulator is doing its job.
 
 **Two things that agreement does not prove.** First, the emulator and `CfxDevice` were written from
 the same document, so a shared misreading of `usb.md` agrees with itself — only live hardware
@@ -195,8 +251,8 @@ never be more permissive than the instrument**: a command the real one rejects h
 here, or the app grows a dependency on leniency that fails in the lab. Where we do not know whether
 the real one rejects something, that is an *invented* answer and Appendix A marks it as one.
 
-**How far it reaches, stated plainly: one recorded session, of one kind of run.** The melt and
-heat-block paths — two of the three kinds the emulator covers — have no recorded traffic at all.
+**How far it reaches, stated plainly: one recorded session, of one kind of run — and that kind is
+the heat block.** The qPCR path's run execution and the melt path have no recorded traffic at all.
 Nothing validates them.
 
 ## 11. Unwitnessed cases — the standing list
@@ -208,15 +264,19 @@ to the emulator adds its entry here in the same commit, unless they have a recor
 
 | case | what would settle it |
 |---|---|
+| A qPCR run's traffic | a `.zpcr` with a `usb-traffic.bin` from a run with a `PLATEREAD` in it. §10.1's session pulls a qPCR run's *files*, but never watched one execute — so reads appearing as their steps end, and the §7.6 hold releasing the last one, are still prose |
 | A melt run's traffic | a `.zpcr` with a `usb-traffic.bin` from a melt |
-| A heat-block run's traffic | the same for a thermal-only run — note it writes no run folder, so the log has nowhere to go but the console's download |
 | Cancel **inside** the start window | a recorded session that cancels within ~6 s of `RemoteRun` |
 | Cancel **outside** it, mid-`PLATEREAD` | `usb-cancel` covers the abort; the wait-for-the-read-to-end path is prose |
 | Pause / resume | implemented from `usb.md` §7.9's description alone |
 | A run started at the touchscreen, then connected to | the app's "found a run already in progress" path |
 | A mid-run disconnect and reconnect | the case that exposed §3's parked-read bug |
 | An upload that fails its CRC | nothing has ever observed a failed `GETFILECRC` |
-| Any non-zero result code | see Appendix A — the failure code itself is invented |
+| Any non-zero result code | see Appendix A — the failure code itself is invented, and §10.1's session never provoked one |
+| **When the staging GUID disappears** | it is gone by the end of a run and present right after its upload; nothing observed the moment between (§10.1) |
+| **What the block reports after a finish** | this instrument was still reporting 94.42 °C when its 95 °C run finished; the emulator drops to ambient at once. How fast a real block falls is unmeasured |
+| **How long the run stays named after the acknowledgement** | one poll after the acknowledging `CANCEL` the instrument still reported `"YOUSEQ_R",BLOCK,OFF` with register 32; the emulator returns to the empty idle immediately. One sample is not a duration |
+| **Listing slot reuse** | §10.1 shows a rewritten file keeping its place and the newest GUID taking the freed slot at the end. Whether that is FAT entry reuse or something else is a guess, so the emulator has not been changed to imitate it |
 
 The length of this list is the honest answer to "how much does a green emulator test prove?".
 
@@ -251,6 +311,15 @@ what the acknowledgement releases; the start window swallowing a `CANCEL`; a the
 writing no folder; the `.alf`'s structure, including that an aborted run's report is byte-identical
 in shape to a completed one's.
 
+§10.1's replay adds a second, independent witness for much of that list — the whole identity
+block, `DELFILE`'s missing-file reply, the upload cycle including the CRC computed over the bytes
+that arrived, `ADDCYCLES 0`, the six-second start window, the status register's `104`/`96`/`97`/
+`32`, field 15's step count (`4` for three `TEMP` steps and an `END`), the preheat holding every
+clock at zero, and a thermal-only run leaving its folder untouched from first command to last. It
+also **measures two things that had been guesses**: the run descriptor's name mangling (spaces
+become underscores before the eight-character cut), and which commands terminate their reply with
+CRLF — the second of which the emulator still does not imitate (§10.1).
+
 ### Derived
 
 The `.alf`'s own content (generated from the schedule that ran); the run folder's marker files;
@@ -267,7 +336,16 @@ timestamps.
   is held; a `RemoteRun` with nothing authored; `GETFILESIZE`/`GETFILE`/`GETFILECRC` on a missing
   file; `COMPUTEFILECRC` with nothing staged; a malformed `RemoteRun`/`LID`/`VOLUME`.
 - **Ramp rate** — 10 s per thermal step. No instrument ever reports one.
-- The block/lid/sample temperature curves, and the lag factor on status field 16.
+- The block/lid/sample temperature curves, and the lag factor on status field 16. §10.1's
+  session measures field 16 under `METHOD BLOCK` and it is *not* a lag: it mirrors the block
+  through a ramp and reads the setpoint at target (`usb.md` §3.2). The lag is measured under
+  `CALC`, which is the method the emulator applies it to; the `BLOCK` case is still the lag model,
+  and so still a guess.
+- **The block temperature after a finish.** The emulator drops to ambient the moment a run ends;
+  the instrument was still reporting 94.42 °C (§11).
+- **Emitting no reply terminator.** Measured to be wrong per command (§10.1) and left alone
+  deliberately: imitating it for the 34 verbs the recording witnesses would mean inventing the
+  rule for every verb it does not.
 - `RTSTATUS?`'s shuttle values (18.31 idle / 30 preheating / 45.2 running) and a constant ambient
   of 26.
 - Listing replies for paths outside `\Storage Card`. (`\Storage Card` itself answering "empty" is
@@ -296,6 +374,21 @@ claims did not survive:
   measurement is the one implemented. §7.4 separately measures that a `RemoteRun`-started run never
   receives a `ProtocolName.txt` at all, which §7.5's list also contradicts.
 
-Two questions the document does not answer, resolved here by applying §2's own rules: whether a
-reply payload carries a `\r\n` terminator (the emulator emits none), and whether `GETFILE` sets
-`passThrough` (it does).
+Two more came out of §10.1's replay, where the recording is the authority:
+
+- **§7.3's `<run name>`, twice.** `STATUS?`'s eight-character truncation also replaces
+  filename-hostile characters: `YouSeq RT - S56` → `"YOUSEQ_R"`, not `"YOUSEQ R"`. And §7.3 still
+  described the report's filename as carrying the name "in full", which §5.2 had already corrected
+  to twelve characters; the stale sentence is gone.
+- **§3.2's field 16.** Under `METHOD BLOCK` it is not a modelled sample temperature at all — it
+  mirrors the block through a ramp and reads the setpoint once the block arrives. The lag §3.2
+  measures is a `CALC` behaviour.
+
+Two questions the document does not answer, which this emulator had resolved by applying §2's own
+rules — and which the recording has now answered the other way:
+
+- **Whether a reply payload carries a `\r\n` terminator.** It depends on the command: nineteen of
+  the thirty-four verbs in §10.1's session end their reply CRLF and the rest end bare. The
+  emulator emits none.
+- **Whether `GETFILE` sets `passThrough`.** It does not — a printable file comes back as an
+  ordinary text message. The emulator sets it.
