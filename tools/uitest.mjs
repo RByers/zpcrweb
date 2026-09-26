@@ -620,6 +620,57 @@ const catalogNames = (cdp) =>
     )
     .then(JSON.parse);
 
+/**
+ * One file's catalog row (`StoredFile` in `state/db.ts`), minus its `view` settings, or `null`.
+ * Carries `modified` and `lastModified`, which are how a check sees the flag and a disk write-back
+ * land. The catalog is written after the file's content (`putFile`), so a row that says so means
+ * the bytes are stored too.
+ */
+const catalogRecord = (cdp, name) =>
+  cdp
+    .eval(
+      `new Promise((res) => { const q = indexedDB.open("zpcrweb");
+         q.onsuccess = () => { const db = q.result;
+           const g = db.transaction("catalog", "readonly").objectStore("catalog").get(${JSON.stringify(name)});
+           g.onsuccess = () => { db.close(); const { view, ...rest } = g.result ?? {};
+             res(g.result ? JSON.stringify(rest) : "null"); }; };
+         q.onerror = () => res("null"); })`,
+      { awaitPromise: true },
+    )
+    .then(JSON.parse);
+
+/**
+ * The stored text of one archive entry of `name` — the first whose entry name matches `entry` — or
+ * `null`. The `content` store keeps one record per archive entry, so this is how a check waits for
+ * an edit to have *landed* after {@link flushWrites}, which starts the flush without awaiting it:
+ * a reload in the meantime can abort the write, and blaming that on the app is what a fixed sleep
+ * here used to risk.
+ */
+const storedEntryText = (cdp, name, entry) =>
+  cdp.eval(
+    `new Promise((res) => { const q = indexedDB.open("zpcrweb");
+       q.onsuccess = () => { const db = q.result;
+         const n = ${JSON.stringify(name)}, re = new RegExp(${JSON.stringify(entry.source)});
+         const g = db.transaction("content", "readonly").objectStore("content")
+           .getAll(IDBKeyRange.bound([n], [n, []]));
+         g.onsuccess = () => { db.close(); const r = g.result.find((r) => re.test(r.entry));
+           res(r ? new TextDecoder().decode(r.bytes) : null); }; };
+       q.onerror = () => res(null); })`,
+    { awaitPromise: true },
+  );
+
+/**
+ * Reload the page for real: a new document that hydrates from IndexedDB. `Page.navigate` to the
+ * same URL with a different `#fragment` is a same-document navigation — the app keeps everything
+ * in memory — so a "survives a reload" check written that way passes whether or not anything was
+ * stored. Going via `about:blank` forces the load.
+ */
+async function reloadAt(cdp, url) {
+  await navigateBlank(cdp);
+  await cdp.send("Page.navigate", { url });
+  await waitFor(() => cdp.eval("document.readyState==='complete'"), { what: "the reload" });
+}
+
 const results = [];
 function check(name, ok, detail = "") {
   results.push({ name, ok });
@@ -3331,12 +3382,10 @@ async function instrumentRunChecks(chrome, origin) {
   // no settings entry. So the name went back to being required on the next load, and with it the
   // red field and the "required" badge (`useZpcrStore`'s `contentToStore`).
   await flushWrites(cdp);
-  // Started, not awaited (see `flushWrites`) — this is the write landing, not the rate
-  // limit expiring.
-  await sleep(200);
-  await cdp.send("Page.navigate", {
-    url: `${origin}#file=${encodeURIComponent(named.file)}&view=overview`,
+  await waitFor(async () => /"Cloned RVP"/.test((await storedEntryText(cdp, named.file, /zpcrweb\.json$/)) ?? ""), {
+    what: "the clone's name to be stored in its zpcrweb.json",
   });
+  await reloadAt(cdp, `${origin}#file=${encodeURIComponent(named.file)}&view=overview`);
   await tabBecomes(cdp, "Overview");
   await waitFor(() => cdp.eval(`!!document.querySelector(".overview__name")`), {
     what: "the reloaded name field",
@@ -3841,10 +3890,10 @@ async function experimentNameChecks(chrome, origin) {
   // this being the first edit — the one the limiter writes immediately — hide the page, which is
   // what makes a real backgrounded tab durable, and flush whatever is pending.
   await flushWrites(cdp);
-  // Started, not awaited (see `flushWrites`) — this is the write landing, not the rate
-  // limit expiring.
-  await sleep(200);
-  await cdp.send("Page.navigate", { url: `${origin}#file=${EXAMPLE}&view=overview` });
+  await waitFor(async () => /"Renamed RVP"/.test((await storedEntryText(cdp, EXAMPLE, /zpcrweb\.json$/)) ?? ""), {
+    what: "the name to be stored in the run's zpcrweb.json",
+  });
+  await reloadAt(cdp, `${origin}#file=${EXAMPLE}&view=overview`);
   await tabBecomes(cdp, "Overview");
   await waitFor(async () => (await headline()).name !== null, { what: "the reloaded headline" });
   const reloaded = await headline();
@@ -4102,9 +4151,9 @@ async function openFilesChecks(chrome, origin) {
   // The catalog write is asynchronous, and reloading before it lands is what this check would
   // otherwise blame on the app.
   await flushWrites(cdp);
-  // Started, not awaited (see `flushWrites`) — this is the write landing, not the rate
-  // limit expiring.
-  await sleep(200);
+  await waitFor(async () => (await catalogRecord(cdp, EXAMPLE)) !== null, {
+    what: "the .zpcr's catalog record",
+  });
   await cdp.eval(`window.location.reload()`);
   await waitFor(() => cdp.eval("document.readyState==='complete'"), { what: "reload" });
   await waitFor(async () => (await chips()) === 1, { what: "the open file after a reload" });
@@ -4228,10 +4277,10 @@ async function closeConfirmChecks(chrome, origin) {
 
   // The flag is about the copy on disk, so it has to outlive this browser session.
   await flushWrites(cdp);
-  // Started, not awaited (see `flushWrites`) — this is the write landing, not the rate
-  // limit expiring.
-  await sleep(200);
-  await cdp.send("Page.navigate", { url: `${origin}#file=${EXAMPLE}&view=overview` });
+  await waitFor(async () => (await catalogRecord(cdp, EXAMPLE))?.modified === true, {
+    what: "the modified flag to be stored",
+  });
+  await reloadAt(cdp, `${origin}#file=${EXAMPLE}&view=overview`);
   await tabBecomes(cdp, "Overview");
   await waitFor(async () => (await chip())?.modified === true, { what: "the flag after a reload" });
   check("the modified state survives a reload", (await chip()).modified === true);
@@ -5016,20 +5065,10 @@ async function runPlateEditChecks(chrome, origin) {
   // The edit is in the archive, not just in the view: a reload reads the run back out of
   // IndexedDB, and the rest of the run has to still be there with it.
   await flushWrites(cdp);
-  // The flush is started, not awaited, and a reload in the meantime aborts it — so wait for the
-  // plate entry's stored record to carry the edit (the `content` store holds one record per
-  // archive entry) before reloading.
   await waitFor(
-    () =>
-      cdp.eval(
-        `new Promise((res) => { const q = indexedDB.open("zpcrweb");
-           q.onsuccess = () => { const db = q.result;
-             const g = db.transaction("content", "readonly").objectStore("content").getAll();
-             g.onsuccess = () => { db.close(); res(g.result.some((r) =>
-               /FirstQualification/.test(r.name) && /\\.plt\\.csv$/.test(r.entry) &&
-               new TextDecoder().decode(r.bytes).includes("Edited in run"))); }; };
-           q.onerror = () => res(false); })`,
-        { awaitPromise: true },
+    async () =>
+      /Edited in run/.test(
+        (await storedEntryText(cdp, "20260720_FirstQualification.zpcr", /\.plt\.csv$/)) ?? "",
       ),
     { what: "the run plate edit to be stored" },
   );
@@ -5302,9 +5341,10 @@ async function explodedStorageChecks(chrome, origin) {
   await setExperimentName(cdp, "Still Running Renamed");
   await waitFor(() => chipPresent(cdp, "Still Running Renamed"), { what: "the renamed chip" });
   await flushWrites(cdp);
-  // Started, not awaited (see `flushWrites`) — this is the write landing, not the rate
-  // limit expiring.
-  await sleep(200);
+  await waitFor(
+    async () => /"Still Running Renamed"/.test((await storedEntryText(cdp, runFile, /zpcrweb\.json$/)) ?? ""),
+    { what: "the new name to be stored in the run's zpcrweb.json" },
+  );
   // Looked up by file name, which a renamed *experiment* doesn't change — the chip's label does.
   const edited = await recordFor("Still_Running");
   check(
@@ -6192,6 +6232,8 @@ async function folderChecks(chrome, origin) {
   );
 
   // Now the shape that kills an un-re-armed watch. Rename again so there is something to undo.
+  const NESTED = "runs/2026/nested.zpcr";
+  const writtenBefore = (await catalogRecord(cdp, NESTED))?.lastModified;
   await setExperimentName(cdp, "Second Rename");
   await waitFor(async () => (await shownName()) === "Second Rename", { what: "the second rename" });
   // The app's own write has to reach the disk before the external one below, or the refresh that
@@ -6199,11 +6241,16 @@ async function folderChecks(chrome, origin) {
   // `DISK_WRITE_INTERVAL_MS` (3 s), so this used to outwait the interval blind. Hiding the page
   // flushes it now instead — the same thing a real backgrounded tab does.
   //
-  // Polling the file's mtime to see it land looks like the next improvement and is not: an open
-  // `FileSystemWritableFileStream` holds an exclusive lock, so a reader arriving mid-write queues
-  // behind it, and polling across the write window stalled the page into the 30 s CDP watchdog.
+  // Seeing it land is done from the catalog, not the file: once the write-back finishes, the app
+  // records the file's new mtime on its catalog row (`useZpcrStore`'s disk throttle). Polling the
+  // file's own mtime looks equivalent and is not — an open `FileSystemWritableFileStream` holds an
+  // exclusive lock, so a reader arriving mid-write queues behind it, and polling across the write
+  // window stalled the page into the 30 s CDP watchdog. A committed name is one edit, so this is
+  // one write, whether the throttle made it at once or the flush made it.
   await flushWrites(cdp);
-  await sleep(400);
+  await waitFor(async () => (await catalogRecord(cdp, NESTED))?.lastModified !== writtenBefore, {
+    what: "the rename to be written back to disk",
+  });
   await externalWrite(["runs", "2026"], "nested.zpcr", true);
   let rearmed = "";
   try {

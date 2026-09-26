@@ -210,6 +210,14 @@ show it is disabled" — no caller does that; they read the tab's `disabled` sta
 | 5 × negative assertions | nothing is going to happen, so there is nothing to wait for. Includes the 5 s echo-suppression check, which must outlast a full 3 s disk-write window. |
 | 1 × drag pacing | the gap *is* the simulation: a burst of mouse moves in one tick coalesces into a jump that never exercises the drag's intermediate frames. |
 
+> **Since:** the `flushWrites` sleeps are gone too. "No pending-writes state to poll" was the same
+> mistake as below: the write itself lands in IndexedDB, so each check now waits for the stored
+> entry or catalog row it needs (`storedEntryText` / `catalogRecord` in `uitest.mjs`), and the
+> disk write-back for the catalog row's new `lastModified`. A sixth, un-slept flush in
+> `runPlateEditChecks` was failing outright, its reload aborting the write. Three of the "survives a
+> reload" checks turned out not to reload at all: `Page.navigate` to the same URL with a new
+> `#fragment` is a same-document navigation. They go via `about:blank` now (`reloadAt`).
+
 What went, and what replaced it:
 
 - **"nothing on screen changes, so there is no observable"** was wrong three times over. Closing a

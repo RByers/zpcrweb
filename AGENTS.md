@@ -286,7 +286,12 @@ is a flake — the suite has been both. `harness.mjs` has the vocabulary:
   already flushes everything pending on `visibilitychange` → hidden, because a backgrounded tab
   may never come back. This hides the page and puts it straight back, so the flush a real
   backgrounded tab gets is the one the test gets. Add no test-only hook to the app for this; the
-  production listener is the hook.
+  production listener is the hook. The flush is started, not awaited, so **wait for the write to
+  land** before reloading or asserting on storage: `uitest.mjs`'s `storedEntryText` /
+  `catalogRecord` read the entry or catalog row it writes. A reload that beats the write aborts it.
+- `reloadAt(cdp, url)` (`uitest.mjs`) — a real reload. `Page.navigate` to the same URL with a
+  different `#fragment` is a same-document navigation that keeps everything in memory, so a
+  "survives a reload" check written that way passes whether or not anything was stored.
 
 **Every wait that gives up fails the run.** `waitValue` and `waitStable` return rather than throw,
 so the `check` after them can report what it actually saw — but the timeout is also recorded, and

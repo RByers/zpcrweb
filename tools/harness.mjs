@@ -173,8 +173,10 @@ export async function navigateBlank(cdp) {
  * dispatch, and put straight back — `document.visibilityState` reads `visible` again on return.
  *
  * The flush is started, not awaited: the listener is `void this.flushAll()`, so there is no
- * completion signal to hook. Callers still need to wait for the write to land — but for
- * something short and bounded, rather than for a rate limit.
+ * completion signal to hook. Callers still need to wait for the write to land, and should wait
+ * for the write itself rather than for a fixed interval: it lands in IndexedDB, which a check can
+ * read (`uitest.mjs`'s `storedEntryText` and `catalogRecord`). A reload before it lands can abort
+ * it.
  */
 export async function flushWrites(cdp) {
   await cdp.eval(`(() => {
