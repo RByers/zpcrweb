@@ -13,7 +13,7 @@
  * is dependency-free and runs in ~3s. Exits non-zero on any failure.
  */
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import {
   REPO,
   activeTab,
@@ -1252,18 +1252,18 @@ async function persistedThresholdChecks(chrome, origin, pw) {
   // the file is unedited, so nothing is at risk and nothing arms.
   await clickTab(cdp, "Files");
   await waitFor(() => cdp.eval(`!!document.querySelector(".filesview__row")`), { what: "the files table" });
-  await cdp.eval(`(() => { const row = [...document.querySelectorAll(".filesview__row")]
-      .find((r) => /RVP/.test(r.textContent));
-      row?.querySelector(".ftbl__del")?.click(); })()`);
-  await waitFor(
-    () => cdp.eval(`![...document.querySelectorAll(".filesview__row")].some((r) => /RVP/.test(r.textContent))`),
-    { what: "the RVP .pcrd to close" },
-  );
+  // By exact filename: other files with "RVP" in their names may be open too, and one of those
+  // being modified would take the click and only arm.
+  const rvpName = JSON.stringify(basename(RVP_PCRD));
+  const rvpRow = `[...document.querySelectorAll(".filesview__row")]
+      .find((r) => r.querySelector(".filesview__filename")?.textContent.trim() === ${rvpName})`;
+  await cdp.eval(`(() => { ${rvpRow}?.querySelector(".ftbl__del")?.click(); })()`);
+  await waitFor(() => cdp.eval(`!${rvpRow}`), { what: "the RVP .pcrd to close" });
   await cdp.eval(`(() => { document.querySelector(".filesview__close")?.click(); })()`);
   // The delete transaction committing is the thing to wait for, and while nothing left on screen
   // shows it, the catalog itself does — so read that rather than time an interval and hope. (It
   // used to be a `sleep(300)` on the grounds that there was no observable; the store is one.)
-  await waitFor(async () => !(await catalogNames(cdp)).some((n) => /RVP/.test(n)), {
+  await waitFor(async () => !(await catalogNames(cdp)).includes(basename(RVP_PCRD)), {
     what: "the RVP .pcrd's catalog record to be deleted",
   });
   cdp.close();
@@ -5016,6 +5016,23 @@ async function runPlateEditChecks(chrome, origin) {
   // The edit is in the archive, not just in the view: a reload reads the run back out of
   // IndexedDB, and the rest of the run has to still be there with it.
   await flushWrites(cdp);
+  // The flush is started, not awaited, and a reload in the meantime aborts it — so wait for the
+  // plate entry's stored record to carry the edit (the `content` store holds one record per
+  // archive entry) before reloading.
+  await waitFor(
+    () =>
+      cdp.eval(
+        `new Promise((res) => { const q = indexedDB.open("zpcrweb");
+           q.onsuccess = () => { const db = q.result;
+             const g = db.transaction("content", "readonly").objectStore("content").getAll();
+             g.onsuccess = () => { db.close(); res(g.result.some((r) =>
+               /FirstQualification/.test(r.name) && /\\.plt\\.csv$/.test(r.entry) &&
+               new TextDecoder().decode(r.bytes).includes("Edited in run"))); }; };
+           q.onerror = () => res(false); })`,
+        { awaitPromise: true },
+      ),
+    { what: "the run plate edit to be stored" },
+  );
   await cdp.send("Page.reload", {});
   await waitFor(() => chipPresent(cdp, "FirstQualification"), { what: "the run's chip after reload" });
   await clickTab(cdp, "Plates");
@@ -6955,6 +6972,11 @@ async function sharedTargetLabelChecks(chrome, origin) {
     JSON.stringify(rows),
   );
 
+  // Leave nothing behind: the run now carries an attached plate (so it's modified, and its ✕ asks
+  // twice), and both it and the fixture plate have "RVP" in their names — which a later check
+  // closing its own RVP file by name would otherwise trip over. This group emptied the database on
+  // the way in, so emptying it again is leaving it as the next group expects.
+  await emptyReload(cdp, origin);
   cdp.close();
 }
 

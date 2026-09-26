@@ -191,6 +191,13 @@ the echo one direction provokes in the other terminates rather than looping:
   first post-hydration write uses `replaceState` (the app choosing its own initial state
   shouldn't create a history entry); later writes `pushState`, which is what makes back/forward
   step through view switches.
+
+  It is also held for a render that **predates the latest navigation**. The effect is passive, so
+  it can run for a commit made before the listener's `setView` was processed (the previous
+  back/forward's own effect flushed late, or a folder search finishing just then), and writing
+  that commit's state pushes the old view back over the URL just navigated to. The listener bumps
+  a `navSeq` counter in the same batch as the state it applies; a render whose `navSeq` is behind
+  the latest one posted doesn't write.
 - **URL → state** listens for `hashchange` *and* `popstate`: `hashchange` alone misses
   `pushState`, `popstate` alone misses manual address-bar edits.
 

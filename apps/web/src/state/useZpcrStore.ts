@@ -1780,22 +1780,40 @@ export function useZpcrStore(): ZpcrStore {
   // `writeHash`), so the echo each direction provokes in the other terminates immediately
   // instead of looping.
   const active = useMemo(() => loadedFiles.find((f) => f.name === activeName) ?? null, [loadedFiles, activeName]);
+  const activeId = active?.name;
   const syncedOnce = useRef(false);
+  /**
+   * Which hash navigation the state has caught up with. The listener below bumps `navSeq` in the
+   * same batch as the state it applies, and `navPosted` the moment it runs — so a render whose
+   * `navSeq` is behind `navPosted` was committed before the latest navigation was applied, and
+   * the state it holds is older than the URL.
+   */
+  const [navSeq, setNavSeq] = useState(0);
+  const navPosted = useRef(0);
 
   // State → URL. Held until hydration finishes: before that `active` is still null, and
   // writing would strip the `#file=` we were opened with before we could honor it. Held for the
   // same reason while a named file is still being looked for in the folders — that search reads
   // from disk, and a write in the middle of it would drop the name being searched for.
+  //
+  // Held, too, for a render that predates the latest navigation (see `navSeq`). This effect is
+  // passive, so it can run for a commit made before the listener's `setView` was processed — the
+  // previous back/forward's own effect, flushed late, or a named-file search finishing just then.
+  // Writing that commit's state pushed the old view straight back over the URL the user had just
+  // navigated to, the listener's second call (`hashchange` after `popstate`) then read the
+  // reverted URL, and the navigation was silently lost. The render that carries the navigation
+  // runs this again, with the state the URL asked for.
   useEffect(() => {
-    if (loading || pendingFile) return;
-    writeHash({ file: active?.name, view }, { replace: !syncedOnce.current });
+    if (loading || pendingFile || navSeq < navPosted.current) return;
+    writeHash({ file: activeId, view }, { replace: !syncedOnce.current });
     syncedOnce.current = true;
-  }, [loading, pendingFile, active, view]);
+  }, [loading, pendingFile, activeId, view, navSeq]);
 
   // URL → state, for back/forward and hand-edited links.
   useEffect(() => {
     return onHashChange(() => {
       const h = readHash();
+      setNavSeq(++navPosted.current);
       if (h.view) setView(h.view);
       if (h.load) setPendingLoad(h.load);
       const wells = wellsInstruction(h);
