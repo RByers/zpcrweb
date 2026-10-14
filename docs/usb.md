@@ -385,7 +385,7 @@ off the record length rather than assume it.
 | 14 | errors | `:`-separated block error codes; a lone `0` means none | `0` throughout — no errors |
 | 15 | step count | **number of steps in the run definition** | yes |
 | 16 | sample temp | calculated sample temperature °C | yes |
-| 17 | lid position | `OPEN`/`CLOSED`/`OPENING`/`CLOSING`/`MANUAL`/`STOP`/`ERROR`/`NONE`/`UNKNOWN` | 4 of 9 |
+| 17 | lid position | `OPEN`/`CLOSED`/`OPENING`/`CLOSING`/`MANUAL`/`STOP`/`ERROR`/`NONE`/`UNKNOWN`. The motorised lid reports `OPENING` for ~18 s after `LID OPEN` and `CLOSING` for ~9 s after `LID CLOSE` (both captures, ±1.4 s of the poll) — and reports both when moved by hand, with no command sent (`usb-run`) | 4 of 9 |
 | 18 | sensor | an unidentified sensor reading | `0` throughout |
 | 19 | result code | the usual `0000` | yes |
 
@@ -494,7 +494,10 @@ is constant — 350.88 … 350.97 across the 30 samples before `PROCEED` interve
 identifies field 10 as **time remaining** rather than a total, and the two ways the sum *does* move
 are exactly the caveats below: it steps down when the instrument re-plans (to ~171.5 after
 `PROCEED` cut the initial hold), and it creeps up by whatever field 10 declines to count during a
-plate read (171.48 → 185.46 over the run's two reads, so ~7 s a read here).
+plate read (171.48 → 185.46 over the run's two reads, so ~7 s a read here). Field 8 itself is
+**not** moved by the `PROCEED`: it read 37.77 s on the first poll of the step after the skipped
+180 s hold — wall time since the protocol started — while field 10 was the one re-planned
+(`tools/emucheck.mjs` over `usb-run`; the emulator had this wrong, `emulator.md` §10.2).
 
 > **One portability caveat.** Field 10 is an *estimate of the protocol's time*, and this instrument
 > transmits it already net of elapsed time. That appears to be a property of this block rather than
@@ -737,8 +740,14 @@ a dozen paths):
 
 So `\Storage Card` is not a special case in the protocol, and the volume root is not what matters:
 `\` itself lists fine (`17;0000` → `Control Panel.lnk`), as does `\Windows` (`4632`).
-`\Storage Card` simply contains nothing but `CurrentRun` and `PCRunReport`, and directories never
-appear in a listing. Path spelling makes no difference — quoted, unquoted, trailing `\`, forward
+Directories never appear in a listing, so that probe could only confirm the two directories it
+knew to ask for; `\Storage Card` holds at least two more. **`\Storage Card\Real-Time Data`**
+keeps a `<run>.zpcr` and a `<run>.txt` per completed run — `usb-basic` lists four runs from
+20–26 July 2026 and downloads their `.zpcr`s (39,550 to 406,323 bytes), which is where CFX Manager
+gets a finished run from without the run folder — and **`\Storage Card\Logs`** holds five
+instrument logs (`DebugLog.txt`, `SystemUsageLog.txt`, `SATServiceSMARTLog.txt`,
+`SystemErrorLog.txt`, `PCServiceSMARTLog.txt`). Both measured in `usb-basic` via
+`tools/emucheck.mjs`. Path spelling makes no difference — quoted, unquoted, trailing `\`, forward
 slashes and lowercase all give the identical reply, and a `*` glob is taken as a literal name and
 comes back "not found". Whether the four bytes are two little-endian `uint16`s or something else
 isn't established; a client should compare them whole. Anything *other* than these two should be
@@ -767,6 +776,17 @@ finished. `Read0000N.Plateread` is exactly the `.Plateread` format `plateread.md
 new decoding needed there, this just confirms *where* and *when* those bytes come off the wire.
 The `.alf` is a run report; §5.2 covers the directory it comes from and
 [`alf.md`](./alf.md) the file itself.
+
+**A file longer than 65,530 bytes comes back as several messages.** The header's length field is
+a `uint16` (§2) and the instrument fills it to 65,530: `usb-basic`'s 406,323-byte `GETFILE` of a
+`.zpcr` from `Real-Time Data` arrived as six messages of 65,530 bytes and one of 13,143, each
+under its own header, back to back. Every file this project has pulled is well under that — a
+plate read is ~22 KB — so `CfxDevice.getFile`, which expects the announced size in one message,
+has never met it.
+
+> **Future:** `getFile` should keep reading until `GETFILESIZE`'s count has arrived. The emulator
+> splits its replies the same way (`emulator/transport.ts`), so the fix is testable without
+> hardware; it is what downloading a completed run from `Real-Time Data` needs.
 
 **A zero-byte file's `GETFILE` reply is unreliable — observed live, not in the reference
 capture.** `\Storage Card\CurrentRun`'s `begun`/`ended` markers (`runFolder.ts`) are zero-content
@@ -1282,8 +1302,10 @@ This is the failure mode a Stop button is *most* likely to hit, because the wind
 where an operator realises they have started the wrong run. A host cannot detect the window from
 `STATUS?` — an armed-but-not-started run and a genuinely idle instrument are the same reply — so
 **it has to remember that it asked for a run**, and keep watching until either the run appears (and
-can then be cancelled for real) or enough time passes that it clearly never will. ~6 s is the one
-measured figure; allow several times that. `CfxDevice.cancelRun`'s `expectStart` is this rule.
+can then be cancelled for real) or enough time passes that it clearly never will. 6.1 s is the
+figure measured live, and `usb-run` shows ~10.7 s (the run appeared on the eighth poll after
+`RemoteRun`, ±1.4 s); allow several times the larger. `CfxDevice.cancelRun`'s `expectStart` is
+this rule.
 
 **1. Don't cancel into a plate read.** While `STATUS?`'s current-step field reads
 `PLATEREAD #h<mask>`, the optics are mid-scan and the `Read0000N.Plateread` file **does not exist

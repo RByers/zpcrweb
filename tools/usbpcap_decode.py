@@ -13,10 +13,15 @@ VID:PID (from any captured GET_DESCRIPTOR(DEVICE) completion), and packet
 counts — enough to find which device number is the CFX96 in a given capture
 (look for VID 0x0614). Pass --device N to print the decoded command/response
 stream for that device: channel-1 (ASCII RCI) exchanges rendered as text,
-everything else as a one-line summary. See usb.md for the header layout and
-field meanings this script implements.
+everything else as a one-line summary. Add --jsonl for the same stream as one
+JSON object per message with the body base64-encoded — lossless, which the
+text form is not (a downloaded file's bytes are not ASCII), and what
+tools/emucheck.mjs replays at the emulator. See usb.md for the header layout
+and field meanings this script implements.
 """
 import argparse
+import base64
+import json
 import struct
 import sys
 from collections import Counter, defaultdict
@@ -98,8 +103,15 @@ def summarize_devices(path):
         print(f"device #{dev}: {counts[dev]:6d} packets  VID:PID seen = {ids or '(none captured)'}{flag}")
 
 
-def _emit(i, ts, direction, m, raw):
+def _emit(i, ts, direction, m, raw, jsonl=False):
     body = bytes(m["body"])
+    if jsonl:
+        # Every channel, every message, nothing decoded: the consumer gets the bytes the wire
+        # carried and the three header facts that aren't in them (usb-traffic.md's same three).
+        print(json.dumps(dict(i=i, ts=ts, dir=direction, channel=m["channel"],
+                              passthrough=m["passthrough"],
+                              body=base64.b64encode(body).decode("ascii"))))
+        return
     if m["channel"] == 1:
         try:
             text = body.decode("ascii", errors="replace").rstrip("\r\n")
@@ -111,7 +123,7 @@ def _emit(i, ts, direction, m, raw):
               f"pt={m['passthrough']} {body.hex()}")
 
 
-def dump_device(path, device, raw):
+def dump_device(path, device, raw, jsonl=False):
     """Reassemble each direction's bulk stream into logical messages before
     printing anything. A message's 5-byte header (see usb.md §2) appears only
     on the packet that starts it; every packet before that message's `length`
@@ -133,7 +145,7 @@ def dump_device(path, device, raw):
             if remaining[d] == 0:
                 h = decode_cfx_header(u.payload)
                 if h is None:
-                    if raw:
+                    if raw and not jsonl:
                         print(f"{i:6d} {u.ts:.6f} BULK {d:3s} short packet (< 5 bytes), "
                               f"can't hold a header: {u.payload.hex()}")
                     continue
@@ -147,16 +159,16 @@ def dump_device(path, device, raw):
 
             if remaining[d] <= 0:
                 m = pending[d]
-                _emit(m["start_i"], m["start_ts"], d, m, raw)
+                _emit(m["start_i"], m["start_ts"], d, m, raw, jsonl)
                 pending[d] = None
                 remaining[d] = 0
-        elif raw and u.transfer == 2 and u.stage == "SETUP" and len(u.payload) == 8:
+        elif raw and not jsonl and u.transfer == 2 and u.stage == "SETUP" and len(u.payload) == 8:
             bmReq, bReq, wVal, wIdx, wLen = struct.unpack("<BBHHH", u.payload)
             print(f"{i:6d} {u.ts:.6f} CONTROL SETUP bmRequestType={bmReq:#04x} "
                   f"bRequest={bReq:#04x} wValue={wVal:#06x} wIndex={wIdx:#06x} wLength={wLen}")
 
     for d in ("IN", "OUT"):
-        if pending[d] is not None and raw:
+        if pending[d] is not None and raw and not jsonl:
             m = pending[d]
             print(f"{m['start_i']:6d} {m['start_ts']:.6f} BULK {d:3s} truncated: capture ended "
                   f"{remaining[d]} bytes short of the declared length={m['length']}")
@@ -167,8 +179,10 @@ if __name__ == "__main__":
     ap.add_argument("pcapng")
     ap.add_argument("--device", type=int, default=None)
     ap.add_argument("--raw", action="store_true", help="also show channel!=1 and control traffic")
+    ap.add_argument("--jsonl", action="store_true",
+                    help="with --device: one JSON object per message, body base64, every channel")
     args = ap.parse_args()
     if args.device is None:
         summarize_devices(args.pcapng)
     else:
-        dump_device(args.pcapng, args.device, args.raw)
+        dump_device(args.pcapng, args.device, args.raw, args.jsonl)

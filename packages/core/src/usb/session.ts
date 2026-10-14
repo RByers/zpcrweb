@@ -522,6 +522,7 @@ export class CfxSession {
   }
 
   async connect(): Promise<void> {
+    this.#closed = false;
     this.#set({ error: null });
     this.cancelReconnect();
     this.#wantConnected = true;
@@ -560,9 +561,11 @@ export class CfxSession {
     this.#teardown();
   }
 
-  /** Close the interface for good — the session is not reusable afterwards. A pending reconnect
-   * goes with it: one firing after the owner has gone would re-claim an interface nobody is
-   * watching any more. */
+  /** Close the interface and stand the session down. A pending reconnect goes with it: one
+   * firing after the owner has gone would re-claim an interface nobody is watching any more.
+   * `connect()` brings a disposed session back — React's StrictMode runs an effect's cleanup
+   * once on mount, against a session held in a ref that outlives it, so a dispose that was
+   * final would leave the one session the page has unable to reconnect on its own. */
   async dispose(): Promise<void> {
     this.#closed = true;
     this.#wantConnected = false;

@@ -37,6 +37,10 @@ export type EmulatorResponder = (command: string, payload: Uint8Array) => Emulat
 
 const LATIN1 = new TextDecoder("latin1");
 
+/** The most payload one message carries (measured, `usb-basic`): five short of the `uint16` the
+ * length field could express. */
+export const MAX_MESSAGE_PAYLOAD = 65_530;
+
 /**
  * The header bytes a *device* reply carries — measured, and not the same as a request's.
  *
@@ -123,9 +127,24 @@ export class EmulatorTransport implements UsbDeviceLike {
     this.halts.push(`${direction}:${endpointNumber}`);
   }
 
-  /** Frame `payload` and push it toward the host, waking a parked `transferIn`. */
+  /**
+   * Frame `payload` and push it toward the host, waking a parked `transferIn`.
+   *
+   * A payload longer than {@link MAX_MESSAGE_PAYLOAD} goes out as consecutive messages of that
+   * length and a remainder, each under its own header — measured: the `usb-basic` capture's
+   * 406,323-byte `GETFILE` of a `.zpcr` arrived as six messages of 65,530 bytes and one of 13,143
+   * (`usb.md` §5). The header's length field is a `uint16`, so this is the only way a file over
+   * 64 KB can come down the wire at all.
+   */
   push(payload: Uint8Array, { channel = 1, passThrough = false } = {}): void {
-    this.pushRaw(encodeFrame({ ...RESPONSE_HEADER, channel, passThrough }, payload));
+    const header = { ...RESPONSE_HEADER, channel, passThrough };
+    if (payload.length <= MAX_MESSAGE_PAYLOAD) {
+      this.pushRaw(encodeFrame(header, payload));
+      return;
+    }
+    for (let at = 0; at < payload.length; at += MAX_MESSAGE_PAYLOAD) {
+      this.pushRaw(encodeFrame(header, payload.subarray(at, at + MAX_MESSAGE_PAYLOAD)));
+    }
   }
 
   /** Push already-framed bytes, so a caller can split one message across several transfers. */

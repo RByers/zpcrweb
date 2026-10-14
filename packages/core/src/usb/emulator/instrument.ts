@@ -21,6 +21,7 @@
 import { OK_CODE } from "../commands.js";
 import { cfxFileCrc } from "../crc.js";
 import { CFX_CURRENT_RUN_DIR, CFX_RUN_REPORT_DIR } from "../runPlan.js";
+import { LID_CLOSING_MS, LID_OPENING_MS } from "./schedule.js";
 import { isRunDefinitionVerb } from "../../runDefinition.js";
 import type { EmulatorClock } from "./clock.js";
 import type { EmulatorRunData } from "./data.js";
@@ -36,6 +37,8 @@ import type { EmulatorReply } from "./transport.js";
  * on leniency fails here rather than in the lab.
  */
 const FAIL_CODE = "0001";
+const REAL_TIME_DATA_DIR = "\\Storage Card\\Real-Time Data";
+const LOGS_DIR = "\\Storage Card\\Logs";
 
 /** The static identification block (`usb.md` §3), defaulting to the committed CT019138 strings. */
 export interface EmulatorIdentity {
@@ -113,7 +116,11 @@ export class EmulatedInstrument {
   /** The protocol currently typed in, one directive per entry (`usb.md` §7.2). */
   private authored: string[] = [];
   private run: EmulatedRun | null = null;
-  private lid: "OPEN" | "CLOSED" = "CLOSED";
+  /** Where the lid is going, and when it gets there: field 17 reads `OPENING`/`CLOSING` on the
+   * way (measured, `usb.md` §3.2 — a motorised lid takes seconds, and a client that waits for
+   * `OPEN` after `LID OPEN` sees the intermediate state first). */
+  private lidTarget: "OPEN" | "CLOSED" = "CLOSED";
+  private lidMovingUntilMs = 0;
   private volumeUl = 10;
   private hotLidOperand = "105,30";
   private guidCounter = 0;
@@ -127,6 +134,14 @@ export class EmulatedInstrument {
       "\\Storage Card",
       CFX_CURRENT_RUN_DIR,
       CFX_RUN_REPORT_DIR,
+      // Holds a `<run>.zpcr` and a `<run>.txt` per completed run on the real instrument — CFX
+      // Manager lists and downloads them (`usb.md` §5, measured in the `usb-basic` capture).
+      // Modelled as existing and empty: when the instrument writes into it is unwitnessed
+      // (`emulator.md` §11), and inventing that would be inventing evidence.
+      REAL_TIME_DATA_DIR,
+      // Five instrument logs (`DebugLog.txt`, `SystemUsageLog.txt`, …) on the real one, same
+      // capture. Present and empty for the same reason.
+      LOGS_DIR,
     ]);
     for (const [name, bytes] of Object.entries(options.initialRunFolder ?? {})) {
       this.fs.write(`${CFX_CURRENT_RUN_DIR}\\${name}`, bytes);
@@ -174,11 +189,15 @@ export class EmulatedInstrument {
         // protocol being typed into the one slot the instrument has, so it clears that slot.
         this.authored = [];
         return ok();
-      case "LID":
-        if (/^OPEN$/i.test(rest)) this.lid = "OPEN";
-        else if (/^CLOSE$/i.test(rest)) this.lid = "CLOSED";
-        else return fail();
+      case "LID": {
+        const target = /^OPEN$/i.test(rest) ? "OPEN" : /^CLOSE$/i.test(rest) ? "CLOSED" : null;
+        if (target === null) return fail();
+        if (target !== this.lidTarget) {
+          this.lidTarget = target;
+          this.lidMovingUntilMs = now + (target === "OPEN" ? LID_OPENING_MS : LID_CLOSING_MS);
+        }
         return ok();
+      }
       case "BLOCKID":
       case "TESTMODE":
       case "SETAPILOGLEVEL":
@@ -194,6 +213,12 @@ export class EmulatedInstrument {
 
   // ---- status -----------------------------------------------------------
 
+  /** Field 17 at `now`. */
+  private lidState(now: number): string {
+    if (now < this.lidMovingUntilMs) return this.lidTarget === "OPEN" ? "OPENING" : "CLOSING";
+    return this.lidTarget;
+  }
+
   private snapshot(now: number): RunSnapshot | null {
     const snap = this.run?.observe(now) ?? null;
     return snap && snap.visible ? snap : null;
@@ -202,7 +227,12 @@ export class EmulatedInstrument {
   private status(): EmulatorReply {
     // The accelerated clock moves here and nowhere else: the host asking what is happening is
     // what makes the next thing happen (`emulator.md` §6).
-    this.clock.poll(this.run?.observe(this.clock.now()).nextEventAtMs ?? null);
+    const before = this.clock.now();
+    const runEvent = this.run?.observe(before).nextEventAtMs ?? null;
+    const lidEvent = this.lidMovingUntilMs > before ? this.lidMovingUntilMs : null;
+    this.clock.poll(
+      runEvent === null ? lidEvent : lidEvent === null ? runEvent : Math.min(runEvent, lidEvent),
+    );
     const now = this.clock.now();
     this.run?.materialise(now);
     const snap = this.snapshot(now);
@@ -227,7 +257,7 @@ export class EmulatedInstrument {
           "0",
           "0",
           AMBIENT_C.toFixed(2),
-          this.lid,
+          this.lidState(now),
           "0",
         ].join(";"),
       );
@@ -268,7 +298,7 @@ export class EmulatedInstrument {
         "0",
         String(snap.stepCount),
         snap.sampleTempC.toFixed(2),
-        this.lid,
+        this.lidState(now),
         "0",
       ].join(";"),
     );

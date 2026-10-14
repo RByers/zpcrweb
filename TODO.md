@@ -6,13 +6,26 @@ visualizer for everything** inside a `.zpcr` archive.
 ## Immediately next
 
 - Fix ROX->Cy5 bleed, eg. as seen in 9/5 run. Does the BioRad software have this too?
-- Build a CFX device emulator for testing purposes, uses the full raw USB protocol but without
-  an actual USB device. 
-  - Add a button to the UI "Connect to mock instrument" for manual testing purposes
-  - Generate realistic data / results based on saved recordings for PCR, melt and heat block runs.
-    But generate the same curves for all wells,
-  - Support both running in realtime (eg. for interactive use) and maximum accelerated time for
-    automated testing (should rely on no sleeps), with on option in the UI when using the mock instrument.
+- [x] **Built a CFX device emulator** — `packages/core/src/usb/emulator/`, speaking the full raw
+      USB protocol with no device, documented in [`emulator.md`](./docs/emulator.md). `#mock` in the
+      URL turns the Instrument view's connect button into "Connect (mock USB)"; the fluorescence is
+      one recorded well's curve written into every well; `#mock=60` scales simulated time and
+      `#mock=max` has no clock at all, advancing a step per status poll, which is what
+      `uitest.mjs`'s `mockInstrumentChecks` drives a whole run on. Alongside it the instrument
+      session and the run follower moved into core (`usb/session.ts`, `usb/runFollower.ts`), where
+      the emulator tests them in milliseconds.
+
+      `tools/emucheck.mjs` replays the two USBPcap captures in `~/lab/BioRad/` at it by hand
+      (`emulator.md` §10.2): every reply shape and code agrees, and `usb-run`'s ten run edges come
+      out in the same order within seconds. Re-run it whenever the emulator's command handling
+      changes.
+- [ ] **Download completed runs from the instrument's own `Real-Time Data` folder.** `usb-basic`
+      shows CFX Manager listing `\Storage Card\Real-Time Data` — a `<run>.zpcr` and `<run>.txt`
+      per completed run — and downloading the `.zpcr`s (`usb.md` §5). That is a finished run
+      retrievable *after* the run folder has been overwritten, which the Instrument view cannot do
+      today. Two things first: `CfxDevice.getFile` must reassemble a reply longer than 65,530
+      bytes (the `.zpcr`s are 40–400 KB and arrive split; the emulator now splits the same way, so
+      it is testable), and a recording of *when* the instrument writes there (`emulator.md` §11).
 - Clean up instrument UI to make it less confusing when moving between runs. Eg:
   - The left panel should be exclusively about the state of the instrument. Eg.
     showing the last completed run and offering to download it. Open / close lid,

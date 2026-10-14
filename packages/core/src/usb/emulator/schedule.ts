@@ -21,6 +21,7 @@
  * | {@link LID_PREHEAT_MS} | the lid warm-up before the block moves | measured (`usb.md` §7.3, ~168 s) |
  * | {@link PLATE_READ_MS} | a `PLATEREAD #h3F` step | measured (`usb.md` §3.2, 15.2 s) |
  * | {@link RAMP_MS} | a thermal step's approach to its setpoint | this emulator's own |
+ * | {@link LID_OPENING_MS}, {@link LID_CLOSING_MS} | the motorised lid in motion after `LID OPEN` / `LID CLOSE` | measured (`usb-run` capture, `usb.md` §3.2 field 17) |
  *
  * Only the last is invented. A real ramp's length depends on how far the block has to travel and
  * the instrument never reports a rate, so a constant is the honest placeholder — it produces the
@@ -43,6 +44,11 @@ export const PLATE_READ_MS = 15_200;
 /** How long a thermal step spends ramping before its hold starts counting. This emulator's own —
  * see the module comment. */
 export const RAMP_MS = 10_000;
+/** After `LID OPEN`, field 17 reads `OPENING` for this long before `OPEN`; after `LID CLOSE`,
+ * `CLOSING` before `CLOSED`. Measured once each in the `usb-run` capture, to the ±1.4 s of its
+ * status poll (`emulator.md` §10.2). */
+export const LID_OPENING_MS = 17_600;
+export const LID_CLOSING_MS = 8_500;
 
 /** One step of the run, as it executes — one pass through it, not one protocol step. */
 export interface ScheduledStep {
@@ -115,7 +121,8 @@ export function scheduleRun(program: RunDefinitionProgram): RunSchedule {
   let at = 0;
   let reads = 0;
   // `repeat` counts passes through the loop currently executing: it goes up wherever the walk
-  // jumps backwards, and resets wherever it skips forward over a step — which is always a
+  // jumps backwards — or lands on the step it just left, which is what a one-step loop body
+  // looks like — and resets wherever it skips forward over a step — which is always a
   // closing `GOTO`, since that is the only directive that can sit between a loop's last body
   // step and whatever follows the loop. That forward skip is the only stage boundary the `.alf`
   // marks (`alf.md` §7.2). Read off the step numbers rather than tracked inside the walk, so the
@@ -126,7 +133,7 @@ export function scheduleRun(program: RunDefinitionProgram): RunSchedule {
   for (const { directive, stepNumber, executed } of walkProgram(program)) {
     if (directive.verb === "GOTO" || directive.verb === "END") continue;
     if (stepNumber > previousStepNumber + 1) repeat = 1;
-    else if (stepNumber < previousStepNumber) repeat++;
+    else if (stepNumber <= previousStepNumber) repeat++;
     previousStepNumber = stepNumber;
 
     const { incrementC, extendSeconds } = modifiersFor(program, directive);

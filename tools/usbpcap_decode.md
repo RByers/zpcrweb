@@ -10,6 +10,7 @@ one tool here that is Python rather than Node.
 python3 tools/usbpcap_decode.py <file.pcapng>              # what devices are in this capture?
 python3 tools/usbpcap_decode.py <file.pcapng> --device 3   # decode one device's stream
 python3 tools/usbpcap_decode.py <file.pcapng> --device 3 --raw
+python3 tools/usbpcap_decode.py <file.pcapng> --device 3 --jsonl   # lossless, for emucheck.mjs
 ```
 
 With no `--device`, it prints one line per USB device number seen, the VID:PID identified from any
@@ -18,7 +19,10 @@ number is the CFX96 in a given capture (look for VID `0x0614`).
 
 With `--device N`, it prints the decoded command/response stream for that device: channel-1 ASCII
 RCI exchanges rendered as text. `--raw` widens that to the traffic normally left out — non-channel-1
-messages and control transfers — as one-line summaries.
+messages and control transfers — as one-line summaries. `--jsonl` prints every reassembled
+message on every channel as one JSON object per line with its body base64-encoded: the text form
+replaces a downloaded file's bytes, this does not, and it is what [`emucheck.mjs`](./emucheck.md)
+replays at the emulator.
 
 ## What it decodes
 

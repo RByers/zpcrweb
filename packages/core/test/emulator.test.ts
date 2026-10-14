@@ -334,6 +334,8 @@ describe("a run, start to collected", () => {
 
     const before = await device.listFiles(CURRENT_RUN);
     expect(before.names).not.toContain("ended");
+    // §7.7: the last read is not there yet — the acknowledgement is what releases it.
+    expect(before.names.filter(isPlateReadName)).toEqual(["Read00001.Plateread"]);
     await device.acknowledgeRun();
     const after = await device.listFiles(CURRENT_RUN);
     expect(after.names).toContain("ended");
@@ -418,9 +420,57 @@ describe("pausing, skipping and stopping", () => {
     await device.startRun(planRun({ runDefinition: TWO_CYCLE, name: "demo" }));
     clock.advance(6_000 + 168_000 + 20_000);
     // Step 1 is a 3-minute hold the run is 20 s into — it cannot have run out.
-    expect((await device.status()).stepText).toBe("TEMP 95.0,180");
+    const before = await device.status();
+    expect(before.stepText).toBe("TEMP 95.0,180");
     await device.runAction("skipStep");
-    expect((await device.status()).stepText).toBe("TEMP 95.0,10");
+    const after = await device.status();
+    expect(after.stepText).toBe("TEMP 95.0,10");
+    // Measured (`usb-run`): the skip re-plans what remains but does not jump the elapsed clock —
+    // the instrument read 37.77 s on the step after a skipped 180 s hold, not 180.
+    expect(after.elapsedS).toBeCloseTo(before.elapsedS!, 1);
+    expect(after.remainingS!).toBeLessThan(before.remainingS! - 100);
+    await close();
+  });
+
+  it("a CANCEL during the lid preheat aborts the run, and STATUS? says so at once", async () => {
+    const clock = manualClock();
+    const { device, close } = await connect({ data: pcrData(), clock });
+    await device.startRun(planRun({ runDefinition: TWO_CYCLE, name: "demo" }));
+    clock.advance(6_000 + 30_000);
+    expect((await device.status()).flags.lidPreheating).toBe(true);
+    const result = await device.cancelRun({ pollMs: 1, timeoutMs: 5_000 });
+    expect(result.stopped).toBe(true);
+    expect(result.timedOut).toBe(false);
+    // Still inside what would have been the preheat: the run must not go on reporting itself
+    // preheating after it answered the abort (register 104), or the client's cancel times out.
+    clock.advance(60_000);
+    const status = await device.status();
+    expect(status.flags.raw).toBe(160);
+    expect(status.flags.lidPreheating).toBe(false);
+    expect(isFinishedRun(status)).toBe(true);
+    await close();
+  });
+
+  it("the lid takes its time: OPENING, then OPEN, then CLOSING, then CLOSED", async () => {
+    const clock = manualClock();
+    const { device, close } = await connect({ clock });
+    await device.runAction("lidOpen");
+    expect((await device.status()).lid).toBe("OPENING");
+    clock.advance(17_000);
+    expect((await device.status()).lid).toBe("OPENING");
+    clock.advance(1_000);
+    expect((await device.status()).lid).toBe("OPEN");
+    await device.runAction("lidClose");
+    expect((await device.status()).lid).toBe("CLOSING");
+    clock.advance(9_000);
+    expect((await device.status()).lid).toBe("CLOSED");
+    await close();
+  });
+
+  it("…and with the accelerated clock a poll carries the lid to where it is going", async () => {
+    const { device, close } = await connect();
+    await device.runAction("lidOpen");
+    await pollUntil(device, (s) => s.lid === "OPEN", 3);
     await close();
   });
 
@@ -641,5 +691,17 @@ describe("@zpcrweb/core/emulator is a subpath of its own", () => {
     const module = (await import(pathToFileURL(built).href)) as typeof import("../src/emulator.js");
     expect(typeof module.createCfxEmulator).toBe("function");
     expect(module.createCfxEmulator().vendorId).toBe(0x0614);
+  });
+});
+
+describe("the schedule counts passes the way the walk does", () => {
+  it("a one-step loop body still advances the repeat, so INC applies on every pass", async () => {
+    const { scheduleRun } = await import("../src/emulator.js");
+    const { parseRunDefinition } = await import("../src/index.js");
+    // `GOTO 1,3` straight back to the step before it: the walk lands on the same step number
+    // four times in a row, which is a backwards jump of zero and was not counted as one.
+    const schedule = scheduleRun(parseRunDefinition("METHOD CALC;TEMP 65.0,5;INC 0.5;GOTO 1,3;END"));
+    expect(schedule.steps.map((s) => s.repeat)).toEqual([1, 2, 3, 4]);
+    expect(schedule.steps.map((s) => s.targetC)).toEqual([65, 65.5, 66, 66.5]);
   });
 });

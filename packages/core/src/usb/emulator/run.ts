@@ -200,8 +200,10 @@ export class EmulatedRun {
    */
   abort(nowMs: number): boolean {
     if (nowMs < this.visibleAtMs || this.isOver(nowMs)) return false;
+    // A run aborted while paused ends where it was paused; the pause's span still has to be
+    // accounted for, or the report's end time and elapsed seconds leave it out.
+    this.resume(nowMs);
     this.abortedAtMs = this.runMs(nowMs);
-    this.pausedAt = null;
     return true;
   }
 
@@ -252,6 +254,11 @@ export class EmulatedRun {
     for (const step of this.schedule.steps) {
       if (step.readIndex === undefined || step.endMs > runMs) continue;
       if (step.readIndex <= this.readsWritten) continue;
+      // The run's last read is released by the acknowledging `CANCEL`, not by its step ending
+      // (`usb.md` §7.6–§7.7): a listing taken at the final `PLATEREAD`→`IDLE` edge does not
+      // find it, which is the case the follower's finish rule exists for. Deliberately only the
+      // last one — every earlier read appears as its step ends, and is listed mid-run.
+      if (step.readIndex === this.schedule.plateReads && !this.acknowledged) continue;
       this.readsWritten = step.readIndex;
       const fileName = `Read${String(step.readIndex).padStart(5, "0")}.Plateread`;
       const mask =
@@ -367,9 +374,12 @@ export class EmulatedRun {
     const stepCount = this.program.steps.length + (this.program.directives.some((d) => d.verb === "END") ? 1 : 0);
     const lidTarget = this.request.lidOn ? this.request.lidTemperatureC : AMBIENT_C;
 
-    if (nowMs < this.protocolStartMs) {
+    if (nowMs < this.protocolStartMs && !this.isOver(nowMs)) {
       // The lid preheat: the run is reporting its first step, the block has not moved, and the
       // clocks stay at zero — `usb.md` §7.3, which is also why a countdown needs its own state.
+      // A `CANCEL` during the preheat is an abort like any other (`isOver`), so it is tested
+      // first: a run that answered the abort and then went on reporting itself preheating would
+      // time out the client's `cancelRun`, which waits for the register to say "stopped".
       const first = this.schedule.steps[0];
       const fraction = (nowMs - this.visibleAtMs) / LID_PREHEAT_MS;
       return {
@@ -397,7 +407,7 @@ export class EmulatedRun {
         finished: true,
         cancelled: this.wasCancelled,
         stepCount: 0,
-        elapsedS: round2(this.endMs / 1000),
+        elapsedS: round2((this.endMs - this.skewMs) / 1000),
         lidTempC: round1(lidTarget),
         nextEventAtMs: null,
       };
@@ -423,7 +433,10 @@ export class EmulatedRun {
       lidTempC: round1(lidTarget),
       // Field 16 lags the block through a ramp and settles on the setpoint (`usb.md` §3.2).
       sampleTempC: round2(ramping ? from + (blockTempC - from) * 0.6 : target),
-      elapsedS: round2(runMs / 1000),
+      // Field 8 is wall time since the protocol started: a `PROCEED` re-plans what remains
+      // (field 10) and moves the run to its next step, but does not jump this clock — measured
+      // in the `usb-run` capture, where it read 37.77 s on the step after a skipped 180 s hold.
+      elapsedS: round2((runMs - this.skewMs) / 1000),
       stepElapsedS: round2(into / 1000),
       rampElapsedS: round2(Math.min(into, RAMP_MS) / 1000),
       holdElapsedS: round2(Math.max(0, into - RAMP_MS) / 1000),

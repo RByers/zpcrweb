@@ -68,6 +68,17 @@ quirks that make the real one awkward:
   isn't there — rather than a text code.
 - The five-command upload cycle (`DELFILE` → `CRCSENDFILE` → `COMPUTEFILECRC` →
   `GETFILESLEN`+`LISTALLFILES` → `GETFILECRC`), with `crc.ts`'s byte-interleaved XOR.
+- **A reply longer than 65,530 bytes goes out as several messages** of that length and a
+  remainder, each under its own header (`transport.ts`'s `MAX_MESSAGE_PAYLOAD`) — measured in
+  the `usb-basic` capture (`usb.md` §5), and the only way a file over 64 KB fits a `uint16`
+  length field. No file the emulator produces is that long; a seeded one can be.
+
+Four directories exist under `\Storage Card`: `CurrentRun` and `PCRunReport`, which the run
+writes into, and `Real-Time Data` and `Logs`, which on the real instrument hold a `.zpcr` and a
+`.txt` per completed run and five instrument logs respectively (`usb.md` §5, measured in
+`usb-basic`). The emulator has them **present and empty**: when the instrument writes into them
+is unwitnessed (§11), and a listing that agrees with the capture while the contents are invented
+would be worse than one that says "nothing here".
 
 ## 5. The run
 
@@ -238,9 +249,64 @@ proves on that front is that the emulator invents no failure where the instrumen
 
 `usb-basic` and `usb-run` are CFX Manager talking to the real CT019138 and are what `usb.md` was
 reverse-engineered from. They live outside the repository (`~/lab/BioRad/`), so this is a by-hand
-check rather than part of `npm test` — and **it has not been run yet**: no script extracts their
-command/response pairs and diffs them against the emulator. Until it is, Appendix A's
-measured/derived/invented split rests on `usb.md`'s prose and on §10.1's one session.
+check rather than part of `npm test`: `tools/emucheck.mjs` ([`tools/emucheck.md`](../tools/emucheck.md))
+decodes a capture losslessly, pairs every channel-1 command with its reply, drives the emulator with
+the same commands on a clock advanced to the capture's own timestamps, and reports every reply that
+differs and every `STATUS?` edge each side passed through. **Re-run it whenever the emulator's
+command handling changes**, and fold what it finds back into Appendix A.
+
+Run on 2026-10-14 against both captures:
+
+| | `usb-basic` | `usb-run` |
+|---|---|---|
+| command/reply pairs | 587, over 36 verbs | 1,595, over 34 verbs |
+| result codes | every one `0000`, both sides | every one `0000`, both sides |
+| reply shapes | identical, every verb | identical, every verb |
+| `STATUS?` | 19 fields; the same 11 populated | 19 fields; the same 16 populated, phase by phase |
+| byte-identical | every identity query, every `GETFILE` (nine files, one of them 406 KB in seven messages), every listing of `Real-Time Data` and `Logs` | every identity query, the whole authoring sequence, every upload |
+| run edges | no run; lid `OPENING`→`OPEN`→`CLOSING`→`CLOSED` in the same order, within 1.4 s | **the same 10 run edges in the same order**, each within 8 s of the instrument's |
+| commands the emulator rejects | none | none |
+| commands the emulator accepts that the instrument refused | none — the instrument refused nothing | none |
+
+**What the comparison corrected in the emulator**, each now a test:
+
+- **The lid takes time.** `LID OPEN` was answered with `OPEN` on the next poll; the instrument
+  reports `OPENING` for ~18 s first, and `CLOSING` for ~9 s after `LID CLOSE`
+  (`schedule.ts`'s `LID_OPENING_MS`/`LID_CLOSING_MS`, from both captures).
+- **`PROCEED` does not move the elapsed clock.** The emulator jumped field 8 to the end of the
+  skipped step; the instrument read 37.77 s on the step after a skipped 180 s hold. Field 8 is wall
+  time since the protocol started, and only field 10 is re-planned (`usb.md` §3.2).
+- **`\Storage Card\Real-Time Data` and `\Storage Card\Logs` exist** (§4). The emulator
+  answered "no such directory" to both; the first holds a `.zpcr` per completed run.
+- **A reply over 65,530 bytes is split** (§4). The emulator framed a 406 KB file as one message,
+  which the real wire cannot carry.
+
+**What it leaves, and why**, all recorded rather than papered over:
+
+- **The start window is 6–11 s, not 6 s.** `usb-run`'s run appeared 10.7 s after `RemoteRun`
+  (±1.4 s of its poll); the live measurement behind `START_WINDOW_MS` was 6.1 s. The emulator keeps
+  6 s — a client has to allow for several times either — so its first step ran 4 s longer than the
+  instrument's before the operator's `PROCEED` cut it.
+- **Step timing is a model.** The emulator's thermal steps came out within −8 s / +4 s of the
+  instrument's (its 10 s ramp against a real 11 s up-ramp and 15 s down-ramp), which is enough to
+  move a plate read by a poll or two: `usb-run`'s `GETFILE` of `Read00001.Plateread` arrived 3 s
+  before the emulator's read existed. The order of events is right; the seconds are not promised.
+- **`CurrentRun`'s listing order differs.** The instrument listed the run's own `runlog.xml`,
+  `RunInfo.xml`, `ProtocolRunDefinition.txt` first and the calibration files after, all the
+  `_BR Clear` set before the `_BR White` set; the emulator lists in write order. Same names, same
+  count; §10.1's `listing-order` entry.
+- **The lid in `usb-run` was closed by hand**: three `LID OPEN` commands, no `LID CLOSE`, and the
+  instrument reporting `CLOSING`→`CLOSED` anyway. The emulator's lid moves only on command, so the
+  run capture's edge table ends two rows short and the script exits 1 on it. That is the operator,
+  not a drift.
+- **`VOLUME?` answered `10` where the emulator says `25`**: the value the instrument was last set
+  to. The emulator's default is the one the committed recordings used.
+- **Two replies in `usb-basic` ran one command behind** after a `TESTMODE 3`: an `*IDN?` answered
+  with a bare `0000` and the next with four raw bytes. A capture artefact of pairing, not
+  something to imitate.
+
+**And the thing neither capture can do**: like §10.1's session, the instrument was never asked
+anything it refused, so every rejection the emulator makes is still a guess (Appendix A).
 
 ### 10.3 End to end
 
@@ -254,13 +320,13 @@ never be more permissive than the instrument**: a command the real one rejects h
 here, or the app grows a dependency on leniency that fails in the lab. Where we do not know whether
 the real one rejects something, that is an *invented* answer and Appendix A marks it as one.
 
-**How far it reaches, stated plainly: one *replayable* session, of one kind of run — and that kind
-is the heat block.** Be careful with what that does and does not say. A qPCR run *was* captured
-from real hardware — `usb-run`, two cycles with two plate reads, is one of the two USBPcap captures
-`usb.md` was reverse-engineered from, so §7's read-collection sequence is measured rather than
-guessed. What is missing is a qPCR log **the fidelity comparison can replay**: the captures live
-outside the repo (§10.2), so nothing automatically checks the emulator against them, and the
-by-hand comparison remains undone. The melt path has neither — no capture and no log.
+**How far it reaches, stated plainly: one *replayable* session of a heat-block run in `npm test`,
+and one qPCR run compared by hand.** `usb-run` — two cycles, two plate reads, a `PROCEED`, the
+§7.6 hold and its acknowledgement — has been replayed at the emulator with `tools/emucheck.mjs`
+(§10.2) and passes through the same ten edges in the same order, so §7's read-collection sequence
+is measured *and* checked. What is still missing is a qPCR log **in the repository**, so that
+check runs on every `npm test` rather than when someone remembers to; the captures are the
+operator's and stay outside it. The melt path has neither — no capture and no log.
 
 ## 11. Unwitnessed cases — the standing list
 
@@ -271,7 +337,7 @@ to the emulator adds its entry here in the same commit, unless they have a recor
 
 | case | what would settle it |
 |---|---|
-| A qPCR run's traffic, *replayably* | a `.zpcr` with a `usb-traffic.bin` from a run with a `PLATEREAD` in it. The behaviour itself is measured — `usb-run` captured two cycles and two reads, and Appendix A lists it as such — but §10.1's replayable session only pulls a qPCR's *files* without watching one execute, so nothing automatically re-checks it |
+| A qPCR run's traffic, *replayably* | a `.zpcr` with a `usb-traffic.bin` from a run with a `PLATEREAD` in it. The behaviour is measured and checked by hand (§10.2 replays `usb-run`), but §10.1's in-repo session only pulls a qPCR's *files* without watching one execute, so `npm test` never re-checks it |
 | A melt run's traffic | a `.zpcr` with a `usb-traffic.bin` from a melt |
 | Cancel **inside** the start window | a recorded session that cancels within ~6 s of `RemoteRun` |
 | Cancel **outside** it, mid-`PLATEREAD` | `usb-cancel` covers the abort; the wait-for-the-read-to-end path is prose |
@@ -283,6 +349,11 @@ to the emulator adds its entry here in the same commit, unless they have a recor
 | **When the staging GUID disappears** | it is gone by the end of a run and present right after its upload; nothing observed the moment between (§10.1) |
 | **What the block reports after a finish** | this instrument was still reporting 94.42 °C when its 95 °C run finished; the emulator drops to ambient at once. How fast a real block falls is unmeasured |
 | **How long the run stays named after the acknowledgement** | one poll after the acknowledging `CANCEL` the instrument still reported `"YOUSEQ_R",BLOCK,OFF` with register 32; the emulator returns to the empty idle immediately. One sample is not a duration |
+| **When `Real-Time Data` and `Logs` gain their files** | both directories exist and hold a completed run's `.zpcr`/`.txt` and the instrument's logs (§4, measured); nothing shows the moment a finished run's `.zpcr` is written there, or whether an acknowledgement is what writes it. The emulator keeps both empty |
+| **`PROCEED` during the lid preheat** | the emulator skips the first step before its clock has started; the instrument's answer is unobserved, and a no-op is as plausible |
+| **A one-step loop body, and nested loops** | `GOTO 1,3` straight back to the step before it counts its passes the way `protocol.md` §4 says it must (tested); a loop *inside* a loop restarts the inner count on paper but what the `.alf`'s repeat column and `STATUS?`'s cycle field do on hardware is unmeasured |
+| **An abort while paused** | the pause's span is kept in the report's clocks (tested); `usb.md` §7.8 lists `CANCEL` on a paused run as itself untested |
+| **The lid moved by hand** | `usb-run` shows `CLOSING`→`CLOSED` with no `LID CLOSE` sent; the emulator's lid moves only on command |
 | **Listing slot reuse** | §10.1 shows a rewritten file keeping its place and the newest GUID taking the freed slot at the end. Whether that is FAT entry reuse or something else is a guess, so the emulator has not been changed to imitate it |
 
 The length of this list is the honest answer to "how much does a green emulator test prove?".
@@ -327,6 +398,15 @@ also **measures two things that had been guesses**: the run descriptor's name ma
 become underscores before the eight-character cut), and which commands terminate their reply with
 CRLF — the second of which the emulator still does not imitate (§10.1).
 
+§10.2's two captures add a third witness — CFX Manager's own conversation, 2,182 exchanges — and
+measure, for the first time: the lid's `OPENING` (~18 s) and `CLOSING` (~9 s) states and their
+durations; that `PROCEED` re-plans field 10 without moving field 8; a start window of ~10.7 s
+beside the 6.1 s measured live; a `GETFILE` over 65,530 bytes arriving as consecutive messages of
+that length; the `Real-Time Data` and `Logs` directories and what they list; `TESTMODE`,
+`SETAPILOGLEVEL`, `FRONTENDLOCKED`, `BLOCKID`, `SetDateTime`, `GETSIPOSTERRORS`, `GETTOTALRAM`,
+`GETPOS?`, `SUPERLOCKDOWNMODE?` and `ENABLERT?` answering exactly as the emulator does; and the
+whole of `usb-run`'s ten run edges in the emulator's order.
+
 ### Derived
 
 The `.alf`'s own content (generated from the schedule that ran); the run folder's marker files;
@@ -362,6 +442,10 @@ timestamps.
   meanings are a guess.
 - The `.alf` step line's field 1 (`-1`) and field 4 (`.00`), written as observed but not understood.
 - `CANCEL` on an idle instrument answering `0000`.
+- **What `Real-Time Data` and `Logs` hold** — nothing, on the emulator. Their existence and what
+  the real ones list are measured (§4); when the instrument writes there is not (§11).
+- **Ramp lengths.** The emulator's 10 s is between the instrument's measured ~11 s up and ~15 s
+  down (§10.2); a block's real ramp depends on the distance, and nothing reports a rate.
 - Clearing `CurrentRun` at the start of a new plate-read run — derived from "every pulled folder
   holds one run's files", never observed directly.
 - The response header bytes `01 00 00 00 …` on every text reply (measured only for the
@@ -399,3 +483,15 @@ rules — and which the recording has now answered the other way:
   emulator emits none.
 - **Whether `GETFILE` sets `passThrough`.** It does not — a printable file comes back as an
   ordinary text message. The emulator sets it.
+
+And four from §10.2's replay of the two captures, where the capture is the authority:
+
+- **§5's "`\Storage Card` contains nothing but `CurrentRun` and `PCRunReport`."** The live probe
+  that established it could not see directories at all. `usb-basic` lists two more — `Real-Time
+  Data`, with a `.zpcr` and a `.txt` per completed run, and `Logs` — and downloads from the first.
+- **§7.8's start window.** "~6 s is the one measured figure" is now two: 6.1 s live and ~10.7 s in
+  `usb-run`. A client's allowance has to cover the larger.
+- **§3.2's field 17** gains durations: `OPENING` ~18 s, `CLOSING` ~9 s, and both reported when the
+  lid is moved by hand with no command sent.
+- **§5 gains the split download**: a file over 65,530 bytes arrives as several messages, which
+  nothing in `usb.md` said and `CfxDevice.getFile` does not yet handle.

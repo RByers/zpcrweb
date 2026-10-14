@@ -14,7 +14,8 @@ it, and the file's own header comment for anything below that.
 | [`harness.mjs`](./harness.mjs) | Shared library for `uishot.mjs` and `uitest.mjs`: the CDP client, the process plumbing, and the waiting vocabulary a check should be written in. | [`harness.md`](./harness.md) |
 | [`chartshot.mjs`](./chartshot.mjs) | Shared library for `zpcr.mjs curves` and `melt`: renders the web app's real chart modules to a PNG from Node. | [`chartshot.md`](./chartshot.md) |
 | [`usbpcap_decode.py`](./usbpcap_decode.py) | Decodes a USBPcap capture of CFX96 traffic, for validating `usb.md` against the real thing. | [`usbpcap_decode.md`](./usbpcap_decode.md) |
+| [`emucheck.mjs`](./emucheck.mjs) | Replays a USBPcap capture at the CFX96 emulator and reports every reply and run edge that differs — `emulator.md` §10.2's by-hand check. | [`emucheck.md`](./emucheck.md) |
 
-`zpcr.mjs` and `cfx.mjs` need a built core (`npm run build`); everything browser-driven needs
+`zpcr.mjs`, `cfx.mjs` and `emucheck.mjs` need a built core (`npm run build`); everything browser-driven needs
 Chrome. `AGENTS.md`'s "UI testing" section says when an agent should reach for `uishot.mjs` and
 `uitest.mjs`; the docs above say how to drive them.
