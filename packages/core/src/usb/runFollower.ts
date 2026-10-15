@@ -72,7 +72,9 @@
  * This used to be eleven `useRef` latches spread over four React effects: each was correct, and
  * collectively they were a machine nothing could print and nothing could assert.
  */
+import { nextFreeRunFileBase } from "../experiment.js";
 import {
+  depositedName,
   hasRunIdentity,
   isSameRun,
   runFilesToFetch,
@@ -220,6 +222,20 @@ export interface RunFollowerMemory {
    * watching the end of beats showing zero for it.
    */
   lastElapsed: number | null;
+  /**
+   * The file the user pressed Start on, and the experiment name the run was sent with
+   * ({@link RunFollower.adopt}) — the file this run's results belong in, whatever either of them
+   * is called by the time the folder is read.
+   *
+   * Remembered by id rather than re-derived from the run's name because the two need not agree: a
+   * file renamed by hand, a disk-backed file whose date was never restamped, the day's second run
+   * of a name (`-2`) — each is named something other than the `<date>-<name>.zpcr` the folder
+   * implies, and each used to have its run filed beside it as a new file. The name is the guard: it
+   * is what the folder's `zpcrweb.json` must say for the folder to be *this* run rather than the
+   * previous one still sitting there. A page fact, like {@link watchedRuns}: a run outlives a
+   * disconnect.
+   */
+  startedFrom: { id: string; experimentName: string } | null;
 }
 
 /** What a view renders — see {@link RunFollower.state}. */
@@ -283,6 +299,20 @@ export interface RunFollowerPorts {
    * finished or not; keep it and the pass fetches the one plate read that arrived.
    */
   heldRun: (fileName: string) => HeldRun | null;
+  /**
+   * Every `.zpcr` the app is holding, whatever it is called — how a run is found **by what it is**
+   * rather than by what its name ought to be.
+   *
+   * {@link heldRun} answers for one name, and a run's name is a derivation (`zpcrNameFromRunFiles`)
+   * that the file it belongs in need not match: the file can be renamed mid-run, a reload forgets
+   * the name the run was started under, and a file named by hand never matched it in the first
+   * place. Each of those used to make the follower conclude it held nothing and file the run again
+   * beside itself. With this, the file whose `RunInfo.xml` is the folder's is the run's file, and
+   * after a reload a begun experiment holding nothing yet and stating the folder's deposited name
+   * is the file the run was started from. Optional: without it only {@link heldRun}'s name lookup
+   * is tried, as before.
+   */
+  openRuns?: () => readonly HeldRun[];
   /**
    * Hand what the instrument has written to the app.
    *
@@ -367,6 +397,7 @@ export class RunFollower {
     watchedRuns: new Set(),
     wasRunning: false,
     lastElapsed: null,
+    startedFrom: null,
   };
 
   constructor(session: CfxSession, ports: RunFollowerPorts) {
@@ -417,9 +448,15 @@ export class RunFollower {
    * Adopting a seed is the opposite claim to {@link expectReportOnly}'s — this run *has* a file —
    * so it also disarms it, which is what keeps a thermal-only start that never ran (cancelled, or
    * the send failed) from being remembered against the next run.
+   *
+   * `experimentName` is the name the run was sent with — `RunPlan.experimentName`, what the run
+   * folder's `zpcrweb.json` will say. Given, it is remembered with the id
+   * ({@link RunFollowerMemory.startedFrom}) and is what lets the run find this file again however
+   * its name and the file's differ.
    */
-  adopt(id: string): void {
+  adopt(id: string, experimentName?: string): void {
     this.#m.reportOnly = false;
+    this.#m.startedFrom = experimentName?.trim() ? { id, experimentName: experimentName.trim() } : null;
     this.#set({ fileName: id });
   }
 
@@ -752,26 +789,91 @@ export class RunFollower {
     const files = await this.#session.fetchDirectoryFiles(CFX_CURRENT_RUN_DIR, idNames);
     if (!files) return; // a failed read leaves the last answer standing; the rail reports it
     const progress = runProgressFromNames(names);
-    const name = zpcrNameFromRunFiles(files, this.#naming());
-    const candidate = this.#ports.heldRun(name);
-    if (isSameRun(candidate?.files, files)) {
+    const { held, adoptId } = this.#place(files);
+    if (held) {
       this.#set({ available: null }); // already in the bar, run and all — nothing to offer
       return;
     }
     this.#set({
       available: {
-        name,
+        name: adoptId ?? this.#freeName(zpcrNameFromRunFiles(files, this.#naming())),
         plateReads: progress.plateReads,
         inProgress: progress.inProgress,
         // The same adoption `#pull` makes, so the offer says where the click will actually put the
         // run rather than implying a file the user hasn't got.
-        into: candidate && !hasRunIdentity(candidate.files) ? candidate.id : null,
+        into: adoptId,
       },
     });
   }
 
   #naming(): RunFolderNaming | undefined {
     return this.#ports.naming?.();
+  }
+
+  /**
+   * Which file the run in this folder belongs in, from the folder's identity entries alone
+   * (`runIdentityFileNames`): `held`, a file that already holds this run and is merged into, or
+   * `adoptId`, the experiment it was started from, which holds none of the run yet and takes it
+   * whole. Neither means a new file.
+   *
+   * In order, and the first answer wins:
+   *
+   * 1. **The file that is this run** — its `RunInfo.xml` is the folder's (`isSameRun`), whatever
+   *    it is called now. Survives a rename mid-run and a reload.
+   * 2. **The file Start was pressed on** ({@link RunFollowerMemory.startedFrom}), while it still
+   *    holds nothing of any run, and only for a folder whose deposited name is the one the run was
+   *    sent with — the previous run, still in the folder, is not this one.
+   * 3. **The file the run's name points at** — the rule this used to be all of, and still the one
+   *    for a file opened by name before the follower knew of it.
+   * 4. **After a reload**, when 2 has been forgotten: a begun experiment that holds nothing of any
+   *    run and whose own name is the folder's deposited one. A touchscreen run deposits no name, so
+   *    it is never matched this way.
+   *
+   * A file holding a *different* run (a `RunInfo.xml` that disagrees) is never an answer.
+   */
+  #place(identity: ZpcrArchive): { held: HeldRun | null; adoptId: string | null } {
+    const deposited = depositedName(identity);
+    const open = this.#ports.openRuns?.() ?? [];
+
+    const same = open.find((r) => isSameRun(r.files, identity));
+    if (same) return { held: same, adoptId: null };
+
+    const started = this.#m.startedFrom;
+    if (started && deposited === started.experimentName) {
+      const file = this.#ports.heldRun(started.id);
+      if (file && isSameRun(file.files, identity)) return { held: file, adoptId: null };
+      if (file && !hasRunIdentity(file.files)) return { held: null, adoptId: file.id };
+    }
+
+    const named = this.#ports.heldRun(zpcrNameFromRunFiles(identity, this.#naming()));
+    if (named && isSameRun(named.files, identity)) return { held: named, adoptId: null };
+    if (named && !hasRunIdentity(named.files)) return { held: null, adoptId: named.id };
+
+    if (deposited) {
+      const pending = open.find(
+        (r) =>
+          !hasRunIdentity(r.files) &&
+          runProgressFromNames(Object.keys(r.files)).begun &&
+          depositedName(r.files) === deposited,
+      );
+      if (pending) return { held: null, adoptId: pending.id };
+    }
+    return { held: null, adoptId: null };
+  }
+
+  /**
+   * `name`, or the next `-N` after it that no held file has — the name a run that belongs in no
+   * file of ours is added under.
+   *
+   * A run's derived name is `<date>-<name>`, which the day's second run of a name shares with the
+   * first (`nextFreeRunFileBase`). The store files by name, so landing a new run under a name a
+   * different run already has would *replace* that run — `#place` has already established
+   * that whatever holds the name is not this run.
+   */
+  #freeName(name: string): string {
+    if (!this.#ports.heldRun(name)) return name;
+    const base = name.replace(/\.zpcr$/i, "");
+    return `${nextFreeRunFileBase(base, (b) => this.#ports.heldRun(`${b}.zpcr`) !== null)}.zpcr`;
   }
 
   /**
@@ -792,36 +894,26 @@ export class RunFollower {
     // reads it back rather than consulting anything kept here, so the answer is always the truth
     // about the file the user actually has: delete it and the next pass fetches the run from the
     // top, keep it and only what the instrument has newly written is fetched.
-    let file = this.#m.identified ? this.#ui.fileName : null;
+    const file = this.#m.identified ? this.#ui.fileName : null;
     let held = file ? this.#ports.heldRun(file) : null;
     // Where a *whole* pass should land, when it isn't simply a new file: the pending experiment
-    // this run was started from, found under the run's own name but holding nothing of the run
-    // yet. Null the rest of the time, and never consulted when there is a `held` run to update.
+    // this run was started from, holding nothing of the run yet. There is nothing there to merge
+    // into — the pass stays whole — but it is that file the run belongs in, rather than a second
+    // one beside it. Null the rest of the time, and never consulted when there is a `held` run.
     let adoptId: string | null = null;
     let identity: ZpcrArchive = {};
     if (!held) {
       // We don't know which file this folder's run belongs to — a fresh connection, a folder the
-      // instrument has cleared for a different run, or a file that has gone. Read the two entries
-      // that *name* a run (~8 KB of ~400 KB) and let them point at it: the file they name, if we
-      // hold that same run, and otherwise nothing, which is a full download.
+      // instrument has cleared for a different run, or a file that has gone or been renamed. Read
+      // the two entries that *name* a run (~8 KB of ~400 KB) and let them point at it (`#place`):
+      // the file holding that same run, the experiment it was started from, and otherwise nothing,
+      // which is a full download into a new file.
       const idNames = runIdentityFileNames(names);
       if (idNames.length > 0) {
         const fetched = await this.#session.fetchDirectoryFiles(CFX_CURRENT_RUN_DIR, idNames);
         if (!fetched) return null; // the fetch failed; the rail reports it, and we retry next tick
         identity = fetched;
-        file = zpcrNameFromRunFiles(fetched, this.#naming());
-        const candidate = this.#ports.heldRun(file);
-        // A file of the right name is not necessarily the right run: the instrument clears the
-        // folder when a run starts, so `RunInfo.xml` has to agree before we append to it.
-        held = isSameRun(candidate?.files, fetched) ? candidate : null;
-        // A candidate that can't agree because it has no `RunInfo.xml` at all is a different case,
-        // and the common one for a run started from a shared folder: a run in progress buffers to
-        // IndexedDB and is only written back to disk when it ends, so the copy this browser opened
-        // mid-run is still the pre-run experiment the run was started from. There is nothing there
-        // to merge into — the pass stays whole — but it is that file the run belongs in, rather
-        // than a second one beside it. A candidate whose `RunInfo.xml` merely *differs* is somebody
-        // else's run and is left alone.
-        if (!held && candidate && !hasRunIdentity(candidate.files)) adoptId = candidate.id;
+        ({ held, adoptId } = this.#place(fetched));
         this.#m.identified = true;
       }
     }
@@ -868,16 +960,26 @@ export class RunFollower {
       // against the held file's *base* name, since the id it is filed under may be a path into a
       // granted folder while the run only ever names itself bare: a run has not been renamed merely
       // by being kept in a shared folder.
-      const renamed = held !== null && runName !== baseNameOf(held.id);
+      //
+      // **Never for a run this app started** (its folder carries a deposited `zpcrweb.json`). That
+      // run's file is the one Start was pressed on, and its name is the user's — a file named by
+      // hand, a disk file with an older date, a `-2` — not a derivation to be corrected. Renaming
+      // it was how a run used to leave the file it was started from on its second plate read.
+      const renamed =
+        held !== null && !depositedName(files) && runName !== baseNameOf(held.id);
       const whole = held === null || renamed;
       const update = whole ? files : fetched;
       // Handed over under the id the run was **found** under rather than the name it derives for
       // itself: the two differ for a file opened out of a granted folder (a path, not a bare name),
       // and the id is the one the store can merge into. Failing that, the pending experiment this
       // run was started from (`adoptId`), and failing that the derived name — a run this browser
-      // has nothing of yet, which is a new file.
+      // has nothing of yet, which is a new file, under a name no other run of ours has.
       const id = await this.#ports.onRun(
-        { name: renamed ? runName : (held?.id ?? adoptId ?? runName), archive: update, whole },
+        {
+          name: renamed ? this.#freeName(runName) : (held?.id ?? adoptId ?? this.#freeName(runName)),
+          archive: update,
+          whole,
+        },
         this.#ui.fileName,
         activate,
       );

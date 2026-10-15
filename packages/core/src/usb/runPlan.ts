@@ -131,6 +131,14 @@ export interface RunUpload {
 export interface RunPlan {
   /** What the run will be called — `RemoteRun`'s run-name operand, and the `.alf` report's name. */
   name: string;
+  /**
+   * The experiment name deposited into the run folder's `zpcrweb.json`, verbatim — `""` when there
+   * is none. **Not {@link name}**: that is this name reduced to what the instrument's command line
+   * and file system accept (`My Experiment` → `My_Experiment`), so it is never what the folder
+   * says. A caller matching a run folder back to the run it started (`runFolder.ts`'s
+   * `RunFolderNaming`, `RunFollower.adopt`) compares against this one.
+   */
+  experimentName: string;
   /** The decoded protocol, so a caller can show the steps it is about to send. */
   program: RunDefinitionProgram;
   /**
@@ -520,6 +528,7 @@ export function planRun(options: PlanRunOptions): RunPlan {
   }
   return {
     name,
+    experimentName,
     program,
     commands,
     remoteRun,

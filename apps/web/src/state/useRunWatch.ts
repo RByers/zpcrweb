@@ -20,7 +20,7 @@ export type { HeldRun } from "@zpcrweb/core";
 /** The hook's handle: the follower's own state, plus the setters a view drives it with. */
 export type RunWatchState = RunFollowerState & {
   setWatching: (on: boolean) => void;
-  adopt: (fileName: string) => void;
+  adopt: (fileName: string, experimentName?: string) => void;
   clearFinished: () => void;
   expectReportOnly: () => void;
   downloadAvailable: () => Promise<void>;
@@ -35,6 +35,7 @@ export function useRunWatch(
   ) => Promise<string | null>,
   onReport: (name: string, bytes: Uint8Array) => Promise<string | null>,
   heldRun: (fileName: string) => HeldRun | null,
+  openRuns: () => readonly HeldRun[],
   /**
    * What the Instrument view's name fields currently hold. Read through a ref so a keystroke in
    * one does not restart anything.
@@ -52,6 +53,8 @@ export function useRunWatch(
   onReportRef.current = onReport;
   const heldRunRef = useRef(heldRun);
   heldRunRef.current = heldRun;
+  const openRunsRef = useRef(openRuns);
+  openRunsRef.current = openRuns;
   const namingRef = useRef(naming);
   namingRef.current = naming;
 
@@ -59,6 +62,7 @@ export function useRunWatch(
     () =>
       new RunFollower(session, {
         heldRun: (name) => heldRunRef.current(name),
+        openRuns: () => openRunsRef.current(),
         onRun: (run, previousId, activate) => onRunRef.current(run, previousId, activate),
         onReport: (name, bytes) => onReportRef.current(name, bytes),
         naming: () => namingRef.current,
@@ -81,7 +85,7 @@ export function useRunWatch(
     () => ({
       ...state,
       setWatching: (on: boolean) => follower.setWatching(on),
-      adopt: (id: string) => follower.adopt(id),
+      adopt: (id: string, experimentName?: string) => follower.adopt(id, experimentName),
       clearFinished: () => follower.clearFinished(),
       expectReportOnly: () => follower.expectReportOnly(),
       downloadAvailable: () => follower.downloadAvailable(),

@@ -16,8 +16,14 @@ import { readFileSync } from "node:fs";
 import {
   RunFollower,
   USB_TRAFFIC_LOG_NAME,
+  buildExperimentArchive,
+  markExperimentBegun,
+  parseRunInfo,
   planRun,
+  runFileBaseName,
   unzipArchive,
+  writeZpcrwebSettings,
+  ZPCRWEB_SETTINGS_VERSION,
   type HeldRun,
   type RunFollowerPorts,
   type ZpcrArchive,
@@ -64,6 +70,7 @@ function fileStore() {
   const ports: RunFollowerPorts = {
     heldRun: (name): HeldRun | null =>
       files.has(name) ? { id: name, files: files.get(name)! } : null,
+    openRuns: () => [...files].map(([id, held]) => ({ id, files: held })),
     onRun: async (run, _previousId, activate) => {
       passes.push({ name: run.name, whole: run.whole, entries: Object.keys(run.archive) });
       const existing = run.whole ? {} : (files.get(run.name) ?? {});
@@ -87,11 +94,14 @@ function onlyRun(files: Map<string, ZpcrArchive>): ZpcrArchive {
 
 /** Stand a session and a follower up, wired exactly as the React shell wires them: one `observe`
  * per published status. */
-function rig(options: Parameters<typeof createCfxEmulator>[0] = {}) {
+function rig(
+  options: Parameters<typeof createCfxEmulator>[0] = {},
+  naming?: RunFollowerPorts["naming"],
+) {
   const emulator = createCfxEmulator({ clock: acceleratedClock(), ...options });
   const session = sessionOn(emulator, { pollMs: 2 });
   const store = fileStore();
-  const follower = new RunFollower(session, store.ports);
+  const follower = new RunFollower(session, { ...store.ports, naming });
   session.subscribe(() => follower.observe(session.state.status, session.state.connection));
   return { emulator, session, follower, ...store, close: () => session.dispose() };
 }
@@ -131,6 +141,115 @@ describe("a run watched from its start", () => {
     expect(r.passes.at(-1)!.entries).toContain("runlog.xml");
     expect(r.passes[0]!.whole).toBe(true);
     expect(r.passes.at(-1)!.whole).toBe(false);
+    await r.close();
+  });
+});
+
+/**
+ * A pending experiment exactly as the app's Start leaves it: protocol, name and the `begun` marker
+ * (`useZpcrStore.ts`'s `beginExperiment`), and nothing of the instrument's yet.
+ */
+function startedExperiment(experimentName: string): ZpcrArchive {
+  return markExperimentBegun(
+    writeZpcrwebSettings(
+      buildExperimentArchive({ protocol: { runDefinition: TWO_CYCLE, name: "TwoCycle" } }),
+      { version: ZPCRWEB_SETTINGS_VERSION, experimentName },
+    ),
+  );
+}
+
+describe("a run started from a file", () => {
+  /**
+   * Start a run the way `App.tsx`'s `startExperiment` does — pin the names, adopt the file — and
+   * run it to the finish. The file is deliberately *not* named `<today>-<name>`: a file renamed by
+   * hand, one restamping skipped (a disk-backed file), or a second run of the day's `-2` all look
+   * like this, and none of them may make the run's results land anywhere but here.
+   */
+  async function runFrom(fileId: string, experimentName: string, pin: boolean) {
+    const plan = planRun({ runDefinition: TWO_CYCLE, name: experimentName });
+    const r = rig(
+      { data: pcrData() },
+      pin ? () => ({ experimentName: plan.name, fileName: fileId.replace(/\.zpcr$/i, "") }) : undefined,
+    );
+    r.files.set(fileId, startedExperiment(experimentName));
+    await r.session.connect();
+    await waitFor("the baseline listing", () => r.follower.memory.lastNames !== null);
+    // Adopted before the send, as `App.tsx`'s `startExperiment` does.
+    r.follower.adopt(fileId, pin ? plan.experimentName : undefined);
+    await r.session.startRun(plan);
+    await waitFor("the run to be filed as finished", () => r.follower.state.finished !== null, 20_000);
+    return r;
+  }
+
+  for (const [label, fileId, name] of [
+    ["a name the file name can carry verbatim", "My_Experiment.zpcr", "My_Experiment"],
+    ["a name with a space in it", "My Experiment.zpcr", "My Experiment"],
+    ["an older date on the file", "20260920-Mock_Run.zpcr", "Mock Run"],
+    ["the day's second run of a name", "20261014-Mock_Run-2.zpcr", "Mock Run"],
+  ] as const) {
+    it(`keeps every read in that file — ${label}`, { timeout: 30_000 }, async () => {
+      const r = await runFrom(fileId, name, true);
+      expect([...r.files.keys()]).toEqual([fileId]);
+      const run = r.files.get(fileId)!;
+      expect(Object.keys(run).filter((n) => n.endsWith(".Plateread"))).toHaveLength(2);
+      expect(Object.keys(run)).toContain("ended");
+      await r.close();
+    });
+  }
+
+  it("keeps it there with the pinned names gone, as after a reload", { timeout: 30_000 }, async () => {
+    const r = await runFrom("My Experiment.zpcr", "My Experiment", false);
+    expect([...r.files.keys()]).toEqual(["My Experiment.zpcr"]);
+    await r.close();
+  });
+
+  it("follows its file through a rename mid-run", { timeout: 30_000 }, async () => {
+    const plan = planRun({ runDefinition: TWO_CYCLE, name: "My Experiment" });
+    const r = rig({ data: pcrData() }, () => ({
+      experimentName: plan.experimentName,
+      fileName: "My Experiment",
+    }));
+    r.files.set("My Experiment.zpcr", startedExperiment("My Experiment"));
+    await r.session.connect();
+    await waitFor("the baseline listing", () => r.follower.memory.lastNames !== null);
+    r.follower.adopt("My Experiment.zpcr", plan.experimentName);
+    await r.session.startRun(plan);
+    await waitFor("the first read to be collected", () => r.passes.length > 0, 20_000);
+    // Renamed by hand, as Overview's Filename row does: a new id, and the pinned name now stale.
+    r.files.set("Renamed.zpcr", r.files.get("My Experiment.zpcr")!);
+    r.files.delete("My Experiment.zpcr");
+    await waitFor("the run to be filed as finished", () => r.follower.state.finished !== null, 20_000);
+    expect([...r.files.keys()]).toEqual(["Renamed.zpcr"]);
+    const run = r.files.get("Renamed.zpcr")!;
+    expect(Object.keys(run).filter((n) => n.endsWith(".Plateread"))).toHaveLength(2);
+    expect(Object.keys(run)).toContain("ended");
+    await r.close();
+  });
+
+  it("never lays a run over an earlier run's file that has the derived name", { timeout: 30_000 }, async () => {
+    const plan = planRun({ runDefinition: TWO_CYCLE, name: "Mock Run" });
+    // The name the run would derive for itself (`zpcrNameFromRunFiles`'s second rung): the date
+    // the emulator's `RunInfo.xml` carries, which is the recording's, not today's.
+    const runInfo = pcrData().supportFiles()["RunInfo.xml"]!;
+    const started = parseRunInfo(new TextDecoder().decode(runInfo)).runStartDate!;
+    const earlier = `${runFileBaseName("Mock Run", started)}.zpcr`;
+    const mine = earlier.replace(/\.zpcr$/, "-2.zpcr");
+    const r = rig({ data: pcrData() }, () => ({ experimentName: plan.name, fileName: mine.replace(/\.zpcr$/i, "") }));
+    // A different run's file: its `RunInfo.xml` is not this run's, as a real earlier run's never is.
+    const earlierRun = previousRun();
+    earlierRun["RunInfo.xml"] = new Uint8Array([...earlierRun["RunInfo.xml"]!, 0x20]);
+    r.files.set(earlier, earlierRun);
+    r.files.set(mine, startedExperiment("Mock Run"));
+    await r.session.connect();
+    await waitFor("the baseline listing", () => r.follower.memory.lastNames !== null);
+    r.follower.adopt(mine, plan.experimentName);
+    await r.session.startRun(plan);
+    await waitFor("the run to be filed as finished", () => r.follower.state.finished !== null, 20_000);
+    expect([...r.files.keys()].sort()).toEqual([earlier, mine].sort());
+    // Untouched: the same archive object, not the new run laid over it. (`toBe` on the archive
+    // itself would diff a megabyte of calibration on failure.)
+    expect(r.files.get(earlier) === earlierRun).toBe(true);
+    expect(Object.keys(r.files.get(mine)!)).toContain("ended");
     await r.close();
   });
 });

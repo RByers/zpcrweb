@@ -3847,33 +3847,27 @@ async function mockInstrumentChecks(chrome, origin) {
     JSON.stringify({ state: finished, reads: await railStat(cdp, "Current run", "Plate reads") }),
   );
 
-  // **The collected run arrives as a file of its own, beside the experiment it was started
-  // from.** `TODO.md` reports that as an app bug ("a new zpcr file gets created for the
-  // experiment in progress"), and this looks exactly like it — but the cause visible here is the
-  // emulator's, so this is not yet a witness for that report.
+  // **The collected run lands in the experiment it was started from** — one `.zpcr`, not a second
+  // one beside it. This check used to tolerate a second file (`20260806-Mock_Run.zpcr`, dated from
+  // the `RunInfo.xml` the emulator replays) and blame the emulator for it; the cause was the app's.
+  // The run was pinned under the instrument's sanitized run name (`Mock_Run`) where the folder's
+  // `zpcrweb.json` says `Mock Run`, so the pin never matched and the run fell back to a name
+  // derived from its own date — which only agreed with the file's when the dates happened to.
+  // Core's `RunFollower` now finds the file Start was pressed on by id, whatever either is called.
   //
-  // A run's file is named for the experiment in the `zpcrweb.json` the host deposited, prefixed
-  // with the run-start date out of `RunInfo.xml` (`runFolder.ts`). The emulator carries
-  // `RunInfo.xml` verbatim from the recording it replays (`emulator.md` §8), so that date is the
-  // recording's rather than this run's, and the two names differ by their prefix alone —
-  // `20260806-Mock_Run.zpcr` against today's `20260920-Mock_Run.zpcr`. Against real hardware the
-  // date would be the run's own and the names would agree.
-  //
-  // So what is asserted is that the run *landed* — complete and readable — and the duplication is
-  // left described rather than blessed. Teaching the emulator to write a `RunInfo.xml` for the
-  // run it actually ran is what would turn this into a real test of `TODO.md`'s report: if the
-  // second file survives that, the app bug is reproduced; if it doesn't, the report has another
-  // cause.
+  // The catalog already held the experiment before the run, so there is no record to wait to
+  // *appear*; what is waited for is the catalog to settle once the run's writes are flushed, and a
+  // second record arriving then is exactly the failure.
   await flushWrites(cdp);
-  const collected = await waitValue(() => catalogNames(cdp), (n) => n.length > 1, {
-    timeout: 20000,
-    what: "the collected run's record in IndexedDB",
+  const collected = await waitStable(() => catalogNames(cdp), {
+    timeout: 10000,
+    what: "the catalog once the collected run is written",
   });
-  const run = collected.find((n) => n !== MOCK_ZPCR.split("/").at(-1)) ?? "";
+  const run = collected[0] ?? "";
   const chips = await cdp.eval(`document.querySelectorAll(".filebar .filechip").length`);
   check(
-    "the run it produced is a .zpcr in the file bar, and a record in IndexedDB",
-    /\.zpcr$/.test(run) && chips === 2,
+    "the run lands in the experiment it was started from — one .zpcr, no second file beside it",
+    collected.length === 1 && /-Mock_Run\.zpcr$/.test(run) && chips === 1,
     JSON.stringify({ collected, chips }),
   );
 

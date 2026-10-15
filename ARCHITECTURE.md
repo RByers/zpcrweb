@@ -435,6 +435,11 @@ name its caller chose, if that caller is still following the same run, and other
 other run — one begun at the touchscreen, or by CFX Manager — keeps `RunInfo.xml`'s `DataFile`,
 which is already the name Manager would have saved it under.
 
+A name is only what a *new* file is called. Which file a run being followed belongs in — the one
+Start was pressed on, whatever it and the run are each called — is the follower's question, answered
+by identity rather than by this derivation (`usb/runFollower.ts`; see the web app's
+ARCHITECTURE.md, "A run's file grows by what the instrument wrote").
+
 This is what lets the web app's Instrument view open a run off a connected instrument as an ordinary
 file (see [`apps/web/ARCHITECTURE.md`](./apps/web/ARCHITECTURE.md)).
 

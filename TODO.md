@@ -38,24 +38,6 @@ visualizer for everything** inside a `.zpcr` archive.
     in the case of the USB log it should represent any saved log in a file.
   - When a completed or other pending experiment file is selected while the instrument is running
     another file, only the running file should pulse "running". 
-- There's a bug where a new zpcr file gets created for the experiment in progress. Review the code
-  and ensure run results are always saved into the file which started the run (if any).
-
-  **What is known so far** (2026-09-20, from driving the simulated instrument): a run's file is
-  named for the experiment in the `zpcrweb.json` the host deposits, prefixed with the run-start
-  date read out of `RunInfo.xml` (`runFolder.ts`'s `zpcrNameFromRunFiles` → `runFileBaseName` +
-  `runStartDate`). The follower then looks for a held file of *that* name (`RunFollower`'s
-  `heldRun`), so identity is carried by a derived string rather than by the file that actually
-  started the run — and any disagreement between the two, in the name or in the date, produces a
-  second file rather than a merge.
-
-  `tools/uitest.mjs`' `mockInstrumentChecks` shows the duplicate, but **is not yet a witness for
-  this report**: the emulator carries `RunInfo.xml` verbatim from the recording it replays
-  (`emulator.md` §8), so its date is the recording's and the names differ by their prefix alone.
-  Against real hardware that date is the run's own. Teaching the emulator to write a `RunInfo.xml`
-  describing the run it actually ran is the cheap next step — if the second file survives that,
-  this bug is reproducible in a test for the first time; if it doesn't, the cause is elsewhere and
-  that is worth knowing before changing any app code.
 - There appears to be a bug with the temperature graph where it doesn't update when the sreen is
   locked / page is not visible (or maybe only when the laptop is sleeping?). See if it's possible
   to download the actual temperature logs during a run and draw the graph based on that. Not the

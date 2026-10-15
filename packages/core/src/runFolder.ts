@@ -216,8 +216,16 @@ export function zpcrNameFromRunFiles(
   return /\.zpcr$/i.test(name) ? name : `${name}.zpcr`;
 }
 
-/** The run name this app deposited into the folder when it started the run, or `""`. */
-function depositedName(files: ZpcrArchive): string {
+/**
+ * The experiment name an archive's `zpcrweb.json` states, or `""`.
+ *
+ * Read from a run folder, it is the name this app deposited when it started the run
+ * (`usb/runPlan.ts`) — so a folder with one is a run this app started, and a folder without one was
+ * started somewhere else. Read from a held `.zpcr`, it is the name that file goes by; the two
+ * agreeing is how a run is matched to the file it was started from after the app has forgotten
+ * which file that was (`usb/runFollower.ts`).
+ */
+export function depositedName(files: ZpcrArchive): string {
   const settings = files[ZPCRWEB_SETTINGS_NAME];
   if (settings === undefined) return "";
   try {

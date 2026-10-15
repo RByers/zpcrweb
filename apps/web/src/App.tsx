@@ -360,6 +360,16 @@ export function App() {
       },
       [store.loaded],
     ),
+    // Every `.zpcr` held, so the watcher can find a run's file by what it is — its `RunInfo.xml`,
+    // or the experiment it was started from — when its name no longer points there (a rename, a
+    // reload that forgot `startedRun`). See `RunFollowerPorts.openRuns`.
+    useCallback(
+      () =>
+        store.loaded.flatMap((f) =>
+          f.kind === "zpcr" && f.content.archive ? [{ id: f.name, files: f.content.files }] : [],
+        ),
+      [store.loaded],
+    ),
     startedRun ?? undefined,
   );
   // Where "← back" on the About page (and the Files table's own ✕) return to, so opening either
@@ -547,11 +557,14 @@ export function App() {
       }
       const started = await store.beginExperiment(id);
       if (!started) return;
+      // `plan.experimentName`, never `plan.name`: the latter is the instrument's sanitized run-name
+      // operand (`My Experiment` → `My_Experiment`), which never equals what the run folder's
+      // `zpcrweb.json` says — so pinning it made every name with a space miss its own file.
       setStartedRun({
-        experimentName: plan.name,
+        experimentName: plan.experimentName,
         fileName: started.name.replace(/\.zpcr$/i, ""),
       });
-      runWatch.adopt(started.name);
+      runWatch.adopt(started.name, plan.experimentName);
     },
     [store, runWatch],
   );

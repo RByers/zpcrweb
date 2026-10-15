@@ -979,10 +979,21 @@ that *disagrees* — and the watcher adopts such a file as the run's: there is n
 so the pass still goes over whole, but it lands on that file instead of beside it. A candidate
 whose `RunInfo.xml` merely differs is somebody else's run and is left alone.
 
+**Which file a run belongs in is answered by identity, not by name** (core's `RunFollower`'s
+`#place`, first answer wins): the held `.zpcr` whose `RunInfo.xml` is the folder's, found among every
+open run (`App.tsx`'s `openRuns`) however it is now named — a rename mid-run does not lose it; the
+file Start was pressed on, while it holds no run yet and the folder's deposited name is the one the
+run was sent with; the file the run's derived name points at; and, after a reload has forgotten what
+was started, a begun experiment holding no run whose own `zpcrweb.json` names the folder's deposit. A
+run that belongs in none of them is a new file, under a name no other held file has (`-2`, `-3`, …):
+the store files by name, so the day's second run of an experiment used to be installed *over* the
+first, whose name it derives.
+
 A pass sends the whole folder when there is nothing to merge into: a run the app isn't holding, or
 one whose file has just been renamed out from under it (the derived name can move when
 `RunInfo.xml` is re-read at the end of a run — compared against the held file's base name, since
-sitting in a folder is not a rename). Then everything the pass has goes over — including whatever
+sitting in a folder is not a rename). A run *this app started* is never renamed: its file is the one
+Start was pressed on, and its name is the user's rather than a derivation to be corrected. Then everything the pass has goes over — including whatever
 the user had added to the file it was reading from.
 
 Every write here is a read-modify-write — a catalog write merges into what is stored, and a content
@@ -3435,12 +3446,20 @@ do. The window it covered is now covered by the file the user is already looking
 Two things still happen at the click. The file's **date is restamped** to today if it still carries one
 in the standard form (`lib/experiment.ts`'s `restampExperimentDate`, applied through the ordinary
 `renameFile` so ids and IndexedDB stay consistent), so an experiment cloned last week and run today is
-filed under today — and `beginExperiment` returns the possibly-new id and name. And that name is
-**pinned** in `App`'s `startedRun` and the new id **adopted** by the watcher (`runWatch.adopt`), which
-together are what make the first real snapshot *supersede* this file rather than land beside it: the
-watcher names its snapshots from the pin (core's `runFolder.ts` naming precedence) and the store
-supersedes by name. The pin survives the selection moving while the run cycles, which is all that is
-left of what `useRunNaming` used to guard.
+filed under today — and `beginExperiment` returns the possibly-new id and name. That id is
+**adopted** by the watcher together with the name the run is sent with
+(`runWatch.adopt(id, plan.experimentName)`), and that is what makes the run's snapshots land in this
+file rather than beside it: core's `RunFollower` remembers the file Start was pressed on and takes it
+as the run's file once the folder's deposited `zpcrweb.json` names the same experiment — whatever the
+file and the run are each called. The name is also **pinned** in `App`'s `startedRun`, which only
+decides what a run's file is called (core's `runFolder.ts` naming precedence), and survives the
+selection moving while the run cycles.
+
+Both take `plan.experimentName`, the name exactly as deposited, and never `plan.name`, the
+instrument's run-name operand sanitized to `A-Za-z0-9_-`. Pinning the latter is what used to make
+every experiment whose name had a space in it miss its own file: the pin never matched the deposit,
+the run fell back to `<run date>-<name>.zpcr`, and that only coincided with the file's name when the
+file had been restamped to the very date in the instrument's `RunInfo.xml`.
 
 The two **deposited** files keep the names of the things they *are*:The two **deposited** files keep the names of the things they *are*: the protocol's own name, and
 (for an overridden plate) the plate file's, else what the plate says about itself via
@@ -3563,8 +3582,9 @@ rewritten in place. Both halves of that — the file being the only copy of the 
 instrument's own writes going back to it — are in "A run's file grows by what the instrument
 wrote", along with what they fixed.
 
-**What the snapshot is called** is decided by `core`'s `runFolder.ts`, in three rungs: the file
-name typed in the Instrument view, then `<YYYYMMDD>-<experiment name>` derived from the folder's
+**What the snapshot is called** — which matters only for a run that lands in a new file, since one
+already in a file keeps that file's name — is decided by `core`'s `runFolder.ts`, in three rungs: the
+name of the file Start was pressed on (pinned in `startedRun`), then `<YYYYMMDD>-<experiment name>` derived from the folder's
 own deposited `zpcrweb.json`, then `RunInfo.xml`'s `DataFile` as before. The first two apply only
 to a folder carrying that deposit — i.e. a run *this app started* — so a run begun at the
 touchscreen keeps the name the instrument gave it no matter what is typed here, and the first rung
