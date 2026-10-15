@@ -15,7 +15,7 @@ question, the instrument's answer depends on what it is doing at that moment, an
 depends on the answer. So this is an instrument that answers: a stateful CFX96 that speaks the raw
 protocol over the same interface a real one does, with no hardware and no WebUSB.
 
-It is also how the Instrument view gets built without an instrument on the desk (`#mock`, §9).
+It is also how the Instrument view gets built without an instrument on the desk (the **Fake device** button, §9).
 
 > **This document exists because the emulator is a thing to be trusted or not.** It is a second
 > implementation of a protocol this project reverse-engineered, so a test that passes against it
@@ -86,7 +86,7 @@ writes into, and `Real-Time Data` and `Logs`, which on the real instrument hold 
 does is unwitnessed (§11), and a listing that agrees with the capture while the contents are
 invented would be worse than one that says "nothing here". They hold only what the caller puts
 there: `initialFiles` (full path → bytes) seeds any existing directory before the session starts,
-and refuses one the instrument doesn't have. The app's `#mock` seeds `Real-Time Data` with three
+and refuses one the instrument doesn't have. The app's Fake device seeds `Real-Time Data` with three
 bundled `.zpcr`s, all over 64 KB — real runs, so nothing in them is invented — and leaves the
 `.txt` beside each out, since what it holds has never been read.
 
@@ -189,9 +189,10 @@ await device.open();
 await device.startRun(planRun({ runDefinition, plate, name }));
 ```
 
-**Browser** — `#mock` in the URL (`README.md`'s hash-key list). The connect button reads
-"Connect (mock USB)" and the rail says outright that nothing here is an instrument. `#mock=60`
-scales time; `#mock=max` advances a step per poll and is what the browser checks use. (The app
+**Browser** — the Instrument view's **Fake device** button, which appears beside Connect over USB
+once a real connect fails (or from the start in a browser with no WebUSB). While it is connected
+the rail says outright that nothing here is an instrument, and offers a speed control: 10× / 60×
+scale time, and Max advances a step per poll, which is what the browser checks use. (The app
 runs its own `switchableClock` — `apps/web/src/state/mockInstrument.ts` — rather than core's
 `acceleratedClock()`, so that changing speed mid-run never has to rebuild the instrument and lose
 the run inside it. Same contract, same rebasing rule.) The

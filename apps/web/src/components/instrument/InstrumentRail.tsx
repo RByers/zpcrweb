@@ -123,8 +123,22 @@ export function InstrumentRail({
    * (`App`'s `openReport`). */
   onOpenReport: (name: string, bytes: Uint8Array) => Promise<string | null>;
 }) {
-  const { connection, info, status, rtStatus, busy, lastAction, runPending, mock } = instrument;
+  const { connection, info, status, rtStatus, busy, lastAction, runPending, mock, fakeOffered } = instrument;
   const connected = connection === "connected";
+  /** Connected, or on the way there or back — the states the connect button ends rather than starts. */
+  const linked = connected || connection === "connecting" || connection === "reconnecting";
+  /** Once a real connect has come to nothing (or there is no WebUSB to try one with), the simulated
+   * instrument is offered beside it — never before, so a bench with an instrument on it isn't
+   * offered a pretend one. */
+  const fakeButton = fakeOffered && !linked && (
+    <button
+      className="btn"
+      onClick={instrument.connectFake}
+      title="Connect to a simulated CFX96 running in this browser — no hardware needed"
+    >
+      Fake device
+    </button>
+  );
   const [mockSpeed, setMockSpeed] = useMockSpeed();
   // Stop and Pause/Resume queue behind the one USB command channel, and clicking Pause/Resume is
   // itself exactly such a fast round trip — so their dimmed look waits a beat (`useBusyBriefly`).
@@ -172,11 +186,14 @@ export function InstrumentRail({
       <div className="rail__section">
         <div className="rail__title">Instrument</div>
         {connection === "unsupported" ? (
-          <div className="rail__note mono">
-            This browser has no WebUSB. Chrome, Edge or another Chromium browser on a secure
-            origin (https, or localhost) can talk to the instrument directly; Firefox and Safari
-            cannot.
-          </div>
+          <>
+            <div className="rail__note mono">
+              This browser has no WebUSB. Chrome, Edge or another Chromium browser on a secure
+              origin (https, or localhost) can talk to the instrument directly; Firefox and Safari
+              cannot.
+            </div>
+            {fakeButton && <div className="instrument__connect">{fakeButton}</div>}
+          </>
         ) : (
           <div className="instrument__connect">
             <button
@@ -194,13 +211,9 @@ export function InstrumentRail({
                 ? "Disconnect"
                 : connection === "connecting"
                   ? "Connecting…"
-                  : // One button, whichever kind of instrument this page is talking to: which one
-                    // it reaches was decided by the link that opened the app, not by a second
-                    // control here, so there is never more than one way to connect on screen.
-                    mock
-                    ? "Connect (mock USB)"
-                    : "Connect over USB"}
+                  : "Connect over USB"}
             </button>
+            {fakeButton}
             <span
               className={
                 "instrument__dot" +
@@ -210,10 +223,9 @@ export function InstrumentRail({
             />
           </div>
         )}
-        {mock && (
-          // Said plainly, and said whether or not anything is connected: a simulated instrument
-          // answers exactly as the real one does — that is the point of it — so nothing else on
-          // this rail would ever give it away.
+        {mock && linked && (
+          // Said plainly: a simulated instrument answers exactly as the real one does — that is
+          // the point of it — so nothing else on this rail would ever give it away.
           <div className="rail__note mono instrument__mock">
             Simulated instrument — there is no hardware here. The status, the files and the
             readings are all produced in this browser, with a recorded run standing in for what

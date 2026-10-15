@@ -15,8 +15,8 @@ import { matchesSupportedExtension } from "../../packages/core/src/fileKind";
 const coreSrc = fileURLToPath(new URL("../../packages/core/src/index.ts", import.meta.url));
 // The emulator is a second entry point of the same package (`@zpcrweb/core/emulator`), aliased
 // separately because the alias above matches the bare specifier only. The app reaches it through
-// a lazy `import()`, so it lands in a chunk of its own and a session that never sets `#mock`
-// never downloads it.
+// a lazy `import()`, so it lands in a chunk of its own and a session that never clicks Fake
+// device never downloads it.
 const emulatorSrc = fileURLToPath(new URL("../../packages/core/src/emulator.ts", import.meta.url));
 
 /** The repo's `samples/` directory — the one copy of these files. */

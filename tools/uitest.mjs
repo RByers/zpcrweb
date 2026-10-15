@@ -3657,7 +3657,7 @@ async function instrumentRunChecks(chrome, origin) {
 /**
  * A pending experiment for the simulated instrument to run: a protocol, a plate, a name, and no
  * results — the state a clone arrives in (see {@link instrumentRunChecks}), which is the only
- * state Start is offered for. Deliberately short: under `#mock=max` a run advances one step per
+ * state Start is offered for. Deliberately short: at `Max` speed a run advances one step per
  * status poll, so three cycles is the whole lifecycle in about a dozen polls.
  */
 const MOCK_ZPCR = join(REPO, "tools/.uishot/dupe/20260920-Mock_Run.zpcr");
@@ -3763,22 +3763,51 @@ const LIVE_CHART_INK = `(() => {
   return String(h);
 })()`;
 
-/** Click the rail's one connect button, whatever it currently says. */
-const clickConnect = (cdp) =>
-  clickButton(cdp, "Connect (mock USB)");
+/** The rail's connect buttons, in order, as one comma-joined string. */
+const connectButtons = (cdp) =>
+  cdp.eval(`[...document.querySelectorAll(".instrument__connect button")].map((b) => b.textContent.trim()).join(",")`);
 
 /**
- * Open the app as a simulated session, with `experiment` loaded and the Instrument view up.
+ * Try the real connect, which cannot succeed here, and return the connect buttons it leaves.
  *
- * `#mock=max` rather than a speed: with no clock at all the run advances one step per status poll
+ * It fails the way a dismissed picker or an absent instrument does — `clickButton` clicks from
+ * script, with no user gesture, so `requestDevice()` rejects — and a failed connect is what
+ * offers Fake device. The once-per-browser unofficial-software warning is acknowledged first, as a
+ * returning user's already is, so no `confirm()` stops the click.
+ */
+async function failRealConnect(cdp) {
+  await cdp.eval(`localStorage.setItem("zpcr:usbWarningAck", "1"), undefined`);
+  await clickButton(cdp, "Connect over USB");
+  return waitValue(() => connectButtons(cdp), (v) => /Fake device/.test(v ?? ""), {
+    what: "the Fake device a failed connect offers",
+  });
+}
+
+/**
+ * Connect to the simulated instrument the way someone without one reaches it — a real connect
+ * that comes to nothing, then the Fake device it offers — and put it at `Max` speed.
+ *
+ * `Max` rather than a speed: with no clock at all the run advances one step per status poll
  * (`state/mockInstrument.ts`), so a whole run costs a dozen polls instead of the ~20 minutes of
  * wall time the protocol describes, and every wait below is still a wait on state rather than on
- * a duration. The flag is consumed at module load, so it has to be in the URL the app *boots*
- * with — which is why this reloads through `emptyReload` rather than assigning `location.hash`.
+ * a duration. Switching after connecting is safe: nothing runs until Start, and a speed change
+ * rebases simulated time rather than jumping it.
  */
+async function clickConnect(cdp) {
+  if (!/Fake device/.test((await connectButtons(cdp)) ?? "")) await failRealConnect(cdp);
+  await clickButton(cdp, "Fake device");
+  const maxSel = `[...document.querySelectorAll(".instrument__speed .segmented__item")].find((b) => b.textContent.trim() === "Max")`;
+  await waitFor(() => cdp.eval(`!!(${maxSel})`), { what: "the connected simulated instrument's speeds" });
+  await cdp.eval(`(${maxSel}).click(), undefined`);
+  await waitFor(() => cdp.eval(`(${maxSel})?.getAttribute("aria-pressed") === "true"`), {
+    what: "the simulated instrument at Max speed",
+  });
+}
+
+/** Open the app with `experiment` loaded and the Instrument view up, from an empty browser. */
 async function openMockSession(chrome, origin, experiment) {
   const cdp = await openPage(chrome.base, origin);
-  await emptyReload(cdp, `${origin}#mock=max`);
+  await emptyReload(cdp, origin);
   await loadFile(cdp, experiment);
   await cdp.eval(`window.location.hash = "view=instrument", undefined`);
   await waitFor(() => cdp.eval(`!!document.querySelector(".instrument__rail")`), {
@@ -3818,19 +3847,20 @@ async function mockInstrumentChecks(chrome, origin) {
     reason: document.querySelector(".instrument__panelnotes .instrument__startreason")?.textContent.trim() ?? null,
   }))()`);
   check(
-    "a #mock session offers the simulated instrument on the view's one connect button",
-    idle.connect.join(",") === "Connect (mock USB)",
-    JSON.stringify(idle.connect),
+    "before any connect has been tried, the rail offers only the real instrument — no Fake device",
+    idle.connect.join(",") === "Connect over USB" && idle.says === null,
+    JSON.stringify(idle),
   );
   check(
-    "…and the panel's Start waits for it, saying so, rather than starting nothing",
+    "…and the panel's Start waits for a connection, saying so, rather than starting nothing",
     idle.startDisabled === true && /Connect to the instrument first/.test(idle.reason ?? ""),
     JSON.stringify({ disabled: idle.startDisabled, reason: idle.reason }),
   );
+  const offered = await failRealConnect(cdp);
   check(
-    "…and says plainly that there is no hardware here",
-    /no hardware here/.test(idle.says ?? ""),
-    JSON.stringify(idle.says),
+    "a connect that reaches no instrument offers a Fake device beside it",
+    offered === "Connect over USB,Fake device",
+    offered,
   );
 
   // A second experiment in the bar, for the lock below. Loaded with nothing running, it simply
@@ -3860,9 +3890,10 @@ async function mockInstrumentChecks(chrome, origin) {
       .find((d) => d.querySelector(".devstat__label").textContent.trim() === "Serial")
       ?.querySelector(".devstat__value").textContent.trim() ?? null,
     speeds: [...document.querySelectorAll(".instrument__speed .segmented__item")].map((b) => b.textContent.trim()),
+    says: document.querySelector(".instrument__mock")?.textContent.trim() ?? null,
   }))()`);
   check(
-    "connecting to it answers the identification block the same way a real one does",
+    "connecting to the Fake device answers the identification block the same way a real one does",
     model === "BIO-RAD C1000" && identity.serial === "CT019138" && startEnabled === true,
     JSON.stringify({ model, ...identity, startEnabled }),
   );
@@ -3870,6 +3901,11 @@ async function mockInstrumentChecks(chrome, origin) {
     "…and a connected mock offers its speeds, Max among them",
     identity.speeds.join(",") === "1×,10×,60×,Max",
     JSON.stringify(identity.speeds),
+  );
+  check(
+    "…and says plainly that there is no hardware here",
+    /no hardware here/.test(identity.says ?? ""),
+    JSON.stringify(identity.says),
   );
 
   await clickButton(cdp, "Start experiment");
@@ -4129,13 +4165,13 @@ async function mockInstrumentChecks(chrome, origin) {
   // one that found a real defect in it: the read parked on the closed handle used to hang.
   await clickButton(long, "Disconnect");
   const unplugged = await waitValue(
-    () => long.eval(`[...document.querySelectorAll(".instrument__rail button")].map((b) => b.textContent.trim()).join(",")`),
+    () => connectButtons(long),
     (v) => /Connect/.test(v ?? ""),
     { timeout: 10000, what: "the rail to report itself disconnected" },
   );
   check(
-    "disconnecting mid-run leaves the rail offering to connect again",
-    unplugged === "Connect (mock USB)",
+    "disconnecting mid-run leaves the rail offering to connect again, Fake device still beside it",
+    unplugged === "Connect over USB,Fake device",
     unplugged,
   );
 
@@ -6352,7 +6388,7 @@ async function diskRunChecks(chrome, origin) {
   await makeMockExperiment(MOCK_ZPCR, "Mock Run", 2);
   const { unzipArchive } = await import("../packages/core/dist/index.js");
   const cdp = await openPage(chrome.base, origin);
-  await emptyReload(cdp, `${origin}#mock=max`);
+  await emptyReload(cdp, origin);
 
   // The experiment goes in an OPFS folder, handed to the app in place of the native picker (the
   // picker itself cannot be driven from CDP — see folderChecks).

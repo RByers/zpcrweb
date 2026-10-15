@@ -7,10 +7,10 @@ visualizer for everything** inside a `.zpcr` archive.
 
 - Fix ROX->Cy5 bleed, eg. as seen in 9/5 run. Does the BioRad software have this too?
 - [x] **Built a CFX device emulator** — `packages/core/src/usb/emulator/`, speaking the full raw
-      USB protocol with no device, documented in [`emulator.md`](./docs/emulator.md). `#mock` in the
-      URL turns the Instrument view's connect button into "Connect (mock USB)"; the fluorescence is
-      one recorded well's curve written into every well; `#mock=60` scales simulated time and
-      `#mock=max` has no clock at all, advancing a step per status poll, which is what
+      USB protocol with no device, documented in [`emulator.md`](./docs/emulator.md). The Instrument
+      view's **Fake device** button (offered once a real connect fails) connects to it; the
+      fluorescence is one recorded well's curve written into every well; the rail's speed control
+      scales simulated time, and its Max has no clock at all, advancing a step per status poll, which is what
       `uitest.mjs`'s `mockInstrumentChecks` drives a whole run on. Alongside it the instrument
       session and the run follower moved into core (`usb/session.ts`, `usb/runFollower.ts`), where
       the emulator tests them in milliseconds.
@@ -22,7 +22,7 @@ visualizer for everything** inside a `.zpcr` archive.
 - [x] **Download completed runs from the instrument's own `Real-Time Data` folder.** Done: the
       files panel lists `Real-Time Data` and `Logs` by name (`CFX_DIRECTORIES` — a listing never
       names a subdirectory, so there is no other way), `CfxDevice.getFile` collects a reply split
-      across several messages, and a `.zpcr` or `.alf` gets **Open**. `#mock` seeds three runs.
+      across several messages, and a `.zpcr` or `.alf` gets **Open**. The Fake device seeds three runs.
       Still open: trying it on the real instrument, and a recording of *when* the instrument
       writes there (`emulator.md` §11).
 - [x] Clean up instrument UI to make it less confusing when moving between runs. Done: the rail is

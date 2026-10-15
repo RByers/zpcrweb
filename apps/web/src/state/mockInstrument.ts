@@ -1,18 +1,18 @@
 /**
  * The mock instrument — a simulated CFX96 the app can connect to with no hardware present.
  *
- * Turned on by `#mock` in the URL, which is read the way `pltdPassword.ts` reads `#cfxPassword`:
- * **an instruction, not state**. `urlHash.ts` deliberately serializes only `file` and `view`, so
- * the flag is consumed once at module load and the address bar goes back to an ordinary bookmark
- * — a link hands someone a mock session, and a reload of the rewritten URL is a real one.
+ * Reached from the Instrument view's **Fake device** button, which the rail offers once a real
+ * connect has failed — no instrument plugged in, the picker dismissed, or no WebUSB at all
+ * (`useCfxDevice.ts`'s `connectFake`). Nothing about it is in the URL: which instrument a
+ * connection reaches is decided by which button was clicked, not by how the page was opened.
  *
- * - `#mock` — realtime, 1× (an instrument's own pace).
- * - `#mock=10` / `#mock=60` — realtime, scaled: an hour of protocol a minute at 60×.
- * - `#mock=max` — no timers at all; the run advances a step per status poll.
+ * Simulated time starts at 1× (an instrument's own pace) and is switchable from the rail —
+ * 10× / 60× scaled, or `Max`, which has no timers at all and advances the run a step per status
+ * poll.
  *
  * Everything simulated is loaded **lazily**: `@zpcrweb/core/emulator` is a whole imitation
  * instrument on its own entry point, reached through `import()` from {@link acquireMockDevice}
- * and from nowhere else, so a build that never sets the flag never downloads it.
+ * and from nowhere else, so a session that never clicks Fake device never downloads it.
  *
  * ## One instrument per page, not one per connection
  *
@@ -64,35 +64,8 @@ const COMPLETED_RUNS = [
 
 const REAL_TIME_DATA_DIR = "\\Storage Card\\Real-Time Data";
 
-const HASH_KEY = "mock";
-
-function parseSpeed(raw: string | null): MockSpeed {
-  if (raw === null || raw === "") return 1;
-  if (/^max$/i.test(raw)) return "max";
-  const n = Number(raw);
-  return Number.isFinite(n) && n > 0 ? n : 1;
-}
-
-/**
- * Read the flag out of the URL at module load, before `urlHash.ts`'s first write rebuilds the
- * hash from file/view alone and drops it — the same ordering `pltdPassword.ts` relies on.
- */
-let enabled = false;
+/** How fast simulated time runs, kept across connects — the rail's speed control sets it. */
 let speed: MockSpeed = 1;
-try {
-  const hash = new URLSearchParams(window.location.hash.replace(/^#/, ""));
-  if (hash.has(HASH_KEY)) {
-    enabled = true;
-    speed = parseSpeed(hash.get(HASH_KEY));
-  }
-} catch {
-  /* ignore (no window, malformed URL) */
-}
-
-/** Whether this page load is a mock session. Fixed for the life of the page. */
-export function mockInstrumentEnabled(): boolean {
-  return enabled;
-}
 
 const listeners = new Set<() => void>();
 

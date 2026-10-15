@@ -24,16 +24,17 @@ columns, run staging and naming, view selection per file kind, file closing and 
 and the disk-backed folder route — whose directory picker cannot be driven from CDP, so an
 origin-private (OPFS) directory stands in for it.
 
-It also runs a **whole experiment on a simulated instrument** (`mockInstrumentChecks`): the app is
-opened with `#mock=max`, connects to the emulated CFX96 through the rail's one connect button,
-starts a pending experiment, and the checks follow the run to its end — the live thermal chart
+It also runs a **whole experiment on a simulated instrument** (`mockInstrumentChecks`): a real
+connect is tried and fails (a click from script carries no user gesture, so the WebUSB picker
+refuses), the **Fake device** that failure offers connects to the emulated CFX96, its speed is set
+to Max, and it starts a pending experiment, and the checks follow the run to its end — the live thermal chart
 redrawing, each plate read being pulled as it lands, the finished `.zpcr` in the file bar and in
 IndexedDB, complete, with its readings drawn in the Curves view. Then the two interruptions:
 disconnecting mid-run and reconnecting to find the same run still cycling, and stopping a run that
 is under way. Last, the files panel: listing the seeded `Real-Time Data` and opening a 400 KB run
 from it, a download that arrives in several messages. Nothing else here exercises the Instrument view past the point where Start appears.
 
-`#mock=max` is what makes that affordable. The simulated instrument has no clock in that mode: the
+Max speed is what makes that affordable. The simulated instrument has no clock in that mode: the
 run advances one step per status poll, so a three-cycle experiment is a dozen polls rather than the
 twenty minutes of wall time its protocol describes, and every wait stays a wait on state. The
 experiments themselves are built at test time from core's own calls, like the other fixtures here —

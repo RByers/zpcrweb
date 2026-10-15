@@ -71,7 +71,7 @@ for baseline/threshold/Cq.
 | [`biomeme.md`](./docs/biomeme.md) | `.bmrun` — a Biomeme handheld device (Franklin/Two3/Three9) run export — the third input format, not a Bio-Rad format at all: no optical channels to unmix (fluorescence is per-dye already), and the device carries its own baseline/threshold/Cq alongside this library's. Self-describing JSON, not reverse-engineered. Implemented by `packages/core/src/biomeme.ts`, entry point `parseBiomeme(bytes)`, which decodes into the same `Zpcr` shape `parseZpcr`/`parsePcrd` produce. |
 | [`usb.md`](./docs/usb.md) | The CFX96/C1000 instrument's own USB control protocol — not a file format: enumeration, the 5-byte application-layer frame, the ASCII command channel, the file upload/download mechanism a run is loaded and read back through, and (§7) the complete start-to-finish sequence of commands a run is made of, including **§7.8 stopping a run in progress** (measured against a live abort — a `CANCEL` sent in the ~6 s start window is accepted and ignored, and the abort is recorded *only* in the status register, never in the run's files) and **§7.9 pausing**. Reverse-engineered from USB captures (decoded with `tools/usbpcap_decode.py`), then implemented and driven against live hardware — §10 lists what the instrument corrected. Implemented by `packages/core/src/usb/`, entry point `CfxDevice`; driven by `tools/cfx.mjs` and the web app's Instrument view, which starts runs and follows them as they go. |
 | [`usb-traffic.md`](./docs/usb-traffic.md) | `usb-traffic.bin` — the USB traffic log the Instrument view records for a run it drove itself, and the second entry this project *writes* into a `.zpcr`. Compact binary records (payload bytes plus the three facts about a message that aren't in them) rather than the text they render to: 5.4× smaller stored and ~40× smaller once zipped, which is what makes attaching a session's whole wire log to a run cost single-digit KB. Not reverse-engineered. Implemented by `packages/core/src/usbTraffic.ts` — `UsbTrafficRecorder` writes, `parseUsbTrafficLog` reads, `formatUsbTrafficLog` renders the one text form there is; the session side is `packages/core/src/usb/session.ts` (always recording) and the console's "save log" switch (whether the run's file keeps it). |
-| [`emulator.md`](./docs/emulator.md) | The **CFX96 emulator** — a stateful imitation instrument that speaks the raw USB protocol with no hardware, so the whole run lifecycle (start, plate reads, cancel, pause, the §7.6 hold) can be driven from a test or from the app. Not a file format, and not evidence: it is a *second* implementation read from `usb.md`, so §10, §11 and Appendix A are about how far it can be trusted — every reply marked measured, derived or **invented**, and a standing list of the behaviours no recording has ever witnessed. Implemented by `packages/core/src/usb/emulator/`, entry point `createCfxEmulator`, shipped on its own subpath `@zpcrweb/core/emulator`; reached from the app with `#mock` in the URL. |
+| [`emulator.md`](./docs/emulator.md) | The **CFX96 emulator** — a stateful imitation instrument that speaks the raw USB protocol with no hardware, so the whole run lifecycle (start, plate reads, cancel, pause, the §7.6 hold) can be driven from a test or from the app. Not a file format, and not evidence: it is a *second* implementation read from `usb.md`, so §10, §11 and Appendix A are about how far it can be trusted — every reply marked measured, derived or **invented**, and a standing list of the behaviours no recording has ever witnessed. Implemented by `packages/core/src/usb/emulator/`, entry point `createCfxEmulator`, shipped on its own subpath `@zpcrweb/core/emulator`; reached from the app through the Instrument view's **Fake device** button, offered once a real connect fails. |
 | [`ARCHITECTURE.md`](./ARCHITECTURE.md) | Project-level design: isomorphic library goals, monorepo layout, input strategy. |
 | [`apps/web/ARCHITECTURE.md`](./apps/web/ARCHITECTURE.md) | Web app design notes. |
 
@@ -263,6 +263,16 @@ npm run dev -w @zpcrweb/web      # start the dev server (http://localhost:5173)
 npm run build -w @zpcrweb/web    # production build
 ```
 
+### Trying the Instrument view without an instrument
+
+Click **Connect over USB** in the Instrument view. When that doesn't connect (nothing plugged in,
+or the device picker dismissed), a **Fake device** button appears beside it. In a browser with no
+WebUSB the button is there from the start. It connects to a **simulated CFX96** running in the page
+(the emulator, [`emulator.md`](./docs/emulator.md)). The rail says plainly that nothing there is an
+instrument, and offers a speed control: 1×, 10×, 60×, or Max, which has no clock and advances a
+run one step per status poll. The simulated instrument lasts as long as the tab: disconnecting and
+connecting again finds a run still going, and a reload starts a fresh one.
+
 ### Browser support
 
 The app is written against standard web APIs and intended to work on the latest version of any
@@ -312,16 +322,9 @@ view is expected to work fine regardless.
   the moment it is read.
 - `#cfxPassword=<value>` seeds the decryption password so encrypted files decrypt instead of
   sitting behind the prompt. URL-escape it — the password can contain characters like `#`.
-- `#mock` connects the Instrument view to a **simulated CFX96** instead of a real one — no
-  hardware, no WebUSB, the whole protocol answered in the browser. The connect button says
-  "Connect (mock USB)" and the rail says plainly that nothing here is an instrument. `#mock=10`
-  or `#mock=60` run simulated time that many times faster; `#mock=max` has no clock at all and
-  advances the run one step per status poll, which is what the browser tests use. Like `#load=`
-  it is consumed on arrival rather than kept in the address bar, so a reload is an ordinary
-  session again.
 
 All are hash keys in one query string (`#cfxPassword=…&view=curves`), parsed by
-`state/pltdPassword.ts`, `state/githubToken.ts`, `state/githubRepos.ts`, `state/mockInstrument.ts` and `state/urlHash.ts`. **The password is in the fragment because it's a
+`state/pltdPassword.ts`, `state/githubToken.ts`, `state/githubRepos.ts` and `state/urlHash.ts`. **The password is in the fragment because it's a
 secret**: fragments are never sent to the server, so they can't reach access logs, proxies, or a
 `Referer` header — `?cfxPassword=` would reach all three. The app strips the password from the
 address bar the moment it reads it, so a URL copied afterwards can be shared safely. The legacy

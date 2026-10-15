@@ -8,7 +8,8 @@ standalone plates (`.pltd`, `.plt.csv`), thermal protocols (`.prcl`, `.prcl.txt`
 reports. It shows them through the Overview, Protocol, Curves (amplification and melt), Plates,
 Reference, Calibration and Raw views, and lets you edit plates and protocols. It can also work
 in a folder on your disk, read files out of a GitHub repository, and drive a CFX96 live over
-WebUSB from the Instrument view (`#mock` in the URL gives you a simulated instrument instead).
+WebUSB from the Instrument view (when connecting fails, a **Fake device** button gives you a
+simulated instrument instead).
 It is still far from a full replacement for CFX Maestro. Open work is tracked in the root
 [`TODO.md`](../../TODO.md).
 

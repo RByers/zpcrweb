@@ -259,38 +259,42 @@ applies it only once that file is the active one, so a link that carries a file 
 can't drop the selection on whichever file happened to be open first. A selection for a file that
 never arrives is never applied, the same answer a `#file=` naming an absent file already gets.
 
-### `#mock` — a simulated instrument in a link
+### Fake device — a simulated instrument
 
-`#mock` makes this page load a **simulated session**: the Instrument view connects to an emulated
-CFX96 running in this tab instead of to hardware (`state/mockInstrument.ts`). It is how the whole
-run lifecycle — connect, start, plate reads arriving, cancel, collect — is reachable without a
-thermocycler on the bench, and it is what `tools/uitest.mjs`'s `mockInstrumentChecks` drives.
+The Instrument view can connect to an emulated CFX96 running in this tab instead of to hardware
+(`state/mockInstrument.ts`). It is how the whole run lifecycle — connect, start, plate reads
+arriving, cancel, collect — is reachable without a thermocycler on the bench, and it is what
+`tools/uitest.mjs`'s `mockInstrumentChecks` drives.
 
-Like `#load=` and `#wells=` it is an **instruction, not state**: read once at module load, before
-`urlHash.ts`'s first write rebuilds the hash out of `file` and `view` alone, so the address bar
-goes back to an ordinary bookmark. A link hands someone a simulated session; a reload of the
-rewritten URL is a real one.
+**Offered only after a real connect fails.** The rail shows **Fake device** beside **Connect over
+USB** once a real connect has come to nothing: the picker dismissed, no instrument found, or an
+error opening one (`useCfxDevice.ts`'s `fakeOffered`, set when `connect` ends anything but
+`connected`). A browser with no WebUSB has no real connect to try, so it gets the button from the
+start, under its no-WebUSB note. It is never offered up front, so someone with an instrument on the
+bench isn't shown a pretend one beside it. Nothing is in the URL. Which instrument a connection
+reaches is decided by which button was clicked last (`mock`), and an automatic reconnect reaches the
+same kind.
 
-**One port, no second code path.** The value of the flag is that it changes as little as possible:
-a `CfxSession` is built from one `acquire` callback that answers with a `UsbDeviceLike`
-(`useCfxDevice.ts`), and the emulator *is* one — so the flag is read there and nowhere else, and
-every layer above (the device, the session's poll, the run follower, the rail) is the same code a
-real instrument drives. The connect button changes its label, and the rail gains a speed control
-and a note saying there is no hardware here; nothing else in the app knows.
+**One port, no second code path.** A `CfxSession` is built from one `acquire` callback that
+answers with a `UsbDeviceLike` (`useCfxDevice.ts`), and the emulator *is* one — so the choice is
+read there and nowhere else, and every layer above (the device, the session's poll, the run
+follower, the rail) is the same code a real instrument drives. The fake skips the
+unofficial-software warning (it has nothing at stake), and while it is connected the rail gains a
+speed control and a note saying there is no hardware here; nothing else in the app knows.
 
 The emulator is loaded **lazily** — `@zpcrweb/core/emulator` is reached through a dynamic
-`import()` from `acquireMockDevice` and from nowhere else — so a build nobody points `#mock` at
-never downloads an imitation instrument.
+`import()` from `acquireMockDevice` and from nowhere else — so a session that never clicks Fake
+device never downloads an imitation instrument.
 
 Its storage starts with three completed runs in `Real-Time Data` — bundled samples, fetched
 beside the run data the emulator's plate reads are lifted from — so the files panel has something
 to list and **Open** there. A sample that fails to fetch is left out rather than failing the connect.
 
-`#mock=10` / `#mock=60` run simulated time that many times faster; `#mock=max` has no clock at
-all, and the run advances one step per status poll, which is what makes a whole run cost a dozen
-polls in a test rather than the minutes its protocol describes. The speed is switchable mid-run
-from the rail, and switching rebases rather than jumping: simulated time never moves backwards,
-because everything above the wire reads it as a difference between successive replies.
+Simulated time starts at 1×. The rail's speed control offers 10× / 60× (that many times faster)
+and Max, which has no clock at all: the run advances one step per status poll, which is what makes
+a whole run cost a dozen polls in a test rather than the minutes its protocol describes. The speed
+is switchable mid-run, and switching rebases rather than jumping: simulated time never moves
+backwards, because everything above the wire reads it as a difference between successive replies.
 
 **One instrument per page, not one per connection.** The emulated device is built on the first
 connect and kept. Disconnecting is unplugging a cable, not switching the machine off — a run goes
