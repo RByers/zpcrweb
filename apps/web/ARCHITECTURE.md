@@ -1762,9 +1762,11 @@ and mostly redundant with the rest of the table.
 No format carries a name except Biomeme's (see `zpcrweb-json.md` §1.1 for the evidence), so the
 app resolves one — stored name, else the format's own, else derived from the file name —
 in `@zpcrweb/core`'s `experiment.ts`, with the app-side half (where the stored name comes from,
-how a `Date` renders) in `lib/experiment.ts`. The date is always **local**: the instrument writes
-`RunStartTime` in GMT, which is the wrong answer to "when did I run this?" by a whole day for an
-evening run west of the meridian.
+how a `Date` renders) in `lib/experiment.ts`. The date is the **instrument's own clock**, shown as
+its digits: core's `resolveRunStart` takes the `.alf` report's local start time over `RunInfo.xml`'s
+`RunStartTime`, because the latter's "GMT" is that clock minus a zone offset the instrument guesses
+at (`alf.md` §4.1) — converted to local time it put a run hours in the future, and an evening run
+on the next day. A run with no report yet (one in progress, or a `.pcrd`) falls back to the stamp.
 
 Two placement decisions worth keeping:
 

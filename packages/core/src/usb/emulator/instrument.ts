@@ -130,6 +130,8 @@ export class EmulatedInstrument {
   private volumeUl = 10;
   private hotLidOperand = "105,30";
   private guidCounter = 0;
+  /** Every `SetDateTime` argument received, oldest first — what a test checks a client sent. */
+  readonly clockSettings: string[] = [];
 
   constructor(options: EmulatedInstrumentOptions) {
     this.clock = options.clock;
@@ -215,6 +217,8 @@ export class EmulatedInstrument {
         return ok();
       case "SETDATETIME":
         // The one command that looks like an action and isn't: it reports success as a value.
+        // What a malformed argument gets is unwitnessed (`emulator.md` §11); this accepts anything.
+        this.clockSettings.push(rest.trim());
         return value("True");
       default:
         return fail();

@@ -42,6 +42,7 @@ export {
   assertCommandArgument,
   encodeCommand,
   parseResponse,
+  setDateTimeCommand,
 } from "./commands.js";
 export type {
   CfxCommandName,

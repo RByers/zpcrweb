@@ -13,6 +13,7 @@ import {
   REQUEST_HEADER,
   decodeHeader,
   encodeFrame,
+  setDateTimeCommand,
   type CfxTransferErrorEvent,
   type UsbDeviceLike,
   type UsbInTransferResultLike,
@@ -480,5 +481,33 @@ describe("CfxDevice", () => {
     const res = await dev.status();
     expect(res.running).toBe(false);
     await dev.close();
+  });
+});
+
+describe("setDateTimeCommand", () => {
+  /** A local wall-clock instant in a zone `offsetMin` minutes *behind* UTC (JavaScript's sign). */
+  const at = (y: number, mo: number, d: number, h: number, mi: number, s: number, offsetMin: number) => {
+    const date = new Date(y, mo - 1, d, h, mi, s);
+    vi.spyOn(date, "getTimezoneOffset").mockReturnValue(offsetMin);
+    return date;
+  };
+
+  it("spells the capture's own example: 12-hour clock, AM/PM, signed offset", () => {
+    // `usb.md` §3 — what CFX Manager sent from an Eastern PC on 2026-07-31.
+    expect(setDateTimeCommand(at(2026, 7, 31, 21, 33, 4, 240))).toBe(
+      "SetDateTime 07/31/2026,09:33:04,PM,-04:00",
+    );
+  });
+
+  it("writes midnight and noon as 12, pads every field, and keeps a half-hour zone", () => {
+    expect(setDateTimeCommand(at(2026, 1, 2, 0, 5, 9, 480))).toBe(
+      "SetDateTime 01/02/2026,12:05:09,AM,-08:00",
+    );
+    expect(setDateTimeCommand(at(2026, 10, 14, 12, 0, 0, -330))).toBe(
+      "SetDateTime 10/14/2026,12:00:00,PM,+05:30",
+    );
+    expect(setDateTimeCommand(at(2026, 10, 14, 23, 59, 59, 0))).toBe(
+      "SetDateTime 10/14/2026,11:59:59,PM,+00:00",
+    );
   });
 });

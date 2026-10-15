@@ -98,11 +98,17 @@ describe("zpcrNameForRunFolder", () => {
     });
 
     it("derives the name from the deposited one when nothing is staged, or a different run is", () => {
-      // The date is the run's own start (`Tue, 21 Jul 2026 05:18:16 GMT`, so the 20th or the 21st
-      // depending on where this test runs), not today's — the same run re-pulled tomorrow keeps
-      // its name.
+      // The date is the run's own start, not today's — the same run re-pulled tomorrow keeps its
+      // name. And it is the `.alf` report's local clock (`Jul 20, 2026 21:18`), not `RunInfo.xml`'s
+      // `Tue, 21 Jul 2026 05:18:16 GMT`: the stamp's zone is whatever the instrument last assumed
+      // (`alf.md` §4.1), and read in the bench's zone it would date this run the 21st.
       const derived = zpcrNameFromRunFiles(started("S183-S185 RVP"));
-      expect(derived).toMatch(/^2026072[01]-S183-S185_RVP\.zpcr$/);
+      expect(derived).toBe("20260720-S183-S185_RVP.zpcr");
+      // Without the report the stamp is all there is, and the day depends on where this runs.
+      const noReport = Object.fromEntries(
+        Object.entries(started("S183-S185 RVP")).filter(([n]) => !/\.alf$/i.test(n)),
+      );
+      expect(zpcrNameFromRunFiles(noReport)).toMatch(/^2026072[01]-S183-S185_RVP\.zpcr$/);
       expect(
         zpcrNameFromRunFiles(started("S183-S185 RVP"), {
           experimentName: "Something else",

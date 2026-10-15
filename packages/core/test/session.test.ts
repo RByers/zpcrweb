@@ -52,6 +52,45 @@ describe("a session brings a connection up and keeps it", () => {
   });
 });
 
+describe("the instrument's clock is set from the host's", () => {
+  it("sends SetDateTime once per connection, with this machine's offset", async () => {
+    const emulator = createCfxEmulator({ clock: acceleratedClock() });
+    const session = sessionOn(emulator);
+    await session.connect();
+    await waitFor("the last-run report read", () => session.state.busy === null);
+    expect(emulator.instrument.clockSettings).toHaveLength(1);
+    expect(emulator.instrument.clockSettings[0]).toMatch(
+      /^\d{2}\/\d{2}\/\d{4},\d{2}:\d{2}:\d{2},(AM|PM),[+-]\d{2}:\d{2}$/,
+    );
+    await session.dispose();
+  });
+
+  it("leaves the clock alone while a run is on the block", async () => {
+    // A reconnect mid-run is the case: the `.alf` report's per-step timestamps come off the clock
+    // being set, and a jump would put a step's measured duration off by the correction.
+    const emulator = createCfxEmulator({ data: pcrData(), clock: acceleratedClock() });
+    const session = new CfxSession({
+      pollMs: 2,
+      reconnectDelaysMs: [1],
+      acquire: async () => emulator,
+    });
+    await session.connect();
+    await waitFor("the last-run report read", () => session.state.busy === null);
+    expect(emulator.instrument.clockSettings).toHaveLength(1);
+    await session.startRun(planRun({ runDefinition: TWO_CYCLE, name: "demo" }));
+    await waitFor("the run to start", () => session.state.status?.running === true);
+
+    emulator.opened = true;
+    drop(emulator);
+    await waitFor("the drop to be noticed", () => session.state.connection === "reconnecting");
+    emulator.opened = true;
+    await waitFor("the reconnect", () => session.state.connection === "connected", 10_000);
+    expect(session.state.status?.running).toBe(true);
+    expect(emulator.instrument.clockSettings).toHaveLength(1);
+    await session.dispose();
+  });
+});
+
 describe("the busy gate", () => {
   it("stands the poll down for the whole of an operation, and lets it back afterwards", async () => {
     const emulator = createCfxEmulator({ clock: acceleratedClock() });

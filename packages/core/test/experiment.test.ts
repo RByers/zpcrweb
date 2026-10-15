@@ -9,6 +9,7 @@ import {
   parseZpcr,
   parseZpcrwebSettingsJson,
   resolveExperimentName,
+  resolveRunStart,
   runFileBaseName,
 } from "../src/index.js";
 
@@ -118,6 +119,34 @@ describe("resolveExperimentName", () => {
 
   it("works with nothing but a filename", () => {
     expect(resolveExperimentName({ fileName: "20260726_S183-S185_RVP.zpcr" })).toBe("S183-S185 RVP");
+  });
+});
+
+describe("resolveRunStart", () => {
+  const zpcr = parseZpcr(readSample("20260726_S183-S185_RVP.zpcr"));
+
+  it("takes the .alf report's local clock over RunInfo.xml's GMT stamp", () => {
+    // The report says `Jul 26, 2026*17:12:46`; `RunInfo.xml` says `Mon, 27 Jul 2026 01:12:47 GMT`,
+    // which is that same clock minus the Pacific offset the instrument assumed (`alf.md` §4.1).
+    // What is wanted is the bench clock's digits, whatever zone this test runs in.
+    const start = resolveRunStart({ reports: zpcr.runReports(), metadata: zpcr.metadata });
+    expect([start!.getFullYear(), start!.getMonth() + 1, start!.getDate()]).toEqual([2026, 7, 26]);
+    expect([start!.getHours(), start!.getMinutes(), start!.getSeconds()]).toEqual([17, 12, 46]);
+    expect(start).not.toBe(zpcr.metadata.runStartDate);
+  });
+
+  it("falls back to the stamp without a report, and to nothing without either", () => {
+    expect(resolveRunStart({ reports: [], metadata: zpcr.metadata })).toBe(zpcr.metadata.runStartDate);
+    expect(resolveRunStart({ metadata: zpcr.metadata })).toBe(zpcr.metadata.runStartDate);
+    expect(resolveRunStart({ reports: [], metadata: { runStartDate: null } })).toBeNull();
+    expect(resolveRunStart({})).toBeNull();
+  });
+
+  it("skips a report whose header would not parse", () => {
+    const broken = { alf: { header: { startedAt: null } } };
+    expect(resolveRunStart({ reports: [broken], metadata: zpcr.metadata })).toBe(
+      zpcr.metadata.runStartDate,
+    );
   });
 });
 

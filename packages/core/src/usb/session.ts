@@ -513,6 +513,19 @@ export class CfxSession {
       } catch {
         /* the poll will catch up */
       }
+      // Set the instrument's clock and zone offset from this machine's, as CFX Manager does on
+      // every connection (`usb.md` §3). Left alone the instrument assumes Pacific, and every
+      // `RunStartTime` it then writes is hours in the future (`alf.md` §4.1). Only when idle: the
+      // `.alf` report's per-step timestamps come off this same clock, and a jump mid-run would
+      // put a step's duration (next line minus this one, `alf.md` §7.4) off by the correction.
+      // Best effort — a refusal costs nothing the connection needs.
+      if (this.state.status?.phase === "idle") {
+        try {
+          await device.setClock();
+        } catch (e) {
+          console.warn("[CfxSession] SetDateTime was not accepted:", e);
+        }
+      }
     } catch (e) {
       // A handle that opened but failed partway through identification is no good to anyone.
       // Closing it here — rather than leaving it to whoever called — is what keeps a failed

@@ -212,6 +212,7 @@ export {
   deriveExperimentName,
   nextFreeRunFileBase,
   resolveExperimentName,
+  resolveRunStart,
   runFileBaseName,
 } from "./experiment.js";
 export { safeFileBase } from "./fileName.js";

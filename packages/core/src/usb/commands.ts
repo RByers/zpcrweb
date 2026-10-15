@@ -112,6 +112,33 @@ export const CFX_DIRECTORIES = [
 ] as const;
 
 /**
+ * `SetDateTime 07/31/2026,09:33:04,PM,-04:00` — the instrument's clock *and* its zone offset, from
+ * one `Date` (`usb.md` §3).
+ *
+ * Why the zone matters more than the time: the instrument stamps every `RunStartTime` and
+ * `.Plateread` `DATETIME` "GMT", but what it writes is its local clock minus the offset it was
+ * last told — and left alone it assumes Pacific, so a run on an Eastern bench lands four hours in
+ * the future (`alf.md` §4.1). CFX Manager sends this on connect with the PC's current offset,
+ * which is what keeps its files right; a client that doesn't gets the stale offset.
+ *
+ * The fields are the host's **local** wall clock, 12-hour with a separate `AM`/`PM`, and the
+ * offset is `getTimezoneOffset()` with its sign flipped — JavaScript counts minutes *behind* UTC
+ * as positive, the command wants `-04:00` for a zone four hours behind.
+ */
+export function setDateTimeCommand(now: Date): string {
+  const d2 = (n: number): string => String(n).padStart(2, "0");
+  const h24 = now.getHours();
+  const h12 = h24 % 12 === 0 ? 12 : h24 % 12;
+  const date = `${d2(now.getMonth() + 1)}/${d2(now.getDate())}/${now.getFullYear()}`;
+  const time = `${d2(h12)}:${d2(now.getMinutes())}:${d2(now.getSeconds())}`;
+  const offsetMin = -now.getTimezoneOffset();
+  const sign = offsetMin < 0 ? "-" : "+";
+  const abs = Math.abs(offsetMin);
+  const tz = `${sign}${d2(Math.floor(abs / 60))}:${d2(abs % 60)}`;
+  return `SetDateTime ${date},${time},${h24 < 12 ? "AM" : "PM"},${tz}`;
+}
+
+/**
  * How much a command in {@link CFX_COMMANDS} is actually known to do.
  *
  * The distinction is load-bearing rather than decorative. `usb.md` documents only what real

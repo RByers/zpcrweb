@@ -25,6 +25,7 @@
  */
 
 import { safeFileBase } from "./fileName.js";
+import type { AlfHeader } from "./alf.js";
 import type { RunMetadata } from "./types.js";
 
 /** Extensions this project loads, longest-first so `.plt.csv` isn't read as `.csv`. */
@@ -139,4 +140,30 @@ export function resolveExperimentName(args: {
   const stated = args.metadata?.experimentName?.trim();
   if (stated) return stated;
   return deriveExperimentName(args.fileName, { serial: args.metadata?.baseSerialNumber });
+}
+
+/**
+ * When a run **started, by the clock on the bench** — the `.alf` report's header when the archive
+ * has one, else `RunInfo.xml`'s `RunStartTime`, else nothing.
+ *
+ * The two disagree, and the report is the one to trust. `RunStartTime` is stamped "GMT", but the
+ * instrument computes it as its local clock minus the zone offset it was last given, which is
+ * Pacific unless a client has set it (`alf.md` §4.1) — so on most benches the "GMT" is simply
+ * wrong, by whole hours, and converting it to local time shows a run that started in the future.
+ * The report's header carries the same local clock verbatim, no zone, and that clock is the one
+ * the operator sees on the touchscreen and sets. {@link AlfHeader.startedAt} reinterprets it in
+ * the host's zone, so formatting its local fields shows exactly the digits the instrument showed.
+ *
+ * A run that lacks a report — one still in progress, or a `.pcrd`-derived run — falls back to the
+ * stamp, which is right whenever the instrument's offset is (this app sets it on every connection:
+ * `usb/session.ts`).
+ */
+export function resolveRunStart(args: {
+  reports?: ReadonlyArray<{ alf: { header: Pick<AlfHeader, "startedAt"> } }> | null;
+  metadata?: Pick<RunMetadata, "runStartDate"> | null;
+}): Date | null {
+  for (const report of args.reports ?? []) {
+    if (report.alf.header.startedAt) return report.alf.header.startedAt;
+  }
+  return args.metadata?.runStartDate ?? null;
 }

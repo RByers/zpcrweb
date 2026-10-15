@@ -355,6 +355,7 @@ to the emulator adds its entry here in the same commit, unless they have a recor
 | A run started at the touchscreen, then connected to | the app's "found a run already in progress" path |
 | A mid-run disconnect and reconnect | the case that exposed §3's parked-read bug |
 | An upload that fails its CRC | nothing has ever observed a failed `GETFILECRC` |
+| `SetDateTime` with a malformed argument, or its effect on the stamps | the capture shows one well-formed send and its `True`; the emulator accepts anything and records it (`clockSettings`) without moving its own clock, whose files take their stamps from `startedAt` |
 | Any non-zero result code | see Appendix A — the failure code itself is invented, and §10.1's session never provoked one |
 | **When the staging GUID disappears** | it is gone by the end of a run and present right after its upload; nothing observed the moment between (§10.1) |
 | **What the block reports after a finish** | this instrument was still reporting 94.42 °C when its 95 °C run finished; the emulator drops to ambient at once. How fast a real block falls is unmeasured |

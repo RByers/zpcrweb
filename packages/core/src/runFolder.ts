@@ -10,7 +10,8 @@
  */
 
 import type { ZpcrArchive } from "./archive.js";
-import { runFileBaseName } from "./experiment.js";
+import { isAlfName, parseAlf } from "./alf.js";
+import { resolveRunStart, runFileBaseName } from "./experiment.js";
 import { isPlateCsvName } from "./plateCsv.js";
 import { isPltdName } from "./pltd.js";
 import { expectedPlateReads } from "./runDefinition.js";
@@ -183,7 +184,8 @@ function zpcrFileName(name: string): string {
  * 2. **The deposited name**, `<YYYYMMDD>-<name>` via {@link runFileBaseName} — the same
  *    derivation the Instrument view offers as its default, so a browser reloaded mid-run (which
  *    forgets what was typed) still lands the file under the name the run was started with.
- *    Dated from the run's own `RunStartTime` when that parses, so the name says when the run
+ *    Dated from the run's own start ({@link resolveRunStart} — the `.alf` report's local clock
+ *    when the folder holds the report, else `RunStartTime`), so the name says when the run
  *    happened rather than when it was pulled.
  * 3. **The name the run calls itself**: `RunInfo.xml`'s `DataFile`, already the `.zpcr` name CFX
  *    Manager would save this run under (e.g. `20260720_211747_CT019138_Luna_noRT.zpcr`), so a run
@@ -201,7 +203,7 @@ export function zpcrNameFromRunFiles(
   if (deposited) {
     const chosen = naming?.fileName?.trim() ?? "";
     if (chosen && naming?.experimentName?.trim() === deposited) return zpcrFileName(chosen);
-    const derived = runFileBaseName(deposited, runStartDate(runInfo));
+    const derived = runFileBaseName(deposited, runStartDate(files));
     if (derived) return `${derived}.zpcr`;
   }
 
@@ -235,13 +237,26 @@ export function depositedName(files: ZpcrArchive): string {
   }
 }
 
-/** When the run started, for the derived name's date stamp; today when the field won't parse. */
-function runStartDate(runInfo: Uint8Array): Date {
-  try {
-    return parseRunInfo(textDecoder.decode(runInfo)).runStartDate ?? new Date();
-  } catch {
-    return new Date();
+/** When the run started, for the derived name's date stamp; today when nothing in the folder
+ * says. The report, when it is there, outranks `RunInfo.xml` — see {@link resolveRunStart}. */
+function runStartDate(files: ZpcrArchive): Date {
+  const reports: { alf: ReturnType<typeof parseAlf> }[] = [];
+  for (const [name, bytes] of Object.entries(files)) {
+    if (!isAlfName(name) || bytes === undefined) continue;
+    try {
+      reports.push({ alf: parseAlf(bytes) });
+    } catch {
+      // Unreadable report: the stamp below still answers.
+    }
   }
+  let metadata = null;
+  try {
+    const runInfo = files[RUNINFO_NAME];
+    if (runInfo !== undefined) metadata = parseRunInfo(textDecoder.decode(runInfo));
+  } catch {
+    // A `RunInfo.xml` this app can't read is the caller's problem to report, via parseZpcr.
+  }
+  return resolveRunStart({ reports, metadata }) ?? new Date();
 }
 
 /**

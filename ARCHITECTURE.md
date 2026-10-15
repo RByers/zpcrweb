@@ -361,6 +361,10 @@ their definitions:
 `CfxDevice` speaks the protocol and knows nothing about staying connected; `CfxSession` adds the
 status poll and the `busy` gate that serialises it against a file transfer, the reconnect above,
 the traffic recording and the capped display window, and the accumulated view of the instrument.
+It also sets the instrument's clock and zone offset from the host's on every connection
+(`SetDateTime`, as CFX Manager does — `usb.md` §3), but only while the instrument is idle: the
+`.alf` report's step timestamps come off that clock, and the instrument otherwise assumes Pacific
+and writes every "GMT" stamp hours wrong (`alf.md` §4.1).
 `RunFollower` sits on top and holds what a *run* is made of: the step-transition rule, the §7.6
 finished-and-held acknowledgement, the first-listing rule and its in-progress exception, which
 pass completes a run's file, and which open file is the run on the block (`runningFile`). Both publish a `subscribe`/`state` snapshot in the shape
@@ -431,7 +435,9 @@ Naming the archive takes three rungs, in `zpcrNameFromRunFiles`. A run *this app
 own `zpcrweb.json` in the folder (`usb/runPlan.ts` deposits it — nothing else writes one there),
 and that both states the run's name and identifies the folder as ours: such a run takes the file
 name its caller chose, if that caller is still following the same run, and otherwise
-`<YYYYMMDD>-<name>` via `experiment.ts`'s `runFileBaseName`, dated from the run's own start. Any
+`<YYYYMMDD>-<name>` via `experiment.ts`'s `runFileBaseName`, dated from the run's own start
+(`resolveRunStart`: the `.alf` report's local clock when the folder has the report, else
+`RunInfo.xml`'s `RunStartTime` — see `alf.md` §4.1 for why they differ, and by hours). Any
 other run — one begun at the touchscreen, or by CFX Manager — keeps `RunInfo.xml`'s `DataFile`,
 which is already the name Manager would have saved it under.
 

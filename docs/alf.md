@@ -142,6 +142,36 @@ report truncates or merely records an already-truncated name can't be told from 
 Fields 3, 4, 13 and 14 make the header a self-contained provenance record: which block, in which
 base unit, ran this — no other file in the archive is needed to say so.
 
+### 4.1 Fields 6–7 are the clock to trust, not `RunStartTime`
+
+The archive stamps the same instant twice: here, as the instrument's local clock with no zone, and
+in `RunInfo.xml`'s `RunStartTime` (and every `.Plateread`'s `DATETIME`, `plateread.md` §3) as an
+RFC-1123 string ending `GMT`. **The "GMT" is not GMT.** It is this local clock minus a zone offset
+the instrument holds separately — the one a client last sent it with `SetDateTime` (`usb.md` §3),
+which CFX Manager does on every connection with its PC's current offset. Left alone, the
+instrument falls back to Pacific. Measured across the committed samples (header start vs.
+`RunStartTime`, all runs on an Eastern bench except the first, Bio-Rad's own):
+
+| run | header (fields 6–7) | `RunStartTime` | offset the instrument assumed |
+|---|---|---|---|
+| `20190516_…_SHORT_QUALIF` | May 16, 2019 12:29 | `Thu, 16 May 2019 19:29:23 GMT` | −7 (Pacific, DST) |
+| `20260720_FirstQualification` | Jul 20, 2026 21:18 | `Tue, 21 Jul 2026 05:18:16 GMT` | −8 |
+| `20260725_GRADIENTTEST` | Jul 25, 2026 12:47 | `Sat, 25 Jul 2026 16:47:46 GMT` | −4 |
+| `20260726_S183-S185_RVP` | Jul 26, 2026 17:12 | `Mon, 27 Jul 2026 01:12:47 GMT` | −8 |
+| `20260807-YouSeq_RT_-_S56` | Aug 6, 2026 19:02 | `Fri, 07 Aug 2026 03:02:24 GMT` | −8 |
+
+Only the 07/25 run — the one made while CFX Manager had recently sent `-04:00` — carries a true
+GMT; the others are four hours in the future, and the 07/20 and 07/26 runs land on the wrong
+calendar day. The local clock is right in every row, which is the clock the operator sees and
+sets on the touchscreen. So **a reader wanting "when did this run happen" takes fields 6–7 and
+shows them as they are**, and treats `RunStartTime` as a fallback for an archive with no report
+(core's `experiment.ts` `resolveRunStart`); and a client that wants the stamps right sends
+`SetDateTime` itself, as CFX Manager does (core's `usb/session.ts`, once per connection, only
+while the instrument is idle — §7.4's per-step timestamps come off this same clock, and a jump
+mid-run would corrupt the step durations they imply). Whether the offset reverts on a power cycle
+or on some other event is not established: the 07/31 capture set it to −4 and the 08/06 run was
+back at −8.
+
 ## 5. Line 2 — the protocol as executed
 
 The full run definition, `*`-delimited, in the same directive language every other carrier uses.
@@ -263,8 +293,8 @@ consecutive lines is a ramp plus a hold under either reading — but two observa
   moment the skip took effect.
 - **Against the plate-read files.** For `samples/20260720_FirstQualification.zpcr`, each
   `Plate Read` line runs 12–13 s *earlier* than the corresponding `.Plateread`'s own `DATETIME`
-  field (which is in **GMT**, while these timestamps are local): read 1 logs `21:23:04` here
-  against `Tue, 21 Jul 2026 05:23:17 GMT` there. The next step's line then follows ~13 s after the
+  field (which is stamped **GMT** — a nominal GMT, see §4.1 — while these timestamps are local):
+  read 1 logs `21:23:04` here against `Tue, 21 Jul 2026 05:23:17 GMT` there. The next step's line then follows ~13 s after the
   `Plate Read` line — so the read *begins* at the logged time, takes ~12 s, and the file is stamped
   when it lands.
 

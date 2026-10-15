@@ -256,7 +256,7 @@ list that is empty when healthy.
 | `TESTMODE <n>` | e.g. `TESTMODE 3`, issued at the very start of both captures |
 | `BLOCKID <n>` | **block identify — flashes that block's indicator**, so an operator can tell which unit is being addressed. `<n>` is the block number; `BLOCKCOUNT?` reports how many exist (1 on a CFX96). Established by correlating the captures against what the operator did: `usb-basic` opens with an indicator flash, then a lid open, then a lid close, and its only `BLOCKID 1` sits at t=…005.2, immediately before the first `LID OPEN` at t=…010.7. `usb-run`, where no flash was performed, contains **no `BLOCKID` at all** despite having the same lid traffic — which is what rules out its being routine setup |
 | `SETAPILOGLEVEL <n>` | e.g. `SETAPILOGLEVEL 1` |
-| `SetDateTime <mm/dd/yyyy>,<hh:mm:ss>,<AM\|PM>,<tz offset>` | e.g. `SetDateTime 07/31/2026,09:33:04,PM,-04:00` → `True;0000` |
+| `SetDateTime <mm/dd/yyyy>,<hh:mm:ss>,<AM\|PM>,<tz offset>` | e.g. `SetDateTime 07/31/2026,09:33:04,PM,-04:00` → `True;0000`. The host's local clock, 12-hour, and its zone offset. **The offset is the part that matters**: every "GMT" stamp the instrument writes (`RunStartTime`, `.Plateread` `DATETIME`) is its local clock minus the offset it was last given, and it assumes Pacific until told otherwise — `alf.md` §4.1 measures the damage. CFX Manager sends this on every connection; so does this library (`session.ts`, idle instrument only; `commands.ts`'s `setDateTimeCommand` spells it) |
 
 **Filesystem and file transfer** — see §5 for the full upload/download mechanism:
 

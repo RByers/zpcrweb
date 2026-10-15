@@ -15,6 +15,7 @@
 import {
   deriveExperimentName,
   resolveExperimentName,
+  resolveRunStart,
   runFileBaseName,
   runProgressFromNames,
   type FileKind,
@@ -42,12 +43,15 @@ export interface ExperimentIdentity {
 }
 
 /**
- * `7/26/26 9:12pm` — a timestamp narrow enough to sit under a file chip, **in local time**.
+ * `7/26/26 5:12pm` — a timestamp narrow enough to sit under a file chip, from the date's
+ * **local fields**.
  *
- * The instrument writes `RunStartTime` in GMT (`Mon, 27 Jul 2026 01:12:47 GMT`), which is the
- * wrong answer to "when did I run this?" by a whole day for anyone west of the meridian in the
- * evening. Everything here is the browser's own locale-independent formatting of local fields,
- * so it renders identically wherever it is read and never surprises with a different order.
+ * What is shown is the instrument's own clock — the `.alf` report's start time, which core's
+ * `resolveRunStart` reinterprets in the browser's zone precisely so that these local fields are
+ * the digits the touchscreen showed. The archive's `RunStartTime` is stamped GMT but computed from
+ * a zone offset the instrument guesses at, so converting *that* to local time is what used to put
+ * a run hours in the future. Locale-independent formatting, so it renders identically wherever it
+ * is read and never surprises with a different order.
  */
 export function formatCompactDateTime(date: Date): string {
   const hours = date.getHours();
@@ -114,7 +118,7 @@ export function experimentIdentity(
   storedName: string | undefined,
 ): ExperimentIdentity {
   const metadata = run?.zpcr?.metadata ?? null;
-  const date = metadata?.runStartDate ?? null;
+  const date = resolveRunStart({ reports: run?.zpcr?.runReports(), metadata });
   return {
     // A disk-backed file's name is its path within the granted folder (`state/db.ts`'s
     // `DiskSource`), and what the run is *called* comes from the file's own name, not from the

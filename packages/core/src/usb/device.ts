@@ -68,6 +68,7 @@ import {
   assertCommandArgument,
   encodeCommand,
   parseResponse,
+  setDateTimeCommand,
   type CfxCommandName,
   type CfxResponse,
 } from "./commands.js";
@@ -1067,6 +1068,18 @@ export class CfxDevice {
    */
   async acknowledgeRun(): Promise<CfxResponse> {
     return this.tryCommand("CANCEL");
+  }
+
+  /**
+   * `SetDateTime` — set the instrument's clock and zone offset to the host's (`usb.md` §3).
+   *
+   * The reply is `True;0000`, a value rather than the bare code every other action returns, so a
+   * `False` would be the instrument declining; it is reported as an error like a missing reply.
+   * The session sends this once per connection, as CFX Manager does — see `CfxSession`.
+   */
+  async setClock(now: Date = new Date()): Promise<void> {
+    const res = await this.command(setDateTimeCommand(now));
+    if (res.value?.trim() !== "True") throw new CfxCommandError("SetDateTime", res);
   }
 
   /** `PAUSE` — suspend the running protocol (`usb.md` §7.9). A no-op when nothing is running. */

@@ -158,6 +158,7 @@ export function parseZpcrArchive(files: ZpcrArchive): Zpcr {
       metadata.numberPlateColumns,
     );
 
+  let reports: AlfEntry[] | null = null;
   return {
     metadata,
     reads,
@@ -195,10 +196,11 @@ export function parseZpcrArchive(files: ZpcrArchive): Zpcr {
           name,
           prcl: parsePrcl(files[name] as Uint8Array, password ? { password } : undefined),
         })),
-    runReports: (): AlfEntry[] =>
-      archive.entries
-        .filter(isAlfName)
-        .map((name) => ({ name, alf: parseAlf(files[name] as Uint8Array) })),
+    // Parsed once: the web app's `experimentIdentity` asks for the run's start on every render of
+    // a chip or a Files row (`resolveRunStart`), and the report never changes under it.
+    runReports: (): AlfEntry[] => (reports ??= archive.entries
+      .filter(isAlfName)
+      .map((name) => ({ name, alf: parseAlf(files[name] as Uint8Array) }))),
     calibrations: (): DcalEntry[] =>
       archive.entries
         .filter(isDcalName)
