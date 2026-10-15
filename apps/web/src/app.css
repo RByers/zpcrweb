@@ -415,6 +415,16 @@
     animation: none;
   }
 }
+/* A chip that can't take the selection here — the Instrument view holding it on the running file
+   (`FileBar`'s `lockedTo`). Dimmed like a disabled button, but only the main part refuses the
+   pointer: its ✕ still closes the file, so it keeps its own cursor. Built from theme tokens and
+   opacity, so it follows the theme without a rule of its own. */
+.filechip.is-locked {
+  opacity: 0.45;
+}
+.filechip.is-locked .filechip__main {
+  cursor: not-allowed;
+}
 .filechip__main {
   display: flex;
   align-items: center;
@@ -4127,9 +4137,9 @@ body.is-cqdrag * {
 }
 /* Start run stays functionally disabled the instant another USB command is in flight (only one
    can be outstanding at a time), but a lid/indicator command round-trips fast enough that the
-   dimmed `:disabled` look above would otherwise flash on and off. `InstrumentRail` adds this
-   class only once busy has lasted long enough to be worth showing, so it wins over `:disabled`
-   for that brief, purely-transient window. */
+   dimmed `:disabled` look above would otherwise flash on and off. `InstrumentRun` adds this
+   class only until busy has lasted long enough to be worth showing (`useBusyBriefly`), so it
+   wins over `:disabled` for that brief, purely-transient window. */
 .instrument__start--armed:disabled {
   opacity: 1;
   cursor: default;
@@ -4746,11 +4756,53 @@ summary.instrument__panelhead {
   color: var(--ink-muted);
 }
 
-/* Start run sits at the head of the rail's actions, full width so it doesn't read as one more
-   equal peer of "Open lid". */
+/* Start sits at the right of the experiment panel's header, the panel's one primary action. */
 .instrument__start {
-  width: 100%;
-  margin-bottom: 6px;
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+/* The header carries the name, the running file's state and Start: the name takes the slack and
+   truncates, so Start never wraps under it. */
+.instrument__experiment > .instrument__panelhead {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+}
+.instrument__panelname {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The running file's State / Plate reads — the rail's `.devstat` rows, laid out inline. */
+.instrument__runstate {
+  display: flex;
+  gap: 14px;
+}
+.instrument__runstate .devstat {
+  gap: 6px;
+  padding: 0;
+  border-bottom: 0;
+}
+/* Start's reason, the deposit report and the follower's note, under the header they belong to. */
+.instrument__panelnotes {
+  padding: 0 14px 10px;
+  font-size: 11px;
+}
+/* The rail's "Last run" section's two buttons. */
+.instrument__lastrunactions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+/* The instrument block's buttons, separated from the connect row above them. */
+.instrument__buttons {
+  margin-top: 10px;
+}
+/* A file's saved USB traffic log — core's one-line-per-message text, as-is. */
+.instrument__savedlog {
+  margin: 0;
+  white-space: pre;
+  font-size: 11px;
 }
 
 /* The deposit phase's report, when it has something to say (`usb.md` §7.4). */

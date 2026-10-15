@@ -19,7 +19,6 @@ export type { HeldRun } from "@zpcrweb/core";
 
 /** The hook's handle: the follower's own state, plus the setters a view drives it with. */
 export type RunWatchState = RunFollowerState & {
-  setWatching: (on: boolean) => void;
   adopt: (fileName: string, experimentName?: string) => void;
   clearFinished: () => void;
   expectReportOnly: () => void;
@@ -76,7 +75,7 @@ export function useRunWatch(
   );
 
   // One observation per status the session publishes — and one on every connection change, so a
-  // disconnect resets the follower's connection-scoped memory even while following is switched off.
+  // disconnect resets the follower's connection-scoped memory.
   useEffect(() => {
     follower.observe(status, connection === "unsupported" ? "disconnected" : connection);
   }, [follower, status, connection]);
@@ -84,7 +83,6 @@ export function useRunWatch(
   return useMemo(
     () => ({
       ...state,
-      setWatching: (on: boolean) => follower.setWatching(on),
       adopt: (id: string, experimentName?: string) => follower.adopt(id, experimentName),
       clearFinished: () => follower.clearFinished(),
       expectReportOnly: () => follower.expectReportOnly(),

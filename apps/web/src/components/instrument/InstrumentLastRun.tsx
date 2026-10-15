@@ -7,8 +7,10 @@
  * place that answers "what did this machine last do?" — unlike the run folder, which exists only
  * for a run with a `PLATEREAD` and otherwise still holds whatever the last such run left there.
  *
- * So the connection reads it, unasked, once (`useCfxDevice`'s `refreshLastReport`), and this panel
- * is where it lands. Two things it is for, in order of how often they matter:
+ * So the connection reads it, unasked, once (`useCfxDevice`'s `refreshLastReport`), and this rail
+ * section is where it lands — collapsed, in the Instrument view's rail, because it is a fact about
+ * the machine and not about whichever file is selected. Two things it is for, in order of how
+ * often they matter:
  *
  * - **Connecting and seeing where you are.** The run on the block is over, the browser was closed,
  *   and this says what happened without opening anything.
@@ -17,13 +19,13 @@
  *   go. "Open report" puts it in the file bar as a file of the user's, which is the same thing a
  *   thermal-only run's report does automatically when this app is the one driving.
  *
- * The report a *watched* run produces arrives on its own (`useRunWatch`), so this panel is not how
- * results are collected. It is the account of the run before the browser got here.
+ * The report a *watched* run produces arrives on its own (`useRunWatch`), so this section is not
+ * how results are collected. It is the account of the run before the browser got here.
  */
 import { useState } from "react";
 import { alfSummaryRows, alfStartedAt } from "../../lib/alfSummary";
-import { Pair } from "../raw/Pair";
 import type { CfxDeviceHandle } from "../../state/useCfxDevice";
+import { Stat } from "./instrumentParts";
 
 export function InstrumentLastRun({
   instrument,
@@ -37,13 +39,13 @@ export function InstrumentLastRun({
   const { connection, lastReport, refreshLastReport, busy, runPending, status } = instrument;
   const [opened, setOpened] = useState<string | null>(null);
 
-  // The panel is about the machine on the other end of the cable; with no cable there is nothing
+  // The section is about the machine on the other end of the cable; with no cable there is nothing
   // it could be describing, and a stale report from a previous session would be a lie.
   if (connection !== "connected") return null;
 
   // A run in progress is about to write the *next* report, and the one that was here has already
   // been deleted by its pre-flight (`usb.md` §7.1) — so say what is happening rather than showing
-  // an empty panel that reads like the instrument has never run anything.
+  // an empty section that reads like the instrument has never run anything.
   const running = status?.running === true || runPending;
   const report = lastReport?.report ?? null;
 
@@ -54,80 +56,89 @@ export function InstrumentLastRun({
   };
 
   return (
-    <section className="instrument__panel">
-      <div className="instrument__panelhead">
-        <h2 className="instrument__paneltitle">Last run on this instrument</h2>
-        {lastReport && (
-          <span className="devrun__hint mono" title={lastReport.name}>
-            {lastReport.name}
+    // Collapsed, like Identity: it describes the run before this browser got here, which is worth
+    // a glance on demand rather than permanent space above the buttons that matter mid-run.
+    <details className="rail__section rail__details instrument__lastrun">
+      <summary className="rail__title">
+        <span>
+          <span className="rail__chevron" aria-hidden="true">
+            ▸
           </span>
-        )}
-      </div>
+          Last run
+        </span>
+      </summary>
 
       {running ? (
-        <div className="instrument__empty mono">
-          <p>
-            A run is under way. Its report is written when it finishes, and will appear here then —
-            the previous one was cleared when this run started.
-          </p>
+        <div className="rail__note">
+          A run is under way. Its report is written when it finishes, and will appear here then —
+          the previous one was cleared when this run started.
         </div>
       ) : !lastReport ? (
-        <div className="instrument__empty mono">
-          <p>
+        <>
+          <div className="rail__note">
             The instrument is holding no run report. It keeps only the most recent one, and clears
             it at the start of every run, so this is what you see after a run whose report has
             already been taken.
-          </p>
-          <button className="btn" onClick={() => void refreshLastReport()} disabled={!!busy}>
-            Check again
-          </button>
-        </div>
+          </div>
+          <div className="instrument__lastrunactions">
+            <button
+              className="btn btn--sm"
+              onClick={() => void refreshLastReport()}
+              disabled={!!busy}
+            >
+              Check again
+            </button>
+          </div>
+        </>
       ) : (
         <>
           {report ? (
             <>
-              <dl className="decoded__dl mono">
-                {alfSummaryRows(report).map((r) => (
-                  <Pair key={r.label} k={r.label} v={r.value} />
-                ))}
-                {/* Not one of the shared rows: on a file's Overview "who started it" tells the
-                    reader nothing, and here it is the whole distinction between a run this
-                    browser drove and one somebody started at the machine. */}
-                <Pair
-                  k="Started"
-                  v={
-                    alfStartedAt(report) === "instrument"
-                      ? "at the instrument"
-                      : `from a computer (${report.header.user})`
-                  }
-                />
-              </dl>
-              <p className="devrun__hint">
+              {alfSummaryRows(report).map((r) => (
+                <Stat key={r.label} label={r.label} value={r.value} />
+              ))}
+              {/* Not one of the shared rows: on a file's Overview "who started it" tells the
+                  reader nothing, and here it is the whole distinction between a run this
+                  browser drove and one somebody started at the machine. */}
+              <Stat
+                label="Started"
+                value={
+                  alfStartedAt(report) === "instrument"
+                    ? "at the instrument"
+                    : `from a computer (${report.header.user})`
+                }
+              />
+              <div className="rail__note instrument__footnote">
                 Read from the instrument, not from a file — it keeps one report and replaces it at
                 the start of the next run. Open it to keep a copy.
-              </p>
+              </div>
             </>
           ) : (
-            <div className="instrument__empty mono">
-              <p>
-                The instrument is holding a report, but its contents could not be read as one. Its
-                bytes are still here — open it to look at them.
-              </p>
+            <div className="rail__note">
+              The instrument is holding a report, but its contents could not be read as one. Its
+              bytes are still here — open it to look at them.
             </div>
           )}
-          <div className="instrument__completeactions">
-            <button className="btn btn--primary" onClick={() => void open()} disabled={!!busy}>
+          <div className="instrument__lastrunactions">
+            <button
+              className="btn btn--primary btn--sm"
+              onClick={() => void open()}
+              disabled={!!busy}
+              title={lastReport.name}
+            >
               Open report
             </button>
-            <button className="btn" onClick={() => void refreshLastReport()} disabled={!!busy}>
+            <button
+              className="btn btn--sm"
+              onClick={() => void refreshLastReport()}
+              disabled={!!busy}
+            >
               Re-read
             </button>
-            {opened && (
-              <span className="devrun__hint mono">In the file bar as {opened}</span>
-            )}
           </div>
+          {opened && <div className="rail__note mono">In the file bar as {opened}</div>}
         </>
       )}
-    </section>
+    </details>
   );
 }

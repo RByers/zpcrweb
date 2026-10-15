@@ -26,7 +26,11 @@ visualizer for everything** inside a `.zpcr` archive.
       today. Two things first: `CfxDevice.getFile` must reassemble a reply longer than 65,530
       bytes (the `.zpcr`s are 40–400 KB and arrive split; the emulator now splits the same way, so
       it is testable), and a recording of *when* the instrument writes there (`emulator.md` §11).
-- Clean up instrument UI to make it less confusing when moving between runs. Eg:
+- [x] Clean up instrument UI to make it less confusing when moving between runs. Done: the rail is
+  only the instrument (buttons, the download offer, a collapsed Last run); Start, the running badge
+  and the run's state moved to the experiment panel and key on the follower's `runningFile`; the
+  Instrument view stays on the running file and locks the file bar there; a non-running file shows
+  its own saved USB log instead of live traffic. Eg:
   - The left panel should be exclusively about the state of the instrument. Eg.
     showing the last completed run and offering to download it. Open / close lid,
     but nothing about the actively selected file (like start experiment). Changing the selected

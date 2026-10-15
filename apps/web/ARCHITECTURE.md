@@ -457,7 +457,7 @@ It enables **three** tabs, `["overview","protocol","raw"]`:
 - **Overview** (`StandaloneReportOverview`) — who ran what, and how it went. The shared
   `OverviewPanel` gets the six summary rows of `lib/alfSummary.ts` (the run's name, when it ran, how
   long it took, the outcome it reports, the instrument, and what the log holds) and nothing else:
-  the full decode is one tab over in Raw, and the Instrument view's last-run panel builds its
+  the full decode is one tab over in Raw, and the Instrument view's Last run section builds its
   account of a report still on the machine from the same six.
 - **Protocol** (`ProtocolView`, the same component a run and a `.prcl.txt` use) — what actually ran,
   and what it cost. A report carries a protocol of its own: line 2 is the run definition
@@ -862,13 +862,28 @@ which stop existing because the selection moved.
 
 It spent a while inside the file-view group, on the argument that starting a run needs a protocol
 and a protocol comes from a file. Both halves of that are still true — but *needing a file as
-input* is not *being a lens on the selected file*, and only the second belongs in that group. The
-difference showed up as two contortions in `App` whose only job was to hide it: `activeLocked`,
-which stopped the file bar switching files while a run was live, and an effect that snapped the
-app's selection to the running file on arriving at the tab. Both are gone, and **nothing replaced
-them**: the file bar is still the only file picker, the experiment this view starts is still simply
-the selected one, and when the selection isn't a run the view shows no run at all. See "The
-Instrument view" below.
+input* is not *being a lens on the selected file*, and only the second belongs in that group.
+
+So the view is split along exactly that line. **The rail is the instrument**: the connection, every
+button that actuates the machine, the run it is holding for this browser, its identity, its status
+and the last run it performed — and nothing that changes when a different chip is clicked. **The
+main panel is the selected file**, and holds the one control that depends on it, Start.
+
+**While a run is on the block, the view's subject is the running file.** The question someone on
+this tab mid-run is asking is "what is the instrument doing?", and a selected file that is some other
+run answers it wrongly — a "running" badge on a finished file, a live console beside a file it is not
+about. So the view keys on the run follower's `runningFile` (the open file whose run is cycling now,
+see "Following a run"): `App` resolves the view's experiment from it, keeps the selection on it while
+the view is showing, and **locks the file bar's other chips on this view only** (`FileBar`'s
+`lockedTo`, greyed out, their ✕ still working).
+
+That last part has history. An earlier `activeLocked` froze the file bar while a run was live, on
+*every* view, alongside an effect that snapped the selection to the running file on arriving at the
+tab. Both were removed, rightly: the lock existed so the user could not abandon the one tab that
+was following the run, and once `useRunWatch` followed a run whatever was selected there was
+nothing to abandon. What is back is narrower and for a different reason — not to protect the
+follower, but because this one view's subject *is* the run on the block. Every other tab still
+switches freely, which is where other files are looked at mid-run. See "The Instrument view" below.
 
 ## State & persistence
 
@@ -3278,23 +3293,47 @@ with nothing loaded at all. Starting a run does still need a protocol, and a pro
 from a file, since the instrument has no library of its own to pick from (`usb.md` §5.1) — but
 *needing a file as input* is not *being a lens on the selected file*.
 
-**Which experiment it would start is the selected one, and that is the whole rule** (`App`'s
-`instrumentExperiment`): the selected file when it is a decoded run, otherwise none. There is no
-picker here to say it a second time — the file bar is the app's one file picker, and a control
-beside it could only agree with the chips or contradict them — and no fallback to a *different*
-run when the selection isn't one, which would be the single answer guaranteed to be wrong.
+**The rail is the instrument; the panel is the selected file.** `InstrumentRail` holds one
+*Instrument* block — the connect button, and directly under it every button that actuates the
+machine (Stop and Pause while a run is underway, then the lid/indicator grid), then the
+*Download run*/*Collect run* offer for a run the instrument is holding — followed by *Identity*,
+*Status* and a collapsed *Last run* (see "What the instrument last ran"). Nothing in it reads the
+selection, so a click on a chip changes nothing there. The rail used to carry Start at the head of an
+*Actions* section and a *Current run* section of the follower's state; both were about the selected
+file as much as the machine, and both moved to the panel — Start into its header, the follower's
+state beside the file it describes.
 
-Showing nothing costs nothing, which is what lets the rule stay this plain: connecting, status, the
-instrument's filesystem, the traffic console and every action but Start live in the rail and need no
-file at all. Plug in a cycler with an empty browser and you can still open the lid; Start disables
-itself with "Select or create an experiment first."
+**Which experiment it shows is the running file while a run is on the block, else the selected
+one** (`App`'s `instrumentExperiment`): the selected file when it is a decoded run, otherwise none.
+The two rungs agree whenever anyone is looking, because while this view is showing `App` keeps the
+selection on the running file (an effect on `runningFileName`) and the file bar locks the other
+chips (see "Instrument is not a file view"). So switching to Overview, picking another file and
+coming back lands on the running file again. One known consequence: a file dropped in while this view
+shows a run lands in the bar but is not selected. There is no picker here to say any of this a
+second time, and no fallback to a *different* run when the selection isn't one, which would be the
+single answer guaranteed to be wrong.
 
-Earlier versions resolved this through as many as four rungs — a live run, a pick made in the view,
-the selection, the last thing resolved — each defensible alone and adding up to a view whose subject
-you could not name by looking at the file bar. What made them seem necessary was the tab pretending
-to be a lens; once it stopped, the plain answer was enough. Nothing needs pinning at the click on
-Start either: the run watcher activates the file it started (`AddFilesOptions.activate`), so the
-selection *is* that run.
+**"Running" on the panel means this file is the run on the block**, keyed on the follower's
+`runningFile` and nothing weaker: the *running*/*pending* badge, the executing-step highlight, the
+follower's *State* and *Plate reads* (`.instrument__runstate`) and its note all render only for that
+file. A finished or pending file selected while another run cycles — reachable from any other tab,
+or before the lock takes — shows none of them; that the instrument is busy is the rail's to say.
+The same test gates the wide instrument panels: the instrument's file browser and the live traffic
+console render only while connected and when nothing is running or this is the running file, since
+otherwise both would be about some other run. In the console's place such a file shows **its own
+saved traffic log** (`usb-traffic.bin`, or an older file's `usb-traffic.log`), collapsed and titled
+as the run's saved log — the same `InstrumentConsole` with a `saved` slot, not a sibling component.
+
+Showing nothing costs nothing: connecting, status and every instrument button live in the rail and
+need no file at all. Plug in a cycler with an empty browser and you can still open the lid; the panel
+offers "New experiment".
+
+Earlier versions resolved the subject through as many as four rungs — a live run, a pick made in the
+view, the selection, the last thing resolved — each defensible alone and adding up to a view whose
+subject you could not name by looking at the file bar. The two rungs left are both visible there:
+the running file is the one chip not greyed out. Nothing needs pinning at the click on Start either:
+`adopt` makes the started file the running file in the same click, and the run watcher activates the
+file it started (`AddFilesOptions.activate`).
 
 One consequence of the tab being reachable with nothing loaded: the welcome screen's "Connect an
 instrument over USB" button just **goes there**, creating nothing. It used to have to invent an
@@ -3363,8 +3402,9 @@ Curves watching its amplification curves arrive. The connection is a property of
 ### What the instrument last ran
 
 **The instrument's `.alf` report is read on connect, unasked** — `CfxSession.refreshLastReport`,
-once per connection, into `lastReport`; `InstrumentLastRun` is the panel that shows it, between the
-experiment and the file browser.
+once per connection, into `lastReport`; `InstrumentLastRun` shows it as the rail's collapsed *Last
+run* section, below Status. It is a fact about the machine rather than about any file, which is why
+it moved out of the main column, where it used to sit between the experiment and the file browser.
 
 `\Storage Card\PCRunReport` is the only place that answers "what did this machine last do?" for
 *every* kind of run. `CurrentRun` exists only for a run with a `PLATEREAD` and otherwise still holds
@@ -3375,11 +3415,11 @@ why it happens on sight rather than behind a button.
 
 It is also the only chance to keep it. The report **survives until a new run's pre-flight deletes
 it** (`CfxDevice.clearRunReports`, §7.1 — CFX Manager's own behaviour, deleting a six-day-old report
-in the reference capture, which this app copies deliberately). So the panel offers "Open report",
+in the reference capture, which this app copies deliberately). So the section offers "Open report",
 which files it through `App`'s `openReport` — the same callback the run watcher uses for a
 thermal-only run's report, so a report collected by hand and one collected automatically are the
 same kind of file. Starting a run clears `lastReport` in the same breath as the deletion, and the
-watcher re-reads it when a run finishes, so the panel describes the run that just happened rather
+watcher re-reads it when a run finishes, so the section describes the run that just happened rather
 than the one before it. `fetchRunReport` — the watcher's collection path for a thermal-only run — is
 that same read rather than a second one: there is one report directory, so whatever comes out of it
 is by definition the current last report.
@@ -3399,7 +3439,7 @@ since the instrument copies it into `CurrentRun` too.
 `planRun()` (core, `usb/runPlan.ts`) reduces the staged pair to exactly what would be sent — the
 command lines, the `RemoteRun` line, the files to deposit — and `CfxDevice.startRun()` sends it
 (`usb.md` §7, §10). `InstrumentView` computes the plan on every render and hands the *same object*
-to both the panel and the rail, so the warnings shown between the two halves and the state of the
+to the panel's checks and its Start button, so the warnings shown between the two halves and the state of the
 Start button can never disagree.
 
 **The name is not typed here.** It is a property of the experiment's file, given on its Overview
@@ -3422,7 +3462,7 @@ would be gone by the time the run's archive came back.
 It is **required, and never inferred**. An experiment still carrying the bare-date file name it was
 created under has no name of its own (`ExperimentIdentity.named`), and `InstrumentView` passes the
 blank that makes `planRun` raise its `no-experiment-name` error — so Start refuses it through the same
-check mechanism a scan-mask mismatch uses, and the rail's reason points at the Overview tab where the
+check mechanism a scan-mask mismatch uses, and Start's reason points at the Overview tab where the
 field is. The one plausible default, the protocol's name, is the wrong one: a protocol is run many
 times, so every run of it would share a name, and the name is what the run's file is called and how it
 is told from yesterday's. The instrument cannot supply it either — its echo comes back uppercased and
@@ -3474,7 +3514,7 @@ step** — §7.5 measured `PROCEED` as "skip the current step", so sending it af
 silently skip the run's first step — which is why the button's own footnote says the run starts on
 the click and to close the lid first. And a **deposit failure is reported, not thrown**: by then
 the run is going, and the files are provenance (they are what let the archive open later with its
-plate map intact), so the rail says the archive may be incomplete rather than pretending the run
+plate map intact), so the panel says the archive may be incomplete rather than pretending the run
 failed.
 
 **The click is answered locally, before the wire.** `useCfxDevice.startRun()` sets a `runPending`
@@ -3482,10 +3522,12 @@ flag synchronously, and only then begins the §7 sequence. Authoring the protoco
 round trips, and the status poll stands back for the whole of it (it skips while `busy`), so
 without this the seconds between the click and the first `STATUS?` show an instrument that still
 says *Idle* next to an armed Start button — an invitation to click twice on the one control in the
-app that heats a block. Nothing is asked of the instrument to know a start was requested: the rail
-reads **Run pending** in both its *Status* and *Current run* sections, the button dims immediately
-(the 150 ms anti-flash delay on the dimmed look applies to short commands, not to this) and relabels
-itself, and the panel badges *pending*.
+app that heats a block. Nothing is asked of the instrument to know a start was requested: the rail's
+*Status* reads **Run pending**, the button dims immediately (the 150 ms anti-flash delay on the
+dimmed look, `useBusyBriefly`, applies to short commands, not to this) and relabels itself, and the
+panel badges *pending* with *State* "run pending" beside it. The badge needs this file to be the
+running file, and it already is by then: `App`'s `startExperiment` calls `runWatch.adopt` — which
+sets `runningFile` synchronously — before `startRun` sets `runPending`.
 
 There is nothing to look at between the click and the first plate read — minutes of lid preheat and
 first hold — except the experiment's own file, which is exactly what it is for: it is already a chip
@@ -3521,7 +3563,7 @@ hopefully:
 `STATUS?` is already being polled for the rail, its current-step field carries the running step's
 command text verbatim, and a completed `.Plateread` appears when a `PLATEREAD` step *ends* — so the
 watcher lists the run folder on that transition. Listing is **edge-triggered, never on a timer**: a
-periodic listing here used to flicker the Instrument rail's Start-run button, since a
+periodic listing here used to flicker the Instrument view's Start button, since a
 `GETFILESLEN`+`LISTALLFILES` round trip holds the `busy` flag the button disables on. The one case
 the transition rule structurally can't catch — the **final** read, whose transition is `PLATEREAD`
 → `IDLE` — is caught by the §7.6 acknowledgement instead: when the run finishes (`STATUS?` reports
@@ -3543,11 +3585,21 @@ to go on and a reload has none. One further listing establishes a baseline when 
 is made — see "The first listing is never pulled" below for why that one is pulled immediately
 rather than diffed against, on the one path where it isn't a stale finished run. Nothing lists on a
 run merely *starting*: `STATUS?`'s `running` flag already says that live, and the marker files
-(`begun` etc.) are a property of the archive this watcher assembles rather than of the rail's live
+(`begun` etc.) are a property of the archive this watcher assembles rather than of the view's live
 state, so they can wait for whichever real edge lists next. That flag's false→true edge is watched
 anyway, though, purely to tell a run *starting* apart from one *found* already going on connect —
 the two listings are identical, so only the live transition tells them apart — which is what the
 `activate` flag below rides on.
+
+There is no switch to stop following: with polling on, the follower always follows. (A `follow`
+switch once let polling run while the follower ignored it — a run this browser started that it then
+refused to collect, which nothing ever asked for.) Besides `fileName`, the last file it wrote, the
+follower publishes **`runningFile`**: the open file whose run is on the block right now, set when
+Start is pressed on it or when a pass matches a cycling run to an open file (so a reload or a
+reconnect mid-run finds it again), kept across a disconnect, and cleared once the run's final
+assembly lands, the instrument is idle with no start pending, or a different run is cycling. It is
+what the Instrument view keys "this selected file is the one running" on, so it never names a file
+whose run is not on the block.
 
 #### A run that writes no run folder
 
@@ -3657,25 +3709,26 @@ Three economies make the once-a-cycle refresh affordable:
   same reason: it is a file the user just asked to exist.
 
 **The whole bar locks to the running file, but only inside the Instrument view.** `App.tsx`'s
-`runActive` (`instrument.connection === "connected" && !!instrument.status?.running`) scopes both
+`runningFileName` — the follower's `runningFile`, while that file is still open — scopes both
 halves of this:
 
-- A chip click in the Instrument view that would switch away from the run in progress is a no-op
-  while `runActive`: `selectFile` refuses it, and `FileBar`/`FileChip` grey the cursor on every chip
-  but the active one (`is-locked`, `activeLocked` prop). This used to also cover toggling a
-  protocol/plate override, locked together with it on purpose —
-  an override staged over the run in progress isn't "the next run" the way it is once this one
-  finishes, it's a claim about the plate or protocol *this* run is using, so leaving it toggleable
-  would let the panel show something other than what the instrument is actually running, exactly
-  the confusion the run-side lock exists to prevent. Everywhere else — Overview, Curves, any other
-  tab — switching files is never blocked: reading Curves while a run cycles is the point of the
-  connection staying open across tabs, and pinning the selection there would defeat it.
-- Since the selection can roam freely elsewhere, an effect in `App` snaps it back on *arrival*:
-  switching to the Instrument view while `runActive` sets `activeName` to `runWatch.fileName` (the
-  watcher's own record of what it last put in the store), not `store.activeName` — the two can have
-  drifted, since a snapshot pulled while the user was elsewhere doesn't activate itself
-  (`AddFilesOptions.activate`). The effect is keyed on `store.view` alone so it fires once on
-  arrival rather than on every later snapshot of the same run.
+- A chip click in the Instrument view that would switch away from the running file is a no-op:
+  `FileBar`'s `lockedTo` greys every other chip out (`is-locked`, `aria-disabled`, a tooltip saying
+  why and that any other tab will show it), and `selectFile` refuses the switch too, since other
+  paths call it. A locked chip's ✕ still closes its file. Everywhere else — Overview, Curves, any
+  other tab — switching files is never blocked: reading Curves while a run cycles is the point of
+  the connection staying open across tabs, and pinning the selection there would defeat it.
+- Since the selection can roam freely elsewhere, an effect in `App` puts it back: whenever the
+  Instrument view is showing and `runningFileName` is set but not selected, it selects it. That
+  fires on arriving at the view mid-run and on a run starting. It keys on `runningFile`, not on
+  `runWatch.fileName` (the last file the follower wrote, which outlives its run), so it never pulls
+  the selection to a run that is over.
+
+This is a narrower revival of a lock that was once removed. The old one was keyed on
+`status.running` and existed so the user could not abandon the only tab following the run; once the
+follower ran whatever was selected that reason was gone, and so was the lock. The one here exists
+because the Instrument view's subject is the run on the block (see "Instrument is not a file
+view"), and it keys on a fact that names *which* file that is.
 
 **"In progress" is stored nowhere.** The `begun`-without-`ended` markers travel *inside* the
 assembled archive, so `runProgressFromNames` (core, `runFolder.ts`) reads the answer out of the
@@ -3705,18 +3758,17 @@ both take the date's slot, because which of the three states a file is in is the
 about it, and the distinction that matters is that one was started and stopped short while the
 other has not been started. The three sets cannot overlap.
 
-Four components, under `components/instrument/`:
+The components, under `components/instrument/` (`instrumentParts.tsx` holds the `Stat` row and the
+`useBusyBriefly` anti-flash hook the rail and the panel share):
 
 - **`InstrumentRail`** — the left rail, reusing the Curves view's `.rail__*` vocabulary so the two
-  read as the same kind of surface. Connection, the identification block, live status, and the
-  action buttons — **Start experiment** among them, at their head. It sits with the lid and indicator
-  commands rather than beside the experiment panel because that is what it is: the control that
-  actuates the instrument. It is disabled until the experiment is startable at all (named, with a
-  protocol, and not already run — `unstartable`), the instrument is
-  connected and idle, and every check passes, and it names the **first** missing piece rather than
-  a generic refusal, so the tooltip is always the next thing to do — including the pending window
-  after a click (above), where the next thing to do is wait. A *Current run* section carries
-  what the watcher is doing and a `follow` switch to stop it. Status fields the protocol doesn't
+  read as the same kind of surface, and **only about the instrument** (see "The Instrument view"
+  above). The *Instrument* block: the connect button, then every button that actuates the machine
+  — Stop/Pause while a run is underway, the `CFX_COMMANDS` grid and its last result — then the
+  *Download run*/*Collect run* offer. Then *Identity* (collapsed), *Status* (open, with the `poll`
+  switch) and *Last run* (`InstrumentLastRun`, collapsed). There is no *Actions* section and no
+  *Current run* section any more: Start and the follower's state moved to `InstrumentRun`, the
+  offer into the Instrument block. Status fields the protocol doesn't
   name are either omitted or footnoted rather than labelled with a guess (the sample temperature is
   the live example). While a run is going, elapsed and estimated-remaining (`usb.md` §3.2 fields 8
   and 10) lead the section as a pair of larger timers — remaining is labelled and tooltipped as an
@@ -3772,10 +3824,22 @@ Four components, under `components/instrument/`:
   thermal protocol and the plate map, each headed by what it is. Both come from the one active file,
   so there is no second source to name and no "override" badge — the halves used to be resolved from
   a three-slot selection where either could supersede the run's own (see the model note above), which
-  is what those badges existed for. It renders a file it does not own, and it has no
-  start button — that belongs with the commands that actuate the instrument, in the rail. What it
-  does carry is the plan's **checks** (above), between the two halves they are about, and — for a run
-  that already has results — the **Clone experiment** button that is the way to run it again.
+  is what those badges existed for. It renders a file it does not own. It carries the plan's
+  **checks** (above), between the two halves they are about, and — for a run that already has
+  results — the **Clone experiment** button that is the way to run it again.
+
+  **Start experiment** is in its header, for a pending experiment only. It used to lead the rail's
+  buttons, on the argument that it actuates the instrument; but it is also the one control whose
+  meaning depends on the selected file, and in the rail it made the rail change with every chip
+  clicked. It is disabled until the experiment is startable at all (named, with a protocol, and not
+  already run — `unstartable`), the instrument is connected and idle, and every check passes, and it
+  names the **first** missing piece rather than a generic refusal — in its tooltip and in the footnote
+  under the header — so the reason is always the next thing to do, including the pending window
+  after a click (above), where the next thing to do is wait. The deposit report (`startNote`) lands
+  under it too. When the file is the running file (`isRunningFile`, see "The Instrument view") the
+  header instead shows the *running* badge and the follower's *State* and *Plate reads*, with its note
+  beneath — what the rail's removed *Current run* section used to say, now said against the file it
+  is about.
 
   What is shown for the protocol is the **ASCII run definition**, not a decoded step table — the
   same `ProtocolDecoded` the Raw and Overview views use, directives as they would go on the wire
@@ -3807,7 +3871,9 @@ Four components, under `components/instrument/`:
 - **`InstrumentFiles`** — the instrument's storage, grouped by kind the way the Raw view groups a
   `.zpcr`. A *single* retrieved file is **saved to disk, not loaded into the app**: what lives on
   the instrument are the *parts* of a run — individual `.Plateread`s, the `.Dcal` set, the
-  `.pltd`/`.prcl` pair — where every format this app opens is a whole run in one container.
+  `.pltd`/`.prcl` pair — where every format this app opens is a whole run in one container. Like
+  the live console below, it renders only while connected and when the selected file is the running
+  file or nothing is running: mid-run, beside some other file, it would be about a different run.
 
   A whole directory is different, and is what **Open run** does: a `.zpcr` *is* a ZIP of a run
   directory (root `ARCHITECTURE.md`, "A run directory is a `.zpcr`"), so the button pulls every
@@ -3829,6 +3895,13 @@ Four components, under `components/instrument/`:
   messages rather than USB packets, which is where the protocol is legible. Channel is on every
   line: a reply arriving on channel 2 rather than 1 is exactly the thing that would otherwise be
   invisible. Polling is hidden by default (it would otherwise be all there is to see).
+
+  It renders only while connected and when the selected file is the running file or nothing is
+  running. For a `.zpcr` that is *not* the run on the block, the same component takes a `saved` slot
+  and shows **that file's own saved log** instead — titled "USB traffic saved with this run", in core's
+  text rendering (`formatUsbTrafficBytes`, as the Raw files view shows it), built only once the panel
+  is opened, with no live switches. One component with an optional slot rather than a sibling, so the
+  two cannot drift apart. A file with no saved log gets nothing in that slot.
 
   **"Hide polling" suppresses at capture, not at render.** The check lives in the session's own
   line buffer, which decides whether a line reaches the published `traffic` window at all; the

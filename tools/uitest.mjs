@@ -2852,8 +2852,8 @@ const chipPresent = (cdp, text) =>
  * halves are overridden because it then contributes nothing (`state/useRunStaging.ts`). Getting
  * one of those wrong would silently stage a run out of the wrong files, which is the failure
  * mode that matters here. Also: that a `.prcl.txt` loaded through the app's ordinary load button
- * arrives as a chip and goes where it can be used, and that Start run appears only with an
- * instrument attached.
+ * arrives as a chip and goes where it can be used, and that a run with results offers a clone
+ * rather than a Start.
  */
 async function instrumentRunChecks(chrome, origin) {
   console.log("\ninstrument runs and experiments");
@@ -3013,9 +3013,10 @@ async function instrumentRunChecks(chrome, origin) {
     JSON.stringify({ read: stagedRead, withScan: staging.lines.filter((l) => l.scan).length }),
   );
 
-  // Start belongs to the instrument, not the panel, so it is absent until one is attached.
-  const startWhenIdle = await cdp.eval(`!!document.querySelector(".instrument__start")`);
-  check("Start appears only with an instrument connected", startWhenIdle === false);
+  // Start is offered for a pending experiment only — this one has results, so the clone above is
+  // the way to run it again and there is no Start to dim (the mock checks see it for a pending one).
+  const startOnRun = await cdp.eval(`!!document.querySelector(".instrument__start")`);
+  check("a run with results offers no Start at all — the clone is how it runs again", startOnRun === false);
 
   // No name is collected here any more, in either form. The experiment's name is a property of its
   // file, typed once on Overview before the instrument is ever involved (see `OverviewView`), so a
@@ -3687,10 +3688,9 @@ async function makeMockExperiment(path, experimentName, extraPasses) {
 /**
  * One `.devstat` from the Instrument rail, by the section it sits in.
  *
- * The section matters: the rail shows two rows labelled `State`, and they answer different
- * questions — the instrument's own (`Status`, which reads the step it is executing) and the run
- * watcher's (`Current run`, which reads whether this app has a run to collect). Reading whichever
- * comes first in the document would silently swap one for the other.
+ * The section matters: the rail's `Status` and `Identity` sections both carry a `Block` row, and a
+ * `State` row here is the instrument's own (the step it is executing) — not the run's, which is
+ * {@link panelStat}'s. Reading whichever comes first in the document would silently swap them.
  */
 const railStat = (cdp, section, label) =>
   cdp.eval(`(() => {
@@ -3701,6 +3701,50 @@ const railStat = (cdp, section, label) =>
       .find((d) => d.querySelector(".devstat__label").textContent.trim() === ${JSON.stringify(label)});
     return stat ? stat.querySelector(".devstat__value").textContent.trim() : null;
   })()`);
+
+/**
+ * One `.devstat` from the Instrument panel's run state (`.instrument__runstate`): `State` (what the
+ * run follower makes of the run — "run pending", "in progress", "finished", "no run") or
+ * `Plate reads`. The panel renders these **only for the running file**, so `null` means either the
+ * row is absent or the file in front of the view is not the run on the block.
+ */
+const panelStat = (cdp, label) =>
+  cdp.eval(`(() => {
+    const box = document.querySelector(".instrument__content .instrument__runstate");
+    if (!box) return null;
+    const stat = [...box.querySelectorAll(".devstat")]
+      .find((d) => d.querySelector(".devstat__label").textContent.trim() === ${JSON.stringify(label)});
+    return stat ? stat.querySelector(".devstat__value").textContent.trim() : null;
+  })()`);
+
+/**
+ * The file bar as the Instrument view's lock sees it: each chip's label, and whether it is the
+ * active one, the running one, and greyed out (`is-locked`, with `aria-disabled` on the chip and
+ * its button — both are asserted, since a screen reader reads the attribute and not the colour).
+ */
+const fileChips = (cdp) =>
+  cdp.eval(`[...document.querySelectorAll(".filebar .filechip")].map((c) => ({
+    name: c.querySelector(".filechip__name").textContent.trim(),
+    active: c.classList.contains("is-active"),
+    running: c.classList.contains("is-running"),
+    locked: c.classList.contains("is-locked"),
+    ariaDisabled: c.getAttribute("aria-disabled") === "true" &&
+      c.querySelector(".filechip__main")?.getAttribute("aria-disabled") === "true",
+  }))`);
+
+/** Click the chip labelled `name` — its `.filechip__main`, the part a user clicks. */
+const clickChip = (cdp, name) =>
+  cdp.eval(`(() => {
+    const c = [...document.querySelectorAll(".filebar .filechip")]
+      .find((c) => c.querySelector(".filechip__name").textContent.trim() === ${JSON.stringify(name)});
+    c?.querySelector(".filechip__main").click();
+    return !!c;
+  })()`);
+
+/** The titles of the Instrument view's main-column panels, in order. */
+const instrumentPanels = (cdp) =>
+  cdp.eval(`[...document.querySelectorAll(".instrument__content .instrument__paneltitle")]
+    .map((t) => t.textContent.trim())`);
 
 /**
  * A hash of the live thermal chart's pixels, or `"gone"` when it isn't on screen.
@@ -3749,7 +3793,7 @@ async function openMockSession(chrome, origin, experiment) {
  * This is the only check group that exercises what the Instrument view is *for*: connecting,
  * starting a run, watching it arrive and collecting it. Everything else about that view has to be
  * asserted against an instrument that isn't there — {@link instrumentRunChecks} stops at the point
- * where Start appears — so a regression anywhere between the rail's button and the `.zpcr` that
+ * where Start appears — so a regression anywhere between the panel's Start and the `.zpcr` that
  * lands in the file bar used to be invisible to every test in this repo.
  *
  * What it does *not* prove is anything about a CFX96: the emulator was written from the same
@@ -3762,15 +3806,26 @@ async function mockInstrumentChecks(chrome, origin) {
 
   // ── A run, start to collected ───────────────────────────────────────────────────────────────
   const cdp = await openMockSession(chrome, origin, MOCK_ZPCR);
+  // The panel draws Start for a pending experiment whether or not anything is connected — dimmed,
+  // with the reason beside it — so wait for it rather than reading a panel still being drawn.
+  await waitFor(() => cdp.eval(`!!document.querySelector(".instrument__panelhead .instrument__start")`), {
+    what: "the pending experiment's Start",
+  });
   const idle = await cdp.eval(`(() => ({
     connect: [...document.querySelectorAll(".instrument__rail button")].map((b) => b.textContent.trim()),
     says: document.querySelector(".instrument__mock")?.textContent.trim() ?? null,
-    start: !!document.querySelector(".instrument__start"),
+    startDisabled: document.querySelector(".instrument__start")?.disabled ?? null,
+    reason: document.querySelector(".instrument__panelnotes .instrument__startreason")?.textContent.trim() ?? null,
   }))()`);
   check(
     "a #mock session offers the simulated instrument on the view's one connect button",
-    idle.connect.join(",") === "Connect (mock USB)" && !idle.start,
+    idle.connect.join(",") === "Connect (mock USB)",
     JSON.stringify(idle.connect),
+  );
+  check(
+    "…and the panel's Start waits for it, saying so, rather than starting nothing",
+    idle.startDisabled === true && /Connect to the instrument first/.test(idle.reason ?? ""),
+    JSON.stringify({ disabled: idle.startDisabled, reason: idle.reason }),
   );
   check(
     "…and says plainly that there is no hardware here",
@@ -3778,22 +3833,38 @@ async function mockInstrumentChecks(chrome, origin) {
     JSON.stringify(idle.says),
   );
 
+  // A second experiment in the bar, for the lock below. Loaded with nothing running, it simply
+  // takes the selection, so the run's own file is picked again before anything is started.
+  await loadFile(cdp, MOCK_LONG_ZPCR);
+  await waitFor(() => chipPresent(cdp, "Long Mock Run"), { what: "the second experiment's chip" });
+  await waitFor(async () => (await fileChips(cdp)).find((c) => c.active)?.name === "Long Mock Run", {
+    what: "the second experiment to take the selection",
+  });
+  await clickChip(cdp, "Mock Run");
+  await waitFor(async () => (await fileChips(cdp)).find((c) => c.active)?.name === "Mock Run", {
+    what: "the run's experiment to be selected again",
+  });
+
   await clickConnect(cdp);
   const model = await waitValue(() => railStat(cdp, "Identity", "Model"), (v) => v !== null, {
     timeout: 15000,
     what: "the instrument to identify itself",
   });
+  const startEnabled = await waitValue(
+    () => cdp.eval(`document.querySelector(".instrument__start")?.disabled === false`),
+    (v) => v === true,
+    { what: "Start to enable once connected" },
+  );
   const identity = await cdp.eval(`(() => ({
     serial: [...document.querySelectorAll(".instrument__rail .devstat")]
       .find((d) => d.querySelector(".devstat__label").textContent.trim() === "Serial")
       ?.querySelector(".devstat__value").textContent.trim() ?? null,
     speeds: [...document.querySelectorAll(".instrument__speed .segmented__item")].map((b) => b.textContent.trim()),
-    start: !!document.querySelector(".instrument__start"),
   }))()`);
   check(
     "connecting to it answers the identification block the same way a real one does",
-    model === "BIO-RAD C1000" && identity.serial === "CT019138" && identity.start,
-    JSON.stringify({ model, ...identity }),
+    model === "BIO-RAD C1000" && identity.serial === "CT019138" && startEnabled === true,
+    JSON.stringify({ model, ...identity, startEnabled }),
   );
   check(
     "…and a connected mock offers its speeds, Max among them",
@@ -3803,7 +3874,7 @@ async function mockInstrumentChecks(chrome, origin) {
 
   await clickButton(cdp, "Start experiment");
   const started = await waitValue(
-    () => railStat(cdp, "Current run", "State"),
+    () => panelStat(cdp, "State"),
     (v) => v === "in progress",
     { timeout: 20000, what: "the run to start" },
   );
@@ -3812,6 +3883,87 @@ async function mockInstrumentChecks(chrome, origin) {
     "Start runs the experiment: the instrument reports a protocol under way",
     started === "in progress" && /^(TEMP|PLATEREAD|GOTO)/.test(executing ?? ""),
     JSON.stringify({ watcher: started, instrument: executing }),
+  );
+
+  // ── While it runs: the view is about the run on the block ────────────────────────────────────
+  // Only the running file gets the badge and the executing-step highlight (`InstrumentRun`'s
+  // `isRunningFile`); both read the live status, so they are waited for rather than read once.
+  const badge = await waitValue(
+    () => cdp.eval(`document.querySelector(".instrument__experiment .instrument__runbadge")?.textContent.trim() ?? null`),
+    (v) => v === "running",
+    { timeout: 10000, what: "the running badge on the run's panel" },
+  );
+  const lit = await waitValue(
+    () => cdp.eval(`document.querySelectorAll(".devrun__part .decoded__protoline.is-active").length`),
+    (v) => v > 0,
+    { timeout: 10000, what: "the executing step to be highlighted" },
+  );
+  check(
+    "the running file's panel is badged running, with the step under way highlighted",
+    badge === "running" && lit === 1,
+    JSON.stringify({ badge, highlighted: lit }),
+  );
+
+  // The file bar is held on the run while this view shows it: the other chip greyed out and
+  // refusing the click, the running one lit.
+  const held = await waitValue(
+    () => fileChips(cdp),
+    (cs) => cs.some((c) => c.running) && cs.some((c) => c.locked),
+    { timeout: 10000, what: "the file bar to lock onto the running file" },
+  );
+  const runChip = held.find((c) => c.name === "Mock Run");
+  const otherChip = held.find((c) => c.name === "Long Mock Run");
+  check(
+    "on Instrument mid-run the bar is locked to the running file: the other chip greyed and aria-disabled",
+    !!(runChip?.active && runChip.running && !runChip.locked && otherChip?.locked && otherChip.ariaDisabled),
+    JSON.stringify(held),
+  );
+  await clickChip(cdp, "Long Mock Run");
+  // Negative assertion: the click must change nothing, so there is no state change to wait for.
+  await sleep(400);
+  const afterLockedClick = (await fileChips(cdp)).find((c) => c.active)?.name;
+  check(
+    "…and clicking the locked chip leaves the selection on the running file",
+    afterLockedClick === "Mock Run",
+    String(afterLockedClick),
+  );
+  const livePanels = await instrumentPanels(cdp);
+  check(
+    "…which gets the instrument's files and the live USB traffic beside it",
+    livePanels.some((t) => t.includes("Files on the instrument")) &&
+      livePanels.some((t) => t.includes("USB traffic") && !/saved with this run/.test(t)),
+    JSON.stringify(livePanels),
+  );
+
+  // Every other tab is free: the other file selects on Overview, and coming back to Instrument
+  // puts the selection back on the run (the snap effect beside `instrumentExperiment` in App).
+  await clickTab(cdp, "Overview");
+  await tabBecomes(cdp, "Overview");
+  await clickChip(cdp, "Long Mock Run");
+  const onOverview = await waitValue(
+    () => fileChips(cdp),
+    (cs) => cs.find((c) => c.active)?.name !== "Mock Run",
+    { what: "the other chip to take the selection on Overview" },
+  );
+  check(
+    "…but on Overview the other file selects as usual, nothing locked",
+    onOverview.find((c) => c.active)?.name === "Long Mock Run" && !onOverview.some((c) => c.locked),
+    JSON.stringify(onOverview),
+  );
+  await clickTab(cdp, "Instrument");
+  const backTo = await waitValue(
+    () => cdp.eval(`(() => ({
+      active: [...document.querySelectorAll(".filebar .filechip.is-active .filechip__name")]
+        .map((n) => n.textContent.trim()).join(","),
+      panel: document.querySelector(".instrument__panelname")?.textContent.trim() ?? null,
+    }))()`),
+    (v) => v.active === "Mock Run",
+    { what: "the selection to return to the running file on Instrument" },
+  );
+  check(
+    "…and returning to Instrument snaps the selection back to the running file",
+    backTo.active === "Mock Run" && backTo.panel === "Mock Run",
+    JSON.stringify(backTo),
   );
 
   const firstInk = await cdp.eval(LIVE_CHART_INK);
@@ -3826,7 +3978,7 @@ async function mockInstrumentChecks(chrome, origin) {
   );
 
   const readsDuring = await waitValue(
-    () => railStat(cdp, "Current run", "Plate reads"),
+    () => panelStat(cdp, "Plate reads"),
     (v) => Number(v) > 0,
     { timeout: 30000, what: "the first plate read to be collected" },
   );
@@ -3836,15 +3988,24 @@ async function mockInstrumentChecks(chrome, origin) {
     `${readsDuring} plate reads, of 3`,
   );
 
-  const finished = await waitValue(
-    () => railStat(cdp, "Current run", "State"),
-    (v) => v === "finished",
-    { timeout: 45000, what: "the run to finish" },
-  );
+  // The panel's run state shows only while the file is the run on the block, and the follower lets
+  // go of it the moment the run's final file lands — the same moment the "Run complete" banner
+  // appears. So the banner is the observable for "finished"; that all three reads arrived is the
+  // collected file's to show (its completeness, on Overview, below).
+  await waitFor(() => cdp.eval(`!!document.querySelector(".instrument__complete")`), {
+    timeout: 45000,
+    what: "the run to finish",
+  });
+  const over = await cdp.eval(`(() => ({
+    banner: document.querySelector(".instrument__complete .instrument__paneltitle")?.textContent.trim() ?? "",
+    runstate: !!document.querySelector(".instrument__runstate"),
+    badge: document.querySelector(".instrument__experiment .instrument__runbadge")?.textContent.trim() ?? null,
+    locked: document.querySelectorAll(".filebar .filechip.is-locked").length,
+  }))()`);
   check(
-    "…and all three of them by the time the run is over",
-    finished === "finished" && (await railStat(cdp, "Current run", "Plate reads")) === "3",
-    JSON.stringify({ state: finished, reads: await railStat(cdp, "Current run", "Plate reads") }),
+    "…and once it is over the panel says so, and stops treating the file as the run on the block",
+    over.banner.length > 0 && !over.runstate && over.badge === null && over.locked === 0,
+    JSON.stringify(over),
   );
 
   // **The collected run lands in the experiment it was started from** — one `.zpcr`, not a second
@@ -3855,20 +4016,61 @@ async function mockInstrumentChecks(chrome, origin) {
   // derived from its own date — which only agreed with the file's when the dates happened to.
   // Core's `RunFollower` now finds the file Start was pressed on by id, whatever either is called.
   //
-  // The catalog already held the experiment before the run, so there is no record to wait to
+  // The catalog already held both experiments before the run, so there is no record to wait to
   // *appear*; what is waited for is the catalog to settle once the run's writes are flushed, and a
-  // second record arriving then is exactly the failure.
+  // third record arriving then is exactly the failure.
   await flushWrites(cdp);
   const collected = await waitStable(() => catalogNames(cdp), {
     timeout: 10000,
     what: "the catalog once the collected run is written",
   });
-  const run = collected[0] ?? "";
+  const run = collected.find((n) => /-Mock_Run\.zpcr$/.test(n)) ?? "";
   const chips = await cdp.eval(`document.querySelectorAll(".filebar .filechip").length`);
   check(
     "the run lands in the experiment it was started from — one .zpcr, no second file beside it",
-    collected.length === 1 && /-Mock_Run\.zpcr$/.test(run) && chips === 1,
+    collected.length === 2 &&
+      collected.filter((n) => /-Mock_Run\.zpcr$/.test(n)).length === 1 &&
+      collected.some((n) => /Long_Mock_Run\.zpcr$/.test(n)) &&
+      chips === 2,
     JSON.stringify({ collected, chips }),
+  );
+
+  // With the run over nothing is held: the other experiment, picked on Overview, is shown on
+  // Instrument as itself — pending, startable, no run state — and the bar is free.
+  await clickTab(cdp, "Overview");
+  await tabBecomes(cdp, "Overview");
+  await clickChip(cdp, "Long Mock Run");
+  await waitFor(async () => (await fileChips(cdp)).find((c) => c.active)?.name === "Long Mock Run", {
+    what: "the pending experiment to take the selection on Overview",
+  });
+  await clickTab(cdp, "Instrument");
+  const pendingShown = await waitValue(
+    () => cdp.eval(`(() => ({
+      panel: document.querySelector(".instrument__panelname")?.textContent.trim() ?? null,
+      badge: !!document.querySelector(".instrument__experiment .instrument__runbadge"),
+      runstate: !!document.querySelector(".instrument__runstate"),
+      start: !!document.querySelector(".instrument__panelhead .instrument__start"),
+      locked: document.querySelectorAll(".filebar .filechip.is-locked").length,
+      active: document.querySelector(".filebar .filechip.is-active .filechip__name")?.textContent.trim() ?? null,
+      panels: [...document.querySelectorAll(".instrument__content .instrument__paneltitle")].map((t) => t.textContent.trim()),
+    }))()`),
+    (v) => v.panel === "Long Mock Run",
+    { what: "the Instrument view to show the pending experiment" },
+  );
+  check(
+    "after the run, another experiment shows on Instrument as itself: Start, no badge, no run state",
+    pendingShown.active === "Long Mock Run" &&
+      pendingShown.start &&
+      !pendingShown.badge &&
+      !pendingShown.runstate,
+    JSON.stringify(pendingShown),
+  );
+  check(
+    "…with nothing in the bar locked, and the live panels back since nothing is running",
+    pendingShown.locked === 0 &&
+      pendingShown.panels.some((t) => t.includes("Files on the instrument")) &&
+      pendingShown.panels.some((t) => t.includes("USB traffic")),
+    JSON.stringify(pendingShown),
   );
 
   await cdp.eval(`window.location.hash = "file=${run}&view=overview", undefined`);
@@ -3880,7 +4082,7 @@ async function mockInstrumentChecks(chrome, origin) {
     flagged: document.querySelectorAll(".filechip__date--incomplete").length,
   }))()`);
   check(
-    "…a complete run: it read the plate every cycle its protocol asked for",
+    "…a complete run: it read the plate all three times its protocol asked for",
     !complete.incomplete && complete.flagged === 0,
     JSON.stringify(complete),
   );
@@ -3906,11 +4108,13 @@ async function mockInstrumentChecks(chrome, origin) {
   // A 16-cycle run this time, so "mid-run" is unambiguous however fast the polls arrive.
   const long = await openMockSession(chrome, origin, MOCK_LONG_ZPCR);
   await clickConnect(long);
-  await waitFor(() => long.eval(`!!document.querySelector(".instrument__start")`), {
-    what: "the connected rail's Start",
+  // Start is drawn (dimmed) before connecting, so what is waited for is it enabling — a click on
+  // the dimmed one would be a silent no-op.
+  await waitFor(() => long.eval(`document.querySelector(".instrument__start")?.disabled === false`), {
+    what: "the connected panel's Start to enable",
   });
   await clickButton(long, "Start experiment");
-  await waitValue(() => railStat(long, "Current run", "State"), (v) => v === "in progress", {
+  await waitValue(() => panelStat(long, "State"), (v) => v === "in progress", {
     timeout: 20000,
     what: "the long run to start",
   });
@@ -3937,7 +4141,7 @@ async function mockInstrumentChecks(chrome, origin) {
 
   await clickConnect(long);
   const backOn = await waitValue(
-    () => railStat(long, "Current run", "State"),
+    () => panelStat(long, "State"),
     (v) => v === "in progress",
     { timeout: 20000, what: "the run to still be going on reconnection" },
   );
@@ -3961,16 +4165,23 @@ async function mockInstrumentChecks(chrome, origin) {
     { timeout: 5000, what: "Stop run to arm itself" },
   );
   await long.eval(`document.querySelector(".instrument__stop").click()`);
-  const stopped = await waitValue(() => railStat(long, "Status", "State"), (v) => v === "Idle", {
-    timeout: 45000,
-    what: "the instrument to report the run stopped",
-  });
+  // The panel's plate-read count shows only while the file is the run on the block, and the
+  // follower lets go of it once the stopped run is over — possibly in the same poll that reports
+  // Idle. So the count is read on every poll of the wait, and the last one seen is the run's.
+  let readsSeen = Number(await panelStat(long, "Plate reads"));
+  const stopped = await waitValue(
+    async () => {
+      const r = await panelStat(long, "Plate reads");
+      if (r !== null) readsSeen = Number(r);
+      return railStat(long, "Status", "State");
+    },
+    (v) => v === "Idle",
+    { timeout: 45000, what: "the instrument to report the run stopped" },
+  );
   const aborted = await long.eval(`(() => ({
-    reads: Number([...document.querySelectorAll(".instrument__rail .devstat")]
-      .find((d) => d.querySelector(".devstat__label").textContent.trim() === "Plate reads")
-      ?.querySelector(".devstat__value").textContent ?? "0"),
-    notes: [...document.querySelectorAll(".instrument__startnote li")].map((l) => l.textContent.trim()),
+    notes: [...document.querySelectorAll(".instrument__rail .instrument__startnote li")].map((l) => l.textContent.trim()),
   }))()`);
+  aborted.reads = readsSeen;
   check(
     "Stop run cancels a run in progress, well short of the 16 cycles it asked for",
     stopped === "Idle" && aborted.reads > 0 && aborted.reads < 16,

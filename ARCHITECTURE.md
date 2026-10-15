@@ -362,8 +362,8 @@ their definitions:
 status poll and the `busy` gate that serialises it against a file transfer, the reconnect above,
 the traffic recording and the capped display window, and the accumulated view of the instrument.
 `RunFollower` sits on top and holds what a *run* is made of: the step-transition rule, the §7.6
-finished-and-held acknowledgement, the first-listing rule and its in-progress exception, and which
-pass completes a run's file. Both publish a `subscribe`/`state` snapshot in the shape
+finished-and-held acknowledgement, the first-listing rule and its in-progress exception, which
+pass completes a run's file, and which open file is the run on the block (`runningFile`). Both publish a `subscribe`/`state` snapshot in the shape
 `useSyncExternalStore` wants, so the React hooks above them are shells.
 
 Two ports keep core free of browser types, and there are only two because a port that exists so one

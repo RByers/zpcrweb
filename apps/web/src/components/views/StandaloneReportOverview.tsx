@@ -35,7 +35,7 @@ export function StandaloneReportOverview({
   OverviewPanelProps,
   "onRenameFile" | "onDownload" | "onClone" | "autoEditName" | "onAutoEditHandled"
 >) {
-  // The same six lines the Instrument view's last-run panel shows, from the same helper — see
+  // The same six lines the Instrument view's Last run section shows, from the same helper — see
   // `lib/alfSummary.ts`.
   const rows: InfoRow[] = report ? alfSummaryRows(report) : [];
 

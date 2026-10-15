@@ -46,7 +46,7 @@ import { StandaloneProtocolOverview } from "./components/views/StandaloneProtoco
 import { StandaloneReportOverview } from "./components/views/StandaloneReportOverview";
 import { ProtocolView } from "./components/views/ProtocolView";
 import { AboutView } from "./components/views/AboutView";
-import { InstrumentView } from "./components/views/InstrumentView";
+import { InstrumentView, type InstrumentExperiment } from "./components/views/InstrumentView";
 import type { ViewId } from "./state/useZpcrStore";
 
 /**
@@ -316,7 +316,7 @@ export function App() {
    * file this app makes rather than reads, it exists only in the browser until it is saved.
    *
    * Two callers, deliberately the same one: the run watcher, for a thermal-only run whose report is
-   * its entire output, and the Instrument view's last-run panel, where the user asks for the report
+   * its entire output, and the Instrument view's Last run section, where the user asks for the report
    * the instrument is already holding. A report collected automatically and one collected by hand
    * should be the same file in every respect.
    */
@@ -372,6 +372,17 @@ export function App() {
     ),
     startedRun ?? undefined,
   );
+  /**
+   * The open file whose run is on the block right now (core's `RunFollowerState.runningFile`), or
+   * null. The follower may still name a file the user has since closed, so it only counts while
+   * the file is still open. This is what the Instrument view's subject and its file-bar lock key on.
+   */
+  const runningFileName =
+    runWatch.runningFile && store.files.some((f) => f.name === runWatch.runningFile)
+      ? runWatch.runningFile
+      : null;
+  /** The file bar is locked to the running file — but only on the Instrument view. */
+  const selectionLockedTo = store.view === "instrument" ? runningFileName : null;
   // Where "← back" on the About page (and the Files table's own ✕) return to, so opening either
   // and leaving again is a no-op.
   const lastView = useRef<ViewId>("curves");
@@ -615,14 +626,16 @@ export function App() {
    *
    * It used to mean something else on the Instrument view, where the chips split into a primary run
    * plus auxiliary protocol/plate "overrides" staged over it — the machinery a previous refactor
-   * removed (`useRunStaging`). One bar, one meaning, everywhere, and **no refusals**: a chip is
-   * clickable on every view including Instrument, which is the point of that view no longer being
-   * a lens on the selection. It used to lock the selection while a run was live, so that leaving
-   * the running file couldn't abandon the tab that was following it, and to snap the selection to
-   * the running file on arrival so that the tab had something to show. Neither is needed now that
-   * that view is no longer a lens on the selection at all: a run is followed by `useRunWatch`
-   * whatever is selected, so nothing is abandoned by switching, and the view simply shows the
-   * selected experiment or none ({@link instrumentExperiment}).
+   * removed (`useRunStaging`). One bar, one meaning, everywhere.
+   *
+   * **One refusal: the Instrument view while a run is on the block.** There the selection is held
+   * on the running file (`selectionLockedTo`, and the effect beside {@link instrumentExperiment}),
+   * so that view always shows what the instrument is doing; the bar greys the other chips out and
+   * this refuses the switch too, since paths other than a chip call it. It is a narrower lock than
+   * the global `activeLocked` that was removed: that one froze the bar on *every* view while a run
+   * was live, to stop the user abandoning a tab that was the only thing following the run. Nothing
+   * is abandoned now — `useRunWatch` follows a run whatever is selected — so every other tab
+   * switches freely, and this one is locked only because its subject is the run on the block.
    *
    * From About, picking a chip also *leaves* About for Overview. About is file-independent — it
    * survives a selection change (see `view` below) — so without this the click would land on a
@@ -632,6 +645,7 @@ export function App() {
    */
   const selectFile = (id: string) => {
     if (!store.files.some((f) => f.name === id)) return;
+    if (selectionLockedTo && id !== selectionLockedTo) return;
     store.setActive(id);
     if (store.view === "about") store.setView("overview");
   };
@@ -744,25 +758,51 @@ export function App() {
   };
 
   /**
-   * The experiment the Instrument view acts on: **the selected file, when it is a decoded run**,
-   * and otherwise nothing.
+   * The experiment the Instrument view acts on: **the running file while a run is on the block,
+   * else the selected file when it is a decoded run**, and otherwise nothing.
    *
-   * That is the whole rule, and the simplicity is the feature. The file bar is the app's one file
-   * picker, so this view needs none of its own; and when the selection isn't a run — a standalone
-   * plate or protocol, an undecoded run, nothing loaded at all — the view says so rather than
-   * showing some *other* run, which would be the one answer guaranteed to be wrong. Showing
-   * nothing costs nothing: connecting, reading status, opening the lid and every other action live
-   * in the rail, which needs no file at all (`InstrumentRail`), and Start disables itself with
-   * "Select or create an experiment first."
+   * The file bar is the app's one file picker, so this view needs none of its own; and when the
+   * selection isn't a run — a standalone plate or protocol, an undecoded run, nothing loaded at
+   * all — the view says so rather than showing some *other* run. Showing nothing costs nothing:
+   * connecting, reading status, opening the lid and every other instrument button live in the rail,
+   * which needs no file at all (`InstrumentRail`).
+   *
+   * The running file comes first because the view's job while a run cycles is to show that run —
+   * and the effect below keeps the selection on it while the view is showing, so the two rungs
+   * name the same file whenever anyone is looking. The memo reads the running file directly rather
+   * than waiting for the selection to catch up, so there is no render in which the view shows a
+   * different file from the one the instrument is running.
    *
    * Earlier versions had this resolve through as many as four rungs — a live run, a pick made in
    * the view, the selection, the last thing resolved — each defensible on its own and adding up to
-   * a view whose subject you couldn't name by looking at the file bar. What made them seem
-   * necessary was the tab pretending to be a lens on the selection (which cost a lock on that bar
-   * and a snap of the selection on arrival, both since deleted); once it stopped pretending, the
-   * plain answer was enough.
+   * a view whose subject you couldn't name by looking at the file bar. The two left are both
+   * visible there: the running file is the one lit chip that isn't greyed out.
    */
-  const instrumentExperiment = useMemo(() => {
+  const instrumentExperiment = useMemo((): InstrumentExperiment | null => {
+    /** A decoded `.zpcr`/`.pcrd` as the experiment this view would show — or null if undecoded. */
+    const runExperiment = (fileName: string, kind: FileKind): InstrumentExperiment | null => {
+      const zpcr = store.runs.get(fileName)?.zpcr;
+      if (!zpcr) return null;
+      const identity = store.experiments.get(fileName);
+      return {
+        fileName,
+        name: identity?.name ?? fileName,
+        named: identity?.named ?? false,
+        zpcr,
+        protocolText: zpcr.protocolText || null,
+        pending: isPendingExperiment(kind, zpcr),
+        // Derived from the file's own markers, so it stays true across a reload mid-run and
+        // doesn't depend on this app being the one that started it (`runFolder.ts`).
+        inProgress: runProgressFromNames(zpcr.archive.entries).inProgress,
+      };
+    };
+    // A run on the block is always a run file: a thermal-only start (a bare `.prcl.txt`) never
+    // becomes the follower's running file, since it leaves no run folder to be one.
+    if (runningFileName) {
+      const running = store.loaded.find((f) => f.name === runningFileName);
+      const experiment = running ? runExperiment(running.name, running.kind) : null;
+      if (experiment) return experiment;
+    }
     // A standalone protocol file is startable as itself, but only when it never reads the plate.
     // Such a run leaves the instrument's run folder untouched and so produces no `.zpcr`
     // (`RunPlan.producesRunFile`), which is exactly why it needs no experiment file: there would
@@ -797,21 +837,27 @@ export function App() {
         inProgress: false,
       };
     }
-    if (!active || !activeRun?.zpcr) return null;
-    const zpcr = activeRun.zpcr;
-    const identity = store.experiments.get(active.name);
-    return {
-      fileName: active.name,
-      name: identity?.name ?? active.name,
-      named: identity?.named ?? false,
-      zpcr,
-      protocolText: zpcr.protocolText || null,
-      pending: isPendingExperiment(active.kind, zpcr),
-      // Derived from the file's own markers, so it stays true across a reload mid-run and doesn't
-      // depend on this app being the one that started it (`runFolder.ts`).
-      inProgress: runProgressFromNames(zpcr.archive.entries).inProgress,
-    };
-  }, [active, activeRun, store.experiments, store.activeProtocolFile]);
+    return active ? runExperiment(active.name, active.kind) : null;
+  }, [active, runningFileName, store.loaded, store.runs, store.experiments, store.activeProtocolFile]);
+
+  /**
+   * Keep the selection on the running file while the Instrument view is showing.
+   *
+   * This fires on arriving at the view mid-run and on a run starting, and it is what makes "switch
+   * to Overview, pick another file, come back to Instrument" land on the running file again: the
+   * selection moved freely on Overview, and coming back puts it where the instrument is. The bar's
+   * other chips are locked meanwhile (`selectionLockedTo`, `FileBar`'s `lockedTo`).
+   *
+   * Known consequence: a file dropped in while this view is showing a run lands in the bar but is
+   * not selected — the add selects it, and this puts the selection straight back. It is there to
+   * look at from any other tab.
+   */
+  useEffect(() => {
+    if (store.view !== "instrument" || !runningFileName) return;
+    if (store.activeName !== runningFileName) store.setActive(runningFileName);
+    // `store` is rebuilt every render; the identities that matter are the ones read here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [store.view, runningFileName, store.activeName]);
 
   /**
    * The decoded `.alf` when the selected file *is* one. Parsed here rather than inside either view
@@ -938,6 +984,7 @@ export function App() {
         onSelect={selectFile}
         onClose={(id) => void store.closeFile(id)}
         experiments={store.experiments}
+        lockedTo={view === "instrument" ? runningFileName : null}
       />
 
       <main className="app__main">
@@ -957,6 +1004,7 @@ export function App() {
             onNewExperiment={() => void createExperiment({}, "instrument")}
             instrument={instrument}
             runWatch={runWatch}
+            runningFile={runningFileName}
             onStartExperiment={startExperiment}
             onCloneExperiment={cloneExperiment}
           />

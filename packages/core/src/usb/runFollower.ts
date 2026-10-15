@@ -10,7 +10,7 @@
  *
  * Listing the folder is entirely **edge-triggered**, never on a timer: a `GETFILESLEN`+
  * `LISTALLFILES` round trip holds the session's `busy` flag, and a periodic listing here used to
- * flicker the Instrument rail's Start-run button (which disables while `busy`) every 30 s, even
+ * flicker the Instrument view's Start button (which disables while `busy`) every 30 s, even
  * with no run in progress. What's left is exactly §7.5/§7.7's own two triggers — the step-transition
  * rule above for every read but the last, and the §7.6 acknowledgement, which is also where the
  * **last** read — `PLATEREAD` → `IDLE` — actually becomes listable — plus one baseline listing on
@@ -66,6 +66,23 @@
  *
  * The one command this issues that *changes* the instrument is the §7.6 acknowledgement — see
  * {@link RunFollowerMemory.watchedRuns} for why it is both safe and necessary.
+ *
+ * **It always follows.** There used to be a "follow" switch that left the status poll running but
+ * had the follower ignore it. Nothing ever asked for that state: turning polling off already means
+ * the follower sees nothing, and "polling on, following off" was a run this browser started that it
+ * then refused to collect — left held by the instrument with no final read, no `ended` marker and
+ * no report.
+ *
+ * **It says which open file is the run on the block** ({@link RunFollowerState.runningFile}). The
+ * web app's Instrument view uses that to decide which selected file is the run the instrument is
+ * driving — a "running" badge, a lock on changing the selection out from under it — so it is held
+ * to a stricter standard than {@link RunFollowerState.fileName}: it must never name a file whose run
+ * is not on the block. It is set when Start is pressed on a file ({@link RunFollower.adopt}) and
+ * whenever a pass resolves which open file a run still cycling belongs to, and cleared once that run
+ * is over — its final assembly landed, the instrument idle with nothing pending, or a different run
+ * cycling. A disconnect leaves it alone, as it leaves `watchedRuns`: a run still going while the
+ * cable is out is still the running file. A reload has no memory, so it starts null and is found
+ * again by the first pass that matches the cycling run to its file.
  *
  * **It is a state machine, and it says so.** Everything it believes lives in one
  * {@link RunFollowerMemory}, advanced by {@link RunFollower.observe} — one call per `STATUS?`.
@@ -236,16 +253,55 @@ export interface RunFollowerMemory {
    * disconnect.
    */
   startedFrom: { id: string; experimentName: string } | null;
+  /**
+   * The instrument's own name for the run {@link RunFollowerState.runningFile} belongs to
+   * (`STATUS?`'s `runName`), so a *different* run cycling — a touchscreen start after ours, or one
+   * started while the cable was out — is seen not to be that file's. Null while a start this app
+   * sent has not yet shown up in `STATUS?` (see {@link startPendingSince}).
+   */
+  runningRun: string | null;
+  /**
+   * Set when Start was pressed on {@link RunFollowerState.runningFile} and `STATUS?` has not yet
+   * admitted the run: a timestamp (ms), refreshed while the session is busy sending it; else null.
+   *
+   * The instrument reports the empty-name idle for ~6 s after `RemoteRun` (`usb.md` §7.8 step 0),
+   * so an idle reading in that window is not "nothing is running". It is a bounded wait rather than
+   * an open one ({@link START_GRACE_MS}): a start whose send failed never shows up at all, and the
+   * file it was pressed on must not go on reading as running.
+   */
+  startPendingSince: number | null;
 }
+
+/**
+ * How long a start may go unconfirmed by `STATUS?`, once the session has finished sending it,
+ * before the file it was pressed on stops counting as running. The measured window is ~6.1 s
+ * (`usb.md` §7.8 step 0); this is several times that, so a slow instrument is not mistaken for a
+ * failed start. This library's own choice, not a measured value.
+ */
+const START_GRACE_MS = 30_000;
 
 /** What a view renders — see {@link RunFollower.state}. */
 export interface RunFollowerState {
-  /** True while the follower is following — it still observes, so it still resets on a disconnect. */
-  watching: boolean;
   /** What the follower last did, for a rail to show. */
   note: string | null;
   /** The id of the file the follower most recently put in the store, if it is still there. */
   fileName: string | null;
+  /**
+   * The id of the open file that the run **currently on the instrument** belongs to, when the
+   * follower knows it — what a "running" badge and a selection lock are keyed on.
+   *
+   * Not {@link fileName}, which is the last file the follower *wrote* and outlives its run: once a
+   * run has finished `fileName` still names it, while this is null. This one is a claim about the
+   * block, so it must never name a file whose run is not cycling (or being finished, §7.6) now.
+   *
+   * Set by {@link RunFollower.adopt} (Start was pressed on that file) and by any pass that matches
+   * a cycling run to an open file. Cleared once the run's final assembly has landed, when the
+   * instrument reports no run with no start pending (or holds a finished run this session never saw
+   * cycling), when a different run is seen cycling, and by {@link RunFollower.expectReportOnly}.
+   * Survives a disconnect. A page reload starts it null; the first matching pass restores it. It
+   * may name a file the user has since closed, so a caller should check it is still open.
+   */
+  runningFile: string | null;
   /**
    * Set once a run this session watched running has finished and its final `.zpcr` has been
    * assembled: what it was called, how long it ran, and the id of that final file — everything a
@@ -376,9 +432,9 @@ export class RunFollower {
   #queue: Promise<unknown> = Promise.resolve();
 
   #ui: RunFollowerState = {
-    watching: true,
     note: null as string | null,
     fileName: null as string | null,
+    runningFile: null as string | null,
     finished: null as RunFollowerState["finished"],
     available: null as RunFollowerState["available"],
   };
@@ -398,7 +454,12 @@ export class RunFollower {
     wasRunning: false,
     lastElapsed: null,
     startedFrom: null,
+    runningRun: null,
+    startPendingSince: null,
   };
+
+  /** The last status observed while connected — what "is a run on the block?" is answered from. */
+  #lastStatus: CfxStatus | null = null;
 
   constructor(session: CfxSession, ports: RunFollowerPorts) {
     this.#session = session;
@@ -433,10 +494,6 @@ export class RunFollower {
     for (const fn of this.#listeners) fn();
   }
 
-  setWatching(on: boolean): void {
-    this.#set({ watching: on });
-  }
-
   /**
    * The seed is this run's first file, so the follower treats it exactly as one of its own
    * snapshots from here on: the pending experiment the run was started from
@@ -453,11 +510,17 @@ export class RunFollower {
    * folder's `zpcrweb.json` will say. Given, it is remembered with the id
    * ({@link RunFollowerMemory.startedFrom}) and is what lets the run find this file again however
    * its name and the file's differ.
+   *
+   * It is also the moment this file becomes {@link RunFollowerState.runningFile}, superseding any
+   * earlier run's claim: the run is about to be on the block, though `STATUS?` will not admit it
+   * for a few seconds yet ({@link RunFollowerMemory.startPendingSince}).
    */
   adopt(id: string, experimentName?: string): void {
     this.#m.reportOnly = false;
     this.#m.startedFrom = experimentName?.trim() ? { id, experimentName: experimentName.trim() } : null;
-    this.#set({ fileName: id });
+    this.#m.runningRun = null;
+    this.#m.startPendingSince = Date.now();
+    this.#set({ fileName: id, runningFile: id });
   }
 
   clearFinished(): void {
@@ -479,7 +542,8 @@ export class RunFollower {
     this.#m.reportOnly = true;
     // Nothing of this run will land in a file of ours, so the follower stops speaking for whatever
     // file it was last following — otherwise the previous run's id would be reported as this run's
-    // when it ends.
+    // when it ends. Nor is any open file the run on the block.
+    this.#clearRunning();
     this.#set({ fileName: null, finished: null });
   }
 
@@ -533,17 +597,22 @@ export class RunFollower {
       this.#m.wasRunning = false;
       this.#m.activateNext = false;
       this.#m.identified = false;
+      this.#lastStatus = null;
       // The offer belongs to a connection: it describes what is in the instrument's folder right
-      // now, and with the cable out there is nothing to download it from.
+      // now, and with the cable out there is nothing to download it from. `runningFile` is not
+      // reset: like `watchedRuns`, it is about the run, which goes on without the cable.
       this.#set({ available: null });
       return;
     }
-    if (!this.#ui.watching) return;
+    this.#lastStatus = status;
 
     // --- the finished run (§7.6) ---------------------------------------------------------------
     // Read first, because a finish *is* a step transition out of the last `PLATEREAD` and the two
     // rules must not both claim it — see below.
-    if (status) this.#observeRun(status);
+    if (status) {
+      this.#observeRun(status);
+      this.#observeRunning(status);
+    }
 
     // --- the step-transition rule (§7.5) -------------------------------------------------------
     const previousStep = this.#m.lastStep;
@@ -620,6 +689,55 @@ export class RunFollower {
     void this.#finish(finishedName, totalS ?? 0, expectReport);
   }
 
+  /**
+   * Keep {@link RunFollowerState.runningFile} honest against what `STATUS?` says is on the block.
+   * Only ever *clears* it, or confirms a pending start: which file a run belongs to is a pass's
+   * answer (`#setRunning`), never a status's.
+   */
+  #observeRunning(status: CfxStatus): void {
+    if (this.#ui.runningFile === null) return;
+    const m = this.#m;
+    if (status.running) {
+      if (m.startPendingSince !== null) {
+        // The start this file was adopted for has shown up — from here on it is that run.
+        m.startPendingSince = null;
+        m.runningRun = status.runName;
+      } else if (m.runningRun !== null && status.runName !== m.runningRun) {
+        this.#clearRunning(); // a different run is cycling; a pass will say whose it is
+      }
+      return;
+    }
+    // A run being finished stays the running file until its final assembly lands (`#finishNow`):
+    // through the §7.6 hold, and through the empty-name idle the acknowledgement leaves behind.
+    if (m.finishing) return;
+    if (isFinishedRun(status) && status.runName === m.runningRun && m.watchedRuns.has(status.runName)) {
+      return; // held, and `#observeRun` is about to finish it
+    }
+    if (m.startPendingSince !== null) {
+      // Not yet admitted (§7.8 step 0's window), or still being sent — a bounded wait.
+      if (this.#session.state.busy !== null) m.startPendingSince = Date.now();
+      else if (Date.now() - m.startPendingSince > START_GRACE_MS) this.#clearRunning();
+      return;
+    }
+    this.#clearRunning(); // idle, or holding a run this session never saw cycling
+  }
+
+  /** A pass found the open file `id` holds the folder's run: if that run is the one cycling, `id`
+   * is {@link RunFollowerState.runningFile}. A folder whose run is not on the block claims nothing. */
+  #setRunning(id: string): void {
+    const status = this.#lastStatus;
+    if (!status?.running) return;
+    this.#m.runningRun = status.runName;
+    this.#m.startPendingSince = null;
+    this.#set({ runningFile: id });
+  }
+
+  #clearRunning(): void {
+    this.#m.runningRun = null;
+    this.#m.startPendingSince = null;
+    this.#set({ runningFile: null });
+  }
+
   async #finish(runName: string, totalS: number, expectReport: boolean): Promise<void> {
     try {
       await this.#finishNow(runName, totalS, expectReport);
@@ -647,6 +765,8 @@ export class RunFollower {
     // instrument's own touchscreen.
     const id = expectReport ? null : await this.#check("final");
     if (id) {
+      // The run's final assembly has landed: it is no longer on the block.
+      this.#clearRunning();
       this.#set({ finished: { name: runName, totalS, fileName: id } });
       // `PCRunReport` now holds the report *this* run wrote, and a last-run panel has been showing
       // the previous run's until this moment. Last, and awaited, so it takes the command channel
@@ -656,6 +776,8 @@ export class RunFollower {
       return;
     }
     if (!expectReport && !this.#m.staleAtFinish) return; // a failed pass, retried by the next edge
+    // No folder of ours, so no open file was this run, whatever the report pass finds.
+    this.#clearRunning();
     const reportId = await this.#collectReport(runName);
     if (reportId) this.#set({ finished: { name: runName, totalS, fileName: reportId } });
   }
@@ -791,9 +913,12 @@ export class RunFollower {
     const progress = runProgressFromNames(names);
     const { held, adoptId } = this.#place(files);
     if (held) {
+      if (progress.inProgress) this.#setRunning(held.id);
       this.#set({ available: null }); // already in the bar, run and all — nothing to offer
       return;
     }
+    // The run's own file is open but holds none of it yet: still the file that run belongs to.
+    if (adoptId && progress.inProgress) this.#setRunning(adoptId);
     this.#set({
       available: {
         name: adoptId ?? this.#freeName(zpcrNameFromRunFiles(files, this.#naming())),
@@ -984,6 +1109,9 @@ export class RunFollower {
         activate,
       );
       const reads = runProgressFromNames(names).plateReads;
+      // This pass resolved which open file the folder's run is in; if that run is the one cycling,
+      // it is the running file. The path a reload or a reconnect mid-run finds it again by.
+      if (id) this.#setRunning(id);
       this.#set({
         fileName: id,
         // Whatever was on offer is now in the file bar — this pass is what installed it.

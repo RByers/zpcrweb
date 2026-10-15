@@ -14,6 +14,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import {
+  CfxSession,
   RunFollower,
   USB_TRAFFIC_LOG_NAME,
   buildExperimentArchive,
@@ -30,7 +31,7 @@ import {
 } from "../src/index.js";
 import { acceleratedClock, createCfxEmulator } from "../src/emulator.js";
 import { RT_S56_SAMPLE_PATH } from "./sample.js";
-import { pcrData, sessionOn, waitFor } from "./sessionRig.js";
+import { drop, pcrData, waitFor } from "./sessionRig.js";
 
 /** Two cycles, two plate reads — the reference capture's own protocol (`usb.md` §7.2). */
 const TWO_CYCLE =
@@ -98,10 +99,21 @@ function rig(
   options: Parameters<typeof createCfxEmulator>[0] = {},
   naming?: RunFollowerPorts["naming"],
 ) {
-  const emulator = createCfxEmulator({ clock: acceleratedClock(), ...options });
-  const session = sessionOn(emulator, { pollMs: 2 });
+  return rigOn(createCfxEmulator({ clock: acceleratedClock(), ...options }), { naming });
+}
+
+/** {@link rig} on an emulator the caller already has — one that outlives a page, or a cable. */
+function rigOn(
+  emulator: ReturnType<typeof createCfxEmulator>,
+  options: { naming?: RunFollowerPorts["naming"]; reconnectDelaysMs?: number[] } = {},
+) {
+  const session = new CfxSession({
+    acquire: async () => emulator,
+    pollMs: 2,
+    reconnectDelaysMs: options.reconnectDelaysMs,
+  });
   const store = fileStore();
-  const follower = new RunFollower(session, { ...store.ports, naming });
+  const follower = new RunFollower(session, { ...store.ports, naming: options.naming });
   session.subscribe(() => follower.observe(session.state.status, session.state.connection));
   return { emulator, session, follower, ...store, close: () => session.dispose() };
 }
@@ -364,6 +376,107 @@ describe("what the follower believes is readable", () => {
     // A run that finishes while the cable is out must still be acknowledged when it comes back,
     // so what this session saw cycling is a page fact, not a connection fact.
     expect(r.follower.memory.watchedRuns.has("SOMERUN")).toBe(true);
+    await r.close();
+  });
+});
+
+/**
+ * `runningFile` is what the Instrument view keys "this selected file is the run on the block" on,
+ * so the property under test is the strict one: it names a file while that file's run is cycling,
+ * and never otherwise.
+ */
+describe("which open file is the run on the block", () => {
+  it("is the file Start was pressed on, until the run's final assembly lands", { timeout: 30_000 }, async () => {
+    const plan = planRun({ runDefinition: TWO_CYCLE, name: "My Experiment" });
+    const r = rig({ data: pcrData() });
+    r.files.set("My Experiment.zpcr", startedExperiment("My Experiment"));
+    await r.session.connect();
+    await waitFor("the baseline listing", () => r.follower.memory.lastNames !== null);
+    expect(r.follower.state.runningFile).toBeNull();
+
+    r.follower.adopt("My Experiment.zpcr", plan.experimentName);
+    // Before `STATUS?` admits the run: the click is what makes it the running file.
+    expect(r.follower.state.runningFile).toBe("My Experiment.zpcr");
+    await r.session.startRun(plan);
+    await waitFor("the run to start", () => r.session.state.status?.running === true);
+    expect(r.follower.state.runningFile).toBe("My Experiment.zpcr");
+    await waitFor("the first read to be collected", () => r.passes.length > 0, 20_000);
+    expect(r.follower.state.runningFile).toBe("My Experiment.zpcr");
+
+    await waitFor("the run to be filed as finished", () => r.follower.state.finished !== null, 20_000);
+    expect(r.follower.state.runningFile).toBeNull();
+    // `fileName` is a different fact: the last file written, which outlives the run.
+    expect(r.follower.state.fileName).toBe("My Experiment.zpcr");
+    await r.close();
+  });
+
+  it("is found again by a page that connects to a run already cycling", { timeout: 30_000 }, async () => {
+    const plan = planRun({ runDefinition: TWO_CYCLE, name: "My Experiment" });
+    const emulator = createCfxEmulator({ clock: acceleratedClock(), data: pcrData() });
+    // The page that started the run, gone once the run has cycled once — a reload, in effect.
+    const before = rigOn(emulator);
+    before.files.set("My Experiment.zpcr", startedExperiment("My Experiment"));
+    await before.session.connect();
+    await waitFor("the baseline listing", () => before.follower.memory.lastNames !== null);
+    before.follower.adopt("My Experiment.zpcr", plan.experimentName);
+    await before.session.startRun(plan);
+    await waitFor("the first read to be collected", () => before.passes.length > 0, 20_000);
+    await before.close();
+
+    // The new page has the started experiment open, and no memory of starting it.
+    const r = rigOn(emulator);
+    r.files.set("My Experiment.zpcr", startedExperiment("My Experiment"));
+    expect(r.follower.state.runningFile).toBeNull();
+    await r.session.connect();
+    await waitFor("the in-progress folder to be pulled", () => r.passes.length > 0, 20_000);
+    expect(r.session.state.status?.running).toBe(true);
+    expect([...r.files.keys()]).toEqual(["My Experiment.zpcr"]);
+    expect(r.follower.state.runningFile).toBe("My Experiment.zpcr");
+    await r.close();
+  });
+
+  it("survives a disconnect mid-run", { timeout: 30_000 }, async () => {
+    const plan = planRun({ runDefinition: TWO_CYCLE, name: "My Experiment" });
+    const emulator = createCfxEmulator({ clock: acceleratedClock(), data: pcrData() });
+    const r = rigOn(emulator, { reconnectDelaysMs: [1] });
+    r.files.set("My Experiment.zpcr", startedExperiment("My Experiment"));
+    await r.session.connect();
+    await waitFor("the baseline listing", () => r.follower.memory.lastNames !== null);
+    r.follower.adopt("My Experiment.zpcr", plan.experimentName);
+    await r.session.startRun(plan);
+    await waitFor("the first read to be collected", () => r.passes.length > 0, 20_000);
+    expect(r.follower.state.runningFile).toBe("My Experiment.zpcr");
+
+    drop(emulator);
+    await waitFor("the drop to be noticed", () => r.session.state.connection === "reconnecting");
+    // The run goes on without the cable, so its file is still the running one.
+    expect(r.follower.state.runningFile).toBe("My Experiment.zpcr");
+    await waitFor("the reconnect", () => r.session.state.connection === "connected", 10_000);
+    await waitFor("the reconnected baseline", () => r.follower.memory.lastNames !== null, 10_000);
+    expect(r.follower.state.runningFile).toBe("My Experiment.zpcr");
+
+    await waitFor("the run to be filed as finished", () => r.follower.state.finished !== null, 20_000);
+    expect(r.follower.state.runningFile).toBeNull();
+    expect([...r.files.keys()]).toEqual(["My Experiment.zpcr"]);
+    await r.close();
+  });
+
+  it("is nothing when the instrument is idle, holding a finished run", async () => {
+    const r = rig({ initialRunFolder: previousRun() });
+    await r.session.connect();
+    await waitFor("the offer", () => r.follower.state.available !== null);
+    expect(r.follower.state.runningFile).toBeNull();
+    await r.close();
+  });
+
+  it("is nothing for an in-progress folder whose run is not on the block", async () => {
+    // The folder says begun-not-ended but `STATUS?` says idle: pulled, as the first-listing rule
+    // says, but not claimed as running.
+    const r = rig({ initialRunFolder: previousRun({ finished: false }) });
+    await r.session.connect();
+    await waitFor("the in-progress folder to be pulled", () => r.passes.length > 0);
+    expect(r.follower.state.fileName).not.toBeNull();
+    expect(r.follower.state.runningFile).toBeNull();
     await r.close();
   });
 });

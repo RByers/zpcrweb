@@ -38,11 +38,17 @@ interface Props {
   runs: Map<string, RunResult>;
   plateFiles: Map<string, PlateFileResult>;
   protocolFiles: Map<string, ProtocolFileResult>;
-  /** The **primary selection** — one chip, in cyan, that a click switches and can never clear.
-   * Usually `ZpcrStore.activeName`, the file every view is pointed at; in the Instrument view,
-   * which shows no file, it is the run being staged (`App.tsx`). */
+  /** The **primary selection** — one chip, in cyan, that a click switches and can never clear:
+   * `ZpcrStore.activeName`, the file every view is pointed at. */
   activeName: string | null;
   onSelect: (id: string) => void;
+  /**
+   * Hold the selection on this one file: every *other* chip is greyed out (`is-locked`,
+   * `aria-disabled`) and its click does nothing, though its ✕ still closes it. `App` sets it to the
+   * running file on the Instrument view only, where the view's subject is the run on the block —
+   * so the tooltip says the others are still a click away on any other tab.
+   */
+  lockedTo?: string | null;
   /**
    * A chip's ✕: **close** this file (`ZpcrStore.closeFile`) — its bytes leave memory and its
    * records leave IndexedDB together. The same control as the Files table's ✕, and the same
@@ -84,6 +90,11 @@ interface Props {
    * card, where it is still one glance away. */
   experiments: Map<string, ExperimentIdentity>;
 }
+
+/** A locked chip's tooltip (see {@link Props.lockedTo}). */
+const LOCKED_TITLE =
+  "The instrument is running the highlighted experiment, so this view stays on it. " +
+  "Other files can be looked at from any other tab.";
 
 /** Fallback chip text for a file whose identity hasn't been resolved yet (a store map still
  * catching up with a just-added file) — the filename, minus the extension, as before. */
@@ -255,6 +266,7 @@ function FileChip({
   isRunning,
   isIncomplete,
   isPending,
+  isLocked,
   onSelect,
   onClose,
 }: {
@@ -274,6 +286,8 @@ function FileChip({
   isIncomplete: boolean;
   /** See {@link Props.pendingIds} — the experiment has not been started. */
   isPending: boolean;
+  /** See {@link Props.lockedTo} — some other chip holds the selection, and this one can't take it. */
+  isLocked: boolean;
   onSelect: (id: string) => void;
   onClose: (id: string) => void;
 }) {
@@ -287,15 +301,26 @@ function FileChip({
         "filechip" +
         (isActive ? " is-active" : "") +
         (isModified ? " is-modified" : "") +
-        (isRunning ? " is-running" : "")
+        (isRunning ? " is-running" : "") +
+        (isLocked ? " is-locked" : "")
       }
+      // On the wrapper as well as the button, so the reason reads wherever the pointer is on the
+      // greyed-out chip. Said in the user's terms: why it is locked, and where it isn't.
+      title={isLocked ? LOCKED_TITLE : undefined}
+      aria-disabled={isLocked || undefined}
     >
       <button
         ref={mainRef}
         className="filechip__main"
         role="tab"
         aria-selected={isActive}
-        onClick={() => onSelect(f.name)}
+        aria-disabled={isLocked || undefined}
+        title={isLocked ? LOCKED_TITLE : undefined}
+        // Not `disabled`: a disabled button takes no hover or focus, and the hover card (the file's
+        // name and contents) is still worth having on a chip that can't be selected here.
+        onClick={() => {
+          if (!isLocked) onSelect(f.name);
+        }}
         onMouseEnter={() => {
           const r = mainRef.current?.getBoundingClientRect();
           if (r) setCardPos({ top: r.bottom + 6, left: r.left });
@@ -379,6 +404,7 @@ export function FileBar({
   incompleteIds,
   pendingIds,
   experiments,
+  lockedTo = null,
 }: Props) {
   const [password] = usePltdPassword();
   return (
@@ -409,6 +435,7 @@ export function FileBar({
           isRunning={inProgressIds.has(f.name)}
           isIncomplete={incompleteIds.has(f.name)}
           isPending={pendingIds.has(f.name)}
+          isLocked={!!lockedTo && f.name !== lockedTo}
           onSelect={onSelect}
           onClose={onClose}
         />

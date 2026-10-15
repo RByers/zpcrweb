@@ -7,16 +7,23 @@
  * nothing selected and with nothing loaded at all, which is where someone with a cycler and no
  * files starts.
  *
+ * **The rail is the instrument; the panel is the selected file.** The rail (`InstrumentRail`)
+ * carries the connection, every button that actuates the machine, what it is holding for this
+ * browser, its identity, status and last run — and nothing that depends on the selection, so
+ * clicking a chip changes nothing there. The main panel (`InstrumentRun`) is the experiment the
+ * selection is, with the Start button that starts it.
+ *
  * It does still need **an experiment** to start, since a protocol comes from a file and the
  * instrument has no library of its own (`usb.md` §5.1). That experiment is the app's ordinary
- * selection and nothing else: the selected file when it is a decoded run, otherwise none, and the
- * panel says so rather than showing a different run than the one lit in the bar. The file bar is
- * the app's one file picker and stays the only one.
+ * selection: the selected file when it is a decoded run, otherwise none, and the panel says so
+ * rather than showing a different run than the one lit in the bar. **While a run is on the block,
+ * the selection is that run** — `App` keeps the selection on the follower's `runningFile` while
+ * this view is showing and locks the file bar's other chips, so this view always shows what the
+ * instrument is doing. Other files are still a click away on any other tab.
  *
- * **Nothing selected is a perfectly good state here**, and the reason this tab can afford so plain
- * a rule: connecting, status, the instrument's own files, the traffic and every action but Start
- * live in the rail, which needs no file at all. Someone can plug in a cycler, open the lid and
- * read its status with an empty browser.
+ * **Nothing selected is a perfectly good state here**: connecting, status and every instrument
+ * button live in the rail, which needs no file at all. Someone can plug in a cycler, open the lid
+ * and read its status with an empty browser.
  *
  * Older still, and worth not re-proposing: a run assembled from a **three-slot staging selection**
  * over every loaded file, where a `.prcl.txt` or `.plt.csv` could override half of some other run,
@@ -41,17 +48,24 @@
  * as itself, and what comes back is the instrument's own run report (`useRunWatch`).
  *
  * Layout reuses the Curves view's rail + content grid so it reads as the same kind of surface:
- * the rail carries connection, identity, status and the commands that actuate the instrument
- * (including Start), and the content column stacks the experiment, the file browser and the
- * traffic console.
+ * the rail carries the instrument, and the content column stacks the experiment, then — for the
+ * running file, or for any file while nothing is running — the instrument's file browser and the
+ * live traffic console. A file that is *not* the run on the block gets neither, since both would be
+ * about some other run; in the console's place it gets its own saved traffic log, if it has one.
  */
 import { useCallback, useMemo } from "react";
-import { planRun, type ZpcrArchive, type RunPlan, type Zpcr } from "@zpcrweb/core";
+import {
+  formatUsbTrafficBytes,
+  isUsbTrafficName,
+  planRun,
+  type ZpcrArchive,
+  type RunPlan,
+  type Zpcr,
+} from "@zpcrweb/core";
 import { InstrumentRail } from "../instrument/InstrumentRail";
 import { InstrumentRun } from "../instrument/InstrumentRun";
-import { InstrumentLastRun } from "../instrument/InstrumentLastRun";
 import { InstrumentFiles } from "../instrument/InstrumentFiles";
-import { InstrumentConsole } from "../instrument/InstrumentConsole";
+import { InstrumentConsole, type SavedTrafficLog } from "../instrument/InstrumentConsole";
 import type { CfxDeviceHandle } from "../../state/useCfxDevice";
 import type { RunWatchState } from "../../state/useRunWatch";
 
@@ -98,11 +112,12 @@ export function InstrumentView({
   onNewExperiment,
   instrument,
   runWatch,
+  runningFile,
   onStartExperiment,
   onCloneExperiment,
 }: {
   onOpenRun: (name: string, archive: ZpcrArchive) => Promise<void> | void;
-  /** Put the instrument's own run report in the file bar — the last-run panel's "Open report".
+  /** Put the instrument's own run report in the file bar — the rail's Last run section's "Open report".
    * The same callback the run watcher files a thermal-only run's report through, so a report
    * collected by hand and one collected automatically become the same kind of file. */
   onOpenReport: (name: string, bytes: Uint8Array) => Promise<string | null>;
@@ -111,7 +126,8 @@ export function InstrumentView({
    * this one just switches to a file the watcher already put in the store. */
   onOpenFinishedRun: (fileName: string) => void;
   /** The selected experiment, or null when the selection isn't one; see the type. Built by `App`
-   * from the active file — see `instrumentExperiment` there. */
+   * from the running file when a run is on the block, else from the active file — the two agree
+   * whenever this view is showing (see `instrumentExperiment` there). */
   experiment: InstrumentExperiment | null;
   /** Make a new pending experiment and stay here — the way out of "nothing to start" when the
    * browser is holding nothing to point at. */
@@ -120,6 +136,9 @@ export function InstrumentView({
   instrument: CfxDeviceHandle;
   /** The follow-the-running-run machinery, likewise owned by `App`. */
   runWatch: RunWatchState;
+  /** The open file whose run is on the block right now — the follower's `runningFile`, resolved
+   * by `App` to null when that file has since been closed. */
+  runningFile: string | null;
   /**
    * Start the experiment in front of us: `App`'s `startExperiment`, which writes the `begun`
    * marker into this very file (restamping its date to today first) and then sends the run. It
@@ -136,9 +155,8 @@ export function InstrumentView({
    * The experiment reduced to exactly what would be sent — commands, files, and the checks that
    * decide whether it may be sent at all (`usb/runPlan.ts`).
    *
-   * Computed here, above both the panel that displays it and the rail that sends it, so the two
-   * cannot disagree: the warnings shown next to the plate are the same object the Start button
-   * consults. Both halves come from the one file, so there is nothing to resolve first — the plate
+   * Computed once, here, so the panel's two uses of it cannot disagree: the warnings shown next to
+   * the plate are the same object the Start button consults. Both halves come from the one file, so there is nothing to resolve first — the plate
    * is simply whichever one the archive carries, and its absence is a `warning` rather than a
    * missing half (`runPlan.ts`), since an experiment may deliberately be run without one.
    */
@@ -182,33 +200,60 @@ export function InstrumentView({
     [onOpenFinishedRun, runWatch],
   );
 
+  const isRunningFile = !!experiment && experiment.fileName === runningFile;
+  // The instrument's storage and its live traffic are about the run on the block, so they show for
+  // that file — or for any file while nothing is running, when there is no other run for them to
+  // be about.
+  const showLive =
+    instrument.connection === "connected" && (runningFile === null || isRunningFile);
+
+  /**
+   * The selected run's own saved USB traffic log, shown in the console's slot when the live one
+   * isn't — live traffic there would belong to some other run. Either name a log is stored under
+   * (`usb-traffic.bin`, or an older file's plain-text `usb-traffic.log`), in the text form the Raw
+   * files view renders it in.
+   */
+  const savedLog = useMemo((): SavedTrafficLog | null => {
+    if (showLive || !experiment?.zpcr) return null;
+    const { zpcr, name } = experiment;
+    const entry = zpcr.archive.entries.find(isUsbTrafficName);
+    if (!entry) return null;
+    return {
+      name,
+      text: () => {
+        try {
+          return /\.log$/i.test(entry)
+            ? zpcr.archive.text(entry)
+            : formatUsbTrafficBytes(zpcr.archive.bytes(entry));
+        } catch (e) {
+          return `This log could not be read: ${e instanceof Error ? e.message : String(e)}`;
+        }
+      },
+    };
+  }, [experiment, showLive]);
+
   return (
     <div className="curves instrument">
-      <InstrumentRail
-        instrument={instrument}
-        experiment={experiment}
-        plan={plan}
-        runWatch={runWatch}
-        onStart={onStartExperiment}
-      />
+      <InstrumentRail instrument={instrument} runWatch={runWatch} onOpenReport={onOpenReport} />
       <div className="instrument__content">
         <InstrumentRun
           experiment={experiment}
           onNewExperiment={onNewExperiment}
           plan={plan}
-          status={instrument.status}
-          pending={instrument.runPending}
-          finished={runWatch.finished}
+          instrument={instrument}
+          runWatch={runWatch}
+          isRunningFile={isRunningFile}
+          onStart={onStartExperiment}
           onOpenFinishedRun={openFinished}
           onNewRun={runWatch.clearFinished}
           onCloneExperiment={onCloneExperiment}
         />
-        {/* Between the experiment and the file browser: it is about this machine rather than about
-            the selection, and it is the answer to "what was it doing before I got here?" — which
-            is a question asked before anyone goes browsing the instrument's storage by hand. */}
-        <InstrumentLastRun instrument={instrument} onOpenReport={onOpenReport} />
-        <InstrumentFiles instrument={instrument} onOpenRun={onOpenRun} />
-        <InstrumentConsole instrument={instrument} />
+        {showLive && <InstrumentFiles instrument={instrument} onOpenRun={onOpenRun} />}
+        {showLive ? (
+          <InstrumentConsole instrument={instrument} />
+        ) : (
+          savedLog && <InstrumentConsole instrument={instrument} saved={savedLog} />
+        )}
       </div>
     </div>
   );

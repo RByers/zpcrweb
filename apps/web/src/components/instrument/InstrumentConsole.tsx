@@ -22,12 +22,27 @@
  * backed by
  * an entry in `CFX_COMMANDS`. Watching the traffic keeps all of the debugging value the prompt
  * had; typing into it was the part with the sharp edge.
+ *
+ * **A file's saved log, in the same panel.** Given `saved`, this renders a selected `.zpcr`'s own
+ * archived traffic log instead of the live connection's — the case where the selected file is not
+ * the run on the block, so live traffic would be about some other run. Same component and markup
+ * rather than a sibling, so the two cannot drift apart; what differs is only what a saved log has
+ * no use for (the live switches, Clear) and a title that says whose log it is.
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { DownloadIcon } from "../DownloadIcon";
 import { downloadText } from "../../lib/download";
 import { USB_TRAFFIC_TEXT_NAME } from "@zpcrweb/core";
 import type { CfxDeviceHandle } from "../../state/useCfxDevice";
+
+/** A traffic log saved inside a file — what the console shows in place of live traffic. */
+export interface SavedTrafficLog {
+  /** The experiment it belongs to, for the title. */
+  name: string;
+  /** Its text rendering, computed on first open: a whole run's log can be large, and a closed
+   * panel has no use for it. */
+  text: () => string;
+}
 
 const time = (ms: number) => {
   const d = new Date(ms);
@@ -36,12 +51,21 @@ const time = (ms: number) => {
   ).padStart(2, "0")}.${String(d.getMilliseconds()).padStart(3, "0")}`;
 };
 
-export function InstrumentConsole({ instrument }: { instrument: CfxDeviceHandle }) {
+export function InstrumentConsole({
+  instrument,
+  saved,
+}: {
+  instrument: CfxDeviceHandle;
+  /** Show this file's saved log rather than the live connection's traffic. */
+  saved?: SavedTrafficLog | null;
+}) {
   const [follow, setFollow] = useState(true);
   // Tracked because a closed panel has no scrollable body: without this the first thing seen on
-  // opening would be the *top* of the backlog, whatever "follow" says.
+  // opening would be the *top* of the backlog, whatever "follow" says. For a saved log it is also
+  // what defers rendering the text until someone asks for it.
   const [open, setOpen] = useState(false);
   const bodyRef = useRef<HTMLDivElement | null>(null);
+  const savedText = useMemo(() => (saved && open ? saved.text() : null), [saved, open]);
 
   // Already filtered: `useCfxDevice` decides what a hidden poll line is and keeps it out of
   // `traffic` entirely, so this panel re-renders only when something it would actually show
@@ -58,12 +82,38 @@ export function InstrumentConsole({ instrument }: { instrument: CfxDeviceHandle 
   // be showing. Text, not the stored records: a downloaded log is for reading, and the Raw files
   // view renders the archived copy the same way (`formatUsbTrafficLog`, one line per message).
   const downloadLog = () => downloadText(USB_TRAFFIC_TEXT_NAME, instrument.trafficLogText());
+  // A saved log downloads exactly what it shows: the file's own record, rendered the same way.
+  const downloadSaved = () =>
+    saved && downloadText(USB_TRAFFIC_TEXT_NAME, savedText ?? saved.text());
+
+  const downloadButton = (
+    <button
+      className="raw__download"
+      onClick={saved ? downloadSaved : downloadLog}
+      // `hasTraffic`, not the recorder's own length: the recorder is a ref, so reading it
+      // during render can't re-enable the button on its own — and now that hidden polls
+      // cause no re-render, a session that has only ever polled would leave it stuck
+      // disabled over a log that is anything but empty.
+      disabled={!saved && !instrument.hasTraffic}
+      aria-label={saved ? "Download this run's saved USB traffic log" : "Download USB traffic log"}
+      title={
+        saved
+          ? "Download the USB traffic log saved in this run's file, as text"
+          : "Download the complete USB traffic log, as text"
+      }
+    >
+      <DownloadIcon />
+    </button>
+  );
 
   return (
     // Collapsed by default: the console is for watching the protocol when something is being
     // debugged, not a thing to have open while using the view.
     <details
-      className="instrument__panel instrument__panel--console instrument__panel--collapsible"
+      className={
+        "instrument__panel instrument__panel--console instrument__panel--collapsible" +
+        (saved ? " instrument__panel--savedlog" : "")
+      }
       onToggle={(e) => setOpen((e.currentTarget as HTMLDetailsElement).open)}
     >
       <summary className="instrument__panelhead">
@@ -71,11 +121,19 @@ export function InstrumentConsole({ instrument }: { instrument: CfxDeviceHandle 
           <span className="rail__chevron" aria-hidden="true">
             ▸
           </span>
-          USB traffic
+          {/* Said in the title, so a saved log is never mistaken for what the instrument is
+              saying now. */}
+          {saved ? "USB traffic saved with this run" : "USB traffic"}
         </h2>
-        {/* These act on the console, not on the panel — but they need no guard: the checkboxes
+        {saved ? (
+          <div className="instrument__consoleopts">
+            <span className="devrun__hint mono">{saved.name}</span>
+            {downloadButton}
+          </div>
+        ) : (
+        /* These act on the console, not on the panel — but they need no guard: the checkboxes
             and the button are their own activation targets, so the <summary> around them never
-            sees the click as a toggle. */}
+            sees the click as a toggle. */
         <div className="instrument__consoleopts">
           {/* The only control here that changes what is *kept* — the rest change what is shown,
               and the recording itself is always running. See `setSaveLog`. */}
@@ -109,24 +167,21 @@ export function InstrumentConsole({ instrument }: { instrument: CfxDeviceHandle 
           <button className="btn btn--sm" onClick={instrument.clearTraffic}>
             Clear
           </button>
-          <button
-            className="raw__download"
-            onClick={downloadLog}
-            // `hasTraffic`, not the recorder's own length: the recorder is a ref, so reading it
-            // during render can't re-enable the button on its own — and now that hidden polls
-            // cause no re-render, a session that has only ever polled would leave it stuck
-            // disabled over a log that is anything but empty.
-            disabled={!instrument.hasTraffic}
-            aria-label="Download USB traffic log"
-            title="Download the complete USB traffic log, as text"
-          >
-            <DownloadIcon />
-          </button>
+          {downloadButton}
         </div>
+        )}
       </summary>
 
       <div className="instrument__consolebody mono" ref={bodyRef}>
-        {lines.length === 0 ? (
+        {saved ? (
+          // Rendered only once opened (`savedText`); the format is core's text rendering, the same
+          // one the Raw files view shows for this entry.
+          savedText === null ? null : savedText.trim() === "" ? (
+            <div className="instrument__empty">The saved log is empty.</div>
+          ) : (
+            <pre className="instrument__savedlog">{savedText}</pre>
+          )
+        ) : lines.length === 0 ? (
           <div className="instrument__empty">
             {instrument.connection === "connected"
               ? "No traffic yet."
