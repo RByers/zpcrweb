@@ -1,9 +1,15 @@
 /**
  * Browse and retrieve the instrument's own filesystem.
  *
- * A single retrieved file is saved to disk rather than loaded into the app: what lives on the
- * instrument are the *parts* of a run — individual `.Plateread`s, the `.Dcal` set, `RunInfo.xml`,
- * the `.pltd`/`.prcl` pair — where every format this app opens is a whole run in one container.
+ * The directories shown are a fixed list (core's `CFX_DIRECTORIES`), not a walk of the tree: the
+ * instrument's listings name files only, so a subdirectory can't be discovered, only asked for by
+ * name — which is also all CFX Manager does.
+ *
+ * **Retrieve** saves a single file to disk rather than loading it into the app: most of what lives
+ * on the instrument are the *parts* of a run — individual `.Plateread`s, the `.Dcal` set,
+ * `RunInfo.xml`, the `.pltd`/`.prcl` pair. A file that is whole in itself gets **Open** besides —
+ * a completed run's `.zpcr` from `Real-Time Data`, or an `.alf` run report — which fetches it and
+ * adds it exactly as a dropped file would be.
  *
  * A whole directory is a different matter, and is what **Open run** does: a `.zpcr` *is* a ZIP of
  * a run directory, so pulling every file yields a real run — not a reconstruction — which then goes
@@ -21,9 +27,17 @@ import type { CfxDeviceHandle } from "../../state/useCfxDevice";
 /** The file that makes a directory a run — and the one `parseZpcr` refuses an archive without. */
 const RUNINFO_NAME = "RunInfo.xml";
 
+/** The instrument's files the app opens on their own. Not every kind `fileKindFromName` names: a
+ * `.txt` would be guessed a protocol, and the instrument's are logs and run notes. */
+function opensAlone(name: string): boolean {
+  return /\.(zpcr|alf)$/i.test(name);
+}
+
 /** Group a flat listing the way the Raw view groups a `.zpcr`'s entries, so a 42-entry
  * `CurrentRun` reads as a handful of kinds rather than one long alphabetical wall. */
 function groupOf(name: string): string {
+  if (/\.zpcr$/i.test(name)) return "Runs";
+  if (/log\.txt$/i.test(name)) return "Logs";
   if (/\.Plateread$/i.test(name)) return "Plate reads";
   if (/\.Dcal$/i.test(name)) return "Calibration";
   if (/\.(pltd|prcl)$/i.test(name)) return "Plate & protocol";
@@ -33,21 +47,26 @@ function groupOf(name: string): string {
 }
 
 const GROUP_ORDER = [
+  "Runs",
   "Metadata",
   "Plate & protocol",
   "Plate reads",
   "Run report",
   "Calibration",
+  "Logs",
   "Other",
 ];
 
 export function InstrumentFiles({
   instrument,
   onOpenRun,
+  onOpenFile,
 }: {
   instrument: CfxDeviceHandle;
   /** Hand the assembled `.zpcr` to the app, exactly as if it had been dropped on the drop zone. */
   onOpenRun: (name: string, archive: ZpcrArchive) => Promise<void> | void;
+  /** The same for one file the instrument already holds whole — see {@link opensAlone}. */
+  onOpenFile: (name: string, bytes: Uint8Array) => Promise<void> | void;
 }) {
   const { directories, busy, connection } = instrument;
   const connected = connection === "connected";
@@ -56,6 +75,18 @@ export function InstrumentFiles({
   const retrieve = async (dir: string, name: string) => {
     const bytes = await instrument.fetchFile(dir, name);
     if (bytes) downloadBytes(name, bytes);
+  };
+
+  const openFile = async (dir: string, name: string) => {
+    setOpenError(null);
+    const bytes = await instrument.fetchFile(dir, name);
+    // As in `openRun`: `undefined` is a failed fetch, already reported by the rail.
+    if (!bytes) return;
+    try {
+      await onOpenFile(name, bytes);
+    } catch (e) {
+      setOpenError(e instanceof Error ? e.message : String(e));
+    }
   };
 
   const openRun = async (dir: string, names: string[]) => {
@@ -92,7 +123,7 @@ export function InstrumentFiles({
         </button>
       </summary>
 
-      {openError && <div className="rail__note">Couldn't open the run: {openError}</div>}
+      {openError && <div className="rail__note">Couldn't open it: {openError}</div>}
 
       {!connected ? (
         <div className="instrument__empty mono">Connect to browse the instrument's storage.</div>
@@ -170,6 +201,16 @@ export function InstrumentFiles({
                           {groups.get(g)!.map((name) => (
                             <li key={name} className="instrument__file">
                               <span className="instrument__filename mono">{name}</span>
+                              {opensAlone(name) && (
+                                <button
+                                  className="btn btn--sm btn--primary"
+                                  disabled={!!busy}
+                                  onClick={() => void openFile(d.path, name)}
+                                  title={`Retrieve ${name} and open it`}
+                                >
+                                  Open
+                                </button>
+                              )}
                               <button
                                 className="btn btn--sm"
                                 disabled={!!busy}

@@ -17,6 +17,14 @@
 /** Bytes of header preceding every logical message's payload. */
 export const FRAME_HEADER_BYTES = 5;
 
+/**
+ * The most payload one message carries — five short of the `uint16` the header's length field
+ * could express (measured, `usb-basic`). A longer reply comes back as consecutive messages filled
+ * to exactly this length and one shorter remainder (`usb.md` §5), which is how the client tells a
+ * reply still arriving from one that has ended.
+ */
+export const MAX_MESSAGE_PAYLOAD = 65_530;
+
 /** The header's bit-packed fields (`usb.md` §2). */
 export interface CfxFrameHeader {
   /** Logical session id. Always 0 in every message of both reference captures (`usb.md` §9). */

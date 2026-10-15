@@ -90,17 +90,25 @@ export class CfxCommandError extends Error {
 }
 
 /**
- * The directories a run's files live in (`usb.md` §5), as a starting point for a file browser.
+ * Every directory on the instrument known to hold something worth browsing (`usb.md` §5).
  *
- * `\Storage Card` is the volume root and has no listing of its own: listings cover files only, and
- * it holds nothing but the two directories below it, so `GETFILESLEN` reports it empty (measured;
- * `usb.md` §5). It is kept here so the browser shows the shape of the filesystem rather than
- * silently starting one level down.
+ * **This list is the browser's whole reach, and it can only be written by hand.** Listings cover
+ * files only and nothing else enumerates a directory, so a subdirectory is found by already
+ * knowing its name — which is how CFX Manager does it too: the `usb-basic` capture lists
+ * `Real-Time Data` and `Logs` by path, and that capture is how this project knows they exist.
+ *
+ * `\Storage Card` is the volume root and has no listing of its own, holding nothing but the
+ * directories below it, so `GETFILESLEN` reports it empty (measured). It is kept here so the
+ * browser shows the shape of the filesystem rather than silently starting one level down.
  */
 export const CFX_DIRECTORIES = [
   { path: "\\Storage Card", label: "Storage Card" },
   { path: "\\Storage Card\\CurrentRun", label: "Current run" },
   { path: "\\Storage Card\\PCRunReport", label: "Run reports" },
+  // A `<run>.zpcr` and a `<run>.txt` per completed run — where CFX Manager gets a finished run from.
+  { path: "\\Storage Card\\Real-Time Data", label: "Completed runs" },
+  // Five instrument logs: `DebugLog.txt`, `SystemErrorLog.txt` and the like.
+  { path: "\\Storage Card\\Logs", label: "Instrument logs" },
 ] as const;
 
 /**

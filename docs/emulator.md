@@ -75,16 +75,20 @@ quirks that make the real one awkward:
 - The five-command upload cycle (`DELFILE` → `CRCSENDFILE` → `COMPUTEFILECRC` →
   `GETFILESLEN`+`LISTALLFILES` → `GETFILECRC`), with `crc.ts`'s byte-interleaved XOR.
 - **A reply longer than 65,530 bytes goes out as several messages** of that length and a
-  remainder, each under its own header (`transport.ts`'s `MAX_MESSAGE_PAYLOAD`) — measured in
+  remainder, each under its own header (`frame.ts`'s `MAX_MESSAGE_PAYLOAD`) — measured in
   the `usb-basic` capture (`usb.md` §5), and the only way a file over 64 KB fits a `uint16`
   length field. No file the emulator produces is that long; a seeded one can be.
 
 Four directories exist under `\Storage Card`: `CurrentRun` and `PCRunReport`, which the run
 writes into, and `Real-Time Data` and `Logs`, which on the real instrument hold a `.zpcr` and a
 `.txt` per completed run and five instrument logs respectively (`usb.md` §5, measured in
-`usb-basic`). The emulator has them **present and empty**: when the instrument writes into them
-is unwitnessed (§11), and a listing that agrees with the capture while the contents are invented
-would be worse than one that says "nothing here".
+`usb-basic`). The emulator has them **present, and never writes into them**: when the instrument
+does is unwitnessed (§11), and a listing that agrees with the capture while the contents are
+invented would be worse than one that says "nothing here". They hold only what the caller puts
+there: `initialFiles` (full path → bytes) seeds any existing directory before the session starts,
+and refuses one the instrument doesn't have. The app's `#mock` seeds `Real-Time Data` with three
+bundled `.zpcr`s, all over 64 KB — real runs, so nothing in them is invented — and leaves the
+`.txt` beside each out, since what it holds has never been read.
 
 ## 5. The run
 
@@ -355,7 +359,7 @@ to the emulator adds its entry here in the same commit, unless they have a recor
 | **When the staging GUID disappears** | it is gone by the end of a run and present right after its upload; nothing observed the moment between (§10.1) |
 | **What the block reports after a finish** | this instrument was still reporting 94.42 °C when its 95 °C run finished; the emulator drops to ambient at once. How fast a real block falls is unmeasured |
 | **How long the run stays named after the acknowledgement** | one poll after the acknowledging `CANCEL` the instrument still reported `"YOUSEQ_R",BLOCK,OFF` with register 32; the emulator returns to the empty idle immediately. One sample is not a duration |
-| **When `Real-Time Data` and `Logs` gain their files** | both directories exist and hold a completed run's `.zpcr`/`.txt` and the instrument's logs (§4, measured); nothing shows the moment a finished run's `.zpcr` is written there, or whether an acknowledgement is what writes it. The emulator keeps both empty |
+| **When `Real-Time Data` and `Logs` gain their files** | both directories exist and hold a completed run's `.zpcr`/`.txt` and the instrument's logs (§4, measured); nothing shows the moment a finished run's `.zpcr` is written there, or whether an acknowledgement is what writes it. The emulator never writes either; they hold what `initialFiles` seeds |
 | **`PROCEED` during the lid preheat** | the emulator skips the first step before its clock has started; the instrument's answer is unobserved, and a no-op is as plausible |
 | **A one-step loop body, and nested loops** | `GOTO 1,3` straight back to the step before it counts its passes the way `protocol.md` §4 says it must (tested); a loop *inside* a loop restarts the inner count on paper but what the `.alf`'s repeat column and `STATUS?`'s cycle field do on hardware is unmeasured |
 | **An abort while paused** | the pause's span is kept in the report's clocks (tested); `usb.md` §7.8 lists `CANCEL` on a paused run as itself untested |
@@ -448,8 +452,9 @@ timestamps.
   meanings are a guess.
 - The `.alf` step line's field 1 (`-1`) and field 4 (`.00`), written as observed but not understood.
 - `CANCEL` on an idle instrument answering `0000`.
-- **What `Real-Time Data` and `Logs` hold** — nothing, on the emulator. Their existence and what
-  the real ones list are measured (§4); when the instrument writes there is not (§11).
+- **What `Real-Time Data` and `Logs` hold** — whatever `initialFiles` seeds, and nothing a run
+  adds. Their existence and what the real ones list are measured (§4); when the instrument writes
+  there is not (§11).
 - **Ramp lengths.** The emulator's 10 s is between the instrument's measured ~11 s up and ~15 s
   down (§10.2); a block's real ramp depends on the distance, and nothing reports a rate.
 - Clearing `CurrentRun` at the start of a new plate-read run — derived from "every pulled folder

@@ -266,6 +266,41 @@ describe("CfxDevice", () => {
     await dev.close();
   });
 
+  it("collects a GETFILE that arrives as several messages into one file", async () => {
+    // Past one message's 65,530-byte ceiling the instrument sends full messages and a remainder,
+    // each under its own header — `EmulatorTransport.push` splits exactly that way.
+    const file = new Uint8Array(150_000).map((_, i) => i % 251);
+    const mock = new MockInstrument((cmd) => {
+      if (cmd.startsWith("GETFILESIZE")) return { payload: text(`${file.length};0000`) };
+      if (cmd.startsWith("GETFILE")) return { payload: file };
+      if (cmd === "STATUS?") return { payload: text(STATUS_IDLE) };
+      return null;
+    });
+    const unsolicited: number[] = [];
+    const dev = new CfxDevice(mock, {
+      onTraffic: (e) => e.direction === "in" && e.unsolicited && unsolicited.push(e.channel),
+    });
+    await dev.open();
+    expect(Array.from(await dev.getFile("\\x\\big.zpcr"))).toEqual(Array.from(file));
+    // No part was left over to be taken for the next command's reply.
+    expect((await dev.status()).phase).toBe("idle");
+    expect(unsolicited).toEqual([]);
+    await dev.close();
+  });
+
+  it("fails a multi-message GETFILE that ends short, without waiting for a timeout", async () => {
+    const mock = new MockInstrument((cmd) => {
+      if (cmd.startsWith("GETFILESIZE")) return { payload: text("200000;0000") };
+      // One full message and a short one: the short one is the last, whatever the count said.
+      if (cmd.startsWith("GETFILE")) return { payload: new Uint8Array(70_000) };
+      return null;
+    });
+    const dev = new CfxDevice(mock, { timeoutMs: 60_000 });
+    await dev.open();
+    await expect(dev.getFile("\\x\\y")).rejects.toThrow(/expected 200000 bytes, received 70000/);
+    await dev.close();
+  });
+
   it("reassembles a reply split across many USB-sized packets", async () => {
     const big = new Uint8Array(5000).fill(0x41);
     const mock = new MockInstrument((cmd) => {

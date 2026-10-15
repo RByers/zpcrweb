@@ -102,6 +102,12 @@ export interface EmulatedInstrumentOptions {
   identity?: Partial<EmulatorIdentity>;
   /** What `\Storage Card\CurrentRun` already holds — usually the *previous* run (`usb.md` §7.5). */
   initialRunFolder?: Record<string, Uint8Array> | null;
+  /**
+   * Files already on the instrument anywhere else, keyed by full path — what a session wants
+   * `Real-Time Data` or `Logs` to hold, since the emulator never writes into either itself. The
+   * directory must be one the instrument has.
+   */
+  initialFiles?: Record<string, Uint8Array> | null;
   /** The wall-clock instant simulated time zero corresponds to, for the files' own timestamps. */
   startedAt?: Date;
 }
@@ -136,15 +142,19 @@ export class EmulatedInstrument {
       CFX_RUN_REPORT_DIR,
       // Holds a `<run>.zpcr` and a `<run>.txt` per completed run on the real instrument — CFX
       // Manager lists and downloads them (`usb.md` §5, measured in the `usb-basic` capture).
-      // Modelled as existing and empty: when the instrument writes into it is unwitnessed
-      // (`emulator.md` §11), and inventing that would be inventing evidence.
+      // Nothing the emulator does writes into it: when the instrument does is unwitnessed
+      // (`emulator.md` §11), and inventing that would be inventing evidence. It holds what
+      // `initialFiles` puts there, and nothing more.
       REAL_TIME_DATA_DIR,
       // Five instrument logs (`DebugLog.txt`, `SystemUsageLog.txt`, …) on the real one, same
-      // capture. Present and empty for the same reason.
+      // capture. Only ever `initialFiles`', for the same reason.
       LOGS_DIR,
     ]);
     for (const [name, bytes] of Object.entries(options.initialRunFolder ?? {})) {
       this.fs.write(`${CFX_CURRENT_RUN_DIR}\\${name}`, bytes);
+    }
+    for (const [path, bytes] of Object.entries(options.initialFiles ?? {})) {
+      this.fs.seed(path, bytes);
     }
   }
 

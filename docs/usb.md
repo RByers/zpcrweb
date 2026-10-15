@@ -696,7 +696,8 @@ should do at it, is untested.
 Two things a client wanting to start a run will look for, and not find.
 
 **No stored-protocol library to name.** The live filesystem probe below found `\Storage Card`
-holds nothing but `CurrentRun` and `PCRunReport`, directories never appear in listings, and no
+holds only run folders, reports, completed runs and logs (`CurrentRun`, `PCRunReport`, and the
+`Real-Time Data` and `Logs` found later), directories never appear in listings, and no
 command in either capture selects a protocol by name — `RemoteRun` takes a run name, user and
 method, not a path. So "run a protocol the instrument already has" is not a thing the protocol
 expresses: a run's protocol is whatever the host most recently put in `CurrentRun`. The one
@@ -751,7 +752,10 @@ a dozen paths):
 So `\Storage Card` is not a special case in the protocol, and the volume root is not what matters:
 `\` itself lists fine (`17;0000` → `Control Panel.lnk`), as does `\Windows` (`4632`).
 Directories never appear in a listing, so that probe could only confirm the two directories it
-knew to ask for; `\Storage Card` holds at least two more. **`\Storage Card\Real-Time Data`**
+knew to ask for; `\Storage Card` holds at least two more. Nothing finds them but their names —
+there is no glob, and no command that lists directories — so a client browses exactly the
+directories it was written to know, which is what CFX Manager does too (and what this library's
+`CFX_DIRECTORIES` lists). **`\Storage Card\Real-Time Data`**
 keeps a `<run>.zpcr` and a `<run>.txt` per completed run — `usb-basic` lists four runs from
 20–26 July 2026 and downloads their `.zpcr`s (39,550 to 406,323 bytes), which is where CFX Manager
 gets a finished run from without the run folder — and **`\Storage Card\Logs`** holds five
@@ -790,13 +794,13 @@ The `.alf` is a run report; §5.2 covers the directory it comes from and
 **A file longer than 65,530 bytes comes back as several messages.** The header's length field is
 a `uint16` (§2) and the instrument fills it to 65,530: `usb-basic`'s 406,323-byte `GETFILE` of a
 `.zpcr` from `Real-Time Data` arrived as six messages of 65,530 bytes and one of 13,143, each
-under its own header, back to back. Every file this project has pulled is well under that — a
-plate read is ~22 KB — so `CfxDevice.getFile`, which expects the announced size in one message,
-has never met it.
-
-> **Future:** `getFile` should keep reading until `GETFILESIZE`'s count has arrived. The emulator
-> splits its replies the same way (`emulator/transport.ts`), so the fix is testable without
-> hardware; it is what downloading a completed run from `Real-Time Data` needs.
+under its own header, back to back. `CfxDevice.getFile` collects them against `GETFILESIZE`'s
+count: the reply stays at the head of the command queue until that many bytes have arrived, since
+with no request ids a part let go early would be taken for the next command's answer. A part
+shorter than 65,530 bytes is the last, so a reply that ends short of the count fails at once
+instead of waiting out the timeout (`frame.ts`'s `MAX_MESSAGE_PAYLOAD`). Tested against the
+emulator, which splits its replies the same way (`emulator/transport.ts`); the client has not yet
+pulled a file this large from the real instrument.
 
 **A zero-byte file's `GETFILE` reply is unreliable — observed live, not in the reference
 capture.** `\Storage Card\CurrentRun`'s `begun`/`ended` markers (`runFolder.ts`) are zero-content

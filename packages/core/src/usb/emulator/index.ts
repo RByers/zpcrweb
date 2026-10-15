@@ -37,6 +37,9 @@ export interface EmulatorOptions {
   identity?: Partial<EmulatorIdentity>;
   /** What `\Storage Card\CurrentRun` already holds on connect — usually the previous run. */
   initialRunFolder?: Record<string, Uint8Array> | null;
+  /** Files already anywhere else on the instrument, keyed by full path — `Real-Time Data`'s
+   * completed runs, say, which the emulator never writes itself. */
+  initialFiles?: Record<string, Uint8Array> | null;
   /** The wall-clock instant simulated time zero corresponds to, for the run's own timestamps. */
   startedAt?: Date;
 }

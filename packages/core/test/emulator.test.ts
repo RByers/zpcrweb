@@ -33,10 +33,11 @@ import {
   type CfxEmulator,
   type ScaledClock,
 } from "../src/emulator.js";
-import { MELT_SAMPLE_PATH, RT_S56_SAMPLE_PATH } from "./sample.js";
+import { MELT_SAMPLE_PATH, RT_S56_SAMPLE_PATH, readSampleBytes } from "./sample.js";
 
 const CURRENT_RUN = "\\Storage Card\\CurrentRun";
 const RUN_REPORTS = "\\Storage Card\\PCRunReport";
+const REAL_TIME_DATA = "\\Storage Card\\Real-Time Data";
 
 /** The reference capture's own protocol: two cycles, two plate reads (`usb.md` §7.2). */
 const TWO_CYCLE =
@@ -209,6 +210,27 @@ describe("the filesystem, quirks included", () => {
     // subdirectories — reports itself empty rather than naming them (`usb.md` §5).
     expect(await device.listFiles("\\Storage Card")).toMatchObject({ status: "empty" });
     await close();
+  });
+
+  it("downloads a completed run from Real-Time Data, though it spans several messages", async () => {
+    // ~400 KB: the instrument sends it as six full 65,530-byte messages and a remainder, the
+    // shape the `usb-basic` capture's `.zpcr` download has (`usb.md` §5).
+    const zpcr = readSampleBytes();
+    const path = `${REAL_TIME_DATA}\\20260720_FirstQualification.zpcr`;
+    const { device, close } = await connect({ initialFiles: { [path]: zpcr } });
+    expect((await device.listFiles(REAL_TIME_DATA)).names).toEqual([
+      "20260720_FirstQualification.zpcr",
+    ]);
+    expect(Array.from(await device.getFile(path))).toEqual(Array.from(zpcr));
+    // Every part went to the one GETFILE: had any leaked, it would answer this instead.
+    expect((await device.status()).phase).toBe("idle");
+    await close();
+  });
+
+  it("refuses to seed a file into a directory the instrument doesn't have", () => {
+    expect(() =>
+      createCfxEmulator({ initialFiles: { "\\Storage Card\\Nowhere\\x.zpcr": new Uint8Array(1) } }),
+    ).toThrow(/no directory/);
   });
 
   it("round-trips a file through sendFile's five-command upload cycle", async () => {

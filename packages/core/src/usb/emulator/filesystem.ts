@@ -1,8 +1,8 @@
 /**
  * The instrument's filesystem — `emulator.md` §4, `usb.md` §5.
  *
- * A flat path→bytes map with two directories in it (`\Storage Card\CurrentRun` and
- * `\Storage Card\PCRunReport`), which is all `\Storage Card` has ever been observed to hold. What
+ * A flat path→bytes map over the directories `\Storage Card` is known to hold (`CurrentRun`,
+ * `PCRunReport`, `Real-Time Data` and `Logs` — see `EmulatedInstrument`'s constructor). What
  * makes it worth a module of its own is that two of its behaviours are **measured quirks a client
  * has to cope with**, and an emulator that tidied them away would be testing the client against a
  * filesystem nobody has:
@@ -77,6 +77,18 @@ export class EmulatorFilesystem {
   /** Put a file in place, creating nothing: the directory must already exist. */
   write(path: string, bytes: Uint8Array): void {
     this.files.set(key(path), { path, bytes });
+  }
+
+  /**
+   * {@link write}, for a file placed before the session starts — which is a test's or a mock
+   * session's setup rather than anything the instrument did, so a typo'd directory is an error
+   * here instead of a file no listing will ever show.
+   */
+  seed(path: string, bytes: Uint8Array): void {
+    if (!this.dirs.has(key(parentOf(path)))) {
+      throw new Error(`can't seed ${path}: the instrument has no directory ${parentOf(path)}`);
+    }
+    this.write(path, bytes);
   }
 
   read(path: string): Uint8Array | null {

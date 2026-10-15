@@ -30,7 +30,8 @@ starts a pending experiment, and the checks follow the run to its end — the li
 redrawing, each plate read being pulled as it lands, the finished `.zpcr` in the file bar and in
 IndexedDB, complete, with its readings drawn in the Curves view. Then the two interruptions:
 disconnecting mid-run and reconnecting to find the same run still cycling, and stopping a run that
-is under way. Nothing else here exercises the Instrument view past the point where Start appears.
+is under way. Last, the files panel: listing the seeded `Real-Time Data` and opening a 400 KB run
+from it, a download that arrives in several messages. Nothing else here exercises the Instrument view past the point where Start appears.
 
 `#mock=max` is what makes that affordable. The simulated instrument has no clock in that mode: the
 run advances one step per status poll, so a three-cycle experiment is a dozen polls rather than the

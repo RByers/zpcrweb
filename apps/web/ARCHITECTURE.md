@@ -282,6 +282,10 @@ The emulator is loaded **lazily** — `@zpcrweb/core/emulator` is reached throug
 `import()` from `acquireMockDevice` and from nowhere else — so a build nobody points `#mock` at
 never downloads an imitation instrument.
 
+Its storage starts with three completed runs in `Real-Time Data` — bundled samples, fetched
+beside the run data the emulator's plate reads are lifted from — so the files panel has something
+to list and **Open** there. A sample that fails to fetch is left out rather than failing the connect.
+
 `#mock=10` / `#mock=60` run simulated time that many times faster; `#mock=max` has no clock at
 all, and the run advances one step per status poll, which is what makes a whole run cost a dozen
 polls in a test rather than the minutes its protocol describes. The speed is switchable mid-run
@@ -3871,9 +3875,14 @@ The components, under `components/instrument/` (`instrumentParts.tsx` holds the 
   away in the well card. The question this preview answers is "is this the right plate?", not
   "what is in well F7?".
 - **`InstrumentFiles`** — the instrument's storage, grouped by kind the way the Raw view groups a
-  `.zpcr`. A *single* retrieved file is **saved to disk, not loaded into the app**: what lives on
-  the instrument are the *parts* of a run — individual `.Plateread`s, the `.Dcal` set, the
-  `.pltd`/`.prcl` pair — where every format this app opens is a whole run in one container. Like
+  `.zpcr`. The directories are core's fixed `CFX_DIRECTORIES`, not a walk of the tree: a listing
+  names files only, so `Real-Time Data` (completed runs) and `Logs` are reached by name, as CFX
+  Manager reaches them. **Retrieve** saves a single file to disk rather than loading it: most of
+  what lives on the instrument are the *parts* of a run — individual `.Plateread`s, the `.Dcal`
+  set, the `.pltd`/`.prcl` pair. A file that is whole in itself — a completed run's `.zpcr` from
+  `Real-Time Data`, an `.alf` — also gets **Open**, which fetches it and hands it to `App`'s
+  `openInstrumentFile`: the same `addFiles` path as a drop, filed as the Last run section's report
+  is, then a switch to Overview. Like
   the live console below, it renders only while connected and when the selected file is the running
   file or nothing is running: mid-run, beside some other file, it would be about a different run.
 

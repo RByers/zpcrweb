@@ -13,7 +13,12 @@
  * what lets both the stateful emulator ({@link EmulatedInstrument}) and `usbDevice.test.ts`'s
  * scripted replies share one shell instead of two drifting copies of the framing.
  */
-import { FrameReassembler, encodeFrame, type CfxFrameHeader } from "../frame.js";
+import {
+  FrameReassembler,
+  MAX_MESSAGE_PAYLOAD,
+  encodeFrame,
+  type CfxFrameHeader,
+} from "../frame.js";
 import type { UsbDeviceLike, UsbInTransferResultLike } from "../transport.js";
 import { CFX_PRODUCT_ID, CFX_VENDOR_ID } from "../transport.js";
 
@@ -37,9 +42,6 @@ export type EmulatorResponder = (command: string, payload: Uint8Array) => Emulat
 
 const LATIN1 = new TextDecoder("latin1");
 
-/** The most payload one message carries (measured, `usb-basic`): five short of the `uint16` the
- * length field could express. */
-export const MAX_MESSAGE_PAYLOAD = 65_530;
 
 /**
  * The header bytes a *device* reply carries — measured, and not the same as a request's.

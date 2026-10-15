@@ -4193,6 +4193,62 @@ async function mockInstrumentChecks(chrome, origin) {
     JSON.stringify(aborted.notes),
   );
   long.close();
+
+  // ── A completed run, straight off the instrument ────────────────────────────────────────────
+  // `Real-Time Data` is a directory no listing reveals — it is reached by name, as CFX Manager
+  // does — and the mock seeds it with three bundled runs, each over one message's 64 KB, so
+  // opening one is also the download that arrives in several messages.
+  const files = await openMockSession(chrome, origin, MOCK_ZPCR);
+  await clickConnect(files);
+  await waitValue(() => railStat(files, "Identity", "Model"), (v) => v !== null, {
+    timeout: 15000,
+    what: "the instrument to identify itself, for the files check",
+  });
+  const DIR = `[...document.querySelectorAll(".instrument__dir")]
+    .find((d) => d.querySelector(".instrument__dirpath")?.textContent.trim() === "\\\\Storage Card\\\\Real-Time Data")`;
+  await files.eval(`document.querySelector(".instrument__panel--collapsible > summary").click()`);
+  await waitFor(() => files.eval(`!!(${DIR})`), { what: "the Completed runs directory in the files panel" });
+  await files.eval(`[...(${DIR}).querySelectorAll("button")].find((b) => b.textContent.trim() === "List").click()`);
+  const listed = await waitValue(
+    () => files.eval(`[...(${DIR}).querySelectorAll(".instrument__filename")].map((n) => n.textContent.trim())`),
+    (v) => v.length > 0,
+    { timeout: 10000, what: "Real-Time Data's listing" },
+  );
+  const opens = await files.eval(`[...(${DIR}).querySelectorAll(".instrument__file")]
+    .filter((li) => [...li.querySelectorAll("button")].some((b) => b.textContent.trim() === "Open")).length`);
+  check(
+    "the files panel lists Real-Time Data by name, with the simulated instrument's completed runs in it",
+    listed.join(",") ===
+      "20260720_FirstQualification.zpcr,20260725_GRADIENTTEST.zpcr,20260726_S183-S185_RVP.zpcr" &&
+      opens === 3,
+    JSON.stringify({ listed, opens }),
+  );
+
+  await files.eval(`[...(${DIR}).querySelectorAll(".instrument__file")]
+    .find((li) => li.querySelector(".instrument__filename").textContent.trim() === "20260720_FirstQualification.zpcr")
+    .querySelector(".btn--primary").click()`);
+  await waitFor(() => files.eval(`!!document.querySelector(".overview__infotable")`), {
+    timeout: 20000,
+    what: "the opened run's Overview",
+  });
+  await flushWrites(files);
+  const opened = await waitValue(
+    () => catalogNames(files),
+    (names) => names.includes("20260720_FirstQualification.zpcr"),
+    { timeout: 10000, what: "the opened run to be stored" },
+  );
+  const openedView = await files.eval(`(() => ({
+    hash: window.location.hash,
+    error: document.querySelector(".instrument__panel .rail__note")?.textContent.trim() ?? null,
+  }))()`);
+  check(
+    "…and Open pulls a 400 KB run down whole and adds it as a file, landing on its Overview",
+    opened.includes("20260720_FirstQualification.zpcr") &&
+      /view=overview/.test(openedView.hash) &&
+      openedView.error === null,
+    JSON.stringify({ catalog: opened, ...openedView }),
+  );
+  files.close();
 }
 
 /**

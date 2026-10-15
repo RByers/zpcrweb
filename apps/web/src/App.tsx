@@ -405,6 +405,11 @@ export function App() {
   const openRun = async (name: string, archive: ZpcrArchive) => {
     if (await store.addRunArchive(name, archive, { modified: true })) store.setView("overview");
   };
+  // One file off the instrument — a completed run's `.zpcr` from `Real-Time Data` — is the same
+  // again, minus the assembly: the instrument already holds it whole. Filed the way a report is.
+  const openInstrumentFile = async (name: string, bytes: Uint8Array) => {
+    if (await openReport(name, bytes)) store.setView("overview");
+  };
 
   /**
    * The file whose Overview should open with its "Filename" row already in edit mode — set by
@@ -996,6 +1001,7 @@ export function App() {
         {view === "instrument" ? (
           <InstrumentView
             onOpenRun={openRun}
+            onOpenFile={openInstrumentFile}
             onOpenReport={openReport}
             onOpenFinishedRun={openFinishedRun}
             experiment={instrumentExperiment}

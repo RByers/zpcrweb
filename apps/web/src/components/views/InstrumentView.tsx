@@ -106,6 +106,7 @@ export interface InstrumentExperiment {
 
 export function InstrumentView({
   onOpenRun,
+  onOpenFile,
   onOpenReport,
   onOpenFinishedRun,
   experiment,
@@ -117,6 +118,9 @@ export function InstrumentView({
   onCloneExperiment,
 }: {
   onOpenRun: (name: string, archive: ZpcrArchive) => Promise<void> | void;
+  /** Open one file retrieved from the instrument — a completed run's `.zpcr` out of
+   * `Real-Time Data`, say — exactly as if it had been dropped on the drop zone. */
+  onOpenFile: (name: string, bytes: Uint8Array) => Promise<void> | void;
   /** Put the instrument's own run report in the file bar — the rail's Last run section's "Open report".
    * The same callback the run watcher files a thermal-only run's report through, so a report
    * collected by hand and one collected automatically become the same kind of file. */
@@ -250,7 +254,7 @@ export function InstrumentView({
           onNewRun={runWatch.clearFinished}
           onCloneExperiment={onCloneExperiment}
         />
-        {showLive && <InstrumentFiles instrument={instrument} onOpenRun={onOpenRun} />}
+        {showLive && <InstrumentFiles instrument={instrument} onOpenRun={onOpenRun} onOpenFile={onOpenFile} />}
         {showLive ? (
           <InstrumentConsole instrument={instrument} />
         ) : (

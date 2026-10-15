@@ -19,13 +19,12 @@ visualizer for everything** inside a `.zpcr` archive.
       (`emulator.md` §10.2): every reply shape and code agrees, and `usb-run`'s ten run edges come
       out in the same order within seconds. Re-run it whenever the emulator's command handling
       changes.
-- [ ] **Download completed runs from the instrument's own `Real-Time Data` folder.** `usb-basic`
-      shows CFX Manager listing `\Storage Card\Real-Time Data` — a `<run>.zpcr` and `<run>.txt`
-      per completed run — and downloading the `.zpcr`s (`usb.md` §5). That is a finished run
-      retrievable *after* the run folder has been overwritten, which the Instrument view cannot do
-      today. Two things first: `CfxDevice.getFile` must reassemble a reply longer than 65,530
-      bytes (the `.zpcr`s are 40–400 KB and arrive split; the emulator now splits the same way, so
-      it is testable), and a recording of *when* the instrument writes there (`emulator.md` §11).
+- [x] **Download completed runs from the instrument's own `Real-Time Data` folder.** Done: the
+      files panel lists `Real-Time Data` and `Logs` by name (`CFX_DIRECTORIES` — a listing never
+      names a subdirectory, so there is no other way), `CfxDevice.getFile` collects a reply split
+      across several messages, and a `.zpcr` or `.alf` gets **Open**. `#mock` seeds three runs.
+      Still open: trying it on the real instrument, and a recording of *when* the instrument
+      writes there (`emulator.md` §11).
 - [x] Clean up instrument UI to make it less confusing when moving between runs. Done: the rail is
   only the instrument (buttons, the download offer, a collapsed Last run); Start, the running badge
   and the run's state moved to the experiment panel and key on the follower's `runningFile`; the

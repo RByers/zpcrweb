@@ -57,6 +57,7 @@
  */
 import {
   FrameReassembler,
+  MAX_MESSAGE_PAYLOAD,
   REQUEST_HEADER,
   encodeFrame,
   type CfxMessage,
@@ -137,6 +138,16 @@ function isUnrecoverableTransferError(err: Error): boolean {
   return /cancell?ed|NotFoundError|device was disconnected|InvalidStateError|must be opened/i.test(
     text,
   );
+}
+
+function concatBytes(parts: readonly Uint8Array[]): Uint8Array {
+  const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+  let at = 0;
+  for (const p of parts) {
+    out.set(p, at);
+    at += p.length;
+  }
+  return out;
 }
 
 function delay(ms: number): Promise<void> {
@@ -343,6 +354,20 @@ interface Pending {
    * request stays at the head of the queue. Only `*IDN?` sets one — see {@link looksLikeIdentity}.
    */
   accept?: (msg: CfxMessage) => boolean;
+  /**
+   * Set for a reply known to be `expected` bytes long, which may arrive as several messages: one
+   * message's length field is a `uint16` and the instrument fills it to 65,530 bytes (`usb.md`
+   * §5), so a larger file comes back as consecutive channel-1 messages, back to back. They are
+   * collected here and resolved as one — see {@link CfxDevice.dispatch}.
+   */
+  assembly?: { expected: number; parts: Uint8Array[]; received: number };
+}
+
+/** What a request may say about its reply — see {@link Pending}'s `accept` and `assembly`. */
+interface ReplyOptions {
+  accept?: Pending["accept"];
+  /** The reply's length in bytes, when it is known in advance and may span several messages. */
+  bytes?: number;
 }
 
 /**
@@ -494,9 +519,23 @@ export class CfxDevice {
       this.emit("in", msg, true);
       return;
     }
-    const waiting = head ? this.queue.shift() : undefined;
+    const waiting = head;
     this.emit("in", msg, !waiting);
     if (!waiting) return; // channel 0/2, or a channel-1 message nobody asked for
+    // A reply arriving in parts stays at the head of the queue until the last of them: the
+    // protocol has no request ids, so a part released early would answer the *next* command.
+    // Only a *full* message promises more — the instrument fills every part but the last — so a
+    // short one ends the reply even when it falls short, and the caller's size check reports the
+    // truncation now rather than after a timeout. (`passThrough` can't tell content from a status
+    // code here: a file's bytes carry it too. A four-byte status code is simply a short part.)
+    const a = waiting.assembly;
+    if (a) {
+      a.parts.push(msg.payload);
+      a.received += msg.payload.length;
+      if (a.received < a.expected && msg.payload.length >= MAX_MESSAGE_PAYLOAD) return;
+      msg = { ...msg, payload: a.parts.length === 1 ? a.parts[0]! : concatBytes(a.parts) };
+    }
+    this.queue.shift();
     if (waiting.timer) clearTimeout(waiting.timer);
     waiting.resolve(msg);
   }
@@ -536,9 +575,9 @@ export class CfxDevice {
   private async exchange(
     command: string,
     timeoutMs?: number,
-    accept?: Pending["accept"],
+    reply: ReplyOptions = {},
   ): Promise<CfxMessage> {
-    return this.exchangeBytes(command, encodeCommand(command), timeoutMs, accept);
+    return this.exchangeBytes(command, encodeCommand(command), timeoutMs, reply);
   }
 
   /**
@@ -554,7 +593,7 @@ export class CfxDevice {
     command: string,
     payload: Uint8Array,
     timeoutMs?: number,
-    accept?: Pending["accept"],
+    { accept, bytes }: ReplyOptions = {},
   ): Promise<CfxMessage> {
     // `pump === null` covers the case `closed` doesn't: the read pump gave up on its own, so the
     // reply to this command is never coming. Without it the command would sit in the queue until
@@ -565,6 +604,7 @@ export class CfxDevice {
     let pending!: Pending;
     const reply = new Promise<CfxMessage>((resolve, reject) => {
       pending = { command, resolve, reject, timer: null, accept };
+      if (bytes !== undefined) pending.assembly = { expected: bytes, parts: [], received: 0 };
       const ms = timeoutMs ?? this.opts.timeoutMs ?? 10_000;
       pending.timer = setTimeout(() => {
         // Drop it from the queue, or every later reply would be matched to the wrong request.
@@ -603,7 +643,8 @@ export class CfxDevice {
    */
   private async sequence<T>(
     fn: (ops: {
-      send: (command: string, timeoutMs?: number) => Promise<CfxMessage>;
+      /** `expectBytes` collects a reply that may span several messages — see {@link Pending}. */
+      send: (command: string, timeoutMs?: number, expectBytes?: number) => Promise<CfxMessage>;
       command: (command: string, timeoutMs?: number) => Promise<CfxResponse>;
       tryCommand: (command: string, timeoutMs?: number) => Promise<CfxResponse>;
       sendBytes: (label: string, payload: Uint8Array, timeoutMs?: number) => Promise<CfxMessage>;
@@ -611,7 +652,7 @@ export class CfxDevice {
   ): Promise<T> {
     return this.hold(() =>
       fn({
-        send: (c, t) => this.exchange(c, t),
+        send: (c, t, n) => this.exchange(c, t, { bytes: n }),
         command: async (c, t) => checked(c, parseResponse((await this.exchange(c, t)).payload)),
         tryCommand: async (c, t) => parseResponse((await this.exchange(c, t)).payload),
         sendBytes: (l, p, t) => this.exchangeBytes(l, p, t),
@@ -653,7 +694,7 @@ export class CfxDevice {
    * {@link looksLikeIdentity} rather than taken as the answer (design point 2).
    */
   async identify(): Promise<CfxIdentity> {
-    const msg = await this.hold(() => this.exchange("*IDN?", undefined, looksLikeIdentity));
+    const msg = await this.hold(() => this.exchange("*IDN?", undefined, { accept: looksLikeIdentity }));
     return parseIdentity(checked("*IDN?", parseResponse(msg.payload)));
   }
 
@@ -731,8 +772,9 @@ export class CfxDevice {
    * separator and accepts the limit rather than pretending to a robustness it can't have.
    *
    * Lists **files only**: a directory containing nothing but subdirectories comes back `empty`,
-   * which is why `\Storage Card` — which holds only `CurrentRun` and `PCRunReport` — has no
-   * listing of its own.
+   * which is why `\Storage Card` has no listing of its own. Nor is there any other way to find a
+   * subdirectory — CFX Manager reaches `Real-Time Data` and `Logs` by name — so the directories a
+   * client can browse are exactly the ones it already knows ({@link CFX_DIRECTORIES}).
    *
    * When `GETFILESLEN` answers with a binary payload instead of a length ({@link CfxListingStatus}),
    * `LISTALLFILES` is **not** sent: with nothing newly buffered it would hand back whichever
@@ -770,6 +812,10 @@ export class CfxDevice {
    * not go through {@link parseResponse}, which would take the last semicolon in a binary file as
    * a field separator. The announced size is used to verify the transfer arrived whole.
    *
+   * It is also what lets a file over 64 KB arrive at all: such a reply comes as several messages
+   * of 65,530 bytes and a remainder (`usb.md` §5 — a 406,323-byte `.zpcr` from `Real-Time Data`
+   * was seven), and the read pump collects them into one against this count (see {@link Pending}).
+   *
    * Runs as one {@link sequence} for the same reason {@link listFiles} does — `GETFILESLEN`
    * demonstrably primes `LISTALLFILES`, so the size/fetch pair is treated as equally stateful
    * rather than assumed independent.
@@ -786,7 +832,7 @@ export class CfxDevice {
       // `GETFILE` sent for one has been observed to go unanswered until the reply timer below
       // finally rejects it — costing up to `timeoutMs` per marker. Nothing to fetch, so don't ask.
       if (expected === 0) return new Uint8Array(0);
-      const msg = await send(`GETFILE ${path}`, timeoutMs);
+      const msg = await send(`GETFILE ${path}`, timeoutMs, expected);
       if (msg.payload.length !== expected) {
         throw new Error(
           `GETFILE ${path}: expected ${expected} bytes, received ${msg.payload.length}`,

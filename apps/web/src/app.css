@@ -4647,6 +4647,8 @@ summary.instrument__panelhead {
   padding: 3px 0;
 }
 .instrument__filename {
+  /* Takes the slack, so a row's buttons (Open, Retrieve) sit together at the right edge. */
+  flex: 1;
   font-size: 12px;
   color: var(--ink-2);
   overflow-wrap: anywhere;

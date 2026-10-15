@@ -47,6 +47,23 @@ export function mockSpeedLabel(speed: MockSpeed): string {
  */
 const RECORDING = "20260807-YouSeq_RT_-_S56.zpcr";
 
+/**
+ * What the simulated instrument's `Real-Time Data` holds on connect: completed runs to browse and
+ * open, since the emulator never writes there itself. These three are runs this project's own
+ * instrument made in July 2026 — the same span `Real-Time Data` was found holding — and every one
+ * is over 64 KB, so opening one exercises a download that arrives in several messages.
+ *
+ * Only the `.zpcr` of each: the real directory pairs every run with a `<run>.txt` too, but what
+ * that file holds has never been read, and a made-up one would be the mock inventing a format.
+ */
+const COMPLETED_RUNS = [
+  "20260720_FirstQualification.zpcr",
+  "20260725_GRADIENTTEST.zpcr",
+  "20260726_S183-S185_RVP.zpcr",
+];
+
+const REAL_TIME_DATA_DIR = "\\Storage Card\\Real-Time Data";
+
 const HASH_KEY = "mock";
 
 function parseSpeed(raw: string | null): MockSpeed {
@@ -162,9 +179,27 @@ export function acquireMockDevice(): Promise<UsbDeviceLike> {
 
 async function buildMockDevice(): Promise<UsbDeviceLike> {
   const { createCfxEmulator, recordedRunData } = await import("@zpcrweb/core/emulator");
-  const response = await fetch(sampleUrl(RECORDING));
+  const [response, completed] = await Promise.all([
+    fetch(sampleUrl(RECORDING)),
+    Promise.all(COMPLETED_RUNS.map(fetchOptionalSample)),
+  ]);
   if (!response.ok) throw new Error(`Couldn't load the simulated instrument's run data (${response.status})`);
   const archive = unzipArchive(new Uint8Array(await response.arrayBuffer()));
+  const initialFiles: Record<string, Uint8Array> = {};
+  for (const [i, bytes] of completed.entries()) {
+    if (bytes) initialFiles[`${REAL_TIME_DATA_DIR}\\${COMPLETED_RUNS[i]}`] = bytes;
+  }
   clock = switchableClock(speed);
-  return createCfxEmulator({ data: recordedRunData(archive), clock });
+  return createCfxEmulator({ data: recordedRunData(archive), clock, initialFiles });
+}
+
+/** A sample's bytes, or null when it isn't there to fetch — an emptier `Real-Time Data` is no
+ * reason to refuse the whole instrument. */
+async function fetchOptionalSample(name: string): Promise<Uint8Array | null> {
+  try {
+    const response = await fetch(sampleUrl(name));
+    return response.ok ? new Uint8Array(await response.arrayBuffer()) : null;
+  } catch {
+    return null;
+  }
 }
