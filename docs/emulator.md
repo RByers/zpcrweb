@@ -51,11 +51,17 @@ would make every test above it meaningless.
 Two details that are behaviour, not decoration:
 
 - A reply goes to the **oldest** parked reader, because that is what a FIFO endpoint does.
-- `close()` **rejects** every parked read and drops anything queued, because WebUSB rejects an
-  in-flight `transferIn` when the handle closes and `CfxDevice`'s pump reads that rejection as
-  "the handle is gone". Without it a disconnect leaves a dead client parked on the endpoint and
-  the *next* client's first answer is delivered to the corpse. See §10 — this was a real bug, and
-  only a browser found it.
+- `close()` **rejects** every parked read, because WebUSB rejects an in-flight `transferIn` when
+  the handle closes and `CfxDevice`'s pump reads that rejection as "the handle is gone". Without
+  it a disconnect leaves a dead client parked on the endpoint and the *next* client's first answer
+  is delivered to the corpse. See §10 — this was a real bug, and only a browser found it.
+- `close()` **keeps anything already queued.** A reply the host never read is in the instrument's
+  pipe, and closing the host's handle does not empty it: the next connection reads it first.
+  Observed on a real instrument — a reload mid-poll left a `STATUS?` answer in the pipe, and the
+  Identity panel of the next connection showed it as the model, with every reply after it one
+  command behind. `CfxDevice.identify` turns such a reply away (`usb.md` §3, "A connection starts
+  in step"), and the transport keeping the queue is what lets `usbDevice.test.ts` and
+  `session.test.ts` prove it.
 
 ## 4. The filesystem
 

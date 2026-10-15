@@ -162,6 +162,16 @@ A channel-1 message's payload is the literal command line: **ASCII, CR-terminate
 (`\r\n` was used consistently in every message captured), no other structure — a plain text
 command in, a plain text response out, framed per §2.
 
+**A connection starts in step.** Replies carry no request id, so the client matches them to
+requests by arrival order — and a reply the instrument wrote for the *previous* connection is still
+in its pipe when the next one opens. Observed: a page reloaded while a `STATUS?` poll was
+outstanding, and the next connection's `*IDN?` was answered with the status line, every
+identification query after it with the reply meant for the one before (`FrontEndSoftware?` got a
+file listing). `CfxDevice.identify` therefore refuses any reply to `*IDN?` that is not shaped like
+one — four comma-separated fields, the first naming Bio-Rad, no semicolon in the value — and goes
+on waiting; the refused reply is logged and shown as unsolicited traffic. `*IDN?` is the first
+command of every connection, so this is the one place it is needed.
+
 **Response shape.** There are two shapes, and which one a command uses depends on whether it has
 a value to report at all:
 

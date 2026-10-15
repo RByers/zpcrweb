@@ -63,6 +63,48 @@ describe("CfxDevice", () => {
     await dev.close();
   });
 
+  it("brings a new connection into step past replies the last one left in the pipe", async () => {
+    // A `STATUS?` poll and a `LISTALLFILES` answered after the previous page went away — the two
+    // shapes observed on a real instrument, which read as the model and the firmware until *IDN?
+    // learned to turn them away. Queued before the handle opens, as a pipe would hold them.
+    // Delivered ahead of *IDN?'s own answer while *IDN? is outstanding — the order a real
+    // connection sees, since the first read completes after the first command is queued.
+    const stale = [
+      `${STATUS_IDLE}\r\n`,
+      "Q12.plt.csv,zpcrweb.json,runlog.xml,RunInfo.xml,FAM_BR Clear.Dcal;0000\r\n",
+    ];
+    const mock: MockInstrument = new MockInstrument((cmd) => {
+      if (cmd === "*IDN?") {
+        for (const line of stale.splice(0)) mock.push(text(line));
+        return { payload: text("BIO-RAD LABORATORIES,C1000,CT019138,2.0.231.0;0000\r\n") };
+      }
+      return cmd === "STATUS?" ? { payload: text(`${STATUS_IDLE}\r\n`) } : null;
+    });
+    const seen: { text: string | null; unsolicited: boolean }[] = [];
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const dev = new CfxDevice(mock, {
+      onTraffic: (e) => {
+        if (e.direction === "in") seen.push({ text: e.text, unsolicited: e.unsolicited });
+      },
+    });
+    await dev.open();
+    expect(await dev.identify()).toMatchObject({
+      manufacturer: "BIO-RAD LABORATORIES",
+      model: "C1000",
+      serial: "CT019138",
+    });
+    // Both stale replies were read, surfaced as traffic nobody asked for, and left out of the
+    // queue — so the command *after* *IDN? gets its own answer too.
+    expect(seen.filter((e) => e.unsolicited).map((e) => e.text?.split(";")[0])).toEqual([
+      "18.40",
+      "Q12.plt.csv,zpcrweb.json,runlog.xml,RunInfo.xml,FAM_BR Clear.Dcal",
+    ]);
+    expect(warn).toHaveBeenCalledTimes(2);
+    expect(await dev.status()).toMatchObject({ running: false, lid: "CLOSED" });
+    warn.mockRestore();
+    await dev.close();
+  });
+
   it("ignores unsolicited channel-2 traffic instead of matching it to a command", async () => {
     // The bug a per-command reader has: a channel-2 message arriving between request and reply
     // would be returned as the answer.

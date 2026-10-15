@@ -29,6 +29,17 @@
  * for B. `sequence` therefore holds the channel across several commands, and every multi-command
  * operation here runs inside one.
  *
+ * Arrival order is also why **a connection has to start in step**. A reply the instrument wrote
+ * for the *previous* connection — a `STATUS?` poll answered after the page reloaded or the user
+ * pressed Disconnect — is still sitting in its pipe when the next connection opens, and it would
+ * be read first and matched to the first command sent, with every reply after it off by one: an
+ * Identity panel reporting a status line as the model and a file listing as the firmware
+ * (observed). The first command of every connection is `*IDN?`, so {@link CfxDevice.identify}
+ * attaches an {@link Pending.accept} check and {@link dispatch} drops any channel-1 reply that
+ * does not look like an identity — logged, and surfaced as unsolicited traffic — until the real
+ * one arrives. Nothing else needs it: once `*IDN?` has been answered the channel is in step, and
+ * it stays so because exactly one command is outstanding at a time.
+ *
  * **3. Command lines are built here and nowhere else.** Every public method on this class is a
  * *named operation* — `status()`, `listFiles(dir)`, `runAction("lidOpen")` — and the machinery
  * that turns one into a command line (`send`/`command`/`tryCommand`/`sequence`) is private. There
@@ -326,6 +337,25 @@ interface Pending {
   resolve: (res: CfxMessage) => void;
   reject: (err: Error) => void;
   timer: ReturnType<typeof setTimeout> | null;
+  /**
+   * When set, a channel-1 reply this returns false for is not this command's answer: it is a
+   * reply left over from an earlier connection (design point 2), dropped as unsolicited while this
+   * request stays at the head of the queue. Only `*IDN?` sets one — see {@link looksLikeIdentity}.
+   */
+  accept?: (msg: CfxMessage) => boolean;
+}
+
+/**
+ * Whether a reply is an answer to `*IDN?` — `BIO-RAD LABORATORIES,C1000,CT019138,2.0.231.0;0000`
+ * (`usb.md` §3): four comma-separated fields, the first naming Bio-Rad, and no semicolon inside
+ * the value. The stale replies this has to turn away are a `STATUS?`/`RTSTATUS?` poll (both
+ * semicolon-heavy) and a `LISTALLFILES` listing (commas, but no manufacturer).
+ */
+function looksLikeIdentity(msg: CfxMessage): boolean {
+  const res = parseResponse(msg.payload);
+  if (!res.ok || res.value === null || res.value.includes(";")) return false;
+  const parts = res.value.split(",");
+  return parts.length >= 4 && /^BIO-RAD\b/i.test(parts[0]!.trim());
 }
 
 export class CfxDevice {
@@ -453,7 +483,18 @@ export class CfxDevice {
   }
 
   private dispatch(msg: CfxMessage): void {
-    const waiting = msg.channel === CHANNEL_ASCII ? this.queue.shift() : undefined;
+    const head = msg.channel === CHANNEL_ASCII ? this.queue[0] : undefined;
+    if (head?.accept && !head.accept(msg)) {
+      // A reply from before this connection, read ahead of the answer to the command at the head
+      // of the queue (design point 2). Leave the command waiting; its answer is still coming.
+      console.warn(
+        `[CfxDevice] dropping a stale reply read ahead of ${head.command}'s answer:`,
+        usbTrafficText(msg.payload)?.slice(0, 80) ?? `${msg.payload.length} bytes`,
+      );
+      this.emit("in", msg, true);
+      return;
+    }
+    const waiting = head ? this.queue.shift() : undefined;
     this.emit("in", msg, !waiting);
     if (!waiting) return; // channel 0/2, or a channel-1 message nobody asked for
     if (waiting.timer) clearTimeout(waiting.timer);
@@ -492,8 +533,12 @@ export class CfxDevice {
   }
 
   /** Write one command and await its reply. Assumes the caller holds the channel. */
-  private async exchange(command: string, timeoutMs?: number): Promise<CfxMessage> {
-    return this.exchangeBytes(command, encodeCommand(command), timeoutMs);
+  private async exchange(
+    command: string,
+    timeoutMs?: number,
+    accept?: Pending["accept"],
+  ): Promise<CfxMessage> {
+    return this.exchangeBytes(command, encodeCommand(command), timeoutMs, accept);
   }
 
   /**
@@ -509,6 +554,7 @@ export class CfxDevice {
     command: string,
     payload: Uint8Array,
     timeoutMs?: number,
+    accept?: Pending["accept"],
   ): Promise<CfxMessage> {
     // `pump === null` covers the case `closed` doesn't: the read pump gave up on its own, so the
     // reply to this command is never coming. Without it the command would sit in the queue until
@@ -518,7 +564,7 @@ export class CfxDevice {
     const frame = encodeFrame(header, payload);
     let pending!: Pending;
     const reply = new Promise<CfxMessage>((resolve, reject) => {
-      pending = { command, resolve, reject, timer: null };
+      pending = { command, resolve, reject, timer: null, accept };
       const ms = timeoutMs ?? this.opts.timeoutMs ?? 10_000;
       pending.timer = setTimeout(() => {
         // Drop it from the queue, or every later reply would be matched to the wrong request.
@@ -601,8 +647,14 @@ export class CfxDevice {
 
   // ---- typed operations -------------------------------------------------
 
+  /**
+   * `*IDN?` — and, being the first command of every connection, the one that brings the channel
+   * into step: a reply left in the pipe by the previous connection is turned away by
+   * {@link looksLikeIdentity} rather than taken as the answer (design point 2).
+   */
   async identify(): Promise<CfxIdentity> {
-    return parseIdentity(await this.command("*IDN?"));
+    const msg = await this.hold(() => this.exchange("*IDN?", undefined, looksLikeIdentity));
+    return parseIdentity(checked("*IDN?", parseResponse(msg.payload)));
   }
 
   async status(): Promise<CfxStatus> {

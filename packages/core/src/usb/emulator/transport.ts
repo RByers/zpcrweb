@@ -108,12 +108,17 @@ export class EmulatorTransport implements UsbDeviceLike {
    * command after it times out. Nothing in Node noticed: a test opens one client and ends. The
    * app's disconnect → reconnect — a cable pulled mid-run, or a user pressing Disconnect and
    * connecting again — is exactly that second client.
+   *
+   * **What is already queued stays queued.** A reply the instrument has written but the host has
+   * not read is in the instrument's pipe, not the host's handle, and closing the handle does not
+   * empty it: the next connection reads it first (observed on a real instrument — an Identity
+   * panel showing a `STATUS?` line as the model, because the previous page's poll was answered
+   * after the page went away). `CfxDevice.identify` is what copes with it, and keeping the queue
+   * is what lets the suite prove that it does.
    */
   async close(): Promise<void> {
     this.opened = false;
     const parked = this.waiters.splice(0);
-    // The pipe is gone with the handle, so anything queued for it goes too.
-    this.outbox.length = 0;
     for (const w of parked) w.reject(new Error("Cancelled: the device was closed"));
   }
   async selectConfiguration(n: number): Promise<void> {

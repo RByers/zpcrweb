@@ -119,6 +119,30 @@ describe("reconnect is the session's job", () => {
     await session.dispose();
   });
 
+  it("identifies the instrument correctly past a poll the last connection never read", async () => {
+    // Disconnect with a `STATUS?` answered but unread: the emulator keeps it queued the way the
+    // instrument's pipe does, so the next connection's first read is that status line. Before
+    // `*IDN?` turned such a reply away, `info.model` here was the status line's `BLOCK` field.
+    const emulator = createCfxEmulator({ clock: acceleratedClock() });
+    const session = sessionOn(emulator);
+    await session.connect();
+    await session.disconnect();
+    emulator.push(
+      new TextEncoder().encode(
+        '18.40;23.8;0;0;IDLE;0;"",BLOCK,OFF;0;0.00;0.00;0.00;0.00;0.00;0;0;0;18.40;CLOSED;0;0000\r\n',
+      ),
+    );
+    await session.connect();
+    expect(session.state.info).toMatchObject({ manufacturer: "BIO-RAD LABORATORIES", model: "C1000" });
+    expect(session.state.info?.frontEndSoftware ?? "").not.toMatch(/;/);
+    // The stale line is still in the record — as traffic nobody asked for, not as an answer.
+    const staleLine = session.state.traffic.find(
+      (l) => l.kind === "message" && l.direction === "in" && /18\.40;23\.8/.test(l.text ?? ""),
+    );
+    expect(staleLine).toMatchObject({ unsolicited: true });
+    await session.dispose();
+  });
+
   it("does not reconnect after a disconnect that was asked for", async () => {
     const emulator = createCfxEmulator({ clock: acceleratedClock() });
     let acquires = 0;
