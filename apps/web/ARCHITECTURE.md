@@ -1926,7 +1926,7 @@ bytes and the name (`RawFilesView.handleDownload`):
 | Mode | What it writes | Name |
 | --- | --- | --- |
 | Decoded | the rendered table flattened to CSV (`decodedToCsv`), or every well/channel of a `.Plateread` (`plateReadToCsv`) | `<entry base>.csv` |
-| Text | what the text pane holds — the decrypted `.pltd`/`.prcl` XML, the rendered traffic log, the file's own text | the entry's name, or `<base>.xml`/`.txt` where the text isn't the stored form |
+| Text | what the text pane holds — the decrypted `.pltd`/`.prcl` XML, the file's own text; **except `usb-traffic.bin`**, which saves its stored bytes from here too (below) | the entry's name, or `<base>.xml`/`.txt` where the text isn't the stored form |
 | Hex | the entry's stored bytes, verbatim (`downloadBytes`) | the archive entry's own name |
 
 Hex is the mode that gets a file *out* of a run unchanged: no re-encoding, no extension swap, and
@@ -1938,10 +1938,12 @@ pick an entry out of. The Hex download is asserted end to end by `uitest`'s `raw
 **`usb-traffic.bin`** — the wire log the Instrument view records for a run it drove itself (see
 "The Instrument view") — groups under **Metadata** and opens in **Text**, the one entry that is
 binary and yet does. Its stored form is records (`usb-traffic.md`); the text is what a reader wants,
-and **this view is where that rendering happens** (`formatUsbTrafficBytes`), which is also why it
-downloads under the text name `usb-traffic.log` rather than the entry's own. There is no *Decoded*
-mode because the text already is the decode — one line per message with the payload bytes on it —
-and no XML tree, since it isn't XML. A `.zpcr` written before the binary format carries a plain-text
+and **this view is where that rendering happens** (`formatUsbTrafficBytes`). Its download is the
+exception to "the button saves what the mode shows": from Text mode too it writes the entry's stored
+bytes under its own name, exactly as Hex would, because the rendering previews every long response
+(`usbTrafficPreview`) and a text file of it would have dropped the payloads the log exists to keep.
+There is no *Decoded* mode because the text already is the decode — one line per message with the
+payload bytes on it — and no XML tree, since it isn't XML. A `.zpcr` written before the binary format carries a plain-text
 `usb-traffic.log` instead, which needs none of this and reads as ordinary text.
 
 **`zpcrweb.json` is the one synthesized entry** (its own "Analysis" group, sorted just above
@@ -3922,9 +3924,13 @@ The components, under `components/instrument/` (`instrumentParts.tsx` holds the 
   it in a console line verbatim swamped the panel with a single line the size of its scrollback —
   in exactly the case the surrounding lines matter most — besides parking megabytes of unreadable
   hex in React state. Lines are built through core's `usbTrafficPreview` (`usb-traffic.md` §4),
-  the same cut the text rendering applies, so the console and a downloaded log agree on where a
-  payload stops. Only responses are cut; a request is a short command. The recording is untouched
-  by any of it and keeps every byte.
+  the same cut the Raw files view's rendering applies, so the console and a loaded-back log agree
+  on where a payload stops. Only responses are cut; a request is a short command. The recording is
+  untouched by any of it and keeps every byte — which is why **the download button writes the
+  recording, not the lines**: `CfxSession.trafficLogBytes()`, saved as `usb-traffic.bin`, the same
+  file a run's `.zpcr` carries, with every byte of every transfer. The same button over a saved log
+  (`saved` slot, below) writes that file's own entry verbatim. A text download used to exist and
+  was a trap: it looked complete and had elided exactly the payloads worth having.
 
   **Recording is unconditional; "save log" decides only what is *kept*.** Every message and
   transfer error goes into core's `UsbTrafficRecorder` (`usb-traffic.md`) for the whole session,

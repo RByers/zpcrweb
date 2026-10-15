@@ -210,8 +210,8 @@ export function InstrumentView({
   /**
    * The selected run's own saved USB traffic log, shown in the console's slot when the live one
    * isn't — live traffic there would belong to some other run. Either name a log is stored under
-   * (`usb-traffic.bin`, or an older file's plain-text `usb-traffic.log`), in the text form the Raw
-   * files view renders it in.
+   * (`usb-traffic.bin`, or an older file's plain-text `usb-traffic.log`): shown in the text form
+   * the Raw files view renders it in, downloaded as the entry itself.
    */
   const savedLog = useMemo((): SavedTrafficLog | null => {
     if (showLive || !experiment?.zpcr) return null;
@@ -220,6 +220,8 @@ export function InstrumentView({
     if (!entry) return null;
     return {
       name,
+      entry,
+      bytes: () => zpcr.archive.bytes(entry),
       text: () => {
         try {
           return /\.log$/i.test(entry)

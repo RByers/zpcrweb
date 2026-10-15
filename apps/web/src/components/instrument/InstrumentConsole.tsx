@@ -9,8 +9,9 @@
  *
  * **Watching, recording and saving are three things.** What scrolls past here is a capped,
  * poll-filtered window. The *recording* behind it is unconditional and complete — core's
- * `UsbTrafficRecorder` (`usb-traffic.md`), which is what the download button writes out as text —
- * so a problem noticed after the fact is still recoverable. The only choice on offer is "save
+ * `UsbTrafficRecorder` (`usb-traffic.md`), which is what the download button writes out, as the
+ * same `usb-traffic.bin` a run's file carries — so a problem noticed after the fact is still
+ * recoverable, with every byte of every transfer. The only choice on offer is "save
  * log": whether a finished run's `.zpcr` carries that record, since that copy is the one that
  * outlives the session (see `useCfxDevice`'s `setSaveLog`).
  *
@@ -31,14 +32,19 @@
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { DownloadIcon } from "../DownloadIcon";
-import { downloadText } from "../../lib/download";
-import { USB_TRAFFIC_TEXT_NAME } from "@zpcrweb/core";
+import { downloadBytes } from "../../lib/download";
+import { USB_TRAFFIC_LOG_NAME } from "@zpcrweb/core";
 import type { CfxDeviceHandle } from "../../state/useCfxDevice";
 
 /** A traffic log saved inside a file — what the console shows in place of live traffic. */
 export interface SavedTrafficLog {
   /** The experiment it belongs to, for the title. */
   name: string;
+  /** The archive entry it is stored under — `usb-traffic.bin`, or an older file's plain-text
+   * `usb-traffic.log` — which is the name the download saves it as. */
+  entry: string;
+  /** The entry's stored bytes, verbatim: what the download button writes. */
+  bytes: () => Uint8Array;
   /** Its text rendering, computed on first open: a whole run's log can be large, and a closed
    * panel has no use for it. */
   text: () => string;
@@ -79,12 +85,13 @@ export function InstrumentConsole({
 
   // Writes the session's whole recording — not the display-only `traffic`/`lines`, since the point
   // of this button is a complete log for decoding, not a copy of whatever the console happens to
-  // be showing. Text, not the stored records: a downloaded log is for reading, and the Raw files
-  // view renders the archived copy the same way (`formatUsbTrafficLog`, one line per message).
-  const downloadLog = () => downloadText(USB_TRAFFIC_TEXT_NAME, instrument.trafficLogText());
-  // A saved log downloads exactly what it shows: the file's own record, rendered the same way.
-  const downloadSaved = () =>
-    saved && downloadText(USB_TRAFFIC_TEXT_NAME, savedText ?? saved.text());
+  // be showing. The stored records, not their text: the text rendering previews a long response
+  // (`usbTrafficPreview`, the same cut the lines above use), so a text download could never show
+  // what a `GETFILE` reply actually carried. The `.bin` is what a run's `.zpcr` holds, and loading
+  // it back is how it gets read — the Raw files view renders it one line per message.
+  const downloadLog = () => downloadBytes(USB_TRAFFIC_LOG_NAME, instrument.trafficLogBytes());
+  // A saved log downloads the file's own entry, verbatim and under its own name.
+  const downloadSaved = () => saved && downloadBytes(saved.entry, saved.bytes());
 
   const downloadButton = (
     <button
@@ -98,8 +105,8 @@ export function InstrumentConsole({
       aria-label={saved ? "Download this run's saved USB traffic log" : "Download USB traffic log"}
       title={
         saved
-          ? "Download the USB traffic log saved in this run's file, as text"
-          : "Download the complete USB traffic log, as text"
+          ? "Download the USB traffic log saved in this run's file"
+          : "Download the complete USB traffic log, with every byte of every transfer"
       }
     >
       <DownloadIcon />

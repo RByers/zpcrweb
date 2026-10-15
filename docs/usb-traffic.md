@@ -31,7 +31,7 @@ reverse-engineered — this is our own format, so every rule below is *this libr
 
 > **Note:** `.zpcr` files written before this format carry a plain-text `usb-traffic.log` entry
 > instead. Both names are recognized (`isUsbTrafficName`) and the Raw files view reads either; only
-> `usb-traffic.bin` is ever written.
+> `usb-traffic.bin` is ever written — and only `usb-traffic.bin` is ever downloaded (§4).
 
 ## 2. What is stored, and what is derived
 
@@ -98,9 +98,15 @@ connected overnight can't grow without bound.
 
 ## 4. The text rendering
 
-`formatUsbTrafficLog(records)` is the only text form there is — the console's download button and
-the Raw files view both call it, so a downloaded log and the copy inside a `.zpcr` are the same
-file. One line per record, in wire order:
+`formatUsbTrafficLog(records)` is the only text form there is — the console shows it live and the
+Raw files view renders the archived copy with it, so what a reader sees on screen is the same in
+both places. It is **a rendering, never a file**: every download of a log — the console's button on
+a live session, the same button over a run's saved log, and the Raw files view's — writes the
+records themselves as `usb-traffic.bin`, because the rendering below previews a long response
+rather than spelling it out, and a log that has dropped the body of a `GETFILE` reply can't answer
+"was this transfer corrupt?", which is the question a traffic log exists for. Reading a downloaded
+log means loading it back: a `.zpcr` that carries it, or the `.bin` on its own, opens in the Raw
+files view in this rendering. One line per record, in wire order:
 
 ```
 <iso> -> ch<n> [<len>B] <hex>[ text="…"]      a message (-> out, <- in)

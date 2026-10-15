@@ -225,7 +225,7 @@ export function useCfxDevice() {
       setHidePolls: (hide: boolean) => session.setHidePolls(hide),
       clearTraffic: () => session.clearTraffic(),
       trafficLogForRun: () => session.trafficLogForRun(),
-      trafficLogText: () => session.trafficLogText(),
+      trafficLogBytes: () => session.trafficLogBytes(),
       refreshDirectory: (path: string) => session.refreshDirectory(path),
       refreshAll: () => session.refreshAll(),
       fetchFile: (dir: string, name: string) => session.fetchFile(dir, name),

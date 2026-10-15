@@ -24,7 +24,7 @@ import { CFX_CURRENT_RUN_DIR } from "./runPlan.js";
 import { CfxDevice, type CfxTrafficEvent, type CfxTransferErrorEvent } from "./device.js";
 import { isFinishedRun } from "./status.js";
 import { UsbTrafficRecorder } from "../usbTraffic.js";
-import { formatUsbTrafficBytes, usbTrafficPreview } from "../usbTraffic.js";
+import { usbTrafficPreview } from "../usbTraffic.js";
 import { parseAlf, type AlfReport } from "../alf.js";
 import { runProgressFromNames, type RunProgress } from "../runFolder.js";
 import type { CfxCommandName } from "./commands.js";
@@ -430,10 +430,18 @@ export class CfxSession {
     return this.#state.saveLog && !this.#recorder.isEmpty ? this.#recorder.bytes() : null;
   }
 
-  /** The whole session's log as text, for a download button — always available, since recording is
-   * unconditional. */
-  trafficLogText(): string {
-    return formatUsbTrafficBytes(this.#recorder.bytes());
+  /**
+   * The whole session's log as stored — the `usb-traffic.bin` records, every byte of every
+   * message — for a download button. Always available, since recording is unconditional, and
+   * independent of the "save log" switch, which decides only what a run's `.zpcr` keeps.
+   *
+   * Bytes rather than text on purpose: the text rendering previews a long response rather than
+   * spelling it out (`usbTrafficPreview`), so a downloaded text log could never answer "was this
+   * transfer corrupt?" — the question a traffic log exists for. The text is what the Raw files
+   * view shows for the file once it is loaded back.
+   */
+  trafficLogBytes(): Uint8Array {
+    return this.#recorder.bytes();
   }
 
   // --- connecting ------------------------------------------------------------------------------

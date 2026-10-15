@@ -7,7 +7,7 @@
  * a hidden poll must not cause a render.
  */
 import { describe, expect, it } from "vitest";
-import { CfxSession, planRun, type UsbDeviceLike } from "../src/index.js";
+import { CfxSession, formatUsbTrafficBytes, planRun, type UsbDeviceLike } from "../src/index.js";
 import { acceleratedClock, createCfxEmulator } from "../src/emulator.js";
 import { drop, pcrData, sessionOn, waitFor } from "./sessionRig.js";
 
@@ -171,9 +171,12 @@ describe("the traffic window", () => {
     expect(session.trafficLogForRun()).toBeNull(); // asked for, but there is nothing to give
     await session.connect();
     expect(session.trafficLogForRun()!.length).toBeGreaterThan(8);
-    expect(session.trafficLogText()).toContain("STATUS?");
+    expect(formatUsbTrafficBytes(session.trafficLogBytes())).toContain("STATUS?");
     session.setSaveLog(false);
     expect(session.trafficLogForRun()).toBeNull();
+    // The download is the recording itself, switch or no switch: the switch decides what a run's
+    // file keeps, not what a download button can write.
+    expect(session.trafficLogBytes().length).toBeGreaterThan(8);
     await session.dispose();
   });
 

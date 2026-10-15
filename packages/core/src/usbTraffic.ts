@@ -31,10 +31,10 @@
  * file's format. */
 export const USB_TRAFFIC_LOG_NAME = "usb-traffic.bin";
 
-/** The name the *text* rendering is downloaded as. Never an archive entry: a `.zpcr` carries the
- * records ({@link USB_TRAFFIC_LOG_NAME}) and the Raw files view renders them, so the two forms
- * can't drift. `.zpcr` files written before the binary format do hold a `usb-traffic.log` entry,
- * which is plain text and still reads as such. */
+/** The plain-text entry `.zpcr` files written before the binary format carry, and still read as
+ * text. Never written any more, and not a download name either: every download of a log is the
+ * records ({@link USB_TRAFFIC_LOG_NAME}), since the text rendering previews a long response
+ * rather than keeping it ({@link usbTrafficPreview}). */
 export const USB_TRAFFIC_TEXT_NAME = "usb-traffic.log";
 
 /** `"ZUSBLOG1"` — magic and version in one, checked by {@link parseUsbTrafficLog}. */

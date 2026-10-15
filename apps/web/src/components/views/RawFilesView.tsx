@@ -1,6 +1,5 @@
 import { useMemo, useRef, useState } from "react";
 import {
-  USB_TRAFFIC_TEXT_NAME,
   ZPCRWEB_SETTINGS_NAME,
   formatUsbTrafficBytes,
   formatZpcrwebSettings,
@@ -205,11 +204,15 @@ export function RawFilesView({ zpcr, settings }: { zpcr: Zpcr; settings: FileSet
     mode === "decoded" ? hasDecoded : mode === "hex" ? selected !== "" : textDownload !== null;
 
   const handleDownload = () => {
-    if (mode === "hex") {
+    if (mode === "hex" || isTrafficLog) {
       // Hex shows the entry's stored bytes, so the download is those bytes under the entry's own
       // name — no re-encoding, no extension swap, whatever the archive holds. `zpcrweb.json` is
       // the one entry whose bytes are synthesized from live state rather than read (see
       // `liveSettingsText`), and the download matches what the dump on screen shows.
+      //
+      // The traffic log does the same from Text mode: its text rendering previews every long
+      // response (`usbTrafficPreview`), so saving it would drop the payloads a log exists to keep.
+      // The `.bin` is the complete record, and loading it back into the app is how it is read.
       downloadBytes(selected, isSettings ? settingsBytes : zpcr.archive.bytes(selected));
       return;
     }
@@ -222,13 +225,7 @@ export function RawFilesView({ zpcr, settings }: { zpcr: Zpcr; settings: FileSet
       if (!decodedRef.current) return;
       downloadText(`${baseName(selected)}.csv`, decodedToCsv(decodedRef.current), "text/csv");
     } else if (textDownload) {
-      // The traffic log downloads under the name its text form has everywhere else — the console's
-      // own button writes exactly the same file (`USB_TRAFFIC_TEXT_NAME`), not `usb-traffic.bin`.
-      const name = isTrafficLog
-        ? USB_TRAFFIC_TEXT_NAME
-        : isPltd || isPrcl
-          ? `${baseName(selected)}.${textDownload.ext}`
-          : selected;
+      const name = isPltd || isPrcl ? `${baseName(selected)}.${textDownload.ext}` : selected;
       const mime =
         textDownload.ext === "xml"
           ? "application/xml"
