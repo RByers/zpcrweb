@@ -3529,11 +3529,12 @@ every experiment whose name had a space in it miss its own file: the pin never m
 the run fell back to `<run date>-<name>.zpcr`, and that only coincided with the file's name when the
 file had been restamped to the very date in the instrument's `RunInfo.xml`.
 
-The two **deposited** files keep the names of the things they *are*:The two **deposited** files keep the names of the things they *are*: the protocol's own name, and
-(for an overridden plate) the plate file's, else what the plate says about itself via
-`identityKey`. Protocols and plates are reused across runs and carry their own identities; an
-experiment name belongs to one run, and stamping it on both copies would overwrite that identity
-for no gain.
+The **deposited** plate keeps the name of the thing it *is*: (for an overridden plate) the plate
+file's, else what the plate says about itself via `identityKey`. Plates are reused across runs and
+carry their own identities; an experiment name belongs to one run, and stamping it on the copy
+would overwrite that identity for no gain. The protocol is not deposited at all — the instrument
+records the one it ran as `ProtocolRunDefinition.txt`, and the protocol's name goes as
+`ProtocolName.txt` (`usb.md` §7.4).
 
 The order is `usb.md` §7's, not the one §5's upload machinery suggests: the protocol is typed in as
 ASCII directives, `RemoteRun` starts it, and the files are deposited **afterwards**, into a run

@@ -192,10 +192,25 @@ describe("planRun", () => {
     );
   });
 
-  it("uploads the protocol and plate as this project's own plaintext formats", () => {
+  it("uploads the plate as this project's own plaintext format", () => {
     const uploads = plan().uploads;
-    expect(new TextDecoder().decode(uploads[0]!.bytes)).toContain("PLATEREAD #h3F;");
-    expect(new TextDecoder().decode(uploads[1]!.bytes)).toContain("# zpcrweb plate definition");
+    expect(new TextDecoder().decode(uploads[0]!.bytes)).toContain("# zpcrweb plate definition");
+  });
+
+  /** The instrument records the protocol it ran as `ProtocolRunDefinition.txt`, so a deposited
+   * copy is redundant — and one sent at the start of the run was usually swept away with the
+   * previous run's files (`usb.md` §7.4). */
+  it("never deposits a copy of the protocol", () => {
+    const uploads = planRun({
+      runDefinition: ALL_CHANNELS,
+      plate: plateUsing([1]),
+      name: "RVP",
+      protocolName: "Luna noRT",
+    }).uploads;
+    expect(uploads.some((u) => /\.prcl/i.test(u.name))).toBe(false);
+    for (const u of uploads) {
+      expect(new TextDecoder().decode(u.bytes)).not.toContain("PLATEREAD");
+    }
   });
 
   /**
@@ -203,7 +218,7 @@ describe("planRun", () => {
    * and arrive with names of their own, so the deposited copies keep them and only `RemoteRun`
    * carries the run's name.
    */
-  it("names the uploads after the protocol and the plate, never after the run", () => {
+  it("names the plate upload after the plate, never after the run", () => {
     const uploads = planRun({
       runDefinition: ALL_CHANNELS,
       plate: plateUsing([1]),
@@ -212,12 +227,11 @@ describe("planRun", () => {
       plateName: "S183-S185 RVP.pltd",
     }).uploads;
     expect(uploads.map((u) => u.name)).toEqual([
-      "Luna_noRT.prcl.txt",
       "ProtocolName.txt",
       "S183-S185_RVP.plt.csv",
       "zpcrweb.json",
     ]);
-    expect(uploads[0]!.path).toBe("\\Storage Card\\CurrentRun\\Luna_noRT.prcl.txt");
+    expect(uploads[1]!.path).toBe("\\Storage Card\\CurrentRun\\S183-S185_RVP.plt.csv");
   });
 
   /** The instrument writes this itself for a touchscreen- or CFX Manager-started run but not for
@@ -262,14 +276,12 @@ describe("planRun", () => {
       name: "My Run/2",
     }).uploads;
     expect(identified.map((u) => u.name)).toEqual([
-      "protocol.prcl.txt",
       "Qualification_Plate_96.plt.csv",
       "zpcrweb.json",
     ]);
 
     const anonymous = plan().uploads;
     expect(anonymous.map((u) => u.name)).toEqual([
-      "protocol.prcl.txt",
       "plate.plt.csv",
       "zpcrweb.json",
     ]);
@@ -279,15 +291,13 @@ describe("planRun", () => {
     const uploads = planRun({
       runDefinition: ALL_CHANNELS,
       plate: plateUsing([1]),
-      protocolName: 'RVP "fast";v2/3',
-      plateName: "  ",
+      plateName: 'RVP "fast";v2/3',
     }).uploads;
     // ` "` and `";` are each one run of disallowed characters, so each collapses to a single `_`.
-    expect(uploads.map((u) => u.name)).toEqual([
-      "RVP_fast_v2_3.prcl.txt",
-      "ProtocolName.txt",
-      "plate.plt.csv",
-    ]);
+    expect(uploads.map((u) => u.name)).toEqual(["RVP_fast_v2_3.plt.csv"]);
+
+    const blank = planRun({ runDefinition: ALL_CHANNELS, plate: plateUsing([1]), plateName: "  " });
+    expect(blank.uploads.map((u) => u.name)).toEqual(["plate.plt.csv"]);
   });
 
   it("refuses to be startable when a check is an error", () => {
@@ -361,7 +371,6 @@ describe("planRun", () => {
     });
     expect(qpcr.producesRunFile).toBe(true);
     expect(qpcr.uploads.map((u) => u.name)).toEqual([
-      "YouSeq_RP.prcl.txt",
       "ProtocolName.txt",
       "plate.plt.csv",
       "zpcrweb.json",

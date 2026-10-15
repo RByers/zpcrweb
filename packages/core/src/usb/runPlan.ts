@@ -18,30 +18,38 @@
  * thermal protocol but not a plate map, well contents or dye assignments, so without them the
  * `.zpcr` that folder becomes has no idea what was in the wells.
  *
- * **So the files are this project's own plaintext formats**, `.prcl.txt` (`prcl.md` §3.1) and
- * `.plt.csv` (`plateCsv.ts`), rather than the encrypted `.prcl`/`.pltd` pair CFX Manager deposits.
- * The mechanism is identical — §5's upload cycle treats a file as opaque bytes — and since nothing
- * on the instrument reads either one, the only question is which is more useful in the archive
- * afterwards. An encrypted `.pltd` would need a password this repository doesn't ship; a
- * `.plt.csv` is picked straight up by `zpcr.plates()`, so the run opens with its plate intact.
+ * **So the plate is this project's own plaintext format**, `.plt.csv` (`plateCsv.ts`), rather than
+ * the encrypted `.pltd` CFX Manager deposits. The mechanism is identical — §5's upload cycle treats
+ * a file as opaque bytes — and since nothing on the instrument reads it, the only question is
+ * which is more useful in the archive afterwards. An encrypted `.pltd` would need a password this
+ * repository doesn't ship; a `.plt.csv` is picked straight up by `zpcr.plates()`, so the run opens
+ * with its plate intact.
  *
- * **And each keeps its own name.** A protocol and a plate are things reused across many runs,
- * with names of their own; an experiment name belongs to one run. So the deposited copies are
- * called after the protocol and the plate they are (`PlanRunOptions.protocolName`/`plateName`),
- * and the run's name travels by the channel §7.3 gives it — `RemoteRun`, `STATUS?` and the
- * `.alf` report — rather than being stamped onto files it doesn't own.
+ * **The protocol is not deposited at all.** CFX Manager also sends its `.prcl`, which carries a
+ * structured step list beside the text; this project's only protocol file, `.prcl.txt`, is the
+ * same directive text the instrument already records for itself as `ProtocolRunDefinition.txt`,
+ * so a copy would add nothing but the protocol's name — which `ProtocolName.txt`, below, carries.
+ * It was deposited until 2026-10, and it rarely survived the trip anyway: sent the moment the run
+ * started, it landed while the firmware was still clearing the previous run out of the folder,
+ * and went with it (`usb.md` §7.4).
  *
- * **A third file carries the name itself.** `RemoteRun`'s name operand reaches the instrument's
+ * **The plate keeps its own name.** A plate is reused across many runs, with a name of its own;
+ * an experiment name belongs to one run. So the deposited copy is called after the plate it is
+ * (`PlanRunOptions.plateName`), and the run's name travels by the channel §7.3 gives it —
+ * `RemoteRun`, `STATUS?` and the `.alf` report — rather than being stamped onto a file it
+ * doesn't own.
+ *
+ * **A second file carries the run's name.** `RemoteRun`'s name operand reaches the instrument's
  * own filenames and nothing else — no Bio-Rad format has a field for what a run is *called*
  * (`experiment.ts`) — so a named run also deposits a `zpcrweb.json` saying so, and the archive
  * assembled from the folder states its own name from then on.
  *
- * **A fourth restores a marker CFX Manager's own runs get for free.** `usb.md` §7.5 measures the
+ * **A third restores a marker CFX Manager's own runs get for free.** `usb.md` §7.5 measures the
  * instrument writing `ProtocolName.txt` into the run folder itself as a run finishes. Observed in
  * practice: a run started here through `RemoteRun` never gets that write, even though a
  * touchscreen- or CFX Manager-started one does — so a run this app starts would otherwise open
  * with no way to say what protocol it ran, unlike one pulled from either of those. A named
- * protocol also deposits its own `ProtocolName.txt`, which closes that gap the same way the third
+ * protocol also deposits its own `ProtocolName.txt`, which closes that gap the same way the second
  * file closes the missing-run-name one.
  */
 import type { PlateDefinition } from "../pltd.js";
@@ -51,7 +59,6 @@ import {
   ZPCRWEB_SETTINGS_VERSION,
 } from "../zpcrwebSettings.js";
 import { plateToCsv } from "../plateCsv.js";
-import { formatRunDefinitionText } from "../prcl.js";
 import {
   parseRunDefinition,
   splitRunDefinition,
@@ -78,7 +85,7 @@ export const CFX_RUN_REPORT_DIR = "\\Storage Card\\PCRunReport";
 export const CFX_PROTOCOL_LABEL = "PCRUN";
 
 /** The marker file the instrument writes for itself, that a `RemoteRun`-started run must deposit
- * instead — see the module comment's fourth file. */
+ * instead — see the module comment's third file. */
 export const PROTOCOL_NAME_TXT = "ProtocolName.txt";
 
 /** `METHOD`'s operand when the run definition carries none. `CALC` in every file and capture. */
@@ -202,8 +209,8 @@ export interface PlanRunOptions {
    */
   name?: string;
   /**
-   * What the uploaded `.prcl.txt` is called (without the extension) — the protocol's own name,
-   * not the run's. Falls back to `protocol`. See {@link PlanRunOptions.plateName}.
+   * The protocol's own name, not the run's — deposited as `ProtocolName.txt`, and only when
+   * given. See {@link PlanRunOptions.plateName}.
    */
   protocolName?: string;
   /**
@@ -249,8 +256,8 @@ function runNameBase(name: string): string {
  * fallback rather than the run name's.
  *
  * The extension goes because these names arrive already carrying one — a plate's `identityKey` is
- * typically `Qualification_Plate_96.pltd`, and a protocol staged from a file keeps its
- * `.prcl.txt` — and `Qualification_Plate_96.pltd.plt.csv` would be a worse name than either.
+ * typically `Qualification_Plate_96.pltd` — and `Qualification_Plate_96.pltd.plt.csv` would be a
+ * worse name than either.
  * Only a known one is stripped, so a plate called `S183-S185 RVP v2.1` keeps its version
  * (as `S183-S185_RVP_v2_1` — the dot is not an allowed name character).
  */
@@ -431,20 +438,12 @@ export function planRun(options: PlanRunOptions): RunPlan {
   // that won't get one deposits nothing.
   const producesRunFile = program.directives.some((d) => d.verb === "PLATEREAD");
 
-  // The deposited files keep the protocol's and the plate's own names, never the run's — see
-  // `PlanRunOptions.plateName` for why the three namespaces stay separate.
-  const protocolBase = uploadBase(options.protocolName, "protocol");
-
-  const uploads: RunUpload[] = [
-    {
-      name: `${protocolBase}.prcl.txt`,
-      path: `${CFX_CURRENT_RUN_DIR}\\${protocolBase}.prcl.txt`,
-      bytes: new TextEncoder().encode(formatRunDefinitionText(runDefinition)),
-    },
-  ];
+  // No copy of the protocol itself: the instrument records the one it ran as
+  // `ProtocolRunDefinition.txt` (see the module comment).
+  const uploads: RunUpload[] = [];
 
   // The instrument writes this itself for a touchscreen- or CFX Manager-started run, but not for
-  // one started here (see the module comment's fourth file), so it is deposited as plain text
+  // one started here (see the module comment's third file), so it is deposited as plain text
   // under the protocol's own name — unsanitized, since it is file *content* rather than a name.
   // Only when there is a name: an unnamed protocol has nothing to say, same reasoning as the
   // run-name deposit below.

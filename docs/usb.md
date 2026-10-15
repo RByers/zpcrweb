@@ -1069,24 +1069,30 @@ read the fluorescence can skip this phase entirely**; a client that wants the ru
 a complete experiment should not.
 
 **What this project deposits instead** (`packages/core/src/usb/runPlan.ts`, `planRun()`): the same
-idea, four files, none of them encrypted.
+idea, three files, none of them encrypted.
 
 | # | File | What it is |
 |---|---|---|
-| 1 | `<protocol>.prcl.txt` | the protocol as the plaintext run definition of `prcl.md` §3.1 |
-| 2 | `ProtocolName.txt` | the protocol's own name, written only when it has one |
-| 3 | `<plate>.plt.csv` | the plate map as this project's plate CSV |
-| 4 | `zpcrweb.json` | what the run is *called* (`zpcrweb-json.md`), written only when it has a name |
+| 1 | `ProtocolName.txt` | the protocol's own name, written only when it has one |
+| 2 | `<plate>.plt.csv` | the plate map as this project's plate CSV |
+| 3 | `zpcrweb.json` | what the run is *called* (`zpcrweb-json.md`), written only when it has a name |
 
-The first and third are named after the protocol and the plate themselves, not after the run:
-those are reused across runs and arrive with names of their own. The fourth exists because operand
-4 of §7.3 is the only channel a run's name has, and it reaches nothing but the instrument's
-composed filenames — no field of `RunInfo.xml` records what a run is called. Depositing the name
-means the `.zpcr` the folder becomes states it, so it survives a reload, a rename on disk, or
-another machine. `RunInfo.xml` and `GlobData.xml` are not written: the instrument writes its own
-`RunInfo.xml`, and the host inventory describes a PC application this isn't.
+The plate file is named after the plate itself, not after the run: a plate is reused across runs
+and arrives with a name of its own. The third exists because operand 4 of §7.3 is the only channel
+a run's name has, and it reaches nothing but the instrument's composed filenames — no field of
+`RunInfo.xml` records what a run is called. Depositing the name means the `.zpcr` the folder
+becomes states it, so it survives a reload, a rename on disk, or another machine. `RunInfo.xml`
+and `GlobData.xml` are not written: the instrument writes its own `RunInfo.xml`, and the host
+inventory describes a PC application this isn't.
 
-**The firmware accepts all four, and reads none of them** (measured live). The deposit was the one
+**The protocol is not deposited.** CFX Manager's `.prcl` carries a structured step list the
+instrument's record lacks; this project's only protocol file is `.prcl.txt` (`prcl.md` §3.1), which
+is the same directive text the instrument writes for itself as `ProtocolRunDefinition.txt` — so a
+copy adds nothing but the protocol's name, which `ProtocolName.txt` already carries. Until 2026-10
+a `<protocol>.prcl.txt` was deposited first, and it almost never reached the archive — see "The
+folder is cleared as the run starts", below.
+
+**The firmware accepts all of them, and reads none** (measured live). The deposit was the one
 phase where our own formats might have been refused — `.prcl.txt`/`.plt.csv` where CFX Manager
 puts an encrypted `.prcl`/`.pltd` pair — and no `CRCSENDFILE` was ever refused by extension or by
 content. Nor did depositing them change anything about the run, which is what §7.4's ordering
@@ -1140,6 +1146,42 @@ Three details of the cycle that only this sequence shows:
 - **The listing in the middle of the cycle is a UI refresh**, not a protocol requirement — the GUID
   is already known from `COMPUTEFILECRC`. The `GETFILESLEN`+`LISTALLFILES` *pairing* is mandatory
   (§5); this particular pair of listings is not.
+
+#### The folder is cleared as the run starts — after `RemoteRun`, not at it
+
+A run that will write a folder (one with a `PLATEREAD`, §7.10) empties `\Storage Card\CurrentRun`
+of the previous run's files first. **The firmware does this in the background, over a few seconds,
+starting just after `RemoteRun` is acknowledged** — and a file written into the folder while it is
+being cleared can be cleared with it. Measured in this project's own traffic log of
+`20261014-S187_S188_S189_cold_check.zpcr` (times from `RemoteRun`'s acknowledgement):
+
+| t | Listing of `CurrentRun` | What the host was doing |
+|---|---|---|
+| +0.1 s | — | `CRCSENDFILE` of `YouSeq_c45.prcl.txt`; checksum verified |
+| +1.1 s | 147 entries: the previous run's (Q12 Sequencing) files, plus the new `.prcl.txt` | |
+| +2.1 s | 124 entries | `ProtocolName.txt` sent |
+| +3.2 s | 69 entries; the `.prcl.txt` still there | `.plt.csv` sent |
+| +4.4 s | **4 entries** — `.plt.csv`, `zpcrweb.json`, `ProtocolName.txt`, a staging GUID. The `.prcl.txt` is gone, with the previous run's `.alf` | `zpcrweb.json` sent |
+| +5.1 s | | `STATUS?` still `IDLE` |
+| +11.8 s | | `STATUS?` reports the first step, `TEMP 95.0,180` |
+
+Nothing the host sent deleted it — its only `DELFILE` was §5's usual one, before the upload. The
+likeliest reading, and the one every file in that run fits, is that the firmware decides what to
+clear when the clear begins and then works through that list: the `.prcl.txt` already existed by
+then, while the three files that survived were written (or, for `ProtocolName.txt`, re-written
+after its `DELFILE`) once the clear was under way. Which files were on the list is inferred, not
+observed; that the folder can lose a file the host has just written and verified is not.
+
+**CFX Manager never meets this**, because it doesn't deposit until the run is visibly under way.
+In `usb-run` it keeps polling after `RemoteRun` until `STATUS?` leaves `IDLE` (≈11 s), sends
+`VOLUME?` and `ADDCYCLES 0`, and only then — 13 s after the start — its first `CRCSENDFILE`. The
+listing that follows that upload is already the new run's own folder (`runlog.xml`, `RunInfo.xml`,
+`ProtocolRunDefinition.txt`, the calibration copies; 741 bytes of listing), so the clear had long
+finished. In the S187 log above the clear also finished well before `STATUS?` left `IDLE`.
+
+The `.prcl.txt` this project used to deposit first was the casualty: of the nine app-started
+`.zpcr`s on hand, only `20260807-YouSeq_RT_-_S56.zpcr` kept it — and that was a thermal-only run
+(§7.10), whose folder is never cleared, so its deposit had landed in the *previous* run's folder.
 
 ### 7.5 Watching the run, and pulling plate reads
 
@@ -1258,8 +1300,8 @@ plate reads:
    first.
 7. Optionally deposit `GlobData.xml`/`.pltd`/`RunInfo.xml`/`.prcl` into
    `\Storage Card\CurrentRun\` (§7.4) if the finished run should be a complete experiment rather
-   than just fluorescence — or this project's plaintext equivalents, plus a `zpcrweb.json` naming
-   the run. Skip it otherwise.
+   than just fluorescence — or this project's plaintext plate, `ProtocolName.txt` and a
+   `zpcrweb.json` naming the run. Skip it otherwise.
 8. Watch `STATUS?` (§7.5). Each time the current step leaves a `PLATEREAD`, list the run directory
    with the mandatory `GETFILESLEN`+`LISTALLFILES` pair (§5, keep the two adjacent) and pull the
    new `Read0000N.Plateread` with `GETFILESIZE`+`GETFILE`. Decode with the existing
