@@ -45,6 +45,8 @@ const PLTD = join(REPO, "samples/QuickPlate_96 wells_All Channels.pltd");
 const BIOMEME = join(REPO, "samples/biomeme-2024-01-17.bmrun");
 const BIOMEME_MELT = join(REPO, "samples/biomeme-2025-10-15-melt.bmrun");
 const MELT_ZPCR = join(REPO, "samples/20230829_135443_CT019138_SINGLE_STEP_.zpcr");
+/** The one sample carrying a `usb-traffic.bin` — the session that drove that run. */
+const TRAFFIC_ZPCR = join(REPO, "samples/20260807-YouSeq_RT_-_S56.zpcr");
 /** The run whose `.pcrd` persists a hand-set FAM threshold — see {@link persistedThresholdChecks}. */
 const RVP_PCRD = join(REPO, "samples/20260726_S183-S185_RVP.pcrd");
 const EXAMPLE = "20260726_S183-S185_RVP.zpcr";
@@ -2649,6 +2651,102 @@ async function rawHexDownloadChecks(chrome, origin) {
     got?.name === entry,
     `${got?.name} vs ${entry}`,
   );
+  cdp.close();
+}
+
+/**
+ * The USB traffic log's Decoded view (`components/raw/DecodedUsbTraffic.tsx`, core's
+ * `usbTrafficDecode.ts`).
+ *
+ * The decoding itself is core's and tested there; what can only break here is the plumbing a
+ * person relies on to read it — that the log opens Decoded, that a row per item is offered and the
+ * poll filter really removes the polls, and that a reply opens into its explanation and leads back
+ * to the request it answers. The expected counts come from core's own decode of the archive, read
+ * here rather than in the browser, so the check can't merely agree with itself.
+ */
+async function usbTrafficViewChecks(chrome, origin) {
+  console.log("\nUSB traffic log, decoded");
+  const cdp = await openPage(chrome.base, origin);
+  await emptyReload(cdp, origin);
+  await loadFile(cdp, TRAFFIC_ZPCR);
+  await cdp.eval(`window.location.hash = "view=raw", undefined`);
+  await tabBecomes(cdp, "Raw");
+
+  const { unzipArchive, decodeUsbTrafficLog } = await import("../packages/core/dist/index.js");
+  const files = unzipArchive(new Uint8Array(readFileSync(TRAFFIC_ZPCR)));
+  const entry = Object.keys(files).find((n) => /usb-traffic\.bin$/i.test(n));
+  const want = decodeUsbTrafficLog(files[entry]);
+
+  /** Click whatever `sel` finds, once it exists — a selector, not a label like `clickButton`. */
+  const clickSel = async (sel, what) => {
+    await waitFor(() => cdp.eval(`!!(${sel})`), { what });
+    await cdp.eval(`(() => { (${sel}).click(); })()`);
+  };
+
+  await clickSel(
+    `[...document.querySelectorAll('.raw__item')].find(b => b.textContent.trim() === ${JSON.stringify(entry)})`,
+    `${entry} in the file list`,
+  );
+  const count = () =>
+    cdp.eval(`document.querySelector('.usblog .runlog__count')?.textContent.trim() ?? null`);
+  const all = await waitValue(count, (v) => v !== null, { what: "the decoded log's item count" });
+  const mode = await cdp.eval(`document.querySelector('.raw__modes .is-active')?.textContent.trim()`);
+  check("The traffic log opens in Decoded mode", mode === "Decoded", `mode=${mode}`);
+  const total = want.items.length.toLocaleString("en-US");
+  check(
+    "…with one row per item of the file, header and segments included",
+    all === `${total} / ${total} items`,
+    `${all} vs ${total}`,
+  );
+  const firstRow = await cdp.eval(
+    `document.querySelector('.usblog__row .usblog__msg')?.textContent ?? ""`,
+  );
+  check("…starting with the file header", /File header/.test(firstRow), firstRow);
+
+  await clickSel(
+    `[...document.querySelectorAll('.usblog .runlog__chip')].find(b => b.textContent.trim() === 'Status polls')`,
+    "the Status polls filter",
+  );
+  const noPolls = await waitValue(count, (v) => v !== all, { what: "the poll filter to apply" });
+  const kept = (want.items.length - want.totals.polls).toLocaleString("en-US");
+  check(
+    "Hiding status polls removes exactly the polls",
+    noPolls === `${kept} / ${total} items`,
+    `${noPolls} vs ${kept}`,
+  );
+
+  // A reply that can be checked against something: the instrument's checksum of an upload.
+  const reply = want.items.find((i) => i.meaning.fields.some((f) => f.label === "Upload check"));
+  await clickSel(`document.querySelector('[data-item="${reply.index}"]')`, "a GETFILECRC reply");
+  const detail = await waitValue(
+    () => cdp.eval(`document.querySelector('.usblog__detail')?.innerText ?? ""`),
+    (v) => v !== "",
+    { what: "the reply to open" },
+  );
+  check(
+    "An opened reply lays out its bytes field by field",
+    /Item type/.test(detail) && /Flags/.test(detail) && /Payload length/.test(detail),
+    detail.slice(0, 200),
+  );
+  check(
+    "…and reads the payload, checking the upload it confirms",
+    /Upload check\s+matches/.test(detail),
+    detail.slice(0, 400),
+  );
+
+  await clickSel(
+    `[...document.querySelectorAll('.usblog__links .runlog__chip')].find(b => /Answers item/.test(b.textContent))`,
+    "the link to the request",
+  );
+  const opened = await waitValue(
+    () => cdp.eval(`document.querySelectorAll('.usblog__detail').length`),
+    (n) => n !== 1,
+    { what: "the request to open" },
+  );
+  const requestOpen = await cdp.eval(
+    `!!document.querySelector('[data-item="${reply.meaning.replyTo}"]')?.classList.contains('is-open')`,
+  );
+  check("…and leads to the request it answers", opened === 2 && requestOpen, `open: ${opened}`);
   cdp.close();
 }
 
@@ -8308,6 +8406,7 @@ async function main() {
     await passwordChecks(chrome, origin, pw);
     await xmlViewChecks(chrome, origin, pw);
     await rawHexDownloadChecks(chrome, origin);
+    await usbTrafficViewChecks(chrome, origin);
     await alfViewChecks(chrome, origin);
     await thermalProfileChecks(chrome, origin);
     await instrumentRunChecks(chrome, origin);

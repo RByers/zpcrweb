@@ -62,10 +62,10 @@ const TEXTUAL = /\.(xml|txt|alf|json|log|plt\.csv)$/i;
 
 /** Best default mode for a file: decoded if a decoder exists, else text for text, else hex.
  *
- * `usb-traffic.bin` is the one entry that is binary and yet opens in **Text**: its stored form is
- * records, and the text is what a reader wants — this view is where that rendering happens
- * (`formatUsbTrafficBytes`, `usb-traffic.md` §4). It gets no *Decoded* mode, because the text
- * already is the decode: one line per message, with the payload bytes on it. */
+ * `usb-traffic.bin` opens **Decoded** (`DecodedUsbTraffic`: every item explained, byte by byte),
+ * and is also the one binary entry with a **Text** mode: its stored form is records, and this view
+ * is where their one-line-per-message rendering happens (`formatUsbTrafficBytes`,
+ * `usb-traffic.md` §4). */
 function defaultMode(name: string): Mode {
   if (decodedKind(name)) return "decoded";
   if (TEXTUAL.test(name) || isUsbTrafficName(name)) return "text";
@@ -210,9 +210,10 @@ export function RawFilesView({ zpcr, settings }: { zpcr: Zpcr; settings: FileSet
       // the one entry whose bytes are synthesized from live state rather than read (see
       // `liveSettingsText`), and the download matches what the dump on screen shows.
       //
-      // The traffic log does the same from Text mode: its text rendering previews every long
-      // response (`usbTrafficPreview`), so saving it would drop the payloads a log exists to keep.
-      // The `.bin` is the complete record, and loading it back into the app is how it is read.
+      // The traffic log does the same from Text and Decoded mode: its text rendering previews
+      // every long response (`usbTrafficPreview`), so saving it would drop the payloads a log
+      // exists to keep, and the decoded view is an explanation, not a table worth a CSV. The
+      // `.bin` is the complete record, and loading it back into the app is how it is read.
       downloadBytes(selected, isSettings ? settingsBytes : zpcr.archive.bytes(selected));
       return;
     }
@@ -298,11 +299,13 @@ export function RawFilesView({ zpcr, settings }: { zpcr: Zpcr; settings: FileSet
             disabled={!canDownload}
             aria-label="Download"
             title={
-              mode === "decoded"
-                ? "Download table as CSV"
-                : mode === "hex"
-                  ? "Download this file's bytes, exactly as stored"
-                  : "Download as a file"
+              isTrafficLog
+                ? "Download the recorded log, exactly as stored"
+                : mode === "decoded"
+                  ? "Download table as CSV"
+                  : mode === "hex"
+                    ? "Download this file's bytes, exactly as stored"
+                    : "Download as a file"
             }
           >
             <DownloadIcon />

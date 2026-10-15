@@ -105,8 +105,8 @@ a live session, the same button over a run's saved log, and the Raw files view's
 records themselves as `usb-traffic.bin`, because the rendering below previews a long response
 rather than spelling it out, and a log that has dropped the body of a `GETFILE` reply can't answer
 "was this transfer corrupt?", which is the question a traffic log exists for. Reading a downloaded
-log means loading it back: a `.zpcr` that carries it, or the `.bin` on its own, opens in the Raw
-files view in this rendering. One line per record, in wire order:
+log means loading it back: a `.zpcr` that carries it opens in the Raw files view, explained (§6),
+with this rendering one click away as its Text mode. One line per record, in wire order:
 
 ```
 <iso> -> ch<n> [<len>B] <hex>[ text="…"]      a message (-> out, <- in)
@@ -160,15 +160,63 @@ The practical reading: **attaching the log to a run costs single-digit KB**, on 
 already hundreds. That is what makes "save log" a switch worth offering rather than a warning worth
 printing.
 
-## 6. Future
+## 6. The decoded view
 
+§4's rendering answers "what crossed the wire". It doesn't answer what a person reading a log
+actually asks: which request did this reply answer, what do the twenty numbers of a `STATUS?` mean,
+did that upload arrive intact, what bytes is this file made of. The Raw files view's **Decoded**
+mode does, and it is now where `usb-traffic.bin` opens. Implemented by
+`packages/core/src/usbTrafficDecode.ts` (`decodeUsbTrafficLog`); the app's
+`components/raw/DecodedUsbTraffic.tsx` only lays it out.
+
+It works in two layers, both pure functions of the file's bytes.
+
+**Layout — every byte accounted for.** The file is walked item by item, and each item is broken into
+the §3 fields at their own offsets: the type byte, the flag bits named one by one, the Δt varint
+and the absolute time it yields, the channel, the length varint, the payload. The 8-byte magic and
+each segment are items too, so the rows tile the whole file with no gap or overlap — the test pins
+that, and pins the walk to `parseUsbTrafficLog`'s records. The walk is separate from the format's
+reader for one reason: it **never throws**. A file cut short or not a log at all decodes as far as
+it reads, and the remainder becomes one *undecodable* item holding the bytes that were left, because
+a raw view shows what a file holds, damaged or not.
+
+**Meaning — the payload read as the protocol** (`usb.md`). Channel-1 requests are matched to replies
+the way `CfxDevice.dispatch` matches them, since the wire carries no request ids:
+
+| Rule | Why |
+|------|-----|
+| A reply answers the **oldest request still waiting** | `dispatch`'s FIFO queue |
+| An unsolicited reply answers nothing | the `unsolicited` flag (§2) is the device's own verdict that nobody was waiting |
+| A fatal **out** error retracts the request just sent | `exchangeBytes` drops a request whose write failed |
+| A `GETFILE` stays waiting while full 65,530-byte parts arrive | a large file comes back in parts (`usb.md` §5) |
+
+Then each payload is read with the parsers the live client uses — `parseResponse`, `parseStatus`,
+`parseRtStatus`, `parseIdentity`, `parseRunDefinition`, `cfxFileCrc` — so there is one reading of the
+protocol, not a second one kept in step by hand. Beyond naming fields, three things are **checked**,
+because they are the questions a log exists to answer: a `GETFILE` reply's size against the
+`GETFILESIZE` before it; a `CRCSENDFILE`'s announced checksum against its own file bytes; and the
+`GETFILECRC` the instrument later reports against the checksum announced for that upload (followed
+through the generated name `COMPUTEFILECRC` returned). Each command also carries a one-sentence
+description of what it does, from `usb.md` §3's vocabulary.
+
+Status polls are most of any log (10 336 of the 10 780 messages in the one committed sample) and can
+be hidden, but are shown by default: this is a raw view. The download button saves the stored
+`.bin` from this mode too, as from Text (§4).
+
+> **Future:** a request that **timed out** leaves no item — `CfxDevice` drops it from its queue
+> without telling the recorder — so here it stays waiting. A late reply is then paired with it
+> (which is probably what it really answers, though not how the client paired it), and if no reply
+> ever comes, every pairing after it is one request off. Recording timeouts as their own item would
+> close this.
+
+## 7. Future
+
+- **Recording timeouts** — §6's note: a timed-out request leaves no item, so pairing after one
+  can drift.
 - **Payload truncation.** A run's `GETFILE` transfers dominate a real log — a plate read is ~50 KB,
   fetched repeatedly by the run watcher — and their content is already in the `.zpcr` beside the
   log. Storing the first *n* bytes plus the true length would shrink a real recording much further
   than any of §5's numbers suggest. Deliberately not implemented: a truncated payload can't answer
   "was this transfer corrupt?", which is exactly the question a traffic log exists for.
-- **A decoded table in the Raw files view.** Today the archived log opens as text, since the text
-  already is the decode (one line per message, payload included). A sortable/filterable table —
-  hide polls, jump to errors — would be the natural next step if reading these becomes routine.
 - **Recording across a reload.** The recorder lives in memory, so a reload starts a new log. The
   records are small enough to persist in IndexedDB; nothing needs it yet.

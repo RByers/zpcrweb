@@ -1,10 +1,17 @@
 import { useMemo } from "react";
-import { isAlfName, parseRunDefinition, parseRunInfoRaw, type Zpcr } from "@zpcrweb/core";
+import {
+  USB_TRAFFIC_LOG_NAME,
+  isAlfName,
+  parseRunDefinition,
+  parseRunInfoRaw,
+  type Zpcr,
+} from "@zpcrweb/core";
 import { DecodedAlfFile } from "./DecodedAlf";
 import { DecodedPlateread } from "./DecodedPlateread";
 import { DecodedPlate } from "./DecodedPlate";
 import { DecodedDcalFile } from "./DecodedDcal";
 import { DecodedProtocol } from "./DecodedProtocol";
+import { DecodedUsbTraffic } from "./DecodedUsbTraffic";
 import { RunLogTable } from "./RunLogTable";
 import { parseRunLog } from "../../lib/runlog";
 import { XmlTreeFromString } from "../../lib/xmlTree";
@@ -21,6 +28,7 @@ export type DecodedKind =
   | "runlog"
   | "protocol"
   | "alf"
+  | "usbtraffic"
   | "xml"
   | null;
 
@@ -33,6 +41,9 @@ export function decodedKind(name: string): DecodedKind {
   if (/runlog\.xml$/i.test(name)) return "runlog";
   if (/ProtocolRunDefinition\.txt$/i.test(name)) return "protocol";
   if (isAlfName(name)) return "alf";
+  // The binary traffic log only: an older `.zpcr`'s plain-text `usb-traffic.log` has no records
+  // to decode, and reads as the text it is.
+  if (name.replace(/^.*[\\/]/, "").toLowerCase() === USB_TRAFFIC_LOG_NAME) return "usbtraffic";
   if (/\.xml$/i.test(name)) return "xml";
   return null;
 }
@@ -58,6 +69,7 @@ export function DecodedView({ zpcr, name }: Props) {
   if (kind === "runlog") return <RunLogTable parsed={parseRunLog(zpcr.archive.text(name))} />;
   if (kind === "protocol") return <ProtocolDecoded text={zpcr.archive.text(name)} />;
   if (kind === "alf") return <DecodedAlfFile text={zpcr.archive.text(name)} />;
+  if (kind === "usbtraffic") return <DecodedUsbTraffic bytes={zpcr.archive.bytes(name)} />;
   if (kind === "xml") return <XmlTreeFromString xml={zpcr.archive.text(name)} />;
 
   return <div className="decoded__na mono">No decoder for this file.</div>;

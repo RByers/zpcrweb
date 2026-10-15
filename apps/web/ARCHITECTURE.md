@@ -1751,6 +1751,8 @@ supplies one.
   two protocol listings would be: the plot is the shape of the run, prettified to be read at a
   glance; the table is what each line literally says.
 
+- **`usb-traffic.bin`** → `DecodedUsbTraffic` (`components/raw/DecodedUsbTraffic.tsx`) — the
+  recorded USB traffic log, every item explained byte by byte; see "`RawFilesView`" below.
 - **other `.xml`** (e.g. `runlog.xml`) → the shared collapsible `XmlTreeFromString`
   (`lib/xmlTree.tsx` — see "Raw views" below).
 
@@ -1954,15 +1956,21 @@ too. `StandaloneRawView` has the same button, always saving the whole file — t
 pick an entry out of. The Hex download is asserted end to end by `uitest`'s `rawHexDownloadChecks`.
 
 **`usb-traffic.bin`** — the wire log the Instrument view records for a run it drove itself (see
-"The Instrument view") — groups under **Metadata** and opens in **Text**, the one entry that is
-binary and yet does. Its stored form is records (`usb-traffic.md`); the text is what a reader wants,
-and **this view is where that rendering happens** (`formatUsbTrafficBytes`). Its download is the
-exception to "the button saves what the mode shows": from Text mode too it writes the entry's stored
-bytes under its own name, exactly as Hex would, because the rendering previews every long response
-(`usbTrafficPreview`) and a text file of it would have dropped the payloads the log exists to keep.
-There is no *Decoded* mode because the text already is the decode — one line per message with the
-payload bytes on it — and no XML tree, since it isn't XML. A `.zpcr` written before the binary format carries a plain-text
-`usb-traffic.log` instead, which needs none of this and reads as ordinary text.
+"The Instrument view") — groups under **Metadata** and opens in **Decoded**
+(`components/raw/DecodedUsbTraffic.tsx`): one row per item of the file, the header and segment
+markers included so the rows account for every byte, each opening into its bytes field by field,
+what the payload says (the request a reply answers, with a link both ways; `STATUS?`'s fields named;
+download sizes and upload checksums checked) and the whole payload as a hex dump. The reading is
+core's `decodeUsbTrafficLog` (`usb-traffic.md` §6); the component only lays it out, a page of 500
+rows at a time with a Status polls toggle and a text filter, since a real session is ten thousand
+items and more. Polls are shown by default — this is a raw view. It is also the one binary entry
+with a **Text** mode: its stored form is records, and **this view is where their one-line-per-message
+rendering happens** (`formatUsbTrafficBytes`). Its download is the exception to "the button saves
+what the mode shows": from Decoded and Text alike it writes the entry's stored bytes under its own
+name, exactly as Hex would, because the text previews every long response (`usbTrafficPreview`) and
+would have dropped the payloads the log exists to keep. `uitest`'s `usbTrafficViewChecks` covers
+the view. A `.zpcr` written before the binary format carries a plain-text `usb-traffic.log` instead,
+which needs none of this and reads as ordinary text.
 
 **`zpcrweb.json` is the one synthesized entry** (its own "Analysis" group, sorted just above
 Plate setup). It is listed whether or not the loaded archive contains it, and its Text/Hex

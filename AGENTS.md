@@ -242,6 +242,8 @@ core's `runDefinition.ts`, `components/raw/DecodedView.tsx`'s
 it from IndexedDB — see `useZpcrStore.ts`'s `closeFile`),
 `components/FileIcons.tsx` (or core's `fileKind.ts`), `components/views/StandaloneRawView.tsx`,
 `components/views/RawFilesView.tsx` (its download button — Hex saves the entry's bytes verbatim),
+`components/raw/DecodedUsbTraffic.tsx` or core's `usbTrafficDecode.ts` (the traffic log's Decoded
+view — `usbTrafficViewChecks`),
 `components/protocol/` (the protocol editor) or core's `protocolBuilder.ts`,
 `components/plate/PlateEditor.tsx`, `components/plate/PlateEditPanel.tsx`,
 `components/plate/usePlateSelection.ts`, `components/plate/PlateViewer.tsx`'s selection props

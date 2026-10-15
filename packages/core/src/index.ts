@@ -208,6 +208,15 @@ export type {
   UsbTrafficError,
   UsbTrafficGap,
 } from "./usbTraffic.js";
+export { decodeUsbTrafficLog } from "./usbTrafficDecode.js";
+export type {
+  DecodedUsbTrafficLog,
+  UsbTrafficItem,
+  UsbTrafficItemKind,
+  UsbTrafficByteField,
+  UsbTrafficMeaning,
+  UsbPayloadField,
+} from "./usbTrafficDecode.js";
 export {
   deriveExperimentName,
   nextFreeRunFileBase,

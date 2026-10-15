@@ -3318,6 +3318,141 @@
   line-height: 1.45;
 }
 
+/* USB traffic log (usb-traffic.bin) decoded view — reuses the run log's controls and table,
+   adding rows that open into a byte-by-byte explanation. */
+.usblog {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  font-size: 12px;
+}
+.usblog__wide {
+  grid-column: span 2;
+}
+.usblog__wide dt {
+  flex-basis: auto;
+}
+.usblog__error {
+  color: var(--danger);
+  border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+}
+.usblog__filter {
+  font: inherit;
+  font-size: 11px;
+  padding: 2px 8px;
+  min-width: 200px;
+  color: var(--ink);
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+.usblog__tblwrap {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.usblog__tbl {
+  width: 100%;
+}
+.usblog__row {
+  cursor: pointer;
+}
+.usblog__row:hover,
+.usblog__row.is-open {
+  background: var(--raised);
+}
+.usblog__row td:first-child {
+  border-left: 2px solid transparent;
+}
+.usblog__row.is-in td {
+  color: var(--ink);
+}
+.usblog__row.is-poll td {
+  color: var(--ink-muted);
+}
+.usblog__row.is-meta td {
+  color: var(--neon-cyan);
+}
+.usblog__row.is-unsolicited td:first-child {
+  border-left-color: var(--warn);
+}
+.usblog__row.is-error td {
+  color: var(--danger);
+}
+.usblog__row.is-error td:first-child {
+  border-left-color: var(--danger);
+}
+.usblog__toggle {
+  border: 0;
+  background: transparent;
+  color: var(--ink-muted);
+  padding: 0 6px 0 0;
+  font: inherit;
+  cursor: pointer;
+}
+.usblog__off {
+  color: var(--ink-muted);
+}
+.usblog__dir {
+  text-align: center;
+}
+.usblog__num {
+  text-align: right !important;
+}
+.usblog__msg {
+  white-space: normal !important;
+  overflow-wrap: anywhere;
+  min-width: 40ch;
+}
+.usblog__detailrow > td {
+  padding: 4px 10px 16px 24px !important;
+  background: var(--panel);
+  white-space: normal !important;
+}
+.usblog__detail {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  cursor: auto;
+}
+.usblog__links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.usblog__fields td {
+  text-align: left;
+  vertical-align: top;
+}
+.usblog__fields th {
+  text-align: left !important;
+}
+.usblog__hex,
+.usblog__raw {
+  color: var(--ink-2);
+  white-space: pre-wrap !important;
+  overflow-wrap: anywhere;
+  max-width: 48ch;
+}
+.usblog__note {
+  white-space: pre-wrap !important;
+  overflow-wrap: anywhere;
+  color: var(--ink-2);
+  min-width: 30ch;
+  max-width: 90ch;
+}
+.usblog__dump {
+  max-height: 420px;
+  overflow: auto;
+  margin: 0;
+}
+
 /* Plate setup (.pltd) decoded view */
 .plate__fluors {
   display: flex;

@@ -465,7 +465,12 @@ is what makes keeping a session's whole wire log with the run cost single-digit 
 one always and attaches it only when asked; `formatUsbTrafficLog` is the single text rendering, used
 by both the console's download button and the Raw files view, and `usbTrafficPreview` is the cut it
 applies to a long reply — exported so the app's live console, which builds its lines as messages
-arrive rather than from stored records, stops a payload in the same place.
+arrive rather than from stored records, stops a payload in the same place. Beside that rendering,
+`usbTrafficDecode.ts`'s `decodeUsbTrafficLog` *explains* a log for the Raw files view's Decoded
+mode: every byte attributed to its item and field, each reply paired with the request it answers
+the way `CfxDevice` pairs them, and each payload read with the client's own parsers (`STATUS?`'s
+fields, download sizes and upload checksums checked) — [`usb-traffic.md`](./docs/usb-traffic.md)
+§6.
 
 ### Did the run finish? Count its reads (`runCompleteness`)
 
