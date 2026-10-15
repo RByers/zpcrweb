@@ -12,13 +12,25 @@ export { csvRow };
  * decoded data instead, to include every well and channel.
  */
 
-/** Trigger a browser download of `content` as `filename`. */
+/**
+ * The name a download is saved under: `filename` without any directory part.
+ *
+ * A file opened out of a granted folder is named by its path within that folder
+ * (`runs/2026-07/a.zpcr` — `state/db.ts`'s `diskFileName`), and handed to `a.download` as is, the
+ * browser flattens the slashes into the name (`runs_2026-07_a.zpcr`). The folders it sat in are
+ * where the app found it, not part of what it is called.
+ */
+export function downloadName(filename: string): string {
+  return filename.slice(filename.lastIndexOf("/") + 1);
+}
+
+/** Trigger a browser download of `content` as `filename` (its base name — see {@link downloadName}). */
 export function downloadText(filename: string, content: string, mimeType = "text/plain"): void {
   const blob = new Blob([content], { type: mimeType });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = filename;
+  a.download = downloadName(filename);
   document.body.appendChild(a);
   a.click();
   a.remove();
@@ -32,7 +44,7 @@ export function downloadBytes(filename: string, bytes: Uint8Array, mimeType = "a
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = filename;
+  a.download = downloadName(filename);
   document.body.appendChild(a);
   a.click();
   a.remove();

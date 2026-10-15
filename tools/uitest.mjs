@@ -6333,6 +6333,137 @@ async function sampleFolderChecks(chrome, origin) {
   cdp.close();
 }
 
+/**
+ * A run started from a `.zpcr` in a granted folder ends up **in that file on disk**.
+ *
+ * The rest of the suite proves the two halves apart — {@link mockInstrumentChecks} runs an
+ * experiment held in the browser, {@link folderChecks} edits a file on disk with nothing running —
+ * and the join between them is where a run used to go missing: while the instrument writes, a
+ * disk-backed run buffers into IndexedDB, and only the moment its `ended` marker arrives does the
+ * store write the finished archive out to the original file (`useZpcrStore.ts`'s completion
+ * effect). Nothing asserted that the moment ever came, or that what it wrote was the whole run.
+ *
+ * The file is named `Mock Run.zpcr` on purpose: no date, so nothing restamps or renames it, and a
+ * space, which the instrument's run name can't carry — the shape that used to make the run land
+ * as a second, browser-only file the disk never heard of.
+ */
+async function diskRunChecks(chrome, origin) {
+  console.log("\na run started from a file on disk");
+  await makeMockExperiment(MOCK_ZPCR, "Mock Run", 2);
+  const { unzipArchive } = await import("../packages/core/dist/index.js");
+  const cdp = await openPage(chrome.base, origin);
+  await emptyReload(cdp, `${origin}#mock=max`);
+
+  // The experiment goes in an OPFS folder, handed to the app in place of the native picker (the
+  // picker itself cannot be driven from CDP — see folderChecks).
+  const b64 = readFileSync(MOCK_ZPCR).toString("base64");
+  await cdp.eval(
+    `(async () => {
+       const root = await navigator.storage.getDirectory();
+       for await (const [n] of root.entries()) await root.removeEntry(n, { recursive: true });
+       const runs = await root.getDirectoryHandle("runs", { create: true });
+       const h = await runs.getFileHandle("Mock Run.zpcr", { create: true });
+       const w = await h.createWritable();
+       await w.write(Uint8Array.from(atob("${b64}"), (c) => c.charCodeAt(0)));
+       await w.close();
+       window.__runFile = h;
+       window.showDirectoryPicker = async () => runs;
+       return true;
+     })()`,
+    { awaitPromise: true },
+  );
+  const diskSize = () =>
+    cdp.eval(`window.__runFile.getFile().then((f) => f.size)`, { awaitPromise: true });
+  const before = await diskSize();
+
+  await cdp.eval(`document.querySelector(".dropzone__folderbtn")?.click(), undefined`);
+  await waitFor(
+    () =>
+      cdp.eval(`[...document.querySelectorAll(".folders__pane--files .folders__name")]
+        .some((n) => n.textContent.trim() === "Mock Run.zpcr")`),
+    { what: "the folder's listing of the experiment" },
+  );
+  await cdp.eval(
+    `[...document.querySelectorAll(".folders__pane--files .folders__file")]
+       .find((r) => r.querySelector(".folders__name")?.textContent.trim() === "Mock Run.zpcr")
+       ?.querySelector(".folders__check")?.click(), undefined`,
+  );
+  await waitFor(() => cdp.eval(`!!document.querySelector(".filechip")`), {
+    what: "the disk-backed experiment's chip",
+  });
+  await cdp.eval(`window.location.hash = "file=runs/Mock Run.zpcr&view=instrument", undefined`);
+  await waitFor(() => cdp.eval(`!!document.querySelector(".instrument__panelhead .instrument__start")`), {
+    what: "the disk-backed experiment's Start",
+  });
+  await clickConnect(cdp);
+  await waitFor(() => cdp.eval(`document.querySelector(".instrument__start")?.disabled === false`), {
+    what: "Start to enable once connected",
+  });
+  await clickButton(cdp, "Start experiment");
+
+  // The file on disk is left alone while the run goes (it buffers into IndexedDB) and written once
+  // when it ends, so its size changing *is* the completion write — and the read below is of what
+  // that write left on disk, not of anything the page is holding.
+  const after = await waitValue(diskSize, (s) => s !== before, {
+    timeout: 60000,
+    what: "the finished run to be written to the file on disk",
+  });
+  const bytes = Buffer.from(
+    await cdp.eval(
+      `window.__runFile.getFile().then((f) => f.arrayBuffer()).then((b) => {
+         let s = ""; const u = new Uint8Array(b);
+         for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode(...u.subarray(i, i + 0x8000));
+         return btoa(s); })`,
+      { awaitPromise: true },
+    ),
+    "base64",
+  );
+  let names = [];
+  try {
+    names = Object.keys(unzipArchive(new Uint8Array(bytes)));
+  } catch (e) {
+    names = [`unreadable: ${e.message}`];
+  }
+  const reads = names.filter((n) => /\.Plateread$/.test(n)).length;
+  check(
+    "the finished run is written into the file it was started from, on disk — every plate read, and the end",
+    reads === 3 && names.includes("ended") && names.includes("RunInfo.xml"),
+    JSON.stringify({ before, after, reads, ended: names.includes("ended") }),
+  );
+
+  // And nowhere else: the run is that file, not a browser-only copy beside it.
+  const chips = await waitStable(
+    () => cdp.eval(`[...document.querySelectorAll(".filebar .filechip")].map((c) => c.title || c.textContent.trim())`),
+    { what: "the file bar once the run is written" },
+  );
+  check("…and the file bar holds that one file, no second copy of the run", chips.length === 1, JSON.stringify(chips));
+
+  // Downloading it saves it under its own name. The app names a disk-backed file by its path in
+  // the folder (`runs/Mock Run.zpcr`), and the browser used to flatten that into the saved name
+  // (`runs_Mock Run.zpcr`). The browser's own `downloadWillBegin` says what it will be called;
+  // the bytes go to the job's scratch directory and are not read.
+  const suggested = [];
+  cdp.on("Page.downloadWillBegin", (p) => suggested.push(p.suggestedFilename));
+  await cdp.send("Page.setDownloadBehavior", {
+    behavior: "allow",
+    downloadPath: join(REPO, "tools/.uishot/downloads"),
+  });
+  await cdp.eval(`window.location.hash = "file=runs/Mock Run.zpcr&view=overview", undefined`);
+  await waitFor(() => cdp.eval(`!!document.querySelector(".overview__downloadbtn")`), {
+    what: "the run's Overview download button",
+  });
+  await cdp.eval(`document.querySelector(".overview__downloadbtn").click(), undefined`);
+  const saved = await waitValue(() => suggested[0] ?? null, (v) => v !== null, {
+    what: "the browser to begin the download",
+  });
+  check(
+    "…and downloading it saves it under its own name, not its folder path",
+    saved === "Mock Run.zpcr",
+    JSON.stringify(saved),
+  );
+  cdp.close();
+}
+
 async function folderChecks(chrome, origin) {
   console.log("\ndisk folders");
   // Tree queries mean the *disk* folder's group: the bundled `samples` group is a sibling of it in
@@ -8086,6 +8217,7 @@ async function main() {
     await thermalProfileChecks(chrome, origin);
     await instrumentRunChecks(chrome, origin);
     await mockInstrumentChecks(chrome, origin);
+    await diskRunChecks(chrome, origin);
     await runSeedChecks(chrome, origin);
     await incompleteRunChecks(chrome, origin);
     await noPlateReadRunChecks(chrome, origin);

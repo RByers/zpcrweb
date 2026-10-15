@@ -1301,7 +1301,13 @@ work, and both are about the file's name, since a name is a file here:
 
 The file's name therefore doesn't move over a run, which is also why `beginExperiment` doesn't
 restamp its date the way it does for a browser-held experiment — a disk-backed file can't be
-renamed from here at all (`renameFile`).
+renamed from here at all (`renameFile`). `uitest`'s `diskRunChecks` runs an experiment opened out of
+a folder on the simulated instrument and reads the file back off disk at the end: every plate read
+and `ended` are in it, and no second file appears.
+
+**The path is the file's id, not its name.** Anything that leaves the app as a file — a download —
+is saved under the base name alone (`lib/download.ts`'s `downloadName`); handed the path, the
+browser flattened it into the saved name (`runs_2026-07_a.zpcr`).
 
 ### The Files view is two panes
 
