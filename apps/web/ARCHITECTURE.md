@@ -784,7 +784,9 @@ stops being. See "Disk-backed files and folders" below.
 
 The two bars are named after those sets and are referred to by those names throughout the code:
 the **view bar** is the tab strip (`components/ViewBar.tsx`), the **file bar** is the row of chips
-under it (`components/FileBar.tsx`).
+under it (`components/FileBar.tsx`). The file bar scrolls horizontally, and a newly opened file's
+chip is appended at its end, so the bar scrolls all the way right whenever a file is added — the
+file just opened is never left clipped off the edge.
 
 ### The invariants
 

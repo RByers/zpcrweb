@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { FileKind } from "@zpcrweb/core";
 import type {
@@ -407,8 +407,23 @@ export function FileBar({
   lockedTo = null,
 }: Props) {
   const [password] = usePltdPassword();
+  // A file that has just been opened is the one about to be looked at, and it arrives at the end of
+  // the bar (the store appends) — which, once the bar overflows, is off its right edge. Scroll the
+  // bar all the way right whenever an id appears that wasn't there before, so the new chip is fully
+  // in view. Only on growth: a rename swaps an id in place, and that chip hasn't moved anywhere.
+  // A layout effect, so the jump lands before the frame that would show the new chip clipped.
+  const barRef = useRef<HTMLDivElement>(null);
+  const prevIdsRef = useRef<Set<string> | null>(null);
+  useLayoutEffect(() => {
+    const prev = prevIdsRef.current;
+    prevIdsRef.current = new Set(files.map((f) => f.name));
+    if (!prev || files.length <= prev.size || files.every((f) => prev.has(f.name))) return;
+    const bar = barRef.current;
+    if (bar) bar.scrollLeft = bar.scrollWidth;
+  }, [files]);
   return (
     <div
+      ref={barRef}
       className="filebar"
       role="tablist"
       aria-label="Loaded files"

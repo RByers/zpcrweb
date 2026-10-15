@@ -4830,6 +4830,65 @@ async function openFilesChecks(chrome, origin) {
  * hadn't), and whether the modified flag outlived a reload — it must, since the stale copy is the
  * one on disk.
  */
+/**
+ * Opening a file scrolls the file bar all the way right (`FileBar.tsx`). The store appends a new
+ * file, so on a bar that overflows its chip lands past the right edge — exactly where the person
+ * who just opened it can't see it.
+ */
+async function fileBarScrollChecks(chrome, origin) {
+  console.log("\nfile bar scrolls to a newly opened file");
+  const cdp = await openPage(chrome.base, origin);
+  await emptyReload(cdp, origin);
+  // Narrow, so a handful of chips is enough to overflow the bar.
+  await cdp.send("Emulation.setDeviceMetricsOverride", {
+    width: 480,
+    height: 700,
+    deviceScaleFactor: 1,
+    mobile: false,
+  });
+  const chips = () => cdp.eval(`document.querySelectorAll(".filebar .filechip").length`);
+  const bar = () =>
+    cdp
+      .eval(
+        `JSON.stringify((() => { const b = document.querySelector(".filebar");
+           const last = [...b.querySelectorAll(".filechip")].at(-1).getBoundingClientRect();
+           const r = b.getBoundingClientRect();
+           return { left: b.scrollLeft, max: b.scrollWidth - b.clientWidth,
+                    lastInside: last.left >= r.left - 1 && last.right <= r.right + 1 }; })())`,
+      )
+      .then(JSON.parse);
+  const open = async (name) => {
+    const before = await chips();
+    await loadFile(cdp, join(REPO, "samples", name));
+    await waitFor(async () => (await chips()) > before, { what: `the chip for ${name}` });
+  };
+  for (const name of [
+    "S183-S185-RVP.plt.csv",
+    "mixed-vessel-YouSeq-RVP.plt.csv",
+    "20260807_231326_CT019138_AGBLK1.alf",
+    "20190516_122922_CT019138_SHORT_QUALIF.zpcr",
+  ])
+    await open(name);
+  // Put the bar back at its left end, so the scroll the next file causes is that file's doing.
+  await cdp.eval(`document.querySelector(".filebar").scrollLeft = 0`);
+  const overflowed = await bar();
+  check(
+    "the file bar overflows at this width",
+    overflowed.max > 0 && overflowed.left === 0,
+    JSON.stringify(overflowed),
+  );
+
+  await open("20230829_135443_CT019138_SINGLE_STEP_.zpcr");
+  const after = await waitValue(bar, (b) => b.left > 0, { what: "the file bar to scroll" });
+  check(
+    "opening a file scrolls the bar all the way right, its new chip fully in view",
+    after.max > 0 && after.left >= after.max - 1 && after.lastInside,
+    JSON.stringify(after),
+  );
+
+  cdp.close();
+}
+
 async function closeConfirmChecks(chrome, origin) {
   console.log("\nclose confirmation");
   const cdp = await openPage(chrome.base, origin);
@@ -8262,6 +8321,7 @@ async function main() {
     await explodedStorageChecks(chrome, origin);
     await experimentNameChecks(chrome, origin);
     await closeConfirmChecks(chrome, origin);
+    await fileBarScrollChecks(chrome, origin);
     await protocolEditorChecks(chrome, origin);
     await plateEditorChecks(chrome, origin);
     await runPlateEditChecks(chrome, origin);
