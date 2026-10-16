@@ -3537,8 +3537,11 @@ records the one it ran as `ProtocolRunDefinition.txt`, and the protocol's name g
 `ProtocolName.txt` (`usb.md` §7.4).
 
 The order is `usb.md` §7's, not the one §5's upload machinery suggests: the protocol is typed in as
-ASCII directives, `RemoteRun` starts it, and the files are deposited **afterwards**, into a run
-already cycling. Two things follow that would otherwise read as bugs. There is **no confirmation
+ASCII directives, `RemoteRun` starts it, and the files are deposited **afterwards** — once
+`STATUS?` shows the run, ~12 s later, since until then the instrument is still clearing the
+previous run out of the folder they go into (`usb.md` §7.4). `runPending` covers that wait, and
+the session leaves the device un-busy through it so Stop works. Two things follow that would
+otherwise read as bugs. There is **no confirmation
 step** — §7.5 measured `PROCEED` as "skip the current step", so sending it after `RemoteRun` would
 silently skip the run's first step — which is why the button's own footnote says the run starts on
 the click and to close the lid first. And a **deposit failure is reported, not thrown**: by then

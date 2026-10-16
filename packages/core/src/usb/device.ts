@@ -83,7 +83,7 @@ import {
   type CfxStatus,
 } from "./status.js";
 import { cfxFileCrc, formatCfxFileCrc } from "./crc.js";
-import { CFX_RUN_REPORT_DIR, type RunPlan } from "./runPlan.js";
+import { CFX_CURRENT_RUN_DIR, CFX_RUN_REPORT_DIR, type RunPlan } from "./runPlan.js";
 import { usbTrafficText } from "../usbTraffic.js";
 import {
   CFX_CONFIGURATION,
@@ -153,6 +153,16 @@ function concatBytes(parts: readonly Uint8Array[]): Uint8Array {
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** The deposit report for a run that never showed up in `STATUS?` — its files were held back
+ * rather than written into a folder that is still the previous run's. Shown under "The run
+ * started. Its files, though:", so it names the files rather than repeating that. */
+export function runNotStartedNote(plan: RunPlan): string {
+  return (
+    `${plan.uploads.map((u) => u.name).join(", ")} weren't copied: the instrument hadn't shown ` +
+    `the run as started, so its run folder may still have held the previous run.`
+  );
 }
 
 /** One decoded message crossing the wire, as handed to {@link CfxDeviceOptions.onTraffic}. */
@@ -275,6 +285,17 @@ export interface CfxRunStartResult {
    * running. Surfaced so a UI can say the archive may be missing its plate map.
    */
   uploadErrors: string[];
+}
+
+/** How {@link CfxDevice.awaitRunStart} waits — every field has a sensible default. */
+export interface CfxAwaitStartOptions {
+  /** Gap between `STATUS?` reads. Default 1 s, about CFX Manager's own poll. */
+  pollMs?: number;
+  /** How long the run may take to appear. Default 60 s — measured starts take ≈11–12 s
+   * (`usb.md` §7.4, "The folder is cleared as the run starts"). */
+  timeoutMs?: number;
+  /** Called with every `STATUS?` this reads, so a caller whose own poll is paused stays live. */
+  onStatus?: (status: CfxStatus) => void;
 }
 
 /** How {@link CfxDevice.cancelRun} should behave — every field has a sensible default. */
@@ -991,13 +1012,24 @@ export class CfxDevice {
    * 7.2  PROTOCOL 'PCRUN', the directives, END  one command each, each acked 0000
    * 7.3  RemoteRun …                            ← the run starts HERE, nothing further required
    *      ADDCYCLES 0                            a no-op the capture sends as ordinary setup
+   *      STATUS? until the run appears          the firmware is clearing the old folder meanwhile
    * 7.4  the files                              deposited into the run folder, after the start
    * ```
    *
+   * The three phases are also {@link beginRun}, {@link awaitRunStart} and {@link depositRunFiles},
+   * for a caller that wants the device free while it waits (`CfxSession.startRun` does, so Stop
+   * works in the start window). This is the three in order.
+   *
+   * **The deposit waits for the run to appear** in `STATUS?`, as CFX Manager's does: the firmware
+   * empties the previous run out of `CurrentRun` in the seconds after `RemoteRun`, and a file
+   * written while it does can go with it — measured, `usb.md` §7.4 "The folder is cleared as the
+   * run starts". A run that never appears gets no deposit: the folder would still be the previous
+   * run's.
+   *
    * §7.4 is skipped entirely for a thermal-only protocol, because there is no run folder to
-   * deposit into — `planRun` gives such a plan no uploads at all, and the loop below simply has
-   * nothing to do. See {@link RunPlan.producesRunFile}, and {@link runReport} for what that run
-   * leaves behind instead.
+   * deposit into — `planRun` gives such a plan no uploads at all, so there is nothing to wait for
+   * either. See {@link RunPlan.producesRunFile}, and {@link runReport} for what that run leaves
+   * behind instead.
    *
    * **There is no confirmation step.** An earlier reading of the capture had `PROCEED` as the
    * "operator has closed the lid" confirmation; §7.5 measured it as *skip to the next step*,
@@ -1011,6 +1043,17 @@ export class CfxDevice {
    * with no way to detect it afterwards.
    */
   async startRun(plan: RunPlan, onProgress?: (what: string) => void): Promise<CfxRunStartResult> {
+    await this.beginRun(plan, onProgress);
+    if (plan.uploads.length === 0) return { uploads: [], uploadErrors: [] };
+    onProgress?.("Waiting for the run to start");
+    const started = await this.awaitRunStart();
+    if (!started) return { uploads: [], uploadErrors: [runNotStartedNote(plan)] };
+    return this.depositRunFiles(plan, onProgress);
+  }
+
+  /** §7.1–§7.3 of {@link startRun}: everything up to and including `RemoteRun`. The run is
+   * starting when this resolves, though `STATUS?` won't say so for several seconds yet. */
+  async beginRun(plan: RunPlan, onProgress?: (what: string) => void): Promise<void> {
     if (!plan.startable) {
       throw new Error("This run plan has unresolved errors and must not be started.");
     }
@@ -1030,8 +1073,39 @@ export class CfxDevice {
       await command(plan.remoteRun);
       await command("ADDCYCLES 0");
     });
-    // Outside the sequence above: each upload is its own multi-command operation that takes the
-    // channel for itself, and nesting one inside a held channel would deadlock (see `sequence`).
+  }
+
+  /**
+   * Poll `STATUS?` until a run just begun with {@link beginRun} appears — reporting a step, or
+   * holding a run name (one cancelled or finished already, whose folder was cleared all the same).
+   * Resolves with that status, or null if {@link CfxAwaitStartOptions.timeoutMs} passes first.
+   *
+   * This is the deposit's synchronisation point, and the one CFX Manager uses: by the time the run
+   * shows in `STATUS?` the firmware has finished emptying the previous run out of `CurrentRun`
+   * (`usb.md` §7.4, "The folder is cleared as the run starts" — ≈4.4 s to clear, ≈11.8 s to appear,
+   * in the one run measured). The clear itself has no observable end of its own: a listing only
+   * shows how far it has got.
+   */
+  async awaitRunStart(options: CfxAwaitStartOptions = {}): Promise<CfxStatus | null> {
+    const { pollMs = 1000, timeoutMs = 60_000, onStatus } = options;
+    const started = Date.now();
+    for (;;) {
+      const status = await this.status();
+      onStatus?.(status);
+      if (status.running || status.runName !== "") return status;
+      if (Date.now() - started >= timeoutMs) return null;
+      await delay(pollMs);
+    }
+  }
+
+  /**
+   * §7.4 of {@link startRun}: upload the plan's files into the run folder, then list it once to
+   * confirm every one of them is still there. Call it only once the run has appeared
+   * ({@link awaitRunStart}) — before that, the folder is still being cleared.
+   */
+  async depositRunFiles(plan: RunPlan, onProgress?: (what: string) => void): Promise<CfxRunStartResult> {
+    // Each upload is its own multi-command operation that takes the channel for itself, so this is
+    // not one `sequence` — nesting one inside a held channel would deadlock (see `sequence`).
     //
     // Failures here are reported, never thrown: by this point the run is *already going*, and
     // aborting a started run because a provenance file didn't copy would be the wrong trade —
@@ -1051,6 +1125,22 @@ export class CfxDevice {
         }
       } catch (e) {
         uploadErrors.push(`${upload.name}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+    // A verified upload can still be gone a moment later — that is how a deposited protocol was
+    // lost before the wait above existed — so check the folder once more, after the last one.
+    if (uploads.length > 0) {
+      try {
+        const present = new Set((await this.listFiles(CFX_CURRENT_RUN_DIR)).names);
+        for (const upload of plan.uploads) {
+          if (uploads.some((u) => u.path === upload.path) && !present.has(upload.name)) {
+            uploadErrors.push(`${upload.name} was copied, but is no longer in the run folder.`);
+          }
+        }
+      } catch (e) {
+        uploadErrors.push(
+          `Couldn't confirm the run folder kept its files: ${e instanceof Error ? e.message : String(e)}`,
+        );
       }
     }
     return { uploads, uploadErrors };

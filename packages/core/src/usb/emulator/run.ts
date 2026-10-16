@@ -94,6 +94,7 @@ export class EmulatedRun {
   /** Set by an abort: the run clock stops here and the protocol is over. */
   private abortedAtMs: number | null = null;
   private acknowledged = false;
+  private cleared = false;
   private started = false;
   private readsWritten = 0;
 
@@ -110,18 +111,7 @@ export class EmulatedRun {
     this.program = parseRunDefinition(request.directives.join(";"));
     this.schedule = scheduleRun(this.program);
     this.producesRunFile = this.schedule.plateReads > 0;
-    // **Clear the folder here, where the run is requested — not where it becomes visible.**
-    // A new run's folder holds that run's files and no other, which is derived rather than
-    // observed (`emulator.md` Appendix A). *When* it is emptied is not a free choice, though:
-    // the host deposits `zpcrweb.json`, the plate and the protocol into this directory
-    // immediately after `RemoteRun` returns (`usb.md` §7.4), which is inside the start window
-    // and so long before the run first shows up in `STATUS?`. Clearing at that later moment
-    // deleted everything the host had just put there, and the run came back named after
-    // whatever `RunInfo.xml` the recording carried rather than the experiment it was started
-    // from — with no plate, so the Curves view had no targets to offer. Found by driving a run
-    // from the browser; a real instrument cannot behave this way, or a deposited run would
-    // never survive its own start.
-    if (this.producesRunFile) this.fs.clear(CFX_CURRENT_RUN_DIR);
+    // The folder is emptied in `materialise`, as the run becomes visible — not here.
   }
 
   /** When the run leaves the start window and becomes visible in `STATUS?`. */
@@ -238,11 +228,22 @@ export class EmulatedRun {
    * listing and a status poll can never disagree about whether a read exists yet.
    */
   materialise(nowMs: number): void {
-    if (nowMs < this.visibleAtMs || !this.producesRunFile || !this.data) return;
+    if (nowMs < this.visibleAtMs || !this.producesRunFile) return;
+    if (!this.cleared) {
+      // **The previous run is cleared out as this one becomes visible**, which is the *latest*
+      // the real clear finishes: measured, the firmware empties the folder in the background over
+      // the first ~4.4 s after `RemoteRun`, and the run appears in `STATUS?` at ~11.8 s (`usb.md`
+      // §7.4, "The folder is cleared as the run starts"). Anything written inside the start window
+      // is therefore lost here, where on the instrument it is lost only if it lands before the
+      // clear passes it — the stricter of the two, so a host that deposits too early is caught by
+      // the emulator rather than by a run that comes back without its plate. A host deposit that
+      // waited for the run to appear arrives after this, is its own, and stays.
+      this.cleared = true;
+      this.fs.clear(CFX_CURRENT_RUN_DIR);
+    }
+    if (!this.data) return;
     if (!this.started) {
       this.started = true;
-      // The folder was emptied when the run was requested (see the constructor). Anything the
-      // host deposited since is its own and stays.
       for (const [name, bytes] of Object.entries(this.data.supportFiles())) {
         this.fs.write(`${CFX_CURRENT_RUN_DIR}\\${name}`, bytes);
       }

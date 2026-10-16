@@ -7,6 +7,7 @@
  */
 export { CfxDevice } from "./device.js";
 export type {
+  CfxAwaitStartOptions,
   CfxCancelOptions,
   CfxCancelResult,
   CfxDeviceOptions,

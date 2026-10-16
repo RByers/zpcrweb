@@ -388,6 +388,13 @@ puller to carry off. What such a run does leave is its `.alf`, which `CfxDevice.
 from `\Storage Card\PCRunReport` — unambiguously this run's, since §7.1 empties that directory at
 every start.
 
+**A run that does build a folder gets its files only once it has appeared.** The firmware clears
+the previous run out of `CurrentRun` in the seconds after `RemoteRun`, and a file written then can
+go with it (`usb.md` §7.4) — so `CfxDevice.startRun` is three phases, `beginRun`,
+`awaitRunStart` (polls `STATUS?` until the run shows) and `depositRunFiles` (uploads, then one
+listing to confirm they stayed). `CfxSession.startRun` runs them as two operations with the wait
+outside the busy gate, so Stop stays usable through the start window.
+
 Driving the real instrument is also what corrected four claims the packet captures had gotten
 wrong — `usb.md` §10 collects them. That is the argument for keeping the CLI: a protocol
 reverse-engineered from captures is a hypothesis until something speaks it.

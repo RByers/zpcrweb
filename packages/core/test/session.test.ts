@@ -113,6 +113,38 @@ describe("the busy gate", () => {
     await session.dispose();
   });
 
+  /**
+   * A start is two operations with a wait between: the files can't go until the run appears
+   * (`usb.md` §7.4), which is ~12 s of start window on a real instrument — and Stop is disabled
+   * while `busy`, so holding the gate through the wait would take it away exactly when a start
+   * window `CANCEL` needs it.
+   */
+  it("releases the gate while a run comes up, then deposits its files", async () => {
+    const emulator = createCfxEmulator({ data: pcrData(), clock: acceleratedClock() });
+    const session = sessionOn(emulator);
+    await session.connect();
+    await waitFor("the last-run report read", () => session.state.busy === null);
+
+    const seen: (string | null)[] = [];
+    const unsubscribe = session.subscribe(() => {
+      if (seen[seen.length - 1] !== session.state.busy) seen.push(session.state.busy);
+    });
+    const plan = planRun({ runDefinition: TWO_CYCLE, name: "demo", protocolName: "twocycle" });
+    const result = await session.startRun(plan);
+    unsubscribe();
+
+    expect(result?.uploadErrors).toEqual([]);
+    expect(result?.uploads).toHaveLength(plan.uploads.length);
+    const started = seen.indexOf("Starting the run");
+    const copying = seen.indexOf("Copying the run's files");
+    expect(started).toBeGreaterThanOrEqual(0);
+    expect(copying).toBeGreaterThan(started);
+    expect(seen.slice(started, copying)).toContain(null);
+    const listed = emulator.instrument.fs.names("\\Storage Card\\CurrentRun");
+    for (const u of plan.uploads) expect(listed).toContain(u.name);
+    await session.dispose();
+  });
+
   it("reports a failed operation rather than throwing it at the caller", async () => {
     const session = sessionOn(createCfxEmulator({ clock: acceleratedClock() }));
     await session.connect();

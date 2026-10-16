@@ -1183,6 +1183,16 @@ The `.prcl.txt` this project used to deposit first was the casualty: of the nine
 `.zpcr`s on hand, only `20260807-YouSeq_RT_-_S56.zpcr` kept it — and that was a thermal-only run
 (§7.10), whose folder is never cleared, so its deposit had landed in the *previous* run's folder.
 
+**So a client deposits only once `STATUS?` shows the run**, as CFX Manager does — a step other
+than `IDLE`, or a held run name for a run already stopped. The clear has no end signal of its own
+(a listing only shows how far it has got), and the run appearing is the latest point either
+measurement puts it at. If the run never appears, deposit nothing: the folder is still the previous
+run's. Then list the folder once after the last upload and check every file is still in it — a
+checksum that verified a moment ago does not prove the file is still there, as the table above
+shows. Implemented by `CfxDevice.startRun` (`awaitRunStart`, then `depositRunFiles`);
+`CfxSession.startRun` runs the two separately so the device is free during the wait, which is
+the start window a Stop button has to work in (§7.8).
+
 ### 7.5 Watching the run, and pulling plate reads
 
 `STATUS?` is the whole mechanism. Its current-step field carries the step's command text verbatim,
@@ -1298,7 +1308,8 @@ plate reads:
 6. `RemoteRun "A","True","False","<name>","<user>","","True","<method>"` (§7.3) — **this starts
    it.** Expect `STATUS?` to leave `IDLE` within ~10 s, and expect the lid, not the block, to heat
    first.
-7. Optionally deposit `GlobData.xml`/`.pltd`/`RunInfo.xml`/`.prcl` into
+7. Once `STATUS?` shows the run (not before — §7.4, "The folder is cleared as the run starts"),
+   optionally deposit `GlobData.xml`/`.pltd`/`RunInfo.xml`/`.prcl` into
    `\Storage Card\CurrentRun\` (§7.4) if the finished run should be a complete experiment rather
    than just fluorescence — or this project's plaintext plate, `ProtocolName.txt` and a
    `zpcrweb.json` naming the run. Skip it otherwise.

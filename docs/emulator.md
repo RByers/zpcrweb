@@ -98,8 +98,11 @@ over `runDefinition.ts`'s `walkProgram` — the same loop-walking the rest of th
 
 The sequence is `usb.md` §7's, in order: `PROTOCOL 'PCRUN'` + directives + `END` to author,
 `RemoteRun` to start (and **only** `RemoteRun` — `PROCEED` skips a step, it does not start
-anything), `ADDCYCLES 0` as ordinary setup, then the files deposited *after* the run is already
-cycling. What follows:
+anything), `ADDCYCLES 0` as ordinary setup, then the files deposited *after* the run has appeared
+in `STATUS?`. What follows:
+
+- `CurrentRun` is emptied of the previous run as the new one becomes visible — so a file written
+  inside the start window is lost, as one can be on the instrument (Appendix A).
 
 - A `Read0000N.Plateread` appears when its `PLATEREAD` step **ends**, not when it begins.
 - **The last read is not listable until the run is acknowledged** (§7.6). A finished protocol
@@ -459,8 +462,11 @@ timestamps.
   there is not (§11).
 - **Ramp lengths.** The emulator's 10 s is between the instrument's measured ~11 s up and ~15 s
   down (§10.2); a block's real ramp depends on the distance, and nothing reports a rate.
-- Clearing `CurrentRun` at the start of a new plate-read run — derived from "every pulled folder
-  holds one run's files", never observed directly.
+- *When* `CurrentRun` is cleared at the start of a new plate-read run. That it is cleared is now
+  measured, in progress over the first ~4.4 s after `RemoteRun` (`usb.md` §7.4, "The folder is
+  cleared as the run starts"); the emulator clears it all at once as the run becomes visible —
+  the latest the real clear could end, chosen so that a host depositing inside the start window
+  loses its files here as it can on the instrument. Which files a real clear spares is inferred.
 - The response header bytes `01 00 00 00 …` on every text reply (measured only for the
   `passThrough` case).
 

@@ -30,6 +30,7 @@ import {
   manualClock,
   recordedRunData,
   realtimeClock,
+  START_WINDOW_MS,
   type CfxEmulator,
   type ScaledClock,
 } from "../src/emulator.js";
@@ -289,24 +290,27 @@ describe("a run, start to collected", () => {
     await close();
   });
 
-  it("keeps what the host deposited, once the run's own files arrive on top", async () => {
-    // §7.4's deposit lands inside the start window, before the run is visible in `STATUS?` at
-    // all, and the emulator empties `CurrentRun` for a new run. The order of those two is not a
-    // free choice: clear the folder when the run *appears* and the deposit is already in it and
-    // is destroyed — which is how a collected run came back named after the recording the
-    // emulator replays instead of the experiment it was started from, with no plate for the
-    // Curves view to offer targets from. A real instrument cannot work that way, or a deposited
-    // run would never survive its own start. Found by driving a run from the browser.
+  /**
+   * Measured (`usb.md` §7.4, "The folder is cleared as the run starts"): the firmware empties the
+   * previous run out of `CurrentRun` in the seconds after `RemoteRun`, and a file written then can
+   * go with it — which is how a deposited `.prcl.txt` came to be missing from nearly every run.
+   * The emulator clears as the run appears, the latest the real clear ends, so a deposit made
+   * inside the start window is lost here and one made after it survives.
+   */
+  it("loses a deposit made inside the start window, and keeps one made after", async () => {
     const clock = manualClock();
     const { device, close } = await connect({ data: pcrData(), clock });
-    await device.startRun(planRun({ runDefinition: TWO_CYCLE, name: "demo", protocolName: "twocycle" }));
+    await device.beginRun(planRun({ runDefinition: TWO_CYCLE, name: "demo" }));
+
+    const early = CURRENT_RUN + "\\early.txt";
+    expect((await device.sendFile(early, new TextEncoder().encode("early"))).verified).toBe(true);
+    clock.advance(START_WINDOW_MS);
+    expect((await device.listFiles(CURRENT_RUN)).names).not.toContain("early.txt");
 
     const deposited = CURRENT_RUN + "\\zpcrweb.json";
     const mine = new TextEncoder().encode('{"experimentName":"mine"}');
     expect((await device.sendFile(deposited, mine)).verified).toBe(true);
-
-    // Past the start window and the lid preheat, so the run writes its own files — the moment
-    // the folder used to be emptied.
+    // Past the lid preheat, so the run writes its own files on top.
     clock.advance(600_000);
     const listed = await device.listFiles(CURRENT_RUN);
     expect(listed.names).toContain("zpcrweb.json");
@@ -315,10 +319,30 @@ describe("a run, start to collected", () => {
     await close();
   });
 
+  /** CFX Manager's order (`usb.md` §7.4): no `CRCSENDFILE` until `STATUS?` shows the run. */
+  it("waits for the run to appear before depositing, and every file survives", async () => {
+    const { device, emulator, close } = await connect({ data: pcrData() });
+    const plan = planRun({
+      runDefinition: TWO_CYCLE,
+      name: "demo",
+      protocolName: "twocycle",
+    });
+    const result = await device.startRun(plan);
+    expect(result.uploadErrors).toEqual([]);
+    expect(result.uploads).toHaveLength(plan.uploads.length);
+
+    const sent = emulator.sent;
+    const firstUpload = sent.findIndex((c) => c.startsWith("CRCSENDFILE"));
+    expect(sent.slice(sent.indexOf("ADDCYCLES 0"), firstUpload)).toContain("STATUS?");
+    const listed = (await device.listFiles(CURRENT_RUN)).names;
+    for (const u of plan.uploads) expect(listed).toContain(u.name);
+    await close();
+  });
+
   it("holds the empty idle through the start window, then runs", async () => {
     const clock = manualClock();
     const { device, close } = await connect({ data: pcrData(), clock });
-    await device.startRun(planRun({ runDefinition: TWO_CYCLE, name: "demo" }));
+    await device.beginRun(planRun({ runDefinition: TWO_CYCLE, name: "demo" }));
     // Measured: `RemoteRun` is accepted and for ~6 s `STATUS?` still reports the empty idle, so
     // an armed run and a genuinely idle instrument are the same reply (`usb.md` §7.8 step 0).
     clock.advance(4_500);
@@ -411,7 +435,7 @@ describe("pausing, skipping and stopping", () => {
   it("pauses and resumes, with the run's clock frozen in between", async () => {
     const clock = manualClock();
     const { device, close } = await connect({ data: pcrData(), clock });
-    await device.startRun(planRun({ runDefinition: TWO_CYCLE, name: "demo" }));
+    await device.beginRun(planRun({ runDefinition: TWO_CYCLE, name: "demo" }));
     clock.advance(6_000 + 168_000 + 20_000);
     const before = await device.status();
     expect(before.running).toBe(true);
@@ -439,7 +463,7 @@ describe("pausing, skipping and stopping", () => {
   it("PROCEED skips to the next step rather than starting or resuming anything", async () => {
     const clock = manualClock();
     const { device, close } = await connect({ data: pcrData(), clock });
-    await device.startRun(planRun({ runDefinition: TWO_CYCLE, name: "demo" }));
+    await device.beginRun(planRun({ runDefinition: TWO_CYCLE, name: "demo" }));
     clock.advance(6_000 + 168_000 + 20_000);
     // Step 1 is a 3-minute hold the run is 20 s into — it cannot have run out.
     const before = await device.status();
@@ -457,7 +481,7 @@ describe("pausing, skipping and stopping", () => {
   it("a CANCEL during the lid preheat aborts the run, and STATUS? says so at once", async () => {
     const clock = manualClock();
     const { device, close } = await connect({ data: pcrData(), clock });
-    await device.startRun(planRun({ runDefinition: TWO_CYCLE, name: "demo" }));
+    await device.beginRun(planRun({ runDefinition: TWO_CYCLE, name: "demo" }));
     clock.advance(6_000 + 30_000);
     expect((await device.status()).flags.lidPreheating).toBe(true);
     const result = await device.cancelRun({ pollMs: 1, timeoutMs: 5_000 });
@@ -530,7 +554,7 @@ describe("pausing, skipping and stopping", () => {
     // also the callback a caller uses to keep its display live while the channel is held.
     const clock = manualClock();
     const { device, close } = await connect({ data: pcrData(), clock });
-    await device.startRun(planRun({ runDefinition: TWO_CYCLE, name: "demo" }));
+    await device.beginRun(planRun({ runDefinition: TWO_CYCLE, name: "demo" }));
     // Start window, lid preheat, then 190 s + 20 s + 40 s of thermal steps: five seconds into
     // the first plate read.
     clock.advance(6_000 + 168_000 + 255_000);
@@ -553,7 +577,7 @@ describe("pausing, skipping and stopping", () => {
   it("survives the start window, where a bare CANCEL is answered 0000 and ignored", async () => {
     const clock = manualClock();
     const { device, emulator, close } = await connect({ data: pcrData(), clock });
-    await device.startRun(planRun({ runDefinition: TWO_CYCLE, name: "demo" }));
+    await device.beginRun(planRun({ runDefinition: TWO_CYCLE, name: "demo" }));
 
     // A fire-and-forget button: accepted, and the run starts anyway. This is the bug.
     expect((await device.acknowledgeRun()).ok).toBe(true);
@@ -568,7 +592,7 @@ describe("pausing, skipping and stopping", () => {
     // start window has to pass in wall time too for the watch-and-retry path to be exercised.
     const clock = realtimeClock(200);
     const { device, close } = await connect({ data: pcrData(), clock });
-    await device.startRun(planRun({ runDefinition: TWO_CYCLE, name: "demo" }));
+    await device.beginRun(planRun({ runDefinition: TWO_CYCLE, name: "demo" }));
     const result = await device.cancelRun({
       expectStart: true,
       pollMs: 5,

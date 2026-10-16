@@ -21,7 +21,12 @@
  */
 import { CFX_DIRECTORIES } from "./commands.js";
 import { CFX_CURRENT_RUN_DIR } from "./runPlan.js";
-import { CfxDevice, type CfxTrafficEvent, type CfxTransferErrorEvent } from "./device.js";
+import {
+  CfxDevice,
+  runNotStartedNote,
+  type CfxTrafficEvent,
+  type CfxTransferErrorEvent,
+} from "./device.js";
 import { isFinishedRun } from "./status.js";
 import { UsbTrafficRecorder } from "../usbTraffic.js";
 import { usbTrafficPreview } from "../usbTraffic.js";
@@ -801,7 +806,31 @@ export class CfxSession {
     // describing a file that has been deleted; the run being started writes the next one, and
     // `refreshLastReport` picks that up when it finishes.
     this.#set({ lastAction: null, lastReport: null });
-    const result = await this.run("Starting run", (d) => d.startRun(plan, (what) => this.progress(what)));
+    const progress = (what: string) => this.progress(what);
+    // `CfxDevice.startRun`'s three phases, taken separately so the device isn't held while the
+    // run comes up: the wait is ~12 s, and it is the start window, where Stop has to work (it is
+    // disabled while `busy`, and `cancelRun`'s `expectStart` exists for exactly this stretch).
+    const begun = await this.run("Starting run", async (d) => {
+      await d.beginRun(plan, progress);
+      return true;
+    });
+    if (!begun) return undefined;
+    let result: CfxRunStartResult = { uploads: [], uploadErrors: [] };
+    const device = this.#device;
+    if (device && plan.uploads.length > 0) {
+      // Not inside `run`: `STATUS?` is one command, so this interleaves safely with the poll and
+      // with a Stop. It publishes what it reads, the way `cancelRun`'s `onStatus` does.
+      let started: CfxStatus | null = null;
+      try {
+        started = await device.awaitRunStart({ onStatus: (s) => this.#set({ status: s }) });
+      } catch (e) {
+        console.error("[CfxSession] waiting for the run to start failed:", e);
+      }
+      result = started
+        ? ((await this.run("Copying the run's files", (d) => d.depositRunFiles(plan, progress))) ??
+          result)
+        : { uploads: [], uploadErrors: [runNotStartedNote(plan)] };
+    }
     await this.refreshStatusNow();
     return result;
   }
