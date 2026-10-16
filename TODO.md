@@ -211,17 +211,14 @@ algorithm, display smoothing) — each understood, none exercised by any sample 
 - [ ] Add a browser-mode Vitest run to prove isomorphism in a real browser environment.
 - [ ] Add more sample `.zpcr` files (different block types, channel counts, cycle counts)
       as they become available.
-- [ ] **Add a sample `.zpcr` with a USB traffic log for each kind of run.** Today
-      `samples/20260807-YouSeq_RT_-_S56.zpcr` is the only file in the repo with a
-      `usb-traffic.bin`, and replaying it against the emulator (`emulator.md` §10.1) showed it is
-      not the qPCR it was taken for: the session's own run is `METHOD BLOCK` with three `TEMP`
-      steps and no `PLATEREAD`, and the 45 reads in the archive are the *previous* run's files,
-      still in `CurrentRun` because a thermal-only run writes no run folder. So the heat-block
-      case is witnessed — its log survived only because the folder was pulled anyway — and what
-      is missing is **a qPCR run's own traffic and a melt's**: nothing has ever recorded reads
-      appearing as their steps end, or the acknowledgement releasing the last one. Not blocked —
-      the log bug under "Web app" above is fixed, so the next run of either kind recorded with
-      "save log" on is the sample this wants, and `emulator.md` §11 says what to do with it.
+- [ ] **Add a sample `.zpcr` with a USB traffic log for each kind of run.** Two are in: the
+      heat-block session (`samples/20260807-YouSeq_RT_-_S56.zpcr`) and, since 2026-10-15, a
+      45-cycle qPCR run (`samples/20261014-S187_S188_S189_cold_check.zpcr`). Both are replayed
+      against the emulator in `npm test` (`emulator.md` §10.1); the qPCR one corrected every
+      duration the emulator modelled, field 2, field 9, and showed the acknowledgement releasing
+      the run up to seconds after the `CANCEL` — which the app had been collecting before. Still
+      missing: **a melt, a cancel, and a session that polls fast across a finish** (`emulator.md`
+      §11). The next run of any of those recorded with "save log" on is the sample this wants.
 
 ### UI tooling follow-ups
 

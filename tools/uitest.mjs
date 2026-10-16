@@ -4279,15 +4279,23 @@ async function mockInstrumentChecks(chrome, origin) {
     (v) => v === "in progress",
     { timeout: 20000, what: "the run to still be going on reconnection" },
   );
+  // The rail reads "<cycle> / <total>" once the loop's `GOTO` has run and status field 2 carries
+  // the total (`usb.md` §3.2) — just "<cycle>" through the first pass, when the two are equal.
+  const cycleOf = (v) => parseInt(v ?? "", 10);
   const advanced = await waitValue(
     () => railStat(long, "Status", "Cycle"),
-    (v) => Number(v) > Number(cycleAtUnplug),
+    (v) => cycleOf(v) > cycleOf(cycleAtUnplug),
     { timeout: 30000, what: "the run to go on cycling after reconnection" },
   );
   check(
     "reconnecting finds the same run still going, and it goes on cycling",
-    backOn === "in progress" && Number(advanced) > Number(cycleAtUnplug),
+    backOn === "in progress" && cycleOf(advanced) > cycleOf(cycleAtUnplug),
     JSON.stringify({ cycleAtUnplug, advanced }),
+  );
+  check(
+    "past its first cycle, the rail shows the cycle out of the loop's total",
+    /^\d+ \/ \d+$/.test(advanced ?? ""),
+    advanced,
   );
 
   // Stop asks twice while a run is cycling (`ActionButton`), so the label is the observable

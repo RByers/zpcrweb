@@ -32,7 +32,11 @@ import {
   manualClock,
   recordedRunData,
   realtimeClock,
+  AT_TARGET_LAG_MS,
+  lidPreheatMs,
+  RELEASE_MS,
   START_WINDOW_MS,
+  START_WINDOW_PLATE_READ_MS,
   type CfxEmulator,
   type ScaledClock,
 } from "../src/emulator.js";
@@ -100,6 +104,17 @@ async function pollUntil(
   for (let i = 0; i < limit && !done(status); i++) status = await device.status();
   if (!done(status)) throw new Error(`gave up after ${limit} polls; last step ${status.stepText}`);
   return status;
+}
+
+/** Move a manual clock to `offsetMs` past the run's first step starting — wherever its start
+ * window and its preheat (which depends on how warm the lid was) put that. */
+function advanceIntoRun(
+  emulator: CfxEmulator,
+  clock: ReturnType<typeof manualClock>,
+  offsetMs: number,
+): void {
+  const run = emulator.instrument.currentRun!;
+  clock.advance(run.protocolStartsAtMs + offsetMs - clock.now());
 }
 
 describe("the emulator answers the identification block", () => {
@@ -306,7 +321,7 @@ describe("a run, start to collected", () => {
 
     const early = CURRENT_RUN + "\\early.txt";
     expect((await device.sendFile(early, new TextEncoder().encode("early"))).verified).toBe(true);
-    clock.advance(START_WINDOW_MS);
+    clock.advance(START_WINDOW_PLATE_READ_MS);
     expect((await device.listFiles(CURRENT_RUN)).names).not.toContain("early.txt");
 
     const deposited = CURRENT_RUN + "\\zpcrweb.json";
@@ -345,9 +360,10 @@ describe("a run, start to collected", () => {
     const clock = manualClock();
     const { device, close } = await connect({ data: pcrData(), clock });
     await device.beginRun(planRun({ runDefinition: TWO_CYCLE, name: "demo" }));
-    // Measured: `RemoteRun` is accepted and for ~6 s `STATUS?` still reports the empty idle, so
-    // an armed run and a genuinely idle instrument are the same reply (`usb.md` §7.8 step 0).
-    clock.advance(4_500);
+    // Measured: `RemoteRun` is accepted and for ~10.7 s — a run with plate reads — `STATUS?` still
+    // reports the empty idle, so an armed run and a genuinely idle instrument are the same reply
+    // (`usb.md` §7.3, §7.8 step 0).
+    clock.advance(START_WINDOW_PLATE_READ_MS - 1_000);
     expect(await device.status()).toMatchObject({ running: false, runName: "", stepText: "IDLE" });
     clock.advance(2_000);
     const started = await device.status();
@@ -361,6 +377,8 @@ describe("a run, start to collected", () => {
   });
 
   it("materialises each plate read as its step ends, and the last only on acknowledgement", async () => {
+    // With the accelerated clock only `STATUS?` moves time, so the listing straight after the
+    // `CANCEL` below sits at the very moment of the acknowledgement — the measured 0.3 s case.
     const { device, close } = await connect({ data: pcrData() });
     await device.startRun(planRun({ runDefinition: TWO_CYCLE, name: "demo" }));
 
@@ -385,14 +403,22 @@ describe("a run, start to collected", () => {
     // §7.7: the last read is not there yet — the acknowledgement is what releases it.
     expect(before.names.filter(isPlateReadName)).toEqual(["Read00001.Plateread"]);
     await device.acknowledgeRun();
-    const after = await device.listFiles(CURRENT_RUN);
-    expect(after.names).toContain("ended");
-    expect(after.names.filter(isPlateReadName)).toEqual([
+    // §7.6, measured: the final read is there at once, but the run is still named and neither
+    // `ended` nor the report has been written — collecting now files a run in progress for ever.
+    const acknowledged = await device.listFiles(CURRENT_RUN);
+    expect(acknowledged.names.filter(isPlateReadName)).toEqual([
       "Read00001.Plateread",
       "Read00002.Plateread",
     ]);
-    // Released: the name is gone and the instrument is back to the empty idle.
-    expect(await device.status()).toMatchObject({ runName: "", stepText: "IDLE" });
+    expect(acknowledged.names).not.toContain("ended");
+    expect((await device.listFiles(RUN_REPORTS)).status).toBe("empty");
+
+    // Released a moment later: the name is gone, the instrument is back to the empty idle, and
+    // `ended` and the report have appeared.
+    const released = await pollUntil(device, (s) => s.runName === "");
+    expect(released).toMatchObject({ runName: "", stepText: "IDLE" });
+    expect((await device.listFiles(CURRENT_RUN)).names).toContain("ended");
+    expect((await device.listFiles(RUN_REPORTS)).names).toHaveLength(1);
 
     // And what came back is a real plate read, with this run's cycle in its header.
     const read = await device.getFile(`${CURRENT_RUN}\\Read00002.Plateread`);
@@ -404,7 +430,7 @@ describe("a run, start to collected", () => {
     const { device, close } = await connect({ data: pcrData() });
     await device.startRun(planRun({ runDefinition: TWO_CYCLE, name: "demo" }));
     await pollUntil(device, (s) => isFinishedRun(s));
-    await device.acknowledgeRun();
+    await device.releaseRun();
 
     const report = await device.runReport();
     expect(report).not.toBeNull();
@@ -434,7 +460,7 @@ describe("a run, start to collected", () => {
     const runInfoOf = async (name: string) => {
       await device.startRun(planRun({ runDefinition: TWO_CYCLE, name }));
       await pollUntil(device, (s) => isFinishedRun(s));
-      await device.acknowledgeRun();
+      await device.releaseRun();
       const bytes = emulator.instrument.fs.read(`${CURRENT_RUN}\\RunInfo.xml`)!;
       return { bytes, raw: parseRunInfoRaw(new TextDecoder().decode(bytes)) };
     };
@@ -471,9 +497,9 @@ describe("a run, start to collected", () => {
 describe("pausing, skipping and stopping", () => {
   it("pauses and resumes, with the run's clock frozen in between", async () => {
     const clock = manualClock();
-    const { device, close } = await connect({ data: pcrData(), clock });
+    const { device, emulator, close } = await connect({ data: pcrData(), clock });
     await device.beginRun(planRun({ runDefinition: TWO_CYCLE, name: "demo" }));
-    clock.advance(6_000 + 168_000 + 20_000);
+    advanceIntoRun(emulator, clock, 40_000);
     const before = await device.status();
     expect(before.running).toBe(true);
 
@@ -499,10 +525,10 @@ describe("pausing, skipping and stopping", () => {
 
   it("PROCEED skips to the next step rather than starting or resuming anything", async () => {
     const clock = manualClock();
-    const { device, close } = await connect({ data: pcrData(), clock });
+    const { device, emulator, close } = await connect({ data: pcrData(), clock });
     await device.beginRun(planRun({ runDefinition: TWO_CYCLE, name: "demo" }));
-    clock.advance(6_000 + 168_000 + 20_000);
-    // Step 1 is a 3-minute hold the run is 20 s into — it cannot have run out.
+    advanceIntoRun(emulator, clock, 40_000);
+    // Step 1 is a 3-minute hold the run is 40 s into (its ramp included) — it cannot have run out.
     const before = await device.status();
     expect(before.stepText).toBe("TEMP 95.0,180");
     await device.runAction("skipStep");
@@ -519,7 +545,7 @@ describe("pausing, skipping and stopping", () => {
     const clock = manualClock();
     const { device, close } = await connect({ data: pcrData(), clock });
     await device.beginRun(planRun({ runDefinition: TWO_CYCLE, name: "demo" }));
-    clock.advance(6_000 + 30_000);
+    clock.advance(START_WINDOW_PLATE_READ_MS + 30_000);
     expect((await device.status()).flags.lidPreheating).toBe(true);
     const result = await device.cancelRun({ pollMs: 1, timeoutMs: 5_000 });
     expect(result.stopped).toBe(true);
@@ -575,7 +601,7 @@ describe("pausing, skipping and stopping", () => {
     // having two owners of that is how a run loses its last read.
     expect(isFinishedRun(result.status)).toBe(true);
 
-    await device.acknowledgeRun();
+    await device.releaseRun();
     const names = (await device.listFiles(CURRENT_RUN)).names;
     expect(names).toContain("ended");
     // A cancelled run is simply a run with fewer reads than its protocol implies — that count is
@@ -590,11 +616,11 @@ describe("pausing, skipping and stopping", () => {
     // (`usb.md` §7.8 step 1). `cancelRun`'s own `onStatus` is what moves time on here, which is
     // also the callback a caller uses to keep its display live while the channel is held.
     const clock = manualClock();
-    const { device, close } = await connect({ data: pcrData(), clock });
+    const { device, emulator, close } = await connect({ data: pcrData(), clock });
     await device.beginRun(planRun({ runDefinition: TWO_CYCLE, name: "demo" }));
-    // Start window, lid preheat, then 190 s + 20 s + 40 s of thermal steps: five seconds into
-    // the first plate read.
-    clock.advance(6_000 + 168_000 + 255_000);
+    // Five seconds into the first plate read, wherever the ramps put it.
+    const firstRead = emulator.instrument.currentRun!.schedule.steps.find((s) => s.readIndex === 1)!;
+    advanceIntoRun(emulator, clock, firstRead.startMs + 5_000);
     expect((await device.status()).stepText).toBe("PLATEREAD #h3F");
 
     const result = await device.cancelRun({
@@ -618,7 +644,7 @@ describe("pausing, skipping and stopping", () => {
 
     // A fire-and-forget button: accepted, and the run starts anyway. This is the bug.
     expect((await device.acknowledgeRun()).ok).toBe(true);
-    clock.advance(6_500);
+    clock.advance(START_WINDOW_PLATE_READ_MS + 500);
     expect((await device.status()).running).toBe(true);
     await close();
     expect(emulator.sent.filter((c) => c === "CANCEL")).toHaveLength(1);
@@ -652,7 +678,7 @@ describe("the other two kinds of run", () => {
     expect(plan.startable).toBe(true);
     await device.startRun(plan);
     await pollUntil(device, (s) => isFinishedRun(s));
-    await device.acknowledgeRun();
+    await device.releaseRun();
 
     const names = (await device.listFiles(CURRENT_RUN)).names.filter(isPlateReadName);
     // `GOTO 3,4` — five passes over the 65 °C step and its read.
@@ -679,7 +705,7 @@ describe("the other two kinds of run", () => {
     expect(plan.uploads).toEqual([]);
     await device.startRun(plan);
     await pollUntil(device, (s) => isFinishedRun(s));
-    await device.acknowledgeRun();
+    await device.releaseRun();
 
     // Not one entry appeared or disappeared, from before the run to after the acknowledgement
     // (`usb.md` §7.10, measured on a CFX96).
@@ -692,6 +718,147 @@ describe("the other two kinds of run", () => {
     const alf = parseAlf(report!.bytes);
     expect(alf.plateReadCount).toBe(0);
     expect(alf.runDefinition).toBe("METHOD BLOCK;HOTLID 105,30;VOLUME 10;TEMP 37.0,30;END");
+    await close();
+  });
+});
+
+/**
+ * What the first recorded qPCR session (`samples/20261014-S187_S188_S189_cold_check.zpcr`, a
+ * 45-cycle run) measured, alongside the `usb-run` capture and the heat-block session — `usb.md`
+ * §3.2, §7.3, §7.6. `emulatorFidelity.test.ts` replays the session itself; these pin each rule.
+ */
+describe("timings and fields measured from a recorded qPCR run", () => {
+  const THREE_CYCLE = TWO_CYCLE.replace("GOTO 2,1", "GOTO 2,2");
+
+  it("reports a loop's total in field 2 only once its GOTO has run", async () => {
+    const { device, close } = await connect({ data: pcrData() });
+    await device.startRun(planRun({ runDefinition: THREE_CYCLE, name: "demo" }));
+    const seen: string[] = [];
+    await pollUntil(device, (s) => {
+      const pair = `${s.cycleCount}/${s.cycle}`;
+      if (s.running && seen.at(-1) !== pair) seen.push(pair);
+      return isFinishedRun(s);
+    });
+    // `1;1` through the first pass, `45;23` in a `GOTO 2,44` loop's 23rd — here, three passes.
+    expect(seen).toEqual(["1/1", "3/2", "3/3"]);
+    await close();
+  });
+
+  it("ramps for as long as the distance needs, and not at all for the same setpoint", async () => {
+    const clock = manualClock();
+    const { device, emulator, close } = await connect({ data: pcrData(), clock });
+    await device.beginRun(planRun({ runDefinition: TWO_CYCLE, name: "demo" }));
+    const steps = emulator.instrument.currentRun!.schedule.steps;
+    // Up from ambient at 3.1 °C/s, 95 → 95 not at all, 95 → 55 at 2.35 °C/s.
+    expect(steps[0]!.rampMs / 1000).toBeCloseTo((95 - 18.4) / 3.1, 1);
+    expect(steps[1]!.rampMs).toBe(0);
+    expect(steps[2]!.rampMs / 1000).toBeCloseTo(40 / 2.35, 1);
+
+    // Field 9 reads the hold, like field 12 — zero through the ramp (`usb.md` §3.2).
+    advanceIntoRun(emulator, clock, steps[2]!.startMs + 5_000);
+    const ramping = await device.status();
+    expect(ramping.flags.atTarget).toBe(false);
+    expect(ramping.rampElapsedS).toBeCloseTo(5, 1);
+    expect(ramping.stepElapsedS).toBe(0);
+    advanceIntoRun(emulator, clock, steps[2]!.startMs + steps[2]!.rampMs + 7_000);
+    const holding = await device.status();
+    expect(holding.flags.atTarget).toBe(true);
+    expect(holding.stepElapsedS).toBeCloseTo(7, 1);
+    expect(holding.stepElapsedS).toBe(holding.holdElapsedS);
+    await close();
+  });
+
+  it("carries the last step's at-target bit into a new setpoint for a moment", async () => {
+    const clock = manualClock();
+    const { device, emulator, close } = await connect({ data: pcrData(), clock });
+    await device.beginRun(planRun({ runDefinition: TWO_CYCLE, name: "demo" }));
+    const toAnneal = emulator.instrument.currentRun!.schedule.steps[2]!;
+    advanceIntoRun(emulator, clock, toAnneal.startMs + 100);
+    const first = await device.status();
+    expect(first.stepText).toBe("TEMP 55.0,30");
+    expect(first.flags.atTarget).toBe(true);
+    clock.advance(AT_TARGET_LAG_MS);
+    expect((await device.status()).flags.atTarget).toBe(false);
+    await close();
+  });
+
+  it("appears sooner for a run with no plate reads, whose folder it leaves alone", async () => {
+    const clock = manualClock();
+    const { device, close } = await connect({ clock });
+    await device.beginRun(planRun({ runDefinition: THERMAL_ONLY, name: "agblk" }));
+    clock.advance(START_WINDOW_MS - 500);
+    expect((await device.status()).runName).toBe("");
+    clock.advance(1_000);
+    expect((await device.status()).runName).toBe("AGBLK");
+    expect(START_WINDOW_PLATE_READ_MS).toBeGreaterThan(START_WINDOW_MS + 4_000);
+    await close();
+  });
+
+  it("preheats the lid for as long as it takes to come within 10 °C of its setpoint", () => {
+    // The three runs measured, lid start → preheat (`usb.md` §7.3). One rate for all three is
+    // within 6 s of each: their own rates spread 0.444–0.469 °C/s.
+    for (const [lidC, measuredS] of [
+      [37.7, 124.5],
+      [19.6, 169.3],
+      [22.5, 154.2],
+    ] as const) {
+      expect(Math.abs(lidPreheatMs(lidC, 105) / 1000 - measuredS)).toBeLessThan(6);
+    }
+    expect(lidPreheatMs(100, 105)).toBe(0);
+    expect(lidPreheatMs(18.4, 105, false)).toBe(0);
+  });
+
+  it("leaves the block and lid to cool after a run, and a warm lid skips the next preheat", async () => {
+    const clock = manualClock();
+    const { device, emulator, close } = await connect({ clock });
+    await device.beginRun(planRun({ runDefinition: THERMAL_ONLY, name: "first" }));
+    const run = emulator.instrument.currentRun!;
+    advanceIntoRun(emulator, clock, run.schedule.endMs + 1_000);
+    const finished = await device.status();
+    expect(isFinishedRun(finished)).toBe(true);
+    // Still at the run's last setpoint a second after it ended, not at ambient — 94.42 °C beside a
+    // 95 °C hold, measured.
+    expect(finished.blockTempC!).toBeGreaterThan(36);
+    expect(finished.lidTempC!).toBeGreaterThan(100);
+    await device.acknowledgeRun();
+    clock.advance(RELEASE_MS);
+    const idle = await device.status();
+    expect(idle.runName).toBe("");
+    expect(idle.blockTempC!).toBeGreaterThan(30);
+    expect(idle.sampleTempC).toBe(idle.blockTempC);
+
+    // Straight into another run: the lid is still hot, so there is no preheat to sit through.
+    await device.beginRun(planRun({ runDefinition: THERMAL_ONLY, name: "second" }));
+    clock.advance(START_WINDOW_MS + 1_000);
+    const second = await device.status();
+    expect(second.runName).toBe("SECOND");
+    expect(second.flags.lidPreheating).toBe(false);
+    await close();
+  });
+
+  it("writes ProtocolRunDefinition.txt CRLF-terminated, as the instrument does", async () => {
+    const { device, emulator, close } = await connect({ data: pcrData() });
+    await device.startRun(planRun({ runDefinition: TWO_CYCLE, name: "demo" }));
+    const text = new TextDecoder().decode(
+      emulator.instrument.fs.read(`${CURRENT_RUN}\\ProtocolRunDefinition.txt`)!,
+    );
+    expect(text).toBe(
+      "METHOD CALC;HOTLID 105,30;VOLUME 25;TEMP 95.0,180;TEMP 95.0,10;TEMP 55.0,30;" +
+        "PLATEREAD #h3F;GOTO 2,1;END\r\n",
+    );
+    await close();
+  });
+
+  it("releaseRun waits out the acknowledgement, so the folder it leaves is complete", async () => {
+    const { device, close } = await connect({ data: pcrData() });
+    await device.startRun(planRun({ runDefinition: TWO_CYCLE, name: "demo" }));
+    await pollUntil(device, (s) => isFinishedRun(s));
+    const result = await device.releaseRun({ pollMs: 1 });
+    expect(result.released).toBe(true);
+    expect(result.status.runName).toBe("");
+    const names = (await device.listFiles(CURRENT_RUN)).names;
+    expect(names).toContain("ended");
+    expect(names.filter((n) => n.endsWith(".alf"))).toHaveLength(1);
     await close();
   });
 });

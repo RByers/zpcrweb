@@ -29,7 +29,7 @@ import {
   type RunFollowerPorts,
   type ZpcrArchive,
 } from "../src/index.js";
-import { acceleratedClock, createCfxEmulator } from "../src/emulator.js";
+import { acceleratedClock, createCfxEmulator, realtimeClock } from "../src/emulator.js";
 import { RT_S56_SAMPLE_PATH } from "./sample.js";
 import { drop, pcrData, waitFor } from "./sessionRig.js";
 
@@ -153,6 +153,27 @@ describe("a run watched from its start", () => {
     expect(r.passes.at(-1)!.entries).toContain("runlog.xml");
     expect(r.passes[0]!.whole).toBe(true);
     expect(r.passes.at(-1)!.whole).toBe(false);
+    await r.close();
+  });
+});
+
+describe("the acknowledgement's release", () => {
+  /**
+   * `usb.md` §7.6, measured: `ended` and the report are written a second or two after the
+   * acknowledging `CANCEL`, as the instrument lets go of the run — and a session that listed the
+   * folder 0.3 s after its `CANCEL` filed a run with neither, in progress for ever. The accelerated
+   * clock can't show this (the poll straight after the `CANCEL` jumps to the release), so this runs
+   * on wall time, scaled: the follower has to actually wait.
+   */
+  it("pulls the finished run only once the instrument has let go of it", { timeout: 30_000 }, async () => {
+    const r = rigOn(createCfxEmulator({ data: pcrData(), clock: realtimeClock(150) }));
+    await r.session.connect();
+    await waitFor("the baseline listing", () => r.follower.memory.lastNames !== null);
+    await r.session.startRun(planRun({ runDefinition: TWO_CYCLE, name: "demo" }));
+    await waitFor("the run to be filed as finished", () => r.follower.state.finished !== null, 25_000);
+    const run = onlyRun(r.files);
+    expect(Object.keys(run)).toContain("ended");
+    expect(Object.keys(run).filter((n) => n.endsWith(".alf"))).toHaveLength(1);
     await r.close();
   });
 });

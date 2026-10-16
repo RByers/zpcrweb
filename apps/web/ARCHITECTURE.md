@@ -3841,7 +3841,7 @@ The components, under `components/instrument/` (`instrumentParts.tsx` holds the 
   out of `CFX_COMMANDS` and gives each a named `CfxDevice` method (see `usb/commands.ts`). Stop
   drives `CfxDevice.cancelRun`, i.e. the whole of `usb.md` §7.8 — it lets a plate read in flight
   finish so the cycle isn't thrown away, resumes a paused run first, and above all *keeps
-  watching*: a `CANCEL` sent in the measured ~6 s between `RemoteRun` and the block actually
+  watching*: a `CANCEL` sent in the measured ~6–11 s between `RemoteRun` and the block actually
   starting is answered `0000` and ignored, so a fire-and-forget button reports success over a run
   that goes on cycling. The two things the wire can't supply come from above it —
   `runPending`, the hook's own React state, which is how the cancel recognises that window at all,

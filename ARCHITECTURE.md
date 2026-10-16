@@ -312,10 +312,13 @@ Three things about it are worth knowing before changing it:
   lifted from a committed recording, one well's curve replicated across all 108 — never
   synthesized — and `encodePlateRead` writes it out as a genuine `.Plateread`. The recording's
   `RunInfo.xml` is kept too, but with its per-run keys rewritten (`emulator/runInfo.ts`): a host
-  tells runs apart by that file, so a verbatim copy made every emulated run the same run. The one check with
-  an outside witness is `test/emulatorFidelity.test.ts`, which replays the 5 390 commands of a
-  real recorded session at it and compares every answer; `emulator.md` §10.1 says what that covers
-  and — at least as important — what it does not.
+  tells runs apart by that file, so a verbatim copy made every emulated run the same run. Its
+  timings are measured ones — start windows, a preheat that depends on the lid, ramps from the
+  distance, the plate read, the acknowledgement's delayed release (`schedule.ts`). The one check
+  with an outside witness is `test/emulatorFidelity.test.ts`, which replays two recorded sessions
+  at it — a heat-block run and a 45-cycle qPCR run, 13 000 commands — and compares every answer,
+  the run's edges and its step timings; `emulator.md` §10.1 says what that covers and — at least
+  as important — what it does not.
 
 It ships as the `@zpcrweb/core/emulator` subpath, a second `tsup` entry, so the web app can reach
 it through a lazy `import()` and a build that never asks for it never carries it.
@@ -368,7 +371,9 @@ It also sets the instrument's clock and zone offset from the host's on every con
 `.alf` report's step timestamps come off that clock, and the instrument otherwise assumes Pacific
 and writes every "GMT" stamp hours wrong (`alf.md` §4.1).
 `RunFollower` sits on top and holds what a *run* is made of: the step-transition rule, the §7.6
-finished-and-held acknowledgement, the first-listing rule and its in-progress exception, which
+finished-and-held acknowledgement (which waits for the instrument to *release* the run before the
+last pull, since `ended` and the report land a second or two after the `CANCEL` —
+`CfxDevice.releaseRun`), the first-listing rule and its in-progress exception, which
 pass completes a run's file, and which open file is the run on the block (`runningFile`). Both publish a `subscribe`/`state` snapshot in the shape
 `useSyncExternalStore` wants, so the React hooks above them are shells.
 

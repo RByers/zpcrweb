@@ -5,6 +5,7 @@ import {
   decodeHeader,
   encodeCommand,
   encodeFrame,
+  isFinishedRun,
   parseIdentity,
   parseResponse,
   parseRtStatus,
@@ -200,6 +201,21 @@ describe("parseStatus", () => {
     expect(phaseOf(0)).toBe("idle");
     expect(phaseOf(0x60)).toBe("running");
     expect(phaseOf(0x20)).toBe("finished");
+  });
+
+  it("takes a finish still carrying the run's register as finished and held", () => {
+    // `usb.md` §7.6: one of three recorded finishes reported `IDLE` with register 97 — block
+    // active, at target — for a poll before the 32. The step and the name are what say "finished,
+    // held", which is what the acknowledgement keys on; the register must not talk it out of that.
+    const transient = of(
+      '59.98;104.9;0;0;IDLE;0;"S187_S18",CALC,OFF;97;5367.88;0.00;0.00;0.00;0.00;0;0;0;59.98;CLOSED;0;0000',
+    );
+    expect(transient.running).toBe(false);
+    expect(isFinishedRun(transient)).toBe(true);
+    const settled = of(
+      '59.37;104.1;0;0;IDLE;0;"S187_S18",CALC,OFF;32;5367.88;0.00;0.00;0.00;0.00;0;0;0;59.37;CLOSED;0;0000',
+    );
+    expect(isFinishedRun(settled)).toBe(true);
   });
 
   it("splits the `:`-separated error list, treating a lone 0 as none", () => {

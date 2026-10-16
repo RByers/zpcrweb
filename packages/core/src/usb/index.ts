@@ -12,6 +12,8 @@ export type {
   CfxCancelResult,
   CfxDeviceOptions,
   CfxDirectory,
+  CfxReleaseOptions,
+  CfxReleaseResult,
   CfxRunStartResult,
   CfxTrafficEvent,
   CfxTransferErrorEvent,

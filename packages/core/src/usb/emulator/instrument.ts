@@ -27,7 +27,7 @@ import type { EmulatorClock } from "./clock.js";
 import type { EmulatorRunData } from "./data.js";
 import { EmulatorFilesystem, FILE_MISSING } from "./filesystem.js";
 import { mangleRunName } from "./report.js";
-import { AMBIENT_C, EmulatedRun, type RunRequest, type RunSnapshot } from "./run.js";
+import { AMBIENT_C, EmulatedRun, type RunRequest, type RunSnapshot, type Temperatures } from "./run.js";
 import type { EmulatorReply } from "./transport.js";
 
 /**
@@ -110,6 +110,13 @@ export interface EmulatedInstrumentOptions {
   initialFiles?: Record<string, Uint8Array> | null;
   /** The wall-clock instant simulated time zero corresponds to, for the files' own timestamps. */
   startedAt?: Date;
+  /**
+   * Where the block and lid sit before any run — ambient by default. An instrument whose last run
+   * ended a while before the emulator started has a lid still warm, which shortens the first
+   * preheat (`usb.md` §7.3); a replay seeds this from its recording. Held, not cooled: how fast a
+   * lid cools that has been sitting for an unknown time is not something to invent.
+   */
+  temperatures?: Partial<Temperatures>;
 }
 
 export class EmulatedInstrument {
@@ -122,6 +129,11 @@ export class EmulatedInstrument {
   /** The protocol currently typed in, one directive per entry (`usb.md` §7.2). */
   private authored: string[] = [];
   private run: EmulatedRun | null = null;
+  /** The last run released, kept for one thing: the block and lid it left behind, which cool
+   * toward ambient rather than snapping there (`usb.md` §7.6) and are where the next run starts. */
+  private previousRun: EmulatedRun | null = null;
+  /** Block and lid before the first run — see {@link EmulatedInstrumentOptions.temperatures}. */
+  private readonly resting: Temperatures;
   /** Where the lid is going, and when it gets there: field 17 reads `OPENING`/`CLOSING` on the
    * way (measured, `usb.md` §3.2 — a motorised lid takes seconds, and a client that waits for
    * `OPEN` after `LID OPEN` sees the intermediate state first). */
@@ -138,6 +150,10 @@ export class EmulatedInstrument {
     this.data = options.data ?? null;
     this.identity = { ...DEFAULT_IDENTITY, ...options.identity };
     this.startedAt = options.startedAt ?? new Date();
+    this.resting = {
+      blockC: options.temperatures?.blockC ?? AMBIENT_C,
+      lidC: options.temperatures?.lidC ?? AMBIENT_C,
+    };
     this.fs = new EmulatorFilesystem([
       "\\Storage Card",
       CFX_CURRENT_RUN_DIR,
@@ -173,7 +189,7 @@ export class EmulatedInstrument {
     // first — so a listing and the `STATUS?` beside it can never disagree about whether a plate
     // read exists yet.
     const now = this.clock.now();
-    this.run?.materialise(now);
+    this.advance(now);
 
     const [verb = "", rest = ""] = splitVerb(line);
     const upper = verb.toUpperCase();
@@ -233,6 +249,23 @@ export class EmulatedInstrument {
     return this.lidTarget;
   }
 
+  /** Bring the run's files up to `now`, and drop the run once its acknowledgement has released it
+   * — which is `RELEASE_MS` after the `CANCEL`, not at it (`usb.md` §7.6). */
+  private advance(now: number): void {
+    const run = this.run;
+    if (!run) return;
+    run.materialise(now);
+    if (run.isReleased(now)) {
+      this.previousRun = run;
+      this.run = null;
+    }
+  }
+
+  /** The block and lid with no run on the block: ambient, or still cooling from the last run. */
+  private idleTemperatures(now: number): Temperatures {
+    return this.previousRun?.temperaturesAt(now) ?? this.resting;
+  }
+
   private snapshot(now: number): RunSnapshot | null {
     const snap = this.run?.observe(now) ?? null;
     return snap && snap.visible ? snap : null;
@@ -248,14 +281,15 @@ export class EmulatedInstrument {
       runEvent === null ? lidEvent : lidEvent === null ? runEvent : Math.min(runEvent, lidEvent),
     );
     const now = this.clock.now();
-    this.run?.materialise(now);
+    this.advance(now);
     const snap = this.snapshot(now);
 
     if (!snap) {
+      const idle = this.idleTemperatures(now);
       return value(
         [
-          AMBIENT_C.toFixed(2),
-          AMBIENT_C.toFixed(1),
+          idle.blockC.toFixed(2),
+          idle.lidC.toFixed(1),
           "0",
           "0",
           "IDLE",
@@ -270,7 +304,9 @@ export class EmulatedInstrument {
           "0",
           "0",
           "0",
-          AMBIENT_C.toFixed(2),
+          // Field 16 reads the block back at idle — 53.72 beside a 53.72 block, measured just
+          // after a run, so it cools with it.
+          idle.blockC.toFixed(2),
           this.lidState(now),
           "0",
         ].join(";"),
@@ -295,16 +331,18 @@ export class EmulatedInstrument {
       [
         snap.blockTempC.toFixed(2),
         snap.lidTempC.toFixed(1),
-        // Fields 2 and 3 are byte-identical in every sample `usb.md` §3.2 has, so they are
-        // written the same here rather than inventing a distinction the traffic cannot support.
-        String(snap.finished ? 0 : snap.cycle),
+        // Field 2 is the loop's total, known only once its `GOTO` has executed; field 3 the pass
+        // (`usb.md` §3.2 — `1;1` through a `GOTO 2,44` loop's first cycle, `45;23` in its 23rd).
+        String(snap.finished ? 0 : snap.cycles),
         String(snap.finished ? 0 : snap.cycle),
         snap.stepText,
         String(snap.finished ? 0 : snap.stepNumber),
         descriptor,
         String(flags),
         snap.elapsedS.toFixed(2),
-        snap.stepElapsedS.toFixed(2),
+        // Field 9 is nominally the whole step, ramp included, but on a CFX96 it reads the hold —
+        // within 0.01 s of field 12 in every sample of both recordings (`usb.md` §3.2).
+        snap.holdElapsedS.toFixed(2),
         snap.remainingS.toFixed(2),
         snap.rampElapsedS.toFixed(2),
         snap.holdElapsedS.toFixed(2),
@@ -469,10 +507,10 @@ export class EmulatedInstrument {
    * `CANCEL` — and it is two different things (`usb.md` §7.6, §7.8).
    *
    * On a run still cycling it aborts. On the finished-but-held run it is the acknowledgement that
-   * releases it, and only then do `ended`, the last read and the `.alf` appear. Inside the ~6 s
-   * start window it is answered `0000` and does nothing at all, and the run starts anyway — which
-   * is exactly why stopping a run takes two of these and why a client has to remember that it
-   * asked for one.
+   * releases it: the last read appears at once, and the run lets go — `ended`, the `.alf`, the
+   * empty idle — `RELEASE_MS` later ({@link advance}). Inside the start window it is
+   * answered `0000` and does nothing at all, and the run starts anyway — which is exactly why
+   * stopping a run takes two of these and why a client has to remember that it asked for one.
    */
   private cancel(now: number): EmulatorReply {
     const run = this.run;
@@ -481,7 +519,6 @@ export class EmulatedInstrument {
     if (!snap.visible) return ok(); // the start window: accepted, ignored
     if (snap.finished) {
       run.acknowledge(now);
-      this.run = null;
       return ok();
     }
     run.abort(now);
@@ -534,6 +571,8 @@ export class EmulatedInstrument {
           blockType: "CFX96",
           cyclerName: this.identity.serial,
         },
+        // A lid still warm from the last run shortens this one's preheat (`usb.md` §7.3).
+        this.idleTemperatures(now),
       );
     } catch {
       // A protocol that cannot be executed on paper — a `GOTO` off the end of the step list, or

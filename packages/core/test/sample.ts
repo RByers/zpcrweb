@@ -111,6 +111,17 @@ export function readMixedVesselPlateText(): string {
  */
 export const RT_S56_SAMPLE_PATH = resolve(here, "../../../samples/20260807-YouSeq_RT_-_S56.zpcr");
 
+/**
+ * A 45-cycle qPCR run driven by this app, with the whole session's `usb-traffic.bin` in it —
+ * connect, author, start, 45 plate reads pulled as they landed, the acknowledgement. The one
+ * recording of a qPCR run *executing* over USB, which is what `emulatorFidelity.test.ts` replays
+ * beside the heat-block session in {@link RT_S56_SAMPLE_PATH}.
+ */
+export const QPCR_S187_SAMPLE_PATH = resolve(
+  here,
+  "../../../samples/20261014-S187_S188_S189_cold_check.zpcr",
+);
+
 /** See {@link RT_S56_SAMPLE_PATH}. */
 export const RP_VALIDATION_SAMPLE_PATH = resolve(
   here,

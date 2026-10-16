@@ -116,10 +116,10 @@ export interface CfxStatus {
   /** Field 1 — heated-lid temperature, °C. */
   lidTempC: number | null;
   /**
-   * Field 2 — byte-identical to {@link cycle} in every sample `usb.md` §3.2 has, so whether this
-   * is genuinely a separate "total cycles" or the firmware echoing the current cycle twice isn't
-   * decidable from one run. Prefer {@link cycle} for "which cycle is this" and the protocol you
-   * authored for the total.
+   * Field 2 — the running loop's total number of passes, but only once its `GOTO` has executed:
+   * `1` through the first cycle of a `GOTO 2,44`, then `45` (`usb.md` §3.2, measured). So it is
+   * not the total from the start, and a protocol's later loops are its own; the protocol you
+   * authored is still the better source for "how many cycles".
    */
   cycleCount: number | null;
   /** Field 3 — current cycle, 1-based, 0 while idle. */

@@ -877,11 +877,17 @@ export class CfxSession {
    * releases the instrument and makes the final plate read, the `ended` marker and the `.alf`
    * report appear. The same command sent to a run still cycling would abort it, which is why the
    * check is here rather than trusted to the caller.
+   *
+   * Resolves only once the instrument has *released* the run (`CfxDevice.releaseRun`) — `ended`
+   * and the report are written a second or two after the `CANCEL`, and the caller is about to
+   * collect them. `onStatus` keeps the published status live meanwhile, as for {@link cancelRun}.
    */
   async acknowledgeFinishedRun(): Promise<boolean> {
     const current = this.#state.status;
     if (!current || !isFinishedRun(current)) return false;
-    const res = await this.run("Acknowledging the finished run", (d) => d.acknowledgeRun());
+    const res = await this.run("Acknowledging the finished run", (d) =>
+      d.releaseRun({ onStatus: (s) => this.#set({ status: s }) }),
+    );
     if (res) await this.refreshStatusNow();
     return res !== undefined;
   }

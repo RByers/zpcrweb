@@ -24,7 +24,12 @@ section previously asserted. The log inside `samples/20260807-YouSeq_RT_-_S56.zp
 session — connect, author, start, watch, finish — behind §7.10 and §7's own live-run note.
 It has since been replayed command for command against this project's emulator
 (`emulator.md` §10.1), which is where §3.2's reading of field 16 under `METHOD BLOCK`, the
-at-target bit's fallback, and §7.3's run-name mangling come from.
+at-target bit's fallback, and §7.3's run-name mangling come from. The log inside
+`samples/20261014-S187_S188_S189_cold_check.zpcr` is the first of a **qPCR run executing** — 45
+cycles, each plate read pulled as it landed — and is replayed the same way. It is the source of
+§3.2's field 2 and ramp rates, §7.3's start windows and preheat, §7.4's folder clear and §7.6's
+release; its first five replies are out of step with their commands (§3, "A connection starts in
+step"), which is the observation that rule came from.
 
 **This protocol is now implemented, and the implementation has been driven against live
 hardware** — see §10. Talking to the same CT019138 confirmed §1's descriptors, §2's framing and
@@ -406,13 +411,16 @@ is a flag word and never was a block count, and field 15 is the protocol's **ste
 directives (§7.2), and field 15 reads exactly `6` in all 300 running samples and `0` when idle. It
 is the denominator for "step *n* of *m*", and `END` counts.
 
-**Fields 2 and 3 are a count and an index, but this capture cannot separate them** — they are
-byte-identical in all 507 running samples, both walking `0` → `1` → `2` on a protocol whose
-`GOTO 2,1` gives two passes. Field 3 is unambiguously the current cycle (it advances in step with
-the plate reads); whether field 2 is genuinely a total that coincidentally matches, or this
-firmware simply echoes the same number twice, is not decidable from one run. Read field 3 for the
-current cycle, and take the total from the protocol you authored rather than from field 2 — see
-`protocol.md` §9, which reaches the same conclusion from the other direction.
+**Field 2 is the running loop's total, but only once its `GOTO` has executed; field 3 is the
+pass.** In `usb-run` the two are byte-identical in all 507 running samples, both walking `0` → `1`
+→ `2` on a `GOTO 2,1` — which could not tell a total from an echo. The 45-cycle run in
+`samples/20261014-S187_S188_S189_cold_check.zpcr` can: under `GOTO 2,44` the pair reads `1;1`
+through the first pass (steps 1–4, before the `GOTO` is reached), then `45;2`, `45;3`, … `45;45`.
+The instrument learns a loop's length by executing its `GOTO`, so the total is not there from the
+start, and the two-pass capture's `1` → `2` is the same rule. What a later loop in the same
+protocol does to field 2 is unmeasured. Read field 3 for the current cycle, and take the total from
+the protocol you authored rather than from field 2 — see `protocol.md` §9, which reaches the same
+conclusion from the other direction.
 
 #### Field 7, the status register
 
@@ -451,6 +459,24 @@ One poll of 2 585 reported `96` with the step's hold clock
 as "not at target" for a poll and then gone. So bit 0 answers "is the block at its setpoint right
 now", not "has this step arrived": a client that treats the falling edge as a step boundary will
 see one that isn't there. Field 12, which does not reset, is the durable signal.
+
+A third witness, the 45-cycle `METHOD CALC` run in
+`samples/20261014-S187_S188_S189_cold_check.zpcr`, shows the same overshoot fall-back (14 polls of
+3 744) and the **mirror case at a step change: bit 0 trails the setpoint.** In 14 of the run's 90
+setpoint changes the first poll of the new step already carried its step text and a running ramp
+clock (field 11 at 0.03–0.26 s) but still had bit 0 set from the step before, with the block
+nowhere near the new setpoint — `TEMP 60.0,60` reported at-target with the block at 94.94. The
+poll after had it clear. At a 1.5 s poll interval, 14 in 90 puts the lag at roughly 0.25 s. So a
+client should not read "at target" off the first poll of a step either; bit 0 *falling* within the
+step, or field 11 freezing, is the arrival.
+
+One register value appeared only in that run: **`97` with the step already `IDLE`** — block active,
+at target, the run named, field 8 at the run's final elapsed — for the first poll after the last
+read ended (0.56 s after it), before the `32` of §7.6 the next poll showed. The other two recorded
+finishes went straight to `32`, one of them a plate-read run polled 0.31 s after its end, so this is
+a transient the instrument sometimes shows rather than a phase of its own. Step `IDLE` with the
+run's name attached means finished either way, which is the test §7.6 needs (`isFinishedRun`);
+the register should not be what decides it.
 
 The last two are worth noting. The finished-but-unacknowledged state of §7.6 is not an odd corner
 the firmware backed into, it is the register's own "completion" encoding — and `160` is that same
@@ -492,12 +518,24 @@ than a measurement.
 - **Field 8, protocol elapsed** — counts up from `0.00` for the life of the run. Well behaved
   throughout; the best input to a progress bar.
 - **Field 11, ramp elapsed** — runs while the block approaches the setpoint and freezes on arrival,
-  the same instant bit 0 of field 7 sets.
+  the same instant bit 0 of field 7 sets (but see field 7 for the bit trailing a setpoint change).
 - **Field 12, hold elapsed** — then counts up to the programmed hold: `TEMP 55.0,30` walks it from
   0.60 to 29.98 before the step advances.
 - **Field 9, step elapsed**, is in principle the whole step, ramp included, and so should exceed
-  field 12. On this firmware it does not: across all 507 samples the two differ by at most 0.01. On
-  a CFX96 both read "time held at this setpoint", and a client should not rely on the distinction.
+  field 12. On this firmware it does not: across all 507 samples the two differ by at most 0.01,
+  and the same holds for every running poll of both recorded sessions (5 990 more). On a CFX96 both
+  read "time held at this setpoint" — `0.00` through a ramp — and a client should not rely on the
+  distinction.
+
+**How long a ramp takes** is what field 11 freezes at, and it follows from how far the block has to
+go. Across the two recorded sessions and `usb-run`, rises of 12, 35, 40, 53 and 72 °C took 3.95,
+11.83, 13.91, 15.33 and 22.98 s — **about 3.1 °C/s up**, each within 1.7 s of that — and falls of 35
+and 40 °C took 15.0 and 16.9 s, **about 2.35 °C/s down**. A step at the setpoint the last one held
+(`TEMP 95.0,180` → `TEMP 95.0,15`) has no ramp at all: bit 0 stays set and field 11 reads `0.00`.
+These are the rates the block reaches the *step's* "at target" by — under `METHOD CALC` that is the
+modelled sample's arrival, not the block's — and nothing on the wire reports a rate. A `PLATEREAD
+#h3F` took a median **12.5 s** over the 45 reads of the qPCR session (11.8 s at the least; one
+outlier of 28 s), and 13.9 and 14.9 s in `usb-run`.
 
 Field 8 counts up and field 10 counts down, both in seconds, and while both are ticking their sum
 is constant — 350.88 … 350.97 across the 30 samples before `PROCEED` intervenes. That is what
@@ -531,10 +569,12 @@ either.** Three measured behaviours:
 
 Once ticking it is usable but consistently optimistic: across the 117 samples where the block was
 thermally active after the `PROCEED` re-plan, `now + field 10` predicted the end of the run
-**6.5 to 21.1 s early**, never late, and the error grew as each plate read went uncounted. Whether
-that shortfall keeps compounding is **untested** — the only run captured here has two reads, and a
-45-cycle protocol has 45. If it does, a long run would under-report by minutes by the end. Round
-the display to a `mm:ss` that does not pretend to second-level precision.
+**6.5 to 21.1 s early**, never late, and the error grew as each plate read went uncounted. **The
+shortfall compounds**, measured on the 45-cycle run in
+`samples/20261014-S187_S188_S189_cold_check.zpcr`: field 10 planned `5014.05` s through the whole
+preheat, and the protocol took `5367.88` — 354 s, nearly six minutes, short, or ~7.9 s per plate
+read. A long run's countdown reaches zero minutes before the run does. Round the display to a
+`mm:ss` that does not pretend to second-level precision.
 
 **Recommended display.** Show field 10 as the source of truth, formatted `mm:ss`, and handle the
 two windows where it stalls rather than trying to correct it:
@@ -1030,12 +1070,39 @@ undemonstrated — §9.
 `…;1;1;TEMP 95.0,180;1;"SINGLETE",CALC,ON;…` — cycle 1, step 1, and the run descriptor built out of
 operands 4, 8 and 2. No confirmation, no second command.
 
-What follows the start is the lid: for the next ~180 s the lid temperature climbs 19 → 95 °C while
-the block sits at ambient 17 °C, and only then does the block ramp. A client that expects to see
-block temperature move immediately will think the run has hung. `STATUS?`'s clocks do not tick
-during this phase either: elapsed (field 8) stays at `0.00` and time-remaining (field 10) holds at
-its initial plan for the full 168 s — §3.2, which is why a countdown needs a "preheating" state of
-its own.
+**How long it takes to show depends on whether the run has plate reads.** Between `RemoteRun` and
+the first poll that shows the run, `STATUS?` reports the plain idle (§7.8 step 0). Bracketed by the
+last idle poll and the first run poll, in the three runs on record:
+
+| run | last idle | first shown | so the run appeared |
+|---|---|---|---|
+| `usb-run` — `PLATEREAD`, CFX Manager | +9.33 s | +11.02 s | between 9.3 and 11.0 s |
+| S187 qPCR session — `PLATEREAD`, this app | +10.38 s | +11.88 s | between 10.4 and 11.9 s |
+| YouSeq RT session — thermal only, this app | +4.44 s | +5.94 s | between 4.4 and 5.9 s |
+
+So ~10.7 s for a run that writes a run folder — the firmware clears the previous run out of
+`CurrentRun` and copies the calibration set in first (§7.4) — and ~5.5 s for one that does not
+(§7.10). The 6.1 s of §7.8 step 0 was a thermal-only start.
+
+What follows the start is the lid: it heats while the block sits at ambient, and only then does the
+block ramp. A client that expects to see block temperature move immediately will think the run has
+hung. `STATUS?`'s clocks do not tick during this phase either: elapsed (field 8) stays at `0.00` and
+time-remaining (field 10) holds at its initial plan throughout — §3.2, which is why a countdown
+needs a "preheating" state of its own.
+
+**The preheat ends when the lid is within 10 °C of its setpoint**, so how long it lasts depends on
+how warm the lid already is. All three runs heated a 105 °C lid at nearly the same rate, and all
+three let the block go at 94.8–95.2 °C:
+
+| run | lid when shown | lid when the block moved | preheat | rate |
+|---|---|---|---|---|
+| `usb-run` | 19.6 °C | 94.8 °C | 169.3 s | 0.444 °C/s |
+| YouSeq RT session | 22.5 °C | 95.2 °C | 154.2 s | 0.469 °C/s |
+| S187 qPCR session | 37.7 °C | 94.8 °C | 124.5 s | 0.455 °C/s |
+
+The S187 lid was still warm from a run that had ended 42 minutes before (it read 34–35 °C at idle,
+and jumped to 37.7 °C within the first poll of the heater coming on). So a run started right after
+another skips most of its preheat, and one started cold sits nearly three minutes.
 
 Two more commands appear here, both optional: `VOLUME?` (reading back the `VOLUME 25` just set —
 a verification, and note the instrument reverts to its own value once the run ends) and
@@ -1217,11 +1284,12 @@ exactly the format `plateread.md` documents. `GETFILE`'s reply is raw bytes with
 step, the transition this whole mechanism watches for is `PLATEREAD` → `IDLE`, not `PLATEREAD` →
 another step, and in the capture no listing was attempted at that moment at all: the second read
 was picked up after the run was acknowledged (§7.6), 66 s later. **Measured live since: re-listing
-once at the end is what a client should do, and it is enough.** The last plate read, the `ended`
-marker and the `.alf` all become visible in the same moment the §7.6 acknowledgement releases
-them, so a run's finish always changes the listing — which is also how a client tells this run's
-folder from the stale one left by a previous run (§7.10). The step-transition rule collects every
-read but the last; the end re-list collects that one.
+once at the end is what a client should do — once the acknowledgement has released the run.** The
+last plate read appears the moment the §7.6 `CANCEL` is answered, but the `ended` marker and the
+`.alf` only as the instrument lets the run go a second or two later (§7.6, "The release"), so the
+re-list waits for that. Either way a run's finish always changes the listing — which is also how a
+client tells this run's folder from the stale one left by a previous run (§7.10). The
+step-transition rule collects every read but the last; the end re-list collects that one.
 
 The run folder also accumulates **marker files** the instrument writes as it goes:
 `calibrationfilescopied` and `begun` are already there by the first listing after the start,
@@ -1271,6 +1339,37 @@ GETFILESLEN + LISTALLFILES \Storage Card\PCRunReport   → 20260731_213926_CT019
 GETFILESIZE + GETFILE      …\<that file>               → the run report
 ```
 
+#### The release — `CANCEL` is answered at once, the run let go a moment later
+
+The acknowledgement is not instantaneous, and a client that collects the moment `CANCEL` returns
+collects too early. Three observations bracket it:
+
+| after `CANCEL` | seen | source |
+|---|---|---|
+| +0.05 s | `STATUS?` still names the run, register 32 | YouSeq RT session |
+| +0.21 s | `STATUS?` still names the run, register 32 | S187 qPCR session |
+| +0.32 s | the listing has the final read, but **no `ended` and no `.alf`** | S187 qPCR session |
+| +2.75 s | `STATUS?` reports the empty idle, `"",BLOCK,OFF;0` | `usb-run` (CFX Manager) |
+| +6.4 s | the listing has `ended` and the `.alf` | `usb-run` |
+
+The S187 session pulled the folder at +0.32 s and stopped, so its `.zpcr` holds the 45th read but
+neither `ended` nor the report — a finished run that reads as in progress for ever. CFX Manager
+never meets this: after its `CANCEL` it sends two `ERRORS?` and polls `STATUS?` until the run's
+name is gone (+2.75 s), and lists only after that. **So a client acknowledges, waits for
+`STATUS?` to stop naming the run, and only then lists** — `CfxDevice.releaseRun`, which
+`CfxSession.acknowledgeFinishedRun` uses. When exactly inside 0.32–2.75 s the files land is not
+observed; that the release is the moment to wait for is the reading every observation fits, and
+CFX Manager's order agrees.
+
+**The block and lid are left where the run left them**, cooling: a 95 °C run read 94.42 °C a
+second after its end, a 55 °C run 54.85 °C and then 53.72 °C three seconds later, a 60 °C run
+59.98 → 59.37 °C over 0.8 s; the lids 104.1–104.8 °C, and 103.1 °C at +3.3 s. Over a longer gap the
+lid was back to 35.0 °C 42 minutes after a run ended — enough heat left to cut the next run's
+preheat by 45 s (§7.3).
+
+**The first `IDLE` poll can still carry register 97** — see §3.2, field 7. Step `IDLE` with the
+run's name attached is the finished-and-held state whatever the register says.
+
 The report's name is `<yyyymmdd>_<hhmmss>_<serial>_<RUN NAME>.alf`, and because §7.1 emptied the
 directory it is the only entry. It is small (693 bytes here); **[`alf.md`](./alf.md) decodes it** —
 a header summary line, the protocol as executed, an error summary, and one line per executed step
@@ -1306,8 +1405,8 @@ plate reads:
 5. Author the protocol (§7.2, `protocol.md` §7): `PROTOCOL 'PCRUN'`, the `METHOD`/`HOTLID`/`VOLUME`
    header, one command per step, `END`. Check every `0000`; a bad step fails at that step.
 6. `RemoteRun "A","True","False","<name>","<user>","","True","<method>"` (§7.3) — **this starts
-   it.** Expect `STATUS?` to leave `IDLE` within ~10 s, and expect the lid, not the block, to heat
-   first.
+   it.** Expect `STATUS?` to leave `IDLE` within ~11 s (~6 s for a run with no `PLATEREAD`), and
+   expect the lid, not the block, to heat first.
 7. Once `STATUS?` shows the run (not before — §7.4, "The folder is cleared as the run starts"),
    optionally deposit `GlobData.xml`/`.pltd`/`RunInfo.xml`/`.prcl` into
    `\Storage Card\CurrentRun\` (§7.4) if the finished run should be a complete experiment rather
@@ -1317,8 +1416,9 @@ plate reads:
    with the mandatory `GETFILESLEN`+`LISTALLFILES` pair (§5, keep the two adjacent) and pull the
    new `Read0000N.Plateread` with `GETFILESIZE`+`GETFILE`. Decode with the existing
    `plateread.md`/`packages/core` parser.
-9. On `IDLE`-with-a-run-name (§7.6): `CANCEL`, re-list — the final read appears only now — pull it,
-   then pull the `.alf` from `\Storage Card\PCRunReport\` if wanted.
+9. On `IDLE`-with-a-run-name (§7.6): `CANCEL`, then poll `STATUS?` until it no longer names the
+   run — `ended` and the `.alf` are written only as it lets go — then re-list, pull the final read,
+   and pull the `.alf` from `\Storage Card\PCRunReport\` if wanted.
 10. To take the *whole* run rather than its pieces: pull every file `LISTALLFILES` reported for
     `\Storage Card\CurrentRun` and zip them unchanged — a `.zpcr` is a plain ZIP of exactly that
     directory, so no conversion is involved. `zpcrNameForRunFolder`
@@ -1370,9 +1470,9 @@ where an operator realises they have started the wrong run. A host cannot detect
 `STATUS?` — an armed-but-not-started run and a genuinely idle instrument are the same reply — so
 **it has to remember that it asked for a run**, and keep watching until either the run appears (and
 can then be cancelled for real) or enough time passes that it clearly never will. 6.1 s is the
-figure measured live, and `usb-run` shows ~10.7 s (the run appeared on the eighth poll after
-`RemoteRun`, ±1.4 s); allow several times the larger. `CfxDevice.cancelRun`'s `expectStart` is
-this rule.
+figure measured live, on a run with no `PLATEREAD`; a run that writes a run folder takes nearly
+twice as long — ~10.7 s in `usb-run` and between 10.4 and 11.9 s in the S187 session (§7.3). Allow
+several times the larger. `CfxDevice.cancelRun`'s `expectStart` is this rule.
 
 **1. Don't cancel into a plate read.** While `STATUS?`'s current-step field reads
 `PLATEREAD #h<mask>`, the optics are mid-scan and the `Read0000N.Plateread` file **does not exist
@@ -1617,8 +1717,9 @@ Three consequences for a client:
 - **Do not pull the folder at the finish.** §7.6's forced listing is the one place a stale folder
   is mistaken for the run that just ended — a 45-cycle qPCR archive can be assembled out of a
   two-minute incubation this way, which is exactly how one sample in `samples/` came to hold
-  another run's plate reads. An unchanged listing at the finish is the signal: a real run's finish
-  always adds the last read, `ended` and the report in the same moment.
+  another run's plate reads. An unchanged listing at the finish is the signal: by the time the
+  acknowledgement has released a real run, its finish has added the last read, `ended` and the
+  report (§7.6, "The release").
 - **Collect the report instead.** The one thing such a run does write is its `.alf`, in
   `\Storage Card\PCRunReport` — and since §7.1 empties that directory at every start, what is in
   it afterwards is this run's and only this run's (`CfxDevice.runReport`). The whole of the
@@ -1773,7 +1874,7 @@ The earlier `x^16 + 1` hypothesis is therefore **wrong**, and so is the name: `C
 | `transport.ts` | §1 — the endpoint/interface constants and `UsbDeviceLike`, the structural interface both environments satisfy. |
 | `crc.ts` | §7.4 — the upload checksum and its wire format. Its byte order is measured, §9.2. |
 | `runPlan.ts` | §7.2–§7.4 as *data*: `planRun()` turns a run definition plus a plate (optional — a run may have none) into the exact command lines, the `RemoteRun` line and the files that would be deposited, and `checkRunPlan()` is the plate↔`PLATEREAD` compatibility check below. Pure — no device involved — which is what lets a UI review a run before any of it is sent. |
-| `device.ts` | §3–§5 and §7 — the read pump, the command queue, the typed operations, `sendFile()` (§5's upload cycle), `startRun()` (§7.1–§7.4) and `acknowledgeRun()` (§7.6). |
+| `device.ts` | §3–§5 and §7 — the read pump, the command queue, the typed operations, `sendFile()` (§5's upload cycle), `startRun()` (§7.1–§7.4), and `acknowledgeRun()` with `releaseRun()`, which waits out the release before a client collects (§7.6). |
 | `emulator/` | A **second implementation, of the other side** — an imitation instrument satisfying `UsbDeviceLike`, so the client above can be driven with no hardware present. Not evidence: see below. |
 
 **Starting a run is implemented, and its shape follows §7 rather than §5's.** `startRun()` clears

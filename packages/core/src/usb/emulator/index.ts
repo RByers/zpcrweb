@@ -23,6 +23,7 @@ import type { UsbDeviceLike } from "../transport.js";
 import { realtimeClock, type EmulatorClock } from "./clock.js";
 import type { EmulatorRunData } from "./data.js";
 import { EmulatedInstrument, type EmulatorIdentity } from "./instrument.js";
+import type { Temperatures } from "./run.js";
 import { EmulatorTransport } from "./transport.js";
 
 export interface EmulatorOptions {
@@ -42,6 +43,9 @@ export interface EmulatorOptions {
   initialFiles?: Record<string, Uint8Array> | null;
   /** The wall-clock instant simulated time zero corresponds to, for the run's own timestamps. */
   startedAt?: Date;
+  /** Where the block and lid sit before any run — ambient unless told otherwise. A warm lid
+   * shortens the first preheat (`usb.md` §7.3). */
+  temperatures?: Partial<Temperatures>;
 }
 
 /** The emulator, as the device handle a client takes — plus the two things a driver of it wants
@@ -73,12 +77,15 @@ export type { EmulatorIdentity } from "./instrument.js";
 export { EmulatorTransport } from "./transport.js";
 export type { EmulatorReply, EmulatorResponder } from "./transport.js";
 export { EmulatedRun } from "./run.js";
-export type { RunRequest, RunSnapshot } from "./run.js";
+export type { RunRequest, RunSnapshot, Temperatures } from "./run.js";
 export {
-  LID_PREHEAT_MS,
+  AT_TARGET_LAG_MS,
   PLATE_READ_MS,
-  RAMP_MS,
+  RELEASE_MS,
   START_WINDOW_MS,
+  START_WINDOW_PLATE_READ_MS,
+  lidPreheatMs,
+  rampMs,
   scheduleRun,
 } from "./schedule.js";
 export type { RunSchedule, ScheduledStep } from "./schedule.js";

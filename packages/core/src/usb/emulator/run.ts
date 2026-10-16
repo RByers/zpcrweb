@@ -6,17 +6,21 @@
  * files a host deposits arrive afterwards into a folder that is already being written, and the
  * finished run is **held** until a second `CANCEL` acknowledges it.
  *
- * Four behaviours here exist because a client got them wrong against real hardware, and an
+ * Five behaviours here exist because a client got them wrong against real hardware, and an
  * emulator that smoothed any of them over would let the same mistake back in:
  *
  * - **A `.Plateread` appears when its step *ends*, not when it starts** (§7.5). A client watching
  *   for the file while `STATUS?` still says `PLATEREAD` waits forever.
- * - **There is a ~6 s window after `RemoteRun` in which the instrument still reports the empty
- *   idle** and a `CANCEL` is answered `0000` and ignored (§7.8 step 0) — the run then starts
- *   anyway. This is why `CfxDevice.cancelRun` has an `expectStart` at all.
+ * - **There is a window after `RemoteRun` in which the instrument still reports the empty idle**
+ *   (~5.5 s, or ~10.7 s for a run with plate reads) and a `CANCEL` is answered `0000` and ignored
+ *   (§7.8 step 0) — the run then starts anyway. This is why `CfxDevice.cancelRun` has an
+ *   `expectStart` at all.
  * - **A finished run is not idle** (§7.6): step `IDLE`, cycle counters zero, the run's name still
- *   attached, status register `32`. The last read, the `ended` marker and the `.alf` appear only
- *   after the acknowledging `CANCEL`, which is why collecting them has to wait for it.
+ *   attached, status register `32`. The last read appears only after the acknowledging `CANCEL`.
+ * - **The acknowledgement is not instant either** (§7.6): for {@link RELEASE_MS} after it the run
+ *   stays named, and only then do `ended` and the `.alf` appear. A client that lists the folder
+ *   the moment `CANCEL` returns files a run with no `ended` and no report — which is what the first
+ *   recorded qPCR session did.
  * - **A protocol with no `PLATEREAD` writes no run folder at all** (§7.10) — not an empty one, no
  *   folder: the previous run's files sit there untouched from first command to last. That
  *   asymmetry is what `RunPlan.producesRunFile` exists for, and it is the case in which a client
@@ -30,17 +34,22 @@ import type { EmulatorFilesystem } from "./filesystem.js";
 import { formatAlf, reportFileName, type AlfRunIdentity } from "./report.js";
 import { dataFileName, emulatedRunIdentifier, runSupportFiles } from "./runInfo.js";
 import {
-  LID_PREHEAT_MS,
-  RAMP_MS,
+  AMBIENT_C,
+  AT_TARGET_LAG_MS,
+  BLOCK_COOL_TAU_S,
+  LID_COOL_TAU_S,
+  LID_HEAT_C_PER_S,
+  RELEASE_MS,
   START_WINDOW_MS,
+  START_WINDOW_PLATE_READ_MS,
+  cooled,
+  lidPreheatMs,
   scheduleRun,
   type RunSchedule,
   type ScheduledStep,
 } from "./schedule.js";
 
-/** The block's resting temperature, and the ambient every idle reply reports. This emulator's
- * own — the instrument's depends on the room. */
-export const AMBIENT_C = 18.4;
+export { AMBIENT_C };
 
 /** What `RemoteRun` was told, plus what the instrument holds alongside it. */
 export interface RunRequest {
@@ -57,6 +66,12 @@ export interface RunRequest {
   volumeUl: number;
 }
 
+/** The block and lid temperatures at one moment. */
+export interface Temperatures {
+  blockC: number;
+  lidC: number;
+}
+
 /** Everything a client can read about the run at one moment — the inputs to `STATUS?`. */
 export interface RunSnapshot {
   /** False inside the start window, where the instrument still reports the empty idle. */
@@ -68,7 +83,10 @@ export interface RunSnapshot {
   atTarget: boolean;
   stepText: string;
   stepNumber: number;
+  /** Field 3, the current pass. */
   cycle: number;
+  /** Field 2 — see {@link ScheduledStep.cycles}. */
+  cycles: number;
   stepCount: number;
   blockTempC: number;
   lidTempC: number;
@@ -87,6 +105,10 @@ export class EmulatedRun {
   readonly schedule: RunSchedule;
   /** True when this run will build a run folder at all (`usb.md` §7.10). */
   readonly producesRunFile: boolean;
+  /** `RemoteRun` to visible, for this kind of run. */
+  private readonly startWindowMs: number;
+  /** How long this run's lid preheat lasts, from the lid it started with. */
+  private readonly preheatMs: number;
 
   private pausedAt: number | null = null;
   private pausedTotalMs = 0;
@@ -94,7 +116,11 @@ export class EmulatedRun {
   private skewMs = 0;
   /** Set by an abort: the run clock stops here and the protocol is over. */
   private abortedAtMs: number | null = null;
-  private acknowledged = false;
+  /** Simulated time the abort arrived, for the cooling that follows it. */
+  private abortedAtNowMs: number | null = null;
+  /** Simulated time of the acknowledging `CANCEL`. */
+  private acknowledgedAtMs: number | null = null;
+  private endDeposited = false;
   private cleared = false;
   private started = false;
   private readsWritten = 0;
@@ -108,21 +134,31 @@ export class EmulatedRun {
     private readonly fs: EmulatorFilesystem,
     private readonly data: EmulatorRunData | null,
     private readonly identity: Omit<AlfRunIdentity, "name" | "user" | "sampleId" | "lidTemperatureC" | "volumeUl">,
+    /** Where the block and lid were when the run was requested — still warm, after a recent run. */
+    private readonly start: Temperatures = { blockC: AMBIENT_C, lidC: AMBIENT_C },
   ) {
     this.program = parseRunDefinition(request.directives.join(";"));
-    this.schedule = scheduleRun(this.program);
+    this.schedule = scheduleRun(this.program, start.blockC);
     this.producesRunFile = this.schedule.plateReads > 0;
+    this.startWindowMs = this.producesRunFile ? START_WINDOW_PLATE_READ_MS : START_WINDOW_MS;
+    this.preheatMs = lidPreheatMs(start.lidC, request.lidTemperatureC, request.lidOn);
     // The folder is emptied in `materialise`, as the run becomes visible — not here.
   }
 
   /** When the run leaves the start window and becomes visible in `STATUS?`. */
   private get visibleAtMs(): number {
-    return this.requestedAtMs + START_WINDOW_MS;
+    return this.requestedAtMs + this.startWindowMs;
   }
 
   /** When the lid preheat ends and the first step's clock starts. */
   private get protocolStartMs(): number {
-    return this.visibleAtMs + LID_PREHEAT_MS;
+    return this.visibleAtMs + this.preheatMs;
+  }
+
+  /** Simulated time the first step starts — after the start window and this run's preheat — for
+   * a test that wants to land inside a particular step ({@link schedule}'s times count from it). */
+  get protocolStartsAtMs(): number {
+    return this.protocolStartMs;
   }
 
   /** Position on the protocol's own clock: 0 at the first step, frozen while paused. */
@@ -142,6 +178,12 @@ export class EmulatedRun {
     return this.abortedAtMs ?? this.schedule.endMs;
   }
 
+  /** Simulated time the protocol ended — the moment the block stops being driven. */
+  private get finishedAtMs(): number {
+    if (this.abortedAtNowMs !== null) return this.abortedAtNowMs;
+    return this.protocolStartMs + this.pausedTotalMs - this.skewMs + this.schedule.endMs;
+  }
+
   /** The step executing at `runMs`, or null once the protocol is over. Zero-length steps (`GOTO`,
    * `END`) never answer: nothing ever observes the instrument sitting on one. */
   private stepAt(runMs: number): ScheduledStep | null {
@@ -151,9 +193,17 @@ export class EmulatedRun {
     return null;
   }
 
-  /** True once the acknowledging `CANCEL` has released the run (`usb.md` §7.6). */
-  get isReleased(): boolean {
-    return this.acknowledged;
+  /**
+   * True once the acknowledgement has released the run (`usb.md` §7.6) — {@link RELEASE_MS} after
+   * the `CANCEL`, not at it. The instrument drops a released run and reports the empty idle.
+   */
+  isReleased(nowMs: number): boolean {
+    return this.acknowledgedAtMs !== null && nowMs >= this.acknowledgedAtMs + RELEASE_MS;
+  }
+
+  /** True from the acknowledging `CANCEL` on, released or not. */
+  get isAcknowledged(): boolean {
+    return this.acknowledgedAtMs !== null;
   }
 
   // ---- control ----------------------------------------------------------
@@ -195,19 +245,61 @@ export class EmulatedRun {
     // accounted for, or the report's end time and elapsed seconds leave it out.
     this.resume(nowMs);
     this.abortedAtMs = this.runMs(nowMs);
+    this.abortedAtNowMs = nowMs;
     return true;
   }
 
-  /** `CANCEL` on a finished run — the acknowledgement that releases it and, with it, the `ended`
-   * marker and the report (`usb.md` §7.6). */
+  /** `CANCEL` on a finished run — the acknowledgement. The last read appears at once; the run is
+   * released, and the `ended` marker and the report written, {@link RELEASE_MS} later (`usb.md`
+   * §7.6). A second `CANCEL` meanwhile changes nothing. */
   acknowledge(nowMs: number): void {
-    if (this.acknowledged) return;
-    this.acknowledged = true;
-    this.depositEndOfRun(nowMs);
+    if (this.acknowledgedAtMs !== null) return;
+    this.acknowledgedAtMs = nowMs;
+    this.materialise(nowMs);
   }
 
   get wasCancelled(): boolean {
     return this.abortedAtMs !== null;
+  }
+
+  // ---- temperatures -----------------------------------------------------
+
+  /** The lid at `nowMs` while the run is going: climbing from where it started at the measured
+   * preheat rate until it reaches its setpoint. */
+  private lidAt(nowMs: number): number {
+    const target = this.request.lidOn ? this.request.lidTemperatureC : AMBIENT_C;
+    if (!this.request.lidOn) return cooled(this.start.lidC, nowMs - this.requestedAtMs, LID_COOL_TAU_S);
+    const climbed = this.start.lidC + (LID_HEAT_C_PER_S * Math.max(0, nowMs - this.visibleAtMs)) / 1000;
+    return Math.min(target, Math.max(this.start.lidC, climbed));
+  }
+
+  /** The block at a point on the run clock: linear through a ramp, then the setpoint. */
+  private blockAt(runMs: number): number {
+    const step = this.stepAt(runMs) ?? this.schedule.steps.at(-1);
+    if (!step) return this.start.blockC;
+    const target = this.holdTempOf(step);
+    const into = Math.min(runMs, step.endMs) - step.startMs;
+    if (step.rampMs <= 0 || into >= step.rampMs) return target;
+    return step.fromC + ((target - step.fromC) * into) / step.rampMs;
+  }
+
+  /**
+   * Block and lid at `nowMs`, for the instrument to report once it has dropped this run — they
+   * cool from where the run left them rather than snapping to ambient (`usb.md` §7.6: a block
+   * still at 94.42 °C, a lid at 103.1 °C, seconds after a finish). Also what the next run starts
+   * from, which is what shortens a warm lid's preheat.
+   */
+  temperaturesAt(nowMs: number): Temperatures {
+    if (!this.isOver(nowMs)) {
+      if (nowMs < this.visibleAtMs) return { ...this.start };
+      return { blockC: nowMs < this.protocolStartMs ? this.start.blockC : this.blockAt(this.runMs(nowMs)), lidC: this.lidAt(nowMs) };
+    }
+    const end = this.finishedAtMs;
+    const since = nowMs - end;
+    return {
+      blockC: cooled(this.blockAt(this.endMs), since, BLOCK_COOL_TAU_S),
+      lidC: cooled(this.lidAt(end), since, LID_COOL_TAU_S),
+    };
   }
 
   // ---- what the filesystem gains, and when ------------------------------
@@ -216,8 +308,8 @@ export class EmulatedRun {
   private dateAt(runMs: number): Date {
     return new Date(
       this.requestedAt.getTime() +
-        START_WINDOW_MS +
-        LID_PREHEAT_MS +
+        this.startWindowMs +
+        this.preheatMs +
         this.pausedTotalMs +
         runMs -
         this.skewMs,
@@ -225,11 +317,19 @@ export class EmulatedRun {
   }
 
   /**
-   * Bring the run folder up to date with where the clock is. Called before every reply, so a
+   * Bring the filesystem up to date with where the clock is. Called before every reply, so a
    * listing and a status poll can never disagree about whether a read exists yet.
    */
   materialise(nowMs: number): void {
-    if (nowMs < this.visibleAtMs || !this.producesRunFile) return;
+    if (nowMs >= this.visibleAtMs && this.producesRunFile) this.materialiseRunFolder(nowMs);
+    // A thermal-only run is released the same way, and its report appears at the same moment.
+    if (!this.endDeposited && this.isReleased(nowMs)) {
+      this.endDeposited = true;
+      this.depositEndOfRun();
+    }
+  }
+
+  private materialiseRunFolder(nowMs: number): void {
     if (!this.cleared) {
       // **The previous run is cleared out as this one becomes visible**, which is the *latest*
       // the real clear finishes: measured, the firmware empties the folder in the background over
@@ -257,7 +357,9 @@ export class EmulatedRun {
       for (const [name, bytes] of Object.entries(support)) {
         this.fs.write(`${CFX_CURRENT_RUN_DIR}\\${name}`, bytes);
       }
-      this.fs.write(`${CFX_CURRENT_RUN_DIR}\\ProtocolRunDefinition.txt`, ascii(this.protocolText()));
+      // CRLF-terminated, unlike the `.alf`'s copy of the same line: 106 bytes for a 104-character
+      // protocol, measured in the recorded qPCR session.
+      this.fs.write(`${CFX_CURRENT_RUN_DIR}\\ProtocolRunDefinition.txt`, ascii(this.protocolText() + "\r\n"));
       this.fs.write(`${CFX_CURRENT_RUN_DIR}\\calibrationfilescopied`, new Uint8Array(0));
       this.fs.write(`${CFX_CURRENT_RUN_DIR}\\${RUN_BEGUN_MARKER}`, new Uint8Array(0));
     }
@@ -269,7 +371,7 @@ export class EmulatedRun {
       // (`usb.md` §7.6–§7.7): a listing taken at the final `PLATEREAD`→`IDLE` edge does not
       // find it, which is the case the follower's finish rule exists for. Deliberately only the
       // last one — every earlier read appears as its step ends, and is listed mid-run.
-      if (step.readIndex === this.schedule.plateReads && !this.acknowledged) continue;
+      if (step.readIndex === this.schedule.plateReads && this.acknowledgedAtMs === null) continue;
       this.readsWritten = step.readIndex;
       const fileName = `Read${String(step.readIndex).padStart(5, "0")}.Plateread`;
       const mask =
@@ -289,8 +391,8 @@ export class EmulatedRun {
         }),
       );
       // Four little-endian int32s: the last read's step, its pass, the running read count, 0.
-      // Read off the committed melt run's own marker (9, 61, 101, 0); nothing else is known
-      // about it, and nothing in this project reads it.
+      // First read off the committed melt run's own marker (9, 61, 101, 0), and since confirmed
+      // byte for byte by the recorded qPCR session's (4, 45, 45, 0) after `GOTO 2,44`.
       const status = new Uint8Array(16);
       const view = new DataView(status.buffer);
       view.setInt32(0, step.stepNumber, true);
@@ -303,13 +405,7 @@ export class EmulatedRun {
   /** The block temperature a step holds at — what a read taken during it records. */
   private holdTempOf(step: ScheduledStep): number {
     // A `PLATEREAD` has no setpoint of its own; it reads at whatever the preceding step held.
-    if (step.targetC !== null) return step.targetC;
-    let previous: number | null = null;
-    for (const s of this.schedule.steps) {
-      if (s === step) break;
-      if (s.targetC !== null) previous = s.targetC;
-    }
-    return previous ?? AMBIENT_C;
+    return step.targetC ?? step.fromC;
   }
 
   /** The protocol as the instrument records it — the directives typed in, with the lid and volume
@@ -325,8 +421,8 @@ export class EmulatedRun {
   }
 
   /** The `.alf`, the `ended` marker, and the report's copy inside the run folder — all of which
-   * appear only once the finished run has been acknowledged (`usb.md` §7.6, §7.8 step 6). */
-  private depositEndOfRun(nowMs: number): void {
+   * appear only once the acknowledgement has released the run (`usb.md` §7.6, §7.8 step 6). */
+  private depositEndOfRun(): void {
     const endRunMs = this.endMs;
     const startedAt = this.dateAt(0);
     const endedAt = this.dateAt(endRunMs);
@@ -350,7 +446,6 @@ export class EmulatedRun {
     const name = reportFileName(startedAt, this.identity.baseSerial, this.request.name);
     this.fs.write(`${CFX_RUN_REPORT_DIR}\\${name}`, report);
     if (this.producesRunFile) {
-      this.materialise(nowMs);
       this.fs.write(`${CFX_CURRENT_RUN_DIR}\\${name}`, report);
       this.fs.write(`${CFX_CURRENT_RUN_DIR}\\${RUN_ENDED_MARKER}`, new Uint8Array(0));
     }
@@ -369,10 +464,11 @@ export class EmulatedRun {
       stepText: "IDLE",
       stepNumber: 0,
       cycle: 0,
+      cycles: 0,
       stepCount: 0,
-      blockTempC: AMBIENT_C,
-      lidTempC: AMBIENT_C,
-      sampleTempC: AMBIENT_C,
+      blockTempC: round2(this.start.blockC),
+      lidTempC: round1(this.start.lidC),
+      sampleTempC: round2(this.start.blockC),
       elapsedS: 0,
       stepElapsedS: 0,
       rampElapsedS: 0,
@@ -383,7 +479,6 @@ export class EmulatedRun {
     if (nowMs < this.visibleAtMs) return idle;
 
     const stepCount = this.program.steps.length + (this.program.directives.some((d) => d.verb === "END") ? 1 : 0);
-    const lidTarget = this.request.lidOn ? this.request.lidTemperatureC : AMBIENT_C;
 
     if (nowMs < this.protocolStartMs && !this.isOver(nowMs)) {
       // The lid preheat: the run is reporting its first step, the block has not moved, and the
@@ -392,7 +487,6 @@ export class EmulatedRun {
       // first: a run that answered the abort and then went on reporting itself preheating would
       // time out the client's `cancelRun`, which waits for the register to say "stopped".
       const first = this.schedule.steps[0];
-      const fraction = (nowMs - this.visibleAtMs) / LID_PREHEAT_MS;
       return {
         ...idle,
         visible: true,
@@ -400,8 +494,9 @@ export class EmulatedRun {
         stepText: first?.directive.text ?? "IDLE",
         stepNumber: first?.stepNumber ?? 0,
         cycle: 1,
+        cycles: 1,
         stepCount,
-        lidTempC: round1(AMBIENT_C + (lidTarget - AMBIENT_C) * fraction),
+        lidTempC: round1(this.lidAt(nowMs)),
         remainingS: round2(this.schedule.endMs / 1000),
         nextEventAtMs: this.protocolStartMs,
       };
@@ -410,8 +505,11 @@ export class EmulatedRun {
     const runMs = this.runMs(nowMs);
     const step = this.isOver(nowMs) ? null : this.stepAt(runMs);
     if (!step) {
-      // §7.6: finished, and still held. Not idle — the name is attached and the register reads
-      // 32, or 160 when the run was aborted rather than allowed to finish (§3.2, §7.8).
+      // §7.6: finished, and still held — also through the {@link RELEASE_MS} after the
+      // acknowledgement. Not idle — the name is attached and the register reads 32, or 160 when the
+      // run was aborted rather than allowed to finish (§3.2, §7.8). The block and lid are where the
+      // run left them, cooling.
+      const temps = this.temperaturesAt(nowMs);
       return {
         ...idle,
         visible: true,
@@ -419,29 +517,37 @@ export class EmulatedRun {
         cancelled: this.wasCancelled,
         stepCount: 0,
         elapsedS: round2((this.endMs - this.skewMs) / 1000),
-        lidTempC: round1(lidTarget),
-        nextEventAtMs: null,
+        blockTempC: round2(temps.blockC),
+        lidTempC: round1(temps.lidC),
+        sampleTempC: round2(temps.blockC),
+        nextEventAtMs: this.acknowledgedAtMs === null ? null : this.acknowledgedAtMs + RELEASE_MS,
       };
     }
 
     const into = runMs - step.startMs;
-    const ramping = step.directive.verb !== "PLATEREAD" && into < RAMP_MS;
+    const ramping = step.directive.verb !== "PLATEREAD" && into < step.rampMs;
+    // The at-target bit trails a setpoint change by a fraction of a second: the first poll of a
+    // new step can still carry the last step's bit (`usb.md` §3.2, field 7).
+    const lagging = ramping && step.executed > 0 && into < AT_TARGET_LAG_MS;
     const target = this.holdTempOf(step);
-    const from = this.previousTargetOf(step);
-    const blockTempC = ramping ? from + ((target - from) * into) / RAMP_MS : target;
+    const from = step.fromC;
+    const blockTempC = this.blockAt(runMs);
+    const rampS = Math.min(into, step.rampMs) / 1000;
+    const holdS = Math.max(0, into - step.rampMs) / 1000;
     return {
       visible: true,
       finished: false,
       cancelled: false,
       paused: this.isPaused,
       preheating: false,
-      atTarget: !ramping,
+      atTarget: !ramping || lagging,
       stepText: step.directive.text,
       stepNumber: step.stepNumber,
       cycle: step.repeat,
+      cycles: step.cycles,
       stepCount,
       blockTempC: round2(blockTempC),
-      lidTempC: round1(lidTarget),
+      lidTempC: round1(this.lidAt(nowMs)),
       // Field 16 lags the block through a ramp and settles on the setpoint (`usb.md` §3.2).
       sampleTempC: round2(ramping ? from + (blockTempC - from) * 0.6 : target),
       // Field 8 is wall time since the protocol started: a `PROCEED` re-plans what remains
@@ -449,22 +555,12 @@ export class EmulatedRun {
       // in the `usb-run` capture, where it read 37.77 s on the step after a skipped 180 s hold.
       elapsedS: round2((runMs - this.skewMs) / 1000),
       stepElapsedS: round2(into / 1000),
-      rampElapsedS: round2(Math.min(into, RAMP_MS) / 1000),
-      holdElapsedS: round2(Math.max(0, into - RAMP_MS) / 1000),
+      rampElapsedS: round2(rampS),
+      holdElapsedS: round2(holdS),
       // Counts down, and — measured — does not tick through a plate read (§3.2).
       remainingS: round2(Math.max(0, this.schedule.endMs - runMs) / 1000),
       nextEventAtMs: this.pausedAt === null ? nowMs + (step.endMs - runMs) : null,
     };
-  }
-
-  /** The setpoint the block is coming *from* when a step begins. */
-  private previousTargetOf(step: ScheduledStep): number {
-    let previous = AMBIENT_C;
-    for (const s of this.schedule.steps) {
-      if (s === step) break;
-      if (s.targetC !== null) previous = s.targetC;
-    }
-    return previous;
   }
 }
 

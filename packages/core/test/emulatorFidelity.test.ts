@@ -1,41 +1,46 @@
 /**
- * The emulator against the one recorded conversation with a real instrument — `emulator.md` §10.1.
+ * The emulator against the recorded conversations with a real instrument — `emulator.md` §10.1.
  *
  * Every other emulator test proves the emulator is *self-consistent*: it answers the way we think
  * a CFX96 answers, to a client written from the same document. This one is the only check in the
- * suite with an outside witness. `samples/20260807-YouSeq_RT_-_S56.zpcr` carries a
- * `usb-traffic.bin` — 10 780 messages of a complete session against CT019138, connect → author →
- * start → watch → finish → pull — recorded by this app itself. The test replays every host→device
- * command out of it, in order, at the emulator, on a clock advanced to the recording's own
- * timestamps, and compares what comes back with what the instrument said.
+ * suite with an outside witness. Two committed `.zpcr`s carry a `usb-traffic.bin` recorded by this
+ * app itself against CT019138, each a whole session — connect → author → start → watch → finish →
+ * pull — and the test replays every host→device command out of each, in order, at the emulator, on
+ * a clock advanced to the recording's own timestamps, and compares what comes back with what the
+ * instrument said.
+ *
+ * | recording | run | what only it witnesses |
+ * |---|---|---|
+ * | `20260807-YouSeq_RT_-_S56.zpcr` | `METHOD BLOCK`, three `TEMP` steps, no `PLATEREAD` — a heat-block run (`usb.md` §7.10) | the thermal path; the final pull of a *previous* qPCR run's folder |
+ * | `20261014-S187_S188_S189_cold_check.zpcr` | `METHOD CALC`, `GOTO 2,44` — a 45-cycle qPCR run | a qPCR run executing: the folder clear, 45 plate reads pulled as they land, field 2, the ramps, the acknowledgement's release |
  *
  * **How far this reaches, stated before anything else.**
  *
- * - It is **one session, of one run**: `METHOD BLOCK`, three `TEMP` steps, no `PLATEREAD`. That
- *   is a *heat-block* run (`usb.md` §7.10) — so this log witnesses the thermal path and, through
- *   the folder it pulls at the end, the file transfer of a previous qPCR run's output. **No
- *   recorded traffic exists for a qPCR run's execution, a melt, a cancel, or a pause**, and
- *   nothing here says anything about them (`emulator.md` §11).
- * - **Every result code in the recording is `0000`.** The instrument was never asked anything it
- *   refused, so the property `emulator.md` Appendix A cares about most — that the emulator is
- *   never *more permissive* than the instrument — is untestable from this file. All this can
- *   check is that the emulator does not invent a failure where the instrument succeeded.
+ * - **No recorded traffic exists for a melt, a cancel, or a pause**, and nothing here says
+ *   anything about them (`emulator.md` §11).
+ * - **Every result code in both recordings is `0000`.** The instrument was never asked anything it
+ *   refused, so the property `emulator.md` Appendix A cares about most — that the emulator is never
+ *   *more permissive* than the instrument — is untestable from these files. All this can check is
+ *   that the emulator does not invent a failure where the instrument succeeded.
  * - A different clock ran. Temperatures, elapsed seconds, GUIDs, free space and file timestamps
  *   cannot match and are never asserted equal; they are compared for shape, population and
  *   plausible range, and every difference is **listed in the test's output** rather than quietly
- *   tolerated.
+ *   tolerated. The step *durations* are the exception: they are the timing model, and each is held
+ *   to the recording's within a stated tolerance.
  *
- * What it *does* prove, and what a failure here means: the emulator's reply to each of the ~5 390
- * commands has the shape the instrument's had (value + `;` + code, a bare code, or raw bytes),
- * the same result code, the same listing, byte-identical file contents, a `STATUS?` record of the
- * same twenty fields with the same ones populated in each phase of the run, and the same sequence
- * of run edges. Where it *knowingly* differs, the difference is one of {@link KNOWN_DIVERGENCES},
- * each of which is recorded in `emulator.md`; anything else fails and names the command.
+ * What it *does* prove, and what a failure here means: the emulator's reply to each command has the
+ * shape the instrument's had (value + `;` + code, a bare code, or raw bytes), the same result code,
+ * the same listing, byte-identical file contents where the emulator was handed the bytes, a
+ * `STATUS?` record of the same twenty fields with the same ones populated in each phase of the run,
+ * and the same sequence of run edges. Where it *knowingly* differs, the difference is one of the
+ * recording's `known` set, each of which is recorded in `emulator.md`; anything else fails and names
+ * the command.
  */
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import {
   parseResponse,
+  parseRunInfoRaw,
   parseUsbTrafficLog,
   unzipArchive,
   type UsbTrafficMessage,
@@ -44,45 +49,74 @@ import {
 import {
   createCfxEmulator,
   manualClock,
+  recordedRunData,
+  START_WINDOW_PLATE_READ_MS,
   type CfxEmulator,
   type EmulatorReply,
+  type ScheduledStep,
 } from "../src/emulator.js";
-import { RT_S56_SAMPLE_PATH } from "./sample.js";
+import { QPCR_S187_SAMPLE_PATH, RT_S56_SAMPLE_PATH } from "./sample.js";
 
+const CURRENT_RUN = "\\Storage Card\\CurrentRun";
 const RUN_REPORTS = "\\Storage Card\\PCRunReport";
 const LATIN1 = new TextDecoder("latin1");
 
+/** The four `RunInfo.xml` keys that belong to the run rather than the instrument — the emulator
+ * writes its own (`runInfo.ts`), and every other key is the recording's. */
+const RUN_OWN_KEYS = new Set(["Identifier", "RunStartTime", "DataFile", "RunDefinition"]);
+
 /**
- * Differences between the emulator and the recording that are **understood and deliberate**, each
- * with its entry in `emulator.md`. A difference outside this set fails the run: the point of a
- * fidelity check is that it cannot be quietly widened.
+ * Differences between the emulator and a recording that are **understood and deliberate**, each
+ * with its entry in `emulator.md` §10.1. A difference outside the recording's set fails the run:
+ * the point of a fidelity check is that it cannot be quietly widened.
  */
-const KNOWN_DIVERGENCES = new Set([
-  // The instrument terminates some replies with CRLF and others bare, per command (§10.1). The
-  // emulator emits none. `parseResponse` strips either, so nothing in the client notices today.
-  "crlf-terminator",
+const DIVERGENCES = {
+  // The instrument terminates some replies with CRLF and others bare, per command. The emulator
+  // emits none. `parseResponse` strips either, so nothing in the client notices today.
+  crlfTerminator: "crlf-terminator",
   // `GETFILE`'s reply is *not* a `passThrough` message on the real instrument — printable files
   // come back recorded as text. The emulator marks it passThrough.
-  "getfile-passthrough",
+  getfilePassthrough: "getfile-passthrough",
   // Instrument-specific values that cannot match: free space and the staging GUID.
-  "instrument-value",
-  // The emulator serves this folder out of the archive, and the archive is not always a
-  // byte-identical copy of what the instrument held — the app rewrote two of these files on the
-  // way in. Not an emulator behaviour at all: it serves exactly the bytes it was given.
-  "archive-copy-differs",
+  instrumentValue: "instrument-value",
+  // The emulator serves the heat-block session's folder out of the archive, and the archive is not
+  // a byte-identical copy of what the instrument held — the app rewrote two files on the way in.
+  archiveCopyDiffers: "archive-copy-differs",
   // The staging GUID copy of an upload is gone from the instrument's listing by the end of the
   // run; the emulator keeps it until the next upload.
-  "staging-guid-lifetime",
+  stagingGuidLifetime: "staging-guid-lifetime",
   // A file deleted and written again keeps its place in the instrument's listing; the emulator's
-  // listing moves it to the end.
-  "listing-order",
+  // listing moves it to the end — and writes a run's support files before the host's deposit,
+  // where the instrument lists them after it.
+  listingOrder: "listing-order",
   // The instrument's at-target bit can fall back to 0 for a poll after the hold has begun; the
   // emulator's never does once a step has arrived.
-  "at-target-flicker",
-  // The emulator's modelled run is ~20 s longer than this instrument's was, which is enough to
-  // change what the session's last `CANCEL` means.
-  "run-duration-model",
-]);
+  atTargetFlicker: "at-target-flicker",
+  // The heat-block run's preheat ran ~4.5 s shorter than one heating rate for all three runs
+  // predicts, which is enough to change what the session's last `CANCEL` means.
+  runDurationModel: "run-duration-model",
+  // The qPCR session's first five replies belong to the command before: a reply left in the pipe
+  // by the previous connection, before `CfxDevice.identify` learned to turn one away (`usb.md` §3,
+  // "A connection starts in step"). Skipped, not compared.
+  staleRepliesAtConnect: "stale-replies-at-connect",
+  // The qPCR session deposited its files inside the start window, before `CfxDevice.startRun`
+  // waited for the run to appear (`usb.md` §7.4). The replay sends them where the client sends
+  // them now — after — so the half-cleared folder the instrument showed meanwhile, and the
+  // `.prcl.txt` its clear swept away, are the recording's and not the emulator's.
+  depositInStartWindow: "deposit-in-start-window",
+  // Plate reads are synthesised from one curve per channel (`emulator.md` §7): the same size and
+  // shape as the instrument's, never the same bytes.
+  syntheticPlateRead: "synthetic-plate-read",
+  // `RunInfo.xml`'s run-own keys are the emulator's (`runInfo.ts`); every other key is compared.
+  runIdentity: "run-identity",
+  // `runlog.xml` is carried from the recording's *finished* run (`emulator.md` §8); the instrument's
+  // grows through the run.
+  runlogVerbatim: "runlog-verbatim",
+  // Once in three recorded finishes, the first `IDLE` poll still carried the run's register 97 —
+  // block active, at target — before the 32 of §7.6. Not emulated: the other two finishes,
+  // one of them a qPCR run polled 0.3 s after its end, went straight to 32 (`usb.md` §7.6).
+  finishRegisterTransient: "finish-register-transient",
+} as const;
 
 // ---- the recording ------------------------------------------------------------------------
 
@@ -102,29 +136,31 @@ interface Exchange {
 
 interface Recording {
   archive: ZpcrArchive;
+  /** Every exchange from the point the conversation is in step. */
   exchanges: Exchange[];
-  /** The `\Storage Card\CurrentRun` listing as the session's first `LISTALLFILES` reported it. */
-  initialNames: string[];
-  reportName: string;
+  /** How many leading exchanges were skipped as out of step. */
+  skipped: number;
+  /** STATUS? fields of every poll, in order, with its time — the instrument's own clocks. */
+  polls: { atMs: number; fields: string[] }[];
 }
 
-function loadRecording(): Recording {
-  const buf = readFileSync(RT_S56_SAMPLE_PATH);
+function loadRecording(path: string, inStepFrom?: (ex: Exchange) => boolean): Recording {
+  const buf = readFileSync(path);
   const archive = unzipArchive(new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength));
   const records = parseUsbTrafficLog(archive["usb-traffic.bin"]!).filter(
     (r): r is UsbTrafficMessage => r.kind === "message",
   );
   const t0 = records[0]!.at;
-  const exchanges: Exchange[] = [];
+  const all: Exchange[] = [];
   for (let i = 0; i < records.length; i++) {
     const out = records[i]!;
     if (out.direction !== "out") continue;
     const reply = records[i + 1];
-    // Every command in this log is answered by the very next record; a log that interleaved
+    // Every command in both logs is answered by the very next record; a log that interleaved
     // differently would need pairing by channel, and saying so is cheaper than pretending.
     if (!reply || reply.direction !== "in") continue;
     const command = (out.text ?? LATIN1.decode(out.payload.slice(0, 512))).replace(/\r?\n$/, "");
-    exchanges.push({
+    all.push({
       index: i,
       atMs: out.at - t0,
       command,
@@ -133,35 +169,131 @@ function loadRecording(): Recording {
       reply,
     });
   }
-  const firstListing = exchanges.find((e) => e.verb === "LISTALLFILES")!;
-  const initialNames = parseResponse(firstListing.reply.payload).value!.split(",");
-  const reportName = initialNames.find((n) => n.endsWith(".alf"))!;
-  return { archive, exchanges, initialNames, reportName };
+  const from = inStepFrom ? all.findIndex(inStepFrom) : 0;
+  const exchanges = all.slice(from);
+  const polls = exchanges
+    .filter((e) => e.verb === "STATUS?")
+    .map((e) => ({ atMs: e.atMs, fields: parseResponse(e.reply.payload).fields }));
+  return { archive, exchanges, skipped: from, polls };
 }
+
+/** The listing a `LISTALLFILES` reply carries, GUIDs masked. */
+function namesOf(reply: Uint8Array | string): string[] {
+  const text = typeof reply === "string" ? reply : replyText(reply);
+  return maskGuids(text).replace(/;\d{4}$/, "").split(",").filter((n) => n !== "");
+}
+
+// ---- what each recording needs ------------------------------------------------------------
+
+interface RecordingSpec {
+  label: string;
+  path: string;
+  /** The first exchange whose reply is its own — see `stale-replies-at-connect`. */
+  inStepFrom?: (ex: Exchange) => boolean;
+  /** `CurrentRun` as the instrument held it before the session's run, in its listing order. */
+  initialNames(rec: Recording): string[];
+  /** `PCRunReport` before the run: the previous run's report, by name. */
+  initialReports(rec: Recording): Record<string, Uint8Array>;
+  /** Hold the deposit back until the run shows, as the client does now (`deposit-in-start-window`). */
+  deferDeposit: boolean;
+  /** The run has plate reads, so the emulator needs curves to write them from — its own archive's. */
+  plateReads: boolean;
+  /** Names the emulator lists and the instrument does not, and why. */
+  emulatorOnlyNames: Record<string, string>;
+  known: Set<string>;
+}
+
+const HEAT_BLOCK: RecordingSpec = {
+  label: "the heat-block session",
+  path: RT_S56_SAMPLE_PATH,
+  initialNames(rec) {
+    const first = rec.exchanges.find((e) => e.verb === "LISTALLFILES")!;
+    return parseResponse(first.reply.payload).value!.split(",");
+  },
+  initialReports(rec) {
+    // The previous run's report, which this session deletes before authoring its own (§7.4).
+    const name = this.initialNames(rec).find((n) => n.endsWith(".alf"))!;
+    return { [name]: rec.archive[name]! };
+  },
+  deferDeposit: false,
+  plateReads: false,
+  emulatorOnlyNames: {},
+  known: new Set([
+    DIVERGENCES.crlfTerminator,
+    DIVERGENCES.getfilePassthrough,
+    DIVERGENCES.instrumentValue,
+    DIVERGENCES.archiveCopyDiffers,
+    DIVERGENCES.stagingGuidLifetime,
+    DIVERGENCES.listingOrder,
+    DIVERGENCES.atTargetFlicker,
+    DIVERGENCES.runDurationModel,
+  ]),
+};
+
+const QPCR: RecordingSpec = {
+  label: "the qPCR session",
+  path: QPCR_S187_SAMPLE_PATH,
+  inStepFrom: (ex) => ex.verb === "ALPHASN?",
+  initialNames(rec) {
+    // The connect-time listing went to the wrong command (`stale-replies-at-connect`), so the
+    // previous run's folder is read off the first listing after `RemoteRun` — before the firmware's
+    // clear had touched it, and less the protocol and staging GUID the host had just put there.
+    const remoteRun = rec.exchanges.findIndex((e) => e.verb === "RemoteRun");
+    const listing = rec.exchanges.slice(remoteRun).find((e) => e.verb === "LISTALLFILES")!;
+    return parseResponse(listing.reply.payload)
+      .value!.split(",")
+      .filter((n) => n !== "YouSeq_c45.prcl.txt" && !GUID.test(n));
+  },
+  initialReports(rec) {
+    const fetched = rec.exchanges.find((e) => e.verb === "GETFILE" && e.command.includes("PCRunReport"))!;
+    return { [fileOf(fetched.command)]: fetched.reply.payload };
+  },
+  deferDeposit: true,
+  plateReads: true,
+  emulatorOnlyNames: { "YouSeq_c45.prcl.txt": DIVERGENCES.depositInStartWindow },
+  known: new Set([
+    DIVERGENCES.crlfTerminator,
+    DIVERGENCES.getfilePassthrough,
+    DIVERGENCES.instrumentValue,
+    DIVERGENCES.stagingGuidLifetime,
+    DIVERGENCES.listingOrder,
+    DIVERGENCES.staleRepliesAtConnect,
+    DIVERGENCES.depositInStartWindow,
+    DIVERGENCES.syntheticPlateRead,
+    DIVERGENCES.runIdentity,
+    DIVERGENCES.runlogVerbatim,
+    DIVERGENCES.atTargetFlicker,
+    DIVERGENCES.finishRegisterTransient,
+  ]),
+};
 
 // ---- the emulator, seeded to look like that instrument ------------------------------------
 
 /**
- * An emulator whose `CurrentRun` holds what the recording's first listing reported, in the order
- * it reported it — so the listing string, and with it the length `GETFILESLEN` answers, is
- * comparable to the real one rather than merely the same length by luck.
- *
- * The bytes come from the archive, which is what the session pulled off this very folder — with
- * two exceptions the comparison reports as `archive-copy-differs`: `zpcrweb.json`, which the
- * session overwrote (so the archive holds the *new* one, and the first `GETFILESIZE` of it
- * disagrees by five bytes), and the plate `.csv`, whose header the app rewrote on the way into
- * the archive (`FAM Ch1` became `FAM`). Neither is an emulator behaviour: it serves back exactly
- * the bytes it was handed.
+ * An emulator whose `CurrentRun` holds what the recording's instrument held, in the order it
+ * listed it — so the listing string, and with it the length `GETFILESLEN` answers, is comparable
+ * to the real one rather than merely the same length by luck — and whose block and lid sit where
+ * the recording's did: the block at its idle reading, the lid where the preheat began. The lid
+ * matters: a lid still warm from an earlier run shortens the preheat (`usb.md` §7.3), and the
+ * qPCR session's was at 37.7 °C.
  */
-function seededEmulator(rec: Recording): CfxEmulator {
+function seededEmulator(spec: RecordingSpec, rec: Recording): CfxEmulator {
   const clock = manualClock();
   const initialRunFolder: Record<string, Uint8Array> = {};
-  for (const name of rec.initialNames) {
+  for (const name of spec.initialNames(rec)) {
     initialRunFolder[name] = rec.archive[name] ?? new Uint8Array(0);
   }
-  const emulator = createCfxEmulator({ clock, initialRunFolder });
-  // The previous run's report, which this session deletes before authoring its own (§7.4).
-  emulator.instrument.fs.write(`${RUN_REPORTS}\\${rec.reportName}`, rec.archive[rec.reportName]!);
+  const idle = rec.polls[0]!.fields;
+  const preheating = rec.polls.find((p) => (Number(p.fields[7]) & 0x08) !== 0)!.fields;
+  const emulator = createCfxEmulator({
+    clock,
+    initialRunFolder,
+    data: spec.plateReads ? recordedRunData(rec.archive) : null,
+    temperatures: { blockC: Number(idle[0]), lidC: Number(preheating[1]) },
+  });
+  for (const [name, bytes] of Object.entries(spec.initialReports(rec))) {
+    emulator.instrument.fs.write(`${RUN_REPORTS}\\${name}`, bytes);
+  }
   return emulator;
 }
 
@@ -174,8 +306,8 @@ interface Divergence {
 }
 
 /** A 36-character GUID, whichever instrument minted it. */
-const GUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g;
-const maskGuids = (s: string) => s.replace(GUID, "<guid>");
+const GUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/;
+const maskGuids = (s: string) => s.replace(new RegExp(GUID.source, "g"), "<guid>");
 
 /** The reply as text with the terminator removed — the form `parseResponse` works on. */
 function replyText(payload: Uint8Array): string {
@@ -199,6 +331,8 @@ function phaseOf(fields: string[]): string {
   if (reg === 0) return "idle";
   if (!(reg & 0x40)) return reg & 0x80 ? "finished-cancelled" : "finished";
   if (reg & 0x08) return "preheat";
+  // Register 97 with the step already `IDLE` — see `finish-register-transient`.
+  if (fields[4] === "IDLE") return "finishing";
   return reg & 0x01 ? "hold" : "ramp";
 }
 
@@ -214,7 +348,9 @@ function populated(fields: string[]): number[] {
 }
 
 interface StatusSide {
-  /** Phase, then step number and text, deduplicated — the edges a follower keys on. */
+  /** Coarse phase, then fields 2/3, step number and text, deduplicated — the edges a follower keys
+   * on. Ramp and hold are one phase here: the at-target bit's timing is the populated-fields
+   * check's business, and both sides' bit can flicker at a step change. */
   edges: string[];
   /** Per phase, the union of the field indices ever populated in it. */
   populatedByPhase: Map<string, Set<number>>;
@@ -231,7 +367,8 @@ function emptyStatusSide(): StatusSide {
 
 function observeStatus(side: StatusSide, fields: string[]): void {
   const phase = phaseOf(fields);
-  const edge = `${phase} step=${fields[5]} ${fields[4]}`;
+  const coarse = phase === "ramp" || phase === "hold" ? "running" : phase;
+  const edge = `${coarse} ${fields[2]}/${fields[3]} step=${fields[5]} ${fields[4]}`;
   if (side.edges[side.edges.length - 1] !== edge) side.edges.push(edge);
   // The cancelled bit changes the register's value, not which fields carry anything, so the two
   // finished states share a bucket here and are told apart in the edge sequence.
@@ -245,7 +382,9 @@ function observeStatus(side: StatusSide, fields: string[]): void {
 }
 
 interface Replay {
+  spec: RecordingSpec;
   rec: Recording;
+  emulator: CfxEmulator;
   divergences: Divergence[];
   failures: string[];
   real: StatusSide;
@@ -254,8 +393,27 @@ interface Replay {
   unanswered: string[];
   /** Commands whose reply was compared byte-for-byte and matched. */
   exact: number;
-  /** Of those, `GETFILE` transfers — the run's own files, served back out of the emulator. */
+  /** Of those, `GETFILE` transfers — whole files, served back out of the emulator. */
   filesExact: number;
+  /** The emulated run's schedule, once `RemoteRun` has made one. */
+  schedule: ScheduledStep[];
+  /** Simulated ms the emulated run's protocol started — after its start window and preheat. */
+  protocolStartAtMs: number | null;
+}
+
+/** `GETFILE`/`GETFILESIZE` of a file that should not be byte-identical, and why — or null. */
+function expectedFileDifference(spec: RecordingSpec, rec: Recording, file: string, mine: Uint8Array, theirs: Uint8Array): string | null {
+  if (spec === HEAT_BLOCK && spec.initialNames(rec).includes(file)) return DIVERGENCES.archiveCopyDiffers;
+  if (/^Read\d{5}\.Plateread$/.test(file) && mine.length === theirs.length) return DIVERGENCES.syntheticPlateRead;
+  if (file === "runlog.xml") return DIVERGENCES.runlogVerbatim;
+  if (file === "RunInfo.xml") {
+    const a = parseRunInfoRaw(LATIN1.decode(mine));
+    const b = parseRunInfoRaw(LATIN1.decode(theirs));
+    const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+    const differing = [...keys].filter((k) => a[k] !== b[k]);
+    return differing.every((k) => RUN_OWN_KEYS.has(k)) ? DIVERGENCES.runIdentity : null;
+  }
+  return null;
 }
 
 /**
@@ -268,16 +426,20 @@ interface Replay {
  *   it. Replaying that line verbatim would ask the emulator about a file only the real
  *   instrument ever had, so the recorded GUID is mapped to the emulator's own.
  * - The clock is advanced to each record's own timestamp, so the emulator's run sits at the same
- *   wall-clock moment the real one did. Its internal phase boundaries are its own (its lid
- *   preheat is 168 s against this instrument's ~155 s), which is why phases are compared as a
- *   *sequence* and never per-poll.
+ *   wall-clock moment the real one did. Its internal phase boundaries are its own, which is why
+ *   phases are compared as a *sequence* and never per-poll.
+ *
+ * And for the qPCR session one reordering (`deposit-in-start-window`): the deposit the recording
+ * made inside the start window is held back and sent just before the first poll that shows the run.
  */
-function replay(): Replay {
-  const rec = loadRecording();
-  const emulator = seededEmulator(rec);
+function replay(spec: RecordingSpec): Replay {
+  const rec = loadRecording(spec.path, spec.inStepFrom);
+  const emulator = seededEmulator(spec, rec);
   const clock = emulator.clock as ReturnType<typeof manualClock>;
   const out: Replay = {
+    spec,
     rec,
+    emulator,
     divergences: [],
     failures: [],
     real: emptyStatusSide(),
@@ -286,24 +448,33 @@ function replay(): Replay {
     unanswered: [],
     exact: 0,
     filesExact: 0,
+    schedule: [],
+    protocolStartAtMs: null,
   };
   const note = (kind: string, command: string, detail: string) => {
-    if (out.divergences.length < 400) out.divergences.push({ kind, command, detail });
+    if (out.divergences.length < 2000) out.divergences.push({ kind, command, detail });
   };
+  if (rec.skipped > 0) {
+    note(DIVERGENCES.staleRepliesAtConnect, "*IDN? … BASESN?", `${rec.skipped} leading exchanges skipped`);
+  }
   const guidMap = new Map<string, string>();
+  const deferred: Exchange[] = [];
+  let deferring = false;
 
-  for (const ex of rec.exchanges) {
+  const compare = (ex: Exchange, inDeposit: boolean) => {
     out.counts.set(ex.verb, (out.counts.get(ex.verb) ?? 0) + 1);
-    const target = Math.max(0, ex.atMs);
-    if (target > clock.now()) clock.advance(target - clock.now());
-
     let line = ex.command;
     for (const [recorded, mine] of guidMap) line = line.split(recorded).join(mine);
 
     const reply: EmulatorReply | null = emulator.instrument.handle(line, ex.payload);
     if (!reply) {
       out.unanswered.push(ex.command.slice(0, 80));
-      continue;
+      return;
+    }
+    if (ex.verb === "RemoteRun") {
+      const run = emulator.instrument.currentRun!;
+      out.schedule = run.schedule.steps;
+      out.protocolStartAtMs = run.protocolStartsAtMs;
     }
     const mine = replyText(reply.payload);
     const theirs = replyText(ex.reply.payload);
@@ -311,7 +482,16 @@ function replay(): Replay {
     // The terminator, first: it is a property of every text reply and is checked once here
     // rather than inside each family below.
     if (/\r?\n$/.test(LATIN1.decode(ex.reply.payload)) && ex.verb !== "GETFILE") {
-      note("crlf-terminator", ex.verb, "instrument ends this reply CRLF; emulator does not");
+      note(DIVERGENCES.crlfTerminator, ex.verb, "instrument ends this reply CRLF; emulator does not");
+    }
+
+    // Inside the held-back deposit, the instrument was answering about a folder its clear was
+    // still sweeping: everything but the upload cycle's own success is the recording's, not ours.
+    if (inDeposit && !["CRCSENDFILE", "COMPUTEFILECRC", "GETFILECRC"].includes(ex.verb)) {
+      if (!bytesEqual(reply.payload, ex.reply.payload)) {
+        note(DIVERGENCES.depositInStartWindow, `${ex.verb} ${fileOf(ex.command)}`.trim(), `${mine.slice(0, 50)} vs ${theirs.slice(0, 50)}`);
+      }
+      return;
     }
 
     switch (ex.verb) {
@@ -340,7 +520,7 @@ function replay(): Replay {
       }
       case "GETFILE": {
         if (reply.passThrough) {
-          note("getfile-passthrough", ex.verb, "emulator marks the file reply passThrough");
+          note(DIVERGENCES.getfilePassthrough, ex.verb, "emulator marks the file reply passThrough");
         }
         if (bytesEqual(reply.payload, ex.reply.payload)) {
           out.exact++;
@@ -348,14 +528,15 @@ function replay(): Replay {
         } else {
           const detail = `${reply.payload.length} B vs ${ex.reply.payload.length} B`;
           const file = fileOf(ex.command);
-          if (rec.initialNames.includes(file)) note("archive-copy-differs", `${ex.verb} ${file}`, detail);
+          const kind = expectedFileDifference(spec, rec, file, reply.payload, ex.reply.payload);
+          if (kind) note(kind, `${ex.verb} ${file}`, detail);
           else out.failures.push(`GETFILE ${file}: served ${detail}`);
         }
         break;
       }
       default: {
-        // Everything else answers `<value>;<code>` or a bare code, or — for the two measured
-        // binary answers — four raw bytes. All three are compared in full.
+        // Everything else answers `<value>;<code>` or a bare code, or — for the measured binary
+        // answers — four raw bytes. All three are compared in full.
         if (ex.reply.text === null && !/^\d{4}$/.test(theirs) && !theirs.includes(";")) {
           if (!bytesEqual(reply.payload, ex.reply.payload)) {
             out.failures.push(
@@ -374,13 +555,13 @@ function replay(): Replay {
         const myCode = parseResponse(reply.payload).code;
         const theirCode = parseResponse(ex.reply.payload).code;
         if (myCode !== theirCode) {
-          out.failures.push(`${ex.verb}: result code ${myCode}, instrument gave ${theirCode}`);
+          out.failures.push(`${ex.verb} ${fileOf(ex.command)}: result code ${myCode}, instrument gave ${theirCode}`);
           break;
         }
         if (maskGuids(mine) === maskGuids(theirs)) {
           out.exact++;
         } else {
-          const kind = kindOfValueDifference(ex, mine, theirs, rec);
+          const kind = kindOfValueDifference(spec, rec, ex, mine, theirs, reply);
           if (kind === null) {
             out.failures.push(
               `${ex.verb} ${fileOf(ex.command)}: answered ${mine.slice(0, 80)}, ` +
@@ -390,23 +571,42 @@ function replay(): Replay {
           }
           note(kind, `${ex.verb} ${fileOf(ex.command)}`.trim(), `${mine.slice(0, 60)} vs ${theirs.slice(0, 60)}`);
         }
-        if (ex.verb === "COMPUTEFILECRC") {
-          const recorded = theirs.split(";")[0]!;
-          const ours = mine.split(";")[0]!;
-          guidMap.set(recorded.replace(/^"|"$/g, ""), ours.replace(/^"|"$/g, ""));
-        }
         break;
       }
     }
+    if (ex.verb === "COMPUTEFILECRC") {
+      const recorded = theirs.split(";")[0]!.split("\\").pop()!;
+      const ours = mine.split(";")[0]!.split("\\").pop()!;
+      guidMap.set(recorded.replace(/^"|"$/g, ""), ours.replace(/^"|"$/g, ""));
+    }
+  };
+
+  for (const ex of rec.exchanges) {
+    const target = Math.max(0, ex.atMs);
+    if (target > clock.now()) clock.advance(target - clock.now());
+
+    if (spec.deferDeposit) {
+      if (ex.verb === "ADDCYCLES") {
+        deferring = true;
+      } else if (deferring && ex.verb !== "STATUS?" && ex.verb !== "RTSTATUS?") {
+        deferred.push(ex);
+        continue;
+      } else if (deferring && ex.verb === "STATUS?" && Number(parseResponse(ex.reply.payload).fields[7]) !== 0) {
+        // The first poll that shows the run: the client deposits now, so the replay does.
+        deferring = false;
+        for (const d of deferred) compare(d, true);
+      }
+    }
+    compare(ex, false);
   }
 
-  // Two differences belong to the session as a whole rather than to any one command, and are
-  // recorded here so they appear in the same list as the rest.
+  // Differences that belong to the session as a whole rather than to any one command, recorded
+  // here so they appear in the same list as the rest.
   const lastReal = out.real.samples.at(-1)?.fields ?? [];
   const lastHeld = [...out.emu.samples].reverse().find((s) => s.phase === "hold")?.fields ?? [];
-  if (out.emu.edges.at(-1) !== out.real.edges.at(-1)) {
+  if (spec === HEAT_BLOCK && out.emu.edges.at(-1) !== out.real.edges.at(-1)) {
     note(
-      "run-duration-model",
+      DIVERGENCES.runDurationModel,
       "STATUS?/CANCEL",
       `the instrument had finished and was holding the run (elapsed ${lastReal[8]} s) when the ` +
         `session's CANCEL arrived; the emulator was still on step ${lastHeld[5]} ` +
@@ -417,14 +617,17 @@ function replay(): Replay {
   for (const [phase, real] of out.real.populatedByPhase) {
     const mine = out.emu.populatedByPhase.get(phase);
     const missing = mine ? [...real].filter((i) => !mine.has(i)) : [];
-    if (phase === "ramp" && missing.join() === "12") {
+    if (phase === "ramp" && missing.join() === "9,12") {
       note(
-        "at-target-flicker",
+        DIVERGENCES.atTargetFlicker,
         "STATUS?",
-        "one poll of 2585 reported not-at-target with the hold clock already running " +
-          "(block 30.39 against a 30.0 setpoint); the emulator's at-target bit never falls back",
+        "a poll reported not-at-target with the hold clock already running; the emulator's " +
+          "at-target bit never falls back once a step has arrived",
       );
     }
+  }
+  if (out.real.populatedByPhase.has("finishing")) {
+    note(DIVERGENCES.finishRegisterTransient, "STATUS?", "IDLE with register 97 before the 32 of §7.6");
   }
   return out;
 }
@@ -440,45 +643,86 @@ function fileOf(command: string): string {
  * case it is a bug in the emulator and the caller fails the run naming the command.
  *
  * This is the part of the test that decides what "close enough" means, so each branch has to be
- * narrow enough that a real mistake cannot slip through it: a listing is excused only when it
- * holds exactly the same names, a length only when it is over by exactly one GUID entry, a file
- * only when the archive's own copy is what differs.
+ * narrow enough that a real mistake cannot slip through it: a listing is excused only when it holds
+ * exactly the same names, or the same plus the staging GUID and the recording's named extras; a
+ * length only when it is over by exactly those; a file only when the file itself is one of the
+ * known kinds.
  */
 function kindOfValueDifference(
+  spec: RecordingSpec,
+  rec: Recording,
   ex: Exchange,
   mine: string,
   theirs: string,
-  rec: Recording,
+  reply: EmulatorReply,
 ): string | null {
-  if (ex.verb === "GETFREESPACE" || ex.verb === "COMPUTEFILECRC") return "instrument-value";
+  if (ex.verb === "GETFREESPACE" || ex.verb === "COMPUTEFILECRC") return DIVERGENCES.instrumentValue;
   if (ex.verb === "LISTALLFILES") {
-    const ours = maskGuids(mine).replace(/;\d{4}$/, "").split(",");
-    const them = maskGuids(theirs).replace(/;\d{4}$/, "").split(",");
+    const ours = namesOf(mine);
+    const them = namesOf(theirs);
     const extra = ours.filter((n) => !them.includes(n));
-    if (extra.length === 1 && extra[0] === "<guid>") return "staging-guid-lifetime";
-    if (ours.length === them.length && [...ours].sort().join() === [...them].sort().join()) {
-      return "listing-order";
+    const missing = them.filter((n) => !ours.includes(n));
+    if (missing.length > 0) return null;
+    if (extra.length === 0) {
+      return [...ours].sort().join() === [...them].sort().join() ? DIVERGENCES.listingOrder : null;
+    }
+    const named = extra.filter((n) => n !== "<guid>");
+    if (extra.filter((n) => n === "<guid>").length > 1) return null;
+    if (named.some((n) => !(n in spec.emulatorOnlyNames))) return null;
+    return named.length > 0 ? spec.emulatorOnlyNames[named[0]!]! : DIVERGENCES.stagingGuidLifetime;
+  }
+  if (ex.verb === "GETFILESLEN") {
+    // 36 characters of GUID plus the comma that joins it, and each named extra plus its comma.
+    const over = Number(mine.split(";")[0]) - Number(theirs.split(";")[0]);
+    const extras = Object.keys(spec.emulatorOnlyNames).map((n) => n.length + 1);
+    for (const guids of [0, 1]) {
+      for (const subset of [[], extras]) {
+        const expected = guids * 37 + subset.reduce((a, b) => a + b, 0);
+        if (expected !== 0 && over === expected) {
+          return subset.length > 0
+            ? Object.values(spec.emulatorOnlyNames)[0]!
+            : DIVERGENCES.stagingGuidLifetime;
+        }
+      }
     }
     return null;
   }
-  if (ex.verb === "GETFILESLEN") {
-    // 36 characters of GUID plus the comma that joins it to the name before it.
-    return Number(mine.split(";")[0]) - Number(theirs.split(";")[0]) === 37
-      ? "staging-guid-lifetime"
-      : null;
-  }
-  const file = fileOf(ex.command);
-  if ((ex.verb === "GETFILESIZE" || ex.verb === "GETFILE") && rec.initialNames.includes(file)) {
-    return "archive-copy-differs";
+  if (ex.verb === "GETFILESIZE") {
+    const file = fileOf(ex.command);
+    const kind = expectedFileDifference(spec, rec, file, reply.payload, ex.reply.payload);
+    if (kind === DIVERGENCES.syntheticPlateRead) return null; // a read's size must match
+    return kind;
   }
   return null;
 }
 
+/**
+ * Step durations on the instrument's own clocks: field 8 less field 11 less field 12 is the moment
+ * the step began, whatever the poll's phase; the next step's start is this one's end. Keyed by
+ * `<step text>` after `<previous step text>`, since a step's ramp depends on where it came from.
+ */
+function measuredDurations(polls: { fields: string[] }[]): Map<string, number[]> {
+  const starts: { key: string; text: string; start: number }[] = [];
+  for (const { fields } of polls) {
+    const reg = Number(fields[7]);
+    if (!(reg & 0x40) || reg & 0x08 || fields[4] === "IDLE") continue;
+    const key = `${fields[3]}:${fields[5]}`;
+    const start = Number(fields[8]) - Number(fields[11]) - Number(fields[12]);
+    if (starts.at(-1)?.key !== key) starts.push({ key, text: fields[4]!, start });
+  }
+  const out = new Map<string, number[]>();
+  for (let i = 1; i + 1 < starts.length; i++) {
+    const k = `${starts[i - 1]!.text} → ${starts[i]!.text}`;
+    (out.get(k) ?? out.set(k, []).get(k)!).push(starts[i + 1]!.start - starts[i]!.start);
+  }
+  return out;
+}
+
+const median = (xs: number[]) => [...xs].sort((a, b) => a - b)[xs.length >> 1]!;
+
 // ---- the checks ---------------------------------------------------------------------------
 
-const session = replay();
-
-describe("the emulator against the one recorded session", () => {
+function sharedChecks(session: Replay) {
   it("replays the whole log, and answers every command", () => {
     // A command the emulator does not implement at all is the one failure that cannot be argued
     // about: the instrument answered it and we would not.
@@ -491,26 +735,16 @@ describe("the emulator against the one recorded session", () => {
   });
 
   it("never disagrees for a reason that is not written down", () => {
-    const unknown = session.divergences.filter((d) => !KNOWN_DIVERGENCES.has(d.kind));
+    const unknown = session.divergences.filter((d) => !session.spec.known.has(d.kind));
     expect(unknown).toEqual([]);
-  });
-
-  it("answers the identity block and the file transfers byte for byte", () => {
-    // Of the 222 commands that are not a status poll, all but the handful in the divergence list
-    // come back exactly as the instrument's did — including the whole final pull: 45 plate
-    // reads, 32 `.Dcal`s, the run log and the report, and the CRCs computed over them.
-    // Pinned, not bounded: the nine replies that don't match are enumerated in
-    // {@link KNOWN_DIVERGENCES}, so any other one moving is a change in what the emulator says
-    // and should have to be looked at. A `>` here would let 213 rot to 206 in silence.
-    expect(session.exact).toBe(213);
-    expect(session.filesExact).toBe(82);
   });
 
   it("reports the same twenty `STATUS?` fields, populated the same way in each phase", () => {
     // The values cannot match, so what is compared is which fields carry anything at all, phase
-    // by phase. The one exception is written down rather than filtered out: see
-    // `at-target-flicker` in {@link KNOWN_DIVERGENCES}.
+    // by phase. The exceptions are written down rather than filtered out: `at-target-flicker` and
+    // `finish-register-transient`.
     for (const [phase, real] of session.real.populatedByPhase) {
+      if (phase === "finishing") continue;
       const mine = session.emu.populatedByPhase.get(phase);
       expect(mine, `the emulator never reached the ${phase} phase`).toBeDefined();
       const missing = [...real].filter((i) => !mine!.has(i)).sort((a, b) => a - b);
@@ -518,7 +752,7 @@ describe("the emulator against the one recorded session", () => {
       expect(extra, `fields the emulator populates in ${phase} and the instrument does not`).toEqual(
         [],
       );
-      if (phase === "ramp" && missing.join() === "12") continue;
+      if (phase === "ramp" && missing.join() === "9,12") continue;
       expect(missing, `fields the instrument populates in ${phase} and the emulator does not`).toEqual(
         [],
       );
@@ -528,25 +762,8 @@ describe("the emulator against the one recorded session", () => {
   it("spells the run descriptor exactly as the instrument did", () => {
     // Field 6 is built from `RemoteRun`'s own operands (`usb.md` §7.3), so unlike every other
     // part of `STATUS?` it can be compared for equality — and it is where the instrument's name
-    // mangling shows: `YouSeq RT - S56` comes back `"YOUSEQ_R"`, uppercased, cut to eight and
-    // with its space turned into an underscore.
+    // mangling shows: uppercased, cut to eight, spaces turned into underscores.
     expect(session.emu.descriptors).toEqual(session.real.descriptors);
-  });
-
-  it("passes through the same run edges in the same order", () => {
-    // The values differ — a different clock ran — but the *sequence* a run follower keys on must
-    // not: idle, the lid preheat, each step's ramp and hold in protocol order, then a finished
-    // state the instrument holds until it is acknowledged (`usb.md` §7.6).
-    expect(session.emu.edges.length).toBe(session.real.edges.length);
-    expect(session.emu.edges.slice(0, -1)).toEqual(session.real.edges.slice(0, -1));
-    // The last one differs in a way worth stating rather than asserting around: the emulator's
-    // modelled run is ~20 s longer than this instrument's (a 168 s lid preheat against ~155 s,
-    // and 10 s per thermal ramp against ~8 s), so the acknowledging `CANCEL` at the end of the
-    // recording arrived while its final hold was still going — and a `CANCEL` on a running run
-    // aborts it (§7.8), which is why its finish carries the cancelled bit. Every edge before
-    // that is identical, which is the part a run follower keys on.
-    expect(session.real.edges.at(-1)).toBe("finished step=0 IDLE");
-    expect(session.emu.edges.at(-1)).toBe("finished-cancelled step=0 IDLE");
   });
 
   it("keeps every `STATUS?` value it invents inside a plausible range", () => {
@@ -578,16 +795,14 @@ describe("the emulator against the one recorded session", () => {
       (byKind.get(d.kind) ?? byKind.set(d.kind, []).get(d.kind)!).push(d);
     }
     const lines = [
-      `commands replayed: ${session.rec.exchanges.length}`,
+      `${session.spec.label}: commands replayed: ${session.rec.exchanges.length}`,
       `  by verb: ${[...session.counts]
         .sort((a, b) => b[1] - a[1])
         .map(([v, n]) => `${v}×${n}`)
         .join(" ")}`,
       `replies matching byte for byte (terminator and GUIDs aside): ${session.exact}` +
         `, of which ${session.filesExact} whole-file transfers`,
-      `result codes: every one of them 0000, on both sides — this session refuses nothing`,
-      `run edges, instrument: ${session.real.edges.join(" → ")}`,
-      `run edges, emulator:   ${session.emu.edges.join(" → ")}`,
+      `run edges, instrument: ${session.real.edges.length}, emulator: ${session.emu.edges.length}`,
       "known differences:",
       ...[...byKind].map(([kind, list]) => {
         const where = [...new Set(list.map((d) => d.command))].slice(0, 6).join(", ");
@@ -597,4 +812,126 @@ describe("the emulator against the one recorded session", () => {
     console.log(lines.join("\n"));
     expect(session.failures).toEqual([]);
   });
+}
+
+const heatBlock = replay(HEAT_BLOCK);
+const qpcr = replay(QPCR);
+
+describe("the emulator against the heat-block session", () => {
+  sharedChecks(heatBlock);
+
+  it("answers the identity block and the file transfers byte for byte", () => {
+    // Of the 222 commands that are not a status poll, all but the handful in the divergence list
+    // come back exactly as the instrument's did — including the whole final pull: 45 plate
+    // reads, 32 `.Dcal`s, the run log and the report, and the CRCs computed over them.
+    // Pinned, not bounded: the replies that don't match are enumerated in the known set, so any
+    // other one moving is a change in what the emulator says and should have to be looked at.
+    expect(heatBlock.exact).toBe(213);
+    expect(heatBlock.filesExact).toBe(82);
+  });
+
+  it("passes through the same run edges in the same order", () => {
+    // The values differ — a different clock ran — but the *sequence* a run follower keys on must
+    // not: idle, the lid preheat, each step in protocol order, then a finished state the
+    // instrument holds until it is acknowledged (`usb.md` §7.6).
+    expect(heatBlock.emu.edges.length).toBe(heatBlock.real.edges.length);
+    expect(heatBlock.emu.edges.slice(0, -1)).toEqual(heatBlock.real.edges.slice(0, -1));
+    // The last one differs in a way worth stating rather than asserting around: this run's lid
+    // heated at 0.469 °C/s against the 0.455 the emulator takes for all three runs measured, so
+    // its preheat is ~4.5 s longer than this instrument's was — and the acknowledging `CANCEL` at
+    // the end of the recording, sent ~1.4 s after the real finish, arrived while the emulator's
+    // last hold was still going. A `CANCEL` on a running run aborts it (§7.8), which is why its
+    // finish carries the cancelled bit. Every edge before that is identical.
+    expect(heatBlock.real.edges.at(-1)).toBe("finished 0/0 step=0 IDLE");
+    expect(heatBlock.emu.edges.at(-1)).toBe("finished-cancelled 0/0 step=0 IDLE");
+  });
+
+  it("runs each step for as long as the instrument did", () => {
+    // From the instrument's own clocks: a step's ramp follows from how far the block goes.
+    const measured = measuredDurations(heatBlock.rec.polls);
+    const steps = heatBlock.schedule;
+    // 30 → 42 → 95: measured 2703.97 s for the 2700 s hold and its 12 °C ramp.
+    expect(Math.abs(steps[1]!.endMs - steps[1]!.startMs - 1000 * median(measured.get("TEMP 30.0,600 → TEMP 42.0,2700")!))).toBeLessThan(1_000);
+  });
 });
+
+describe("the emulator against the qPCR session", () => {
+  sharedChecks(qpcr);
+
+  it("skips only the stale replies at connect", () => {
+    // `*IDN?` was answered with a status line, and the four commands after it with the reply
+    // meant for the one before — the bug `CfxDevice.identify` now turns away.
+    expect(qpcr.rec.skipped).toBe(5);
+  });
+
+  it("answers the identity block and the file transfers byte for byte", () => {
+    // Every file the emulator is handed rather than makes comes back exactly — the 32 `.Dcal`s, the
+    // deposited plate and `zpcrweb.json`, the previous run's report, `ProtocolRunDefinition.txt`
+    // (CRLF and all) and `lastplatereadstatus`; the 45 plate reads are synthetic and RunInfo.xml
+    // and runlog.xml the run's own, each a named kind above. Pinned, as above.
+    expect(qpcr.exact).toBe(161);
+    expect(qpcr.filesExact).toBe(36);
+  });
+
+  it("passes through the same run edges in the same order, field 2 included", () => {
+    // Field 2 is the loop's total once its `GOTO` has run — `1/1` through cycle 1, `45/2` from the
+    // second (`usb.md` §3.2). Every step of all 45 cycles, then the §7.6 hold: the emulator finished
+    // a minute earlier, so it was holding the run for longer, but the sequence is the same.
+    const real = qpcr.real.edges.filter((e) => !e.startsWith("finishing"));
+    expect(qpcr.emu.edges).toEqual(real);
+    expect(real).toContain("running 1/1 step=4 PLATEREAD #h3F");
+    expect(real).toContain("running 45/2 step=2 TEMP 95.0,15");
+    expect(real.at(-1)).toBe("finished 0/0 step=0 IDLE");
+  });
+
+  it("starts, preheats and runs each step for as long as the instrument did", () => {
+    const { polls } = qpcr.rec;
+    const remoteRunAt = qpcr.rec.exchanges.find((e) => e.verb === "RemoteRun")!.atMs;
+    // The start window: the run was first seen 11.88 s after `RemoteRun`, the poll before at
+    // 10.38 s still idle — the emulator's must fall between.
+    const firstRun = polls.findIndex((p) => p.atMs > remoteRunAt && p.fields[7] !== "0");
+    expect(START_WINDOW_PLATE_READ_MS).toBeGreaterThan(polls[firstRun - 1]!.atMs - remoteRunAt);
+    expect(START_WINDOW_PLATE_READ_MS).toBeLessThanOrEqual(polls[firstRun]!.atMs - remoteRunAt);
+
+    // The preheat, from the lid the run started with: within 3 s of the instrument's 124.5 s.
+    const preheatEnded = polls.find((p) => p.atMs > polls[firstRun]!.atMs && !(Number(p.fields[7]) & 0x08))!;
+    const realProtocolStart = preheatEnded.atMs - 1000 * Number(preheatEnded.fields[8]);
+    expect(Math.abs(qpcr.protocolStartAtMs! - realProtocolStart)).toBeLessThan(3_000);
+
+    // Each kind of step, against the median of its 44–45 measured instances.
+    const measured = measuredDurations(polls);
+    const emulated = (from: string, to: string) => {
+      const i = qpcr.schedule.findIndex((s, k) => k > 0 && s.directive.text === to && qpcr.schedule[k - 1]!.directive.text === from && s.repeat > 1);
+      const s = qpcr.schedule[i]!;
+      return (s.endMs - s.startMs) / 1000;
+    };
+    for (const [from, to, toleranceS] of [
+      ["PLATEREAD #h3F", "TEMP 95.0,15", 1.5], // a 35 °C ramp up and a 15 s hold: 26.95 s
+      ["TEMP 95.0,15", "TEMP 60.0,60", 1.5], // a 35 °C ramp down and a 60 s hold: 75.48 s
+      ["TEMP 60.0,60", "PLATEREAD #h3F", 1.0], // a read: 12.50 s
+    ] as const) {
+      const real = median(measured.get(`${from} → ${to}`)!);
+      expect(Math.abs(emulated(from, to) - real), `${from} → ${to}: ${real} s measured`).toBeLessThan(toleranceS);
+    }
+
+    // And the whole protocol within 1.5 % — the per-step errors do not compound into minutes.
+    const realTotalS = Number(polls.find((p) => p.fields[4] === "IDLE" && p.fields[6] !== '"",BLOCK,OFF')!.fields[8]);
+    const emuTotalS = qpcr.schedule.at(-1)!.endMs / 1000;
+    expect(Math.abs(emuTotalS - realTotalS) / realTotalS).toBeLessThan(0.015);
+  });
+
+  it("is still holding the run when the session lists the folder 0.3 s after its CANCEL", () => {
+    // The listing the recording took straight after the acknowledgement had the final read and no
+    // `ended` — and the emulator, `RELEASE_MS` from letting go, agrees (`usb.md` §7.6). This is the
+    // listing that left the archive with no `ended` and no report.
+    const latest = (verb: string) => [...qpcr.rec.exchanges].reverse().find((e) => e.verb === verb)!;
+    const cancelAt = latest("CANCEL").atMs;
+    const last = latest("LISTALLFILES");
+    expect(last.atMs - cancelAt).toBeLessThan(500);
+    const names = namesOf(last.reply.payload);
+    expect(names).toContain("Read00045.Plateread");
+    expect(names).not.toContain("ended");
+    expect(qpcr.real.edges.at(-1)).toBe("finished 0/0 step=0 IDLE");
+  });
+});
+

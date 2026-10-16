@@ -264,7 +264,8 @@ export interface RunFollowerMemory {
    * Set when Start was pressed on {@link RunFollowerState.runningFile} and `STATUS?` has not yet
    * admitted the run: a timestamp (ms), refreshed while the session is busy sending it; else null.
    *
-   * The instrument reports the empty-name idle for ~6 s after `RemoteRun` (`usb.md` §7.8 step 0),
+   * The instrument reports the empty-name idle for ~6 s after `RemoteRun`, ~11 s for a run with
+   * plate reads (`usb.md` §7.3, §7.8 step 0),
    * so an idle reading in that window is not "nothing is running". It is a bounded wait rather than
    * an open one ({@link START_GRACE_MS}): a start whose send failed never shows up at all, and the
    * file it was pressed on must not go on reading as running.
@@ -274,8 +275,8 @@ export interface RunFollowerMemory {
 
 /**
  * How long a start may go unconfirmed by `STATUS?`, once the session has finished sending it,
- * before the file it was pressed on stops counting as running. The measured window is ~6.1 s
- * (`usb.md` §7.8 step 0); this is several times that, so a slow instrument is not mistaken for a
+ * before the file it was pressed on stops counting as running. The measured window is ~6 s, or
+ * ~11 s for a run with plate reads (`usb.md` §7.3); this is several times that, so a slow instrument is not mistaken for a
  * failed start. This library's own choice, not a measured value.
  */
 const START_GRACE_MS = 30_000;
@@ -753,11 +754,14 @@ export class RunFollower {
         : `Run "${runName}" finished — collecting the last read.`,
     });
     // Sent either way: the acknowledgement is what releases the instrument from holding the
-    // finished run, and a thermal-only run is held exactly as a qPCR one is.
+    // finished run, and a thermal-only run is held exactly as a qPCR one is. It resolves once the
+    // instrument has let go of the run, which is a second or two after the `CANCEL` and the moment
+    // `ended` and the `.alf` are written — collecting before that filed a run with neither
+    // (`usb.md` §7.6).
     await this.#session.acknowledgeFinishedRun();
-    // Forced: the final read and `ended` land as part of this same moment, and waiting for the
-    // signature to differ would just add a round trip. This is also the run's last `.zpcr`, so the
-    // USB traffic log is attached here, if "save log" asks for one.
+    // Forced: the final read and `ended` have landed by now, and waiting for the signature to
+    // differ would just add a round trip. This is also the run's last `.zpcr`, so the USB traffic
+    // log is attached here, if "save log" asks for one.
     //
     // Skipped outright when the run was known in advance to write no folder — there is nothing to
     // list for. Otherwise the listing itself answers it: `#check` declines a stale folder and says
@@ -873,7 +877,8 @@ export class RunFollower {
       // came back as the archive of a reverse-transcription incubation.
       //
       // A real run's finish always changes the listing: the last plate read, the `ended` marker and
-      // the `.alf` all land in the moment §7.6's acknowledgement releases them. So an unchanged
+      // the `.alf` have all landed once §7.6's acknowledgement has released the run, which is what
+      // `#finishNow` waits for before asking. So an unchanged
       // listing here is proof the folder is not this run's, and the finish collects the run's own
       // report instead (see `staleAtFinish`).
       //

@@ -298,6 +298,27 @@ export interface CfxAwaitStartOptions {
   onStatus?: (status: CfxStatus) => void;
 }
 
+/** How {@link CfxDevice.releaseRun} waits for the instrument to let go of a finished run. */
+export interface CfxReleaseOptions {
+  /** Gap between `STATUS?` reads. Default 500 ms. */
+  pollMs?: number;
+  /** How long the release may take. Default 15 s — measured releases complete inside 2.75 s
+   * (`usb.md` §7.6). */
+  timeoutMs?: number;
+  /** Called with every `STATUS?` this reads, so a caller whose own poll is paused stays live. */
+  onStatus?: (status: CfxStatus) => void;
+}
+
+/** What {@link CfxDevice.releaseRun} found. */
+export interface CfxReleaseResult {
+  /** The reply to the acknowledging `CANCEL` — `0000` whether or not anything was released. */
+  reply: CfxResponse;
+  /** True once `STATUS?` no longer names the run. False on a timeout. */
+  released: boolean;
+  /** The last status read. */
+  status: CfxStatus;
+}
+
 /** How {@link CfxDevice.cancelRun} should behave — every field has a sensible default. */
 export interface CfxCancelOptions {
   /**
@@ -315,8 +336,8 @@ export interface CfxCancelOptions {
   readWaitMs?: number;
   /** Overall budget before giving up and reporting `timedOut`. Default 60 s. */
   timeoutMs?: number;
-  /** How long a run asked for may take to appear, with `expectStart`. Default 20 s — the one
-   * measured start window was ~6 s (`usb.md` §7.3). */
+  /** How long a run asked for may take to appear, with `expectStart`. Default 20 s — measured
+   * start windows are ~6 s, or ~11 s for a run with plate reads (`usb.md` §7.3). */
   startWindowMs?: number;
   /** Called with every `STATUS?` this reads, so a caller whose own poll is paused stays live. */
   onStatus?: (status: CfxStatus) => void;
@@ -1155,9 +1176,38 @@ export class CfxDevice {
    * plate read, the `ended` marker and the `.alf` report only appear in the run folder afterwards.
    * On a run still in progress the same command aborts it — which is why nothing here sends it
    * without checking the status first.
+   *
+   * **The release is not immediate**, so collecting straight after this is too early: see
+   * {@link releaseRun}, which is what a client that is about to pull the folder wants.
    */
   async acknowledgeRun(): Promise<CfxResponse> {
     return this.tryCommand("CANCEL");
+  }
+
+  /**
+   * Acknowledge a finished run and wait until the instrument has let go of it (`usb.md` §7.6).
+   *
+   * The `CANCEL` is answered at once, but the run stays named in `STATUS?` for a second or two
+   * afterwards, and `ended` and the `.alf` are written only as it is released: measured, a listing
+   * 0.3 s after the `CANCEL` held the final read but neither of those, and a run pulled at that
+   * moment was filed with no report and no `ended` marker — in progress for ever. CFX Manager
+   * waits for `STATUS?` to report the empty idle before it lists anything, and so does this.
+   *
+   * Resolves once `STATUS?` no longer names the run, or with `released: false` after
+   * {@link CfxReleaseOptions.timeoutMs}. Like {@link acknowledgeRun}, only for a run
+   * {@link isFinishedRun} says is finished.
+   */
+  async releaseRun(options: CfxReleaseOptions = {}): Promise<CfxReleaseResult> {
+    const { pollMs = 500, timeoutMs = 15_000, onStatus } = options;
+    const reply = await this.acknowledgeRun();
+    const started = Date.now();
+    for (;;) {
+      const status = await this.status();
+      onStatus?.(status);
+      if (status.runName === "" || status.running) return { reply, released: true, status };
+      if (Date.now() - started >= timeoutMs) return { reply, released: false, status };
+      await delay(pollMs);
+    }
   }
 
   /**
@@ -1195,7 +1245,7 @@ export class CfxDevice {
    * 2. **It resumes a paused run first** (§7.8 step 2) — whether `CANCEL` ends a paused run is
    *    untested, and a stop button is most likely to be pressed in exactly that state.
    * 3. **It survives the start window.** Measured on a live instrument: between `RemoteRun` and
-   *    the block actually starting there are ~6 s during which `STATUS?` still reports the empty
+   *    the block actually starting there are ~6–11 s during which `STATUS?` still reports the empty
    *    idle, and a `CANCEL` sent in that window is answered `0000` and *ignored* — the run then
    *    starts anyway. A fire-and-forget button therefore reports success and leaves a run
    *    cycling, which is the bug this method exists for. Given `expectStart`, it keeps watching
