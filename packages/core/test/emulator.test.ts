@@ -19,7 +19,9 @@ import {
   CfxDevice,
   isFinishedRun,
   isPlateReadName,
+  isSameRun,
   parseAlf,
+  parseRunInfoRaw,
   planRun,
   unzipArchive,
   type CfxStatus,
@@ -419,6 +421,41 @@ describe("a run, start to collected", () => {
     // Seven executed steps: three of cycle 1 plus the read, then cycle 2's three.
     expect(alf.steps.map((s) => s.stepNumber)).toEqual([1, 2, 3, 4, 2, 3, 4]);
     expect(alf.steps.map((s) => s.repeat)).toEqual([1, 1, 1, 1, 2, 2, 2]);
+    await close();
+  });
+
+  /**
+   * A host identifies a run by its `RunInfo.xml` (`isSameRun`). Carried verbatim from the
+   * recording, every emulated run had the same one, so the app's run follower took a second run
+   * for the first and merged its reads into the first run's file (`emulator.md` §7).
+   */
+  it("gives every run its own RunInfo.xml, keeping the recording's instrument fields", async () => {
+    const { device, emulator, close } = await connect({ data: pcrData() });
+    const runInfoOf = async (name: string) => {
+      await device.startRun(planRun({ runDefinition: TWO_CYCLE, name }));
+      await pollUntil(device, (s) => isFinishedRun(s));
+      await device.acknowledgeRun();
+      const bytes = emulator.instrument.fs.read(`${CURRENT_RUN}\\RunInfo.xml`)!;
+      return { bytes, raw: parseRunInfoRaw(new TextDecoder().decode(bytes)) };
+    };
+    const first = await runInfoOf("first");
+    const second = await runInfoOf("second");
+
+    expect(isSameRun({ "RunInfo.xml": first.bytes }, { "RunInfo.xml": second.bytes })).toBe(false);
+    expect(first.raw.Identifier).toMatch(/^[0-9A-F]{8}(-[0-9A-F]{4}){3}-[0-9A-F]{12}$/);
+    expect(first.raw.Identifier).not.toBe(second.raw.Identifier);
+    expect(second.raw.DataFile).toMatch(/^\d{8}_\d{6}_CT019138_second\.zpcr$/);
+    expect(second.raw.RunDefinition).toContain("PLATEREAD #h3F;GOTO 2,1");
+    expect(new Date(second.raw.RunStartTime!).getTime()).toBeGreaterThan(
+      new Date(first.raw.RunStartTime!).getTime(),
+    );
+    // Everything that describes the instrument rather than the run is the recording's, untouched.
+    const recorded = parseRunInfoRaw(new TextDecoder().decode(pcrArchive!["RunInfo.xml"]));
+    const own = new Set(["Identifier", "RunStartTime", "DataFile", "RunDefinition"]);
+    for (const [key, value] of Object.entries(recorded)) {
+      if (!own.has(key)) expect([key, second.raw[key]]).toEqual([key, value]);
+    }
+    expect(Object.keys(second.raw)).toEqual(Object.keys(recorded));
     await close();
   });
 

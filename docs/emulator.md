@@ -160,6 +160,17 @@ Three kinds of run, from three committed samples:
 | melt | `samples/20230829_135443_CT019138_SINGLE_STEP_.zpcr` (the melt `melt.md` §A.1 measures) |
 | heat block | none needed — a thermal-only run writes no reads, so `data` is optional |
 
+The run folder's other files — `runlog.xml`, the `.Dcal` calibration set and `RunInfo.xml` — come
+from the recording too, verbatim except for **`RunInfo.xml`'s four per-run keys**, which
+`emulator/runInfo.ts` rewrites for each run: `Identifier` (a GUID-shaped value derived from the
+request time and run name), `RunStartTime` (the run clock's zero, on the same "GMT" clock as the
+reads' `DATETIME`), `DataFile` (`<yyyymmdd>_<hhmmss>_<serial>_<name>.zpcr`) and `RunDefinition`
+(the protocol as run). Every other key — serials, firmware, factory calibration — is the
+instrument's rather than the run's and keeps the recording's bytes. This is not cosmetic: a host
+identifies a run by its `RunInfo.xml` (`runFolder.ts`'s `isSameRun`), and with the recording's
+copy every emulated run looked like the same run, so the app's run follower merged a second run
+into the first one's file.
+
 **Core stays I/O-free**: the caller supplies the archive. In Node a test reads `samples/` off disk;
 in the browser the app fetches the bundled copy. Core never opens a path.
 
@@ -178,8 +189,8 @@ Recorded so nobody "completes" it:
 - `INC`'s effect on `STATUS?`'s step text. The text stays verbatim; the `.alf` and the block
   temperature do increment.
 - A run started at the instrument's own touchscreen.
-- `RunInfo.xml`, `runlog.xml` and the `.Dcal` set are carried verbatim from the recording, so they
-  describe the **recorded** run, not the emulated one.
+- `runlog.xml`, the `.Dcal` set, and every `RunInfo.xml` key but the four §7 rewrites are carried
+  verbatim from the recording, so they describe the **recorded** run, not the emulated one.
 
 ## 9. Using it
 
@@ -426,7 +437,8 @@ whole of `usb-run`'s ten run edges in the emulator's order.
 
 The `.alf`'s own content (generated from the schedule that ran); the run folder's marker files;
 block and lid temperature *values* at each moment; elapsed and remaining seconds; the run's
-timestamps.
+timestamps; `RunInfo.xml`'s `RunStartTime`, `DataFile` and `RunDefinition` (§7 — the shapes are
+the recording's, `DataFile`'s name sanitizing is a guess from one example).
 
 ### Invented — nothing observed
 
@@ -453,6 +465,8 @@ timestamps.
 - Listing replies for paths outside `\Storage Card`. (`\Storage Card` itself answering "empty" is
   measured; `\Nonexistent` is measured; the general rule between them is extrapolated.)
 - The staging GUID's shape — a deterministic counter, not random.
+- `RunInfo.xml`'s `Identifier` — a hash of the request time and run name, shaped like the real
+  GUID but generated nothing like it (§7). Unique per run, which is all a host relies on.
 - `lastplatereadstatus`'s four int32s, read off one melt run's `(9, 61, 101, 0)`. The field
   meanings are a guess.
 - The `.alf` step line's field 1 (`-1`) and field 4 (`.00`), written as observed but not understood.

@@ -28,6 +28,7 @@ import { RUN_BEGUN_MARKER, RUN_ENDED_MARKER } from "../../runFolder.js";
 import type { EmulatorRunData } from "./data.js";
 import type { EmulatorFilesystem } from "./filesystem.js";
 import { formatAlf, reportFileName, type AlfRunIdentity } from "./report.js";
+import { dataFileName, emulatedRunIdentifier, runSupportFiles } from "./runInfo.js";
 import {
   LID_PREHEAT_MS,
   RAMP_MS,
@@ -244,7 +245,16 @@ export class EmulatedRun {
     if (!this.data) return;
     if (!this.started) {
       this.started = true;
-      for (const [name, bytes] of Object.entries(this.data.supportFiles())) {
+      // `RunInfo.xml` is made this run's (`runInfo.ts`): a host identifies a run by it, so the
+      // recording's verbatim copy made every emulated run look like the same one.
+      const startedAt = this.dateAt(0);
+      const support = runSupportFiles(this.data, {
+        identifier: emulatedRunIdentifier(this.requestedAt.getTime(), this.request.name),
+        startedAt,
+        dataFile: dataFileName(startedAt, this.identity.baseSerial, this.request.name),
+        runDefinition: this.protocolText(),
+      });
+      for (const [name, bytes] of Object.entries(support)) {
         this.fs.write(`${CFX_CURRENT_RUN_DIR}\\${name}`, bytes);
       }
       this.fs.write(`${CFX_CURRENT_RUN_DIR}\\ProtocolRunDefinition.txt`, ascii(this.protocolText()));
